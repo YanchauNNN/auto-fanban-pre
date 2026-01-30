@@ -24,6 +24,7 @@ class TextItem:
     y: float
     text: str
     bbox: BBox | None
+    text_height: float | None
     source: str
 
 
@@ -68,6 +69,7 @@ class AnchorFirstLocator:
         self.anchor_texts = [t for t in texts if t]
         self.roi_field_name = anchor_cfg.get("roi_field_name", "锚点")
         self.match_policy = anchor_cfg.get("match_policy", "single_hit_same_roi")
+        self.anchor_calibration = anchor_cfg.get("calibration", {})
 
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         self.roi_margin_percent = float(tolerances.get("roi_margin_percent", 0.0))
@@ -186,7 +188,7 @@ class AnchorFirstLocator:
                 profile = self.spec.get_roi_profile(profile_id)
                 if not profile:
                     continue
-                rb_offset = profile.fields.get(self.roi_field_name)
+                rb_offset = self._get_anchor_rb_offset(profile_id, profile)
                 if not rb_offset:
                     continue
                 anchor_roi = self._restore_roi(bbox, rb_offset, sx, sy)
@@ -213,6 +215,19 @@ class AnchorFirstLocator:
             }
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
         return candidates
+
+    def _get_anchor_rb_offset(self, profile_id: str, profile) -> list[float] | None:
+        rb_offset = None
+        try:
+            rb_offset = profile.fields.get(self.roi_field_name)
+        except Exception:
+            rb_offset = None
+        if rb_offset:
+            return rb_offset
+        calib = self.anchor_calibration.get(profile_id, {})
+        if isinstance(calib, dict):
+            rb_offset = calib.get("anchor_roi_rb_offset_1to1")
+        return rb_offset
 
     def _append_candidate_frame(
         self,
@@ -386,15 +401,23 @@ class AnchorFirstLocator:
                 text = (e.dxf.text or "").strip()
                 p = e.dxf.insert
                 x, y = float(p.x), float(p.y)
+                height = float(getattr(e.dxf, "height", 2.5) or 2.5)
                 bbox = AnchorFirstLocator._bbox_from_text(
                     text=text,
                     x=x,
                     y=y,
-                    height=float(getattr(e.dxf, "height", 2.5) or 2.5),
+                    height=height,
                     halign=int(getattr(e.dxf, "halign", 0) or 0),
                     valign=int(getattr(e.dxf, "valign", 0) or 0),
                 )
-                return TextItem(x=x, y=y, text=text, bbox=bbox, source=src)
+                return TextItem(
+                    x=x,
+                    y=y,
+                    text=text,
+                    bbox=bbox,
+                    text_height=height,
+                    source=src,
+                )
             if tp == "MTEXT":
                 try:
                     text = (e.plain_text() or "").strip()
@@ -403,20 +426,39 @@ class AnchorFirstLocator:
                 p = e.dxf.insert
                 x, y = float(p.x), float(p.y)
                 bbox = AnchorFirstLocator._bbox_from_mtext(e, text, x, y)
-                return TextItem(x=x, y=y, text=text, bbox=bbox, source=src)
+                try:
+                    height = float(getattr(e.dxf, "char_height", getattr(e.dxf, "height", 2.5)))
+                except Exception:
+                    height = 2.5
+                return TextItem(
+                    x=x,
+                    y=y,
+                    text=text,
+                    bbox=bbox,
+                    text_height=height,
+                    source=src,
+                )
             if tp == "ATTRIB":
                 text = (e.dxf.text or "").strip()
                 p = e.dxf.insert
                 x, y = float(p.x), float(p.y)
+                height = float(getattr(e.dxf, "height", 2.5) or 2.5)
                 bbox = AnchorFirstLocator._bbox_from_text(
                     text=text,
                     x=x,
                     y=y,
-                    height=float(getattr(e.dxf, "height", 2.5) or 2.5),
+                    height=height,
                     halign=int(getattr(e.dxf, "halign", 0) or 0),
                     valign=int(getattr(e.dxf, "valign", 0) or 0),
                 )
-                return TextItem(x=x, y=y, text=text, bbox=bbox, source=src)
+                return TextItem(
+                    x=x,
+                    y=y,
+                    text=text,
+                    bbox=bbox,
+                    text_height=height,
+                    source=src,
+                )
             return None
 
         def walk_entity(ent, src_prefix: str, depth: int) -> Iterable[TextItem]:

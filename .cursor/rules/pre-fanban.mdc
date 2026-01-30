@@ -1,0 +1,504 @@
+---
+description: 
+alwaysApply: true
+---
+
+# 文档生成模块参数规范——注意一切新增参数都需要在“D:\Programs\auto-fanban\auto-fanban-pre\documents\参数规范.yaml”和“D:\Programs\auto-fanban\auto-fanban-pre\documents\参数规范_运行期.yaml”中留下记录，同时这两个文件也是目前参数的唯一依据
+
+> 范围：**封面（Word+PDF）/目录（Excel+PDF）/设计文件（Excel+PDF）/IED计划（仅Excel，单独输出）**  
+> 约束：DXF 仅作为中间文件，不对用户输出；文档生成模块只消费“图框识别/图签提取”后的结构化数据。  
+> 模板：`documents_bin/` 下的 xlsx/docx（已做结构扫描，目录/设计/IED 的表头与合并区域可直接固化）。
+>
+> **建议阅读方式**：本文件是“可读说明版”。权威的“结构化参数规范（可供前端/后端/校验/生成manifest使用）”见：`documents/参数规范.yaml`
+> 运行期参数（并发/超时/ODA路径等）见：`documents/参数规范_运行期.yaml`
+
+---
+## 1) 输入/输出接口（建议作为后端稳定 API）
+
+### 1.1 输入对象：`DocContext`
+
+- **job 维度**
+  - `project_no: str`（项目号：用户前端选择；用于切换模板分支/选择词库列/部分规则分支）
+  -下拉菜单可选：1818-巴基斯坦恰希玛核电厂五号机组，2016-浙江金七门核电厂1、2号机组，2026-江苏徐圩核能供热发电厂一期工程，1916-福建漳州核电厂3、4号机组，1907-三门核电项目5、6号机组，2035-600MV高温气冷堆示范工程，1418-海南昌江核电厂3、4号机组
+  - `job_id: str`（任务唯一标识：一次完整“上传→处理→产物”流水线的唯一ID；用于查进度/下载产物/manifest追溯）
+  - `options: DocOptions`（生成选项：是否生成封面/目录/设计/IED、是否导出PDF、PDF引擎等，注意，当为true时，全部文件都生成，这里无需区分具体是哪个文件）
+- **用户输入（全局字段）**
+  - `user_params: GlobalDocParams`（全局参数：用户在前端填/选的字段集合）
+- **图纸清单（逐张图）**
+  - `frames: list[FrameMeta]`（每张拆分图对应一条元数据：图号、标题、内部编码等）
+- **聚合字段（由 frames 统计/推导）**
+  - `aggregates: Aggregates`（聚合统计：总张数、目录条目、册次等由frames汇总得到的字段）
+- **规则与映射（可版本化）**
+  - `rules: DocRules`（规则与映射：排序、默认值、枚举、映射表等配置）
+- **模板选择**
+  - `templates: TemplateSelection`（模板选择：封面变体选择等；由前端或规则确定）
+
+### 1.2 输出对象：`DocArtifacts`
+
+- `cover_docx, cover_pdf`（封面 Word 与对应 PDF）
+- `catalog_xlsx, catalog_pdf`（目录 Excel 与对应 PDF）
+- `design_xlsx, design_pdf`（设计文件 Excel 与对应 PDF）
+- `ied_xlsx`（IED 计划 Excel，单独输出，不包含在 package.zip 中，也不导出 PDF）
+- `manifest.json`（生成清单：记录模板版本、输入参数、推导字段、生成日志摘要、产物路径）
+---
+## 2) 参数分层（避免“全局字段 vs 每张图字段”互相覆盖）
+### 2.1 `DocOptions`（控制是否生成与导出）
+| Key | 含义 | 类型 | 默认 |
+|---|---|---:|---|
+| `enabled`（是否启用“文档生成模块”） | 文档生成总开关 | bool | true |
+| `export_pdf`（是否导出PDF） | 是否导出 PDF | bool | true（必须） |
+| `pdf_engine`（导出PDF的实现方式） | Word/Excel → PDF 引擎 | enum | `office_com`（优先） / `libreoffice`（备选） |
+| `pdf_margin`（PDF页边距设置，适用于DWG/DXF打印） | 上下左右页边距（mm） | dict | 默认 `{top:20, bottom:10, left:20, right:10}`，定义为“PDF 页面边缘 → 图框最大外框线”的距离 |
+> 约定：当 `options.enabled == true` 时，**封面/目录/设计文件/IED 全部生成并全部输出**，无需再区分单个文件的开关。
+> 注意：封面 docx 为“Word 内嵌 Excel(OLE)”结构；若要稳定刷新 OLE，优先使用 **Office COM**。
+### 2.2 `GlobalDocParams`（用户输入，全局字段）
+| Key | 中文含义 | 类型 | 必填 | 备注 |
+|---|---|---:|:---:|---|
+| `project_no`（项目号） | 项目号 | str | 是 | **前端选择**；用于模板分支（1818/非1818）、词库匹配、部分规则分支 |
+| `engineering_no`（工程号） | 工程号 | str | 是 | **从 DXF 图签“工程号”提取**（见 `frames[].titleblock.engineering_no`）；与前端 `project_no` 概念区分，但默认值可相同 |
+| `subitem_no`（子项号） | 子项号 | str | 是 | **从 DXF 图签“子项号”提取**（见 `frames[].titleblock.subitem_no`）；用于封面与目录 |
+| `wbs_code`（WBS编码） | WBS编码 | str | 是 | **前端输入一次**：同一图册（`album_internal_code` 相同）下封面/目录/001~XXX 所有行 WBS 编码均相同，因此设计文件与 IED 计划共用该值 |
+| `system_code`（系统代码） | 系统代码 | str | 否 | **前端输入**，默认 `NA`；用于设计文件与 IED（模板列“系统代码”） |
+| `system_name`（系统名称） | 系统名称 | str | 否 | **前端输入**，默认 `NA`；用于设计文件（模板列“系统名称”） |
+| `ied_status`（IED状态） | IED状态 | str | 是 | **前端输入**，默认 `发布`；模板“填写说明”明确：`编制` 不驱动生成设计文件，`发布` 会自动驱动产生设计文件并触发更多字段必填/格式校验 |
+| `ied_chief_designer`（责任设总） | 责任设总 | str | 否 | 前端输入；格式建议 `姓名@ID`（填写说明） |
+| `ied_change_flag`（变更标记） | 变更标记 | str | 否 | **前端选择**；一次输入全行复用（IED 导入表 B列）。候选：MOD/CAN/REC/IDM… |
+| `ied_doc_type`（文档类型） | 文档类型 | str | 是 | **前端选择**；一次输入全行复用（IED 导入表 C列）。候选：图册/文件/图纸/章节… |
+| `ied_fu_flag`（FU标记） | FU标记 | str | 否 | **前端输入**；一次输入全行复用（IED 导入表 R列）；默认 `N` |
+| `ied_internal_tag`（IED内部标识） | 内部标识 | str | 否 | **前端输入**；一次输入全行复用（IED 导入表 U列）；默认 `否` |
+| `ied_design_type`（设计类型） | 设计类型 | str | 否 | **前端选择**；一次输入全行复用（IED 导入表 V列）；候选来自模板 Sheet4 “AP1000设计类型” A列 |
+| `ied_responsible_unit`（责任单位） | 责任单位 | str | 否 | **前端选择**；一次输入全行复用（IED 导入表 X列）；候选见 `documents_bin/responsible_unit.json` |
+| `ied_discipline_office`（专业室） | 专业室 | str | 发布时必填 | **前端选择**；一次输入全行复用（IED 导入表 BJ列）；候选见 `documents_bin/responsible_unit.json`；写入值取所选字符串最后一个 `-` 后的文本 |
+| `ied_prepared_by`（编制者） | 编制者 | str | 发布时必填 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_prepared_by_2`（第二编制者） | 第二编制者 | str | 否 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_prepared_date`（编制日期） | 编制日期 | str | 发布时必填 | 前端输入；格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_checked_by`（校核者） | 校核者 | str | 发布时必填 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_checked_date`（校核日期） | 校核日期 | str | 发布时必填 | 前端输入；格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_discipline_leader`（工种负责人） | 工种负责人 | str | 否 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_discipline_leader_date`（工种负责人审核日期） | 工种负责人审核日期 | str | 否 | 前端输入；格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_reviewed_by`（审核者） | 审核者 | str | 发布时必填 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_reviewed_date`（审核日期） | 审核日期 | str | 发布时必填 | 前端输入；格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_approved_by`（审定者） | 审定者 | str | 否 | 前端输入；格式 `姓名@ID`（填写说明） |
+| `ied_approved_date`（审定日期） | 审定日期 | str | 否 | 前端输入；格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_submitted_plan_date`（所提交计划） | 所提交计划 | str | 否 | 前端输入；日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_publish_plan_date`（出版计划） | 出版计划 | str | 否 | 前端输入；日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_external_plan_date`（外部计划） | 外部计划 | str | 否 | 前端输入；日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_fu_plan_date`（FU计划） | FU计划 | str | 否 | 前端输入；日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明） |
+| `ied_person_qual_category`（人员资格类别） | 人员资格类别 | str | 发布时必填 | **前端输入**：发布状态下必填；具体资格校验规则见模板 `IED计划模板文件.xlsx` 的 `设计资格校验规则` |
+| `work_hours`（工时数） | 工时数（统一输入） | str | 发布时必填 | **前端输入一次**：同值写入 设计文件 `Z 实际工时数` 与 IED `AT 计划工时`；默认 `100` |
+| `subitem_name`（子项名称） | 子项名称（中文） | str | 是 | **前端直接输入**（全局变量，中文） |
+| `subitem_name_en`（子项名称英文） | 子项名称（英文） | str | 仅1818 | **前端直接输入**（仅1818项目需要） |
+| `design_phase`（设计阶段） | 设计阶段 | str | 是 | **派生规则**：从 `frames[].titleblock.status` 派生；当 ROI 状态为 `CFC` 时，design_phase 固定为 `施工图设计`（同设计文件中的 `design_phase`） |
+| `discipline`（专业/工种） | 专业（中文或简称） | str | 是 | **从 001 图纸的 DXF 图签“专业”提取/聚合**（见 `frames[].titleblock.discipline`；封面/目录使用001图纸专业） |
+| `album_title_cn`（图册/文件名称-中文） | 图册/文件名称（中文册名） | str | 是 | **前端输入**：用于封面/目录/设计/IED 的“封面/目录条目名称”派生与封面模板写入 |
+| `album_title_en`（图册/文件名称-英文） | 图册/文件名称（英文册名） | str | 仅1818 | **前端输入**：仅 1818 需要；用于 1818 封面英文标题与派生 cover_title_en/catalog_title_en |
+| `cover_title_cn`（封面名称-中文） | 封面条目名称（中文） | str | 是 | **派生**：`album_title_cn + '封面'` |
+| `catalog_title_cn`（目录名称-中文） | 目录条目名称（中文） | str | 是 | **派生**：`album_title_cn + '目录'` |
+| `cover_title_en`（封面名称-英文） | Cover Title (EN) | str | 仅1818 | **派生**：`album_title_en + ' Cover'` |
+| `catalog_title_en`（目录名称-英文） | Contents Title (EN) | str | 仅1818 | **派生**：`album_title_en + ' Contents'`（如需更正式可改为 ' Table of Contents'） |
+| `album_internal_code`（图册编号-内部） | 图册编号（内部编码前缀） | str | 是 | **不新增ROI**：取 `frames[].titleblock.internal_code` 的前缀 `XXXXXXX-XXXXX`（建议用 001 图纸派生）；用于封面 N3（合并 `N3:S3`） |
+| `catalog_internal_code`（目录页眉“编号/Document No.”） | 目录编号 | str | 是 | **派生**：取 001 图纸 internal_code，把末段 `-001` 替换为 `-TM`（目录页眉H1） |
+| `cover_internal_code`（封面内部编码） | 封面内部编码 | str | 是 | **派生**：取 001 图纸 internal_code，把末段 `-001` 替换为 `-FM` |
+| `album_code`（图册编号） | 图册编号（末2位数字） | str | 是 | **不新增ROI**：从 `frames[].titleblock.internal_code` 的“中间5位”末2位提取（两种 internal_code 格式都适用），例如 `20161NH-JGS01-002 -> 01`；用于封面 I25（合并 `I25:S25`） |
+| `cover_external_code`（封面外部编码） | 封面外部编码 | str | 是 | **派生**：取 001 图纸 external_code，把第 9~11 位替换为 `F01`（19位固定） |
+| `catalog_external_code`（目录外部编码） | 目录外部编码 | str | 是 | **派生**：取 001 图纸 external_code，把第 9~11 位替换为 `T01`（目录页眉H3） |
+| `cover_revision`（封面版次） | 封面版次 | str | 否 | **前端输入**，默认 `A`；写入封面时需“增量追加”（通用封面 N5 在“版次：”后追加；1818封面 M5 在“Rev.:”后追加） |
+| 册次（共X册 第Y册） | 册次 | - | 否 | **模板固定**（当前不做变量参数，不输入/不改动） |
+| `revision`（版次/Rev.） | 版次/Rev. | str | 是 | **从 DXF 图签“版次”提取**（见 `frames[].titleblock.revision`） |
+| `doc_status`（状态/Status） | 状态/Status | str | 是 | **从 DXF 图签“状态”提取**（见 `frames[].titleblock.status`） |
+| `classification`（密级） | 密级/Classification | str | 是 | **前端输入**；写入封面/设计文件/IED 的密级字段 |
+| `approved_by`（封面批准人） | 批准人 | str | 否 | **已确认：取消，不读取也不编辑** |
+| `cover_variant`（非1818封面模板选择） | 封面模板变体 | enum | 是（非1818） | `通用/压力容器/核安全设备`（你已确认由前端选择） |
+| `upgrade_start_seq`（升版起始尾号） | 升版范围起始 | int | 否 | 前端输入：例如 5 表示 005 |
+| `upgrade_end_seq`（升版结束尾号） | 升版范围结束 | int | 否 | 前端输入：例如 12 表示 012 |
+| `upgrade_revision`（升版版本） | 升版版本 | str | 否 | 前端输入：例如 B/C；用于派生 `catalog_revision` |
+| `upgrade_note_text`（升版标记文本） | 升版标记 | str | 否 | 默认“升版”，用于目录明细 I 列 |
+| `catalog_revision`（目录版次） | 目录版次 | str | 是 | **派生**：优先取 `upgrade_revision`；未提供则取 `cover_revision`（默认A） |
+| `cover_paper_size_text`（封面图幅） | 封面图幅 | str | 是 | 固定为 `A4文件` |
+| `cover_page_total`（封面页数） | 封面页数 | int | 是 | 固定为 1 |
+| `catalog_paper_size_text`（目录图幅） | 目录图幅 | str | 是 | 固定为 `A4文件` |
+| `catalog_page_total`（目录页数） | 目录页数 | int | 是 | **派生**：目录 xlsx 导出 PDF 后计页得到，并回填目录行 H 列后再二次导出 PDF |
+
+### 2.3 `FrameMeta`（每张拆分图纸字段）
+
+> 你已确认：**2.3 的业务字段都需要来自 DXF 图签提取**。在实现上，仍建议把“DXF解析/外框拟合/ROI还原”的运行期结果一并记录（也属于 DXF 流水线产物），便于排错与质量控制。  
+> 因此这里把字段拆成两层：  
+> - A) **运行期识别产生（DXF流水线内）**：外框/缩放/ROI profile 等（用于提取稳定性与调试）  
+> - B) **图签字段（titleblock，来自DXF ROI）**：严格对照 `CNPE_titleblock_runtime_config_v1.yaml` 的 `field_definitions`（字段名/ROI字段名/解析规则）
+
+#### 2.3.0 编码字段命名统一（非常重要，避免后续“图号/编码/文档号”混乱）
+
+结合 YAML 的字段定义，统一只保留两类编码，并补充你给出的**封面/目录特殊命名规则**：
+
+- `frames[].titleblock.internal_code`（内部编码：排序主键、设计文件“内部编码(E)”）
+- `frames[].titleblock.external_code`（外部编码：DOC.NO 类似“正式文档号”，设计文件“文件编码(D)”、IED“文件编码(G)”）
+
+并建议把目录两列映射为：
+- 目录 `B/C 图纸（文件）编号` = `internal_code`
+- 目录 `D 文件编码` = `external_code`
+
+> 你已确认：**B/C=内部编码，D=外部编码**。
+
+**DXF 提取到的图纸内部编码编号规则（你已补充）**
+- 内部编码整体格式：`XXXXXXX-XXXXX-XXX`
+- DXF 图纸里提取到的 `internal_code`：末尾 `XXX` 从 `001` 开始递增（例如 `...-001 / ...-002 / ...-003`）
+
+**封面/目录内部编码的派生规则（你给出的特殊规则）**
+- 取 `internal_code_001 = frames[internal_code endswith '-001'].titleblock.internal_code`（格式：`XXXXXXX-XXXXX-001`）
+- 封面内部编码：去掉最后的 `-001` 并替换为 `-FM`
+  - `cover_internal_code = XXXXXXX-XXXXX-FM`
+- 目录内部编码：去掉最后的 `-001` 并替换为 `-TM`
+  - `catalog_internal_code = XXXXXXX-XXXXX-TM`
+
+**封面/目录外部编码的派生规则（你给出的特殊规则）**
+- 外部编码长度固定 19（YAML 里也有 `fixed_len: 19`）
+- 取 `external_code_001 = frames[internal_code endswith '-001'].titleblock.external_code`
+- 将外部编码的第 9~11 位数字（你说通常是 `001`）替换：
+  - 封面外部编码：替换为 `F01`
+  - 目录外部编码：替换为 `T01`
+  - `cover_external_code = replace(external_code_001[9..11], 'F01')`
+  - `catalog_external_code = replace(external_code_001[9..11], 'T01')`
+
+> 注：这里的“第 9~11 位”按**从 1 开始计数**理解（即字符串切片 `[8:11]`）。
+> 你给的样例：
+> - 001 图纸外部编码：`JD1NHT11001B25C42SD`
+> - 目录外部编码（T01）：`JD1NHT11T01B25C42SD`
+> - 封面外部编码（F01）：`JD1NHT11F01B25C42SD`
+
+#### 2.3.1 Frame 运行期字段（识别/调试/重命名支撑）
+
+| 参数路径 | 含义 | 来源 | 主要用途 |
+|---|---|---|---|
+| `frames[].frame_id`（图框实例ID） | 该图框的唯一ID | 后端生成 | 追溯/日志/报错定位；**注意：后续需与图签“张数/第几张”（`frames[].titleblock.page_total/page_index`）做关联**，因为可能存在**多图框共属于同一张图纸**（图纸级聚合逻辑后续补充） |
+| `frames[].source_file`（来源DWG路径） | 原始输入文件路径/文件名 | 上传文件（非图签字段） | 追溯 |
+| `frames[].paper_variant_id`（匹配到的标准图幅模板ID） | 例如 `CNPE_A1_2016` | DXF流水线：对候选外框做**尺寸拟合**，在 `参数规范.yaml/sections.titleblock_extraction_spec/scale_fit/canonical_variants` 中匹配最接近的标准图幅ID，输出为 `paper_variant_id` | PDF打印/版式/调试 |
+| `frames[].sx, frames[].sy`（几何缩放因子） | 外框拟合得到的缩放（几何缩放） | YAML `scale_fit.outputs.sx/sy` | 还原 ROI / 质量检查；用于计算 `geom_scale_factor`，并与图签读取到的比例（`frames[].titleblock.scale_text`→`scale_denominator`）做一致性比较 |
+| `frames[].roi_profile_id`（ROI配置档） | `RB_PROFILE_BASE10/SMALL5` | YAML `roi_profiles` | 决定各字段 ROI 位置 |
+| `frames[].scale_mismatch`（比例不一致布尔值） | 几何缩放 vs 图签比例是否不一致 | DXF流水线 Step4 `scale_consistency_check` | `true` 时需要报警，并写入 `frames[].flags[]`（追加 `比例不一致`） |
+| `frames[].flags[]`（告警标记） | 例如 `比例不一致` | YAML `scale_mismatch.flag_name` | 报告/质检（由各类检查产出，如比例一致性检查） |
+
+#### 2.3.2 Frame 图签字段（从 DXF ROI 提取，严格对齐 YAML）
+
+> 推荐统一放在：`frames[].titleblock.<field>`，并在 `manifest.json` 里同时记录原始ROI文本与解析结果（便于排错）。
+
+| 参数路径 | 业务含义 | YAML 对应项 | 提取 ROI 字段名 | 解析规则 | 主要用途 |
+|---|---|---|---|---|---|
+| `frames[].titleblock.external_code`（图纸外部编码） | 图纸外部编码 | `field_definitions.external_code` | 外部编码 | `docno_plus_fixed19` | IED：文件编码(G) / 目录：文件编码(D) / 追溯 |
+| `frames[].titleblock.internal_code`（图纸内部编码） | 图纸内部编码 | `field_definitions.internal_code` | 内部编码 | regex `^[0-9]{4}[A-Z0-9]+-[A-Z0-9]+$` | **目录排序关键字段** / 目录：图纸编号(B/C) / 设计文件：内部编码(E) |
+| `frames[].titleblock.engineering_no`（工程号） | 4位工程号 | `field_definitions.engineering_no` | 工程号 | regex `^[0-9]{4}$` | 写封面/目录页眉工程号；也可校验与前端 `project_no` 是否一致（默认值可相同，但必须区分变量名） |
+| `frames[].titleblock.subitem_no`（子项号） | 子项号 | `field_definitions.subitem_no` | 子项号 | `text_exact_or_lexicon` | **封面/目录使用**；subitem_name 由前端输入 |
+> 说明：你已确认不再使用“系统号(system_no)”作为字段；改为前端输入 `system_code/system_name`（默认 NA），因此 titleblock 不再提取系统号。
+| `frames[].titleblock.paper_size_text`（图幅文本） | 图幅 | `field_definitions.paper_size_text` | 图幅 | text | 设计文件：图幅(S) / PDF打印设置 |
+| `frames[].titleblock.discipline`（专业） | 专业 | `field_definitions.discipline` | 专业 | text | 设计文件：专业(N) / 目录可用 |
+| `frames[].titleblock.scale_text`（比例文本） | `1:X` | `field_definitions.scale_text` | 比例 | regex `^1[:：](\\d+(?:\\.\\d+)?)$` | 质检：比例一致性 / 可写入报表 |
+| `frames[].titleblock.page_total`（共N张） | 总张数 | `field_definitions.page_info` | 张数 | regex `共\\s*(\\d+)\\s*张.*第\\s*(\\d+)\\s*张` | 生成目录页数/册内统计（若需要） |
+| `frames[].titleblock.page_index`（第M张） | 当前张序 | `field_definitions.page_info` | 张数 | 同上 | 重命名/排序辅助（若需要） |
+| `frames[].titleblock.title_cn`（中文标题） | 图纸标题 | `field_definitions.title_cn` | 图纸标题 | `title_bilingual_split` | 目录：名称(E) / 设计文件：中文标题(G) / IED：中文标题(K) |
+| `frames[].titleblock.title_en`（英文标题） | 图纸英文标题 | `field_definitions.title_en` | 图纸标题 | `title_bilingual_split` | 1818：设计文件英文标题(H) / IED英文标题(L)；非1818可为空 |
+| `frames[].titleblock.revision`（版次） | 版次 | `field_definitions.revision` | 版次 | `latest_nonempty_in_column` | 封面/目录/设计/IED |
+| `frames[].titleblock.status`（状态） | 状态 | `field_definitions.status` | 状态 | `latest_nonempty_in_column` | 封面/目录/设计/IED |
+| `frames[].titleblock.date`（日期） | 日期 | `field_definitions.date` | 日期 | `latest_nonempty_in_column_or_text` | 追溯/可选写入封面/报表 |
+
+> 说明：你文档里原 `FrameMeta.drawing_no/file_code/paper_size/...` 等字段，建议统一改为从 `frames[].titleblock.*` 派生/映射出来，避免同一信息出现两份来源导致冲突。
+
+---
+
+## 3) 字段优先级与覆盖约定（强烈建议固化）
+
+对同名字段（如 `discipline/design_phase/revision/status`）按以下优先级取值：
+
+1. **FrameMeta**（每张图图签/模板提取值，且通过校验）
+2. **GlobalDocParams**（用户输入全局值）
+3. **rules.defaults**（系统默认值）
+
+并在 `manifest.json` 输出“字段来源报告”（可选但强烈推荐）：
+- `field -> source(frame/global/default) -> value`
+- 缺失/不合法字段清单（用于前端提示）
+
+---
+
+## 4) 模板体系与选择规则（已扫描确认的事实）
+
+### 4.1 封面模板（docx，均包含 1 个嵌入的 Excel Worksheet）
+
+- `封面模板文件.docx`（通用）
+- `封面模板文件压力容器版.docx`（通用变体）
+- `封面模板文件核安全设备版.docx`（通用变体）
+- `1818图册封面模板.docx`（1818 专用）
+
+> 上述 4 个 docx 文件都包含 `word/embeddings/Microsoft_Excel_Worksheet.xlsx`，因此导出 PDF 推荐 `office_com`。
+
+**模板选择（建议）**
+- `project_no == "1818"`：固定使用 `1818图册封面模板.docx`
+- 否则：使用 `cover_variant` 选择三套通用封面之一
+
+### 4.2 目录模板（xlsx）
+
+- 通用：`目录模板文件.xlsx`（Sheet1/2/3；主要用 Sheet1）
+- 1818：`1818图册目录模板.xlsx`（Sheet1/2/3；主要用 Sheet1；且 `C1` 预填 `1818`）
+
+**结构确认**
+- 目录表头为两行（第 7~8 行），图纸的外部编码、内部编码、图纸中文标题、版次、状态、页数、附注的数据从 **第 9 行**开始写。
+- `B列与C列`为合并单元格（模板内大量存在 `B{row}:C{row}` 合并区，已扫描确认）。
+
+### 4.3 设计文件模板（xlsx）
+
+- `设计文件模板.xlsx` / Sheet `设计文件模板`
+- **表头在第 1 行，共 26 列（A~Z），已扫描确认**
+
+### 4.4 IED 计划模板（xlsx）
+
+- `IED计划模板文件.xlsx` / Sheet `IED导入模板 (修改)`
+- **表头在第 1 行，共 66 列（A~BN），已扫描确认**（见第 8 节）
+
+---
+
+## 5) 封面（Cover）参数与落点（docx 内嵌 Excel(OLE)）
+
+> 说明：封面模板为 docx + 内嵌 Excel(OLE)；实际填写发生在嵌入的 worksheet 上。  
+> 下表的“单元格坐标”来自你当前模板约定（后续如有变更，以模板扫描/人工确认更新为准）。
+
+### 5.1 通用封面（`封面模板文件*.docx`，内嵌 Sheet“封面”）
+
+| Key | 含义 | 写入单元格（值位） | 备注 |
+|---|---|---|---|
+| `engineering_no` | 工程号 | `I11` | 标签 `D11` |
+| `subitem_no` | 子项号 | `I13` | 标签 `D13`（封面使用子项号） |
+| `subitem_name` | 子项名称（中文） | `I15` | 标签 `D15`（**前端输入**，全局变量） |
+| `design_phase` | 设计阶段 | `I17` | 标签 `D17` |
+| `discipline` | 专业 | `I19` | 标签 `D19` |
+| `album_title_cn` | 图册(文件)名称（中文） | `I21(+I22联动)` | **联动写入**：为控制每格字数，将值尽量对半分到 `I21/I22`；分割点必须满足“右侧字符为中文(CJK)”（允许左侧为非中文且右侧为中文）；禁止在纯英文/数字/符号序列中间分割 |
+| `album_code` | 图册编号（末2位） | `I25` | 标签 `D25`（合并 `I25:S25`） |
+| `album_internal_code` | 图册编号（内部编码前缀） | `N3` | 标签 `N2`；值位 `N3:S3`（合并区）；内容为 `XXXXXXX-XXXXX` |
+| `cover_revision` | 封面版次（用户前端输入） | `N5` | 值位 `N5:P5`（合并区）；模板已有“版次：”，在其后追加值；默认 `A`；**与 ROI 提取的 revision 区分** |
+| 册次（共X册 第Y册） | 共X册 第Y册 | `N4` | **模板固定**：当前不做变量参数，不输入/不改动（模板默认已填） |
+
+**封面外部编码写入位置**
+- 通用封面嵌入 Excel：第 **29** 行从 **B 列**开始有 **19 个单元格**（连续格），用于输入 **19 位外部编码**
+- 写入值：`cover_external_code`（按上面的 `F01` 替换规则生成）
+
+### 5.2 1818 封面（`1818图册封面模板.docx`，内嵌 Sheet“封面”）
+
+| Key | 含义 | 写入单元格（值位） | 备注 |
+|---|---|---|---|
+| `engineering_no` | 工程号/Project No. | `I10` | 标签 `D10/D11` |
+| `subitem_no` | 子项号/Item No. | `I12` | 标签 `D12/D13`（封面使用子项号） |
+| `subitem_name` | 子项名称（中文） | `I14` | 标签 `D14`（**前端输入**，全局变量） |
+| `subitem_name_en` | 子项名称（英文） | `I15` | 标签 `D15`（**前端输入**，仅1818项目） |
+| `design_phase` | 设计阶段（中文） | `I16` | 标签 `D16`（从001图纸status派生：CFC→施工图设计） |
+| `design_phase_en` | 设计阶段（英文）/Design Phase | `I17` | 标签 `D17`（**由映射表生成**：施工图设计→Constructing Design） |
+| `discipline` | 专业（中文） | `I18` | 标签 `D18`（从001图纸DXF提取） |
+| `discipline_en` | 专业（英文）/Discipline | `I19` | 标签 `D19`（**由映射表生成**：结构→Structural、建筑→Architectural、总图运输→Site & Transportation） |
+> 1818 封面英文翻译规则：**子项名称中英文都由前端输入**（`subitem_name` 和 `subitem_name_en`）；设计阶段、专业的英文由**映射表**自动生成（见 `参数规范.yaml` 的 `enums.discipline_en_map` 和 `enums.design_phase_en_map`）。
+| `album_title_cn` | 文件名称（中文） | `I21(+I22联动)` | 规则同通用封面：中文按“右侧为中文”的边界尽量对半分到 `I21/I22` |
+| `album_title_en` | Document Title (EN) | `I23(+I24联动)` | 英文允许在完整英文单词之间（空白处）分割，尽量对半；优先分割后右侧以字母开头的单词（示例见参数规范.yaml） |
+| `album_code` | 图册编号（末2位）/Album Code | `I25` | 标签 `D25/D26`（与通用封面一致） |
+| `album_internal_code` | Document No.（内部编码前缀） | `M3` | 标签 `M2`；值位 `M3:S3`（合并区）；内容为 `XXXXXXX-XXXXX` |
+| 册次（Vol. x of y） | Vol. x of y | `M4` | 模板固定值（不做变量处理） |
+| `cover_revision` | Rev.（封面版次） | `M5` | **与通用封面一致**：使用 `cover_revision`（前端输入，默认A）；写入时在单元格原值 `Rev.:` 后增量追加 |
+| `doc_status` | Status | `P5` | 默认模板可能预填，可覆盖 |
+| `classification` | Classification | - | 无须在封面中填写 |
+
+---
+
+## 6) 目录（Catalog）参数与落点
+
+### 6.1 通用目录（`目录模板文件.xlsx` / Sheet1）
+
+**页眉字段（建议落点保持与现模板一致）**
+
+| Key | 含义 | 单元格（建议） | 备注 |
+|---|---|---|---|
+| `engineering_no`（工程号） | 工程号 | `C1` | 标签 `A1` |
+| `catalog_internal_code`（目录页眉编号=内部编码TM） | 编号 | `H1` | **内部编码**：取 001 图纸内部编码派生 `-TM`（见 2.3.0） |
+| `catalog_external_code`（目录文件外部编码=T01） | 文件编号 | `H3` | **外部编码**：取 001 图纸外部编码并将第 9~11 位替换为 `T01`（目录=T01；封面=F01）（见 2.3.0） |
+| `subitem_no`（子项号） | 子项号 | `C5` | 标签 `A5`（封面/目录使用子项号） |
+| `catalog_revision`（目录版次） | 版次 | `H5` | 取 `catalog_revision`：优先前端升版版本 `upgrade_revision`；未提供则取 `cover_revision`（默认A） |
+
+> 说明：扫描显示这些单元格在模板里多为空（作为填写位），因此生成时直接写入即可。
+
+**目录明细（从第 9 行开始）**
+
+| 列 | 含义 | 来源 |
+|---:|---|---|
+| A | 序号 | 自动递增 |
+| B/C | 图纸（文件）编号 | `frames[].titleblock.internal_code`（内部编码） |
+| D | 文件编码 | `frames[].titleblock.external_code`（外部编码） |
+| E | 图纸（文件）名称 | **写入顺序与排序**：目录明细每一行是一组“文件信息”。从上到下固定为：**第1行=封面文件**、**第2行=目录文件**、其余为上传DWG拆分得到的 `001~XXX` 图纸。对 `001~XXX` 图纸行：必须按 `frames[].titleblock.internal_code` 的尾号 `XXX`（3位数字）升序排序后再写入（同尾号再按 internal_code 字符串排序作为兜底）。名称取值：封面行用 `cover_title_cn`；目录行用 `catalog_title_cn`；图纸行用 `frames[].titleblock.title_cn` |
+| F | 版次 | `frames[].titleblock.revision`（或聚合全局） |
+| G | 状态 | `frames[].titleblock.status`（或聚合全局） |
+| H | 页数 | 图纸行：`frames[].titleblock.page_total`（若无则默认 1）；封面行：固定 `1`；目录行：**由目录分页算法计算得到**（见 9.3） |
+| I | 附注 | **升版标记**：前端输入 `upgrade_start_seq~upgrade_end_seq`（例如 5~12 表示 005~012），则对排序后的图纸行中尾号在该范围内的行，I列写入文本 `upgrade_note_text`（默认“升版”）；其余留空（封面/目录行留空） |
+
+> 排序规则（你已确认）：目录明细按 `FrameMeta.internal_code`（内部编码）排序后再写入。
+> 排序规则（落到路径）：按 `frames[].titleblock.internal_code` 排序后写入。
+
+### 6.2 1818 目录（`1818图册目录模板.xlsx` / Sheet1）
+
+**页眉字段**
+
+| Key | 含义 | 单元格（模板扫描确认的合并区） |
+|---|---|---|
+| `engineering_no`（工程号/Project No.） | Project No. | `C1`（模板预填 1818，可覆盖） |
+| `catalog_internal_code`（目录页眉编号/Document No.） | Document No. | `H1`（合并 `H1:I2`） |
+| `catalog_external_code`（目录文件外部编码=T01/Document Code） | Document Code | `H3`（合并 `H3:I4`） |
+| `subitem_no`（子项号/Item No.） | Item No. | `C5`（合并 `C5:C6`）（目录使用子项号） |
+| `catalog_revision`（版次/Rev.） | Rev. | `H5`（合并 `H5:H6`） |
+
+明细区写入规则同通用模板。
+
+---
+
+## 7) 设计文件（Design File）参数与落点（A~Z，已扫描确认）
+
+模板：`设计文件模板.xlsx` / Sheet `设计文件模板`  
+数据从第 2 行开始，每张图一行。
+
+| 列 | 表头 | 参数Key（建议） | 推荐来源 |
+|---:|---|---|---|
+| A | 状态 | `design.status`（设计文件状态：这个需要区别于图纸、封面、目录的状态status，虽然文件内写的是“状态”但这是专指设计文件.xlsx内种每个图纸的发布状态，默认为“编制”） | **全局同值** 规则/默认：用户前端输入，默认为“编制” |
+| B | WBS编码 | `wbs_code`（WBS分解编码：用于项目管理/归档） | **全局同值**：用户只输入一次 `wbs_code`，同一图册内所有行共用（含封面/目录/图纸）。 |
+| C | 所属图册编码 | `album_internal_code`（图册/文档号：该文件归属的图册） | 全局/规则（建议由 DXF/规则聚合得到，见 2.2） |
+| D | 文件编码 | `frames[].titleblock.external_code`（外部编码：DOC.NO） | DXF图签提取 |
+| E | 内部编码 | `frames[].titleblock.internal_code`（内部编码：排序主键） | DXF图签提取 |
+| F | 版本 | `frames[].titleblock.revision`（版次/修订版本） | DXF图签提取（或聚合全局） |
+| G | 中文标题 | `frames[].titleblock.title_cn`（中文标题） | DXF图签提取；**封面/目录行**分别用 `cover_title_cn` / `catalog_title_cn`（所有项目） |
+| H | 英文标题 | `frames[].titleblock.title_en`（英文标题） | 1818：写入英文标题；非1818可留空。另：封面/目录行分别用 `cover_title_en` / `catalog_title_en`（仅1818） |
+| I | 内部标识 | `design.internal_tag`（内部标识：内部管理用的附加标识） | **全局同值**规则:用户前端输入，默认为“否”|
+| J | 子项名称 | `subitem_name`（子项名称中文） | **前端输入**（全局变量） |
+| K | 子项号 | `subitem_no`（子项号） | **titleblock 提取**：来自 `frames[].titleblock.subitem_no`（全局聚合见 2.2） |
+| L | 系统代码 | `system_code`（系统代码：前端输入，默认 NA） | **全局同值**全局（前端输入） |
+| M | 系统名称 | `system_name`（系统名称：前端输入，默认 NA） | **全局同值**（前端输入） |
+| N | 专业(工种) | `frames[].titleblock.discipline`（专业/工种） | 图纸行：DXF图签提取；封面/目录行：取 **001 图纸**的专业（=全局 `discipline`） |
+| O | 专业代码 | `design.discipline_code`（专业对应的标准代码） | 映射表（需你给“专业→代码”）：结构：JG；建筑：JZ；总图运输：ZY，其他专业待补充 |
+| P | 专业室 | `design.discipline_office`（专业室/责任单位子项） | **全局同值**（用户前端输入，默认为空）|
+| Q | 设计阶段 | `design_phase`（设计阶段） | **派生**：来自 `frames[].titleblock.status`；当 status=`CFC` 时映射为 **“施工图设计”**（见 2.2） |
+| R | 密级 | `classification`（密级：内部/公开等） | **全局同值**全局/规则 ：前端用户输入，默认为“非密”|
+| S | 图幅 | `frames[].titleblock.paper_size_text`（图幅规格：A0+1/2等） | DXF图签提取 ，对于封面和目录都是A4文件|
+| T | 总页数 | `frames[].titleblock.page_total`（页数） | 图纸行：DXF图签提取（无则默认 1）；封面行：`cover_page_total`=1；目录行：`catalog_page_total`（导出PDF计页得到） |
+| U | 文件类别 | `design.file_category`（文件类别） | **全局同值****前端选择输入**：选项集合来自 `设计文件模板.xlsx` 的 Sheet5 “文件类别” A列 |
+| V | 图纸文件状态 | `frames[].titleblock.status`（状态） | **全局同值****不新增变量**：与 titleblock.status 同值。封面/目录行：取 001 图纸的 status（=全局 `doc_status`） |
+| W | 附件名称 | `design.attachment_name`（附件名称：若有外部附件） | 规则：用户前端输入，默认为空 |
+| X | 是否质保核查 | `design.qa_required`（是否需要质保核查：是/否） | **全局同值**规则：用户前端输入，默认为“否” |
+| Y | 质保核查工程师 | `design.qa_engineer`（质保核查责任人） | **全局同值**规则：用户前端输入，默认为空 |
+| Z | 实际工时数 | `work_hours`（工时数） | **全局同值**：用户前端输入一次；同值回填到 IED `AT 计划工时`；默认 `100` |
+
+---
+
+## 8) IED 导入表（IED计划）参数与落点（A~BW，共 75 列，已扫描确认）
+
+模板：`IED计划模板文件.xlsx` / Sheet `IED导入模板 (修改)`  
+数据从第 2 行开始，每条“文件/图纸”一行。写入顺序：**封面、目录、001~XXX 图纸**（图纸按 internal_code 尾号 `XXX` 升序）。
+
+| 列 | 表头 | 参数Key（建议） | 推荐来源 |
+|---:|---|---|---|
+| A | 新增标记 | （常量）`'A'` | 固定写入 `'A'` 代表新增导入 |
+| B | 变更标记 | `ied_change_flag` | **全局同值**：前端选择/可空（MOD/CAN/REC/IDM…，见模板“填写说明”）。用户一次选择后写入所有行。 |
+| C | 文档类型 | `ied_doc_type` | **全局同值**：前端选择（图册/文件/图纸/章节…）。用户一次选择后写入所有行。 |
+| D | IED状态 | `ied_status` | **必填**。规则：前端输入，**默认“发布”**。说明：`编制` 状态不驱动生成设计文件；`发布` 状态系统自动驱动产生设计文件到编制者工作台（见模板 Sheet“填写说明”）。 |
+| E | WBS编码 | `wbs_code` | **必填**（填写说明）。**全局同值**：用户只输入一次 `wbs_code`，同一图册内所有行共用（含封面/目录/图纸）。 |
+| F | 所属图册/文件编码 | `album_internal_code` | **全局同值**：同一图册内（封面/目录/001~XXX）该值一致。按你的业务规则：本列直接填写图册编码（= `album_internal_code`）。 |
+| G | 文件编码 | `frames[].titleblock.external_code`（外部编码） | 图纸行：DXF提取；封面/目录行：`cover_external_code` / `catalog_external_code` |
+| H | 原文件编码 | （留空） | 不输入数据，生成时固定留空，为后续 IDM/升级策略预留。 |
+| I | 内部编码 | `frames[].titleblock.internal_code`（内部编码） | 图纸行：DXF提取；封面/目录行：`cover_internal_code` / `catalog_internal_code` |
+| J | 版本 | `frames[].titleblock.revision`（版次） | 图纸行：DXF提取；封面行：`cover_revision`；目录行：`catalog_revision` |
+| K | 中文标题 | `frames[].titleblock.title_cn`（中文标题） | 图纸行：DXF提取；封面/目录行：`cover_title_cn` / `catalog_title_cn` |
+| L | 英文标题 | `frames[].titleblock.title_en`（英文标题） | 1818：图纸行DXF提取；封面/目录行：`cover_title_en` / `catalog_title_en`；非1818留空 |
+| M | 人员资格类别 | `ied_person_qual_category` | **发布状态必填**（填写说明）。前端输入；**默认值：一般核安全物项-民用**（你要求）。校验规则见模板“设计资格校验规则”。 |
+| N | 所提交计划 | `ied_submitted_plan_date` | 日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。用户前端输入 |
+| O | 计划会签日期 | （留空） | 固定空值|
+| P | 出版计划 | `ied_publish_plan_date` | 日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 用户前端输入|
+| Q | 外部计划 | `ied_external_plan_date` | 日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 用户前端输入|
+| R | FU标记 | `ied_fu_flag` | **全局同值**：前端输入；默认值：`N`（写入所有行）。 |
+| S | FU计划 | `ied_fu_plan_date` | 日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 用户前端输入，默认值：空值|
+| T | 计划调整依据 | （留空） | 暂时空置（固定空值）。 |
+| U | 内部标识 | `ied_internal_tag` | **全局同值**：用户前端输入，默认值：`否`（写入所有行）。 |
+| V | 设计类型 | `ied_design_type` | **全局同值**：用户前端选择；候选项来自 `IED计划模板文件.xlsx` Sheet4 “AP1000设计类型” A列（一次选择写入所有行）。 |
+| W | 责任设总 | `ied_chief_designer` | **全局同值**：用户前端输入；格式：`姓名@ID`（写入所有行）。 |
+| X | 责任单位 | `ied_responsible_unit` | **全局同值**：用户前端选择；候选项见 `documents_bin/responsible_unit.json`（一次选择写入所有行）。 |
+| Y | 是否联合编审文件 | `ied.is_joint_review_doc` | 设定为固定值：否 |
+| Z | 章节号 | （留空） | 固定空值 |
+| AA | 章节名称 | （留空） | 固定空值 |
+| AB | SSC编码 | （留空） | 固定空值 |
+| AC | 是否更新SSC关联 | （留空） | 固定空值 |
+| AD | 机组 | （留空） | 固定空值 |
+| AE | 系统代码 | （留空） | 固定空值 |
+| AF | 安装厂房 | （留空） | 固定空值 |
+| AG | 安装层位及标高 | （留空） | 固定空值 |
+| AH | 安装区域 | （留空） | 固定空值 |
+| AI | 安装层位 | （留空） | 固定空值 |
+| AJ | 岛别 | （留空） | 固定空值 |
+| AK | 土建厂房代码 | （留空） | 固定空值 |
+| AL | 土建分区 | （留空） | 固定空值 |
+| AM | 土建层位及标高 | （留空） | 固定空值 |
+| AN | 土建区域 | （留空） | 固定空值 |
+| AO | 房间 | （留空） | 固定空值 |
+| AP | 模块 | （留空） | 固定空值 |
+| AQ | 设备代码 | （留空） | 固定空值 |
+| AR | 总体性文件 | （留空） | 固定空值 |
+| AS | 相关物项类别 | （留空） | 固定空值 |
+| AT | 计划工时 | `work_hours` | **发布状态必填**（填写说明）。用户前端输入一次；同值回填到设计文件 `Z 实际工时数`；默认 `100`。 |
+| AU | 是否验证 | （留空） | 固定空值 |
+| AV | 验证方法 | （留空） | 固定空值 |
+| AW | 验证人 | （留空） | 固定空值 |
+| AX | 验证日期 | （留空） | 固定空值 |
+| AY | 编制者 | `ied_prepared_by` | **发布状态必填**：格式 `姓名@ID`（填写说明）。 |
+| AZ | 第二编制者 | `ied_prepared_by_2` | 用户前端输入，默认值：空值，格式 `姓名@ID`（填写说明）。 |
+| BA | 编制日期 | `ied_prepared_date` | **发布状态必填**：日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 |
+| BB | 校核者 | `ied_checked_by` | **发布状态必填**：格式 `姓名@ID`（填写说明）。 |
+| BC | 校核日期 | `ied_checked_date` | **发布状态必填**：日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 |
+| BD | 工种负责人 | `ied_discipline_leader` | **发布状态必填**格式 `姓名@ID`（填写说明）。 |
+| BE | 工种负责人审核日期 | `ied_discipline_leader_date` |**发布状态必填** 日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 |
+| BF | 审核者 | `ied_reviewed_by` | **发布状态必填**：格式 `姓名@ID`（填写说明）。 |
+| BG | 审核日期 | `ied_reviewed_date` | **发布状态必填**：日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 |
+| BH | 审定者 | `ied_approved_by` | **发布状态必填**格式 `姓名@ID`（填写说明）。 |
+| BI | 审定日期 | `ied_approved_date` | **发布状态必填**日期格式 `YYYY-MM-DD` 且必须为文本格式（填写说明）。 |
+| BJ | 专业室 | `ied_discipline_office` | **发布状态必填**、**全局同值**：前端选择；候选项见 `documents_bin/responsible_unit.json`，写入值取所选字符串最后一个 `-` 后面的文本（例如“河北分公司-建筑结构所-结构一室”写入“结构一室”）。 |
+| BK | 密级 | `classification`（密级） | **发布状态必填**全局：前端输入 |
+| BL | 所提交计划原因 | （留空） | 固定空值 |
+| BM | 出版计划原因 | （留空） | 固定空值 |
+| BN | 外部计划原因 | （留空） | 固定空值 |
+| BO | 预估图纸量 | （留空） | 固定空值 |
+| BP | 原定费用(元) | （留空） | 固定空值 |
+| BQ | 计划WR日期 | （留空） | 固定空值 |
+| BR | 是否三维模型 | （留空） | 固定空值 |
+| BS | 是否交付数据 | （留空） | 固定空值 |
+| BT | 数据类型 | （留空） | 固定空值 |
+| BU | EM包 | （留空） | 固定空值 |
+| BV | 安装大类 | （留空） | 固定空值 |
+| BW | 责任系统 | （留空） | 固定空值 |
+
+> 来自模板 Sheet“填写说明”的关键约束（已按当前模板文字整理）：
+> - **新增标记（A）**：仅用于“系统中不存在该外部编码”的新增导入；系统以 **外部编码（G）** 作为唯一标识判断是否存在。
+> - **变更标记（B）**：用于修改/删除/恢复/IDM 等；当 `IDM` 时 **原文件编码（H）必填**，且 `文件编码（G）` 填新的正确编码。
+> - **IED状态（D）**：必填；`发布` 状态会驱动产生设计文件，因此会触发更多列的必填与格式校验。
+> - **“发布”状态下必填（示例）**：`人员资格类别（M）/计划工时（AT）/编制者（AY）/编制日期（BA）/校核者（BB）/校核日期（BC）/审核者（BF）/审核日期（BG）/密级（BK）` 等（姓名类列格式为 `姓名@ID`；日期列格式为 `YYYY-MM-DD` 且 **必须为文本格式**）。
+> - **日期格式（多列）**：模板多处要求 `YYYY-MM-DD` 且必须为“文本格式”（例如：计划会签日期、所提交计划、出版计划、外部计划、FU计划，以及校审链条中的日期列等）。
+
+---
+
+## 9) 规则与映射（建议作为可版本化配置，而不是硬编码）
+### 9.1 `DocRules.defaults`（默认值集合）
+- 默认 `revision/doc_status/classification/page_count` 等
+### 9.2 `DocRules.catalog_sort`（目录排序规则）
+- `by_internal_code`（你已确认：按内部编码排序） / `by_drawing_no` / `by_file_code` / `custom`
+### 9.4 `DocRules.catalog_pagination`（目录分页与目录页数）
+**模板事实（已从模板XML解析确认）**
+- 通用目录模板与1818目录模板均为 **A4横向打印**（A4=paperSize=9，orientation=landscape），并设置了 `scale≈94~95`。
+- 两套目录模板的页眉均已预置页码占位：`共&N页 第&P页`（页数由Excel分页后自动显示）。
+- 通用目录模板默认定义：`Print_Titles = Sheet1!$1:$8`（第1~8行为打印标题行）；`Print_Area = Sheet1!$A$1:$I$42`（生成时应动态更新）。
+**目录页数算法（推荐实现）**
+- 生成并写入目录 `xlsx` 后，运行时根据实际写入的最后一行 `last_row` 更新打印区域：
+  - `Print_Area = Sheet1!$A$1:$I${last_row}`
+  - `Print_Titles = Sheet1!$1:$8`（不变）
+- 优先使用 Excel 分页信息（如 `HPageBreaks/VPageBreaks`）计算页数，回填 `H` 列后仅导出一次最终 PDF。
+- 若分页信息不稳定，则回退为导出PDF计页再回填的双导出流程，确保 `xlsx` 与 `pdf` 一致。
+### 9.3 `DocRules.mappings`（映射表集合）
+- `discipline -> discipline_code / discipline_office`
+- `file_category`（可参考 `设计文件模板.xlsx` 的 sheet `文件类别`）
+- `design_type`（可参考 `责任单位/ACP1000设计类型/AP1000设计类型` 等 sheet）
+## 10) 模板切换规则（已确定）
+**已确定**
+- `project_no == "1818"`：使用 `1818图册封面模板.docx` + `1818图册目录模板.xlsx`
+- 否则：使用通用模板： `封面模板文件.docx` + `目录模板文件.xlsx`
+- 添加一个全局变量，由用户前端输入，是否使用压力容器封面或和安全设备封面，默认为不使用

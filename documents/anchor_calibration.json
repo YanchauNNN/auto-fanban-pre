@@ -1,0 +1,21 @@
+{
+  "reference_point": "text_bbox_right_bottom",
+  "BASE10": {
+    "text_height_1to1_mm": 2.7,
+    "text_ref_in_anchor_roi_1to1": {
+      "dx_right": 95.5785,
+      "dy_bottom": 10.5602,
+      "dx_left": 84.4215,
+      "dy_top": 5.4398
+    }
+  },
+  "SMALL5": {
+    "text_height_1to1_mm": 2.7,
+    "text_ref_in_anchor_roi_1to1": {
+      "dx_right": -0.0215,
+      "dy_bottom": -0.0398,
+      "dx_left": 82.6215,
+      "dy_top": 3.2398
+    }
+  }
+}

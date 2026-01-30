@@ -27,7 +27,7 @@ import ezdxf
 from ..config import load_spec
 from ..interfaces import DetectionError, IFrameDetector
 from ..models import FrameMeta
-from .detection import AnchorFirstLocator, CandidateFinder, PaperFitter
+from .detection import AnchorCalibratedLocator, CandidateFinder, PaperFitter
 
 
 class FrameDetector(IFrameDetector):
@@ -59,7 +59,7 @@ class FrameDetector(IFrameDetector):
             coord_tol=coord_tol,
             orthogonality_tol_deg=orthogonality_tol_deg,
         )
-        self.anchor_locator = AnchorFirstLocator(
+        self.anchor_calibrated_locator = AnchorCalibratedLocator(
             self.spec,
             self.candidate_finder,
             self.paper_fitter,
@@ -78,4 +78,4 @@ class FrameDetector(IFrameDetector):
 
         msp = doc.modelspace()
 
-        return self.anchor_locator.locate_frames(msp, dxf_path)
+        return self.anchor_calibrated_locator.locate_frames(msp, dxf_path)

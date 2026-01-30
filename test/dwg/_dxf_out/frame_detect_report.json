@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-01-29T18:13:33",
+  "dxf_dir": "test\\dwg\\_dxf_out",
+  "dwg_dir": "test\\dwg",
+  "out_dir": "test\\dwg\\_dxf_out",
+  "options": {
+    "skip_line_rebuild": false
+  },
+  "items": [
+    {
+      "file": "1818.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818.dxf"
+    },
+    {
+      "file": "2016.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": "test\\dwg\\_dxf_out\\2016.dxf",
+      "frame_count": 1,
+      "variants": [
+        "CNPE_A4"
+      ],
+      "scales": [
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 50.000002372047,
+          "sy": 49.99999987981309,
+          "geom_scale_factor": 50.00000112593004
+        }
+      ],
+      "frames": [
+        {
+          "runtime": {
+            "frame_id": "9883b1b7-37f8-4d4c-9435-fbe1e31d559e",
+            "source_file": "test\\dwg\\_dxf_out\\2016.dxf",
+            "outer_bbox": {
+              "xmin": -383207.1145317756,
+              "ymin": -63131.23732526425,
+              "xmax": -372707.1140336457,
+              "ymax": -48281.23736095976
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 50.000002372047,
+            "sy": 49.99999987981309,
+            "geom_scale_factor": 50.00000112593004,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        }
+      ],
+      "elapsed_s": 3.406,
+      "error": null
+    }
+  ]
+}

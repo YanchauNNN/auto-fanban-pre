@@ -1,0 +1,589 @@
+{
+  "generated_at": "2026-01-28T18:01:43",
+  "dxf_dir": "test\\dwg\\_dxf_out",
+  "dwg_dir": "test\\dwg",
+  "out_dir": "test\\dwg\\_dxf_out",
+  "options": {
+    "skip_line_rebuild": false
+  },
+  "items": [
+    {
+      "file": "1818.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": "test\\dwg\\_dxf_out\\1818.dxf",
+      "frame_count": 12,
+      "variants": [
+        "CNPE_A1+1/4",
+        "CNPE_A1+1/4",
+        "CNPE_A1+1/4",
+        "CNPE_A1+1/4",
+        "CNPE_A1+1/4",
+        "CNPE_A4",
+        "CNPE_A4",
+        "CNPE_A4",
+        "CNPE_A4",
+        "CNPE_A4",
+        "CNPE_A4",
+        "CNPE_A4"
+      ],
+      "scales": [
+        {
+          "paper_variant_id": "CNPE_A1+1/4",
+          "sx": 99.99999999999984,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999991
+        },
+        {
+          "paper_variant_id": "CNPE_A1+1/4",
+          "sx": 99.99999999999984,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999991
+        },
+        {
+          "paper_variant_id": "CNPE_A1+1/4",
+          "sx": 100.0,
+          "sy": 100.0,
+          "geom_scale_factor": 100.0
+        },
+        {
+          "paper_variant_id": "CNPE_A1+1/4",
+          "sx": 100.00000000000001,
+          "sy": 99.99999999999996,
+          "geom_scale_factor": 99.99999999999999
+        },
+        {
+          "paper_variant_id": "CNPE_A1+1/4",
+          "sx": 100.00000000000006,
+          "sy": 100.00000000000001,
+          "geom_scale_factor": 100.00000000000003
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.9999999999956,
+          "sy": 100.0,
+          "geom_scale_factor": 99.9999999999978
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.99999999999775,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999888
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.99999999999775,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999888
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.9999999999956,
+          "sy": 100.0,
+          "geom_scale_factor": 99.9999999999978
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.99999999999557,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999778
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.99999999999557,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999778
+        },
+        {
+          "paper_variant_id": "CNPE_A4",
+          "sx": 99.99999999999557,
+          "sy": 100.0,
+          "geom_scale_factor": 99.99999999999778
+        }
+      ],
+      "frames": [
+        {
+          "runtime": {
+            "frame_id": "9739bdbd-bc9d-4901-adba-d2425d775a78",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 8987.870341717993,
+              "ymin": 678918.3650774456,
+              "xmax": 114087.87034171783,
+              "ymax": 738318.3650774456
+            },
+            "paper_variant_id": "CNPE_A1+1/4",
+            "sx": 99.99999999999984,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999991,
+            "roi_profile_id": "BASE10",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "df0ded3e-73a9-4e9c-bfb3-fb72b7e7dff5",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 8987.870341717993,
+              "ymin": 592541.4424215307,
+              "xmax": 114087.87034171783,
+              "ymax": 651941.4424215307
+            },
+            "paper_variant_id": "CNPE_A1+1/4",
+            "sx": 99.99999999999984,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999991,
+            "roi_profile_id": "BASE10",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "f95048df-26ac-4cfb-8761-1d8465af7f78",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 8987.870341717993,
+              "ymin": 490163.9975404473,
+              "xmax": 114087.870341718,
+              "ymax": 549563.9975404473
+            },
+            "paper_variant_id": "CNPE_A1+1/4",
+            "sx": 100.0,
+            "sy": 100.0,
+            "geom_scale_factor": 100.0,
+            "roi_profile_id": "BASE10",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "7a9de96d-1afc-437e-b98b-27d16cc20b61",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 15805.15395454809,
+              "ymin": 80668.69332087963,
+              "xmax": 120905.1539545481,
+              "ymax": 140068.6933208796
+            },
+            "paper_variant_id": "CNPE_A1+1/4",
+            "sx": 100.00000000000001,
+            "sy": 99.99999999999996,
+            "geom_scale_factor": 99.99999999999999,
+            "roi_profile_id": "BASE10",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "81b3ebbe-d8c6-42eb-b28b-08cb9373e621",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 14744.44745147394,
+              "ymin": 7132.735888861491,
+              "xmax": 119844.447451474,
+              "ymax": 66532.7358888615
+            },
+            "paper_variant_id": "CNPE_A1+1/4",
+            "sx": 100.00000000000006,
+            "sy": 100.00000000000001,
+            "geom_scale_factor": 100.00000000000003,
+            "roi_profile_id": "BASE10",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "1e856122-8b81-4a41-a7a3-71de85e4326d",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 9241.328840098606,
+              "ymin": 910986.5524249714,
+              "xmax": 30241.32884009768,
+              "ymax": 940686.5524249714
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.9999999999956,
+            "sy": 100.0,
+            "geom_scale_factor": 99.9999999999978,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "df8d81e7-1a6c-4234-8065-2f05b0381113",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 30241.32884009768,
+              "ymin": 910986.5524249714,
+              "xmax": 51241.32884009721,
+              "ymax": 940686.5524249714
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.99999999999775,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999888,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "ef84ef6a-9017-478c-850e-bd528184995e",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 30241.32884009768,
+              "ymin": 878137.8162275938,
+              "xmax": 51241.32884009721,
+              "ymax": 907837.8162275938
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.99999999999775,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999888,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "7e70a53e-fe6b-4042-b21f-8dcfabb7d086",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 9241.328840098606,
+              "ymin": 878137.8162275938,
+              "xmax": 30241.32884009768,
+              "ymax": 907837.8162275938
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.9999999999956,
+            "sy": 100.0,
+            "geom_scale_factor": 99.9999999999978,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "ff792306-71d4-4388-8051-910f57d69f39",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 51241.32884009721,
+              "ymin": 910986.5524249714,
+              "xmax": 72241.32884009628,
+              "ymax": 940686.5524249714
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.99999999999557,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999778,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "4593889f-8465-455d-b139-7f8c6c15767a",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 72241.32884009628,
+              "ymin": 910986.5524249714,
+              "xmax": 93241.32884009535,
+              "ymax": 940686.5524249714
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.99999999999557,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999778,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        },
+        {
+          "runtime": {
+            "frame_id": "1b535ce0-4e2d-4197-96a4-a779deb9c0c6",
+            "source_file": "test\\dwg\\_dxf_out\\1818.dxf",
+            "outer_bbox": {
+              "xmin": 51241.32884009721,
+              "ymin": 878137.8162275938,
+              "xmax": 72241.32884009628,
+              "ymax": 907837.8162275938
+            },
+            "paper_variant_id": "CNPE_A4",
+            "sx": 99.99999999999557,
+            "sy": 100.0,
+            "geom_scale_factor": 99.99999999999778,
+            "roi_profile_id": "SMALL5",
+            "scale_mismatch": false,
+            "flags": [],
+            "pdf_path": null,
+            "dwg_path": null
+          },
+          "titleblock": {
+            "internal_code": null,
+            "external_code": null,
+            "album_code": null,
+            "engineering_no": null,
+            "subitem_no": null,
+            "paper_size_text": null,
+            "discipline": null,
+            "scale_text": null,
+            "scale_denominator": null,
+            "page_total": null,
+            "page_index": null,
+            "title_cn": null,
+            "title_en": null,
+            "revision": null,
+            "status": null,
+            "date": null
+          },
+          "raw_extracts": {}
+        }
+      ],
+      "elapsed_s": 2601.427,
+      "error": null
+    }
+  ]
+}
