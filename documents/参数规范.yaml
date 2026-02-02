@@ -866,7 +866,11 @@ titleblock_extract:
       BASE10:
         template_dxf: "test/dxf-biaozhun/2016-A0.dxf"
         text_height_1to1_mm: 2.7
+        text_height_1to1_mm_by_project:
+          "1818": 2.5
         anchor_roi_rb_offset_1to1: [10.0, 190.0, 68.0, 84.0]
+        anchor_roi_rb_offset_1to1_by_project:
+          "1818": [16.1906, 196.1906, 69.4498, 85.4498]
         text_ref_in_anchor_roi_1to1:
           dx_right: 95.5785
           dy_bottom: 10.5602
@@ -875,7 +879,11 @@ titleblock_extract:
       SMALL5:
         template_dxf: "test/dxf-biaozhun/2016-A4.dxf"
         text_height_1to1_mm: 2.7
+        text_height_1to1_mm_by_project:
+          "1818": 2.5
         anchor_roi_rb_offset_1to1: [100.6, 183.2, 73.6, 76.8]
+        anchor_roi_rb_offset_1to1_by_project:
+          "1818": [106.7506, 189.3506, 75.0398, 78.2398]
         text_ref_in_anchor_roi_1to1:
           dx_right: -0.0215
           dy_bottom: -0.0398

@@ -1,0 +1,154 @@
+{
+  "generated_at": "2026-02-02T14:15:12",
+  "dxf_dir": "test\\dxf-1818",
+  "dwg_dir": "test\\dwg",
+  "out_dir": "test\\dwg\\_dxf_out",
+  "options": {
+    "skip_line_rebuild": false
+  },
+  "items": [
+    {
+      "file": "1818-A0+二分之一.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A0+二分之一.dxf"
+    },
+    {
+      "file": "1818-A0+八分之一.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A0+八分之一.dxf"
+    },
+    {
+      "file": "1818-A0+四分之一.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A0+四分之一.dxf"
+    },
+    {
+      "file": "1818-A0.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A0.dxf"
+    },
+    {
+      "file": "1818-A0竖向.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A0竖向.dxf"
+    },
+    {
+      "file": "1818-A1+1.0L.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1+1.0L.dxf"
+    },
+    {
+      "file": "1818-A1+二分之一.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1+二分之一.dxf"
+    },
+    {
+      "file": "1818-A1+四分之一.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1+四分之一.dxf"
+    },
+    {
+      "file": "1818-A1.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1.dxf"
+    },
+    {
+      "file": "1818-A1流程图.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1流程图.dxf"
+    },
+    {
+      "file": "1818-A1竖向.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A1竖向.dxf"
+    },
+    {
+      "file": "1818-A3.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A3.dxf"
+    },
+    {
+      "file": "1818-A4.dxf",
+      "source_suffix": ".dxf",
+      "dxf_path": null,
+      "frame_count": 0,
+      "variants": [],
+      "scales": [],
+      "frames": [],
+      "elapsed_s": null,
+      "error": "DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf=1818-A4.dxf"
+    }
+  ]
+}

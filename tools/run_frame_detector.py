@@ -15,6 +15,8 @@ def _add_backend_to_path() -> None:
 
 def _collect_inputs(dwg_dir: Path, dxf_dir: Path | None) -> list[Path]:
     if dxf_dir:
+        if dxf_dir.is_file():
+            return [dxf_dir]
         return sorted(dxf_dir.glob("*.dxf"))
     return sorted(dwg_dir.glob("*.dwg"))
 
@@ -65,6 +67,11 @@ def main() -> int:
         choices=["auto", "calibrated", "fallback"],
         help="锚点定位模式：auto(直推优先+回退)/calibrated(仅直推)/fallback(仅旧逻辑)",
     )
+    parser.add_argument(
+        "--project-no",
+        default="",
+        help="项目号（如1818），用于锚点字高等项目差异化配置",
+    )
     args = parser.parse_args()
 
     _add_backend_to_path()
@@ -77,7 +84,7 @@ def main() -> int:
         dxf_dir = Path(args.dxf_dir) if args.dxf_dir else None
     out_dir = Path(args.out_dir)
 
-    detector = FrameDetector()
+    detector = FrameDetector(project_no=args.project_no or None)
     oda = ODAConverter()
 
     if args.skip_line_rebuild:
@@ -126,8 +133,12 @@ def main() -> int:
                 }
                 for f in frames
             ]
+            rb_points = [
+                {"x": f.runtime.outer_bbox.xmax, "y": f.runtime.outer_bbox.ymin}
+                for f in frames
+            ]
             print(
-                f"{path.name}: frames={len(frames)} variants={variants} scales={scales}"
+                f"{path.name}: frames={len(frames)} variants={variants} scales={scales} rb={rb_points}"
             )
             elapsed_s = round(time.perf_counter() - started_at, 3)
             results.append(
@@ -138,13 +149,52 @@ def main() -> int:
                     "frame_count": len(frames),
                     "variants": variants,
                     "scales": scales,
+                    "rb_points": rb_points,
                     "frames": [f.model_dump(mode="json") for f in frames],
                     "elapsed_s": elapsed_s,
                     "error": None,
                 }
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"{path.name}: ERROR {exc}")
+            rb_points: list[dict[str, float]] = []
+            if "dxf_path" in locals():
+                try:
+                    import ezdxf  # type: ignore
+                    from src.cad.detection.anchor_first_locator import (  # type: ignore
+                        AnchorFirstLocator,
+                    )
+
+                    doc = ezdxf.readfile(str(dxf_path))
+                    msp = doc.modelspace()
+                    text_items = list(AnchorFirstLocator._iter_text_items(msp))
+                    anchor_items = [
+                        t
+                        for t in text_items
+                        if detector.anchor_calibrated_locator._match_any_text(  # noqa: SLF001
+                            t.text, detector.anchor_calibrated_locator.anchor_texts
+                        )
+                    ]
+                    rb_targets = detector.anchor_calibrated_locator._build_rb_targets(  # noqa: SLF001
+                        anchor_items
+                    )
+                    rb_points = []
+                    seen_anchors: set[int] = set()
+                    for t in rb_targets:
+                        anchor_id = t["anchor_id"]
+                        if anchor_id in seen_anchors:
+                            continue
+                        seen_anchors.add(anchor_id)
+                        rb_points.append(
+                            {
+                                "x": t["rb_x"],
+                                "y": t["rb_y"],
+                                "profile_id": t["profile_id"],
+                                "scale": t["scale"],
+                            }
+                        )
+                except Exception:
+                    rb_points = []
+            print(f"{path.name}: ERROR {exc} rb={rb_points}")
             results.append(
                 {
                     "file": path.name,
@@ -153,6 +203,7 @@ def main() -> int:
                     "frame_count": 0,
                     "variants": [],
                     "scales": [],
+                    "rb_points": rb_points,
                     "frames": [],
                     "elapsed_s": None,
                     "error": str(exc),

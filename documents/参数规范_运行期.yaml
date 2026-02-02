@@ -63,3 +63,18 @@ runtime_options:
     log_level:   { type: str, default: "INFO", desc: "日志级别" }
     log_to_file: { type: bool, default: true, desc: "是否输出到文件" }
 
+  # --------------------------------------------------------------------------
+  # 7) 运行期业务覆盖（锚点校准相关）
+  # --------------------------------------------------------------------------
+  titleblock_overrides:
+    anchor_text_height_by_project:
+      type: "dict[str,float]"
+      default: { "1818": 2.5 }
+      desc: "锚点字高1:1按项目覆盖，优先于参数规范中的text_height_1to1_mm"
+    anchor_roi_rb_offset_by_project:
+      type: "dict[str,list[float]]"
+      default:
+        "1818_BASE10": [16.1906, 196.1906, 69.4498, 85.4498]
+        "1818_SMALL5": [106.7506, 189.3506, 75.0398, 78.2398]
+      desc: "锚点ROI右下角偏移按项目覆盖（key格式: {project}_{profile}）"
+

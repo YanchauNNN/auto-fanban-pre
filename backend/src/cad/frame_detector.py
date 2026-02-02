@@ -33,7 +33,12 @@ from .detection import AnchorCalibratedLocator, CandidateFinder, PaperFitter
 class FrameDetector(IFrameDetector):
     """图框检测器实现"""
 
-    def __init__(self, spec_path: str | None = None, min_frame_dim: float = 100.0):
+    def __init__(
+        self,
+        spec_path: str | None = None,
+        min_frame_dim: float = 100.0,
+        project_no: str | None = None,
+    ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
         self.paper_variants = self.spec.get_paper_variants()
         outer_frame_cfg = self.spec.titleblock_extract.get("outer_frame", {})
@@ -64,6 +69,7 @@ class FrameDetector(IFrameDetector):
             self.candidate_finder,
             self.paper_fitter,
             max_candidates=self.max_candidates,
+            project_no=project_no,
         )
 
     def detect_frames(self, dxf_path: Path) -> list[FrameMeta]:
