@@ -28,6 +28,7 @@ class CandidateFrame:
     sy: float
     roi_profile_id: str
     fit_error: float
+    layer: str
 
     @property
     def area(self) -> float:
@@ -61,16 +62,18 @@ class AnchorCalibratedLocator:
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         scale_mismatch = tolerances.get("scale_mismatch", {})
         self.scale_tol_rel = float(scale_mismatch.get("rel_tol", 0.02))
-        self.rb_tol = 0.1
+        self.rb_tol = 1.0
 
         outer_frame_cfg = self.spec.titleblock_extract.get("outer_frame", {})
         layer_priority = outer_frame_cfg.get("layer_priority", {})
-        self.primary_layer = str(layer_priority.get("primary_layer", "_TSZ-PLOT_MARK"))
-        self.secondary_layer = str(layer_priority.get("secondary_layer", "0"))
-        self.primary_entities = set(
-            layer_priority.get("primary_entities", ["LWPOLYLINE", "POLYLINE"])
-        )
-        self.secondary_entities = set(layer_priority.get("secondary_entities", ["LINE"]))
+        layers = layer_priority.get("layers")
+        if not layers:
+            primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
+            secondary = layer_priority.get("secondary_layer", "0")
+            layers = [primary, secondary]
+        self.layer_order = [str(layer_name) for layer_name in layers if layer_name]
+        entity_order = layer_priority.get("entity_order", ["LWPOLYLINE", "POLYLINE", "LINE"])
+        self.entity_order = [str(e) for e in entity_order if e]
 
         a4_cfg = self.spec.a4_multipage.get("cluster_building", {})
         self.a4_gap_factor = float(a4_cfg.get("gap_threshold_factor", 0.5))
@@ -83,75 +86,126 @@ class AnchorCalibratedLocator:
         anchor_items = [t for t in text_items if self._match_any_text(t.text, self.anchor_texts)]
         if not anchor_items:
             raise DetectionError(f"DETECT_FRAMES/ANCHOR_SCAN: 未找到锚点文本 dxf={dxf_path.name}")
-
-        polylines = self._collect_polylines(msp)
-        lines = self._collect_lines(msp)
-
-        frames: list[FrameMeta] = []
-        used_candidates: set[tuple[float, float, float, float]] = set()
-        found_rb = False
-        found_geom = False
-        a4_candidates: list[CandidateFrame] | None = None
-        a4_cluster_map: dict[tuple[float, float, float, float], list[CandidateFrame]] = {}
-
+        rb_targets: list[dict] = []
         for idx, anchor_item in enumerate(anchor_items, start=1):
             for profile_id, calib in self._iter_calibrations():
                 scale = self._scale_from_text(anchor_item, calib)
                 if scale is None:
                     continue
-                found_rb = True
                 outer_xmax, outer_ymin = self._outer_rb_from_anchor(anchor_item, scale, calib)
-
-                matches = self._match_polylines(
-                    polylines,
-                    outer_xmax,
-                    outer_ymin,
-                    scale,
-                    profile_id,
+                rb_targets.append(
+                    {
+                        "anchor_id": idx,
+                        "profile_id": profile_id,
+                        "scale": scale,
+                        "rb_x": outer_xmax,
+                        "rb_y": outer_ymin,
+                    }
                 )
-                if not matches:
-                    matches = self._match_lines(
-                        lines,
-                        outer_xmax,
-                        outer_ymin,
-                        scale,
-                        profile_id,
-                    )
 
-                if not matches:
-                    continue
+        if not rb_targets:
+            raise DetectionError(f"DETECT_FRAMES/RB_LOCATE: 无法定位图框右下角 dxf={dxf_path.name}")
 
-                found_geom = True
-                selected = min(matches, key=lambda c: (c.fit_error, c.area))
-                self.logger.info(
-                    "锚点直推: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
-                    idx,
-                    selected.paper_variant_id,
-                    selected.sx,
-                    selected.sy,
-                    selected.roi_profile_id,
-                    selected.bbox.xmin,
-                    selected.bbox.ymin,
-                    selected.bbox.xmax,
-                    selected.bbox.ymax,
-                )
-                self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
+        frames: list[FrameMeta] = []
+        used_candidates: set[tuple[float, float, float, float]] = set()
+        unresolved = dict(enumerate(rb_targets))
+        found_geom = False
+        poly_cache: dict[tuple[str, str], list[dict]] = {}
+        line_cache: dict[str, list[tuple[tuple[float, float], tuple[float, float]]]] = {}
+        a4_cache: dict[str, tuple[list[CandidateFrame], dict[tuple[float, float, float, float], list[CandidateFrame]]]] = {}
 
-                # A4扩展：加入同簇外框（无需锚点）
-                if self._is_a4_candidate(selected):
-                    if a4_candidates is None:
-                        a4_candidates = self._build_a4_candidates(polylines)
-                        a4_cluster_map = self._cluster_lookup(
-                            self._build_a4_clusters(a4_candidates)
+        for layer in self.layer_order:
+            if not unresolved:
+                break
+            for entity_type in self.entity_order:
+                if not unresolved:
+                    break
+                if entity_type in {"LWPOLYLINE", "POLYLINE"}:
+                    cache_key = (layer, entity_type)
+                    if cache_key not in poly_cache:
+                        poly_cache[cache_key] = self._query_polylines(msp, layer, entity_type)
+                    polylines = poly_cache[cache_key]
+                    if not polylines:
+                        continue
+                    for target_id in list(unresolved.keys()):
+                        target = unresolved[target_id]
+                        matches = self._match_polylines(
+                            polylines,
+                            target["rb_x"],
+                            target["rb_y"],
+                            target["scale"],
+                            target["profile_id"],
+                            layer,
                         )
-                    cluster = a4_cluster_map.get(self._candidate_key(selected), [])
-                    for cand in cluster:
-                        self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+                        if not matches:
+                            continue
+                        found_geom = True
+                        selected = min(matches, key=lambda c: (c.fit_error, c.area))
+                        self.logger.info(
+                            "锚点直推: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
+                            target["anchor_id"],
+                            selected.paper_variant_id,
+                            selected.sx,
+                            selected.sy,
+                            selected.roi_profile_id,
+                            selected.bbox.xmin,
+                            selected.bbox.ymin,
+                            selected.bbox.xmax,
+                            selected.bbox.ymax,
+                        )
+                        self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
+                        if self._is_a4_candidate(selected):
+                            if layer not in a4_cache:
+                                layer_polylines = (
+                                    poly_cache.get((layer, "LWPOLYLINE"), [])
+                                    + poly_cache.get((layer, "POLYLINE"), [])
+                                )
+                                a4_candidates = self._build_a4_candidates(layer_polylines, layer)
+                                a4_cluster_map = self._cluster_lookup(
+                                    self._build_a4_clusters(a4_candidates)
+                                )
+                                a4_cache[layer] = (a4_candidates, a4_cluster_map)
+                            cluster = a4_cache[layer][1].get(self._candidate_key(selected), [])
+                            for cand in cluster:
+                                self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+                        unresolved.pop(target_id, None)
+                elif entity_type == "LINE":
+                    if layer not in line_cache:
+                        line_cache[layer] = self._query_lines(msp, layer)
+                    lines = line_cache[layer]
+                    if not lines:
+                        continue
+                    for target_id in list(unresolved.keys()):
+                        target = unresolved[target_id]
+                        matches = self._match_lines(
+                            lines,
+                            target["rb_x"],
+                            target["rb_y"],
+                            target["scale"],
+                            target["profile_id"],
+                            layer,
+                        )
+                        if not matches:
+                            continue
+                        found_geom = True
+                        selected = min(matches, key=lambda c: (c.fit_error, c.area))
+                        self.logger.info(
+                            "锚点直推: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
+                            target["anchor_id"],
+                            selected.paper_variant_id,
+                            selected.sx,
+                            selected.sy,
+                            selected.roi_profile_id,
+                            selected.bbox.xmin,
+                            selected.bbox.ymin,
+                            selected.bbox.xmax,
+                            selected.bbox.ymax,
+                        )
+                        self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
+                        unresolved.pop(target_id, None)
 
         if frames:
             return frames
-        if not found_rb:
-            raise DetectionError(f"DETECT_FRAMES/RB_LOCATE: 无法定位图框右下角 dxf={dxf_path.name}")
         if not found_geom:
             raise DetectionError(
                 f"DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf={dxf_path.name}"
@@ -229,20 +283,12 @@ class AnchorCalibratedLocator:
             and abs(cand.sy - scale) / max(scale, 1e-9) <= self.scale_tol_rel
         )
 
-    def _collect_polylines(self, msp) -> list[dict]:
+    def _query_polylines(self, msp, layer: str, entity_type: str) -> list[dict]:
         polylines: list[dict] = []
-        for entity in msp:
-            tp = entity.dxftype()
-            if tp not in self.primary_entities:
+        for entity in self._iter_layer_entities(msp, layer, entity_type):
+            if not self._is_polyline_closed(entity, entity_type):
                 continue
-            try:
-                if entity.dxf.layer != self.primary_layer:
-                    continue
-            except Exception:
-                continue
-            if not self._is_polyline_closed(entity, tp):
-                continue
-            vertices = self._polyline_vertices(entity, tp)
+            vertices = self._polyline_vertices(entity, entity_type)
             if not vertices:
                 continue
             if not self._is_axis_aligned(vertices):
@@ -251,20 +297,50 @@ class AnchorCalibratedLocator:
             polylines.append({"bbox": bbox, "vertices": vertices})
         return polylines
 
-    def _collect_lines(self, msp) -> list[tuple[tuple[float, float], tuple[float, float]]]:
-        if "LINE" not in self.secondary_entities:
-            return []
+    def _query_lines(
+        self, msp, layer: str
+    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         lines: list[tuple[tuple[float, float], tuple[float, float]]] = []
-        for entity in msp.query("LINE"):
-            try:
-                if entity.dxf.layer != self.secondary_layer:
-                    continue
-            except Exception:
-                continue
+        for entity in self._iter_layer_entities(msp, layer, "LINE"):
             start = entity.dxf.start
             end = entity.dxf.end
             lines.append(((float(start.x), float(start.y)), (float(end.x), float(end.y))))
         return lines
+
+    def _iter_layer_entities(self, msp, layer: str, entity_type: str):
+        query = f'{entity_type}[layer=="{layer}"]'
+        try:
+            for entity in msp.query(query):
+                yield entity
+        except Exception:
+            for entity in msp.query(entity_type):
+                try:
+                    if entity.dxf.layer == layer:
+                        yield entity
+                except Exception:
+                    continue
+
+        insert_query = f'INSERT[layer=="{layer}"]'
+        try:
+            inserts = list(msp.query(insert_query))
+        except Exception:
+            inserts = [e for e in msp.query("INSERT") if getattr(e.dxf, "layer", None) == layer]
+
+        for insert in inserts:
+            try:
+                for ve in insert.virtual_entities():
+                    if ve.dxftype() != entity_type:
+                        continue
+                    try:
+                        ve_layer = ve.dxf.layer
+                    except Exception:
+                        ve_layer = "0"
+                    effective_layer = layer if ve_layer == "0" else ve_layer
+                    if effective_layer != layer:
+                        continue
+                    yield ve
+            except Exception:
+                continue
 
     def _match_polylines(
         self,
@@ -273,6 +349,7 @@ class AnchorCalibratedLocator:
         rb_y: float,
         scale: float,
         profile_id: str,
+        layer: str,
     ) -> list[CandidateFrame]:
         matches: list[CandidateFrame] = []
         for item in polylines:
@@ -281,7 +358,7 @@ class AnchorCalibratedLocator:
             bbox = item["bbox"]
             if not self._bbox_matches_rb(bbox, rb_x, rb_y):
                 continue
-            matches.extend(self._fit_bbox_candidates(bbox, scale, profile_id))
+            matches.extend(self._fit_bbox_candidates(bbox, scale, profile_id, layer))
         return matches
 
     def _match_lines(
@@ -291,6 +368,7 @@ class AnchorCalibratedLocator:
         rb_y: float,
         scale: float,
         profile_id: str,
+        layer: str,
     ) -> list[CandidateFrame]:
         max_w = 0.0
         max_h = 0.0
@@ -302,19 +380,17 @@ class AnchorCalibratedLocator:
             x2, y2 = p_other
             dx = x2 - x1
             dy = y2 - y1
-            if abs(dy) <= self.rb_tol:
-                if x2 <= rb_x + self.rb_tol:
-                    max_w = max(max_w, rb_x - x2)
-            elif abs(dx) <= self.rb_tol:
-                if y2 >= rb_y - self.rb_tol:
-                    max_h = max(max_h, y2 - rb_y)
+            if abs(dy) <= self.rb_tol and x2 <= rb_x + self.rb_tol:
+                max_w = max(max_w, rb_x - x2)
+            elif abs(dx) <= self.rb_tol and y2 >= rb_y - self.rb_tol:
+                max_h = max(max_h, y2 - rb_y)
         if max_w <= 0 or max_h <= 0:
             return []
         bbox = BBox(xmin=rb_x - max_w, ymin=rb_y, xmax=rb_x, ymax=rb_y + max_h)
-        return self._fit_bbox_candidates(bbox, scale, profile_id)
+        return self._fit_bbox_candidates(bbox, scale, profile_id, layer)
 
     def _fit_bbox_candidates(
-        self, bbox: BBox, scale: float, profile_id: str
+        self, bbox: BBox, scale: float, profile_id: str, layer: str
     ) -> list[CandidateFrame]:
         matches: list[CandidateFrame] = []
         for paper_id, sx, sy, fit_profile_id, error in self.paper_fitter.fit_all(
@@ -329,13 +405,14 @@ class AnchorCalibratedLocator:
                 sy=sy,
                 roi_profile_id=fit_profile_id,
                 fit_error=error,
+                layer=layer,
             )
             if not self._scale_close(cand, scale):
                 continue
             matches.append(cand)
         return matches
 
-    def _build_a4_candidates(self, polylines: list[dict]) -> list[CandidateFrame]:
+    def _build_a4_candidates(self, polylines: list[dict], layer: str) -> list[CandidateFrame]:
         candidates: list[CandidateFrame] = []
         for item in polylines:
             bbox = item["bbox"]
@@ -352,6 +429,7 @@ class AnchorCalibratedLocator:
                         sy=sy,
                         roi_profile_id=profile_id,
                         fit_error=error,
+                        layer=layer,
                     )
                 )
         return candidates
@@ -421,6 +499,7 @@ class AnchorCalibratedLocator:
                         sy=sy,
                         roi_profile_id=profile_id,
                         fit_error=error,
+                        layer="*",
                     )
                 )
 

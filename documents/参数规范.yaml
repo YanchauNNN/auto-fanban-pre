@@ -716,10 +716,8 @@ titleblock_extract:
     preferred_entities: ["LWPOLYLINE(closed)", "POLYLINE(closed)"]
     fallback: "LINE重建矩形"
     layer_priority:
-      primary_layer: "_TSZ-PLOT_MARK"
-      primary_entities: ["LWPOLYLINE", "POLYLINE"]
-      secondary_layer: "0"
-      secondary_entities: ["LINE"]
+      layers: ["_TSZ-PLOT_MARK", "TK", "图框", "ttkk", "0"]
+      entity_order: ["LWPOLYLINE", "POLYLINE", "LINE"]
     acceptance:
       min_area_rank: "按面积排序取top-N"
       orthogonality_tol_deg: 1.0

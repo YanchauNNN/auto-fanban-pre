@@ -51,7 +51,10 @@ def _xlsx_sheet_paths(z: zipfile.ZipFile) -> list[dict]:
         return []
 
     rid_to_target: dict[str, str] = {}
-    for rel in rels.findall("r:Relationship", {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}):
+    for rel in rels.findall(
+        "r:Relationship",
+        {"r": "http://schemas.openxmlformats.org/package/2006/relationships"},
+    ):
         rid = rel.attrib.get("Id")
         target = rel.attrib.get("Target")
         if rid and target:
@@ -65,7 +68,11 @@ def _xlsx_sheet_paths(z: zipfile.ZipFile) -> list[dict]:
         name = sh.attrib.get("name") or ""
         rid = sh.attrib.get(f"{{{NS['r']}}}id") or sh.attrib.get("r:id") or ""
         target = rid_to_target.get(rid, "")
-        path = ("xl/" + target.lstrip("/")) if target and not target.startswith("xl/") else target
+        path = (
+            ("xl/" + target.lstrip("/"))
+            if target and not target.startswith("xl/")
+            else target
+        )
         out.append({"name": name, "rid": rid, "path": path})
     return out
 
@@ -90,7 +97,9 @@ def _cell_text(c: ET.Element, shared_strings: list[str]) -> str:
     if t == "s":
         try:
             idx = int(raw)
-            return (shared_strings[idx] if 0 <= idx < len(shared_strings) else raw).strip()
+            return (
+                shared_strings[idx] if 0 <= idx < len(shared_strings) else raw
+            ).strip()
         except ValueError:
             return raw.strip()
     return raw.strip()
@@ -99,8 +108,17 @@ def _cell_text(c: ET.Element, shared_strings: list[str]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--xlsx", required=True)
-    ap.add_argument("--sheet", default="", help="sheet name (exact). 若PowerShell下中文传参乱码，可用 --sheet-index")
-    ap.add_argument("--sheet-index", type=int, default=-1, help="sheet index (0-based). e.g. 1 表示第二个sheet")
+    ap.add_argument(
+        "--sheet",
+        default="",
+        help="sheet name (exact). 若PowerShell下中文传参乱码，可用 --sheet-index",
+    )
+    ap.add_argument(
+        "--sheet-index",
+        type=int,
+        default=-1,
+        help="sheet index (0-based). e.g. 1 表示第二个sheet",
+    )
     ap.add_argument("--out", required=True, help="output TSV path: cell\\tvalue")
     args = ap.parse_args()
 
@@ -126,14 +144,18 @@ def main() -> int:
         target = None
         if args.sheet_index >= 0:
             if args.sheet_index >= len(sheets):
-                raise SystemExit(f"sheet-index out of range: {args.sheet_index}. total={len(sheets)}")
+                raise SystemExit(
+                    f"sheet-index out of range: {args.sheet_index}. total={len(sheets)}"
+                )
             target = sheets[args.sheet_index]
         else:
             if not args.sheet:
                 raise SystemExit("need --sheet or --sheet-index")
             target = next((s for s in sheets if s["name"] == args.sheet), None)
         if not target:
-            raise SystemExit(f"sheet not found: {args.sheet}. available: {[s['name'] for s in sheets]}")
+            raise SystemExit(
+                f"sheet not found: {args.sheet}. available: {[s['name'] for s in sheets]}"
+            )
         sh_root = _et(_safe_read(z, target["path"]))
         if sh_root is None:
             raise SystemExit(f"cannot parse sheet xml: {target['path']}")
@@ -163,4 +185,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

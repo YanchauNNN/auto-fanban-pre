@@ -18,7 +18,9 @@ def main() -> None:
 
     ied = None
     for f in obj.get("files", []):
-        if f.get("type") == "xlsx" and str(f.get("path", "")).endswith("IED计划模板文件.xlsx"):
+        if f.get("type") == "xlsx" and str(f.get("path", "")).endswith(
+            "IED计划模板文件.xlsx"
+        ):
             ied = f
             break
     if not ied:
@@ -43,4 +45,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

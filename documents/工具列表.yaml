@@ -1,11 +1,16 @@
 # 工具脚本用途与去留建议
 # 说明：针对 tools/ 目录下现有小程序，标记用途、依赖、是否建议删除。
+# 变更记录（2026-01-30）：
+# - 合并锚点标定/校验脚本到 tools/anchor_calibration_tool.py（子命令 calibrate/verify）。
+# - tools/calibrate_anchor_from_biaozhun.py 与 tools/verify_anchor_rb_biaozhun.py 改为 DEPRECATED 包装器。
+# - 将临时脚本 _tmp_* 归档到 tools/_tmp/ 目录。
+# - 补充 tools/run_frame_detector.py 等遗漏工具说明。
 
 tools:
   - name: test_dxf_roi_extract.py
     path: "tools/test_dxf_roi_extract.py"
     purpose: "DXF→ROI→字段解析的主测试/调试脚本，可输出完整/摘要 JSON 报告。"
-    deps: ["ezdxf", "yaml"]
+    deps: ["ezdxf", "pyyaml"]
     keep: "保留复用（回归与调试ROI解析的核心脚本）"
 
   - name: check_md_yaml_correspondence.py
@@ -47,7 +52,7 @@ tools:
   - name: simulate_catalog_pagination.py
     path: "tools/simulate_catalog_pagination.py"
     purpose: "用 Excel COM 模拟目录写入/分页/导出PDF并计页（含封面/目录/001~n 生成）。"
-    deps: ["comtypes", "pdf_page_count"]
+    deps: ["comtypes", "Microsoft Excel(Windows)", "pdf_page_count"]
     keep: "保留复用（分页算法验证与回归）。"
 
   - name: text_split_rules.py
@@ -55,3 +60,39 @@ tools:
     purpose: "封面/1818 标题的中英文两格分割规则实现，可内嵌到正式逻辑。"
     deps: []
     keep: "保留复用（建议合入主代码后此文件可降级为参考）。"
+
+  - name: run_frame_detector.py
+    path: "tools/run_frame_detector.py"
+    purpose: "批跑 DWG/DXF 的图框检测（支持JSON汇总输出、biaozhun快捷模式、锚点模式切换）。"
+    deps: ["backend依赖环境(含ezdxf/pyyaml等)", "ODA(如处理DWG)"]
+    keep: "保留复用（端到端回归与性能观测的入口脚本）。"
+
+  - name: anchor_calibration_tool.py
+    path: "tools/anchor_calibration_tool.py"
+    purpose: "锚点校准与验证工具：calibrate(从1:1模板提取校准JSON) / verify(校验锚点反算RB与外层矩形图层外框RB一致)。"
+    deps: ["ezdxf", "pyyaml", "backend代码(用于calibrate时CandidateFinder)"]
+    keep: "保留复用（锚点直推的核心校验/标定工具，建议作为唯一入口）。"
+
+  - name: calibrate_anchor_from_biaozhun.py
+    path: "tools/calibrate_anchor_from_biaozhun.py"
+    purpose: "DEPRECATED：历史入口，已包装到 anchor_calibration_tool.py calibrate。"
+    deps: []
+    keep: "保留兼容（后续可在稳定后删除）。"
+
+  - name: verify_anchor_rb_biaozhun.py
+    path: "tools/verify_anchor_rb_biaozhun.py"
+    purpose: "DEPRECATED：历史入口，已包装到 anchor_calibration_tool.py verify。"
+    deps: []
+    keep: "保留兼容（后续可在稳定后删除）。"
+
+  - name: _tmp_dump_xlsx_sheet_cells.py
+    path: "tools/_tmp/_tmp_dump_xlsx_sheet_cells.py"
+    purpose: "临时工具：从xlsx中导出指定sheet的所有非空单元格为TSV（用于定位模板/字段问题）。"
+    deps: []
+    keep: "建议归档（仅调试用；可保留在 tools/_tmp/）。"
+
+  - name: _tmp_print_ied_headers.py
+    path: "tools/_tmp/_tmp_print_ied_headers.py"
+    purpose: "临时工具：从模板扫描报告里打印 IED 表头（用于人工核对）。"
+    deps: []
+    keep: "建议归档（仅调试用；可保留在 tools/_tmp/）。"
