@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 
 import yaml
@@ -14,7 +13,14 @@ def _collect_yaml_global_keys(spec: dict) -> set[str]:
         params = doc.get("params", {})
         # 收集所有嵌套字段的keys
         keys = set()
-        for category in ["project", "from_titleblock", "cover", "catalog", "design", "ied"]:
+        for category in [
+            "project",
+            "from_titleblock",
+            "cover",
+            "catalog",
+            "design",
+            "ied",
+        ]:
             if category in params:
                 keys.update(params[category].keys())
         return keys
@@ -124,7 +130,11 @@ def main() -> int:
     elif "sections" in spec and "doc_generation_spec" in spec["sections"]:
         doc = spec["sections"]["doc_generation_spec"]
         gfields = doc["objects"]["GlobalDocParams"]["fields"]
-        deprecated = {k for k, v in gfields.items() if isinstance(v, dict) and v.get("deprecated") is True}
+        deprecated = {
+            k
+            for k, v in gfields.items()
+            if isinstance(v, dict) and v.get("deprecated") is True
+        }
 
     yaml_only_global = sorted((global_keys - deprecated) - md_key_like)
 
@@ -134,12 +144,18 @@ def main() -> int:
     print("MD GlobalDocParams table keys:", len(md_key_like))
     print()
 
-    print("MD-only keys (declared in MD GlobalDocParams table but not in YAML keys):", len(md_only))
+    print(
+        "MD-only keys (declared in MD GlobalDocParams table but not in YAML keys):",
+        len(md_only),
+    )
     for k in md_only:
         print("  -", k)
     print()
 
-    print("YAML GlobalDocParams missing in MD table (excluding deprecated):", len(yaml_only_global))
+    print(
+        "YAML GlobalDocParams missing in MD table (excluding deprecated):",
+        len(yaml_only_global),
+    )
     for k in yaml_only_global:
         print("  -", k)
 
@@ -149,5 +165,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

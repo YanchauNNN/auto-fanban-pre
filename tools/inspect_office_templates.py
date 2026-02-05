@@ -15,10 +15,8 @@ import os
 import re
 import sys
 import zipfile
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
-
 
 NS = {
     "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -103,7 +101,10 @@ def _xlsx_sheet_map(z: zipfile.ZipFile) -> List[Dict[str, Any]]:
         return []
 
     rid_to_target: Dict[str, str] = {}
-    for rel in rels.findall("r:Relationship", {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}):
+    for rel in rels.findall(
+        "r:Relationship",
+        {"r": "http://schemas.openxmlformats.org/package/2006/relationships"},
+    ):
         rid = rel.attrib.get("Id")
         target = rel.attrib.get("Target")
         if rid and target:
@@ -148,7 +149,9 @@ def _xlsx_extract_cells(
         if t == "s" and v is not None and v.text is not None:
             try:
                 idx = int(v.text)
-                found[r_u] = shared_strings[idx] if 0 <= idx < len(shared_strings) else v.text
+                found[r_u] = (
+                    shared_strings[idx] if 0 <= idx < len(shared_strings) else v.text
+                )
             except ValueError:
                 found[r_u] = v.text
         elif t == "inlineStr":
@@ -156,7 +159,7 @@ def _xlsx_extract_cells(
             found[r_u] = "".join(texts).strip()
         else:
             # number / str / etc
-            found[r_u] = (v.text if v is not None else None)
+            found[r_u] = v.text if v is not None else None
     return found
 
 
@@ -172,7 +175,6 @@ def _xlsx_extract_table_preview(
     """
     # 构建一个 {A1: value} map（只采集预览范围内，避免遍历太大）
     end_row = start_row + max_rows - 1
-    end_col = _index_to_col(max_cols)
     preview_wanted: List[str] = []
     for r in range(start_row, end_row + 1):
         for ci in range(1, max_cols + 1):
@@ -244,9 +246,9 @@ def _xlsx_row_values(
             texts = [t_el.text or "" for t_el in c.findall(".//s:t", NS)]
             val = "".join(texts).strip()
         else:
-            val = (v.text if v is not None else None)
+            val = v.text if v is not None else None
 
-        by_col[col_idx] = (str(val) if val is not None else None)
+        by_col[col_idx] = str(val) if val is not None else None
 
     max_col = min(max_col, max_cols_cap)
     values: List[Optional[str]] = []
@@ -271,19 +273,27 @@ def inspect_xlsx(path: str) -> Dict[str, Any]:
             sh_root = _et_from_bytes(_safe_read(z, sh_path))
             if sh_root is None:
                 result["sheets"].append(
-                    {"name": sh.get("name"), "path": sh_path, "error": "cannot parse sheet xml"}
+                    {
+                        "name": sh.get("name"),
+                        "path": sh_path,
+                        "error": "cannot parse sheet xml",
+                    }
                 )
                 continue
 
             merged = _xlsx_extract_merged_ranges(sh_root)
             # 预览范围加宽一些：便于直接看到“设计文件/IED”等长表头
-            preview = _xlsx_extract_table_preview(sh_root, shared, max_rows=8, max_cols=40, start_row=1)
+            preview = _xlsx_extract_table_preview(
+                sh_root, shared, max_rows=8, max_cols=40, start_row=1
+            )
 
             # 一些常用关键单元格（目录模板常见）
             key_cells = ["C1", "H1", "H3", "C5", "H5"]
             key_values = _xlsx_extract_cells(sh_root, shared, key_cells)
 
-            header_row1 = _xlsx_row_values(sh_root, shared, row_index=1, max_cols_cap=120)
+            header_row1 = _xlsx_row_values(
+                sh_root, shared, row_index=1, max_cols_cap=120
+            )
 
             result["sheets"].append(
                 {
@@ -343,7 +353,9 @@ def inspect_docx(path: str) -> Dict[str, Any]:
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="documents_bin", help="包含模板的目录（相对或绝对）")
+    ap.add_argument(
+        "--root", default="documents_bin", help="包含模板的目录（相对或绝对）"
+    )
     ap.add_argument("--out", default="", help="输出 JSON 报告路径（可选）")
     args = ap.parse_args(argv)
 
@@ -376,7 +388,7 @@ def main(argv: List[str]) -> int:
 
     # 控制台也输出一个简版摘要
     for f in results["files"]:
-        print(f"- {os.path.basename(f.get('path',''))}: {f.get('type','?')}")
+        print(f"- {os.path.basename(f.get('path', ''))}: {f.get('type', '?')}")
         if f.get("type") == "xlsx":
             sheets = f.get("sheets", [])
             print(f"  sheets: {[s.get('name') for s in sheets]}")
@@ -388,5 +400,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
-

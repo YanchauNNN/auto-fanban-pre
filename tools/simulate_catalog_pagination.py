@@ -16,14 +16,14 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
-import sys
 import uuid
 from pathlib import Path
-import re
 from typing import Optional
 
 import comtypes.client  # type: ignore
+
 try:
     # when executed from repo root: `python tools/...`
     from tools.pdf_page_count import count_pdf_pages  # type: ignore
@@ -53,7 +53,9 @@ def _replace_pos_9_11(code: str, repl3: str) -> str:
     return code[:8] + repl3 + code[11:]
 
 
-def _derive_cover_catalog_codes(dwg_internal_001: str, dwg_external_001: str) -> dict[str, str]:
+def _derive_cover_catalog_codes(
+    dwg_internal_001: str, dwg_external_001: str
+) -> dict[str, str]:
     cover_internal = re.sub(r"-001$", "-FM", dwg_internal_001)
     catalog_internal = re.sub(r"-001$", "-TM", dwg_internal_001)
     cover_external = _replace_pos_9_11(dwg_external_001, "F01")
@@ -77,7 +79,7 @@ def _fill_catalog_entries(
     写入目录明细（封面、目录、001~n_dwg图纸），从 start_row 开始。
     返回 last_row。
     """
-    bilingual_e = (project_no == "1818")
+    bilingual_e = project_no == "1818"
 
     # user-provided code series
     def dwg_external(seq: int) -> str:
@@ -182,7 +184,9 @@ def _count_pages_by_pagebreaks(ws) -> Optional[int]:
     return max(1, (h + 1) * (v + 1))
 
 
-def export_catalog_pdf_and_count_pages(kind: str, *, project_no: str, n_dwg: int, out_dir: Path) -> tuple[Path, int]:
+def export_catalog_pdf_and_count_pages(
+    kind: str, *, project_no: str, n_dwg: int, out_dir: Path
+) -> tuple[Path, int]:
     template = _resolve_template(kind)
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = out_dir / "_tmp_excel"
@@ -205,7 +209,9 @@ def export_catalog_pdf_and_count_pages(kind: str, *, project_no: str, n_dwg: int
 
         # 按模板约定：明细从第9行开始；标题行1~8固定为Print_Titles
         start_row = 9
-        last_row = _fill_catalog_entries(ws, start_row=start_row, project_no=project_no, n_dwg=n_dwg)
+        last_row = _fill_catalog_entries(
+            ws, start_row=start_row, project_no=project_no, n_dwg=n_dwg
+        )
 
         ws.PageSetup.PrintTitleRows = "$1:$8"
         ws.PageSetup.PrintArea = f"$A$1:$I${last_row}"
@@ -270,11 +276,13 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     kind = "catalog_1818" if args.project_no == "1818" else "catalog_common"
-    pdf, pages = export_catalog_pdf_and_count_pages(kind, project_no=args.project_no, n_dwg=args.n_dwg, out_dir=out_dir)
-    print(f"{args.project_no} kind={kind} dwg={args.n_dwg} -> catalog_pages={pages} pdf={pdf}")
+    pdf, pages = export_catalog_pdf_and_count_pages(
+        kind, project_no=args.project_no, n_dwg=args.n_dwg, out_dir=out_dir
+    )
+    print(
+        f"{args.project_no} kind={kind} dwg={args.n_dwg} -> catalog_pages={pages} pdf={pdf}"
+    )
 
 
 if __name__ == "__main__":
     main()
-
-

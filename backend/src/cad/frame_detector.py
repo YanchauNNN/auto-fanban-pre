@@ -27,7 +27,12 @@ import ezdxf
 from ..config import load_spec
 from ..interfaces import DetectionError, IFrameDetector
 from ..models import FrameMeta
-from .detection import AnchorCalibratedLocator, CandidateFinder, PaperFitter
+from .detection import (
+    AnchorCalibratedLocator,
+    AnchorFirstLocator,
+    CandidateFinder,
+    PaperFitter,
+)
 
 
 class FrameDetector(IFrameDetector):
@@ -38,10 +43,23 @@ class FrameDetector(IFrameDetector):
         spec_path: str | None = None,
         min_frame_dim: float = 100.0,
         project_no: str | None = None,
+        frame_detect_mode: str | None = None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
         self.paper_variants = self.spec.get_paper_variants()
+        principles = self.spec.titleblock_extract.get("principles", {})
+        self.frame_detect_mode = str(
+            frame_detect_mode or principles.get("detection_mode", "geometry_first")
+        )
         outer_frame_cfg = self.spec.titleblock_extract.get("outer_frame", {})
+        layer_priority = outer_frame_cfg.get("layer_priority", {})
+        layers = layer_priority.get("layers")
+        if not layers:
+            primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
+            secondary = layer_priority.get("secondary_layer", "0")
+            layers = [primary, secondary]
+        entity_order = layer_priority.get("entity_order", ["LWPOLYLINE", "POLYLINE", "LINE"])
+        line_rebuild_limits = outer_frame_cfg.get("line_rebuild_limits", {})
         acceptance_cfg = outer_frame_cfg.get("acceptance", {})
         orthogonality_tol_deg = float(acceptance_cfg.get("orthogonality_tol_deg", 1.0))
         self.max_candidates = (
@@ -63,6 +81,16 @@ class FrameDetector(IFrameDetector):
             min_dim=min_frame_dim,
             coord_tol=coord_tol,
             orthogonality_tol_deg=orthogonality_tol_deg,
+            layer_order=layers,
+            entity_order=entity_order,
+            line_rebuild_limits=line_rebuild_limits,
+        )
+        self.anchor_locator = AnchorFirstLocator(
+            self.spec,
+            self.candidate_finder,
+            self.paper_fitter,
+            max_candidates=self.max_candidates,
+            project_no=project_no,
         )
         self.anchor_calibrated_locator = AnchorCalibratedLocator(
             self.spec,
@@ -84,4 +112,6 @@ class FrameDetector(IFrameDetector):
 
         msp = doc.modelspace()
 
-        return self.anchor_calibrated_locator.locate_frames(msp, dxf_path)
+        if self.frame_detect_mode == "rb_anchor":
+            return self.anchor_calibrated_locator.locate_frames(msp, dxf_path)
+        return self.anchor_locator.locate_frames(msp, dxf_path)

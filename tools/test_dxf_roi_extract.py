@@ -33,7 +33,12 @@ class Rect:
         return self.xmin <= x < self.xmax and self.ymin <= y < self.ymax
 
     def intersects(self, other: "Rect") -> bool:
-        return not (self.xmax < other.xmin or self.xmin > other.xmax or self.ymax < other.ymin or self.ymin > other.ymax)
+        return not (
+            self.xmax < other.xmin
+            or self.xmin > other.xmax
+            or self.ymax < other.ymin
+            or self.ymin > other.ymax
+        )
 
     def expanded(self, pct: float) -> "Rect":
         """Expand rect by pct of its own width/height on each side."""
@@ -84,8 +89,12 @@ def iter_text_items_in_space(space: Any) -> Iterable[TextItem]:
             s0 = t.replace(" ", "")
             w = max(1, len(s0)) * h * 0.6
             hh = h * 1.2
-            halign = int(getattr(e.dxf, "halign", 0) or 0)  # 0=left,1=center,2=right (common)
-            valign = int(getattr(e.dxf, "valign", 0) or 0)  # 0=baseline,1=bottom,2=middle,3=top
+            halign = int(
+                getattr(e.dxf, "halign", 0) or 0
+            )  # 0=left,1=center,2=right (common)
+            valign = int(
+                getattr(e.dxf, "valign", 0) or 0
+            )  # 0=baseline,1=bottom,2=middle,3=top
             if halign == 1:
                 xmin, xmax = x - w / 2, x + w / 2
             elif halign == 2:
@@ -99,7 +108,9 @@ def iter_text_items_in_space(space: Any) -> Iterable[TextItem]:
                 ymin, ymax = y - hh / 2, y + hh / 2
             else:
                 ymin, ymax = y, y + hh
-            return TextItem(x, y, t, src, bbox=Rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax))
+            return TextItem(
+                x, y, t, src, bbox=Rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+            )
         if e.dxftype() == "MTEXT":
             try:
                 t = (e.plain_text() or "").strip()
@@ -108,7 +119,9 @@ def iter_text_items_in_space(space: Any) -> Iterable[TextItem]:
             p = e.dxf.insert
             # Approximate bbox (good enough to catch right/center aligned MTEXT whose insertion point is outside ROI)
             try:
-                char_h = float(getattr(e.dxf, "char_height", getattr(e.dxf, "height", 2.5)))
+                char_h = float(
+                    getattr(e.dxf, "char_height", getattr(e.dxf, "height", 2.5))
+                )
             except Exception:
                 char_h = 2.5
             lines = [ln for ln in t.splitlines() if ln.strip()] or [t]
@@ -171,7 +184,9 @@ def iter_text_items_in_space(space: Any) -> Iterable[TextItem]:
                 ymin, ymax = y - hh / 2, y + hh / 2
             else:
                 ymin, ymax = y, y + hh
-            return TextItem(x, y, t, src, bbox=Rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax))
+            return TextItem(
+                x, y, t, src, bbox=Rect(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+            )
         return None
 
     def walk_entity(ent: Any, src_prefix: str, depth: int) -> Iterable[TextItem]:
@@ -220,7 +235,12 @@ def parse_rev_table_field(
     import re
 
     if field not in {"date", "status"}:
-        return {"ok": True, "value": "", "raw": "", "note": "unsupported_rev_table_field"}
+        return {
+            "ok": True,
+            "value": "",
+            "raw": "",
+            "note": "unsupported_rev_table_field",
+        }
 
     lines = cluster_lines(roi_items, y_tol=y_tol)
     row_texts: list[tuple[float, str]] = []
@@ -234,7 +254,9 @@ def parse_rev_table_field(
     # bottom first = latest
     row_texts.sort(key=lambda t: t[0])
 
-    re_full = re.compile(r"^(?P<rev>[A-Z])\s+(?P<date>\d{4}\.\d{2})\s+(?P<status>[A-Z0-9]+)$")
+    re_full = re.compile(
+        r"^(?P<rev>[A-Z])\s+(?P<date>\d{4}\.\d{2})\s+(?P<status>[A-Z0-9]+)$"
+    )
     re_date_status = re.compile(r"^(?P<date>\d{4}\.\d{2})\s+(?P<status>[A-Z0-9]+)$")
     re_date_only = re.compile(r"^(?P<date>\d{4}\.\d{2})$")
     re_status_only = re.compile(r"^(?P<status>[A-Z0-9]+)$")
@@ -243,19 +265,45 @@ def parse_rev_table_field(
     for y, s in row_texts:
         m = re_full.match(s)
         if m:
-            parsed_rows.append({"y": y, "raw": s, "rev": m.group("rev"), "date": m.group("date"), "status": m.group("status")})
+            parsed_rows.append(
+                {
+                    "y": y,
+                    "raw": s,
+                    "rev": m.group("rev"),
+                    "date": m.group("date"),
+                    "status": m.group("status"),
+                }
+            )
             continue
         m = re_date_status.match(s)
         if m:
-            parsed_rows.append({"y": y, "raw": s, "rev": None, "date": m.group("date"), "status": m.group("status")})
+            parsed_rows.append(
+                {
+                    "y": y,
+                    "raw": s,
+                    "rev": None,
+                    "date": m.group("date"),
+                    "status": m.group("status"),
+                }
+            )
             continue
         m = re_date_only.match(s)
         if m:
-            parsed_rows.append({"y": y, "raw": s, "rev": None, "date": m.group("date"), "status": None})
+            parsed_rows.append(
+                {"y": y, "raw": s, "rev": None, "date": m.group("date"), "status": None}
+            )
             continue
         m = re_status_only.match(s)
         if m:
-            parsed_rows.append({"y": y, "raw": s, "rev": None, "date": None, "status": m.group("status")})
+            parsed_rows.append(
+                {
+                    "y": y,
+                    "raw": s,
+                    "rev": None,
+                    "date": None,
+                    "status": m.group("status"),
+                }
+            )
             continue
 
     # choose best row by revision match first, else latest row that has the requested field
@@ -271,9 +319,20 @@ def parse_rev_table_field(
                 break
 
     if chosen is None:
-        return {"ok": False, "value": None, "raw": join_text(roi_items, y_tol=y_tol, line_join="\n"), "error": "rev_table_no_match"}
+        return {
+            "ok": False,
+            "value": None,
+            "raw": join_text(roi_items, y_tol=y_tol, line_join="\n"),
+            "error": "rev_table_no_match",
+        }
 
-    return {"ok": True, "value": chosen.get(field), "raw": chosen.get("raw", ""), "note": "rev_table_row_parse", "revision_ref": expected_revision}
+    return {
+        "ok": True,
+        "value": chosen.get(field),
+        "raw": chosen.get("raw", ""),
+        "note": "rev_table_row_parse",
+        "revision_ref": expected_revision,
+    }
 
 
 def clean_alnum(text: str) -> str:
@@ -356,7 +415,9 @@ def extract_fixed19_from_single_chars(
     return code, debug
 
 
-def extract_page_info_two_tokens_by_x(roi_items: list[TextItem]) -> tuple[Optional[str], Optional[str]]:
+def extract_page_info_two_tokens_by_x(
+    roi_items: list[TextItem],
+) -> tuple[Optional[str], Optional[str]]:
     """
     Many DXFs draw the labels "共/张/第/张" as graphics, leaving only two variable cells as text.
     Rule: left token = page_total, right token = page_index. Tokens are sorted by x.
@@ -375,13 +436,18 @@ def extract_page_info_two_tokens_by_x(roi_items: list[TextItem]) -> tuple[Option
     return toks[0][1], toks[1][1]
 
 
-def pick_top_text_by_y(roi_items: list[TextItem], *, max_candidates: int = 20) -> tuple[Optional[str], list[dict[str, Any]]]:
+def pick_top_text_by_y(
+    roi_items: list[TextItem], *, max_candidates: int = 20
+) -> tuple[Optional[str], list[dict[str, Any]]]:
     """
     Pick the top-most (max y) text item in ROI, using insertion point only.
     Returns (selected_text, candidates_debug_sorted_by_y_desc).
     """
     cands = sorted(roi_items, key=lambda it: (-it.y, it.x))
-    debug = [{"text": (it.text or "").strip(), "x": it.x, "y": it.y, "src": it.src} for it in cands[:max_candidates]]
+    debug = [
+        {"text": (it.text or "").strip(), "x": it.x, "y": it.y, "src": it.src}
+        for it in cands[:max_candidates]
+    ]
     for it in cands:
         s = (it.text or "").strip()
         if s:
@@ -397,7 +463,9 @@ def has_cjk(s: str) -> bool:
     return False
 
 
-def extract_text_lines_for_title(roi_items: list[TextItem], *, y_tol: float) -> list[str]:
+def extract_text_lines_for_title(
+    roi_items: list[TextItem], *, y_tol: float
+) -> list[str]:
     """
     Build "text lines" from ROI items:
     - Treat each TEXT/ATTRIB as one line fragment.
@@ -484,7 +552,9 @@ def expand_rect(r: Rect, *, base: Rect, margin_percent: float) -> Rect:
 
 def find_outer_frames_in_space(space: Any) -> list[Rect]:
     frames: list[Rect] = []
-    segments: list[tuple[float, float, float, float, float]] = []  # (x1,y1,x2,y2,length)
+    segments: list[
+        tuple[float, float, float, float, float]
+    ] = []  # (x1,y1,x2,y2,length)
     for e in space:
         if e.dxftype() == "LWPOLYLINE":
             try:
@@ -548,7 +618,11 @@ def find_outer_frames_in_space(space: Any) -> list[Rect]:
 
 
 def text_in_rect(items: list[TextItem], r: Rect) -> list[TextItem]:
-    return [t for t in items if r.contains_point(t.x, t.y) or (t.bbox is not None and r.intersects(t.bbox))]
+    return [
+        t
+        for t in items
+        if r.contains_point(t.x, t.y) or (t.bbox is not None and r.intersects(t.bbox))
+    ]
 
 
 def has_anchor_combo(items: list[TextItem]) -> tuple[bool, int, int]:
@@ -576,11 +650,16 @@ def fit_scale(
 
     best: Optional[dict[str, Any]] = None
 
-    def score_fit(Wc: float, Hc: float, rotated: bool) -> tuple[float, float, float, float]:
+    def score_fit(
+        Wc: float, Hc: float, rotated: bool
+    ) -> tuple[float, float, float, float]:
         sx = outer.w / Wc
         sy = outer.h / Hc
         geom_scale = (sx + sy) / 2.0
-        max_rel_err = max(abs(outer.w - Wc * sx) / max(1e-9, outer.w), abs(outer.h - Hc * sy) / max(1e-9, outer.h))
+        max_rel_err = max(
+            abs(outer.w - Wc * sx) / max(1e-9, outer.w),
+            abs(outer.h - Hc * sy) / max(1e-9, outer.h),
+        )
         # uniformity
         if geom_scale == 0:
             uni = 1e9
@@ -596,17 +675,33 @@ def fit_scale(
         Hc = float(v["H"])
         # normal
         s, sx, sy, geom = score_fit(Wc, Hc, False)
-        cand = {"paper_variant_id": vid, "sx": sx, "sy": sy, "geom_scale_factor": geom, "score": s, "rotated": False}
+        cand = {
+            "paper_variant_id": vid,
+            "sx": sx,
+            "sy": sy,
+            "geom_scale_factor": geom,
+            "score": s,
+            "rotated": False,
+        }
         if best is None or cand["score"] < best["score"]:
             best = cand
         if allow_rotation:
             s2, sx2, sy2, geom2 = score_fit(Hc, Wc, True)
-            cand2 = {"paper_variant_id": vid, "sx": sx2, "sy": sy2, "geom_scale_factor": geom2, "score": s2, "rotated": True}
+            cand2 = {
+                "paper_variant_id": vid,
+                "sx": sx2,
+                "sy": sy2,
+                "geom_scale_factor": geom2,
+                "score": s2,
+                "rotated": True,
+            }
             if best is None or cand2["score"] < best["score"]:
                 best = cand2
 
     assert best is not None
-    best["roi_profile_id_default"] = canonical_variants[best["paper_variant_id"]]["roi_profile_id_default"]
+    best["roi_profile_id_default"] = canonical_variants[best["paper_variant_id"]][
+        "roi_profile_id_default"
+    ]
     return best
 
 
@@ -617,9 +712,16 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
         import re
 
         patterns = parse_cfg.get("patterns") or {}
-        full_pat = patterns.get("full") or r"^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
-        short_pat = patterns.get("short") or r"^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})$"
-        mid_album_pat = patterns.get("mid_album") or r"^(?P<mid3>[A-Z0-9]{3})(?P<album>[0-9]{2})$"
+        full_pat = (
+            patterns.get("full")
+            or r"^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
+        )
+        short_pat = (
+            patterns.get("short") or r"^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})$"
+        )
+        mid_album_pat = (
+            patterns.get("mid_album") or r"^(?P<mid3>[A-Z0-9]{3})(?P<album>[0-9]{2})$"
+        )
 
         m = re.match(full_pat, t)
         kind = "full" if m else None
@@ -627,11 +729,21 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
             m = re.match(short_pat, t)
             kind = "short" if m else None
         if not m:
-            return {"ok": False, "value": None, "raw": t, "error": "internal_code_no_match"}
+            return {
+                "ok": False,
+                "value": None,
+                "raw": t,
+                "error": "internal_code_no_match",
+            }
 
         prefix = m.group("prefix") if "prefix" in m.groupdict() else None
         mid = m.group("mid") if "mid" in m.groupdict() else None
-        out: dict[str, Any] = {"ok": True, "value": m.group(0), "raw": t, "variant": kind}
+        out: dict[str, Any] = {
+            "ok": True,
+            "value": m.group(0),
+            "raw": t,
+            "variant": kind,
+        }
         if prefix and mid:
             out["internal_code_base"] = f"{prefix}-{mid}"
             mm = re.match(mid_album_pat, mid)
@@ -646,7 +758,12 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
 
     if ptype == "derived_from_internal_code_album_code":
         # This parse type is handled in a post-pass (needs internal_code parse result).
-        return {"ok": False, "value": None, "raw": t, "error": "derived_field_requires_postpass"}
+        return {
+            "ok": False,
+            "value": None,
+            "raw": t,
+            "error": "derived_field_requires_postpass",
+        }
 
     if ptype == "page_info_auto":
         import re
@@ -661,7 +778,11 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
                     out_map = parse_cfg["output"]
                     for k, group_idx in out_map.items():
                         try:
-                            out[k] = float(m.group(int(group_idx))) if "." in m.group(int(group_idx)) else int(m.group(int(group_idx)))
+                            out[k] = (
+                                float(m.group(int(group_idx)))
+                                if "." in m.group(int(group_idx))
+                                else int(m.group(int(group_idx)))
+                            )
                         except Exception:
                             out[k] = m.group(int(group_idx))
                 return out
@@ -673,7 +794,9 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
             if not ln:
                 continue
             # keep A-Z/0-9 and X, drop other chars
-            s = "".join(ch for ch in ln.upper() if ("A" <= ch <= "Z") or ("0" <= ch <= "9"))
+            s = "".join(
+                ch for ch in ln.upper() if ("A" <= ch <= "Z") or ("0" <= ch <= "9")
+            )
             if s:
                 parts.append(s)
         if len(parts) >= 2:
@@ -686,7 +809,14 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
                 idx = int(idx_s)
             except Exception:
                 idx = idx_s
-            return {"ok": True, "value": None, "raw": t, "page_total": total, "page_index": idx, "note": "page_info_two_tokens_fallback"}
+            return {
+                "ok": True,
+                "value": None,
+                "raw": t,
+                "page_total": total,
+                "page_index": idx,
+                "note": "page_info_two_tokens_fallback",
+            }
         return {"ok": False, "value": None, "raw": t, "error": "page_info_no_match"}
 
     if ptype == "regex":
@@ -702,7 +832,11 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
             out_map = parse_cfg["output"]
             for k, group_idx in out_map.items():
                 try:
-                    out[k] = float(m.group(int(group_idx))) if "." in m.group(int(group_idx)) else int(m.group(int(group_idx)))
+                    out[k] = (
+                        float(m.group(int(group_idx)))
+                        if "." in m.group(int(group_idx))
+                        else int(m.group(int(group_idx)))
+                    )
                 except Exception:
                     out[k] = m.group(int(group_idx))
         return out
@@ -717,7 +851,13 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
             sub = s[i : i + fixed_len]
             if len(sub) == fixed_len:
                 return {"ok": True, "value": sub, "raw": t}
-        return {"ok": False, "value": None, "raw": t, "error": f"fixed_len_{fixed_len}_not_found", "clean": s}
+        return {
+            "ok": False,
+            "value": None,
+            "raw": t,
+            "error": f"fixed_len_{fixed_len}_not_found",
+            "clean": s,
+        }
 
     if ptype in {"text", "text_exact_or_lexicon"}:
         return {"ok": True, "value": t, "raw": t}
@@ -733,16 +873,31 @@ def parse_field(var_name: str, raw: str, parse_cfg: dict[str, Any]) -> dict[str,
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Test DXF ROI extraction against documents/参数规范.yaml.")
-    ap.add_argument("--dxf", default="dxf/A0.dxf", help="DXF file path OR a directory containing sample DXFs")
+    ap = argparse.ArgumentParser(
+        description="Test DXF ROI extraction against documents/参数规范.yaml."
+    )
+    ap.add_argument(
+        "--dxf",
+        default="dxf/A0.dxf",
+        help="DXF file path OR a directory containing sample DXFs",
+    )
     ap.add_argument(
         "--dxf-kind",
         default="a0",
         help="When --dxf is a directory, pick which sample to use: a0/titleblock/frameset/mix (default: a0)",
     )
     ap.add_argument("--spec", default="documents/参数规范.yaml", help="Spec YAML path")
-    ap.add_argument("--out", default="documents/dxf_roi_test_report_A0.json", help="Output report JSON path")
-    ap.add_argument("--topn", type=int, default=5, help="Top-N outer frame candidates by area to test")
+    ap.add_argument(
+        "--out",
+        default="documents/dxf_roi_test_report_A0.json",
+        help="Output report JSON path",
+    )
+    ap.add_argument(
+        "--topn",
+        type=int,
+        default=5,
+        help="Top-N outer frame candidates by area to test",
+    )
     ap.add_argument(
         "--mode",
         default="debug",
@@ -761,7 +916,9 @@ def main() -> int:
         if candidate.exists():
             spec_path = candidate
         else:
-            raise SystemExit(f"Could not find 参数规范.yaml under directory: {spec_path}")
+            raise SystemExit(
+                f"Could not find 参数规范.yaml under directory: {spec_path}"
+            )
 
     spec = load_spec(spec_path)
     tb = get_titleblock_spec(spec)
@@ -806,7 +963,9 @@ def main() -> int:
             if name == "Model":
                 continue
             try:
-                layout = doc.layouts.get(name)  # safer than doc.layout(name) across ezdxf versions
+                layout = doc.layouts.get(
+                    name
+                )  # safer than doc.layout(name) across ezdxf versions
             except Exception:
                 layout = None
             if layout is None:
@@ -830,16 +989,26 @@ def main() -> int:
         # internal_code may have multiple compatible patterns
         if field_defs["internal_code"]["parse"].get("type") == "internal_code_cnpe":
             pats = field_defs["internal_code"]["parse"].get("patterns") or {}
-            re_internal_full = re.compile(pats.get("full", r"^[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3}$"))
-            re_internal_short = re.compile(pats.get("short", r"^[A-Z0-9]{7}-[A-Z0-9]{5}$"))
+            re_internal_full = re.compile(
+                pats.get("full", r"^[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3}$")
+            )
+            re_internal_short = re.compile(
+                pats.get("short", r"^[A-Z0-9]{7}-[A-Z0-9]{5}$")
+            )
         else:
-            re_internal_full = re.compile(field_defs["internal_code"]["parse"]["pattern"])
+            re_internal_full = re.compile(
+                field_defs["internal_code"]["parse"]["pattern"]
+            )
             re_internal_short = re_internal_full
         re_engineering = re.compile(field_defs["engineering_no"]["parse"]["pattern"])
         re_scale = re.compile(field_defs["scale_text"]["parse"]["pattern"])
         re_page = re.compile(field_defs["page_info"]["parse"]["pattern"])
 
-        anchor_text_items = [t for t in items if any(s in t.text for s in anchor_cfg["search_text_any_of"])]
+        anchor_text_items = [
+            t
+            for t in items
+            if any(s in t.text for s in anchor_cfg["search_text_any_of"])
+        ]
         external19 = []
         internal = []
         engineering = []
@@ -849,17 +1018,28 @@ def main() -> int:
             al = clean_alnum(t.text.upper())
             if len(al) == 19:
                 external19.append({"value": al, "x": t.x, "y": t.y, "src": t.src})
-            if re_internal_full.search(t.text.strip()) or re_internal_short.search(t.text.strip()):
-                internal.append({"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src})
+            if re_internal_full.search(t.text.strip()) or re_internal_short.search(
+                t.text.strip()
+            ):
+                internal.append(
+                    {"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src}
+                )
             if re_engineering.search(t.text.strip()):
-                engineering.append({"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src})
+                engineering.append(
+                    {"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src}
+                )
             if re_scale.search(t.text.strip()):
-                scale.append({"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src})
+                scale.append(
+                    {"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src}
+                )
             if re_page.search(t.text.strip()):
                 page.append({"value": t.text.strip(), "x": t.x, "y": t.y, "src": t.src})
 
         diagnostics_by_space[space_name] = {
-            "anchor_text_items": [{"x": t.x, "y": t.y, "text": t.text, "src": t.src} for t in anchor_text_items],
+            "anchor_text_items": [
+                {"x": t.x, "y": t.y, "text": t.text, "src": t.src}
+                for t in anchor_text_items
+            ],
             "external19_candidates_top20": external19[:20],
             "internal_code_candidates_top20": internal[:20],
             "engineering_no_candidates_top20": engineering[:20],
@@ -892,7 +1072,9 @@ def main() -> int:
 
     # Evaluate all candidates; later you can focus on anchor_ok ones.
     for idx, (space_name, outer) in enumerate(all_candidates):
-        fit = fit_scale(outer=outer, canonical_variants=canonical_variants, fit_method=fit_method)
+        fit = fit_scale(
+            outer=outer, canonical_variants=canonical_variants, fit_method=fit_method
+        )
         sx = float(fit["sx"])
         sy = float(fit["sy"])
         profile_id = fit["roi_profile_id_default"]
@@ -930,17 +1112,22 @@ def main() -> int:
         for roi_name, rb in profile["fields_rb_offset_1to1"].items():
             if "图框定位" not in roi_name:
                 continue
-            roi = rect_from_rb_offset(outer=outer, rb_offset=[float(x) for x in rb], sx=sx, sy=sy)
+            roi = rect_from_rb_offset(
+                outer=outer, rb_offset=[float(x) for x in rb], sx=sx, sy=sy
+            )
             roi = expand_rect(roi, base=outer, margin_percent=roi_margin_percent)
             roi_items = [
                 t
                 for t in texts
-                if roi.contains_point(t.x, t.y) or (t.bbox is not None and roi.intersects(t.bbox))
+                if roi.contains_point(t.x, t.y)
+                or (t.bbox is not None and roi.intersects(t.bbox))
             ]
             joined = join_text(roi_items, y_tol=y_tol, line_join=line_join)
             # allow spaces inside Chinese anchor text
             nj = normalize_for_anchor(joined)
-            hit = any(normalize_for_anchor(s) in nj for s in anchor_cfg["search_text_any_of"])
+            hit = any(
+                normalize_for_anchor(s) in nj for s in anchor_cfg["search_text_any_of"]
+            )
             anchor_hits.append(
                 {
                     "roi_name": roi_name,
@@ -956,10 +1143,12 @@ def main() -> int:
         # field extraction
         extracted: dict[str, Any] = {}
         debug_rois: dict[str, Any] = {}
-        revision_ctx: Optional[str] = None
         for var, fd in field_defs.items():
             # Derived fields (no ROI): postpone to post-pass
-            if fd.get("parse", {}).get("type") == "derived_from_internal_code_album_code":
+            if (
+                fd.get("parse", {}).get("type")
+                == "derived_from_internal_code_album_code"
+            ):
                 continue
             # system_no removed -> may appear as comment only; skip non-dict
             if not isinstance(fd, dict):
@@ -969,11 +1158,19 @@ def main() -> int:
                 continue
             rb = profile["fields_rb_offset_1to1"].get(roi_field_name)
             if rb is None:
-                extracted[var] = {"ok": False, "value": None, "error": f"roi_not_found:{roi_field_name}"}
+                extracted[var] = {
+                    "ok": False,
+                    "value": None,
+                    "error": f"roi_not_found:{roi_field_name}",
+                }
                 continue
-            roi = rect_from_rb_offset(outer=outer, rb_offset=[float(x) for x in rb], sx=sx, sy=sy)
+            roi = rect_from_rb_offset(
+                outer=outer, rb_offset=[float(x) for x in rb], sx=sx, sy=sy
+            )
             # Adjacent revision-table columns (版次/状态/日期) share borders; expanding ROI can cause cross-contamination.
-            effective_margin = 0.0 if var in {"revision", "status", "date"} else roi_margin_percent
+            effective_margin = (
+                0.0 if var in {"revision", "status", "date"} else roi_margin_percent
+            )
             roi = expand_rect(roi, base=outer, margin_percent=effective_margin)
             # Important: for revision-table columns and page_info cells, users expect STRICT "in-ROI" behavior.
             # Using approximate bbox intersection can falsely pull neighbor-column texts due to alignment/width heuristics.
@@ -981,7 +1178,12 @@ def main() -> int:
             if var in point_only_vars:
                 roi_items = [t for t in texts if roi.contains_point(t.x, t.y)]
             else:
-                roi_items = [t for t in texts if roi.contains_point(t.x, t.y) or (t.bbox is not None and roi.intersects(t.bbox))]
+                roi_items = [
+                    t
+                    for t in texts
+                    if roi.contains_point(t.x, t.y)
+                    or (t.bbox is not None and roi.intersects(t.bbox))
+                ]
             raw_text = join_text(roi_items, y_tol=y_tol, line_join=line_join)
 
             # Title bilingual split: compute title_cn + title_en from the same ROI, no extra ROI.
@@ -1004,8 +1206,18 @@ def main() -> int:
                         "en_lines": en_lines,
                     }
                     # record ROI debug once
-                    debug_rois["title_cn"] = {"roi_field_name": roi_field_name, "roi": roi.__dict__, "raw": "\n".join(lines), "count": len(roi_items)}
-                    debug_rois["title_en"] = {"roi_field_name": roi_field_name, "roi": roi.__dict__, "raw": "\n".join(lines), "count": len(roi_items)}
+                    debug_rois["title_cn"] = {
+                        "roi_field_name": roi_field_name,
+                        "roi": roi.__dict__,
+                        "raw": "\n".join(lines),
+                        "count": len(roi_items),
+                    }
+                    debug_rois["title_en"] = {
+                        "roi_field_name": roi_field_name,
+                        "roi": roi.__dict__,
+                        "raw": "\n".join(lines),
+                        "count": len(roi_items),
+                    }
                 continue
 
             # Rule: for revision/date/status columns, user requires picking the top-most (highest y) text in the column.
@@ -1019,13 +1231,19 @@ def main() -> int:
                     "candidates": cand_debug,
                 }
                 extracted[var] = parsed
-                debug_rois[var] = {"roi_field_name": roi_field_name, "roi": roi.__dict__, "raw": raw_text, "count": len(roi_items)}
-                if var == "revision" and top:
-                    revision_ctx = top
+                debug_rois[var] = {
+                    "roi_field_name": roi_field_name,
+                    "roi": roi.__dict__,
+                    "raw": raw_text,
+                    "count": len(roi_items),
+                }
                 continue
 
             # Special: external_code is often stored as 19 separate single-char texts in cells.
-            if var == "external_code" and fd.get("parse", {}).get("type") == "docno_plus_fixed19":
+            if (
+                var == "external_code"
+                and fd.get("parse", {}).get("type") == "docno_plus_fixed19"
+            ):
                 fixed_len = int(fd.get("parse", {}).get("fixed_len", 19))
                 rebuilt, rebuilt_debug = extract_fixed19_from_single_chars(
                     roi_items,
@@ -1043,7 +1261,10 @@ def main() -> int:
                 else:
                     parsed = parse_field(var, raw_text, fd.get("parse", {}))
             # Special: page_info often only has two variable cells as text; sort by x: left=total, right=index
-            elif var == "page_info" and fd.get("parse", {}).get("type") == "page_info_auto":
+            elif (
+                var == "page_info"
+                and fd.get("parse", {}).get("type") == "page_info_auto"
+            ):
                 total_s, idx_s = extract_page_info_two_tokens_by_x(roi_items)
                 if total_s is not None and idx_s is not None:
                     try:
@@ -1067,14 +1288,19 @@ def main() -> int:
             else:
                 parsed = parse_field(var, raw_text, fd.get("parse", {}))
             extracted[var] = parsed
-            debug_rois[var] = {"roi_field_name": roi_field_name, "roi": roi.__dict__, "raw": raw_text, "count": len(roi_items)}
-            if var == "revision" and isinstance(parsed, dict):
-                revision_ctx = str(parsed.get("value") or "").strip() or None
-
+            debug_rois[var] = {
+                "roi_field_name": roi_field_name,
+                "roi": roi.__dict__,
+                "raw": raw_text,
+                "count": len(roi_items),
+            }
         # Post-pass: derive album_code from internal_code (no new ROI)
         if "album_code" in field_defs:
             fd = field_defs["album_code"]
-            if fd.get("parse", {}).get("type") == "derived_from_internal_code_album_code":
+            if (
+                fd.get("parse", {}).get("type")
+                == "derived_from_internal_code_album_code"
+            ):
                 ic = extracted.get("internal_code")
                 if isinstance(ic, dict) and ic.get("ok"):
                     ac = ic.get("album_code")
@@ -1086,12 +1312,21 @@ def main() -> int:
                         "note": "derived_from_internal_code",
                     }
                 else:
-                    extracted["album_code"] = {"ok": False, "value": None, "raw": (ic.get("raw") if isinstance(ic, dict) else ""), "error": "missing_internal_code"}
+                    extracted["album_code"] = {
+                        "ok": False,
+                        "value": None,
+                        "raw": (ic.get("raw") if isinstance(ic, dict) else ""),
+                        "error": "missing_internal_code",
+                    }
 
         # scale consistency check (geom vs titleblock)
         geom = float(fit["geom_scale_factor"])
         scale_den: Optional[float] = None
-        if "scale_text" in extracted and extracted["scale_text"].get("ok") and "scale_denominator" in extracted["scale_text"]:
+        if (
+            "scale_text" in extracted
+            and extracted["scale_text"].get("ok")
+            and "scale_denominator" in extracted["scale_text"]
+        ):
             try:
                 scale_den = float(extracted["scale_text"]["scale_denominator"])
             except Exception:
@@ -1112,7 +1347,10 @@ def main() -> int:
             "fit": fit,
             "anchor_ok": anchor_ok,
             "anchor_combo_ok": anchor_combo_ok,
-            "anchor_combo_counts": {"company_count": company_cnt, "cnpe_count": cnpe_cnt},
+            "anchor_combo_counts": {
+                "company_count": company_cnt,
+                "cnpe_count": cnpe_cnt,
+            },
             "anchor_search_steps": anchor_search_steps,
             "anchor_hits": anchor_hits,
             "titleblock": extracted,
@@ -1131,12 +1369,16 @@ def main() -> int:
         candidates = report["outer_frame_candidates"]
         best = None
         if candidates:
-            best = sorted(candidates, key=lambda c: (not c["anchor_ok"], c["fit"]["score"]))[0]
+            best = sorted(
+                candidates, key=lambda c: (not c["anchor_ok"], c["fit"]["score"])
+            )[0]
         summary = {
             "dxf": report["dxf"],
             "spec": report["spec"],
             "text_items_count_by_space": report["text_items_count_by_space"],
-            "anchor_global_combo_count_by_space": report["anchor_global_combo_count_by_space"],
+            "anchor_global_combo_count_by_space": report[
+                "anchor_global_combo_count_by_space"
+            ],
             "best_candidate": None,
             "extracted_titleblock_values": None,
             "scale_fit": None,
@@ -1157,9 +1399,12 @@ def main() -> int:
             }
             summary["scale_fit"] = best["fit"]
             summary["scale_consistency"] = best["scale_consistency"]
-            summary["extracted_titleblock"] = {k: v for k, v in best["titleblock"].items()}
+            summary["extracted_titleblock"] = {
+                k: v for k, v in best["titleblock"].items()
+            }
             summary["extracted_titleblock_values"] = {
-                k: (v.get("value") if isinstance(v, dict) else None) for k, v in best["titleblock"].items()
+                k: (v.get("value") if isinstance(v, dict) else None)
+                for k, v in best["titleblock"].items()
             }
         report = summary
 
@@ -1180,18 +1425,23 @@ def main() -> int:
     report = sanitize_for_json(report)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print(f"Wrote report: {out_path}")
 
     # basic summary
     if args.mode == "debug":
         # show anchor_ok first
-        ordered = sorted(report["outer_frame_candidates"], key=lambda c: (not c["anchor_ok"], c["fit"]["score"]))
+        ordered = sorted(
+            report["outer_frame_candidates"],
+            key=lambda c: (not c["anchor_ok"], c["fit"]["score"]),
+        )
         for c in ordered[: min(10, len(ordered))]:
             fit = c["fit"]
             print(
                 f"[cand#{c['candidate_index']}] space={c['space']} "
-                f"size={c['outer']['xmax']-c['outer']['xmin']:.3f}x{c['outer']['ymax']-c['outer']['ymin']:.3f} "
+                f"size={c['outer']['xmax'] - c['outer']['xmin']:.3f}x{c['outer']['ymax'] - c['outer']['ymin']:.3f} "
                 f"variant={fit['paper_variant_id']} sx={fit['sx']:.6f} sy={fit['sy']:.6f} anchor_ok={c['anchor_ok']}"
             )
     else:
@@ -1206,5 +1456,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

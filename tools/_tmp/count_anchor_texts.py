@@ -39,6 +39,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dxf", required=True, help="DXF path")
     ap.add_argument("--spec", default=str(REPO_ROOT / "documents" / "参数规范.yaml"))
+    ap.add_argument("--verbose", action="store_true", help="输出更多信息")
     args = ap.parse_args()
 
     sys.path.insert(0, str(REPO_ROOT / "backend"))
@@ -69,8 +70,23 @@ def main() -> int:
     print("sample_texts", [short(t) for t in uniq_texts[:3]])
     for i, it in enumerate(matches[:5]):
         print(
-            f"match[{i}] x={it.x:.3f} y={it.y:.3f} source={it.source} text={short(it.text or '')}"
+            f"match[{i}] x={it.x:.3f} y={it.y:.3f} source={it.source} "
+            f"text={short(it.text or '')}"
         )
+    if args.verbose:
+        heights = [it.text_height for it in matches if it.text_height is not None]
+        print("text_height_count", len(heights))
+        if heights:
+            buckets = {}
+            for h in heights:
+                key = round(float(h), 3)
+                buckets[key] = buckets.get(key, 0) + 1
+            print(
+                "text_height_sample",
+                [round(h, 3) for h in sorted(heights)[:5]],
+                [round(h, 3) for h in sorted(heights)[-5:]],
+            )
+            print("text_height_buckets", buckets)
     return 0
 
 

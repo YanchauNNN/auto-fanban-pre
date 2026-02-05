@@ -52,6 +52,7 @@ class AnchorFirstLocator:
         candidate_finder,
         paper_fitter,
         max_candidates: int | None = None,
+        project_no: str | None = None,
     ) -> None:
         self.spec = spec
         self.candidate_finder = candidate_finder
@@ -70,6 +71,17 @@ class AnchorFirstLocator:
         self.roi_field_name = anchor_cfg.get("roi_field_name", "锚点")
         self.match_policy = anchor_cfg.get("match_policy", "single_hit_same_roi")
         self.anchor_calibration = anchor_cfg.get("calibration", {})
+        self.project_no = project_no
+        scale_fit_cfg = self.spec.titleblock_extract.get("scale_fit", {})
+        self.size_match_tol = float(scale_fit_cfg.get("uniform_scale_tol", 0.02))
+        self.base10_template_min_coverage = 0.6
+        scale_candidates = anchor_cfg.get("scale_candidates")
+        if isinstance(scale_candidates, list) and scale_candidates:
+            self.anchor_scale_candidates = [float(v) for v in scale_candidates]
+        else:
+            self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
+        self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
+        self._anchor_scale_range: tuple[float, float] | None = None
 
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         self.roi_margin_percent = float(tolerances.get("roi_margin_percent", 0.0))
@@ -94,6 +106,7 @@ class AnchorFirstLocator:
             self.logger.info("锚点定位结束: dxf=%s 未找到锚点文本", dxf_path.name)
             return []
 
+        self._anchor_scale_range = self._compute_anchor_scale_range(anchor_items)
         candidates = self._build_candidates(msp)
         self.logger.info(
             "候选外框: dxf=%s candidates=%d",
@@ -103,17 +116,6 @@ class AnchorFirstLocator:
         if not candidates:
             self.logger.info("锚点定位结束: dxf=%s 未找到候选外框", dxf_path.name)
             return []
-
-        a4_candidates = [c for c in candidates if self._is_a4_candidate(c)]
-        a4_clusters = self._build_a4_clusters(a4_candidates)
-        a4_cluster_map = self._cluster_lookup(a4_clusters)
-        if a4_candidates:
-            self.logger.info(
-                "A4簇统计: dxf=%s clusters=%d a4_candidates=%d",
-                dxf_path.name,
-                len(a4_clusters),
-                len(a4_candidates),
-            )
 
         frames: list[FrameMeta] = []
         used_candidates: set[tuple[float, float, float, float]] = set()
@@ -129,7 +131,9 @@ class AnchorFirstLocator:
                 self._short_text(anchor_item.text),
             )
             if not matches:
-                continue
+                matches = self._find_global_matches(anchor_item, msp)
+                if not matches:
+                    continue
 
             selected = min(matches, key=lambda c: (c.fit_error, c.area))
             self.logger.info(
@@ -146,16 +150,30 @@ class AnchorFirstLocator:
             )
             self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
 
-            # A4扩展：加入同簇外框（无需锚点）
-            if self._is_a4_candidate(selected):
-                cluster = a4_cluster_map.get(self._candidate_key(selected), [])
-                self.logger.info(
-                    "A4扩展: index=%d cluster_size=%d",
-                    idx,
-                    len(cluster),
-                )
-                for cand in cluster:
-                    self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+        small5_templates = self._collect_size_templates(frames, "SMALL5")
+        a4_candidates = [
+            c
+            for c in candidates
+            if c.roi_profile_id == "SMALL5"
+            and self._bbox_matches_templates(c.bbox, small5_templates)
+        ]
+        a4_clusters = self._build_a4_clusters(a4_candidates)
+        a4_cluster_map = self._cluster_lookup(a4_clusters)
+        if a4_candidates:
+            self.logger.info(
+                "A4簇统计: dxf=%s clusters=%d a4_candidates=%d",
+                dxf_path.name,
+                len(a4_clusters),
+                len(a4_candidates),
+            )
+        for frame in frames:
+            if frame.runtime.roi_profile_id != "SMALL5":
+                continue
+            cluster = a4_cluster_map.get(self._bbox_key(frame.runtime.outer_bbox), [])
+            if not cluster:
+                continue
+            for cand in cluster:
+                self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
 
         self.logger.info(
             "锚点定位完成: dxf=%s frames=%d",
@@ -169,41 +187,159 @@ class AnchorFirstLocator:
         anchor_item: TextItem,
         candidates: list[CandidateFrame],
     ) -> list[CandidateFrame]:
-        matches: list[CandidateFrame] = []
+        roi_matches: list[CandidateFrame] = []
         for cand in candidates:
-            if not self._text_in_roi(anchor_item, cand.anchor_roi):
+            if self._text_in_roi(anchor_item, cand.anchor_roi):
+                if self.match_policy == "single_hit_same_roi":
+                    pass
+                roi_matches.append(cand)
+        return roi_matches
+
+    def _compute_anchor_scale_range(
+        self, anchor_items: list[TextItem]
+    ) -> tuple[float, float] | None:
+        scales: list[float] = []
+        for item in anchor_items:
+            for _profile_id, calib in self._iter_calibrations():
+                scale = self._scale_from_text(item, calib)
+                if scale:
+                    scales.append(scale)
+        if not scales:
+            return None
+        return min(scales), max(scales)
+
+    def _iter_calibrations(self):
+        for profile_id, calib in self.anchor_calibration.items():
+            if profile_id in {"reference_point"}:
                 continue
-            if self.match_policy == "single_hit_same_roi":
-                pass
-            matches.append(cand)
-        return matches
+            if isinstance(calib, dict):
+                yield profile_id, calib
+
+    def _scale_from_text(self, item: TextItem, calib: dict) -> float | None:
+        text_h = item.text_height
+        if text_h is None and item.bbox is not None:
+            text_h = item.bbox.height / 1.2
+        if text_h is None:
+            return None
+        base_h = calib.get("text_height_1to1_mm")
+        overrides = calib.get("text_height_1to1_mm_by_project", {})
+        if self.project_no and isinstance(overrides, dict):
+            override = overrides.get(self.project_no)
+            if override:
+                base_h = override
+        if not base_h:
+            return None
+        return float(text_h) / float(base_h)
+
+    def _find_global_matches(self, anchor_item: TextItem, msp) -> list[CandidateFrame]:
+        best_bbox: BBox | None = None
+        best_area: float | None = None
+        for entity in self._iter_all_polylines(msp):
+            tp = entity.dxftype()
+            vertices = self._polyline_vertices(entity, tp)
+            if len(vertices) < 4:
+                continue
+            if not self.candidate_finder._is_axis_aligned(vertices):  # noqa: SLF001
+                continue
+            bbox = self._bbox_from_vertices(vertices)
+            if (
+                bbox.width < self.candidate_finder.min_dim
+                or bbox.height < self.candidate_finder.min_dim
+            ):
+                continue
+            if not self._text_in_roi(anchor_item, bbox):
+                continue
+            area = bbox.width * bbox.height
+            if best_area is None or area > best_area:
+                best_area = area
+                best_bbox = bbox
+        if not best_bbox:
+            return []
+        return self._build_candidates_for_bbox(best_bbox, use_scale_filter=False)
+
+    @staticmethod
+    def _iter_all_polylines(msp):
+        def walk_entity(ent, depth: int):
+            if depth > 8:
+                return
+            tp = ent.dxftype()
+            if tp in {"LWPOLYLINE", "POLYLINE"}:
+                yield ent
+                return
+            if tp == "INSERT":
+                try:
+                    for ve in ent.virtual_entities():
+                        yield from walk_entity(ve, depth + 1)
+                except Exception:
+                    return
+
+        for e in msp:
+            yield from walk_entity(e, 0)
+
+    @staticmethod
+    def _polyline_vertices(entity, tp: str) -> list[tuple[float, float]]:
+        vertices: list[tuple[float, float]] = []
+        if tp == "LWPOLYLINE":
+            for p in entity.get_points():
+                vertices.append((float(p[0]), float(p[1])))
+        elif tp == "POLYLINE":
+            for v in entity.vertices:
+                loc = v.dxf.location
+                vertices.append((float(loc.x), float(loc.y)))
+        return vertices
+
+    @staticmethod
+    def _bbox_from_vertices(vertices: list[tuple[float, float]]) -> BBox:
+        xs = [p[0] for p in vertices]
+        ys = [p[1] for p in vertices]
+        return BBox(xmin=min(xs), ymin=min(ys), xmax=max(xs), ymax=max(ys))
+
+    def _collect_size_templates(
+        self, frames: list[FrameMeta], profile_id: str
+    ) -> list[tuple[float, float]]:
+        templates: list[tuple[float, float]] = []
+        for frame in frames:
+            if frame.runtime.roi_profile_id != profile_id:
+                continue
+            bbox = frame.runtime.outer_bbox
+            templates.append((bbox.width, bbox.height))
+        unique: list[tuple[float, float]] = []
+        seen: set[tuple[float, float]] = set()
+        for w, h in templates:
+            key = (round(w, 3), round(h, 3))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append((w, h))
+        return unique
+
+    def _bbox_matches_templates(
+        self, bbox: BBox, templates: list[tuple[float, float]]
+    ) -> bool:
+        if not templates:
+            return False
+        for tw, th in templates:
+            if (
+                abs(bbox.width - tw) / max(tw, 1e-9) <= self.size_match_tol
+                and abs(bbox.height - th) / max(th, 1e-9) <= self.size_match_tol
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _pick_candidate_profile(
+        candidates: list[CandidateFrame], profile_id: str
+    ) -> CandidateFrame | None:
+        matches = [cand for cand in candidates if cand.roi_profile_id == profile_id]
+        if not matches:
+            return None
+        return min(matches, key=lambda c: (c.fit_error, c.area))
 
     def _build_candidates(self, msp) -> list[CandidateFrame]:
         candidates: list[CandidateFrame] = []
         bboxes = self.candidate_finder.find_rectangles(msp)
         for bbox in bboxes:
-            for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
-                bbox, self.paper_variants
-            ):
-                profile = self.spec.get_roi_profile(profile_id)
-                if not profile:
-                    continue
-                rb_offset = self._get_anchor_rb_offset(profile_id, profile)
-                if not rb_offset:
-                    continue
-                anchor_roi = self._restore_roi(bbox, rb_offset, sx, sy)
-                anchor_roi = self._expand_roi(anchor_roi, self.roi_margin_percent)
-                candidates.append(
-                    CandidateFrame(
-                        bbox=bbox,
-                        paper_variant_id=paper_id,
-                        sx=sx,
-                        sy=sy,
-                        roi_profile_id=profile_id,
-                        anchor_roi=anchor_roi,
-                        fit_error=error,
-                    )
-                )
+            candidates.extend(self._build_candidates_for_bbox(bbox))
 
         candidates.sort(key=lambda c: c.area, reverse=True)
         if self.max_candidates:
@@ -214,6 +350,46 @@ class AnchorFirstLocator:
                 ]
             }
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
+        return candidates
+
+    def _build_candidates_for_bbox(
+        self, bbox: BBox, *, use_scale_filter: bool = True
+    ) -> list[CandidateFrame]:
+        candidates: list[CandidateFrame] = []
+        for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
+            bbox, self.paper_variants
+        ):
+            scale = (sx + sy) / 2.0
+            if use_scale_filter and self._anchor_scale_range:
+                min_scale, max_scale = self._anchor_scale_range
+                margin = self.anchor_scale_tol
+                if scale < min_scale * (1 - margin) or scale > max_scale * (1 + margin):
+                    continue
+            elif use_scale_filter and self.anchor_scale_candidates:
+                rel_err = min(
+                    abs(scale - c) / max(c, 1e-9) for c in self.anchor_scale_candidates
+                )
+                if rel_err > self.anchor_scale_tol:
+                    continue
+            profile = self.spec.get_roi_profile(profile_id)
+            if not profile:
+                continue
+            rb_offset = self._get_anchor_rb_offset(profile_id, profile)
+            if not rb_offset:
+                continue
+            anchor_roi = self._restore_roi(bbox, rb_offset, sx, sy)
+            anchor_roi = self._expand_roi(anchor_roi, self.roi_margin_percent)
+            candidates.append(
+                CandidateFrame(
+                    bbox=bbox,
+                    paper_variant_id=paper_id,
+                    sx=sx,
+                    sy=sy,
+                    roi_profile_id=profile_id,
+                    anchor_roi=anchor_roi,
+                    fit_error=error,
+                )
+            )
         return candidates
 
     def _get_anchor_rb_offset(self, profile_id: str, profile) -> list[float] | None:
@@ -227,6 +403,13 @@ class AnchorFirstLocator:
         calib = self.anchor_calibration.get(profile_id, {})
         if isinstance(calib, dict):
             rb_offset = calib.get("anchor_roi_rb_offset_1to1")
+            overrides = calib.get("anchor_roi_rb_offset_1to1_by_project", {})
+            if self.project_no and isinstance(overrides, dict):
+                override = overrides.get(self.project_no)
+                if override:
+                    rb_offset = override
+        if rb_offset:
+            return [float(v) for v in rb_offset]
         return rb_offset
 
     def _append_candidate_frame(

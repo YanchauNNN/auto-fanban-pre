@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import math
 import sys
 from pathlib import Path
@@ -182,10 +183,10 @@ def main() -> int:
         CandidateFinder,
         PaperFitter,
     )
-    from src.cad.detection.anchor_first_locator import (
-        AnchorFirstLocator,  # type: ignore
-    )
     from src.config import load_spec  # type: ignore
+
+    anchor_module = importlib.import_module("src.cad.detection.anchor_first_locator")
+    AnchorFirstLocator = anchor_module.AnchorFirstLocator
 
     if len(sys.argv) < 2:
         print("Usage: python tools/_tmp/check_rb_lines.py <dxf-path>")

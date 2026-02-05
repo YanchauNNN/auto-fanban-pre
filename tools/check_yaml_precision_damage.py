@@ -1,5 +1,4 @@
 import argparse
-import difflib
 import re
 from pathlib import Path
 
@@ -11,18 +10,26 @@ def _resolve_spec_path(p: Path) -> Path:
             return target
         matches = [x for x in p.glob("*.yaml") if x.name.endswith("参数规范.yaml")]
         if not matches:
-            raise FileNotFoundError(f"Could not find 参数规范.yaml under directory: {p}")
+            raise FileNotFoundError(
+                f"Could not find 参数规范.yaml under directory: {p}"
+            )
         return matches[0]
     return p
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Sanity-check whether fixed-decimal rounding caused non-numeric damage.")
+    ap = argparse.ArgumentParser(
+        description="Sanity-check whether fixed-decimal rounding caused non-numeric damage."
+    )
     ap.add_argument(
         "path",
         help="YAML file path OR a directory containing 参数规范.yaml (useful on Windows terminals where non-ASCII args may garble)",
     )
-    ap.add_argument("--bak", default=None, help="Backup file path; defaults to <path>.bak2 if exists else <path>.bak")
+    ap.add_argument(
+        "--bak",
+        default=None,
+        help="Backup file path; defaults to <path>.bak2 if exists else <path>.bak",
+    )
     args = ap.parse_args()
 
     path = _resolve_spec_path(Path(args.path))
@@ -83,7 +90,12 @@ def main() -> int:
             print("cur:", a)
             print("bak:", b)
 
-    ok = patterns_ok and pipeline_step_float_ok and page_output_float_ok and not masked_diffs
+    ok = (
+        patterns_ok
+        and pipeline_step_float_ok
+        and page_output_float_ok
+        and not masked_diffs
+    )
     if ok:
         print("RESULT=OK (no non-numeric damage detected)")
         return 0
@@ -94,5 +106,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

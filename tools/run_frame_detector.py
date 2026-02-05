@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,14 @@ def _collect_inputs(dwg_dir: Path, dxf_dir: Path | None) -> list[Path]:
             return [dxf_dir]
         return sorted(dxf_dir.glob("*.dxf"))
     return sorted(dwg_dir.glob("*.dwg"))
+
+
+def _collect_anchor_items(msp, detector) -> list[object]:
+    from src.cad.detection.anchor_first_locator import AnchorFirstLocator  # type: ignore
+
+    text_items = list(AnchorFirstLocator._iter_text_items(msp))
+    locator = getattr(detector, "anchor_locator", detector.anchor_calibrated_locator)
+    return [t for t in text_items if locator._match_any_text(t.text, locator.anchor_texts)]
 
 
 def main() -> int:
@@ -110,6 +119,17 @@ def main() -> int:
                 dxf_path = oda.dwg_to_dxf(path, out_dir)
             else:
                 dxf_path = path
+            anchor_texts_count = None
+            anchor_items: list[object] = []
+            try:
+                import ezdxf  # type: ignore
+
+                doc = ezdxf.readfile(str(dxf_path))
+                msp = doc.modelspace()
+                anchor_items = _collect_anchor_items(msp, detector)
+                anchor_texts_count = len(anchor_items)
+            except Exception:
+                anchor_texts_count = None
             if args.anchor_mode == "auto":
                 frames = detector.detect_frames(dxf_path)
             else:
@@ -124,6 +144,9 @@ def main() -> int:
                 else:
                     frames = detector.anchor_locator.locate_frames(msp, dxf_path)
             variants = [f.runtime.paper_variant_id for f in frames]
+            profile_counts = Counter(f.runtime.roi_profile_id for f in frames)
+            base10_count = profile_counts.get("BASE10", 0)
+            small5_count = profile_counts.get("SMALL5", 0)
             scales = [
                 {
                     "paper_variant_id": f.runtime.paper_variant_id,
@@ -138,7 +161,8 @@ def main() -> int:
                 for f in frames
             ]
             print(
-                f"{path.name}: frames={len(frames)} variants={variants} scales={scales} rb={rb_points}"
+                f"{path.name}: frames={len(frames)} base10={base10_count} small5={small5_count} "
+                f"anchors={anchor_texts_count} variants={variants} scales={scales} rb={rb_points}"
             )
             elapsed_s = round(time.perf_counter() - started_at, 3)
             results.append(
@@ -147,6 +171,9 @@ def main() -> int:
                     "source_suffix": path.suffix.lower(),
                     "dxf_path": str(dxf_path),
                     "frame_count": len(frames),
+                    "base10_count": base10_count,
+                    "small5_count": small5_count,
+                    "anchor_texts": anchor_texts_count,
                     "variants": variants,
                     "scales": scales,
                     "rb_points": rb_points,
@@ -157,23 +184,15 @@ def main() -> int:
             )
         except Exception as exc:  # noqa: BLE001
             rb_points: list[dict[str, float]] = []
+            anchor_texts_count = None
             if "dxf_path" in locals():
                 try:
                     import ezdxf  # type: ignore
-                    from src.cad.detection.anchor_first_locator import (  # type: ignore
-                        AnchorFirstLocator,
-                    )
 
                     doc = ezdxf.readfile(str(dxf_path))
                     msp = doc.modelspace()
-                    text_items = list(AnchorFirstLocator._iter_text_items(msp))
-                    anchor_items = [
-                        t
-                        for t in text_items
-                        if detector.anchor_calibrated_locator._match_any_text(  # noqa: SLF001
-                            t.text, detector.anchor_calibrated_locator.anchor_texts
-                        )
-                    ]
+                    anchor_items = _collect_anchor_items(msp, detector)
+                    anchor_texts_count = len(anchor_items)
                     rb_targets = detector.anchor_calibrated_locator._build_rb_targets(  # noqa: SLF001
                         anchor_items
                     )
@@ -201,6 +220,9 @@ def main() -> int:
                     "source_suffix": path.suffix.lower(),
                     "dxf_path": None,
                     "frame_count": 0,
+                    "base10_count": 0,
+                    "small5_count": 0,
+                    "anchor_texts": anchor_texts_count,
                     "variants": [],
                     "scales": [],
                     "rb_points": rb_points,

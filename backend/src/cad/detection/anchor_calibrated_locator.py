@@ -64,6 +64,12 @@ class AnchorCalibratedLocator:
         self.calibration = anchor_cfg.get("calibration", {})
         self.reference_point = self.calibration.get("reference_point", "text_bbox_right_bottom")
         self.project_no = project_no
+        scale_candidates = anchor_cfg.get("scale_candidates")
+        if isinstance(scale_candidates, list) and scale_candidates:
+            self.anchor_scale_candidates = [float(v) for v in scale_candidates]
+        else:
+            self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
+        self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
 
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         scale_mismatch = tolerances.get("scale_mismatch", {})
@@ -80,6 +86,13 @@ class AnchorCalibratedLocator:
         self.layer_order = [str(layer_name) for layer_name in layers if layer_name]
         entity_order = layer_priority.get("entity_order", ["LWPOLYLINE", "POLYLINE", "LINE"])
         self.entity_order = [str(e) for e in entity_order if e]
+        line_limits = outer_frame_cfg.get("line_rebuild_limits", {})
+        self.line_rebuild_max_segments = (
+            int(line_limits["max_segments"]) if line_limits.get("max_segments") else None
+        )
+        self.line_rebuild_max_coord_pairs = (
+            int(line_limits["max_coord_pairs"]) if line_limits.get("max_coord_pairs") else None
+        )
 
         a4_cfg = self.spec.a4_multipage.get("cluster_building", {})
         self.a4_gap_factor = float(a4_cfg.get("gap_threshold_factor", 0.5))
@@ -113,6 +126,7 @@ class AnchorCalibratedLocator:
                 list[CandidateFrame], dict[tuple[float, float, float, float], list[CandidateFrame]]
             ],
         ] = {}
+        line_rectangles: list[BBox] | None = None
 
         for layer in self.layer_order:
             if len(selected_by_anchor) >= len(targets_by_anchor):
@@ -206,6 +220,46 @@ class AnchorCalibratedLocator:
                                 best.bbox.ymax,
                             )
 
+        if len(selected_by_anchor) < len(targets_by_anchor):
+            line_rectangles = self._build_line_rectangles(msp)
+            if line_rectangles:
+                for anchor_id, targets in targets_by_anchor.items():
+                    if anchor_id in selected_by_anchor:
+                        continue
+                    best: CandidateFrame | None = None
+                    for target in targets:
+                        matches = self._match_rectangles(
+                            line_rectangles,
+                            target["rb_x"],
+                            target["rb_y"],
+                            target["scale"],
+                            target["profile_id"],
+                            layer="*",
+                        )
+                        if not matches:
+                            continue
+                        found_geom = True
+                        candidate = min(matches, key=lambda c: (c.fit_error, c.area))
+                        if best is None or (candidate.fit_error, candidate.area) < (
+                            best.fit_error,
+                            best.area,
+                        ):
+                            best = candidate
+                    if best:
+                        selected_by_anchor[anchor_id] = best
+                        self.logger.info(
+                            "锚点直推(线段重建): index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
+                            anchor_id,
+                            best.paper_variant_id,
+                            best.sx,
+                            best.sy,
+                            best.roi_profile_id,
+                            best.bbox.xmin,
+                            best.bbox.ymin,
+                            best.bbox.xmax,
+                            best.bbox.ymax,
+                        )
+
         for anchor_id in sorted(selected_by_anchor.keys()):
             selected = selected_by_anchor[anchor_id]
             self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
@@ -237,8 +291,11 @@ class AnchorCalibratedLocator:
     ) -> list[tuple[CandidateFrame, float]]:
         matches: list[tuple[CandidateFrame, float]] = []
         for profile_id, calib in self._iter_calibrations():
-            for scale in self._iter_scales_from_text(anchor_item, calib):
-                outer_xmax, outer_ymin = self._outer_rb_from_anchor(anchor_item, scale, calib)
+            for candidate in self._iter_scale_candidates(anchor_item, calib):
+                scale = candidate["scale"]
+                outer_xmax, outer_ymin = self._outer_rb_from_anchor(
+                    anchor_item, scale, calib, candidate["use_project_override"]
+                )
                 pos_tol = max(2.0, 2.0 * scale)
 
                 for cand in candidates:
@@ -271,45 +328,79 @@ class AnchorCalibratedLocator:
         rb_targets: list[dict] = []
         for idx, anchor_item in enumerate(anchor_items, start=1):
             for profile_id, calib in self._iter_calibrations():
-                for scale in self._iter_scales_from_text(anchor_item, calib):
-                    outer_xmax, outer_ymin = self._outer_rb_from_anchor(anchor_item, scale, calib)
-                    rb_targets.append(
-                        {
-                            "anchor_id": idx,
-                            "profile_id": profile_id,
-                            "scale": scale,
-                            "rb_x": outer_xmax,
-                            "rb_y": outer_ymin,
-                        }
-                    )
+                candidates = self._iter_scale_candidates(anchor_item, calib)
+                if not candidates:
+                    continue
+                candidate = candidates[0]
+                scale = candidate["scale"]
+                outer_xmax, outer_ymin = self._outer_rb_from_anchor(
+                    anchor_item, scale, calib, candidate["use_project_override"]
+                )
+                rb_targets.append(
+                    {
+                        "anchor_id": idx,
+                        "profile_id": profile_id,
+                        "scale": scale,
+                        "rb_x": outer_xmax,
+                        "rb_y": outer_ymin,
+                        "use_project_override": candidate["use_project_override"],
+                    }
+                )
         return rb_targets
 
     def _scale_from_text(self, item: TextItem, calib: dict) -> float | None:
-        scales = self._iter_scales_from_text(item, calib)
-        return scales[0] if scales else None
+        candidates = self._iter_scale_candidates(item, calib)
+        return candidates[0]["scale"] if candidates else None
 
     def _iter_scales_from_text(self, item: TextItem, calib: dict) -> list[float]:
+        candidates = self._iter_scale_candidates(item, calib)
+        return [c["scale"] for c in candidates]
+
+    def _iter_scale_candidates(self, item: TextItem, calib: dict) -> list[dict]:
         text_h = item.text_height
         if text_h is None and item.bbox is not None:
             text_h = item.bbox.height / 1.2
         if text_h is None:
             return []
-        base_h = self._resolve_text_height_1to1(calib)
-        if not base_h:
+        base_h = calib.get("text_height_1to1_mm")
+        overrides = calib.get("text_height_1to1_mm_by_project", {})
+        candidates: list[dict] = []
+        if base_h:
+            candidates.append(
+                {"scale": float(text_h) / float(base_h), "use_project_override": False}
+            )
+        if self.project_no and isinstance(overrides, dict):
+            override = overrides.get(self.project_no)
+            if override:
+                candidates.append(
+                    {
+                        "scale": float(text_h) / float(override),
+                        "use_project_override": True,
+                    }
+                )
+        if not candidates:
             return []
-        return [float(text_h) / float(base_h)]
+        if self.anchor_scale_candidates:
+
+            def score(scale: float) -> float:
+                return min(abs(scale - c) / max(c, 1e-9) for c in self.anchor_scale_candidates)
+
+            scored = [(score(c["scale"]), c) for c in candidates]
+            scored.sort(key=lambda item: item[0])
+            filtered = [cand for err, cand in scored if err <= self.anchor_scale_tol]
+            return filtered if filtered else []
+        return candidates
 
     def _resolve_text_height_1to1(self, calib: dict) -> float | None:
         base_h = calib.get("text_height_1to1_mm")
-        overrides = calib.get("text_height_1to1_mm_by_project", {})
-        if self.project_no and isinstance(overrides, dict):
-            override = overrides.get(self.project_no)
-            if override is not None:
-                return float(override)
         return float(base_h) if base_h is not None else None
 
     def _outer_rb_from_anchor(
-        self, item: TextItem, scale: float, calib: dict
+        self,
+        item: TextItem,
+        scale: float,
+        calib: dict,
+        use_project_override: bool,
     ) -> tuple[float, float]:
         ref_x, ref_y = self._anchor_ref_point(item)
         ref_cfg = calib.get("text_ref_in_anchor_roi_1to1", {})
@@ -318,15 +409,15 @@ class AnchorCalibratedLocator:
         roi_xmax = ref_x + dx_right * scale
         roi_ymin = ref_y - dy_bottom * scale
 
-        anchor_rb = self._resolve_anchor_rb_offset(calib)
+        anchor_rb = self._resolve_anchor_rb_offset(calib, use_project_override)
         outer_xmax = roi_xmax + float(anchor_rb[0]) * scale
         outer_ymin = roi_ymin - float(anchor_rb[2]) * scale
         return outer_xmax, outer_ymin
 
-    def _resolve_anchor_rb_offset(self, calib: dict) -> list[float]:
+    def _resolve_anchor_rb_offset(self, calib: dict, use_project_override: bool) -> list[float]:
         base = calib.get("anchor_roi_rb_offset_1to1", [0.0, 0.0, 0.0, 0.0])
         overrides = calib.get("anchor_roi_rb_offset_1to1_by_project", {})
-        if self.project_no and isinstance(overrides, dict):
+        if use_project_override and self.project_no and isinstance(overrides, dict):
             override = overrides.get(self.project_no)
             if override is not None:
                 return [float(v) for v in override]
@@ -369,6 +460,102 @@ class AnchorCalibratedLocator:
         lines.extend(self._open_polyline_segments(msp, layer))
         return lines
 
+    def _build_line_rectangles(self, msp) -> list[BBox]:
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for layer in self.layer_order:
+            segments.extend(self._query_lines(msp, layer))
+        if not segments:
+            return []
+        if self.line_rebuild_max_segments and len(segments) > self.line_rebuild_max_segments:
+            self.logger.info(
+                "线段数量过多，跳过线段重建: segments=%d limit=%d",
+                len(segments),
+                self.line_rebuild_max_segments,
+            )
+            return []
+        horizontal: list[tuple[float, float, float]] = []
+        vertical: list[tuple[float, float, float]] = []
+        for (x1, y1), (x2, y2) in segments:
+            dx = x2 - x1
+            dy = y2 - y1
+            length = (dx * dx + dy * dy) ** 0.5
+            if length <= 0:
+                continue
+            if (
+                abs(dy) <= self.candidate_finder.coord_tol
+                or abs(dy) / length <= self.candidate_finder._sin_tol
+            ):  # noqa: SLF001
+                y = (y1 + y2) / 2.0
+                horizontal.append((y, min(x1, x2), max(x1, x2)))
+            elif (
+                abs(dx) <= self.candidate_finder.coord_tol
+                or abs(dx) / length <= self.candidate_finder._sin_tol
+            ):  # noqa: SLF001
+                x = (x1 + x2) / 2.0
+                vertical.append((x, min(y1, y2), max(y1, y2)))
+
+        h_segments = self.candidate_finder._cluster_segments(horizontal)  # noqa: SLF001
+        v_segments = self.candidate_finder._cluster_segments(vertical)  # noqa: SLF001
+        if not h_segments or not v_segments:
+            return []
+        ys = sorted(h_segments.keys())
+        xs = sorted(v_segments.keys())
+        if (
+            self.line_rebuild_max_coord_pairs
+            and len(xs) * len(ys) > self.line_rebuild_max_coord_pairs
+        ):
+            self.logger.info(
+                "候选坐标组合过多，跳过线段重建: pairs=%d limit=%d",
+                len(xs) * len(ys),
+                self.line_rebuild_max_coord_pairs,
+            )
+            return []
+        rectangles: list[BBox] = []
+        seen: set[tuple[float, float, float, float]] = set()
+        for yi, y1 in enumerate(ys):
+            for y2 in ys[yi + 1 :]:
+                if (y2 - y1) < self.candidate_finder.min_dim:
+                    continue
+                for xi, x1 in enumerate(xs):
+                    for x2 in xs[xi + 1 :]:
+                        if (x2 - x1) < self.candidate_finder.min_dim:
+                            continue
+                        if not self.candidate_finder._has_edge(h_segments[y1], x1, x2):  # noqa: SLF001
+                            continue
+                        if not self.candidate_finder._has_edge(h_segments[y2], x1, x2):  # noqa: SLF001
+                            continue
+                        if not self.candidate_finder._has_edge(v_segments[x1], y1, y2):  # noqa: SLF001
+                            continue
+                        if not self.candidate_finder._has_edge(v_segments[x2], y1, y2):  # noqa: SLF001
+                            continue
+                        key = (
+                            round(x1, 3),
+                            round(y1, 3),
+                            round(x2, 3),
+                            round(y2, 3),
+                        )
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        rectangles.append(BBox(xmin=x1, ymin=y1, xmax=x2, ymax=y2))
+        return rectangles
+
+    def _match_rectangles(
+        self,
+        rectangles: list[BBox],
+        rb_x: float,
+        rb_y: float,
+        scale: float,
+        profile_id: str,
+        layer: str,
+    ) -> list[CandidateFrame]:
+        matches: list[CandidateFrame] = []
+        for bbox in rectangles:
+            if not self._bbox_matches_rb(bbox, rb_x, rb_y):
+                continue
+            matches.extend(self._fit_bbox_candidates(bbox, scale, profile_id, layer))
+        return matches
+
     def _open_polyline_segments(
         self, msp, layer: str
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
@@ -402,27 +589,61 @@ class AnchorCalibratedLocator:
                 except Exception:
                     continue
 
-        insert_query = f'INSERT[layer=="{layer}"]'
         try:
-            inserts = list(msp.query(insert_query))
+            inserts = list(msp.query("INSERT"))
         except Exception:
-            inserts = [e for e in msp.query("INSERT") if getattr(e.dxf, "layer", None) == layer]
+            inserts = list(msp.query("INSERT"))
 
         for insert in inserts:
-            try:
-                for ve in insert.virtual_entities():
-                    if ve.dxftype() != entity_type:
-                        continue
-                    try:
-                        ve_layer = ve.dxf.layer
-                    except Exception:
-                        ve_layer = "0"
-                    effective_layer = layer if ve_layer == "0" else ve_layer
-                    if effective_layer != layer:
-                        continue
-                    yield ve
-            except Exception:
+            insert_layer = getattr(insert.dxf, "layer", "0")
+            yield from self._iter_insert_entities(
+                insert,
+                entity_type=entity_type,
+                target_layer=layer,
+                parent_layer=insert_layer,
+                depth=0,
+            )
+
+    def _iter_insert_entities(
+        self,
+        insert,
+        *,
+        entity_type: str,
+        target_layer: str,
+        parent_layer: str,
+        depth: int,
+        max_depth: int = 8,
+    ):
+        if depth > max_depth:
+            return
+        insert_layer = getattr(insert.dxf, "layer", "0") or "0"
+        effective_insert_layer = parent_layer if insert_layer == "0" else insert_layer
+        try:
+            virtuals = list(insert.virtual_entities())
+        except Exception:
+            return
+        for ve in virtuals:
+            tp = ve.dxftype()
+            if tp == "INSERT":
+                yield from self._iter_insert_entities(
+                    ve,
+                    entity_type=entity_type,
+                    target_layer=target_layer,
+                    parent_layer=effective_insert_layer,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
                 continue
+            if tp != entity_type:
+                continue
+            try:
+                ve_layer = ve.dxf.layer
+            except Exception:
+                ve_layer = "0"
+            effective_layer = effective_insert_layer if ve_layer == "0" else ve_layer
+            if effective_layer != target_layer:
+                continue
+            yield ve
 
     def _match_polylines(
         self,
@@ -455,17 +676,24 @@ class AnchorCalibratedLocator:
         max_w = 0.0
         max_h = 0.0
         for p1, p2 in lines:
-            p_near, p_other = self._pick_rb_endpoint(p1, p2, rb_x, rb_y)
-            if p_near is None:
-                continue
-            x1, y1 = p_near
-            x2, y2 = p_other
+            x1, y1 = p1
+            x2, y2 = p2
             dx = x2 - x1
             dy = y2 - y1
-            if abs(dy) <= self.rb_tol and x2 <= rb_x + self.rb_tol:
-                max_w = max(max_w, rb_x - x2)
-            elif abs(dx) <= self.rb_tol and y2 >= rb_y - self.rb_tol:
-                max_h = max(max_h, y2 - rb_y)
+            if abs(dy) <= self.rb_tol:
+                y = (y1 + y2) / 2.0
+                if abs(y - rb_y) <= self.rb_tol:
+                    xmin = min(x1, x2)
+                    xmax = max(x1, x2)
+                    if xmin <= rb_x + self.rb_tol and xmax >= rb_x - self.rb_tol:
+                        max_w = max(max_w, rb_x - xmin)
+            elif abs(dx) <= self.rb_tol:
+                x = (x1 + x2) / 2.0
+                if abs(x - rb_x) <= self.rb_tol:
+                    ymin = min(y1, y2)
+                    ymax = max(y1, y2)
+                    if ymin <= rb_y + self.rb_tol and ymax >= rb_y - self.rb_tol:
+                        max_h = max(max_h, ymax - rb_y)
         if max_w <= 0 or max_h <= 0:
             return []
         bbox = BBox(xmin=rb_x - max_w, ymin=rb_y, xmax=rb_x, ymax=rb_y + max_h)

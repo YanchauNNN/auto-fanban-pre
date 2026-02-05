@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import re
-from typing import Iterable, Tuple
+from typing import Tuple
 
 
 def _is_cjk(ch: str) -> bool:
@@ -76,5 +76,3 @@ def split_en_two_cells(text: str) -> Tuple[str, str]:
 
 
 __all__ = ["split_cn_two_cells", "split_en_two_cells"]
-
-

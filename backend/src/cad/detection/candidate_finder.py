@@ -22,11 +22,26 @@ class CandidateFinder:
         min_dim: float = 100.0,
         coord_tol: float = 0.5,
         orthogonality_tol_deg: float = 1.0,
+        layer_order: list[str] | None = None,
+        entity_order: list[str] | None = None,
+        line_rebuild_limits: dict[str, int] | None = None,
     ) -> None:
         self.min_dim = min_dim
         self.coord_tol = coord_tol
         self.orthogonality_tol_deg = orthogonality_tol_deg
         self._sin_tol = math.sin(math.radians(orthogonality_tol_deg))
+        self.layer_order = [str(layer) for layer in (layer_order or []) if layer]
+        default_entity_order = ["LWPOLYLINE", "POLYLINE", "LINE"]
+        self.entity_order = (
+            [str(e) for e in entity_order if e] if entity_order else default_entity_order
+        )
+        limits = line_rebuild_limits or {}
+        self.line_rebuild_max_segments = (
+            int(limits["max_segments"]) if limits.get("max_segments") else None
+        )
+        self.line_rebuild_max_coord_pairs = (
+            int(limits["max_coord_pairs"]) if limits.get("max_coord_pairs") else None
+        )
 
     def find_rectangles(self, msp) -> list[BBox]:
         """
@@ -38,6 +53,11 @@ class CandidateFinder:
         Returns:
             候选矩形的BBox列表（按面积降序）
         """
+        if self.layer_order:
+            return self._find_rectangles_by_layer(msp)
+        return self._find_rectangles_global(msp)
+
+    def _find_rectangles_global(self, msp) -> list[BBox]:
         poly_candidates: list[BBox] = []
         # 1. 从LWPOLYLINE提取
         for entity in msp.query("LWPOLYLINE"):
@@ -61,6 +81,45 @@ class CandidateFinder:
         # 按面积降序排序
         candidates.sort(key=lambda b: b.width * b.height, reverse=True)
 
+        return candidates
+
+    def _find_rectangles_by_layer(self, msp) -> list[BBox]:
+        poly_candidates: list[BBox] = []
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        allow_line_rebuild = "LINE" in self.entity_order
+
+        for layer in self.layer_order:
+            for entity_type in self.entity_order:
+                if entity_type in {"LWPOLYLINE", "POLYLINE"}:
+                    for entity in self._iter_layer_entities(msp, layer, entity_type):
+                        vertices = self._polyline_vertices(entity, entity_type)
+                        if len(vertices) < 2:
+                            continue
+                        is_closed = self._is_polyline_closed(
+                            entity, entity_type, vertices
+                        )
+                        if is_closed or (
+                            len(vertices) >= 4 and self._is_axis_aligned(vertices)
+                        ):
+                            if not self._is_axis_aligned(vertices):
+                                continue
+                            bbox = self._bbox_from_vertices(vertices)
+                            if self._is_valid_size(bbox):
+                                poly_candidates.append(bbox)
+                            continue
+                        if allow_line_rebuild:
+                            segments.extend(self._polyline_segments(vertices))
+                elif entity_type == "LINE" and allow_line_rebuild:
+                    segments.extend(self._line_segments(msp, layer))
+
+        line_candidates: list[BBox] = []
+        if allow_line_rebuild and segments:
+            line_candidates = [
+                bbox for bbox in self._rebuild_from_segments(segments) if self._is_valid_size(bbox)
+            ]
+
+        candidates = self._dedupe_candidates(poly_candidates + line_candidates)
+        candidates.sort(key=lambda b: b.width * b.height, reverse=True)
         return candidates
 
     def _extract_bbox(self, entity) -> BBox | None:
@@ -123,16 +182,160 @@ class CandidateFinder:
             unique.append(bbox)
         return unique
 
+    def _iter_layer_entities(self, msp, layer: str, entity_type: str):
+        query = f'{entity_type}[layer=="{layer}"]'
+        try:
+            for entity in msp.query(query):
+                yield entity
+        except Exception:
+            for entity in msp.query(entity_type):
+                try:
+                    if entity.dxf.layer == layer:
+                        yield entity
+                except Exception:
+                    continue
+
+        try:
+            inserts = list(msp.query("INSERT"))
+        except Exception:
+            inserts = list(msp.query("INSERT"))
+
+        for insert in inserts:
+            insert_layer = getattr(insert.dxf, "layer", "0")
+            yield from self._iter_insert_entities(
+                insert,
+                entity_type=entity_type,
+                target_layer=layer,
+                parent_layer=insert_layer,
+                depth=0,
+            )
+
+    def _iter_insert_entities(
+        self,
+        insert,
+        *,
+        entity_type: str,
+        target_layer: str,
+        parent_layer: str,
+        depth: int,
+        max_depth: int = 8,
+    ):
+        if depth > max_depth:
+            return
+        insert_layer = getattr(insert.dxf, "layer", "0") or "0"
+        effective_insert_layer = parent_layer if insert_layer == "0" else insert_layer
+        try:
+            virtuals = list(insert.virtual_entities())
+        except Exception:
+            return
+        for ve in virtuals:
+            tp = ve.dxftype()
+            if tp == "INSERT":
+                yield from self._iter_insert_entities(
+                    ve,
+                    entity_type=entity_type,
+                    target_layer=target_layer,
+                    parent_layer=effective_insert_layer,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                )
+                continue
+            if tp != entity_type:
+                continue
+            try:
+                ve_layer = ve.dxf.layer
+            except Exception:
+                ve_layer = "0"
+            effective_layer = effective_insert_layer if ve_layer == "0" else ve_layer
+            if effective_layer != target_layer:
+                continue
+            yield ve
+
+    def _polyline_vertices(self, entity, tp: str) -> list[tuple[float, float]]:
+        vertices: list[tuple[float, float]] = []
+        if tp == "LWPOLYLINE":
+            for p in entity.get_points():
+                vertices.append((float(p[0]), float(p[1])))
+        elif tp == "POLYLINE":
+            for v in entity.vertices:
+                loc = v.dxf.location
+                vertices.append((float(loc.x), float(loc.y)))
+        return vertices
+
+    def _is_polyline_closed(
+        self, entity, tp: str, vertices: list[tuple[float, float]]
+    ) -> bool:
+        if tp == "LWPOLYLINE":
+            closed = bool(getattr(entity, "closed", False) or getattr(entity, "is_closed", False))
+        elif tp == "POLYLINE":
+            closed = bool(getattr(entity, "is_closed", False) or getattr(entity, "closed", False))
+        else:
+            closed = False
+        if not closed and len(vertices) >= 3 and vertices[0] == vertices[-1]:
+            return True
+        return closed
+
+    @staticmethod
+    def _bbox_from_vertices(vertices: list[tuple[float, float]]) -> BBox:
+        xs = [p[0] for p in vertices]
+        ys = [p[1] for p in vertices]
+        return BBox(xmin=min(xs), ymin=min(ys), xmax=max(xs), ymax=max(ys))
+
+    @staticmethod
+    def _polyline_segments(
+        vertices: list[tuple[float, float]],
+    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for idx in range(len(vertices) - 1):
+            p1 = vertices[idx]
+            p2 = vertices[idx + 1]
+            if p1 == p2:
+                continue
+            segments.append((p1, p2))
+        return segments
+
+    def _line_segments(
+        self, msp, layer: str
+    ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for entity in self._iter_layer_entities(msp, layer, "LINE"):
+            start = entity.dxf.start
+            end = entity.dxf.end
+            segments.append(
+                ((float(start.x), float(start.y)), (float(end.x), float(end.y)))
+            )
+        return segments
+
     def _rebuild_from_lines(self, msp) -> list[BBox]:
         """从LINE实体重建矩形（兜底方案）"""
-        horizontal: list[tuple[float, float, float]] = []
-        vertical: list[tuple[float, float, float]] = []
-
+        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for entity in msp.query("LINE"):
             start = entity.dxf.start
             end = entity.dxf.end
-            x1, y1 = float(start.x), float(start.y)
-            x2, y2 = float(end.x), float(end.y)
+            segments.append(
+                ((float(start.x), float(start.y)), (float(end.x), float(end.y)))
+            )
+        for entity_type in ("LWPOLYLINE", "POLYLINE"):
+            for entity in msp.query(entity_type):
+                vertices = self._polyline_vertices(entity, entity_type)
+                if not vertices:
+                    continue
+                if self._is_polyline_closed(entity, entity_type, vertices):
+                    continue
+                segments.extend(self._polyline_segments(vertices))
+        return self._rebuild_from_segments(segments)
+
+    def _rebuild_from_segments(
+        self, segments: list[tuple[tuple[float, float], tuple[float, float]]]
+    ) -> list[BBox]:
+        if not segments:
+            return []
+        if self.line_rebuild_max_segments and len(segments) > self.line_rebuild_max_segments:
+            return []
+
+        horizontal: list[tuple[float, float, float]] = []
+        vertical: list[tuple[float, float, float]] = []
+        for (x1, y1), (x2, y2) in segments:
             dx = x2 - x1
             dy = y2 - y1
             length = math.hypot(dx, dy)
@@ -156,6 +359,11 @@ class CandidateFinder:
 
         ys = sorted(h_segments.keys())
         xs = sorted(v_segments.keys())
+        if (
+            self.line_rebuild_max_coord_pairs
+            and len(xs) * len(ys) > self.line_rebuild_max_coord_pairs
+        ):
+            return []
 
         for yi, y1 in enumerate(ys):
             for y2 in ys[yi + 1 :]:

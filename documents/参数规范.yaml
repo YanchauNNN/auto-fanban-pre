@@ -655,16 +655,19 @@ titleblock_extract:
   description: |
     图签提取模块负责从 DXF 中识别图框、提取图签字段。
     采用 rb_offset 坐标系（相对于图框右下角），支持任意比例图框。
+    当前识别为“几何优先 + 锚点ROI验证”：几何候选→纸张拟合→锚点ROI验证→A4簇扩展→字段提取→比例校验。
 
   # --------------------------------------------------------------------------
   # 3.1 处理流水线
   # --------------------------------------------------------------------------
   pipeline:
     - { step: 1, name: "dwg_to_dxf",     desc: "DWG转DXF(ODA File Converter)" }
-    - { step: 2, name: "frame_detect",   desc: "图框候选检测(闭合矩形/LINE重建)" }
-    - { step: 3, name: "frame_verify",   desc: "锚点ROI验证(本文件产权属中国核电工程有限公司（CNPE）所有，未经书面许可，不得以任何方式复制、传播、发表和外传。)" }
-    - { step: 4, name: "scale_check",    desc: "比例一致性检查(几何缩放vs图签比例)" }
-    - { step: 5, name: "field_extract",  desc: "字段ROI提取与解析" }
+    - { step: 2, name: "geom_candidates", desc: "layer_priority内几何候选(闭合矩形/开放4点/LINE重建)" }
+    - { step: 3, name: "scale_fit",       desc: "纸张拟合得到paper_variant_id/sx/sy/roi_profile" }
+    - { step: 4, name: "anchor_verify",   desc: "锚点ROI验证并按fit_error选择候选" }
+    - { step: 5, name: "a4_cluster_expand", desc: "SMALL5(A4)锚点命中作为种子扩展簇" }
+    - { step: 6, name: "field_extract",   desc: "字段ROI提取与解析" }
+    - { step: 7, name: "scale_check",     desc: "比例一致性检查(几何缩放vs图签比例)" }
 
   # --------------------------------------------------------------------------
   # 3.2 核心原则
@@ -672,6 +675,8 @@ titleblock_extract:
   principles:
     production_has_no_calibration_layers: true  # 生产环境无标定图层
     roi_coordinate_system: "rb_offset_scaled"   # ROI坐标相对于右下角，按比例缩放
+    detection_mode: "geometry_first"            # 几何优先，锚点ROI用于验证与选择
+    rb_locate_as_entry: false                   # RB定位不作为入口（仅用于ROI还原）
 
     # rb_offset 定义（基于1:1标定，运行时按sx/sy缩放）
     rb_offset_formula:
@@ -715,12 +720,21 @@ titleblock_extract:
   outer_frame:
     preferred_entities: ["LWPOLYLINE(closed)", "POLYLINE(closed)"]
     fallback: "LINE重建矩形"
+    detection_notes:
+      - "需要扫描INSERT块内的图元（含LINE/LWPOLYLINE/POLYLINE）。"
+      - "块内实体的effective layer规则：若实体layer为'0'则继承INSERT层，否则使用实体自身layer。"
+      - "因此检测不应仅限于INSERT自身layer匹配，需要遍历所有INSERT并按effective layer归类。"
+      - "闭合多段线需为轴对齐矩形；开放多段线(4点轴对齐)可作为矩形候选，其余开放多段线拆为线段参与LINE匹配。"
+      - "线段重建仅在layer_priority范围内执行，并受线段数量/组合上限保护。"
     layer_priority:
-      layers: ["_TSZ-PLOT_MARK", "TK", "图框", "ttkk", "0"]
+      layers: ["_TSZ-PLOT_MARK", "TK", "图框", "ttkk", "0", "BORDER"]
       entity_order: ["LWPOLYLINE", "POLYLINE", "LINE"]
     acceptance:
       min_area_rank: "按面积排序取top-N"
       orthogonality_tol_deg: 1.0
+    line_rebuild_limits:
+      max_segments: 5000
+      max_coord_pairs: 50000
     multi_frame_per_dxf: true
 
   # --------------------------------------------------------------------------
@@ -858,6 +872,9 @@ titleblock_extract:
   # --------------------------------------------------------------------------
   anchor:
     search_text: ["本文件产权属中国核电工程有限公司（CNPE）所有，未经书面许可，不得以任何方式复制、传播、发表和外传。"]
+    scale_candidates: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235, 240, 245, 250, 255, 260, 265, 270, 275, 280, 285, 290, 295, 300]
+    scale_match_rel_tol: 0.1
+    # scale_candidates/scale_match_rel_tol 仅在RB兼容模式使用（geometry_first 不依赖字高比例）
     profile_priority: [BASE10, SMALL5]
     match_policy: "single_hit_same_roi"
     roi_field_name: "锚点"

@@ -67,14 +67,34 @@ runtime_options:
   # 7) 运行期业务覆盖（锚点校准相关）
   # --------------------------------------------------------------------------
   titleblock_overrides:
+    frame_detect_mode:
+      type: "enum"
+      default: "geometry_first"
+      desc: "图框识别模式：geometry_first(几何优先+锚点ROI验证) / rb_anchor(锚点RB直推兼容模式)"
     anchor_text_height_by_project:
-      type: "dict[str,float]"
-      default: { "1818": 2.5 }
-      desc: "锚点字高1:1按项目覆盖，优先于参数规范中的text_height_1to1_mm"
-    anchor_roi_rb_offset_by_project:
-      type: "dict[str,list[float]]"
+      type: "dict[str,dict[str,float]]"
       default:
-        "1818_BASE10": [16.1906, 196.1906, 69.4498, 85.4498]
-        "1818_SMALL5": [106.7506, 189.3506, 75.0398, 78.2398]
-      desc: "锚点ROI右下角偏移按项目覆盖（key格式: {project}_{profile}）"
+        BASE10: { "1818": 2.7 }
+        SMALL5: { "1818": 2.7 }
+      desc: "锚点字高1:1按项目覆盖（按profile分组，RB定位兼容模式使用）"
+    anchor_scale_candidates:
+      type: "list[float]"
+      default: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235, 240, 245, 250, 255, 260, 265, 270, 275, 280, 285, 290, 295, 300]
+      desc: "锚点字高推导比例的优选尺度列表（RB定位兼容模式使用）"
+    anchor_scale_match_rel_tol:
+      type: "float"
+      default: 0.1
+      desc: "锚点比例与候选尺度的相对误差阈值（RB定位兼容模式使用）"
+    anchor_roi_rb_offset_by_project:
+      type: "dict[str,dict[str,list[float]]]"
+      default:
+        BASE10:
+          "1818": [16.1906, 196.1906, 69.4498, 85.4498]
+        SMALL5:
+          "1818": [106.7506, 189.3506, 75.0398, 78.2398]
+      desc: "锚点ROI右下角偏移按项目覆盖（用于ROI还原；按profile分组）"
+    line_rebuild_limits:
+      type: "dict[str,int]"
+      default: { max_segments: 5000, max_coord_pairs: 50000 }
+      desc: "LINE重建矩形的上限（geometry_first 模式生效）"
 
