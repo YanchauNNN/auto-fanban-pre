@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Iterable
 
@@ -42,6 +43,7 @@ class CandidateFinder:
         self.line_rebuild_max_coord_pairs = (
             int(limits["max_coord_pairs"]) if limits.get("max_coord_pairs") else None
         )
+        self.logger = logging.getLogger(__name__)
 
     def find_rectangles(self, msp) -> list[BBox]:
         """
@@ -71,12 +73,17 @@ class CandidateFinder:
             if bbox and self._is_valid_size(bbox):
                 poly_candidates.append(bbox)
 
-        # 3. LINE重建矩形（补强策略，始终执行）
+        if poly_candidates:
+            candidates = self._dedupe_candidates(poly_candidates)
+            candidates.sort(key=lambda b: b.width * b.height, reverse=True)
+            return candidates
+
+        # 3. LINE重建矩形（补强策略：仅在无poly候选时执行）
         line_candidates = [
             bbox for bbox in self._rebuild_from_lines(msp) if self._is_valid_size(bbox)
         ]
 
-        candidates = self._dedupe_candidates(poly_candidates + line_candidates)
+        candidates = self._dedupe_candidates(line_candidates)
 
         # 按面积降序排序
         candidates.sort(key=lambda b: b.width * b.height, reverse=True)
@@ -85,10 +92,12 @@ class CandidateFinder:
 
     def _find_rectangles_by_layer(self, msp) -> list[BBox]:
         poly_candidates: list[BBox] = []
-        segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        line_candidates: list[BBox] = []
         allow_line_rebuild = "LINE" in self.entity_order
 
         for layer in self.layer_order:
+            layer_poly_candidates: list[BBox] = []
+            layer_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
             for entity_type in self.entity_order:
                 if entity_type in {"LWPOLYLINE", "POLYLINE"}:
                     for entity in self._iter_layer_entities(msp, layer, entity_type):
@@ -105,18 +114,26 @@ class CandidateFinder:
                                 continue
                             bbox = self._bbox_from_vertices(vertices)
                             if self._is_valid_size(bbox):
-                                poly_candidates.append(bbox)
+                                layer_poly_candidates.append(bbox)
                             continue
                         if allow_line_rebuild:
-                            segments.extend(self._polyline_segments(vertices))
+                            layer_segments.extend(self._polyline_segments(vertices))
                 elif entity_type == "LINE" and allow_line_rebuild:
-                    segments.extend(self._line_segments(msp, layer))
+                    layer_segments.extend(self._line_segments(msp, layer))
 
-        line_candidates: list[BBox] = []
-        if allow_line_rebuild and segments:
-            line_candidates = [
-                bbox for bbox in self._rebuild_from_segments(segments) if self._is_valid_size(bbox)
-            ]
+            if layer_poly_candidates:
+                poly_candidates.extend(layer_poly_candidates)
+                continue
+            if allow_line_rebuild and layer_segments:
+                line_candidates.extend(
+                    [
+                        bbox
+                        for bbox in self._rebuild_from_segments(
+                            layer_segments, context=f"layer={layer}"
+                        )
+                        if self._is_valid_size(bbox)
+                    ]
+                )
 
         candidates = self._dedupe_candidates(poly_candidates + line_candidates)
         candidates.sort(key=lambda b: b.width * b.height, reverse=True)
@@ -323,14 +340,23 @@ class CandidateFinder:
                 if self._is_polyline_closed(entity, entity_type, vertices):
                     continue
                 segments.extend(self._polyline_segments(vertices))
-        return self._rebuild_from_segments(segments)
+        return self._rebuild_from_segments(segments, context="global_lines")
 
     def _rebuild_from_segments(
-        self, segments: list[tuple[tuple[float, float], tuple[float, float]]]
+        self,
+        segments: list[tuple[tuple[float, float], tuple[float, float]]],
+        *,
+        context: str | None = None,
     ) -> list[BBox]:
         if not segments:
             return []
         if self.line_rebuild_max_segments and len(segments) > self.line_rebuild_max_segments:
+            self.logger.warning(
+                "LINE重建跳过: context=%s segments=%d max_segments=%d",
+                context or "-",
+                len(segments),
+                self.line_rebuild_max_segments,
+            )
             return []
 
         horizontal: list[tuple[float, float, float]] = []
@@ -363,6 +389,14 @@ class CandidateFinder:
             self.line_rebuild_max_coord_pairs
             and len(xs) * len(ys) > self.line_rebuild_max_coord_pairs
         ):
+            self.logger.warning(
+                "LINE重建跳过: context=%s coord_pairs=%d max_coord_pairs=%d xs=%d ys=%d",
+                context or "-",
+                len(xs) * len(ys),
+                self.line_rebuild_max_coord_pairs,
+                len(xs),
+                len(ys),
+            )
             return []
 
         for yi, y1 in enumerate(ys):

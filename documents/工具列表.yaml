@@ -1,9 +1,8 @@
 # 工具脚本用途与去留建议
 # 说明：针对 tools/ 目录下现有小程序，标记用途、依赖、是否建议删除。
-# 变更记录（2026-01-30）：
+# 变更记录（2026-02-06）：
 # - 合并锚点标定/校验脚本到 tools/anchor_calibration_tool.py（子命令 calibrate/verify）。
-# - tools/calibrate_anchor_from_biaozhun.py 与 tools/verify_anchor_rb_biaozhun.py 改为 DEPRECATED 包装器。
-# - 将临时脚本 _tmp_* 归档到 tools/_tmp/ 目录。
+# - 删除 DEPRECATED 包装器与 tools/_tmp 临时脚本（模块2已被pytest覆盖）。
 # - 补充 tools/run_frame_detector.py 等遗漏工具说明。
 
 tools:
@@ -73,26 +72,3 @@ tools:
     deps: ["ezdxf", "pyyaml", "backend代码(用于calibrate时CandidateFinder)"]
     keep: "保留复用（锚点直推的核心校验/标定工具，建议作为唯一入口）。"
 
-  - name: calibrate_anchor_from_biaozhun.py
-    path: "tools/calibrate_anchor_from_biaozhun.py"
-    purpose: "DEPRECATED：历史入口，已包装到 anchor_calibration_tool.py calibrate。"
-    deps: []
-    keep: "保留兼容（后续可在稳定后删除）。"
-
-  - name: verify_anchor_rb_biaozhun.py
-    path: "tools/verify_anchor_rb_biaozhun.py"
-    purpose: "DEPRECATED：历史入口，已包装到 anchor_calibration_tool.py verify。"
-    deps: []
-    keep: "保留兼容（后续可在稳定后删除）。"
-
-  - name: _tmp_dump_xlsx_sheet_cells.py
-    path: "tools/_tmp/_tmp_dump_xlsx_sheet_cells.py"
-    purpose: "临时工具：从xlsx中导出指定sheet的所有非空单元格为TSV（用于定位模板/字段问题）。"
-    deps: []
-    keep: "建议归档（仅调试用；可保留在 tools/_tmp/）。"
-
-  - name: _tmp_print_ied_headers.py
-    path: "tools/_tmp/_tmp_print_ied_headers.py"
-    purpose: "临时工具：从模板扫描报告里打印 IED 表头（用于人工核对）。"
-    deps: []
-    keep: "建议归档（仅调试用；可保留在 tools/_tmp/）。"

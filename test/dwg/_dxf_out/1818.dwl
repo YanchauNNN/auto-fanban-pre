@@ -1,3 +1,0 @@
-lenovo
-LAPTOP-D7TUFRPU 
-2026Äê2ÔÂ4ÈÕ  17:29:17

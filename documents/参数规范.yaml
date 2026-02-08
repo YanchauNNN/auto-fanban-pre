@@ -727,7 +727,7 @@ titleblock_extract:
       - "闭合多段线需为轴对齐矩形；开放多段线(4点轴对齐)可作为矩形候选，其余开放多段线拆为线段参与LINE匹配。"
       - "线段重建仅在layer_priority范围内执行，并受线段数量/组合上限保护。"
     layer_priority:
-      layers: ["_TSZ-PLOT_MARK", "TK", "图框", "ttkk", "0", "BORDER"]
+      layers: ["_TSZ-PLOT_MARK", "TK", "图框", "ttkk", "0", "BORDER", "GT_1"]
       entity_order: ["LWPOLYLINE", "POLYLINE", "LINE"]
     acceptance:
       min_area_rank: "按面积排序取top-N"

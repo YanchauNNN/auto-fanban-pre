@@ -106,7 +106,7 @@ class AnchorFirstLocator:
             self.logger.info("锚点定位结束: dxf=%s 未找到锚点文本", dxf_path.name)
             return []
 
-        self._anchor_scale_range = self._compute_anchor_scale_range(anchor_items)
+        self._anchor_scale_range = None
         candidates = self._build_candidates(msp)
         self.logger.info(
             "候选外框: dxf=%s candidates=%d",
@@ -131,9 +131,7 @@ class AnchorFirstLocator:
                 self._short_text(anchor_item.text),
             )
             if not matches:
-                matches = self._find_global_matches(anchor_item, msp)
-                if not matches:
-                    continue
+                continue
 
             selected = min(matches, key=lambda c: (c.fit_error, c.area))
             self.logger.info(
@@ -231,51 +229,6 @@ class AnchorFirstLocator:
             return None
         return float(text_h) / float(base_h)
 
-    def _find_global_matches(self, anchor_item: TextItem, msp) -> list[CandidateFrame]:
-        best_bbox: BBox | None = None
-        best_area: float | None = None
-        for entity in self._iter_all_polylines(msp):
-            tp = entity.dxftype()
-            vertices = self._polyline_vertices(entity, tp)
-            if len(vertices) < 4:
-                continue
-            if not self.candidate_finder._is_axis_aligned(vertices):  # noqa: SLF001
-                continue
-            bbox = self._bbox_from_vertices(vertices)
-            if (
-                bbox.width < self.candidate_finder.min_dim
-                or bbox.height < self.candidate_finder.min_dim
-            ):
-                continue
-            if not self._text_in_roi(anchor_item, bbox):
-                continue
-            area = bbox.width * bbox.height
-            if best_area is None or area > best_area:
-                best_area = area
-                best_bbox = bbox
-        if not best_bbox:
-            return []
-        return self._build_candidates_for_bbox(best_bbox, use_scale_filter=False)
-
-    @staticmethod
-    def _iter_all_polylines(msp):
-        def walk_entity(ent, depth: int):
-            if depth > 8:
-                return
-            tp = ent.dxftype()
-            if tp in {"LWPOLYLINE", "POLYLINE"}:
-                yield ent
-                return
-            if tp == "INSERT":
-                try:
-                    for ve in ent.virtual_entities():
-                        yield from walk_entity(ve, depth + 1)
-                except Exception:
-                    return
-
-        for e in msp:
-            yield from walk_entity(e, 0)
-
     @staticmethod
     def _polyline_vertices(entity, tp: str) -> list[tuple[float, float]]:
         vertices: list[tuple[float, float]] = []
@@ -339,7 +292,7 @@ class AnchorFirstLocator:
         candidates: list[CandidateFrame] = []
         bboxes = self.candidate_finder.find_rectangles(msp)
         for bbox in bboxes:
-            candidates.extend(self._build_candidates_for_bbox(bbox))
+            candidates.extend(self._build_candidates_for_bbox(bbox, use_scale_filter=False))
 
         candidates.sort(key=lambda c: c.area, reverse=True)
         if self.max_candidates:

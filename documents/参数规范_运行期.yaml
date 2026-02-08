@@ -98,3 +98,28 @@ runtime_options:
       default: { max_segments: 5000, max_coord_pairs: 50000 }
       desc: "LINE重建矩形的上限（geometry_first 模式生效）"
 
+  # --------------------------------------------------------------------------
+  # 8) 多DWG处理与冲突策略
+  # --------------------------------------------------------------------------
+  multi_dwg_policy:
+    per_dwg_isolation:
+      type: bool
+      default: true
+      desc: "多DWG按文件独立执行流水线A，互不干扰"
+    same_name_dwg:
+      type: enum
+      default: "error"
+      desc: "同名DWG处理策略：error(报错)/skip(跳过)/rename(自动改名)"
+    code_conflict:
+      type: enum
+      default: "error"
+      desc: "internal_code/external_code重复处理策略：error(报错)/skip(跳过)/rename(自动改名)"
+    output_grouping:
+      type: enum
+      default: "by_dwg"
+      desc: "输出分组方式：by_dwg(按DWG分目录)/flat(平铺)"
+    manifest_grouping:
+      type: enum
+      default: "by_dwg"
+      desc: "manifest.inputs.dwg_files[] 与 manifest.artifacts 按DWG分组"
+
