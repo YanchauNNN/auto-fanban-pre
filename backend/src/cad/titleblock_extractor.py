@@ -321,9 +321,16 @@ class TitleblockExtractor(ITitleblockExtractor):
         outer = frame.runtime.outer_bbox
         width = max(1e-6, outer.width)
         height = max(1e-6, outer.height)
+        # 允许 5% 的边界容差，但必须在图框附近（防止匹配到其他图框的文本）
+        margin_x = width * 0.05
+        margin_y = height * 0.05
         candidates: list[tuple[float, TextItem]] = []
         for item in items:
             if not item.text:
+                continue
+            # 首先确保文本在当前图框范围内（含容差）
+            if not (outer.xmin - margin_x <= item.x <= outer.xmax + margin_x
+                    and outer.ymin - margin_y <= item.y <= outer.ymax + margin_y):
                 continue
             xnorm = (item.x - outer.xmin) / width
             ynorm = (item.y - outer.ymin) / height
