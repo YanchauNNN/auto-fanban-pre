@@ -12,40 +12,45 @@ from src.cad import FrameDetector
 from src.interfaces import DetectionError
 
 
-def test_detect_frames_uses_anchor_locator(sample_dxf_path: Path, monkeypatch: pytest.MonkeyPatch):
-    detector = FrameDetector(frame_detect_mode="geometry_first")
-    called = {"anchor": False}
+@pytest.mark.parametrize(
+    ("mode", "expected_attr", "blocked_attr"),
+    [
+        ("geometry_first", "anchor_locator", "anchor_calibrated_locator"),
+        ("rb_anchor", "anchor_calibrated_locator", "anchor_locator"),
+    ],
+    ids=["geometry_first", "rb_anchor"],
+)
+def test_detect_frames_routing(
+    sample_dxf_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_attr: str,
+    blocked_attr: str,
+) -> None:
+    """验证 frame_detect_mode 正确路由到对应定位器"""
+    detector = FrameDetector(frame_detect_mode=mode)
+    called = {"hit": False}
 
-    def fake_anchor(_msp, _path):
-        called["anchor"] = True
+    def fake_expected(_msp, _path):
+        called["hit"] = True
         return []
 
-    def fake_calibrated(_msp, _path):
-        raise AssertionError("anchor_calibrated_locator should not be called")
+    def fake_blocked(_msp, _path):
+        raise AssertionError(f"{blocked_attr} should not be called in {mode} mode")
 
-    monkeypatch.setattr(detector.anchor_locator, "locate_frames", fake_anchor)
-    monkeypatch.setattr(detector.anchor_calibrated_locator, "locate_frames", fake_calibrated)
-
-    detector.detect_frames(sample_dxf_path)
-    assert called["anchor"]
-
-
-def test_detect_frames_uses_anchor_calibrated(sample_dxf_path: Path, monkeypatch: pytest.MonkeyPatch):
-    detector = FrameDetector(frame_detect_mode="rb_anchor")
-    called = {"calibrated": False}
-
-    def fake_calibrated(_msp, _path):
-        called["calibrated"] = True
-        return []
-
-    def fake_anchor(_msp, _path):
-        raise AssertionError("anchor_locator should not be called")
-
-    monkeypatch.setattr(detector.anchor_calibrated_locator, "locate_frames", fake_calibrated)
-    monkeypatch.setattr(detector.anchor_locator, "locate_frames", fake_anchor)
+    monkeypatch.setattr(
+        getattr(detector, expected_attr),
+        "locate_frames",
+        fake_expected,
+    )
+    monkeypatch.setattr(
+        getattr(detector, blocked_attr),
+        "locate_frames",
+        fake_blocked,
+    )
 
     detector.detect_frames(sample_dxf_path)
-    assert called["calibrated"]
+    assert called["hit"]
 
 
 def test_detect_frames_missing_file_raises() -> None:

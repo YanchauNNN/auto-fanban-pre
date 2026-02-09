@@ -104,7 +104,11 @@ def main() -> int:
             paper = frame.runtime.paper_variant_id or "-"
 
             if "A4" in paper.upper():
-                status = _a4_page_status(tb)
+                if tb.internal_code or tb.external_code or tb.engineering_no or tb.title_cn or tb.title_en:
+                    missing = _missing_fields(tb)
+                    status = "A4主: OK" if not missing else "A4主: 缺失: " + ", ".join(missing)
+                else:
+                    status = _a4_page_status(tb)
             elif "未命中锚点文本" in frame.runtime.flags:
                 status = "跳过: 无锚点"
             else:

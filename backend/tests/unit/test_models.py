@@ -4,6 +4,7 @@
 每个模块完成后必须运行：pytest tests/unit/test_models.py -v
 """
 
+import pytest
 
 from src.models import (
     BBox,
@@ -26,17 +27,18 @@ class TestBBox:
         assert sample_bbox.width == 841
         assert sample_bbox.height == 594
 
-    def test_intersects_true(self):
-        """测试相交判定-相交"""
+    @pytest.mark.parametrize(
+        ("other", "expected"),
+        [
+            (BBox(xmin=50, ymin=50, xmax=150, ymax=150), True),
+            (BBox(xmin=200, ymin=200, xmax=300, ymax=300), False),
+        ],
+        ids=["overlapping", "separate"],
+    )
+    def test_intersects(self, other: BBox, expected: bool):
+        """测试相交判定"""
         b1 = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
-        b2 = BBox(xmin=50, ymin=50, xmax=150, ymax=150)
-        assert b1.intersects(b2)
-
-    def test_intersects_false(self):
-        """测试相交判定-不相交"""
-        b1 = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
-        b2 = BBox(xmin=200, ymin=200, xmax=300, ymax=300)
-        assert not b1.intersects(b2)
+        assert b1.intersects(other) == expected
 
 
 class TestTitleblockFields:
@@ -117,15 +119,15 @@ class TestSheetSet:
 class TestDocContext:
     """文档上下文测试"""
 
-    def test_is_1818(self):
+    @pytest.mark.parametrize(
+        ("project_no", "expected"),
+        [("1818", True), ("2016", False)],
+        ids=["is_1818", "not_1818"],
+    )
+    def test_is_1818(self, project_no: str, expected: bool):
         """测试1818项目判定"""
-        params = GlobalDocParams(project_no="1818")
-        ctx = DocContext(params=params)
-        assert ctx.is_1818
-
-        params2 = GlobalDocParams(project_no="2016")
-        ctx2 = DocContext(params=params2)
-        assert not ctx2.is_1818
+        ctx = DocContext(params=GlobalDocParams(project_no=project_no))
+        assert ctx.is_1818 == expected
 
     def test_get_frame_001(self, sample_frame: FrameMeta):
         """测试获取001图纸"""

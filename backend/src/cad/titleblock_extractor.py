@@ -97,10 +97,14 @@ class TitleblockExtractor(ITitleblockExtractor):
             return frame
 
         if self._is_a4_frame(frame):
-            self._extract_a4_page_marker(frame, text_items)
-            return frame
-
-        if self.anchor_texts and not self._frame_has_anchor_text(
+            if self.anchor_texts and self._frame_has_anchor_text(
+                text_items, frame, profile, profile_id
+            ):
+                pass
+            else:
+                self._extract_a4_page_marker(frame, text_items)
+                return frame
+        elif self.anchor_texts and not self._frame_has_anchor_text(
             text_items, frame, profile, profile_id
         ):
             frame.add_flag("未命中锚点文本")
@@ -224,21 +228,41 @@ class TitleblockExtractor(ITitleblockExtractor):
     ) -> bool:
         rb_offset = self._get_anchor_rb_offset(profile_id, profile)
         if rb_offset is None:
-            roi = self._expand_roi(frame.runtime.outer_bbox, self.roi_margin_percent)
-        else:
-            roi = self._restore_roi(
-                frame.runtime.outer_bbox,
-                rb_offset,
-                frame.runtime.sx or 1.0,
-                frame.runtime.sy or 1.0,
-            )
-            roi = self._expand_roi(roi, self.roi_margin_percent)
+            return False
+        roi = self._restore_roi(
+            frame.runtime.outer_bbox,
+            rb_offset,
+            frame.runtime.sx or 1.0,
+            frame.runtime.sy or 1.0,
+        )
+        roi = self._expand_roi(roi, self.roi_margin_percent)
+        sx = frame.runtime.sx or 1.0
+        sy = frame.runtime.sy or 1.0
+        scale = (sx + sy) / 2.0
+        tol_base = float(getattr(profile, "tolerance", 0.5))
+        margin_tol = min(roi.width, roi.height) * self.roi_margin_percent
+        tol = max(tol_base * scale, margin_tol, 1.0)
+        best_dist = None
         for item in items:
-            if not self._item_in_roi(item, roi, use_bbox=True):
+            if not self._match_any_text(item.text, self.anchor_texts):
                 continue
-            if self._match_any_text(item.text, self.anchor_texts):
-                return True
-        return False
+            dist = self._point_to_bbox_distance(item.x, item.y, roi)
+            best_dist = dist if best_dist is None else min(best_dist, dist)
+        return best_dist is not None and best_dist <= tol
+
+    @staticmethod
+    def _point_to_bbox_distance(x: float, y: float, bbox: BBox) -> float:
+        dx = 0.0
+        if x < bbox.xmin:
+            dx = bbox.xmin - x
+        elif x > bbox.xmax:
+            dx = x - bbox.xmax
+        dy = 0.0
+        if y < bbox.ymin:
+            dy = bbox.ymin - y
+        elif y > bbox.ymax:
+            dy = y - bbox.ymax
+        return (dx * dx + dy * dy) ** 0.5
 
     def _extract_a4_page_marker(self, frame: FrameMeta, items: list[TextItem]) -> None:
         """仅提取A4右上角页码，不做titleblock字段解析"""
@@ -266,6 +290,18 @@ class TitleblockExtractor(ITitleblockExtractor):
     ) -> tuple[int | None, int | None]:
         joined = self._join_text(items)
         if joined:
+            m = re.search(r"rolls\s*(\d+)\s*of\s*(\d+)", joined, flags=re.IGNORECASE)
+            if m:
+                idx_raw, total_raw = m.group(1), m.group(2)
+                idx = int(idx_raw) if idx_raw.isdigit() else None
+                total = int(total_raw) if total_raw.isdigit() else None
+                return total, idx
+            m = re.search(r"(\d+)\s*of\s*(\d+)", joined, flags=re.IGNORECASE)
+            if m:
+                idx_raw, total_raw = m.group(1), m.group(2)
+                idx = int(idx_raw) if idx_raw.isdigit() else None
+                total = int(total_raw) if total_raw.isdigit() else None
+                return total, idx
             m = re.search(r"共\s*(\d+)\s*张\s*第\s*([0-9Xx]+)\s*张", joined)
             if m:
                 total_raw, idx_raw = m.group(1), m.group(2)

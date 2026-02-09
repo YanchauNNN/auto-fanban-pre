@@ -12,6 +12,9 @@ from src.cad.detection.anchor_first_locator import AnchorFirstLocator
 from src.config import BusinessSpec
 from src.models import BBox
 
+# ---------------------------------------------------------------------------
+# 本文件专用的 Dummy 依赖（仅此处使用，不上提 conftest）
+# ---------------------------------------------------------------------------
 
 class DummyFinder:
     def __init__(self, bboxes: list[BBox]) -> None:
@@ -30,38 +33,13 @@ class DummyFitter:
         return [(self.paper_variant_id, 1.0, 1.0, "BASE10", 0.0)]
 
 
-def _make_spec() -> BusinessSpec:
-    return BusinessSpec(
-        schema_version="2.0",
-        titleblock_extract={
-            "paper_variants": {"A1": {"W": 100.0, "H": 50.0, "profile": "BASE10"}},
-            "roi_profiles": {
-                "BASE10": {
-                    "description": "test",
-                    "tolerance": 0.5,
-                    "outer_frame": [0, 100, 0, 50],
-                    "fields": {"锚点": [0, 100, 0, 50]},
-                }
-            },
-            "anchor": {
-                "search_text": ["ANCHOR"],
-                "roi_field_name": "锚点",
-                "match_policy": "single_hit_same_roi",
-            },
-            "tolerances": {"roi_margin_percent": 0.0},
-        },
-        a4_multipage={},
-        doc_generation={},
-        enums={},
-    )
+# ---------------------------------------------------------------------------
+# 测试用例
+# ---------------------------------------------------------------------------
 
-
-def test_locate_frames_returns_match() -> None:
-    spec = _make_spec()
+def test_locate_frames_returns_match(anchor_spec: BusinessSpec) -> None:
     bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=50)
-    finder = DummyFinder([bbox])
-    fitter = DummyFitter()
-    locator = AnchorFirstLocator(spec, finder, fitter)
+    locator = AnchorFirstLocator(anchor_spec, DummyFinder([bbox]), DummyFitter())
 
     doc = ezdxf.new()
     msp = doc.modelspace()
@@ -71,12 +49,9 @@ def test_locate_frames_returns_match() -> None:
     assert len(frames) == 1
 
 
-def test_locate_frames_no_roi_match_returns_empty() -> None:
-    spec = _make_spec()
+def test_locate_frames_no_roi_match_returns_empty(anchor_spec: BusinessSpec) -> None:
     bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=50)
-    finder = DummyFinder([bbox])
-    fitter = DummyFitter()
-    locator = AnchorFirstLocator(spec, finder, fitter)
+    locator = AnchorFirstLocator(anchor_spec, DummyFinder([bbox]), DummyFitter())
 
     doc = ezdxf.new()
     msp = doc.modelspace()
@@ -86,12 +61,9 @@ def test_locate_frames_no_roi_match_returns_empty() -> None:
     assert frames == []
 
 
-def test_build_candidates_ignores_scale_filter() -> None:
-    spec = _make_spec()
+def test_build_candidates_ignores_scale_filter(anchor_spec: BusinessSpec) -> None:
     bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=50)
-    finder = DummyFinder([bbox])
-    fitter = DummyFitter()
-    locator = AnchorFirstLocator(spec, finder, fitter)
+    locator = AnchorFirstLocator(anchor_spec, DummyFinder([bbox]), DummyFitter())
 
     locator._anchor_scale_range = (0.1, 0.2)
     candidates = locator._build_candidates(None)

@@ -69,7 +69,14 @@ class AnchorCalibratedLocator:
             self.anchor_scale_candidates = [float(v) for v in scale_candidates]
         else:
             self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
+        self._scale_candidate_set: set[int] = {
+            int(c) for c in self.anchor_scale_candidates
+        }
         self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
+        scale_fit_cfg = self.spec.titleblock_extract.get("scale_fit", {})
+        self.scale_candidate_match_tol = float(
+            scale_fit_cfg.get("scale_candidate_match_tol", 0.015)
+        )
 
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         scale_mismatch = tolerances.get("scale_mismatch", {})
@@ -434,6 +441,25 @@ class AnchorCalibratedLocator:
             and abs(cand.sy - scale) / max(scale, 1e-9) <= self.scale_tol_rel
         )
 
+    def _scale_matches_candidate(self, scale: float) -> bool:
+        """检查 geom_scale_factor 是否为有效的整数比例候选。
+
+        规则（始终生效）：
+        1. round(scale) 必须存在于 scale_candidates 集合中
+        2. |scale - round(scale)| / round(scale) 须 <= scale_candidate_match_tol
+
+        用途：过滤误匹配的内层矩形（如 97.336 不是标准比例）。
+        """
+        if not self._scale_candidate_set:
+            return True
+        nearest_int = round(scale)
+        if nearest_int < 1:
+            return False
+        if nearest_int not in self._scale_candidate_set:
+            return False
+        rel_err = abs(scale - nearest_int) / nearest_int
+        return rel_err <= self.scale_candidate_match_tol
+
     def _query_polylines(self, msp, layer: str, entity_type: str) -> list[dict]:
         polylines: list[dict] = []
         for entity in self._iter_layer_entities(msp, layer, entity_type):
@@ -708,6 +734,10 @@ class AnchorCalibratedLocator:
         ):
             if fit_profile_id != profile_id:
                 continue
+            # 强制校验：比例必须接近 scale_candidates 中的某个整数值
+            cand_scale = (sx + sy) / 2.0
+            if not self._scale_matches_candidate(cand_scale):
+                continue
             cand = CandidateFrame(
                 bbox=bbox,
                 paper_variant_id=paper_id,
@@ -730,6 +760,10 @@ class AnchorCalibratedLocator:
                 bbox, self.paper_variants
             ):
                 if "A4" not in paper_id:
+                    continue
+                # 强制校验：比例必须接近 scale_candidates 中的某个整数值
+                cand_scale = (sx + sy) / 2.0
+                if not self._scale_matches_candidate(cand_scale):
                     continue
                 candidates.append(
                     CandidateFrame(

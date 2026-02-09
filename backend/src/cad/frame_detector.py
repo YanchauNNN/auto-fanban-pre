@@ -26,7 +26,7 @@ import ezdxf
 
 from ..config import load_spec
 from ..interfaces import DetectionError, IFrameDetector
-from ..models import FrameMeta
+from ..models import BBox, FrameMeta
 from .detection import (
     AnchorCalibratedLocator,
     AnchorFirstLocator,
@@ -77,6 +77,30 @@ class FrameDetector(IFrameDetector):
             uniform_scale_tol=float(scale_fit_cfg.get("uniform_scale_tol", 0.02)),
             error_metric=str(scale_fit_cfg.get("fit_error_metric", "max_rel_error(W,H)")),
         )
+        anchor_cfg = self.spec.titleblock_extract.get("anchor", {})
+        scale_candidates = anchor_cfg.get("scale_candidates", [])
+        scale_candidate_set: set[int] = set()
+        for c in scale_candidates:
+            try:
+                scale_candidate_set.add(int(float(c)))
+            except (TypeError, ValueError):
+                continue
+        scale_candidate_match_tol = float(scale_fit_cfg.get("scale_candidate_match_tol", 0.015))
+
+        def bbox_scale_validator(bbox: BBox) -> bool:
+            if not scale_candidate_set:
+                return True
+            fits = self.paper_fitter.fit_all(bbox, self.paper_variants)
+            if not fits:
+                return False
+            _paper_id, sx, sy, _profile_id, _error = min(fits, key=lambda f: f[4])
+            scale = (sx + sy) / 2.0
+            nearest = round(scale)
+            if nearest < 1 or nearest not in scale_candidate_set:
+                return False
+            rel_err = abs(scale - nearest) / nearest
+            return rel_err <= scale_candidate_match_tol
+
         self.candidate_finder = CandidateFinder(
             min_dim=min_frame_dim,
             coord_tol=coord_tol,
@@ -84,6 +108,7 @@ class FrameDetector(IFrameDetector):
             layer_order=layers,
             entity_order=entity_order,
             line_rebuild_limits=line_rebuild_limits,
+            bbox_scale_validator=bbox_scale_validator,
         )
         self.anchor_locator = AnchorFirstLocator(
             self.spec,

@@ -85,6 +85,10 @@ runtime_options:
       type: "float"
       default: 0.1
       desc: "锚点比例与候选尺度的相对误差阈值（RB定位兼容模式使用）"
+    scale_candidate_match_tol:
+      type: "float"
+      default: 0.015
+      desc: "比例候选匹配容差（强制生效）：geom_scale_factor 四舍五入到整数后须存在于 anchor.scale_candidates 列表中，且与该整数的相对误差不超过此阈值；不满足的候选矩形将被丢弃（避免 97.336 等非整数比例误判为有效图框）"
     anchor_roi_rb_offset_by_project:
       type: "dict[str,dict[str,list[float]]]"
       default:

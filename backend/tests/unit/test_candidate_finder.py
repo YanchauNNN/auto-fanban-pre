@@ -10,48 +10,52 @@ import ezdxf
 import pytest
 
 from src.cad.detection.candidate_finder import CandidateFinder
+from tests.conftest import add_rect_lines, add_rect_polyline
 
 
-def _add_rect_polyline(msp, layer: str, x0: float, y0: float, x1: float, y1: float) -> None:
-    msp.add_lwpolyline(
-        [(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
-        close=True,
-        dxfattribs={"layer": layer},
-    )
-
-
-def _add_rect_lines(msp, layer: str, x0: float, y0: float, x1: float, y1: float) -> None:
-    msp.add_line((x0, y0), (x1, y0), dxfattribs={"layer": layer})
-    msp.add_line((x1, y0), (x1, y1), dxfattribs={"layer": layer})
-    msp.add_line((x1, y1), (x0, y1), dxfattribs={"layer": layer})
-    msp.add_line((x0, y1), (x0, y0), dxfattribs={"layer": layer})
-
-
-def test_line_rebuild_only_when_no_polyline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_line_rebuild_conditionally_with_polyline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """闭合多段线全部合法时跳过段重建；存在非法比例时降级段重建。"""
     doc = ezdxf.new()
     doc.layers.new("L1")
     doc.layers.new("L2")
     msp = doc.modelspace()
 
-    _add_rect_polyline(msp, "L1", 0, 0, 200, 100)
-    _add_rect_lines(msp, "L1", 300, 0, 500, 100)
-    _add_rect_lines(msp, "L2", 0, 200, 200, 300)
+    # L1: 闭合多段线 + LINE 矩形
+    add_rect_polyline(msp, "L1", 0, 0, 200, 100)
+    add_rect_lines(msp, "L1", 300, 0, 500, 100)
+    # L2: 仅 LINE 矩形
+    add_rect_lines(msp, "L2", 0, 200, 200, 300)
 
-    finder = CandidateFinder(layer_order=["L1", "L2"], entity_order=["LWPOLYLINE", "POLYLINE", "LINE"])
-    contexts: list[str | None] = []
+    def run_with_validator(validator):
+        finder = CandidateFinder(
+            layer_order=["L1", "L2"],
+            entity_order=["LWPOLYLINE", "POLYLINE", "LINE"],
+            bbox_scale_validator=validator,
+        )
+        contexts: list[str | None] = []
+        original = finder._rebuild_from_segments
 
-    original = finder._rebuild_from_segments
+        def wrapped(segments, *, context=None):
+            contexts.append(context)
+            return original(segments, context=context)
 
-    def wrapped(segments, *, context=None):
-        contexts.append(context)
-        return original(segments, context=context)
+        monkeypatch.setattr(finder, "_rebuild_from_segments", wrapped)
+        bboxes = finder.find_rectangles(msp)
+        return contexts, bboxes
 
-    monkeypatch.setattr(finder, "_rebuild_from_segments", wrapped)
-
-    bboxes = finder.find_rectangles(msp)
-
+    # 1) 全部合法：L1 跳过段重建，L2 仍需重建
+    contexts, bboxes = run_with_validator(lambda _bbox: True)
     assert any(abs(b.width - 200) < 1e-6 and abs(b.height - 100) < 1e-6 for b in bboxes)
     assert "layer=L1" not in contexts
+    assert "layer=L2" in contexts
+
+    # 2) L1 闭合多段线非法：触发段重建
+    def validator(bbox):
+        return not (abs(bbox.xmin) < 1e-6 and abs(bbox.ymin) < 1e-6)
+
+    contexts, bboxes = run_with_validator(validator)
+    assert any(abs(b.width - 200) < 1e-6 and abs(b.height - 100) < 1e-6 for b in bboxes)
+    assert "layer=L1" in contexts
     assert "layer=L2" in contexts
 
 
@@ -59,8 +63,8 @@ def test_global_skips_line_rebuild_when_poly_exists(monkeypatch: pytest.MonkeyPa
     doc = ezdxf.new()
     msp = doc.modelspace()
 
-    _add_rect_polyline(msp, "0", 0, 0, 200, 100)
-    _add_rect_lines(msp, "0", 300, 0, 500, 100)
+    add_rect_polyline(msp, "0", 0, 0, 200, 100)
+    add_rect_lines(msp, "0", 300, 0, 500, 100)
 
     finder = CandidateFinder(layer_order=None)
     called = {"rebuild": False}

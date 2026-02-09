@@ -80,7 +80,13 @@ class AnchorFirstLocator:
             self.anchor_scale_candidates = [float(v) for v in scale_candidates]
         else:
             self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
+        self._scale_candidate_set: set[int] = {
+            int(c) for c in self.anchor_scale_candidates
+        }
         self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
+        self.scale_candidate_match_tol = float(
+            scale_fit_cfg.get("scale_candidate_match_tol", 0.015)
+        )
         self._anchor_scale_range: tuple[float, float] | None = None
 
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
@@ -305,6 +311,27 @@ class AnchorFirstLocator:
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
         return candidates
 
+    def _scale_matches_candidate(self, scale: float) -> bool:
+        """检查 geom_scale_factor 是否为有效的整数比例候选。
+
+        规则（始终生效，不受 use_scale_filter 控制）：
+        1. round(scale) 必须存在于 scale_candidates 集合中
+        2. |scale - round(scale)| / round(scale) 须 <= scale_candidate_match_tol
+
+        用途：过滤误匹配的内层矩形（如 97.336 不是标准比例）。
+        """
+        if not self._scale_candidate_set:
+            return True
+        nearest_int = round(scale)
+        if nearest_int < 1:
+            return False
+        # 检查该整数是否为已知候选比例
+        if nearest_int not in self._scale_candidate_set:
+            return False
+        # 检查与整数的相对偏差
+        rel_err = abs(scale - nearest_int) / nearest_int
+        return rel_err <= self.scale_candidate_match_tol
+
     def _build_candidates_for_bbox(
         self, bbox: BBox, *, use_scale_filter: bool = True
     ) -> list[CandidateFrame]:
@@ -313,6 +340,15 @@ class AnchorFirstLocator:
             bbox, self.paper_variants
         ):
             scale = (sx + sy) / 2.0
+            # ① 强制校验：比例必须接近 scale_candidates 中的某个整数值
+            if not self._scale_matches_candidate(scale):
+                self.logger.debug(
+                    "候选矩形比例 %.3f 不在 scale_candidates 中，跳过 paper=%s",
+                    scale,
+                    paper_id,
+                )
+                continue
+            # ② 可选的锚点范围/候选列表精细过滤（RB 兼容模式）
             if use_scale_filter and self._anchor_scale_range:
                 min_scale, max_scale = self._anchor_scale_range
                 margin = self.anchor_scale_tol

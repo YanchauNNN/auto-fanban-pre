@@ -8,7 +8,7 @@
 
 使用方式：
     from src.interfaces import IFrameDetector
-    
+
     class MyFrameDetector(IFrameDetector):
         def detect_frames(self, dxf_path: Path) -> list[FrameMeta]:
             ...
@@ -35,14 +35,14 @@ class IODAConverter(ABC):
     def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
         """
         DWG 转 DXF
-        
+
         Args:
             dwg_path: 输入DWG文件路径
             output_dir: 输出目录
-            
+
         Returns:
             生成的DXF文件路径
-            
+
         Raises:
             ConversionError: 转换失败
         """
@@ -52,11 +52,11 @@ class IODAConverter(ABC):
     def dxf_to_dwg(self, dxf_path: Path, output_dir: Path) -> Path:
         """
         DXF 转 DWG
-        
+
         Args:
             dxf_path: 输入DXF文件路径
             output_dir: 输出目录
-            
+
         Returns:
             生成的DWG文件路径
         """
@@ -70,15 +70,15 @@ class IFrameDetector(ABC):
     def detect_frames(self, dxf_path: Path) -> list[FrameMeta]:
         """
         检测DXF中的所有图框
-        
+
         流程：
         1. 解析DXF找到候选矩形（闭合polyline优先，LINE重建兜底）
         2. 锚点验证（CNPE/中国核电工程有限公司）
         3. 纸张尺寸拟合（确定paper_variant/sx/sy）
-        
+
         Args:
             dxf_path: DXF文件路径
-            
+
         Returns:
             检测到的图框元数据列表（runtime部分已填充）
         """
@@ -92,11 +92,11 @@ class ITitleblockExtractor(ABC):
     def extract_fields(self, dxf_path: Path, frame: FrameMeta) -> FrameMeta:
         """
         提取单个图框的图签字段
-        
+
         Args:
             dxf_path: DXF文件路径
             frame: 图框元数据（runtime部分已填充）
-            
+
         Returns:
             更新后的图框元数据（titleblock部分已填充）
         """
@@ -110,10 +110,10 @@ class IA4MultipageGrouper(ABC):
     def group_a4_pages(self, frames: list[FrameMeta]) -> tuple[list[FrameMeta], list[SheetSet]]:
         """
         对A4图框进行成组处理
-        
+
         Args:
             frames: 所有检测到的图框
-            
+
         Returns:
             (非A4多页的图框列表, A4多页成组列表)
         """
@@ -132,12 +132,12 @@ class IFrameSplitter(ABC):
     ) -> tuple[Path, Path]:
         """
         拆分单个图框并输出PDF+DWG
-        
+
         Args:
             dxf_path: 源DXF文件路径
             frame: 图框元数据
             output_dir: 输出目录
-            
+
         Returns:
             (PDF路径, DWG路径)
         """
@@ -152,12 +152,12 @@ class IFrameSplitter(ABC):
     ) -> tuple[Path, Path]:
         """
         拆分A4多页成组并输出多页PDF+DWG
-        
+
         Args:
             dxf_path: 源DXF文件路径
             sheet_set: A4多页成组
             output_dir: 输出目录
-            
+
         Returns:
             (多页PDF路径, DWG路径)
         """
@@ -175,11 +175,11 @@ class ICoverGenerator(ABC):
     def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path]:
         """
         生成封面文档
-        
+
         Args:
             ctx: 文档生成上下文
             output_dir: 输出目录
-            
+
         Returns:
             (docx路径, pdf路径)
         """
@@ -193,11 +193,11 @@ class ICatalogGenerator(ABC):
     def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path, int]:
         """
         生成目录文档
-        
+
         Args:
             ctx: 文档生成上下文
             output_dir: 输出目录
-            
+
         Returns:
             (xlsx路径, pdf路径, 页数)
         """
@@ -211,11 +211,11 @@ class IDesignFileGenerator(ABC):
     def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path]:
         """
         生成设计文件
-        
+
         Args:
             ctx: 文档生成上下文
             output_dir: 输出目录
-            
+
         Returns:
             (xlsx路径, pdf路径)
         """
@@ -229,11 +229,11 @@ class IIEDGenerator(ABC):
     def generate(self, ctx: DocContext, output_dir: Path) -> Path:
         """
         生成IED计划（仅Excel，不导出PDF）
-        
+
         Args:
             ctx: 文档生成上下文
             output_dir: 输出目录
-            
+
         Returns:
             xlsx路径
         """
@@ -304,10 +304,10 @@ class IPackager(ABC):
     def package(self, job: Job) -> Path:
         """
         打包交付产物
-        
+
         Args:
             job: 任务对象
-            
+
         Returns:
             package.zip 路径
         """
@@ -317,10 +317,10 @@ class IPackager(ABC):
     def generate_manifest(self, job: Job) -> Path:
         """
         生成manifest.json
-        
+
         Args:
             job: 任务对象
-            
+
         Returns:
             manifest.json 路径
         """

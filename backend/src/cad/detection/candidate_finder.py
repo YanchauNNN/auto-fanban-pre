@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from ...models import BBox
 
@@ -26,6 +26,7 @@ class CandidateFinder:
         layer_order: list[str] | None = None,
         entity_order: list[str] | None = None,
         line_rebuild_limits: dict[str, int] | None = None,
+        bbox_scale_validator: Callable[[BBox], bool] | None = None,
     ) -> None:
         self.min_dim = min_dim
         self.coord_tol = coord_tol
@@ -43,6 +44,7 @@ class CandidateFinder:
         self.line_rebuild_max_coord_pairs = (
             int(limits["max_coord_pairs"]) if limits.get("max_coord_pairs") else None
         )
+        self._bbox_scale_validator = bbox_scale_validator
         self.logger = logging.getLogger(__name__)
 
     def find_rectangles(self, msp) -> list[BBox]:
@@ -97,7 +99,8 @@ class CandidateFinder:
 
         for layer in self.layer_order:
             layer_poly_candidates: list[BBox] = []
-            layer_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+            layer_poly_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+            layer_line_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
             for entity_type in self.entity_order:
                 if entity_type in {"LWPOLYLINE", "POLYLINE"}:
                     for entity in self._iter_layer_entities(msp, layer, entity_type):
@@ -117,23 +120,55 @@ class CandidateFinder:
                                 layer_poly_candidates.append(bbox)
                             continue
                         if allow_line_rebuild:
-                            layer_segments.extend(self._polyline_segments(vertices))
+                            layer_poly_segments.extend(self._polyline_segments(vertices))
                 elif entity_type == "LINE" and allow_line_rebuild:
-                    layer_segments.extend(self._line_segments(msp, layer))
+                    layer_line_segments.extend(self._line_segments(msp, layer))
 
             if layer_poly_candidates:
-                poly_candidates.extend(layer_poly_candidates)
-                continue
-            if allow_line_rebuild and layer_segments:
-                line_candidates.extend(
-                    [
-                        bbox
-                        for bbox in self._rebuild_from_segments(
-                            layer_segments, context=f"layer={layer}"
-                        )
-                        if self._is_valid_size(bbox)
+                if self._bbox_scale_validator:
+                    valid = [
+                        bbox for bbox in layer_poly_candidates if self._bbox_scale_validator(bbox)
                     ]
-                )
+                    invalid_count = len(layer_poly_candidates) - len(valid)
+                    poly_candidates.extend(valid)
+                    if invalid_count == 0:
+                        continue
+                else:
+                    poly_candidates.extend(layer_poly_candidates)
+                    continue
+            if allow_line_rebuild and (layer_poly_segments or layer_line_segments):
+                combined_segments = layer_poly_segments + layer_line_segments
+                if (
+                    self.line_rebuild_max_segments
+                    and len(combined_segments) > self.line_rebuild_max_segments
+                    and layer_poly_segments
+                ):
+                    poly_rects = self._rebuild_from_segments(
+                        layer_poly_segments, context=f"layer={layer}:poly_only"
+                    )
+                    valid_poly_rects = [
+                        bbox for bbox in poly_rects if self._is_valid_size(bbox)
+                    ]
+                    line_candidates.extend(valid_poly_rects)
+                    if valid_poly_rects:
+                        continue
+                    if layer_line_segments:
+                        line_rects = self._rebuild_from_segments(
+                            layer_line_segments, context=f"layer={layer}:line_only"
+                        )
+                        line_candidates.extend(
+                            [bbox for bbox in line_rects if self._is_valid_size(bbox)]
+                        )
+                else:
+                    line_candidates.extend(
+                        [
+                            bbox
+                            for bbox in self._rebuild_from_segments(
+                                combined_segments, context=f"layer={layer}"
+                            )
+                            if self._is_valid_size(bbox)
+                        ]
+                    )
 
         candidates = self._dedupe_candidates(poly_candidates + line_candidates)
         candidates.sort(key=lambda b: b.width * b.height, reverse=True)

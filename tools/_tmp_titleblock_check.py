@@ -43,7 +43,7 @@ def _missing_fields(tb) -> list[str]:
 
 def main() -> int:
     root = _setup_path()
-    from src.cad import FrameDetector, TitleblockExtractor
+    from src.cad import FrameDetector, TitleblockExtractor  # type: ignore[import-not-found]
 
     dxf_paths = [
         root / "test" / "dwg" / "_dxf_out" / "1818仿真图.dxf",

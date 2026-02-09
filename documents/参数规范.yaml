@@ -745,6 +745,10 @@ titleblock_extract:
     uniform_scale_required: true
     uniform_scale_tol: 0.02  # 2%
     fit_error_metric: "max_rel_error(W,H)"
+    # 比例候选匹配（强制生效）：geom_scale_factor 必须接近 anchor.scale_candidates 中的某个整数值
+    # 算法：round(geom_scale_factor) 须在 scale_candidates 中，且相对误差 < scale_candidate_match_tol
+    # 不满足的候选矩形将被放弃，继续搜索下一个矩形
+    scale_candidate_match_tol: 0.015  # 1.5%，保守容差（实测正确图框误差 ≈ 0%）
     outputs: [paper_variant_id, sx, sy, geom_scale_factor]
 
   # --------------------------------------------------------------------------

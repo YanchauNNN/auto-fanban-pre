@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Generator
 from pathlib import Path
 
+import ezdxf
 import pytest
 
 from src.config import BusinessSpec, RuntimeConfig, SpecLoader
@@ -31,6 +32,7 @@ from src.models import (
 # ============================================================================
 # 配置 Fixtures
 # ============================================================================
+
 
 @pytest.fixture(scope="session")
 def spec() -> BusinessSpec:
@@ -86,6 +88,7 @@ def _create_mock_spec() -> BusinessSpec:
 # ============================================================================
 # 数据模型 Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def sample_bbox() -> BBox:
@@ -151,8 +154,7 @@ def sample_global_params() -> GlobalDocParams:
 
 @pytest.fixture
 def sample_doc_context(
-    sample_frame: FrameMeta,
-    sample_global_params: GlobalDocParams
+    sample_frame: FrameMeta, sample_global_params: GlobalDocParams
 ) -> DocContext:
     """示例文档上下文"""
     return DocContext(
@@ -166,6 +168,7 @@ def sample_doc_context(
 # ============================================================================
 # Job Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def temp_job() -> Generator[Job]:
@@ -185,6 +188,7 @@ def temp_job() -> Generator[Job]:
 # ============================================================================
 # 文件 Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def temp_dir() -> Generator[Path]:
@@ -215,3 +219,79 @@ EOF
 """
     dxf_path.write_text(dxf_content)
     return dxf_path
+
+
+# ============================================================================
+# 锚点定位器测试用 Fixtures
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def anchor_spec() -> BusinessSpec:
+    """锚点定位器测试用 BusinessSpec（超集，兼容 calibrated/first）"""
+    return BusinessSpec(
+        schema_version="2.0",
+        titleblock_extract={
+            "paper_variants": {"A1": {"W": 100.0, "H": 50.0, "profile": "BASE10"}},
+            "roi_profiles": {
+                "BASE10": {
+                    "description": "test",
+                    "tolerance": 0.5,
+                    "outer_frame": [0, 100, 0, 50],
+                    "fields": {"锚点": [0, 100, 0, 50]},
+                },
+            },
+            "anchor": {
+                "search_text": ["ANCHOR"],
+                "roi_field_name": "锚点",
+                "match_policy": "single_hit_same_roi",
+            },
+            "tolerances": {"roi_margin_percent": 0.0},
+        },
+        a4_multipage={},
+        doc_generation={},
+        enums={},
+    )
+
+
+@pytest.fixture
+def dxf_doc() -> tuple:
+    """返回 (doc, msp) 元组，消除 ezdxf.new() 重复样板"""
+    doc = ezdxf.new()
+    return doc, doc.modelspace()
+
+
+# ============================================================================
+# DXF 几何辅助函数（纯函数，供测试文件直接 import 使用）
+# ============================================================================
+
+
+def add_rect_polyline(
+    msp,
+    layer: str,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+) -> None:
+    """向 modelspace 添加闭合矩形多段线"""
+    msp.add_lwpolyline(
+        [(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+        close=True,
+        dxfattribs={"layer": layer},
+    )
+
+
+def add_rect_lines(
+    msp,
+    layer: str,
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+) -> None:
+    """向 modelspace 添加 4 条 LINE 围成的矩形"""
+    msp.add_line((x0, y0), (x1, y0), dxfattribs={"layer": layer})
+    msp.add_line((x1, y0), (x1, y1), dxfattribs={"layer": layer})
+    msp.add_line((x1, y1), (x0, y1), dxfattribs={"layer": layer})
+    msp.add_line((x0, y1), (x0, y0), dxfattribs={"layer": layer})
