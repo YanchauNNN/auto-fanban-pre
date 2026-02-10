@@ -78,6 +78,16 @@ class LoggingConfig(BaseModel):
     log_to_file: bool = True
 
 
+class MultiDwgPolicyConfig(BaseModel):
+    """多DWG处理与冲突策略"""
+
+    per_dwg_isolation: bool = True
+    same_name_dwg: str = "error"
+    code_conflict: str = "error"
+    output_grouping: str = "by_dwg"
+    manifest_grouping: str = "by_dwg"
+
+
 class RuntimeConfig(BaseSettings):
     """运行期配置（支持环境变量覆盖）"""
 
@@ -96,6 +106,7 @@ class RuntimeConfig(BaseSettings):
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
 
     model_config = {
         "env_prefix": "FANBAN_",
@@ -124,6 +135,9 @@ class RuntimeConfig(BaseSettings):
             upload_limits=UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
             lifecycle=LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
             logging=LoggingConfig(**cls._extract(runtime_opts, "logging")),
+            multi_dwg_policy=MultiDwgPolicyConfig(
+                **cls._extract(runtime_opts, "multi_dwg_policy"),
+            ),
         )
 
         config._resolve_paths(base_dir=path.parent)

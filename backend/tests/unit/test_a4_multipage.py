@@ -5,8 +5,9 @@ A4MultipageGrouper 单元测试
 - 触发条件（无 A4 / 单个 A4 / 多个 A4）
 - 簇构建（相邻 / 远距离）
 - Master 识别与评分
-- page_total < 2 回退
-- 一致性校验（页数不一致 / 页码重复 / 页码不连续 / Slave page_total 冲突 / Master 缺字段）
+- page_total 取值（永远等于实际簇帧数）
+- 辅助张数校验（Master/Slave page_total 与实际张数不一致 → A4张数有误，请检查）
+- 一致性校验（页码重复 / 页码不连续 / Master 缺字段 / 首页页码异常）
 - flags 不中断处理
 - 页码排序
 - 元数据继承
@@ -243,12 +244,11 @@ class TestMasterIdentification:
         assert ss.master_page.frame_meta.titleblock.internal_code == "1234567-JG001-001"
 
 
-class TestPageTotalLt2Fallback:
-    """page_total < 2 回退逻辑测试
+class TestPageTotalIsClusterSize:
+    """page_total 永远等于实际簇帧数
 
-    新逻辑：_resolve_page_total() 优先级为
-    Master(≥2) > Slave共识(≥2) > 簇帧数。
-    因此只要簇帧数 ≥ 2，就不会真正回退。
+    Master 图签区和 Slave 页码标记只是辅助信息，
+    真实张数 = len(cluster)。
     """
 
     def test_single_a4_not_grouped(self):
@@ -260,24 +260,22 @@ class TestPageTotalLt2Fallback:
         assert sheet_sets == []
         assert len(remaining) == 2
 
-    def test_master_pt1_slave_pt1_uses_cluster_size(self):
-        """Master 和 Slave 都声称 page_total=1，但簇有 2 帧
-        → 使用簇帧数(2)成组，并标记页数不一致"""
+    def test_page_total_equals_cluster_size(self):
+        """page_total 始终等于簇帧数，不受 Master/Slave 声称值影响"""
         grouper = _make_grouper()
-        master = make_master_frame(x_offset=0, y_offset=0, page_total=1)
-        slave = make_slave_frame(x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=1)
+        # Master 声称 page_total=99，Slave 声称 page_total=50
+        # 但实际只有 2 帧 → page_total=2
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=99)
+        slave = make_slave_frame(
+            x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=50,
+        )
+        _, sheet_sets = grouper.group_a4_pages([master, slave])
 
-        remaining, sheet_sets = grouper.group_a4_pages([master, slave])
-
-        # 簇帧数=2 ≥ 2 → 依然成组
         assert len(sheet_sets) == 1
-        ss = sheet_sets[0]
-        assert ss.page_total == 2
-        assert len(remaining) == 0
+        assert sheet_sets[0].page_total == 2  # 实际帧数
 
-    def test_master_pt1_slave_pt7_uses_slave_consensus(self):
-        """Master page_total=1（图签区值），Slave 共识 page_total=7
-        → 使用 Slave 共识值成组（真实场景：1818仿真图.dxf）"""
+    def test_1818_real_scenario(self):
+        """真实场景：1818仿真图.dxf — Master page_total=1, Slave=7, 实际=7"""
         grouper = _make_grouper()
         master = make_master_frame(x_offset=0, y_offset=0, page_total=1)
         slaves = [
@@ -287,29 +285,42 @@ class TestPageTotalLt2Fallback:
             )
             for i in range(6)
         ]
-        remaining, sheet_sets = grouper.group_a4_pages([master, *slaves])
+        _, sheet_sets = grouper.group_a4_pages([master, *slaves])
 
         assert len(sheet_sets) == 1
         ss = sheet_sets[0]
-        # Slave 共识值 7 被采用
-        assert ss.page_total == 7
+        assert ss.page_total == 7  # 7 帧
         assert len(ss.pages) == 7
-        assert len(remaining) == 0
+        # Master 声称 1 ≠ 实际 7 → 应有 flag
+        assert "A4张数有误，请检查" in ss.flags
 
 
-class TestConsistencyPageCountMismatch:
-    """帧数 != page_total 时产生 flag"""
+class TestAuxiliaryPageCountCheck:
+    """Master/Slave 声称的张数与实际簇帧数不一致时产生 flag"""
 
-    def test_consistency_page_count_mismatch(self):
+    def test_master_page_total_mismatch(self):
+        """Master 声称 page_total=5，实际只有 2 帧 → A4张数有误，请检查"""
         grouper = _make_grouper()
-        # Master 声明 page_total=5，但簇内实际只有 2 个帧
         master = make_master_frame(x_offset=0, y_offset=0, page_total=5)
         slave = make_slave_frame(x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=5)
 
         _, sheet_sets = grouper.group_a4_pages([master, slave])
 
         assert len(sheet_sets) == 1
-        assert "A4多页_页数不一致" in sheet_sets[0].flags
+        assert sheet_sets[0].page_total == 2  # 实际帧数
+        assert "A4张数有误，请检查" in sheet_sets[0].flags
+
+    def test_all_consistent_no_flag(self):
+        """Master、Slave、实际帧数三者一致时 → 无 flag"""
+        grouper = _make_grouper()
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=3)
+        s2 = make_slave_frame(x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=3)
+        s3 = make_slave_frame(x_offset=0, y_offset=2 * (_A4_H + 5), page_index=3, page_total=3)
+
+        _, sheet_sets = grouper.group_a4_pages([master, s2, s3])
+
+        assert len(sheet_sets) == 1
+        assert "A4张数有误，请检查" not in sheet_sets[0].flags
 
 
 class TestConsistencyDuplicatePageIndex:
@@ -352,10 +363,11 @@ class TestConsistencyGapInPageIndex:
         assert "A4多页_页码不连续" in sheet_sets[0].flags
 
 
-class TestSlavePageTotalConflict:
-    """Slave 的 page_total 与 Master 不一致时产生 flag"""
+class TestSlavePageTotalMismatch:
+    """Slave 声称的张数与实际簇帧数不一致时产生 flag"""
 
-    def test_slave_page_total_conflict(self):
+    def test_slave_page_total_mismatch(self):
+        """Master 一致(3)，但某 Slave 声称 5 ≠ 实际 3 → A4张数有误，请检查"""
         grouper = _make_grouper()
         master = make_master_frame(x_offset=0, y_offset=0, page_total=3)
         slave_ok = make_slave_frame(
@@ -365,13 +377,14 @@ class TestSlavePageTotalConflict:
         slave_bad = make_slave_frame(
             x_offset=0, y_offset=2 * (_A4_H + 5),
             page_index=3,
-            page_total=5,  # 与 Master 的 3 不一致
+            page_total=5,  # 实际是 3 帧，但 Slave 声称 5
         )
 
         _, sheet_sets = grouper.group_a4_pages([master, slave_ok, slave_bad])
 
         assert len(sheet_sets) == 1
-        assert "A4多页_页总数冲突" in sheet_sets[0].flags
+        assert sheet_sets[0].page_total == 3  # 实际帧数
+        assert "A4张数有误，请检查" in sheet_sets[0].flags
 
 
 class TestMasterMissingFieldsFlag:
@@ -402,8 +415,8 @@ class TestFlagsNotInterrupt:
         grouper = _make_grouper()
         # 构造一个会触发多种 flag 的场景：
         # - Master 缺 title_cn → A4多页_Master缺关键字段
-        # - 帧数(2) != page_total(5) → A4多页_页数不一致
-        # - Slave page_total(3) != Master page_total(5) → A4多页_页总数冲突
+        # - Master page_total=5 ≠ 实际 2 → A4张数有误，请检查
+        # - 页码 1,2 但 page_total=2 → 正常（不触发页码不连续）
         master = make_a4_frame(
             x_offset=0, y_offset=0,
             page_total=5, page_index=1,
@@ -415,7 +428,7 @@ class TestFlagsNotInterrupt:
         slave = make_slave_frame(
             x_offset=0, y_offset=_A4_H + 5,
             page_index=2,
-            page_total=3,  # 与 Master 的 5 不一致
+            page_total=3,  # 也不等于实际 2
         )
 
         _, sheet_sets = grouper.group_a4_pages([master, slave])
@@ -423,13 +436,12 @@ class TestFlagsNotInterrupt:
         # 尽管有多种异常，SheetSet 依然正常返回
         assert len(sheet_sets) == 1
         ss = sheet_sets[0]
-        assert ss.page_total == 5
+        assert ss.page_total == 2  # 实际帧数
         assert len(ss.pages) == 2
         assert ss.master_page is not None
         # 应包含多个 flags
         assert "A4多页_Master缺关键字段" in ss.flags
-        assert "A4多页_页数不一致" in ss.flags
-        assert "A4多页_页总数冲突" in ss.flags
+        assert "A4张数有误，请检查" in ss.flags
 
 
 class TestPagesSortedByIndex:

@@ -44,16 +44,19 @@ class SheetSet(BaseModel):
     def validate_consistency(self) -> list[str]:
         """一致性校验，返回新增的flags（不中断）
 
-        校验项（对照 YAML ``consistency_checks``）：
-        1. 簇内A4外框数 != page_total  → ``A4多页_页数不一致``
-        2. 页码重复                     → ``A4多页_页码重复``
-        3. 页码不连续                   → ``A4多页_页码不连续``
-        4. Slave page_total 与 Master 不一致 → ``A4多页_页总数冲突``
-        5. Master page_index != 1       → ``A4多页_首页页码异常``
+        校验项：
+        1. 页数安全检查（len(pages) != page_total） → ``A4多页_页数不一致``
+        2. 页码重复                                  → ``A4多页_页码重复``
+        3. 页码不连续                                → ``A4多页_页码不连续``
+        4. Master page_index != 1                    → ``A4多页_首页页码异常``
+
+        注：Master/Slave 的 page_total 与实际张数的比对
+        由 ``A4MultipageGrouper._check_page_count_consistency()`` 在
+        构建 SheetSet 前完成（flag: ``A4张数有误，请检查``）。
         """
         new_flags: list[str] = []
 
-        # 1. 校验页数
+        # 1. 页数安全检查（page_total 已取自 len(cluster)，正常不会触发）
         if len(self.pages) != self.page_total:
             new_flags.append("A4多页_页数不一致")
 
@@ -66,24 +69,7 @@ class SheetSet(BaseModel):
             else:
                 new_flags.append("A4多页_页码不连续")
 
-        # 4. Slave page_total 与 Master 不一致
-        #    （可能已在 _process_cluster._check_slave_page_total 中追加过，避免重复）
-        if "A4多页_页总数冲突" not in self.flags:
-            if self.master_page and self.master_page.frame_meta:
-                master_pt = self.master_page.frame_meta.titleblock.page_total
-                if master_pt is not None:
-                    for page in self.pages:
-                        if page.has_titleblock:
-                            continue  # 跳过 Master 自身
-                        if (
-                            page.frame_meta
-                            and page.frame_meta.titleblock.page_total is not None
-                            and page.frame_meta.titleblock.page_total != master_pt
-                        ):
-                            new_flags.append("A4多页_页总数冲突")
-                            break  # 只追加一次
-
-        # 5. 校验Master页码
+        # 4. 校验Master页码
         if self.master_page and self.master_page.page_index != 1:
             new_flags.append("A4多页_首页页码异常")
 

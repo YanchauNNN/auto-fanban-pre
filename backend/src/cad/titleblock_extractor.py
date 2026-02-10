@@ -448,24 +448,40 @@ class TitleblockExtractor(ITitleblockExtractor):
             return internal_code, album_code
         return None, None
 
+    # 外部编码中至少包含的数字个数（过滤模板占位文字）
+    _EXT_CODE_MIN_DIGITS = 3
+
     def _parse_external_code(
         self, items: list[TextItem], parse_cfg: dict[str, Any]
     ) -> str | None:
         fixed_len = int(parse_cfg.get("length", parse_cfg.get("fixed_len", 19)))
         header_hint = str(parse_cfg.get("header", "DOC.NO"))
+
+        # 优先尝试单字符重建（真实外部编码通常逐字符存储）
+        rebuilt = self._rebuild_fixed19_from_single_chars(items, fixed_len, header_hint)
+        if rebuilt and self._is_valid_external_code(rebuilt):
+            return rebuilt
+
+        # 回退：从拼接文本中提取
         joined = self._join_text(items)
         cleaned = self._clean_alnum(joined.upper())
         header_clean = self._clean_alnum(header_hint.upper())
         if header_clean and cleaned.startswith(header_clean):
-            cleaned = cleaned[len(header_clean) :]
-        if len(cleaned) == fixed_len:
+            cleaned = cleaned[len(header_clean):]
+        if len(cleaned) == fixed_len and self._is_valid_external_code(cleaned):
             return cleaned
-        for i in range(0, max(0, len(cleaned) - fixed_len + 1)):
+        for i in range(max(0, len(cleaned) - fixed_len + 1)):
             sub = cleaned[i : i + fixed_len]
-            if len(sub) == fixed_len:
+            if len(sub) == fixed_len and self._is_valid_external_code(sub):
                 return sub
-        rebuilt = self._rebuild_fixed19_from_single_chars(items, fixed_len, header_hint)
-        return rebuilt
+
+        return None
+
+    @classmethod
+    def _is_valid_external_code(cls, code: str) -> bool:
+        """校验外部编码有效性：长度正确且包含足够数字（排除模板占位文字）"""
+        digit_count = sum(1 for ch in code if ch.isdigit())
+        return digit_count >= cls._EXT_CODE_MIN_DIGITS
 
     def _parse_regex(
         self, items: list[TextItem], parse_cfg: dict[str, Any]

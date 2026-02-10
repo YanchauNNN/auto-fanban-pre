@@ -148,14 +148,18 @@ class A4MultipageGrouper(IA4MultipageGrouper):
     def _process_cluster(self, cluster: list[FrameMeta]) -> SheetSet | None:
         """处理单个A4簇
 
+        page_total 定义：
+            真实多页张数 = 簇内检测到的实际 A4 图框数量 ``len(cluster)``。
+            Master 图签区和 Slave 页码标记仅为辅助校验信息。
+
         流程：
         1. 识别 Master 页
         2. Master 缺失关键字段检查 → 追加 flag（不中断）
-        3. 确定 page_total（优先 Slave 共识 > 簇帧数 > Master titleblock）
-        4. page_total < 2 回退 → 返回 None（簇内帧回退为普通帧）
-        5. Slave page_total 交叉校验 → 追加 flag（不中断）
-        6. 构建页面列表
-        7. 一致性校验
+        3. page_total = len(cluster)（实际检测张数即为权威值）
+        4. 辅助张数校验：Master / Slave 的 page_total 与实际张数不一致
+           → flag ``A4张数有误，请检查``（不中断，预留给前端）
+        5. 构建页面列表
+        6. 一致性校验（页码连续性等）
         """
         flags: list[str] = []
 
@@ -167,22 +171,13 @@ class A4MultipageGrouper(IA4MultipageGrouper):
         # 2. Master 缺失关键字段检查
         self._check_master_fields(master, flags)
 
-        # 3. 确定 page_total
-        #    Master 的 titleblock.page_total 来自图签区"共N张"，
-        #    可能只反映图纸文件级别（=1），而非 A4 多页组的真实张数。
-        #    因此当簇有 ≥2 帧且 Master.page_total < 2 时，
-        #    优先使用 Slave 共识 page_total 或簇帧数。
-        page_total = self._resolve_page_total(master, cluster)
+        # 3. page_total = 实际检测到的 A4 图框数量（权威值）
+        page_total = len(cluster)
 
-        # 4. page_total < 2 回退：不按多页处理
-        if page_total < 2:
-            return None
+        # 4. 辅助张数校验：Master/Slave 的 page_total 与实际张数比对
+        self._check_page_count_consistency(master, cluster, flags)
 
-        # 5. Slave page_total 交叉校验（仅在 _process_cluster 中做，
-        #    validate_consistency 中的同名检查会跳过已存在的 flag）
-        self._check_slave_page_total(master, cluster, flags)
-
-        # 6. 构建页面列表（Slave 也保存 frame_meta 引用）
+        # 5. 构建页面列表（Slave 也保存 frame_meta 引用）
         pages = []
         for frame in cluster:
             is_master = frame.frame_id == master.frame_id
@@ -197,24 +192,24 @@ class A4MultipageGrouper(IA4MultipageGrouper):
                 )
             )
 
-        # 7. 按页码排序
+        # 6. 按页码排序
         pages.sort(key=lambda p: p.page_index)
 
-        # 8. 找到 master_page 引用
+        # 7. 找到 master_page 引用
         master_page_ref = next(
             (p for p in pages if p.has_titleblock), None
         )
 
-        # 9. 构建SheetSet
+        # 8. 构建SheetSet
         sheet_set = SheetSet(
             cluster_id=str(uuid.uuid4()),
             page_total=page_total,
             pages=pages,
             master_page=master_page_ref,
-            flags=flags,  # 先把已收集的 flags 传入
+            flags=flags,
         )
 
-        # 10. 一致性校验（会追加更多 flags）
+        # 9. 一致性校验（页码连续性 / 首页页码等）
         sheet_set.validate_consistency()
 
         return sheet_set
@@ -232,64 +227,35 @@ class A4MultipageGrouper(IA4MultipageGrouper):
         if any(v is None for v in required):
             flags.append("A4多页_Master缺关键字段")
 
-    def _check_slave_page_total(
+    def _check_page_count_consistency(
         self,
         master: FrameMeta,
         cluster: list[FrameMeta],
         flags: list[str],
     ) -> None:
-        """Slave page_total 交叉校验
+        """辅助张数校验
 
-        若 Slave 的 page_total 非空且与 Master 的 page_total 不一致
-        → 追加 flag ``A4多页_页总数冲突``（仅追加一次）
+        真实多页张数 = ``len(cluster)``（实际检测到的 A4 图框数量）。
+        Master 图签区 ``page_total`` 和 Slave 页码标记 ``page_total``
+        仅为辅助信息。若任一与实际张数不一致，追加 flag
+        ``A4张数有误，请检查``（仅追加一次，不中断，预留给前端展示）。
         """
+        actual = len(cluster)
+
+        # 检查 Master 的 page_total
         master_pt = master.titleblock.page_total
-        if master_pt is None:
-            return
+        if master_pt is not None and master_pt != actual:
+            flags.append("A4张数有误，请检查")
+            return  # 只追加一次
+
+        # 检查 Slave 的 page_total
         for frame in cluster:
             if frame.frame_id == master.frame_id:
                 continue
             slave_pt = frame.titleblock.page_total
-            if slave_pt is not None and slave_pt != master_pt:
-                flags.append("A4多页_页总数冲突")
+            if slave_pt is not None and slave_pt != actual:
+                flags.append("A4张数有误，请检查")
                 return  # 只追加一次
-
-    def _resolve_page_total(
-        self, master: FrameMeta, cluster: list[FrameMeta],
-    ) -> int:
-        """确定簇的有效 page_total
-
-        优先级：
-        1. Master.titleblock.page_total（若 ≥ 2 则直接采用）
-        2. Slave 共识 page_total（若所有非空 Slave 一致且 ≥ 2）
-        3. 簇帧数（兜底）
-
-        典型场景：Master 图签区"共1张 第1张"记录的是文件级页数，
-        而 Slave 右上角页码标记"共7张 第X张"才是真实多页张数。
-        """
-        master_pt = master.titleblock.page_total
-
-        # 快速路径：Master 的 page_total ≥ 2 → 直接信任
-        if master_pt is not None and master_pt >= 2:
-            return master_pt
-
-        # 收集 Slave 的 page_total 值
-        slave_totals: set[int] = set()
-        for frame in cluster:
-            if frame.frame_id == master.frame_id:
-                continue
-            spt = frame.titleblock.page_total
-            if spt is not None:
-                slave_totals.add(spt)
-
-        # 若 Slave 达成共识（仅一个唯一值）且 ≥ 2 → 使用 Slave 值
-        if len(slave_totals) == 1:
-            consensus = next(iter(slave_totals))
-            if consensus >= 2:
-                return consensus
-
-        # 兜底：簇帧数
-        return len(cluster)
 
     def _identify_master(self, cluster: list[FrameMeta]) -> FrameMeta | None:
         """识别Master页（字段命中最多，或page_index=1）"""
