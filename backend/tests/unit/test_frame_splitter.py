@@ -65,12 +65,16 @@ class MockODAConverter:
 class MockPdfExporter(DxfPdfExporter):
     """PDF导出mock — touch 出 .pdf 文件"""
 
-    def export_single_page(self, dxf_path, pdf_path, *, clip_bbox=None):
+    def export_single_page(
+        self, dxf_path, pdf_path, *, clip_bbox=None, paper_size_mm=None,
+    ):
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         pdf_path.touch()
         return pdf_path
 
-    def export_multipage(self, dxf_path, pdf_path, page_bboxes):
+    def export_multipage(
+        self, dxf_path, pdf_path, page_bboxes, paper_size_mm=None,
+    ):
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         pdf_path.touch()
         return pdf_path, False
@@ -79,12 +83,16 @@ class MockPdfExporter(DxfPdfExporter):
 class FailingPdfExporter(DxfPdfExporter):
     """多页失败的PDF导出mock"""
 
-    def export_single_page(self, dxf_path, pdf_path, *, clip_bbox=None):
+    def export_single_page(
+        self, dxf_path, pdf_path, *, clip_bbox=None, paper_size_mm=None,
+    ):
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         pdf_path.touch()
         return pdf_path
 
-    def export_multipage(self, dxf_path, pdf_path, page_bboxes):
+    def export_multipage(
+        self, dxf_path, pdf_path, page_bboxes, paper_size_mm=None,
+    ):
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
         pdf_path.touch()
         return pdf_path, True  # 兜底标记
@@ -109,13 +117,31 @@ def _make_splitter(
     """创建可测试的 FrameSplitter（绕过 load_spec / get_config）"""
     obj = object.__new__(FrameSplitter)
     obj.spec = MagicMock()
-    obj.spec.doc_generation = {"options": {"pdf_margin_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10}}}
-    obj.spec.a4_multipage = {"clipping": {"margin": {"margin_percent": "0.015"}}}
+    obj.spec.doc_generation = {
+        "options": {
+            "pdf_margin_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10},
+            "pdf_aci1_linewidth_mm": 0.4,
+            "pdf_aci_default_linewidth_mm": 0.18,
+        },
+    }
+    obj.spec.a4_multipage = {
+        "clipping": {
+            "margin": {"margin_percent": "0.015"},
+            "unknown_bbox_policy": "keep_if_uncertain",
+        },
+    }
+    obj.spec.titleblock_extract = {
+        "paper_variants": {
+            "CNPE_A1": {"W": 841.0, "H": 594.0, "profile": "BASE10"},
+            "CNPE_A4": {"W": 210.0, "H": 297.0, "profile": "SMALL5"},
+        },
+    }
     obj.config = MagicMock()
     obj.oda = oda or MockODAConverter()
     obj.margins = {"top": 20, "bottom": 10, "left": 20, "right": 10}
     obj.pdf_exporter = pdf_exporter or MockPdfExporter()
     obj._margin_percent = 0.015
+    obj._unknown_bbox_policy = "keep_if_uncertain"
     return obj
 
 
@@ -532,3 +558,196 @@ class TestConfigMultiDwgPolicy:
         assert runtime_config.multi_dwg_policy.code_conflict == "error"
         assert runtime_config.multi_dwg_policy.per_dwg_isolation is True
         assert runtime_config.multi_dwg_policy.same_name_dwg == "error"
+
+
+class TestConfigDxfPdfExport:
+    """验证 dxf_pdf_export 默认值"""
+
+    def test_default_pdf_export_config(self, runtime_config):
+        assert runtime_config.dxf_pdf_export.aci1_linewidth_mm == 0.4
+        assert runtime_config.dxf_pdf_export.aci_default_linewidth_mm == 0.18
+        assert runtime_config.dxf_pdf_export.monochrome is True
+        assert runtime_config.dxf_pdf_export.screening == 100
+
+
+# ======================================================================
+# 裁切判定测试（均衡安全，零误删）
+# ======================================================================
+
+
+class TestShouldDeleteEntity:
+    """_should_delete_entity 零误删判定"""
+
+    def test_bbox_inside_clip_keeps(self):
+        """bbox 与 clip_bbox 相交 → 保留"""
+        eb = BBox(xmin=10, ymin=10, xmax=50, ymax=50)
+        clip = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        assert FrameSplitter._should_delete_entity(eb, None, [clip]) is False
+
+    def test_bbox_outside_clip_deletes(self):
+        """bbox 完全在 clip_bbox 外 → 删除"""
+        eb = BBox(xmin=5000, ymin=5000, xmax=6000, ymax=6000)
+        clip = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        assert FrameSplitter._should_delete_entity(eb, None, [clip]) is True
+
+    def test_no_bbox_no_anchors_keeps(self):
+        """无 bbox 无锚点 → 保留（零误删）"""
+        assert FrameSplitter._should_delete_entity(None, None, [
+            BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+        ]) is False
+
+    def test_no_bbox_anchor_inside_keeps(self):
+        """无 bbox 但锚点在框内 → 保留"""
+        anchors = [(50.0, 50.0)]
+        clip = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        assert FrameSplitter._should_delete_entity(None, anchors, [clip]) is False
+
+    def test_no_bbox_anchor_outside_deletes(self):
+        """无 bbox 但锚点全在框外 → 删除"""
+        anchors = [(9999.0, 9999.0)]
+        clip = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        assert FrameSplitter._should_delete_entity(None, anchors, [clip]) is True
+
+    def test_no_bbox_mixed_anchors_keeps(self):
+        """无 bbox 但有一个锚点在框内 → 保留（零误删）"""
+        anchors = [(50.0, 50.0), (9999.0, 9999.0)]
+        clip = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        assert FrameSplitter._should_delete_entity(None, anchors, [clip]) is False
+
+    def test_multiple_clip_bboxes_any_match_keeps(self):
+        """多个 clip_bbox，锚点在其中一个内 → 保留"""
+        anchors = [(150.0, 150.0)]
+        clips = [
+            BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            BBox(xmin=100, ymin=100, xmax=200, ymax=200),
+        ]
+        assert FrameSplitter._should_delete_entity(None, anchors, clips) is False
+
+
+class TestGetEntityAnchors:
+    """_get_entity_anchors 锚点提取"""
+
+    def test_line_has_start_end_anchors(self):
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        line = msp.add_line((100, 200), (300, 400))
+        anchors = FrameSplitter._get_entity_anchors(line)
+        assert anchors is not None
+        assert len(anchors) >= 2
+        # start 和 end 都应该被提取
+        xs = [a[0] for a in anchors]
+        assert 100.0 in xs
+        assert 300.0 in xs
+
+    def test_text_has_insert_anchor(self):
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        text = msp.add_text("TEST", dxfattribs={"insert": (500, 600)})
+        anchors = FrameSplitter._get_entity_anchors(text)
+        assert anchors is not None
+        assert any(a[0] == 500.0 and a[1] == 600.0 for a in anchors)
+
+    def test_circle_has_center_anchor(self):
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        circle = msp.add_circle((150, 250), radius=50)
+        anchors = FrameSplitter._get_entity_anchors(circle)
+        assert anchors is not None
+        assert any(a[0] == 150.0 and a[1] == 250.0 for a in anchors)
+
+
+class TestAnchorClipping:
+    """端到端：bbox 不可算实体通过锚点被清理"""
+
+    def test_entity_with_insert_outside_is_deleted(self, temp_dir):
+        """远处的 TEXT 实体（insert 在框外）应被清理"""
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        # 框内实体
+        msp.add_lwpolyline([(10, 10), (90, 10), (90, 90), (10, 90)], close=True)
+        # 远处实体（应删除）
+        msp.add_line((8000, 8000), (9000, 9000))
+
+        dxf_path = temp_dir / "src" / "test.dxf"
+        dxf_path.parent.mkdir(parents=True, exist_ok=True)
+        doc.saveas(str(dxf_path))
+
+        frame = _make_frame(x=0, y=0, w=100, h=100, source_file=dxf_path)
+        splitter = _make_splitter(temp_dir)
+        split_dxf = splitter.clip_frame(dxf_path, frame, temp_dir / "work")
+
+        out_doc = ezdxf.readfile(str(split_dxf))
+        out_entities = list(out_doc.modelspace())
+        # 远处 LINE 应被删除
+        assert len(out_entities) == 1
+
+    def test_entity_inside_is_never_deleted(self, temp_dir):
+        """框内实体必须零误删"""
+        doc = ezdxf.new()
+        msp = doc.modelspace()
+        msp.add_lwpolyline([(10, 10), (90, 10), (90, 90), (10, 90)], close=True)
+        msp.add_line((20, 20), (80, 80))
+        msp.add_text("INSIDE", dxfattribs={"insert": (50, 50)})
+        msp.add_circle((50, 50), radius=10)
+
+        dxf_path = temp_dir / "src" / "test.dxf"
+        dxf_path.parent.mkdir(parents=True, exist_ok=True)
+        doc.saveas(str(dxf_path))
+
+        frame = _make_frame(x=0, y=0, w=100, h=100, source_file=dxf_path)
+        splitter = _make_splitter(temp_dir)
+        split_dxf = splitter.clip_frame(dxf_path, frame, temp_dir / "work")
+
+        out_doc = ezdxf.readfile(str(split_dxf))
+        out_entities = list(out_doc.modelspace())
+        # 全部 4 个实体都应保留
+        assert len(out_entities) == 4
+
+
+# ======================================================================
+# 图幅尺寸辅助测试
+# ======================================================================
+
+
+class TestPaperSizeHelpers:
+    """paper_size_mm / a4_paper_size 辅助方法"""
+
+    def test_get_paper_size_mm_a1(self, temp_dir):
+        splitter = _make_splitter(temp_dir)
+        result = splitter._get_paper_size_mm("CNPE_A1")
+        assert result == (841.0, 594.0)
+
+    def test_get_paper_size_mm_a4(self, temp_dir):
+        splitter = _make_splitter(temp_dir)
+        result = splitter._get_paper_size_mm("CNPE_A4")
+        assert result == (210.0, 297.0)
+
+    def test_get_paper_size_mm_none(self, temp_dir):
+        splitter = _make_splitter(temp_dir)
+        assert splitter._get_paper_size_mm(None) is None
+
+    def test_get_paper_size_mm_unknown(self, temp_dir):
+        splitter = _make_splitter(temp_dir)
+        assert splitter._get_paper_size_mm("UNKNOWN") is None
+
+    def test_a4_landscape(self):
+        bbox = BBox(xmin=0, ymin=0, xmax=29700, ymax=21000)
+        assert FrameSplitter._get_a4_paper_size(bbox) == (297.0, 210.0)
+
+    def test_a4_portrait(self):
+        bbox = BBox(xmin=0, ymin=0, xmax=21000, ymax=29700)
+        assert FrameSplitter._get_a4_paper_size(bbox) == (210.0, 297.0)
+
+
+class TestExtractOption:
+    """_extract_option YAML 格式处理"""
+
+    def test_plain_value(self):
+        assert FrameSplitter._extract_option({"key": 0.5}, "key", 1.0) == 0.5
+
+    def test_yaml_dict_format(self):
+        opts = {"key": {"type": "float", "default": 0.4, "desc": "test"}}
+        assert FrameSplitter._extract_option(opts, "key", 1.0) == 0.4
+
+    def test_missing_key_uses_default(self):
+        assert FrameSplitter._extract_option({}, "missing", 99) == 99

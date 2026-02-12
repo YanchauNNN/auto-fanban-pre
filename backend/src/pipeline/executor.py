@@ -334,8 +334,16 @@ class PipelineExecutor:
                 pdf_path = drawings_dir / f"{name}.pdf"
                 dwg_path = drawings_dir / f"{name}.dwg"
 
-                # PDF
-                self.splitter.pdf_exporter.export_single_page(split_dxf, pdf_path)
+                # PDF（严格窗口打印 + 1:1 图幅）
+                clip_bbox = frame.runtime.outer_bbox
+                paper_size_mm = self.splitter._get_paper_size_mm(
+                    frame.runtime.paper_variant_id,
+                )
+                self.splitter.pdf_exporter.export_single_page(
+                    split_dxf, pdf_path,
+                    clip_bbox=clip_bbox,
+                    paper_size_mm=paper_size_mm,
+                )
                 frame.runtime.pdf_path = pdf_path
 
                 # DWG（已由批量转换产出，确认存在）
@@ -369,10 +377,15 @@ class PipelineExecutor:
                 pdf_path = drawings_dir / f"{name}.pdf"
                 dwg_path = drawings_dir / f"{name}.dwg"
 
-                # 多页PDF
+                # 多页PDF（严格窗口打印 + 1:1 A4 图幅）
                 page_bboxes = [p.outer_bbox for p in sheet_set.pages]
+                a4_paper = (
+                    self.splitter._get_a4_paper_size(page_bboxes[0])
+                    if page_bboxes else None
+                )
                 _, is_fallback = self.splitter.pdf_exporter.export_multipage(
                     split_dxf, pdf_path, page_bboxes,
+                    paper_size_mm=a4_paper,
                 )
                 if is_fallback:
                     sheet_set.flags.append("A4多页_PDF兜底为单页大图")

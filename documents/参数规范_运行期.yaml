@@ -127,3 +127,14 @@ runtime_options:
       default: "by_dwg"
       desc: "manifest.inputs.dwg_files[] 与 manifest.artifacts 按DWG分组"
 
+  # --------------------------------------------------------------------------
+  # 9) DXF→PDF 渲染覆盖（ezdxf + matplotlib）
+  # --------------------------------------------------------------------------
+  dxf_pdf_export:
+    aci1_linewidth_mm:         { type: float, default: 0.4,  desc: "ACI颜色1线宽(mm)" }
+    aci_default_linewidth_mm:  { type: float, default: 0.18, desc: "ACI颜色2~255默认线宽(mm)" }
+    monochrome:                { type: bool,  default: true,  desc: "全黑输出（覆盖颜色为#000000）" }
+    screening:                 { type: int,   default: 100,   desc: "淡显百分比(1~100)" }
+    font_dirs:                 { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "字体搜索目录（追加到 ezdxf.options.support_dirs）" }
+    fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
+

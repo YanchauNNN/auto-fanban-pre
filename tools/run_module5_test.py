@@ -136,14 +136,52 @@ def main():
         output_name_for_sheet_set,
     )
 
-    # 构造 splitter（绕过 load_spec，直接注入参数）
+    # 构造 splitter（绕过完整初始化，但保持与主流程一致的参数来源）
+    from src.config import load_spec
+
+    spec = load_spec()
+    options = spec.doc_generation.get("options", {})
+
+    def _opt(key: str, default):
+        value = options.get(key, default)
+        if isinstance(value, dict) and "default" in value:
+            return value["default"]
+        return value
+
+    margins = _opt("pdf_margin_mm", {"top": 20, "bottom": 10, "left": 20, "right": 10})
+    aci1_lw = float(_opt("pdf_aci1_linewidth_mm", 0.4))
+    aci_default_lw = float(_opt("pdf_aci_default_linewidth_mm", 0.18))
+    font_dirs = _opt("pdf_font_dirs", ["fronts/Fonts", "Fonts"])
+    fallback_fonts = _opt(
+        "pdf_fallback_font_family",
+        ["SimSun", "Microsoft YaHei", "SimHei"],
+    )
+    if isinstance(font_dirs, str):
+        font_dirs = [font_dirs]
+    if isinstance(fallback_fonts, str):
+        fallback_fonts = [fallback_fonts]
+
     splitter = object.__new__(FrameSplitter)
-    splitter.spec = None
+    splitter.spec = spec
     splitter.config = None
     splitter.oda = None
-    splitter.margins = {"top": 20, "bottom": 10, "left": 20, "right": 10}
-    splitter.pdf_exporter = DxfPdfExporter(margins=splitter.margins)
-    splitter._margin_percent = 0.015
+    splitter.margins = margins
+    splitter.pdf_exporter = DxfPdfExporter(
+        margins=splitter.margins,
+        aci1_linewidth=aci1_lw,
+        aci_default_linewidth=aci_default_lw,
+        font_dirs=font_dirs,
+        fallback_font_family=fallback_fonts,
+    )
+    clip_cfg = spec.a4_multipage.get("clipping", {})
+    margin_cfg = clip_cfg.get("margin", {})
+    margin_percent = margin_cfg.get("margin_percent", 0.015)
+    if isinstance(margin_percent, dict) and "default" in margin_percent:
+        margin_percent = margin_percent["default"]
+    splitter._margin_percent = float(margin_percent)
+    splitter._unknown_bbox_policy = clip_cfg.get(
+        "unknown_bbox_policy", "keep_if_uncertain",
+    )
 
     total = len(remaining) + len(sheet_sets)
     print(f"\n[Module 5a] 裁切 {total} 个图框 ...")
@@ -186,7 +224,14 @@ def main():
         for f, clip_dxf, name in frame_clips:
             try:
                 pdf_path = drawings_dir / f"{name}.pdf"
-                splitter.pdf_exporter.export_single_page(clip_dxf, pdf_path)
+                # 单页严格窗口打印 + 1:1 图幅
+                paper_size_mm = splitter._get_paper_size_mm(f.runtime.paper_variant_id)
+                splitter.pdf_exporter.export_single_page(
+                    clip_dxf,
+                    pdf_path,
+                    clip_bbox=f.runtime.outer_bbox,
+                    paper_size_mm=paper_size_mm,
+                )
                 pdf_count += 1
                 sz = pdf_path.stat().st_size / 1024
                 print(f"  {name}.pdf ({sz:.0f} KB)")
@@ -197,8 +242,15 @@ def main():
             try:
                 pdf_path = drawings_dir / f"{name}.pdf"
                 page_bboxes = [p.outer_bbox for p in ss.pages]
+                # 多页严格窗口打印 + A4方向1:1 图幅
+                paper_size_mm = (
+                    splitter._get_a4_paper_size(page_bboxes[0]) if page_bboxes else None
+                )
                 _, fallback = splitter.pdf_exporter.export_multipage(
-                    clip_dxf, pdf_path, page_bboxes,
+                    clip_dxf,
+                    pdf_path,
+                    page_bboxes,
+                    paper_size_mm=paper_size_mm,
                 )
                 pdf_count += 1
                 sz = pdf_path.stat().st_size / 1024

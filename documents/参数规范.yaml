@@ -72,6 +72,14 @@ doc_generation:
     pdf_engine:     { type: enum, default: "office_com", desc: "PDF引擎（含OLE时推荐office_com）" }
     pdf_margin_mm:  { type: object, default: { top: 20, bottom: 10, left: 20, right: 10 }, desc: "DXF→PDF 打印页边距（单位mm，指PDF页面边缘到图框最大外框线的距离）" }
 
+    # DXF→PDF 黑白打印样式（纯 Python 渲染）
+    pdf_monochrome:        { type: bool,   default: true, desc: "全部颜色输出黑色" }
+    pdf_aci1_linewidth_mm: { type: float,  default: 0.4,  desc: "ACI颜色1的线宽(mm)" }
+    pdf_aci_default_linewidth_mm: { type: float, default: 0.18, desc: "ACI颜色2~255的默认线宽(mm)" }
+    pdf_screening:         { type: int,    default: 100,  desc: "淡显百分比(1~100)，100表示不淡化" }
+    pdf_font_dirs:         { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "DXF→PDF 字体搜索目录（用于 SHX/bigfont/TTF，支持相对项目根路径）" }
+    pdf_fallback_font_family: { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 中文字体兜底顺序" }
+
   # --------------------------------------------------------------------------
   # 2.2 全局参数定义
   # --------------------------------------------------------------------------
@@ -1043,9 +1051,10 @@ a4_multipage:
     desc: "保持各A4外框相对位置不变"
     margin:
       formula: "outer_bbox ± margin"
-      margin_percent: "1%~2%，随W_obs/H_obs自适应"
+      margin_percent: { type: float, default: 0.015, range: [0.005, 0.02], desc: "裁切边距相对外框宽高的比例" }
     entity_rule: "实体bbox与任一clip_bbox相交则保留"
     coordinate_rule: "不做平移/不归零坐标，保持原始坐标"
+    unknown_bbox_policy: { type: enum, default: "keep_if_uncertain", desc: "bbox不可算实体策略：keep_if_uncertain(无法判定时保留) / anchor_heuristic(锚点在框外则删)" }
 
   # --------------------------------------------------------------------------
   # 4.8 PDF输出

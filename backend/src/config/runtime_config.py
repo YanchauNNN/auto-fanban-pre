@@ -88,6 +88,19 @@ class MultiDwgPolicyConfig(BaseModel):
     manifest_grouping: str = "by_dwg"
 
 
+class DxfPdfExportConfig(BaseModel):
+    """DXF→PDF 渲染配置（ACI线宽映射 + 黑白控制）"""
+
+    aci1_linewidth_mm: float = 0.4
+    aci_default_linewidth_mm: float = 0.18
+    monochrome: bool = True
+    screening: int = 100
+    font_dirs: list[str] = Field(default_factory=lambda: ["fronts/Fonts", "Fonts"])
+    fallback_font_family: list[str] = Field(
+        default_factory=lambda: ["SimSun", "Microsoft YaHei", "SimHei"],
+    )
+
+
 class RuntimeConfig(BaseSettings):
     """运行期配置（支持环境变量覆盖）"""
 
@@ -107,6 +120,7 @@ class RuntimeConfig(BaseSettings):
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
+    dxf_pdf_export: DxfPdfExportConfig = Field(default_factory=DxfPdfExportConfig)
 
     model_config = {
         "env_prefix": "FANBAN_",
@@ -137,6 +151,9 @@ class RuntimeConfig(BaseSettings):
             logging=LoggingConfig(**cls._extract(runtime_opts, "logging")),
             multi_dwg_policy=MultiDwgPolicyConfig(
                 **cls._extract(runtime_opts, "multi_dwg_policy"),
+            ),
+            dxf_pdf_export=DxfPdfExportConfig(
+                **cls._extract(runtime_opts, "dxf_pdf_export"),
             ),
         )
 
