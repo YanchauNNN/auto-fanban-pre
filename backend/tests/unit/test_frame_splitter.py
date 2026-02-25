@@ -113,6 +113,8 @@ def _make_splitter(
     *,
     oda=None,
     pdf_exporter=None,
+    pdf_engine: str = "python",
+    autocad_pdf_exporter=None,
 ) -> FrameSplitter:
     """创建可测试的 FrameSplitter（绕过 load_spec / get_config）"""
     obj = object.__new__(FrameSplitter)
@@ -140,6 +142,8 @@ def _make_splitter(
     obj.oda = oda or MockODAConverter()
     obj.margins = {"top": 20, "bottom": 10, "left": 20, "right": 10}
     obj.pdf_exporter = pdf_exporter or MockPdfExporter()
+    obj.autocad_pdf_exporter = autocad_pdf_exporter or MockPdfExporter()
+    obj._pdf_engine = pdf_engine
     obj._margin_percent = 0.015
     obj._unknown_bbox_policy = "keep_if_uncertain"
     return obj
@@ -751,3 +755,124 @@ class TestExtractOption:
 
     def test_missing_key_uses_default(self):
         assert FrameSplitter._extract_option({}, "missing", 99) == 99
+
+
+# ======================================================================
+# pdf_engine 路由测试
+# ======================================================================
+
+
+class _RecordingExporter(DxfPdfExporter):
+    """记录 export_single_page / export_multipage 被调用次数的 mock 导出器"""
+
+    def __init__(self):
+        self.single_calls: list[Path] = []
+        self.multi_calls: list[Path] = []
+
+    def export_single_page(self, dxf_path, pdf_path, *, clip_bbox=None, paper_size_mm=None):
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.touch()
+        self.single_calls.append(pdf_path)
+        return pdf_path
+
+    def export_multipage(self, dxf_path, pdf_path, page_bboxes, paper_size_mm=None):
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.touch()
+        self.multi_calls.append(pdf_path)
+        return pdf_path, False
+
+
+class TestPdfEngineRouting:
+    """pdf_engine 开关路由测试"""
+
+    def test_python_engine_uses_py_exporter(self, temp_dir: Path):
+        """pdf_engine=python 时只调用 pdf_exporter"""
+        py_exp = _RecordingExporter()
+        acad_exp = _RecordingExporter()
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        frame = _make_frame(source_file=dxf)
+        splitter = _make_splitter(
+            temp_dir,
+            pdf_exporter=py_exp,
+            autocad_pdf_exporter=acad_exp,
+            pdf_engine="python",
+        )
+        splitter.split_frame(dxf, frame, temp_dir / "out")
+
+        assert len(py_exp.single_calls) == 1
+        assert len(acad_exp.single_calls) == 0
+
+    def test_autocad_com_engine_uses_acad_exporter(self, temp_dir: Path):
+        """pdf_engine=autocad_com 时只调用 autocad_pdf_exporter"""
+        py_exp = _RecordingExporter()
+        acad_exp = _RecordingExporter()
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        frame = _make_frame(source_file=dxf)
+        splitter = _make_splitter(
+            temp_dir,
+            pdf_exporter=py_exp,
+            autocad_pdf_exporter=acad_exp,
+            pdf_engine="autocad_com",
+        )
+        splitter.split_frame(dxf, frame, temp_dir / "out")
+
+        assert len(acad_exp.single_calls) == 1
+        assert len(py_exp.single_calls) == 0
+
+    def test_both_engine_calls_both_exporters(self, temp_dir: Path):
+        """pdf_engine=both 时两个导出器都被调用，primary 产物来自 AutoCAD"""
+        py_exp = _RecordingExporter()
+        acad_exp = _RecordingExporter()
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        frame = _make_frame(source_file=dxf)
+        splitter = _make_splitter(
+            temp_dir,
+            pdf_exporter=py_exp,
+            autocad_pdf_exporter=acad_exp,
+            pdf_engine="both",
+        )
+        pdf, _ = splitter.split_frame(dxf, frame, temp_dir / "out")
+
+        assert len(py_exp.single_calls) == 1, "Python exporter should be called"
+        assert len(acad_exp.single_calls) == 1, "AutoCAD exporter should be called"
+        # Primary 产物路径应为 AutoCAD 输出（不含 __py 后缀）
+        assert "__py" not in pdf.name
+
+    def test_both_engine_fallback_when_acad_fails(self, temp_dir: Path):
+        """pdf_engine=both 时 AutoCAD 失败，最终产物由 Python 结果覆盖"""
+        class _FailingAcadExporter(DxfPdfExporter):
+            def export_single_page(self, dxf_path, pdf_path, **_):
+                raise RuntimeError("COM not available")
+
+        py_exp = _RecordingExporter()
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        frame = _make_frame(source_file=dxf)
+        splitter = _make_splitter(
+            temp_dir,
+            pdf_exporter=py_exp,
+            autocad_pdf_exporter=_FailingAcadExporter(),
+            pdf_engine="both",
+        )
+        # 应该成功（AutoCAD 失败后降级到 Python）
+        pdf, _ = splitter.split_frame(dxf, frame, temp_dir / "out")
+        assert pdf.exists(), "降级后的 Python PDF 应存在"
+        assert len(py_exp.single_calls) == 1
+
+    def test_multipage_python_engine(self, temp_dir: Path):
+        """pdf_engine=python 时多页走 pdf_exporter"""
+        py_exp = _RecordingExporter()
+        acad_exp = _RecordingExporter()
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        ss = _make_sheet_set(page_count=2)
+        for page in ss.pages:
+            if page.frame_meta:
+                page.frame_meta.runtime.source_file = dxf
+        splitter = _make_splitter(
+            temp_dir,
+            pdf_exporter=py_exp,
+            autocad_pdf_exporter=acad_exp,
+            pdf_engine="python",
+        )
+        splitter.split_sheet_set(dxf, ss, temp_dir / "out")
+        assert len(py_exp.multi_calls) == 1
+        assert len(acad_exp.multi_calls) == 0

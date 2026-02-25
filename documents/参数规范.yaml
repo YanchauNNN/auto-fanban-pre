@@ -8,7 +8,7 @@
 # ============================================================================
 
 schema_version: "2.0"
-last_updated: "2025-01-13"
+last_updated: "2026-02-13"
 
 # ============================================================================
 # 一、通用枚举定义
@@ -29,6 +29,7 @@ enums:
 
   # PDF 引擎
   pdf_engine: ["office_com", "libreoffice"]
+  module5_pdf_engine: ["python", "autocad_com", "both"]
 
   # IED 变更标记
   ied_change_flag: ["MOD", "CAN", "REC", "IDM"]
@@ -79,6 +80,16 @@ doc_generation:
     pdf_screening:         { type: int,    default: 100,  desc: "淡显百分比(1~100)，100表示不淡化" }
     pdf_font_dirs:         { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "DXF→PDF 字体搜索目录（用于 SHX/bigfont/TTF，支持相对项目根路径）" }
     pdf_fallback_font_family: { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 中文字体兜底顺序" }
+
+    # 模块5（CAD）导出链路控制
+    module5_pdf_engine: { type: "enum[module5_pdf_engine]", default: "python", desc: "模块5 PDF 引擎：python/autocad_com/both" }
+    autocad_install_dir: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于 Fonts/CTB/PC3 路径推导）" }
+    autocad_prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
+    autocad_visible: { type: bool, default: false, desc: "AutoCAD COM 是否显示主窗口" }
+    autocad_plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 绘图超时（秒）" }
+    autocad_ctb_path: { type: str, default: "Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径（相对路径默认基于 autocad_install_dir）" }
+    autocad_pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "PC3 配置名" }
+    autocad_retry: { type: int, default: 1, desc: "AutoCAD 绘图失败重试次数" }
 
   # --------------------------------------------------------------------------
   # 2.2 全局参数定义

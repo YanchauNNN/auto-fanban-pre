@@ -164,7 +164,9 @@ class PipelineExecutor:
         for dwg_file in dwg_files:
             try:
                 self._update_progress(
-                    job, current_file=dwg_file.name, message="DWG转DXF中",
+                    job,
+                    current_file=dwg_file.name,
+                    message="DWG转DXF中",
                     details={"dwg_current": dwg_file.name},
                 )
                 dxf_path = self.oda.dwg_to_dxf(dwg_file, dxf_dir)
@@ -187,7 +189,9 @@ class PipelineExecutor:
         for dxf_path in dxf_files:
             try:
                 self._update_progress(
-                    job, current_file=dxf_path.name, message="图框检测中",
+                    job,
+                    current_file=dxf_path.name,
+                    message="图框检测中",
                     details={"dxf_current": dxf_path.name},
                 )
                 frames = self.frame_detector.detect_frames(dxf_path)
@@ -220,7 +224,8 @@ class PipelineExecutor:
             dxf_path = frame.runtime.source_file
             try:
                 self._update_progress(
-                    job, current_file=dxf_path.name,
+                    job,
+                    current_file=dxf_path.name,
                     message=f"字段提取中 ({i + 1}/{total})",
                     details={"frames_field_done": i + 1},
                 )
@@ -255,24 +260,30 @@ class PipelineExecutor:
         for dxf_path, frames in frames_by_dxf.items():
             try:
                 self._update_progress(
-                    job, current_file=dxf_path.name,
+                    job,
+                    current_file=dxf_path.name,
                     message=f"裁切中 ({done}/{total})",
                     details={"split_done": done},
                 )
 
                 def _progress_cb(entity_count: int) -> None:
                     self._update_progress(
-                        job, message=f"裁切中(实体已处理 {entity_count})",
+                        job,
+                        message=f"裁切中(实体已处理 {entity_count})",
                     )
 
                 results = self.splitter.clip_frames_batch(
-                    dxf_path, frames, split_dir, progress_cb=_progress_cb,
+                    dxf_path,
+                    frames,
+                    split_dir,
+                    progress_cb=_progress_cb,
                 )
                 for frame, split_path in results:
                     context["split_results"][frame.frame_id] = split_path
                 done += len(results)
                 self._update_progress(
-                    job, message=f"裁切中 ({done}/{total})",
+                    job,
+                    message=f"裁切中 ({done}/{total})",
                     details={"split_done": done},
                 )
             except Exception as e:
@@ -285,12 +296,15 @@ class PipelineExecutor:
             try:
                 dxf_path = sheet_set.master_page.frame_meta.runtime.source_file
                 self._update_progress(
-                    job, current_file=dxf_path.name,
+                    job,
+                    current_file=dxf_path.name,
                     message=f"A4成组裁切中 ({done + 1}/{total})",
                     details={"split_done": done + 1},
                 )
                 split_path = self.splitter.clip_sheet_set(
-                    dxf_path, sheet_set, split_dir,
+                    dxf_path,
+                    sheet_set,
+                    split_dir,
                 )
                 context["sheet_set_splits"][sheet_set.cluster_id] = split_path
                 done += 1
@@ -320,30 +334,51 @@ class PipelineExecutor:
         self._batch_dxf_to_dwg(split_dir, drawings_dir)
 
         # -- 单帧：导出 PDF + 查找 DWG --
+        frame_tasks: list[tuple] = []
         for frame in context["frames"]:
             split_dxf = split_results.get(frame.frame_id)
             if not split_dxf:
                 continue
+            name = output_name_for_frame(frame)
+            pdf_path = drawings_dir / f"{name}.pdf"
+            dwg_path = drawings_dir / f"{name}.dwg"
+            clip_bbox = frame.runtime.outer_bbox
+            paper_size_mm = self.splitter._get_paper_size_mm(frame.runtime.paper_variant_id)
+            frame_tasks.append(
+                (frame, split_dxf, name, pdf_path, dwg_path, clip_bbox, paper_size_mm)
+            )
+
+        pdf_engine = getattr(self.splitter, "_pdf_engine", "python")
+        batch_autocad_ok = False
+        if frame_tasks and pdf_engine == "autocad_com":
+            batch_jobs = [
+                (split_dxf, pdf_path, clip_bbox, paper_size_mm)
+                for (_, split_dxf, _, pdf_path, _, clip_bbox, paper_size_mm) in frame_tasks
+            ]
+            try:
+                # 关键优化：同一批单帧任务仅启动一次 AutoCAD
+                self.splitter.autocad_pdf_exporter.export_single_page_batch(batch_jobs)
+                batch_autocad_ok = True
+            except Exception as e:
+                logger.warning(f"AutoCAD 批量PDF出图失败，回退逐张模式: {e}")
+
+        for frame, split_dxf, name, pdf_path, dwg_path, clip_bbox, paper_size_mm in frame_tasks:
             try:
                 done += 1
                 self._update_progress(
-                    job, message=f"导出中 ({done}/{total})",
+                    job,
+                    message=f"导出中 ({done}/{total})",
                     details={"export_done": done},
                 )
-                name = output_name_for_frame(frame)
-                pdf_path = drawings_dir / f"{name}.pdf"
-                dwg_path = drawings_dir / f"{name}.dwg"
 
-                # PDF（严格窗口打印 + 1:1 图幅）
-                clip_bbox = frame.runtime.outer_bbox
-                paper_size_mm = self.splitter._get_paper_size_mm(
-                    frame.runtime.paper_variant_id,
-                )
-                self.splitter.pdf_exporter.export_single_page(
-                    split_dxf, pdf_path,
-                    clip_bbox=clip_bbox,
-                    paper_size_mm=paper_size_mm,
-                )
+                if not (pdf_engine == "autocad_com" and batch_autocad_ok):
+                    self.splitter._export_single_page_routed(
+                        split_dxf,
+                        pdf_path,
+                        clip_bbox=clip_bbox,
+                        paper_size_mm=paper_size_mm,
+                        name=name,
+                    )
                 frame.runtime.pdf_path = pdf_path
 
                 # DWG（已由批量转换产出，确认存在）
@@ -353,7 +388,9 @@ class PipelineExecutor:
                     # 单独尝试转换
                     try:
                         frame.runtime.dwg_path = self.splitter._convert_to_dwg(
-                            split_dxf, drawings_dir, name,
+                            split_dxf,
+                            drawings_dir,
+                            name,
                         )
                     except Exception as dwg_err:
                         logger.warning(f"DWG转换失败: {name}: {dwg_err}")
@@ -370,7 +407,8 @@ class PipelineExecutor:
             try:
                 done += 1
                 self._update_progress(
-                    job, message=f"A4成组导出中 ({done}/{total})",
+                    job,
+                    message=f"A4成组导出中 ({done}/{total})",
                     details={"export_done": done},
                 )
                 name = output_name_for_sheet_set(sheet_set)
@@ -379,13 +417,13 @@ class PipelineExecutor:
 
                 # 多页PDF（严格窗口打印 + 1:1 A4 图幅）
                 page_bboxes = [p.outer_bbox for p in sheet_set.pages]
-                a4_paper = (
-                    self.splitter._get_a4_paper_size(page_bboxes[0])
-                    if page_bboxes else None
-                )
-                _, is_fallback = self.splitter.pdf_exporter.export_multipage(
-                    split_dxf, pdf_path, page_bboxes,
+                a4_paper = self.splitter._get_a4_paper_size(page_bboxes[0]) if page_bboxes else None
+                is_fallback = self.splitter._export_multipage_routed(
+                    split_dxf,
+                    pdf_path,
+                    page_bboxes,
                     paper_size_mm=a4_paper,
+                    name=name,
                 )
                 if is_fallback:
                     sheet_set.flags.append("A4多页_PDF兜底为单页大图")
@@ -396,7 +434,9 @@ class PipelineExecutor:
                 else:
                     try:
                         self.splitter._convert_to_dwg(
-                            split_dxf, drawings_dir, name,
+                            split_dxf,
+                            drawings_dir,
+                            name,
                         )
                     except Exception as dwg_err:
                         logger.warning(f"A4 DWG转换失败: {name}: {dwg_err}")
@@ -438,7 +478,8 @@ class PipelineExecutor:
         try:
             self._update_progress(job, message="生成目录中")
             catalog_xlsx, catalog_pdf, page_count = self.catalog_gen.generate(
-                doc_ctx, docs_dir,
+                doc_ctx,
+                docs_dir,
             )
             doc_ctx.derived.catalog_page_total = page_count
         except Exception as e:
@@ -524,6 +565,9 @@ class PipelineExecutor:
         job_file = job_dir / "job.json"
         with open(job_file, "w", encoding="utf-8") as f:
             json.dump(
-                job.model_dump(mode="json"), f,
-                ensure_ascii=False, indent=2, default=str,
+                job.model_dump(mode="json"),
+                f,
+                ensure_ascii=False,
+                indent=2,
+                default=str,
             )

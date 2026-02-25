@@ -8,9 +8,11 @@ CAD 处理模块 - DXF解析/图框检测/字段提取
 - titleblock_extractor: ROI还原 + 字段解析
 - a4_multipage: A4多页成组
 - splitter: 裁切/拆分输出
+- autocad_path_resolver: AutoCAD安装路径解析
 """
 
 from .a4_multipage import A4MultipageGrouper
+from .autocad_path_resolver import AutoCADPathInfo, resolve_autocad_paths
 from .dxf_pdf_exporter import DxfPdfExporter
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
@@ -24,4 +26,6 @@ __all__ = [
     "A4MultipageGrouper",
     "FrameSplitter",
     "DxfPdfExporter",
+    "AutoCADPathInfo",
+    "resolve_autocad_paths",
 ]

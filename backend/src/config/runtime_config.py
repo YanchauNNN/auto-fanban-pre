@@ -47,6 +47,30 @@ class ODAConfig(BaseModel):
     work_dir: str | None = None
 
 
+class Module5ExportConfig(BaseModel):
+    """模块5导出配置"""
+
+    pdf_engine: str = "python"
+
+
+class AutoCADConfig(BaseModel):
+    """AutoCAD 运行配置（模块5增量链路）"""
+
+    install_dir: str = r"D:\Program Files\Autodesk\AutoCAD 2021"
+    prog_id_candidates: list[str] = Field(
+        default_factory=lambda: [
+            "AutoCAD.Application.24.1",
+            "AutoCAD.Application.24.0",
+            "AutoCAD.Application",
+        ],
+    )
+    visible: bool = False
+    plot_timeout_sec: int = 300
+    ctb_path: str = r"Plotters\Plot Styles\monochrome.ctb"
+    pc3_name: str = "DWG To PDF.pc3"
+    retry: int = 1
+
+
 class PDFEngineConfig(BaseModel):
     """PDF引擎配置"""
 
@@ -115,6 +139,8 @@ class RuntimeConfig(BaseSettings):
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     retries: RetryConfig = Field(default_factory=RetryConfig)
     oda: ODAConfig = Field(default_factory=ODAConfig)
+    module5_export: Module5ExportConfig = Field(default_factory=Module5ExportConfig)
+    autocad: AutoCADConfig = Field(default_factory=AutoCADConfig)
     pdf_engine: PDFEngineConfig = Field(default_factory=PDFEngineConfig)
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
@@ -145,6 +171,10 @@ class RuntimeConfig(BaseSettings):
             timeouts=TimeoutConfig(**cls._extract(runtime_opts, "timeouts")),
             retries=RetryConfig(**cls._extract(runtime_opts, "retries")),
             oda=ODAConfig(**cls._extract(runtime_opts, "oda_converter")),
+            module5_export=Module5ExportConfig(
+                **cls._extract(runtime_opts, "module5_export"),
+            ),
+            autocad=AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
             pdf_engine=PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
             upload_limits=UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
             lifecycle=LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
@@ -182,6 +212,15 @@ class RuntimeConfig(BaseSettings):
             work_dir = Path(self.oda.work_dir)
             if not work_dir.is_absolute():
                 self.oda.work_dir = str((base_dir / work_dir).resolve())
+        if self.autocad.install_dir:
+            install_dir = Path(self.autocad.install_dir)
+            if not install_dir.is_absolute():
+                self.autocad.install_dir = str((base_dir / install_dir).resolve())
+        if self.autocad.ctb_path:
+            ctb_path = Path(self.autocad.ctb_path)
+            if not ctb_path.is_absolute():
+                autocad_base = Path(self.autocad.install_dir) if self.autocad.install_dir else base_dir
+                self.autocad.ctb_path = str((autocad_base / ctb_path).resolve())
 
     def get_job_dir(self, job_id: str) -> Path:
         """获取任务工作目录"""

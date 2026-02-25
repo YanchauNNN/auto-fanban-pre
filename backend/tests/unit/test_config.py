@@ -63,3 +63,14 @@ class TestRuntimeConfig:
         """测试获取任务目录"""
         job_dir = runtime_config.get_job_dir("test-job-id")
         assert "test-job-id" in str(job_dir)
+
+    def test_module5_autocad_defaults(self, runtime_config: RuntimeConfig):
+        """测试模块5 AutoCAD 默认配置"""
+        assert runtime_config.module5_export.pdf_engine == "python"
+        assert runtime_config.autocad.install_dir == r"D:\Program Files\Autodesk\AutoCAD 2021"
+        assert runtime_config.autocad.prog_id_candidates == [
+            "AutoCAD.Application.24.1",
+            "AutoCAD.Application.24.0",
+            "AutoCAD.Application",
+        ]
+        assert runtime_config.autocad.pc3_name == "DWG To PDF.pc3"

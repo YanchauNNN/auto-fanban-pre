@@ -7,7 +7,7 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2025-01-13"
+last_updated: "2026-02-13"
 
 runtime_options:
   # --------------------------------------------------------------------------
@@ -35,6 +35,19 @@ runtime_options:
   oda_converter:
     exe_path: { type: str, required: true, default: "..\\bin\\ODAFileConverter 25.12.0\\ODAFileConverter.exe", desc: "ODA File Converter 可执行文件路径（可使用相对路径，默认相对config目录）" }
     work_dir: { type: str, required: false, desc: "ODA 临时工作目录（可选）" }
+
+  module5_export:
+    pdf_engine: { type: enum, default: "python", desc: "模块5 PDF 导出引擎：python/autocad_com/both" }
+
+  autocad:
+    install_dir: { type: str, required: false, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于字体目录和打印配置路径推导）" }
+    prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
+    visible: { type: bool, default: false, desc: "是否显示 AutoCAD 主窗口（调试时可设 true）" }
+    plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 打印超时（秒）" }
+    ctb_path: { type: str, required: false, default: "Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径；相对路径按 install_dir 解析" }
+    pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "AutoCAD 使用的 PC3 配置名" }
+    retry: { type: int, default: 1, desc: "AutoCAD 打印失败重试次数" }
+
   pdf_engine:
     preferred: { type: enum, default: "office_com", desc: "PDF 引擎优先级：office_com/libreoffice" }
     fallback:  { type: enum, default: "libreoffice", desc: "PDF 引擎兜底" }

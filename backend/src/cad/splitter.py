@@ -27,6 +27,8 @@ from ezdxf import bbox as ezdxf_bbox
 from ..config import get_config, load_spec
 from ..interfaces import IFrameSplitter
 from ..models import BBox, FrameMeta, SheetSet
+from .autocad_path_resolver import resolve_autocad_paths
+from .autocad_pdf_exporter import AutoCADPdfExporter
 from .dxf_pdf_exporter import DxfPdfExporter
 from .oda_converter import ODAConverter
 
@@ -106,7 +108,7 @@ class FrameSplitter(IFrameSplitter):
             "top": 20, "bottom": 10, "left": 20, "right": 10,
         }
 
-        # PDF 打印样式参数（ACI 线宽映射）
+        # PDF 打印样式参数（ACI 线宽映射，纯 Python 渲染器使用）
         aci1_lw = self._extract_option(options, "pdf_aci1_linewidth_mm", 0.4)
         aci_default_lw = self._extract_option(
             options, "pdf_aci_default_linewidth_mm", 0.18,
@@ -128,15 +130,48 @@ class FrameSplitter(IFrameSplitter):
             getattr(self.config.dxf_pdf_export, "fallback_font_family", []),
         )
 
-        font_dirs = runtime_font_dirs or spec_font_dirs
-        fallback_fonts = runtime_fallback_fonts or spec_fallback_fonts
-        self.pdf_exporter = pdf_exporter or DxfPdfExporter(
+        # AutoCAD 路径解析（为两个导出器提供字体目录）
+        autocad_install_dir = getattr(getattr(self.config, "autocad", None), "install_dir", None)
+        self.autocad_paths = resolve_autocad_paths(autocad_install_dir)
+        autocad_font_dirs = (
+            [str(self.autocad_paths.fonts_dir)]
+            if self.autocad_paths.fonts_dir is not None
+            else []
+        )
+        if self.autocad_paths.install_dir is not None:
+            logger.info("模块5检测到AutoCAD目录: %s", self.autocad_paths.install_dir)
+
+        runtime_font_dirs = self._merge_unique_lists(autocad_font_dirs, runtime_font_dirs)
+        font_dirs = self._merge_unique_lists(runtime_font_dirs, spec_font_dirs)
+        fallback_fonts = self._merge_unique_lists(runtime_fallback_fonts, spec_fallback_fonts)
+
+        # 纯 Python 导出器（baseline / 兜底）
+        self.pdf_exporter: DxfPdfExporter = pdf_exporter or DxfPdfExporter(
             margins=self.margins,
             aci1_linewidth=float(aci1_lw),
             aci_default_linewidth=float(aci_default_lw),
             font_dirs=font_dirs,
             fallback_font_family=fallback_fonts,
         )
+
+        # AutoCAD COM 导出器（仅在 pdf_engine=autocad_com/both 时使用）
+        acad_cfg = getattr(self.config, "autocad", None)
+        ctb_name = Path(getattr(acad_cfg, "ctb_path", "monochrome.ctb")).name
+        self.autocad_pdf_exporter: AutoCADPdfExporter = AutoCADPdfExporter(
+            prog_id_candidates=getattr(acad_cfg, "prog_id_candidates", None),
+            visible=getattr(acad_cfg, "visible", False),
+            plot_timeout_sec=getattr(acad_cfg, "plot_timeout_sec", 180),
+            ctb_name=ctb_name,
+            pc3_name=getattr(acad_cfg, "pc3_name", "DWG To PDF.pc3"),
+            retry=getattr(acad_cfg, "retry", 1),
+            margins=self.margins,
+        )
+
+        # pdf_engine 开关：python | autocad_com | both
+        self._pdf_engine: str = getattr(
+            getattr(self.config, "module5_export", None), "pdf_engine", "python"
+        )
+        logger.info("模块5 PDF引擎: %s", self._pdf_engine)
 
         clip_cfg = self.spec.a4_multipage.get("clipping", {})
         margin_cfg = clip_cfg.get("margin", {})
@@ -228,7 +263,7 @@ class FrameSplitter(IFrameSplitter):
         return output_path
 
     # ==================================================================
-    # Stage 8: export
+    # Stage 8: export（含 pdf_engine 路由）
     # ==================================================================
 
     def export_frame(
@@ -237,16 +272,14 @@ class FrameSplitter(IFrameSplitter):
         output_dir.mkdir(parents=True, exist_ok=True)
         name = output_name_for_frame(frame)
         pdf_path = output_dir / f"{name}.pdf"
-
-        # 严格窗口打印：使用图框外框作为裁切窗口
         clip_bbox = frame.runtime.outer_bbox
-        # 1:1 图幅：使用标准图幅尺寸
         paper_size_mm = self._get_paper_size_mm(frame.runtime.paper_variant_id)
 
-        self.pdf_exporter.export_single_page(
+        self._export_single_page_routed(
             split_dxf, pdf_path,
             clip_bbox=clip_bbox,
             paper_size_mm=paper_size_mm,
+            name=name,
         )
         dwg_path = self._convert_to_dwg(split_dxf, output_dir, name)
         frame.runtime.pdf_path = pdf_path
@@ -260,17 +293,119 @@ class FrameSplitter(IFrameSplitter):
         name = output_name_for_sheet_set(sheet_set)
         pdf_path = output_dir / f"{name}.pdf"
         page_bboxes = [page.outer_bbox for page in sheet_set.pages]
-
-        # 确定 A4 纸张方向（从首页外框判断）
         paper_size_mm = self._get_a4_paper_size(page_bboxes[0]) if page_bboxes else None
 
-        _, is_fallback = self.pdf_exporter.export_multipage(
-            split_dxf, pdf_path, page_bboxes, paper_size_mm=paper_size_mm,
+        is_fallback = self._export_multipage_routed(
+            split_dxf, pdf_path, page_bboxes,
+            paper_size_mm=paper_size_mm,
+            name=name,
         )
         if is_fallback:
             sheet_set.flags.append("A4多页_PDF兜底为单页大图")
         dwg_path = self._convert_to_dwg(split_dxf, output_dir, name)
         return pdf_path, dwg_path
+
+    # ------------------------------------------------------------------
+    # pdf_engine 路由内部方法
+    # ------------------------------------------------------------------
+
+    def _export_single_page_routed(
+        self,
+        split_dxf: Path,
+        pdf_path: Path,
+        *,
+        clip_bbox,
+        paper_size_mm,
+        name: str,
+    ) -> None:
+        """根据 pdf_engine 路由单页 PDF 导出。
+
+        python       → DxfPdfExporter（纯 Python）
+        autocad_com  → AutoCADPdfExporter，失败时抛出
+        both         → 优先 AutoCAD，失败则降级到 Python，并同时保留 Python 结果对比
+        """
+        if self._pdf_engine == "python":
+            self.pdf_exporter.export_single_page(
+                split_dxf, pdf_path,
+                clip_bbox=clip_bbox,
+                paper_size_mm=paper_size_mm,
+            )
+            return
+
+        if self._pdf_engine == "autocad_com":
+            self.autocad_pdf_exporter.export_single_page(
+                split_dxf, pdf_path,
+                clip_bbox=clip_bbox,
+                paper_size_mm=paper_size_mm,
+            )
+            return
+
+        # pdf_engine == "both"：AutoCAD 为主，Python 为对比，AutoCAD 失败则降级
+        py_pdf = pdf_path.with_name(pdf_path.stem + "__py.pdf")
+        self.pdf_exporter.export_single_page(
+            split_dxf, py_pdf,
+            clip_bbox=clip_bbox,
+            paper_size_mm=paper_size_mm,
+        )
+        try:
+            self.autocad_pdf_exporter.export_single_page(
+                split_dxf, pdf_path,
+                clip_bbox=clip_bbox,
+                paper_size_mm=paper_size_mm,
+            )
+            logger.info(
+                "both模式: AutoCAD出图成功 %s（Python对比版: %s）", name, py_pdf.name,
+            )
+        except Exception as exc:
+            # AutoCAD 失败时降级到 Python 结果作为最终产物
+            logger.warning(
+                "both模式: AutoCAD出图失败 %s，降级到Python结果: %s", name, exc,
+            )
+            import shutil as _shutil
+            _shutil.copy2(str(py_pdf), str(pdf_path))
+
+    def _export_multipage_routed(
+        self,
+        split_dxf: Path,
+        pdf_path: Path,
+        page_bboxes: list,
+        *,
+        paper_size_mm,
+        name: str,
+    ) -> bool:
+        """根据 pdf_engine 路由多页 PDF 导出，返回 is_fallback。"""
+        if self._pdf_engine == "python":
+            _, is_fallback = self.pdf_exporter.export_multipage(
+                split_dxf, pdf_path, page_bboxes, paper_size_mm=paper_size_mm,
+            )
+            return is_fallback
+
+        if self._pdf_engine == "autocad_com":
+            _, is_fallback = self.autocad_pdf_exporter.export_multipage(
+                split_dxf, pdf_path, page_bboxes, paper_size_mm=paper_size_mm,
+            )
+            return is_fallback
+
+        # both：AutoCAD 为主，失败降级
+        py_pdf = pdf_path.with_name(pdf_path.stem + "__py.pdf")
+        _, py_fallback = self.pdf_exporter.export_multipage(
+            split_dxf, py_pdf, page_bboxes, paper_size_mm=paper_size_mm,
+        )
+        try:
+            _, acad_fallback = self.autocad_pdf_exporter.export_multipage(
+                split_dxf, pdf_path, page_bboxes, paper_size_mm=paper_size_mm,
+            )
+            logger.info(
+                "both模式: AutoCAD多页出图成功 %s（Python对比版: %s）", name, py_pdf.name,
+            )
+            return acad_fallback
+        except Exception as exc:
+            logger.warning(
+                "both模式: AutoCAD多页出图失败 %s，降级到Python: %s", name, exc,
+            )
+            import shutil as _shutil
+            _shutil.copy2(str(py_pdf), str(pdf_path))
+            return py_fallback
 
     # ==================================================================
     # IFrameSplitter 接口（向后兼容）
@@ -436,6 +571,23 @@ class FrameSplitter(IFrameSplitter):
         if isinstance(value, list):
             return [str(v) for v in value if v is not None]
         return [str(value)]
+
+    @staticmethod
+    def _merge_unique_lists(*values: list[str]) -> list[str]:
+        """按入参顺序合并字符串列表（忽略空值与大小写重复）"""
+        merged: list[str] = []
+        seen: set[str] = set()
+        for group in values:
+            for item in group:
+                normalized = str(item).strip()
+                if not normalized:
+                    continue
+                key = normalized.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(normalized)
+        return merged
 
     def _calc_clip_bbox(self, outer_bbox: BBox, margin_percent: float | None = None) -> BBox:
         mp = margin_percent if margin_percent is not None else self._margin_percent
