@@ -1,3 +1,6 @@
 # Local font packs (do not commit)
 fronts/Fonts/
 Fonts/
+
+# Test files (do not commit)
+test/
