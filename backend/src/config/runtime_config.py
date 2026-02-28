@@ -47,10 +47,58 @@ class ODAConfig(BaseModel):
     work_dir: str | None = None
 
 
+class Module5CadRunnerConfig(BaseModel):
+    """模块5 CAD运行器配置"""
+
+    accoreconsole_exe: str = r"D:\Program Files\Autodesk\AutoCAD 2021\accoreconsole.exe"
+    script_dir: str = r"..\backend\src\cad\scripts"
+    task_timeout_sec: int = 900
+    retry: int = 1
+    locale: str = "en-US"
+    max_parallel_dxf: int = 1
+
+
+class Module5SelectionConfig(BaseModel):
+    """模块5选集配置"""
+
+    mode: str = "crossing"
+    bbox_margin_percent: float = 0.015
+    empty_selection_retry_margin_percent: float = 0.03
+
+
+class Module5PlotConfig(BaseModel):
+    """模块5打印配置"""
+
+    pc3_name: str = "DWG To PDF.pc3"
+    ctb_name: str = "monochrome.ctb"
+    paper_from_frame: bool = True
+    use_monochrome: bool = True
+    margins_mm: dict[str, float] = Field(
+        default_factory=lambda: {
+            "top": 20.0,
+            "bottom": 10.0,
+            "left": 20.0,
+            "right": 10.0,
+        },
+    )
+
+
+class Module5OutputConfig(BaseModel):
+    """模块5输出策略配置"""
+
+    a4_multipage_pdf: str = "merge_pages"
+    on_frame_fail: str = "flag_and_continue"
+
+
 class Module5ExportConfig(BaseModel):
     """模块5导出配置"""
 
     pdf_engine: str = "python"
+    engine: str = "cad_dxf"
+    cad_runner: Module5CadRunnerConfig = Field(default_factory=Module5CadRunnerConfig)
+    selection: Module5SelectionConfig = Field(default_factory=Module5SelectionConfig)
+    plot: Module5PlotConfig = Field(default_factory=Module5PlotConfig)
+    output: Module5OutputConfig = Field(default_factory=Module5OutputConfig)
 
 
 class AutoCADConfig(BaseModel):
@@ -194,13 +242,23 @@ class RuntimeConfig(BaseSettings):
     def _extract(data: dict[str, Any], key: str) -> dict[str, Any]:
         """提取并展平配置"""
         section = data.get(key, {})
-        result = {}
-        for k, v in section.items():
-            if isinstance(v, dict) and "default" in v:
-                result[k] = v["default"]
-            elif not isinstance(v, dict):
-                result[k] = v
-        return result
+        extracted = RuntimeConfig._extract_tree(section)
+        return extracted if isinstance(extracted, dict) else {}
+
+    @staticmethod
+    def _extract_tree(node: Any) -> Any:
+        """递归提取 default 值，兼容嵌套配置结构。"""
+        if isinstance(node, dict):
+            if "default" in node and any(k in node for k in ("type", "desc", "required")):
+                return node["default"]
+            result: dict[str, Any] = {}
+            for k, v in node.items():
+                extracted = RuntimeConfig._extract_tree(v)
+                if extracted is None and isinstance(v, dict):
+                    continue
+                result[k] = extracted
+            return result
+        return node
 
     def _resolve_paths(self, base_dir: Path) -> None:
         """解析相对路径配置为绝对路径（基于配置文件所在目录）"""
@@ -219,8 +277,22 @@ class RuntimeConfig(BaseSettings):
         if self.autocad.ctb_path:
             ctb_path = Path(self.autocad.ctb_path)
             if not ctb_path.is_absolute():
-                autocad_base = Path(self.autocad.install_dir) if self.autocad.install_dir else base_dir
+                autocad_base = (
+                    Path(self.autocad.install_dir) if self.autocad.install_dir else base_dir
+                )
                 self.autocad.ctb_path = str((autocad_base / ctb_path).resolve())
+        if self.module5_export.cad_runner.accoreconsole_exe:
+            accore = Path(self.module5_export.cad_runner.accoreconsole_exe)
+            if not accore.is_absolute():
+                self.module5_export.cad_runner.accoreconsole_exe = str(
+                    (base_dir / accore).resolve(),
+                )
+        if self.module5_export.cad_runner.script_dir:
+            script_dir = Path(self.module5_export.cad_runner.script_dir)
+            if not script_dir.is_absolute():
+                self.module5_export.cad_runner.script_dir = str(
+                    (base_dir / script_dir).resolve(),
+                )
 
     def get_job_dir(self, job_id: str) -> Path:
         """获取任务工作目录"""

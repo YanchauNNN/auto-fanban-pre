@@ -29,6 +29,7 @@ from ..interfaces import IFrameSplitter
 from ..models import BBox, FrameMeta, SheetSet
 from .autocad_path_resolver import resolve_autocad_paths
 from .autocad_pdf_exporter import AutoCADPdfExporter
+from .cad_dxf_executor import CADDXFExecutor
 from .dxf_pdf_exporter import DxfPdfExporter
 from .oda_converter import ODAConverter
 
@@ -184,6 +185,12 @@ class FrameSplitter(IFrameSplitter):
         self._unknown_bbox_policy = clip_cfg.get(
             "unknown_bbox_policy", "keep_if_uncertain",
         )
+        self._module5_engine: str = getattr(
+            getattr(self.config, "module5_export", None),
+            "engine",
+            "python_fallback",
+        )
+        self.cad_dxf_executor = CADDXFExecutor(config=self.config, spec=self.spec)
 
     # ==================================================================
     # Stage 7: clip-only
@@ -412,12 +419,52 @@ class FrameSplitter(IFrameSplitter):
     # ==================================================================
 
     def split_frame(self, dxf_path: Path, frame: FrameMeta, output_dir: Path) -> tuple[Path, Path]:
+        if self._module5_engine == "cad_dxf":
+            result = self.cad_dxf_executor.execute_source_dxf(
+                job_id="adhoc",
+                source_dxf=dxf_path,
+                frames=[frame],
+                sheet_sets=[],
+                output_dir=output_dir,
+                task_root=output_dir / "_cad_tasks",
+            )
+            self.cad_dxf_executor.apply_result(
+                result=result,
+                frames_by_id={frame.frame_id: frame},
+                sheet_sets_by_id={},
+            )
+            if frame.runtime.pdf_path is None or frame.runtime.dwg_path is None:
+                raise RuntimeError("cad_dxf 导出失败: 单帧输出路径缺失")
+            return frame.runtime.pdf_path, frame.runtime.dwg_path
+
         split_dxf = self.clip_frame(dxf_path, frame, output_dir)
         return self.export_frame(split_dxf, frame, output_dir)
 
     def split_sheet_set(
         self, dxf_path: Path, sheet_set: SheetSet, output_dir: Path,
     ) -> tuple[Path, Path]:
+        if self._module5_engine == "cad_dxf":
+            result = self.cad_dxf_executor.execute_source_dxf(
+                job_id="adhoc",
+                source_dxf=dxf_path,
+                frames=[],
+                sheet_sets=[sheet_set],
+                output_dir=output_dir,
+                task_root=output_dir / "_cad_tasks",
+            )
+            self.cad_dxf_executor.apply_result(
+                result=result,
+                frames_by_id={},
+                sheet_sets_by_id={sheet_set.cluster_id: sheet_set},
+            )
+            # sheet_set 路径回填在 pipeline 中按 result 统一处理，这里保持接口兼容返回
+            name = output_name_for_sheet_set(sheet_set)
+            pdf_path = output_dir / f"{name}.pdf"
+            dwg_path = output_dir / f"{name}.dwg"
+            if not pdf_path.exists() or not dwg_path.exists():
+                raise RuntimeError("cad_dxf 导出失败: A4成组输出路径缺失")
+            return pdf_path, dwg_path
+
         split_dxf = self.clip_sheet_set(dxf_path, sheet_set, output_dir)
         return self.export_sheet_set(split_dxf, sheet_set, output_dir)
 
@@ -431,7 +478,7 @@ class FrameSplitter(IFrameSplitter):
         output_path: Path,
         clip_bboxes: list[BBox],
     ) -> None:
-        """裁切的唯一正确方式：复制原始DXF，删除框外实体。
+        """Python fallback 裁切：复制原始DXF，删除框外实体。
 
         保证字体/样式/块定义/DXF头段完全不变。
 

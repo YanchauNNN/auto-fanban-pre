@@ -91,6 +91,20 @@ doc_generation:
     autocad_pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "PC3 配置名" }
     autocad_retry: { type: int, default: 1, desc: "AutoCAD 绘图失败重试次数" }
 
+    # 模块5 CAD-DXF 主执行链路（运行期扩展）
+    module5_engine: { type: str, default: "cad_dxf", desc: "模块5主执行引擎：cad_dxf/python_fallback/autocad_com" }
+    module5_cad_runner_accoreconsole_exe: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
+    module5_cad_runner_script_dir: { type: str, default: "..\\backend\\src\\cad\\scripts", desc: "模块5 CAD脚本目录（lsp/scr）" }
+    module5_cad_runner_task_timeout_sec: { type: int, default: 900, desc: "单个 source_dxf 执行超时（秒）" }
+    module5_cad_runner_retry: { type: int, default: 1, desc: "AcCoreConsole 执行失败重试次数" }
+    module5_cad_runner_locale: { type: str, default: "en-US", desc: "AcCoreConsole 语言区域" }
+    module5_cad_runner_max_parallel_dxf: { type: int, default: 1, desc: "并发执行 source_dxf 的最大数量" }
+    module5_selection_mode: { type: str, default: "crossing", desc: "选集模式：crossing/window（主链路固定 crossing）" }
+    module5_bbox_margin_percent: { type: float, default: 0.015, desc: "图框 bbox 扩边比例（用于选集）" }
+    module5_empty_selection_retry_margin_percent: { type: float, default: 0.03, desc: "空选集时二次扩边比例" }
+    module5_output_a4_multipage_pdf: { type: str, default: "merge_pages", desc: "A4成组PDF输出策略：merge_pages/single_page_fallback" }
+    module5_output_on_frame_fail: { type: str, default: "flag_and_continue", desc: "单帧失败策略：flag_and_continue/abort_dxf" }
+
   # --------------------------------------------------------------------------
   # 2.2 全局参数定义
   # --------------------------------------------------------------------------

@@ -144,6 +144,8 @@ def _make_splitter(
     obj.pdf_exporter = pdf_exporter or MockPdfExporter()
     obj.autocad_pdf_exporter = autocad_pdf_exporter or MockPdfExporter()
     obj._pdf_engine = pdf_engine
+    obj._module5_engine = "python_fallback"
+    obj.cad_dxf_executor = MagicMock()
     obj._margin_percent = 0.015
     obj._unknown_bbox_policy = "keep_if_uncertain"
     return obj
@@ -876,3 +878,75 @@ class TestPdfEngineRouting:
         splitter.split_sheet_set(dxf, ss, temp_dir / "out")
         assert len(py_exp.multi_calls) == 1
         assert len(acad_exp.multi_calls) == 0
+
+
+class TestCadDxfEngineRouting:
+    """module5_engine=cad_dxf 时走 CADDXFExecutor 路由。"""
+
+    def test_split_frame_routes_to_cad_executor(self, temp_dir: Path):
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        frame = _make_frame(source_file=dxf)
+        splitter = _make_splitter(temp_dir)
+        splitter._module5_engine = "cad_dxf"
+
+        expected_pdf = temp_dir / "out" / "frame.pdf"
+        expected_dwg = temp_dir / "out" / "frame.dwg"
+        fake_result = {
+            "frames": [
+                {
+                    "frame_id": frame.frame_id,
+                    "status": "ok",
+                    "pdf_path": str(expected_pdf),
+                    "dwg_path": str(expected_dwg),
+                    "flags": [],
+                },
+            ],
+            "sheet_sets": [],
+            "errors": [],
+        }
+
+        def _apply_result(*, result, frames_by_id, sheet_sets_by_id):
+            assert frames_by_id[frame.frame_id] is frame
+            frame.runtime.pdf_path = Path(result["frames"][0]["pdf_path"])
+            frame.runtime.dwg_path = Path(result["frames"][0]["dwg_path"])
+            return (1, 0)
+
+        splitter.cad_dxf_executor.execute_source_dxf.return_value = fake_result
+        splitter.cad_dxf_executor.apply_result.side_effect = _apply_result
+
+        pdf, dwg = splitter.split_frame(dxf, frame, temp_dir / "out")
+
+        assert pdf == expected_pdf
+        assert dwg == expected_dwg
+        splitter.cad_dxf_executor.execute_source_dxf.assert_called_once()
+
+    def test_split_sheet_set_routes_to_cad_executor(self, temp_dir: Path):
+        dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
+        ss = _make_sheet_set(page_count=2)
+        for page in ss.pages:
+            if page.frame_meta:
+                page.frame_meta.runtime.source_file = dxf
+
+        splitter = _make_splitter(temp_dir)
+        splitter._module5_engine = "cad_dxf"
+
+        out_dir = temp_dir / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = output_name_for_sheet_set(ss)
+        expected_pdf = out_dir / f"{stem}.pdf"
+        expected_dwg = out_dir / f"{stem}.dwg"
+        expected_pdf.touch()
+        expected_dwg.touch()
+
+        splitter.cad_dxf_executor.execute_source_dxf.return_value = {
+            "frames": [],
+            "sheet_sets": [{"cluster_id": ss.cluster_id, "status": "ok", "flags": []}],
+            "errors": [],
+        }
+        splitter.cad_dxf_executor.apply_result.return_value = (0, 1)
+
+        pdf, dwg = splitter.split_sheet_set(dxf, ss, out_dir)
+
+        assert pdf == expected_pdf
+        assert dwg == expected_dwg
+        splitter.cad_dxf_executor.execute_source_dxf.assert_called_once()

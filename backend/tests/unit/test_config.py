@@ -4,7 +4,6 @@
 每个模块完成后必须运行：pytest tests/unit/test_config.py -v
 """
 
-
 from src.config import BusinessSpec, RuntimeConfig
 
 
@@ -67,6 +66,9 @@ class TestRuntimeConfig:
     def test_module5_autocad_defaults(self, runtime_config: RuntimeConfig):
         """测试模块5 AutoCAD 默认配置"""
         assert runtime_config.module5_export.pdf_engine == "python"
+        assert runtime_config.module5_export.engine == "cad_dxf"
+        assert runtime_config.module5_export.selection.mode == "crossing"
+        assert runtime_config.module5_export.cad_runner.task_timeout_sec == 900
         assert runtime_config.autocad.install_dir == r"D:\Program Files\Autodesk\AutoCAD 2021"
         assert runtime_config.autocad.prog_id_candidates == [
             "AutoCAD.Application.24.1",

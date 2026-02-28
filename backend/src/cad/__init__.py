@@ -12,7 +12,9 @@ CAD 处理模块 - DXF解析/图框检测/字段提取
 """
 
 from .a4_multipage import A4MultipageGrouper
+from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import AutoCADPathInfo, resolve_autocad_paths
+from .cad_dxf_executor import CADDXFExecutor
 from .dxf_pdf_exporter import DxfPdfExporter
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
@@ -24,6 +26,8 @@ __all__ = [
     "FrameDetector",
     "TitleblockExtractor",
     "A4MultipageGrouper",
+    "CADDXFExecutor",
+    "AcCoreConsoleRunner",
     "FrameSplitter",
     "DxfPdfExporter",
     "AutoCADPathInfo",

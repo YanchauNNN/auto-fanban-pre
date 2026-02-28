@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from ..cad import (
     A4MultipageGrouper,
+    CADDXFExecutor,
     FrameDetector,
     FrameSplitter,
     ODAConverter,
@@ -66,6 +67,7 @@ class PipelineExecutor:
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
         self.splitter = FrameSplitter()
+        self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.derivation = DerivationEngine()
         self.cover_gen = CoverGenerator()
         self.catalog_gen = CatalogGenerator()
@@ -90,6 +92,8 @@ class PipelineExecutor:
                 "split_results": {},
                 # Stage 7 产物: {cluster_id: split_dxf_path}
                 "sheet_set_splits": {},
+                # Stage 7 (cad_dxf) 产物: {source_dxf: result_json_dict}
+                "cad_dxf_results": {},
             }
 
             for stage in DELIVERABLE_STAGES:
@@ -239,12 +243,20 @@ class PipelineExecutor:
         context["frames"] = remaining
         context["sheet_sets"] = sheet_sets
 
+    def _module5_engine(self) -> str:
+        """模块5主执行引擎（cad_dxf / python_fallback / autocad_com）。"""
+        return getattr(self.config.module5_export, "engine", "cad_dxf")
+
     # ==================================================================
     # 阶段 7 (Stage B): SPLIT_AND_RENAME — 仅裁切
     # ==================================================================
 
     def _stage_split(self, job: Job, context: dict) -> None:
         """仅裁切DXF，产出中间产物到 work/split/"""
+        if self._module5_engine() == "cad_dxf":
+            self._stage_split_cad_dxf(job, context)
+            return
+
         split_dir = job.work_dir / "work" / "split"
         split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -313,12 +325,65 @@ class PipelineExecutor:
                 sheet_set.flags.append("裁切失败")
                 done += 1
 
+    def _stage_split_cad_dxf(self, job: Job, context: dict) -> None:
+        """cad_dxf 主路径：按 source_dxf 分组，执行 CAD 内核导出。"""
+        drawings_dir = job.work_dir / "output" / "drawings"
+        task_root = job.work_dir / "work" / "cad_tasks"
+        drawings_dir.mkdir(parents=True, exist_ok=True)
+        task_root.mkdir(parents=True, exist_ok=True)
+
+        grouped = self.cad_dxf_executor.group_by_source_dxf(
+            context["frames"],
+            context["sheet_sets"],
+        )
+        total = len(grouped)
+        done = 0
+        job.progress.details.update({"split_total": total, "split_done": 0})
+        context["cad_dxf_results"] = {}
+
+        for done, (source_dxf, group) in enumerate(grouped.items(), start=1):
+            self._update_progress(
+                job,
+                current_file=source_dxf.name,
+                message=f"CAD-DXF执行中 ({done}/{total})",
+                details={"split_done": done},
+            )
+            try:
+                result = self.cad_dxf_executor.execute_source_dxf(
+                    job_id=job.job_id,
+                    source_dxf=source_dxf,
+                    frames=group["frames"],
+                    sheet_sets=group["sheet_sets"],
+                    output_dir=drawings_dir,
+                    task_root=task_root,
+                )
+                context["cad_dxf_results"][str(source_dxf)] = result
+            except Exception as e:  # noqa: BLE001
+                logger.warning("CAD-DXF执行失败: %s: %s", source_dxf, e)
+                context["cad_dxf_results"][str(source_dxf)] = {
+                    "schema_version": "cad-dxf-result@1.0",
+                    "source_dxf": str(source_dxf),
+                    "frames": [],
+                    "sheet_sets": [],
+                    "errors": [str(e)],
+                }
+                job.add_flag(f"DXF执行失败:{source_dxf.name}")
+                for frame in group["frames"]:
+                    frame.add_flag("DXF执行失败")
+                for sheet_set in group["sheet_sets"]:
+                    if "DXF执行失败" not in sheet_set.flags:
+                        sheet_set.flags.append("DXF执行失败")
+
     # ==================================================================
     # 阶段 8 (Stage B): EXPORT_PDF_AND_DWG — 统一导出
     # ==================================================================
 
     def _stage_export(self, job: Job, context: dict) -> None:
         """从中间DXF导出 PDF + DWG 到 output/drawings/"""
+        if self._module5_engine() == "cad_dxf":
+            self._stage_export_cad_dxf(job, context)
+            return
+
         drawings_dir = job.work_dir / "output" / "drawings"
         drawings_dir.mkdir(parents=True, exist_ok=True)
 
@@ -454,6 +519,62 @@ class PipelineExecutor:
             self.splitter.oda.dxf_to_dwg(dxf_files[0], output_dir)
         except Exception as e:
             logger.warning(f"批量DXF→DWG失败: {e}")
+
+    def _stage_export_cad_dxf(self, job: Job, context: dict) -> None:
+        """cad_dxf 主路径的导出校验与结果回填。"""
+        drawings_dir = job.work_dir / "output" / "drawings"
+        drawings_dir.mkdir(parents=True, exist_ok=True)
+
+        frames_by_id = {frame.frame_id: frame for frame in context["frames"]}
+        sheet_sets_by_id = {ss.cluster_id: ss for ss in context["sheet_sets"]}
+        results = context.get("cad_dxf_results", {})
+
+        total = len(context["frames"]) + len(context["sheet_sets"])
+        done = 0
+        job.progress.details.update({"export_total": total, "export_done": 0})
+
+        for source_dxf, result in results.items():
+            self._update_progress(
+                job,
+                current_file=Path(source_dxf).name,
+                message=f"结果回填中 ({done}/{total})",
+                details={"export_done": done},
+            )
+            frame_count, sheet_count = self.cad_dxf_executor.apply_result(
+                result=result,
+                frames_by_id=frames_by_id,
+                sheet_sets_by_id=sheet_sets_by_id,
+            )
+            done += frame_count + sheet_count
+
+            for err in result.get("errors", []):
+                if isinstance(err, str) and err:
+                    job.add_flag(f"CAD结果错误:{Path(source_dxf).name}:{err}")
+
+        # 对未被 result 命中的帧做补充校验，保证失败可见
+        for frame in context["frames"]:
+            if frame.runtime.pdf_path is None or not frame.runtime.pdf_path.exists():
+                frame.add_flag("PDF缺失")
+
+            if frame.runtime.dwg_path is None or not frame.runtime.dwg_path.exists():
+                frame.add_flag("DWG缺失")
+
+        # 成组结果若无显式成功记录，保守追加失败标记
+        result_cluster_ids = {
+            str(item.get("cluster_id", ""))
+            for result in results.values()
+            for item in result.get("sheet_sets", [])
+            if isinstance(item, dict)
+        }
+        for sheet_set in context["sheet_sets"]:
+            if sheet_set.cluster_id not in result_cluster_ids and "导出失败" not in sheet_set.flags:
+                sheet_set.flags.append("导出失败")
+
+        self._update_progress(
+            job,
+            message=f"结果回填完成 ({done}/{total})",
+            details={"export_done": done},
+        )
 
     # ==================================================================
     # 阶段 9-10: 文档生成 / 打包（不变）
