@@ -249,13 +249,21 @@ class AcCoreConsoleRunner:
             ymin = float(bbox.get("ymin", 0.0))
             xmax = float(bbox.get("xmax", 0.0))
             ymax = float(bbox.get("ymax", 0.0))
+            vertices = self._frame_vertices(frame, bbox)
             paper = frame.get("paper_size_mm") or [0.0, 0.0]
             paper_w = float(paper[0]) if len(paper) > 0 else 0.0
             paper_h = float(paper[1]) if len(paper) > 1 else 0.0
+            sx = float(frame.get("sx")) if frame.get("sx") is not None else 0.0
+            sy = float(frame.get("sy")) if frame.get("sy") is not None else 0.0
             content.append(
                 (
                     f'(module5-run-frame "{frame_id}" "{name}" '
                     f"{xmin:.6f} {ymin:.6f} {xmax:.6f} {ymax:.6f} "
+                    f"{vertices[0][0]:.6f} {vertices[0][1]:.6f} "
+                    f"{vertices[1][0]:.6f} {vertices[1][1]:.6f} "
+                    f"{vertices[2][0]:.6f} {vertices[2][1]:.6f} "
+                    f"{vertices[3][0]:.6f} {vertices[3][1]:.6f} "
+                    f"{sx:.6f} {sy:.6f} "
                     f"{paper_w:.6f} {paper_h:.6f})"
                 ),
             )
@@ -267,20 +275,19 @@ class AcCoreConsoleRunner:
             if not pages:
                 content.append(
                     f'(module5-add-sheet-result "{cluster_id}" "failed" "" "" 0 '
-                    '"A4_MULTI_NO_PAGES")',
+                    '"A4_MULTI_NO_PAGES" nil)',
                 )
                 continue
 
-            union = self._union_pages_bbox(pages)
             page_count = len(pages)
             first_paper = pages[0].get("paper_size_mm") or [297.0, 210.0]
             paper_w = float(first_paper[0]) if len(first_paper) > 0 else 297.0
             paper_h = float(first_paper[1]) if len(first_paper) > 1 else 210.0
+            pages_expr = self._pages_to_lisp_list(pages)
             content.append(
                 (
                     f'(module5-run-sheet-set "{cluster_id}" "{name}" '
-                    f"{union['xmin']:.6f} {union['ymin']:.6f} "
-                    f"{union['xmax']:.6f} {union['ymax']:.6f} "
+                    f"{pages_expr} "
                     f"{paper_w:.6f} {paper_h:.6f} {page_count})"
                 ),
             )
@@ -303,9 +310,78 @@ class AcCoreConsoleRunner:
         return value.replace("\\", "\\\\").replace('"', '\\"')
 
     @staticmethod
-    def _union_pages_bbox(pages: list[dict[str, Any]]) -> dict[str, float]:
-        xmin = min(float(p["bbox"]["xmin"]) for p in pages)
-        ymin = min(float(p["bbox"]["ymin"]) for p in pages)
-        xmax = max(float(p["bbox"]["xmax"]) for p in pages)
-        ymax = max(float(p["bbox"]["ymax"]) for p in pages)
-        return {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax}
+    def _frame_vertices(frame: dict[str, Any], bbox: dict[str, Any]) -> list[tuple[float, float]]:
+        raw_vertices = frame.get("vertices")
+        if isinstance(raw_vertices, list) and len(raw_vertices) >= 4:
+            parsed: list[tuple[float, float]] = []
+            for item in raw_vertices[:4]:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    parsed.append((float(item[0]), float(item[1])))
+            if len(parsed) == 4:
+                return parsed
+
+        xmin = float(bbox.get("xmin", 0.0))
+        ymin = float(bbox.get("ymin", 0.0))
+        xmax = float(bbox.get("xmax", 0.0))
+        ymax = float(bbox.get("ymax", 0.0))
+        return [
+            (xmin, ymin),
+            (xmax, ymin),
+            (xmax, ymax),
+            (xmin, ymax),
+        ]
+
+    @staticmethod
+    def _pages_to_lisp_list(pages: list[dict[str, Any]]) -> str:
+        literals: list[str] = []
+        for page in pages:
+            page_index = int(page.get("page_index", 0))
+            bbox = page.get("bbox", {})
+            xmin = float(bbox.get("xmin", 0.0))
+            ymin = float(bbox.get("ymin", 0.0))
+            xmax = float(bbox.get("xmax", 0.0))
+            ymax = float(bbox.get("ymax", 0.0))
+            vertices = page.get("vertices")
+            if isinstance(vertices, list) and len(vertices) >= 4:
+                parsed: list[tuple[float, float]] = []
+                for item in vertices[:4]:
+                    if isinstance(item, (list, tuple)) and len(item) >= 2:
+                        parsed.append((float(item[0]), float(item[1])))
+                if len(parsed) == 4:
+                    vx1, vy1 = parsed[0]
+                    vx2, vy2 = parsed[1]
+                    vx3, vy3 = parsed[2]
+                    vx4, vy4 = parsed[3]
+                else:
+                    vx1, vy1, vx2, vy2, vx3, vy3, vx4, vy4 = (
+                        xmin,
+                        ymin,
+                        xmax,
+                        ymin,
+                        xmax,
+                        ymax,
+                        xmin,
+                        ymax,
+                    )
+            else:
+                vx1, vy1, vx2, vy2, vx3, vy3, vx4, vy4 = (
+                    xmin,
+                    ymin,
+                    xmax,
+                    ymin,
+                    xmax,
+                    ymax,
+                    xmin,
+                    ymax,
+                )
+            sx = float(page.get("sx")) if page.get("sx") is not None else 0.0
+            sy = float(page.get("sy")) if page.get("sy") is not None else 0.0
+            literals.append(
+                "(list "
+                f"{page_index:d} "
+                f"{xmin:.6f} {ymin:.6f} {xmax:.6f} {ymax:.6f} "
+                f"{vx1:.6f} {vy1:.6f} {vx2:.6f} {vy2:.6f} "
+                f"{vx3:.6f} {vy3:.6f} {vx4:.6f} {vy4:.6f} "
+                f"{sx:.6f} {sy:.6f})",
+            )
+        return f"(list {' '.join(literals)})"

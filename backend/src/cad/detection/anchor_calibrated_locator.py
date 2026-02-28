@@ -69,9 +69,7 @@ class AnchorCalibratedLocator:
             self.anchor_scale_candidates = [float(v) for v in scale_candidates]
         else:
             self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
-        self._scale_candidate_set: set[int] = {
-            int(c) for c in self.anchor_scale_candidates
-        }
+        self._scale_candidate_set: set[int] = {int(c) for c in self.anchor_scale_candidates}
         self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
         scale_fit_cfg = self.spec.titleblock_extract.get("scale_fit", {})
         self.scale_candidate_match_tol = float(
@@ -872,10 +870,18 @@ class AnchorCalibratedLocator:
         frames.append(self._to_frame_meta(cand, dxf_path))
 
     def _to_frame_meta(self, cand: CandidateFrame, dxf_path: Path) -> FrameMeta:
+        bbox = cand.bbox
+        vertices = [
+            (float(bbox.xmin), float(bbox.ymin)),
+            (float(bbox.xmax), float(bbox.ymin)),
+            (float(bbox.xmax), float(bbox.ymax)),
+            (float(bbox.xmin), float(bbox.ymax)),
+        ]
         runtime = FrameRuntime(
             frame_id=str(self._uuid()),
             source_file=dxf_path,
-            outer_bbox=cand.bbox,
+            outer_bbox=bbox,
+            outer_vertices=vertices,
             paper_variant_id=cand.paper_variant_id,
             sx=cand.sx,
             sy=cand.sy,

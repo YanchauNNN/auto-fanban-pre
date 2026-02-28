@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 class BBox(BaseModel):
     """边界框"""
+
     xmin: float
     ymin: float
     xmax: float
@@ -30,15 +31,16 @@ class BBox(BaseModel):
     def intersects(self, other: BBox) -> bool:
         """判断是否相交"""
         return not (
-            self.xmax < other.xmin or
-            self.xmin > other.xmax or
-            self.ymax < other.ymin or
-            self.ymin > other.ymax
+            self.xmax < other.xmin
+            or self.xmin > other.xmax
+            or self.ymax < other.ymin
+            or self.ymin > other.ymax
         )
 
 
 class TitleblockFields(BaseModel):
     """图签字段（从DXF ROI提取）"""
+
     internal_code: str | None = Field(None, description="内部编码(XXXXXXX-XXXXX-XXX)")
     external_code: str | None = Field(None, description="外部编码(19位)")
     album_code: str | None = Field(None, description="图册编号(从mid提取)")
@@ -67,9 +69,15 @@ class TitleblockFields(BaseModel):
 
 class FrameRuntime(BaseModel):
     """图框运行期字段（DXF流水线生成）"""
+
     frame_id: str = Field(..., description="图框实例唯一ID")
-    source_file: Path = Field(..., description="来源DWG文件路径")
+    source_file: Path = Field(..., description="检测/提取来源文件路径（通常为DXF）")
+    cad_source_file: Path | None = Field(None, description="CAD切图来源文件路径（优先DWG）")
     outer_bbox: BBox = Field(..., description="外框边界")
+    outer_vertices: list[tuple[float, float]] = Field(
+        default_factory=list,
+        description="图框四顶点坐标（按左下/右下/右上/左上）",
+    )
 
     # 纸张拟合结果
     paper_variant_id: str | None = Field(None, description="匹配的标准图幅ID")
@@ -91,6 +99,7 @@ class FrameRuntime(BaseModel):
 
 class FrameMeta(BaseModel):
     """图框完整元数据（运行期+图签）"""
+
     runtime: FrameRuntime
     titleblock: TitleblockFields = Field(default_factory=TitleblockFields)
 

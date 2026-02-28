@@ -251,6 +251,12 @@ class RuntimeConfig(BaseSettings):
         if isinstance(node, dict):
             if "default" in node and any(k in node for k in ("type", "desc", "required")):
                 return node["default"]
+            # 叶子参数允许无 default（例如可选 work_dir），此时应返回 None，
+            # 避免把参数元数据对象误当作真实配置值。
+            if "default" not in node and "type" in node:
+                has_nested_value = any(isinstance(v, (dict, list)) for v in node.values())
+                if not has_nested_value:
+                    return None
             result: dict[str, Any] = {}
             for k, v in node.items():
                 extracted = RuntimeConfig._extract_tree(v)

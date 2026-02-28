@@ -129,6 +129,52 @@ class _RunnerMaterializeStub:
         return {"exit_code": 0}
 
 
+class _PdfFallbackStub:
+    """记录 Python 回退导出调用。"""
+
+    def __init__(self) -> None:
+        self.single_calls: list[dict] = []
+        self.multi_calls: list[dict] = []
+
+    def export_single_page(
+        self,
+        source_dxf: Path,
+        pdf_path: Path,
+        *,
+        clip_bbox: BBox | None = None,
+        paper_size_mm: tuple[float, float] | None = None,
+    ) -> None:
+        self.single_calls.append(
+            {
+                "source_dxf": source_dxf,
+                "pdf_path": pdf_path,
+                "clip_bbox": clip_bbox,
+                "paper_size_mm": paper_size_mm,
+            },
+        )
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_text("single-fallback", encoding="utf-8")
+
+    def export_multipage(
+        self,
+        source_dxf: Path,
+        pdf_path: Path,
+        page_bboxes: list[BBox],
+        *,
+        paper_size_mm: list[float] | None = None,
+    ) -> None:
+        self.multi_calls.append(
+            {
+                "source_dxf": source_dxf,
+                "pdf_path": pdf_path,
+                "page_bboxes": page_bboxes,
+                "paper_size_mm": paper_size_mm,
+            },
+        )
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_text("multi-fallback", encoding="utf-8")
+
+
 def _make_runtime(frame_id: str, source_file: Path, bbox: BBox) -> FrameRuntime:
     return FrameRuntime(
         frame_id=frame_id,
@@ -173,6 +219,27 @@ def _make_sheet_set(cluster_id: str, frame: FrameMeta) -> SheetSet:
         page_total=1,
         pages=[page],
         master_page=page,
+    )
+
+
+def _make_sheet_set_two_pages(cluster_id: str, frame: FrameMeta) -> SheetSet:
+    page1 = PageInfo(
+        page_index=1,
+        outer_bbox=frame.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=frame,
+    )
+    page2 = PageInfo(
+        page_index=2,
+        outer_bbox=BBox(xmin=0, ymin=0, xmax=900, ymax=600),
+        has_titleblock=True,
+        frame_meta=frame,
+    )
+    return SheetSet(
+        cluster_id=cluster_id,
+        page_total=2,
+        pages=[page1, page2],
+        master_page=page1,
     )
 
 
@@ -455,3 +522,86 @@ def test_safe_task_dir_name_strips_non_ascii():
     name = CADDXFExecutor._safe_task_dir_name(Path("2016仿真图.dxf"))
     assert name.startswith("2016_")
     assert all(ch.isascii() for ch in name)
+
+
+def test_sheet_set_partial_page_pdfs_should_fallback_not_merge(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    sheet_set = _make_sheet_set_two_pages("cluster-1", frame)
+    executor = _make_executor()
+    fallback_stub = _PdfFallbackStub()
+    executor._pdf_fallback_exporter = fallback_stub
+
+    staged_output_dir = tmp_path / "stage-out"
+    staged_output_dir.mkdir(parents=True, exist_ok=True)
+    partial_page_pdf = staged_output_dir / "set__p1.pdf"
+    # 故意写入非 PDF 内容：若错误触发合并，会在此处抛错导致测试失败。
+    partial_page_pdf.write_text("not-a-pdf", encoding="utf-8")
+    dwg_path = staged_output_dir / "set.dwg"
+    dwg_path.write_text("dwg", encoding="utf-8")
+    merged_pdf = staged_output_dir / "set.pdf"
+
+    result = {
+        "frames": [],
+        "sheet_sets": [
+            {
+                "cluster_id": "cluster-1",
+                "status": "failed",
+                "pdf_path": str(merged_pdf),
+                "dwg_path": str(dwg_path),
+                "page_count": 2,
+                "flags": ["PLOT_FAILED"],
+                "page_pdf_paths": [str(partial_page_pdf)],
+            },
+        ],
+        "errors": [],
+    }
+
+    executor._recover_pdf_with_python_fallback(
+        result=result,
+        frames=[frame],
+        sheet_sets=[sheet_set],
+        staged_output_dir=staged_output_dir,
+    )
+
+    item = result["sheet_sets"][0]
+    assert len(fallback_stub.multi_calls) == 1
+    assert "PDF_CAD_WINDOW_MERGED" not in item["flags"]
+    assert "PDF_CAD_WINDOW_PARTIAL" in item["flags"]
+    assert "PDF_PYTHON_FALLBACK" in item["flags"]
+    assert merged_pdf.exists()
+
+
+def test_normalize_canvas_swaps_target_size_after_rotation(tmp_path: Path):
+    pypdf = pytest.importorskip("pypdf")
+
+    executor = _make_executor()
+
+    pdf_path = tmp_path / "portrait.pdf"
+    writer = pypdf.PdfWriter()
+    writer.add_blank_page(
+        width=CADDXFExecutor._mm_to_pt(210.0),
+        height=CADDXFExecutor._mm_to_pt(297.0),
+    )
+    with open(pdf_path, "wb") as f:
+        writer.write(f)
+
+    changed = executor._normalize_cad_pdf_canvas_for_paper(
+        pdf_path=pdf_path,
+        paper_size_mm=(297.0, 210.0),
+    )
+    assert changed is True
+
+    reader = pypdf.PdfReader(str(pdf_path))
+    page = reader.pages[0]
+    width_mm = float(page.mediabox.width) * 25.4 / 72.0
+    height_mm = float(page.mediabox.height) * 25.4 / 72.0
+    assert width_mm == pytest.approx(240.0, abs=2.0)
+    assert height_mm == pytest.approx(327.0, abs=2.0)
+    assert height_mm > 296.0

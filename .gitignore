@@ -4,3 +4,6 @@ Fonts/
 
 # Test files (do not commit)
 test/
+
+# Runtime artifacts
+storage/

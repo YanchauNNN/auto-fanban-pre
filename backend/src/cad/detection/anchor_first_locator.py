@@ -80,9 +80,7 @@ class AnchorFirstLocator:
             self.anchor_scale_candidates = [float(v) for v in scale_candidates]
         else:
             self.anchor_scale_candidates = [1, 2, 5, 10, 20, 25, 50, 100, 200]
-        self._scale_candidate_set: set[int] = {
-            int(c) for c in self.anchor_scale_candidates
-        }
+        self._scale_candidate_set: set[int] = {int(c) for c in self.anchor_scale_candidates}
         self.anchor_scale_tol = float(anchor_cfg.get("scale_match_rel_tol", 0.1))
         self.scale_candidate_match_tol = float(
             scale_fit_cfg.get("scale_candidate_match_tol", 0.015)
@@ -272,9 +270,7 @@ class AnchorFirstLocator:
             unique.append((w, h))
         return unique
 
-    def _bbox_matches_templates(
-        self, bbox: BBox, templates: list[tuple[float, float]]
-    ) -> bool:
+    def _bbox_matches_templates(self, bbox: BBox, templates: list[tuple[float, float]]) -> bool:
         if not templates:
             return False
         for tw, th in templates:
@@ -355,9 +351,7 @@ class AnchorFirstLocator:
                 if scale < min_scale * (1 - margin) or scale > max_scale * (1 + margin):
                     continue
             elif use_scale_filter and self.anchor_scale_candidates:
-                rel_err = min(
-                    abs(scale - c) / max(c, 1e-9) for c in self.anchor_scale_candidates
-                )
+                rel_err = min(abs(scale - c) / max(c, 1e-9) for c in self.anchor_scale_candidates)
                 if rel_err > self.anchor_scale_tol:
                     continue
             profile = self.spec.get_roi_profile(profile_id)
@@ -415,10 +409,18 @@ class AnchorFirstLocator:
         frames.append(self._to_frame_meta(cand, dxf_path))
 
     def _to_frame_meta(self, cand: CandidateFrame, dxf_path: Path) -> FrameMeta:
+        bbox = cand.bbox
+        vertices = [
+            (float(bbox.xmin), float(bbox.ymin)),
+            (float(bbox.xmax), float(bbox.ymin)),
+            (float(bbox.xmax), float(bbox.ymax)),
+            (float(bbox.xmin), float(bbox.ymax)),
+        ]
         runtime = FrameRuntime(
             frame_id=str(self._uuid()),
             source_file=dxf_path,
-            outer_bbox=cand.bbox,
+            outer_bbox=bbox,
+            outer_vertices=vertices,
             paper_variant_id=cand.paper_variant_id,
             sx=cand.sx,
             sy=cand.sy,

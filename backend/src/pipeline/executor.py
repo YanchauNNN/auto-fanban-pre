@@ -86,6 +86,7 @@ class PipelineExecutor:
 
             context: dict = {
                 "dxf_files": [],
+                "dxf_to_dwg": {},
                 "frames": [],
                 "sheet_sets": [],
                 # Stage 7 产物: {frame_id: split_dxf_path}
@@ -96,13 +97,35 @@ class PipelineExecutor:
                 "cad_dxf_results": {},
             }
 
-            for stage in DELIVERABLE_STAGES:
+            split_only = bool(job.options.get("split_only", False))
+            stages = (
+                [
+                    stage
+                    for stage in DELIVERABLE_STAGES
+                    if stage.name
+                    in {
+                        StageEnum.INGEST.value,
+                        StageEnum.CONVERT_DWG_TO_DXF.value,
+                        StageEnum.DETECT_FRAMES.value,
+                        StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
+                        StageEnum.SCALE_FIT_AND_CHECK.value,
+                        StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
+                        StageEnum.A4_MULTIPAGE_GROUPING.value,
+                        StageEnum.SPLIT_AND_RENAME.value,
+                        StageEnum.EXPORT_PDF_AND_DWG.value,
+                    }
+                ]
+                if split_only
+                else DELIVERABLE_STAGES
+            )
+            for stage in stages:
                 self._execute_stage(job, stage, context)
 
             # 聚合 frame/sheet_set flags 到 job
             self._aggregate_flags(job, context)
 
             job.mark_succeeded()
+            self._update_progress(job, message="任务完成", force=True)
 
         except Exception as e:
             logger.exception(f"流水线执行失败: {job.job_id}")
@@ -175,6 +198,7 @@ class PipelineExecutor:
                 )
                 dxf_path = self.oda.dwg_to_dxf(dwg_file, dxf_dir)
                 context["dxf_files"].append(dxf_path)
+                context["dxf_to_dwg"][str(dxf_path.resolve())] = dwg_file.resolve()
                 job.progress.details["dwg_converted"] = (
                     job.progress.details.get("dwg_converted", 0) + 1
                 )
@@ -199,6 +223,10 @@ class PipelineExecutor:
                     details={"dxf_current": dxf_path.name},
                 )
                 frames = self.frame_detector.detect_frames(dxf_path)
+                source_dwg = context.get("dxf_to_dwg", {}).get(str(dxf_path.resolve()))
+                if source_dwg is not None:
+                    for frame in frames:
+                        frame.runtime.cad_source_file = Path(source_dwg)
                 context["frames"].extend(frames)
                 job.progress.details["dxf_processed"] = (
                     job.progress.details.get("dxf_processed", 0) + 1
