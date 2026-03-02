@@ -18,6 +18,7 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
     module5_trace_log = tmp_path / "module5_trace.log"
 
     task_data = {
+        "workflow_stage": "split_only",
         "job_id": "job-1",
         "source_dxf": str(tmp_path / "src.dxf"),
         "output_dir": str(tmp_path / "out"),
@@ -28,8 +29,18 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
             "margins_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10},
         },
         "selection": {
+            "mode": "database",
             "bbox_margin_percent": 0.015,
             "empty_selection_retry_margin_percent": 0.03,
+            "hard_retry_margin_percent": 0.25,
+            "db_unknown_bbox_policy": "keep_if_uncertain",
+            "db_fallback_to_crossing": True,
+        },
+        "output": {
+            "pdf_from_split_dwg_mode": "always",
+            "split_stage_plot_enabled": False,
+            "plot_preferred_area": "extents",
+            "plot_fallback_area": "window",
         },
         "frames": [
             {
@@ -61,6 +72,7 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
 
     runner._write_runtime_script(
         runtime_scr=runtime_scr,
+        task_json=tmp_path / "task.json",
         lsp_path=lsp_path,
         task_data=task_data,
         result_json=result_json,
@@ -69,9 +81,48 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
 
     content = runtime_scr.read_text(encoding="utf-8")
     assert '(module5-reset "' in content
-    assert '(module5-run-frame "f-1" "N1"' in content
-    assert '(module5-run-sheet-set "c-1" "S1"' in content
+    assert '(module5-set-selection-config "database" 0.250000 "keep_if_uncertain" T)' in content
+    assert '(module5-set-output-config "always" "extents" "window" nil)' in content
+    assert '(module5-run-frame-split "f-1" "N1"' in content
+    assert '(module5-run-sheet-set-split "c-1" "S1"' in content
     assert "(module5-finalize)" in content
+
+
+def test_write_runtime_script_uses_dotnet_bridge_when_enabled(tmp_path: Path):
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    runtime_scr = tmp_path / "runtime.scr"
+    lsp_path = tmp_path / "module5_cad_executor.lsp"
+    lsp_path.write_text("(princ)\n", encoding="utf-8")
+    task_json = tmp_path / "task.json"
+    result_json = tmp_path / "result.json"
+    trace_log = tmp_path / "module5_trace.log"
+    task_data = {
+        "workflow_stage": "split_only",
+        "engines": {
+            "selection_engine": "dotnet",
+            "plot_engine": "dotnet",
+            "dotnet_bridge": {
+                "enabled": True,
+                "dll_path": str(tmp_path / "Module5CadBridge.dll"),
+                "command_name": "M5BRIDGE_RUN",
+                "netload_each_run": True,
+            },
+        },
+    }
+
+    runner._write_runtime_script(
+        runtime_scr=runtime_scr,
+        task_json=task_json,
+        lsp_path=lsp_path,
+        task_data=task_data,
+        result_json=result_json,
+        module5_trace_log=trace_log,
+    )
+    content = runtime_scr.read_text(encoding="utf-8")
+    assert 'command "_.NETLOAD"' in content
+    assert 'command "M5BRIDGE_RUN"' in content
+    assert "TRUSTEDPATHS" not in content
+    assert "(module5-finalize)" not in content
 
 
 def test_run_accepts_timeout_when_result_exists(tmp_path: Path, monkeypatch):

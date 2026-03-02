@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {}
+  },
+  "projects": {
+    "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
+        "projectName": "Module5CadBridge",
+        "projectPath": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
+        "packagesPath": "C:\\Users\\lenovo\\.nuget\\packages\\",
+        "outputPath": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\lenovo\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "runtimeIdentifierGraphPath": "C:\\Users\\lenovo\\AppData\\Local\\dotnet-sdk-8.0.418\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

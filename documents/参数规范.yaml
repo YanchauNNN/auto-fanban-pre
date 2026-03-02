@@ -8,7 +8,7 @@
 # ============================================================================
 
 schema_version: "2.0"
-last_updated: "2026-02-13"
+last_updated: "2026-03-02"
 
 # ============================================================================
 # 一、通用枚举定义
@@ -82,7 +82,7 @@ doc_generation:
     pdf_fallback_font_family: { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 中文字体兜底顺序" }
 
     # 模块5（CAD）导出链路控制
-    module5_pdf_engine: { type: "enum[module5_pdf_engine]", default: "python", desc: "模块5 PDF 引擎：python/autocad_com/both" }
+    module5_pdf_engine: { type: "enum[module5_pdf_engine]", default: "python", desc: "模块5历史参数（已废止，不再参与切图/打印路由）" }
     autocad_install_dir: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于 Fonts/CTB/PC3 路径推导）" }
     autocad_prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     autocad_visible: { type: bool, default: false, desc: "AutoCAD COM 是否显示主窗口" }
@@ -92,18 +92,37 @@ doc_generation:
     autocad_retry: { type: int, default: 1, desc: "AutoCAD 绘图失败重试次数" }
 
     # 模块5 CAD-DXF 主执行链路（运行期扩展）
-    module5_engine: { type: str, default: "cad_dxf", desc: "模块5主执行引擎：cad_dxf/python_fallback/autocad_com" }
+    module5_engine: { type: str, default: "cad_dxf", desc: "模块5主执行引擎（固定cad_dxf）" }
     module5_cad_runner_accoreconsole_exe: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
     module5_cad_runner_script_dir: { type: str, default: "..\\backend\\src\\cad\\scripts", desc: "模块5 CAD脚本目录（lsp/scr）" }
     module5_cad_runner_task_timeout_sec: { type: int, default: 900, desc: "单个 source_dxf 执行超时（秒）" }
     module5_cad_runner_retry: { type: int, default: 1, desc: "AcCoreConsole 执行失败重试次数" }
     module5_cad_runner_locale: { type: str, default: "en-US", desc: "AcCoreConsole 语言区域" }
     module5_cad_runner_max_parallel_dxf: { type: int, default: 1, desc: "并发执行 source_dxf 的最大数量" }
-    module5_selection_mode: { type: str, default: "crossing", desc: "选集模式：crossing/window（主链路固定 crossing）" }
+    module5_dotnet_bridge_enabled: { type: bool, default: true, desc: "是否启用 .NET 桥接主路径（按 stage+engine 生效）" }
+    module5_dotnet_bridge_dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
+    module5_dotnet_bridge_command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
+    module5_dotnet_bridge_netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
+    module5_dotnet_bridge_fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
+    module5_selection_engine: { type: str, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
+    module5_selection_mode: { type: str, default: "database", desc: "选集模式：database/crossing（默认database，数据库级几何相交）" }
     module5_bbox_margin_percent: { type: float, default: 0.015, desc: "图框 bbox 扩边比例（用于选集）" }
     module5_empty_selection_retry_margin_percent: { type: float, default: 0.03, desc: "空选集时二次扩边比例" }
+    module5_hard_retry_margin_percent: { type: float, default: 0.25, desc: "空选集硬重试扩边比例（第三次重试）" }
+    module5_db_unknown_bbox_policy: { type: str, default: "keep_if_uncertain", desc: "数据库级选集中，无法计算bbox实体处理策略：keep_if_uncertain/drop" }
+    module5_db_fallback_to_crossing: { type: bool, default: true, desc: "数据库级选集失败时是否回退crossing命令选集" }
+    module5_plot_engine: { type: str, default: "dotnet", desc: "窗口打印执行引擎：dotnet/lisp" }
     module5_output_a4_multipage_pdf: { type: str, default: "merge_pages", desc: "A4成组PDF输出策略：merge_pages/single_page_fallback" }
     module5_output_on_frame_fail: { type: str, default: "flag_and_continue", desc: "单帧失败策略：flag_and_continue/abort_dxf" }
+    module5_output_pdf_from_split_dwg_mode: { type: str, default: "always", desc: "模块5 PDF链路策略：always(固定从切图DWG打印)/off(仅调试禁用)" }
+    module5_output_split_stage_plot_enabled: { type: bool, default: false, desc: "切图阶段是否同时打印PDF（默认false，仅执行WBLOCK）" }
+    module5_output_plot_preferred_area: { type: str, default: "extents", desc: "切图DWG打印主策略：extents/window" }
+    module5_output_plot_fallback_area: { type: str, default: "window", desc: "切图DWG打印回退策略：window/none" }
+    module5_output_plot_session_mode: { type: str, default: "per_source_batch", desc: "打印会话模式：per_source_batch（每个source_dxf一次窗口批量打印）" }
+    module5_output_plot_from_source_window_enabled: { type: bool, default: true, desc: "是否启用原始DWG窗口批量打印主路径" }
+    module5_output_plot_fallback_to_split_on_failure: { type: bool, default: true, desc: "窗口主路径失败时仅对失败帧/失败页回退到切图DWG打印" }
+    module5_output_pdf_validation_min_size_bytes: { type: int, default: 1024, desc: "PDF 最小体积门禁（字节）" }
+    module5_output_pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
   # --------------------------------------------------------------------------
   # 2.2 全局参数定义

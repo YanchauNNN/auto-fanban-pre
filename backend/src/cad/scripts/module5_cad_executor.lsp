@@ -25,12 +25,24 @@
 (setq *m5-margin-right* 10.0)
 (setq *m5-bbox-margin* 0.015)
 (setq *m5-retry-margin* 0.03)
+(setq *m5-hard-retry-margin* 0.25)
+(setq *m5-pdf-from-split-mode* "always")
+(setq *m5-plot-preferred-area* "extents")
+(setq *m5-plot-fallback-area* "window")
+(setq *m5-split-stage-plot-enabled* nil)
+(setq *m5-selection-mode* "database")
+(setq *m5-db-unknown-bbox-policy* "keep_if_uncertain")
+(setq *m5-db-fallback-crossing* T)
 
 (setq *m5-frame-results* nil)
 (setq *m5-sheet-results* nil)
 (setq *m5-errors* nil)
 (setq *m5-last-wblock-error* "")
 (setq *m5-last-plot-error* "")
+
+(defun m5-str-lower (s)
+  (strcase (if s s "") T)
+)
 
 (defun m5-log (msg / fp)
   (if (and *m5-log-path* (/= *m5-log-path* ""))
@@ -70,6 +82,39 @@
   )
 )
 
+(defun m5-sleep-ms (delay-ms / start now elapsed)
+  (if (and delay-ms (> delay-ms 0))
+    (progn
+      (setq start (getvar "MILLISECS"))
+      (setq now start)
+      (setq elapsed 0)
+      (while (< elapsed delay-ms)
+        (setq now (getvar "MILLISECS"))
+        (if (>= now start)
+          (setq elapsed (- now start))
+          (setq elapsed (+ (- 2147483647 start) now))
+        )
+      )
+    )
+  )
+  T
+)
+
+(defun m5-file-exists-retry (path retries delay-ms / i ok)
+  (setq i 0)
+  (setq ok nil)
+  (while (and (< i retries) (not ok))
+    (if (m5-file-exists path)
+      (setq ok T)
+      (if (and delay-ms (> delay-ms 0))
+        (m5-sleep-ms delay-ms)
+      )
+    )
+    (setq i (1+ i))
+  )
+  ok
+)
+
 (defun m5-bbox-expand (xmin ymin xmax ymax ratio / w h dx dy)
   (setq w (- xmax xmin))
   (setq h (- ymax ymin))
@@ -103,6 +148,104 @@
   (strcat (rtos x 2 8) "," (rtos y 2 8))
 )
 
+(defun m5-bbox-overlap-p (a b)
+  (if (or
+        (> (nth 0 a) (nth 2 b))
+        (< (nth 2 a) (nth 0 b))
+        (> (nth 1 a) (nth 3 b))
+        (< (nth 3 a) (nth 1 b))
+      )
+    nil
+    T
+  )
+)
+
+(defun m5-safe-vla-ename (obj / ret)
+  (setq ret (vl-catch-all-apply 'vlax-vla-object->ename (list obj)))
+  (if (vl-catch-all-error-p ret)
+    nil
+    ret
+  )
+)
+
+(defun m5-try-get-entity-point (ename / data pt)
+  (setq data (entget ename))
+  (if data
+    (progn
+      (setq pt (cdr (assoc 10 data)))
+      (if (and pt (>= (length pt) 2))
+        (list (car pt) (cadr pt))
+        nil
+      )
+    )
+    nil
+  )
+)
+
+(defun m5-get-entity-bbox (obj ename / minpt maxpt ret minlst maxlst pt)
+  (setq ret (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'minpt 'maxpt)))
+  (if (vl-catch-all-error-p ret)
+    (progn
+      (setq pt (if ename (m5-try-get-entity-point ename) nil))
+      (if pt
+        (list (car pt) (cadr pt) (car pt) (cadr pt))
+        nil
+      )
+    )
+    (progn
+      (setq minlst (vlax-safearray->list (vlax-variant-value minpt)))
+      (setq maxlst (vlax-safearray->list (vlax-variant-value maxpt)))
+      (if (and minlst maxlst (>= (length minlst) 2) (>= (length maxlst) 2))
+        (list (car minlst) (cadr minlst) (car maxlst) (cadr maxlst))
+        nil
+      )
+    )
+  )
+)
+
+(defun m5-select-by-db-bbox (bbox / acad doc space ss obj ename ent-bbox bbox-ret matched uncertain policy)
+  (setq acad (vlax-get-acad-object))
+  (setq doc (vla-get-ActiveDocument acad))
+  (setq space (vla-get-ModelSpace doc))
+  (setq ss (ssadd))
+  (setq matched 0)
+  (setq uncertain 0)
+  (setq policy (m5-str-lower *m5-db-unknown-bbox-policy*))
+  (vlax-for obj space
+    (setq ename (m5-safe-vla-ename obj))
+    (if ename
+      (progn
+        (setq bbox-ret (vl-catch-all-apply 'm5-get-entity-bbox (list obj ename)))
+        (if (vl-catch-all-error-p bbox-ret)
+          (setq ent-bbox nil)
+          (setq ent-bbox bbox-ret)
+        )
+        (if ent-bbox
+          (if (m5-bbox-overlap-p ent-bbox bbox)
+            (progn
+              (ssadd ename ss)
+              (setq matched (1+ matched))
+            )
+          )
+          (if (= policy "keep_if_uncertain")
+            (progn
+              (ssadd ename ss)
+              (setq uncertain (1+ uncertain))
+            )
+          )
+        )
+      )
+    )
+  )
+  (if (> (+ matched uncertain) 0)
+    (progn
+      (m5-log (strcat "[SELECT-DB] matched=" (itoa matched) ", uncertain=" (itoa uncertain)))
+      ss
+    )
+    nil
+  )
+)
+
 (defun m5-select-crossing (bbox / p1 p2)
   (setq p1 (list (nth 0 bbox) (nth 1 bbox)))
   (setq p2 (list (nth 2 bbox) (nth 3 bbox)))
@@ -116,18 +259,40 @@
   )
 )
 
+(defun m5-select-bbox-once (bbox / mode ss db-ret)
+  (setq mode (m5-str-lower *m5-selection-mode*))
+  (setq ss nil)
+  (if (= mode "crossing")
+    (setq ss (m5-select-crossing bbox))
+    (progn
+      (setq db-ret (vl-catch-all-apply 'm5-select-by-db-bbox (list bbox)))
+      (if (vl-catch-all-error-p db-ret)
+        (progn
+          (m5-log (strcat "[SELECT-DB] error=" (vl-catch-all-error-message db-ret)))
+          (setq ss nil)
+        )
+        (setq ss db-ret)
+      )
+      (if (and (null ss) *m5-db-fallback-crossing*)
+        (setq ss (m5-select-crossing bbox))
+      )
+    )
+  )
+  ss
+)
+
 (defun m5-select-with-retry (xmin ymin xmax ymax / bbox retry-bbox hard-retry-bbox ss)
   (setq bbox (m5-bbox-expand xmin ymin xmax ymax *m5-bbox-margin*))
-  (setq ss (m5-select-crossing bbox))
+  (setq ss (m5-select-bbox-once bbox))
   (if (null ss)
     (progn
       (setq retry-bbox (m5-bbox-expand xmin ymin xmax ymax *m5-retry-margin*))
-      (setq ss (m5-select-crossing retry-bbox))
+      (setq ss (m5-select-bbox-once retry-bbox))
       (if (null ss)
         (progn
-          ; 二次兜底：给A4小图框更大的窗口容错
-          (setq hard-retry-bbox (m5-bbox-expand xmin ymin xmax ymax 0.25))
-          (setq ss (m5-select-crossing hard-retry-bbox))
+          ; 二次兜底：小图框可使用更大的窗口容错（由配置控制）。
+          (setq hard-retry-bbox (m5-bbox-expand xmin ymin xmax ymax *m5-hard-retry-margin*))
+          (setq ss (m5-select-bbox-once hard-retry-bbox))
         )
       )
     )
@@ -258,7 +423,7 @@
   (setq *m5-frame-results* (append *m5-frame-results* (list line)))
 )
 
-(defun module5-add-sheet-result (cluster-id status pdf-path dwg-path page-count flag page-pdf-paths / line)
+(defun module5-add-sheet-result (cluster-id status pdf-path dwg-path page-count flag page-dwg-paths page-pdf-paths / line)
   (setq line
     (strcat
       "{"
@@ -268,6 +433,7 @@
       "\"dwg_path\":\"" (m5-json-escape dwg-path) "\","
       "\"page_count\":" (itoa page-count) ","
       "\"flags\":" (m5-make-flag-json flag) ","
+      "\"page_dwg_paths\":" (m5-make-string-array-json page-dwg-paths) ","
       "\"page_pdf_paths\":" (m5-make-string-array-json page-pdf-paths)
       "}"
     )
@@ -346,6 +512,7 @@
   (if (or (null ss) (= (sslength ss) 0))
     nil
     (progn
+      ; AcCoreConsole 下显式传入 ss 兼容性较差，稳定路径仍使用 "_P"（已通过前置 sssetfirst 固定上下文）。
       (sssetfirst nil ss)
       (setq cmd-ret (vl-catch-all-apply 'command-s (list "_.-WBLOCK" dwg-path "0,0,0" "_P" "")))
       (if (vl-catch-all-error-p cmd-ret)
@@ -353,7 +520,7 @@
           (setq *m5-last-wblock-error* (vl-catch-all-error-message cmd-ret))
           nil
         )
-        (m5-file-exists dwg-path)
+        (m5-file-exists-retry dwg-path 15 100)
       )
     )
   )
@@ -368,33 +535,61 @@
   )
 )
 
-(defun m5-do-plot-once (pdf-path bbox media orient / p1 p2 cmd-ret)
+(defun m5-do-plot-once (pdf-path bbox media orient area-mode / p1 p2 cmd-ret mode)
+  (setq mode (strcase (if area-mode area-mode "W")))
   (setq p1 (m5-point-str (nth 0 bbox) (nth 1 bbox)))
   (setq p2 (m5-point-str (nth 2 bbox) (nth 3 bbox)))
-  (setq cmd-ret
-    (vl-catch-all-apply
-      'command-s
-      (list
-        "_.-PLOT"
-        "Y"
-        ""
-        *m5-pc3*
-        media
-        "M"
-        orient
-        "N"
-        "W"
-        p1
-        p2
-        "F"
-        "C"
-        "Y"
-        *m5-ctb*
-        "Y"
-        "A"
-        pdf-path
-        "N"
-        "Y"
+  (if (= mode "E")
+    (setq cmd-ret
+      (vl-catch-all-apply
+        'command-s
+        (list
+          "_.-PLOT"
+          "Y"
+          ""
+          *m5-pc3*
+          media
+          "M"
+          orient
+          "N"
+          "E"
+          "F"
+          "C"
+          "Y"
+          *m5-ctb*
+          "Y"
+          "A"
+          pdf-path
+          "N"
+          "Y"
+        )
+      )
+    )
+    (setq cmd-ret
+      (vl-catch-all-apply
+        'command-s
+        (list
+          "_.-PLOT"
+          "Y"
+          ""
+          *m5-pc3*
+          media
+          "M"
+          orient
+          "N"
+          "W"
+          p1
+          p2
+          "F"
+          "C"
+          "Y"
+          *m5-ctb*
+          "Y"
+          "A"
+          pdf-path
+          "N"
+          "Y"
+        )
       )
     )
   )
@@ -403,61 +598,95 @@
       (setq *m5-last-plot-error* (strcat "PLOT_COMMAND_ERROR:" (vl-catch-all-error-message cmd-ret)))
       nil
     )
-    (if (m5-file-exists pdf-path)
+    (if (m5-file-exists-retry pdf-path 10 100)
       (progn
         (setq *m5-last-plot-error* "")
         T
       )
       (progn
-        (setq *m5-last-plot-error* (strcat "PLOT_OUTPUT_MISSING:" media))
+        (setq *m5-last-plot-error* (strcat "PLOT_OUTPUT_MISSING:" media ":" mode))
         nil
       )
     )
   )
 )
 
-(defun m5-do-plot (pdf-path bbox paper-w paper-h / media1 media2 orient1 orient2 ok)
+(defun m5-do-plot-with-area (pdf-path bbox paper-w paper-h area-mode / media1 media2 orient1 orient2 ok)
   (setq *m5-last-plot-error* "")
   (setq media1 (m5-media-name paper-w paper-h))
   (setq media2 (m5-media-name paper-h paper-w))
   (setq orient1 (m5-orientation-name paper-w paper-h))
   (setq orient2 (m5-orientation-name paper-h paper-w))
 
-  (setq ok (m5-do-plot-once pdf-path bbox media1 orient1))
+  (setq ok (m5-do-plot-once pdf-path bbox media1 orient1 area-mode))
 
   ; A0在不同驱动上常见 media 名差异，优先尝试 expand（可保留页边距语义）。
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1219.00_x_871.00_MM)" "Landscape"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1219.00_x_871.00_MM)" "Landscape" area-mode))
   )
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(871.00_x_1219.00_MM)" "Portrait"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(871.00_x_1219.00_MM)" "Portrait" area-mode))
   )
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1189.00_x_841.00_MM)" "Landscape"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1189.00_x_841.00_MM)" "Landscape" area-mode))
   )
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1189.00_x_841.00_MM)" "Portrait"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(1189.00_x_841.00_MM)" "Portrait" area-mode))
   )
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(841.00_x_1189.00_MM)" "Landscape"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(841.00_x_1189.00_MM)" "Landscape" area-mode))
   )
   (if (and (not ok) (m5-is-a0-paper paper-w paper-h))
-    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(841.00_x_1189.00_MM)" "Portrait"))
+    (setq ok (m5-do-plot-once pdf-path bbox "ISO_expand_A0_(841.00_x_1189.00_MM)" "Portrait" area-mode))
   )
 
   (if (and (not ok) (/= orient2 orient1))
-    (setq ok (m5-do-plot-once pdf-path bbox media1 orient2))
+    (setq ok (m5-do-plot-once pdf-path bbox media1 orient2 area-mode))
   )
 
   (if (and (not ok) (/= media2 media1))
-    (setq ok (m5-do-plot-once pdf-path bbox media2 orient1))
+    (setq ok (m5-do-plot-once pdf-path bbox media2 orient1 area-mode))
   )
 
   (if (and (not ok) (/= media2 media1) (/= orient2 orient1))
-    (setq ok (m5-do-plot-once pdf-path bbox media2 orient2))
+    (setq ok (m5-do-plot-once pdf-path bbox media2 orient2 area-mode))
   )
 
   ok
+)
+
+(defun m5-do-plot (pdf-path bbox paper-w paper-h)
+  (m5-do-plot-with-area pdf-path bbox paper-w paper-h "W")
+)
+
+(defun m5-do-plot-from-split-dwg (pdf-path bbox paper-w paper-h / preferred fallback ok used-flag)
+  (setq preferred (m5-str-lower *m5-plot-preferred-area*))
+  (setq fallback (m5-str-lower *m5-plot-fallback-area*))
+  (setq ok nil)
+  (setq used-flag "")
+
+  (if (= preferred "extents")
+    (progn
+      (setq ok (m5-do-plot-with-area pdf-path bbox paper-w paper-h "E"))
+      (if ok (setq used-flag "PLOT_EXTENTS_USED"))
+    )
+    (progn
+      (setq ok (m5-do-plot-with-area pdf-path bbox paper-w paper-h "W"))
+      (if ok (setq used-flag "PLOT_WINDOW_USED"))
+    )
+  )
+
+  (if (and (not ok) (= fallback "window") (/= preferred "window"))
+    (progn
+      (setq ok (m5-do-plot-with-area pdf-path bbox paper-w paper-h "W"))
+      (if ok (setq used-flag "PLOT_WINDOW_FALLBACK"))
+    )
+  )
+
+  (if ok
+    (list T used-flag)
+    (list nil "PLOT_FAILED")
+  )
 )
 
 (defun module5-reset (result-path job-id source-dxf log-path)
@@ -470,6 +699,14 @@
   (setq *m5-errors* nil)
   (setq *m5-last-wblock-error* "")
   (setq *m5-last-plot-error* "")
+  (setq *m5-pdf-from-split-mode* "always")
+  (setq *m5-plot-preferred-area* "extents")
+  (setq *m5-plot-fallback-area* "window")
+  (setq *m5-split-stage-plot-enabled* nil)
+  (setq *m5-selection-mode* "database")
+  (setq *m5-db-unknown-bbox-policy* "keep_if_uncertain")
+  (setq *m5-db-fallback-crossing* T)
+  (setq *m5-hard-retry-margin* 0.25)
   (m5-set-system-vars)
   (m5-log (strcat "[START] job=" job-id " source=" source-dxf))
   (princ)
@@ -488,6 +725,302 @@
   (setq *m5-bbox-margin* bbox-margin)
   (setq *m5-retry-margin* retry-margin)
   (m5-log (strcat "[CFG] output=" output-dir ", pc3=" pc3 ", ctb=" ctb))
+  (princ)
+)
+
+(defun module5-set-selection-config
+  (selection-mode hard-retry-margin db-unknown-bbox-policy db-fallback-crossing)
+  (setq *m5-selection-mode* (if selection-mode selection-mode "database"))
+  (setq *m5-hard-retry-margin* (if (and hard-retry-margin (> hard-retry-margin 0.0)) hard-retry-margin 0.25))
+  (setq *m5-db-unknown-bbox-policy*
+    (if db-unknown-bbox-policy db-unknown-bbox-policy "keep_if_uncertain")
+  )
+  (setq *m5-db-fallback-crossing* db-fallback-crossing)
+  (m5-log
+    (strcat
+      "[CFG] selection_mode="
+      *m5-selection-mode*
+      ", hard_retry_margin="
+      (rtos *m5-hard-retry-margin* 2 6)
+      ", unknown_bbox_policy="
+      *m5-db-unknown-bbox-policy*
+      ", db_fallback_crossing="
+      (if *m5-db-fallback-crossing* "true" "false")
+    )
+  )
+  (princ)
+)
+
+(defun module5-set-output-config
+  (pdf-from-split-mode preferred-area fallback-area split-stage-plot-enabled)
+  (setq *m5-pdf-from-split-mode* pdf-from-split-mode)
+  (setq *m5-plot-preferred-area* preferred-area)
+  (setq *m5-plot-fallback-area* fallback-area)
+  (setq *m5-split-stage-plot-enabled* split-stage-plot-enabled)
+  (m5-log
+    (strcat
+      "[CFG] output_mode="
+      pdf-from-split-mode
+      ", preferred="
+      preferred-area
+      ", fallback="
+      fallback-area
+      ", split_plot_enabled="
+      (if split-stage-plot-enabled "true" "false")
+    )
+  )
+  (princ)
+)
+
+(defun module5-run-frame-split
+  (frame-id name xmin ymin xmax ymax vx1 vy1 vx2 vy2 vx3 vy3 vx4 vy4 frame-sx frame-sy paper-w paper-h / verts ss sel-count dwg-path ok-w)
+  (setq ss (m5-select-with-retry xmin ymin xmax ymax))
+  (if (null ss)
+    (progn
+      (setq verts (list
+        (list vx1 vy1)
+        (list vx2 vy2)
+        (list vx3 vy3)
+        (list vx4 vy4)
+      ))
+      (setq ss (m5-select-crossing-polygon verts))
+    )
+  )
+
+  (if (null ss)
+    (progn
+      (module5-add-frame-result frame-id "failed" "" "" 0 "CAD_EMPTY_SELECTION")
+      (m5-log (strcat "[FRAME-SPLIT] failed empty selection: " frame-id))
+    )
+    (progn
+      (setq sel-count (sslength ss))
+      (setq dwg-path (strcat *m5-output-dir* "\\" name ".dwg"))
+      (setq ok-w (vl-catch-all-apply 'm5-do-wblock (list dwg-path ss)))
+      (if (vl-catch-all-error-p ok-w)
+        (progn
+          (setq *m5-last-wblock-error* (vl-catch-all-error-message ok-w))
+          (setq ok-w nil)
+        )
+      )
+      (if ok-w
+        (progn
+          (module5-add-frame-result frame-id "ok" "" dwg-path sel-count "")
+          (m5-log (strcat "[FRAME-SPLIT] ok: " frame-id ", dwg=" dwg-path))
+        )
+        (progn
+          (module5-add-frame-result frame-id "failed" "" dwg-path sel-count "WBLOCK_FAILED")
+          (m5-log (strcat "[FRAME-SPLIT] failed: " frame-id ", err=" *m5-last-wblock-error*))
+        )
+      )
+    )
+  )
+  (princ)
+)
+
+(defun module5-run-frame-plot-from-split
+  (frame-id name xmin ymin xmax ymax vx1 vy1 vx2 vy2 vx3 vy3 vx4 vy4 frame-sx frame-sy paper-w paper-h / bbox pdf-path plot-bbox plot-sx plot-sy plot-ret ok-p plot-flag)
+  (setq bbox (list xmin ymin xmax ymax))
+  (setq pdf-path (strcat *m5-output-dir* "\\" name ".pdf"))
+  (setq plot-sx frame-sx)
+  (setq plot-sy frame-sy)
+  (if (or (null plot-sx) (<= plot-sx 1e-6))
+    (if (> paper-w 1e-6)
+      (setq plot-sx (/ (- xmax xmin) paper-w))
+      (setq plot-sx 1.0)
+    )
+  )
+  (if (or (null plot-sy) (<= plot-sy 1e-6))
+    (if (> paper-h 1e-6)
+      (setq plot-sy (/ (- ymax ymin) paper-h))
+      (setq plot-sy 1.0)
+    )
+  )
+  (setq plot-bbox (m5-apply-plot-margins bbox plot-sx plot-sy))
+  (setq plot-ret (vl-catch-all-apply 'm5-do-plot-from-split-dwg (list pdf-path plot-bbox paper-w paper-h)))
+  (if (vl-catch-all-error-p plot-ret)
+    (progn
+      (setq ok-p nil)
+      (setq plot-flag "PLOT_FAILED")
+      (setq *m5-last-plot-error* (vl-catch-all-error-message plot-ret))
+    )
+    (progn
+      (setq ok-p (car plot-ret))
+      (setq plot-flag (cadr plot-ret))
+    )
+  )
+  (if ok-p
+    (progn
+      (module5-add-frame-result frame-id "ok" pdf-path *m5-source-dxf* 1 plot-flag)
+      (m5-log (strcat "[FRAME-PLOT] ok: " frame-id ", flag=" plot-flag ", pdf=" pdf-path))
+    )
+    (progn
+      (module5-add-frame-result frame-id "failed" pdf-path *m5-source-dxf* 1 plot-flag)
+      (m5-log (strcat "[FRAME-PLOT] failed: " frame-id ", flag=" plot-flag ", err=" *m5-last-plot-error*))
+    )
+  )
+  (princ)
+)
+
+(defun module5-run-frame-plot-window
+  (frame-id name xmin ymin xmax ymax vx1 vy1 vx2 vy2 vx3 vy3 vx4 vy4 frame-sx frame-sy paper-w paper-h / bbox pdf-path plot-bbox plot-sx plot-sy ok-p)
+  (setq bbox (list xmin ymin xmax ymax))
+  (setq pdf-path (strcat *m5-output-dir* "\\" name ".pdf"))
+  (setq plot-sx frame-sx)
+  (setq plot-sy frame-sy)
+  (if (or (null plot-sx) (<= plot-sx 1e-6))
+    (if (> paper-w 1e-6)
+      (setq plot-sx (/ (- xmax xmin) paper-w))
+      (setq plot-sx 1.0)
+    )
+  )
+  (if (or (null plot-sy) (<= plot-sy 1e-6))
+    (if (> paper-h 1e-6)
+      (setq plot-sy (/ (- ymax ymin) paper-h))
+      (setq plot-sy 1.0)
+    )
+  )
+  (setq plot-bbox (m5-apply-plot-margins bbox plot-sx plot-sy))
+  (setq ok-p (vl-catch-all-apply 'm5-do-plot (list pdf-path plot-bbox paper-w paper-h)))
+  (if (vl-catch-all-error-p ok-p)
+    (progn
+      (setq *m5-last-plot-error* (vl-catch-all-error-message ok-p))
+      (setq ok-p nil)
+    )
+  )
+  (if ok-p
+    (progn
+      (module5-add-frame-result frame-id "ok" pdf-path *m5-source-dxf* 1 "PLOT_WINDOW_USED")
+      (m5-log (strcat "[FRAME-PLOT-WINDOW] ok: " frame-id ", pdf=" pdf-path))
+    )
+    (progn
+      (module5-add-frame-result frame-id "failed" pdf-path *m5-source-dxf* 1 "PLOT_WINDOW_FAILED")
+      (m5-log (strcat "[FRAME-PLOT-WINDOW] failed: " frame-id ", err=" *m5-last-plot-error*))
+    )
+  )
+  (princ)
+)
+
+(defun module5-run-sheet-set-split
+  (cluster-id name pages paper-w paper-h page-count / ss page page-ss verts union-bbox sel-count dwg-path pdf-path ok-w page-dwgs page-dwg page-index page-ok page-partial)
+  (setq ss nil)
+  (foreach page pages
+    (if (and page (>= (length page) 5))
+      (progn
+        (setq page-ss (m5-select-with-retry (nth 1 page) (nth 2 page) (nth 3 page) (nth 4 page)))
+        (if (and (null page-ss) (>= (length page) 13))
+          (progn
+            (setq verts (list
+              (list (nth 5 page) (nth 6 page))
+              (list (nth 7 page) (nth 8 page))
+              (list (nth 9 page) (nth 10 page))
+              (list (nth 11 page) (nth 12 page))
+            ))
+            (setq page-ss (m5-select-crossing-polygon verts))
+          )
+        )
+        (if page-ss
+          (setq ss (m5-ss-union ss page-ss))
+        )
+      )
+    )
+  )
+
+  (if (null ss)
+    (progn
+      (module5-add-sheet-result cluster-id "failed" "" "" page-count "CAD_EMPTY_SELECTION" nil nil)
+      (m5-log (strcat "[SHEET-SPLIT] failed empty selection: " cluster-id))
+    )
+    (progn
+      (setq union-bbox (m5-pages-union-bbox pages))
+      (if union-bbox
+        (progn
+          (setq page-ss (m5-select-with-retry (nth 0 union-bbox) (nth 1 union-bbox) (nth 2 union-bbox) (nth 3 union-bbox)))
+          (if (null page-ss)
+            (progn
+              (setq verts (list
+                (list (nth 0 union-bbox) (nth 1 union-bbox))
+                (list (nth 2 union-bbox) (nth 1 union-bbox))
+                (list (nth 2 union-bbox) (nth 3 union-bbox))
+                (list (nth 0 union-bbox) (nth 3 union-bbox))
+              ))
+              (setq page-ss (m5-select-crossing-polygon verts))
+            )
+          )
+          (if page-ss
+            (setq ss page-ss)
+          )
+        )
+      )
+      (setq sel-count (sslength ss))
+      (setq dwg-path (strcat *m5-output-dir* "\\" name ".dwg"))
+      (setq pdf-path (strcat *m5-output-dir* "\\" name ".pdf"))
+      (setq ok-w (vl-catch-all-apply 'm5-do-wblock (list dwg-path ss)))
+      (if (vl-catch-all-error-p ok-w)
+        (progn
+          (setq *m5-last-wblock-error* (vl-catch-all-error-message ok-w))
+          (setq ok-w nil)
+        )
+      )
+
+      (setq page-dwgs nil)
+      (setq page-partial nil)
+      (foreach page pages
+        (if (and page (>= (length page) 5))
+          (progn
+            (setq page-index (fix (nth 0 page)))
+            (setq page-ss (m5-select-with-retry (nth 1 page) (nth 2 page) (nth 3 page) (nth 4 page)))
+            (if (and (null page-ss) (>= (length page) 13))
+              (progn
+                (setq verts (list
+                  (list (nth 5 page) (nth 6 page))
+                  (list (nth 7 page) (nth 8 page))
+                  (list (nth 9 page) (nth 10 page))
+                  (list (nth 11 page) (nth 12 page))
+                ))
+                (setq page-ss (m5-select-crossing-polygon verts))
+              )
+            )
+            (if page-ss
+              (progn
+                (setq page-dwg (strcat *m5-output-dir* "\\" name "__p" (itoa page-index) ".dwg"))
+                (setq page-ok (vl-catch-all-apply 'm5-do-wblock (list page-dwg page-ss)))
+                (if (vl-catch-all-error-p page-ok)
+                  (setq page-ok nil)
+                )
+                (if page-ok
+                  (setq page-dwgs (append page-dwgs (list page-dwg)))
+                  (setq page-partial T)
+                )
+              )
+              (setq page-partial T)
+            )
+          )
+        )
+      )
+
+      (if (and ok-w (= (length page-dwgs) page-count) (not page-partial))
+        (progn
+          (module5-add-sheet-result cluster-id "ok" pdf-path dwg-path page-count "" page-dwgs nil)
+          (m5-log
+            (strcat "[SHEET-SPLIT] ok: " cluster-id ", dwg=" dwg-path ", page_dwgs=" (itoa (length page-dwgs)))
+          )
+        )
+        (progn
+          (module5-add-sheet-result
+            cluster-id
+            "failed"
+            pdf-path
+            dwg-path
+            page-count
+            (if ok-w "A4_PAGE_WBLOCK_PARTIAL" "WBLOCK_FAILED")
+            page-dwgs
+            nil
+          )
+          (m5-log (strcat "[SHEET-SPLIT] failed: " cluster-id ", page_dwgs=" (itoa (length page-dwgs))))
+        )
+      )
+    )
+  )
   (princ)
 )
 
@@ -611,7 +1144,7 @@
   )
   (if (null ss)
     (progn
-      (module5-add-sheet-result cluster-id "failed" "" "" page-count "CAD_EMPTY_SELECTION" nil)
+      (module5-add-sheet-result cluster-id "failed" "" "" page-count "CAD_EMPTY_SELECTION" nil nil)
       (m5-log (strcat "[SHEET] failed empty selection: " cluster-id))
     )
     (progn
@@ -713,7 +1246,7 @@
       )
       (if (and ok-w ok-p (> (length page-pdfs) 0))
         (progn
-          (module5-add-sheet-result cluster-id "failed" pdf-path dwg-path page-count "PLOT_MERGE_REQUIRED" page-pdfs)
+          (module5-add-sheet-result cluster-id "failed" pdf-path dwg-path page-count "PLOT_MERGE_REQUIRED" nil page-pdfs)
           (m5-log (strcat "[SHEET] pending merge: " cluster-id ", pages=" (itoa page-count)))
         )
         (progn
@@ -724,6 +1257,7 @@
             dwg-path
             page-count
             (if ok-w "PLOT_FAILED" "WBLOCK_FAILED")
+            nil
             page-pdfs
           )
           (m5-log (strcat "[SHEET] failed export: " cluster-id))

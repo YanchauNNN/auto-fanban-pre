@@ -7,7 +7,7 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2026-02-13"
+last_updated: "2026-03-02"
 
 runtime_options:
   # --------------------------------------------------------------------------
@@ -37,8 +37,8 @@ runtime_options:
     work_dir: { type: str, required: false, desc: "ODA 临时工作目录（可选）" }
 
   module5_export:
-    pdf_engine: { type: enum, default: "python", desc: "模块5 PDF 导出引擎：python/autocad_com/both" }
-    engine: { type: enum, default: "cad_dxf", desc: "模块5主执行引擎：cad_dxf/python_fallback/autocad_com" }
+    pdf_engine: { type: enum, default: "python", desc: "模块5历史参数（已废止，不再参与切图/打印路由）" }
+    engine: { type: enum, default: "cad_dxf", desc: "模块5主执行引擎（固定cad_dxf）" }
     cad_runner:
       accoreconsole_exe: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
       script_dir: { type: str, default: "..\\backend\\src\\cad\\scripts", desc: "模块5 CAD脚本目录（包含 lsp/scr）" }
@@ -46,10 +46,20 @@ runtime_options:
       retry: { type: int, default: 1, desc: "AcCoreConsole 执行失败重试次数" }
       locale: { type: str, default: "en-US", desc: "AcCoreConsole 语言区域" }
       max_parallel_dxf: { type: int, default: 1, desc: "并发执行 source_dxf 的最大数量" }
+    dotnet_bridge:
+      enabled: { type: bool, default: true, desc: "是否启用 .NET 桥接主路径（按 stage+engine 生效）" }
+      dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
+      command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
+      netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
+      fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
     selection:
-      mode: { type: enum, default: "crossing", desc: "选集模式：crossing/window（主链路固定 crossing）" }
+      engine: { type: enum, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
+      mode: { type: enum, default: "database", desc: "选集模式：database/crossing（默认database，采用数据库级几何相交选集）" }
       bbox_margin_percent: { type: float, default: 0.015, desc: "图框 bbox 扩边比例（用于选集）" }
       empty_selection_retry_margin_percent: { type: float, default: 0.03, desc: "空选集时二次扩边比例" }
+      hard_retry_margin_percent: { type: float, default: 0.25, desc: "空选集硬重试扩边比例（第三次重试）" }
+      db_unknown_bbox_policy: { type: enum, default: "keep_if_uncertain", desc: "数据库级选集中，无法计算bbox实体的处理策略：keep_if_uncertain/drop" }
+      db_fallback_to_crossing: { type: bool, default: true, desc: "数据库级选集失败时是否回退到crossing命令选集" }
     plot:
       pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "CAD 打印设备 PC3 名称" }
       ctb_name: { type: str, default: "monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
@@ -60,8 +70,18 @@ runtime_options:
         default: { top: 20, bottom: 10, left: 20, right: 10 }
         desc: "窗口打印页边距（mm）"
     output:
+      plot_engine: { type: enum, default: "dotnet", desc: "窗口打印执行引擎：dotnet/lisp" }
       a4_multipage_pdf: { type: enum, default: "merge_pages", desc: "A4成组PDF输出策略：merge_pages/single_page_fallback" }
       on_frame_fail: { type: enum, default: "flag_and_continue", desc: "单帧失败策略：flag_and_continue/abort_dxf" }
+      pdf_from_split_dwg_mode: { type: enum, default: "always", desc: "是否从切图DWG导出PDF：always(固定主链路)/off(仅调试禁用)" }
+      split_stage_plot_enabled: { type: bool, default: false, desc: "切图阶段是否同时打印PDF（默认关闭，固定两阶段执行）" }
+      plot_preferred_area: { type: enum, default: "extents", desc: "切图DWG打印主策略：extents/window" }
+      plot_fallback_area: { type: enum, default: "window", desc: "切图DWG打印回退策略：window/none" }
+      plot_session_mode: { type: enum, default: "per_source_batch", desc: "打印会话模式：per_source_batch(每个source_dxf一次窗口批量打印)" }
+      plot_from_source_window_enabled: { type: bool, default: true, desc: "是否启用原始DWG窗口批量打印主路径" }
+      plot_fallback_to_split_on_failure: { type: bool, default: true, desc: "窗口主路径失败时是否仅对失败页/失败帧回退到切图DWG打印" }
+      pdf_validation_min_size_bytes: { type: int, default: 1024, desc: "PDF 最小体积门禁（字节）" }
+      pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
   autocad:
     install_dir: { type: str, required: false, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于字体目录和打印配置路径推导）" }

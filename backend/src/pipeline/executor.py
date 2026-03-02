@@ -29,7 +29,6 @@ from ..cad import (
     A4MultipageGrouper,
     CADDXFExecutor,
     FrameDetector,
-    FrameSplitter,
     ODAConverter,
     TitleblockExtractor,
 )
@@ -66,7 +65,6 @@ class PipelineExecutor:
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
-        self.splitter = FrameSplitter()
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.derivation = DerivationEngine()
         self.cover_gen = CoverGenerator()
@@ -89,10 +87,6 @@ class PipelineExecutor:
                 "dxf_to_dwg": {},
                 "frames": [],
                 "sheet_sets": [],
-                # Stage 7 产物: {frame_id: split_dxf_path}
-                "split_results": {},
-                # Stage 7 产物: {cluster_id: split_dxf_path}
-                "sheet_set_splits": {},
                 # Stage 7 (cad_dxf) 产物: {source_dxf: result_json_dict}
                 "cad_dxf_results": {},
             }
@@ -272,86 +266,16 @@ class PipelineExecutor:
         context["sheet_sets"] = sheet_sets
 
     def _module5_engine(self) -> str:
-        """模块5主执行引擎（cad_dxf / python_fallback / autocad_com）。"""
-        return getattr(self.config.module5_export, "engine", "cad_dxf")
+        """模块5主执行引擎（固定为 cad_dxf）。"""
+        return "cad_dxf"
 
     # ==================================================================
     # 阶段 7 (Stage B): SPLIT_AND_RENAME — 仅裁切
     # ==================================================================
 
     def _stage_split(self, job: Job, context: dict) -> None:
-        """仅裁切DXF，产出中间产物到 work/split/"""
-        if self._module5_engine() == "cad_dxf":
-            self._stage_split_cad_dxf(job, context)
-            return
-
-        split_dir = job.work_dir / "work" / "split"
-        split_dir.mkdir(parents=True, exist_ok=True)
-
-        # -- 普通图框（按源DXF分组批量裁切）--
-        frames_by_dxf: dict[Path, list] = {}
-        for frame in context["frames"]:
-            frames_by_dxf.setdefault(frame.runtime.source_file, []).append(frame)
-
-        total = len(context["frames"]) + len(context["sheet_sets"])
-        done = 0
-        job.progress.details.update({"split_total": total, "split_done": 0})
-
-        for dxf_path, frames in frames_by_dxf.items():
-            try:
-                self._update_progress(
-                    job,
-                    current_file=dxf_path.name,
-                    message=f"裁切中 ({done}/{total})",
-                    details={"split_done": done},
-                )
-
-                def _progress_cb(entity_count: int) -> None:
-                    self._update_progress(
-                        job,
-                        message=f"裁切中(实体已处理 {entity_count})",
-                    )
-
-                results = self.splitter.clip_frames_batch(
-                    dxf_path,
-                    frames,
-                    split_dir,
-                    progress_cb=_progress_cb,
-                )
-                for frame, split_path in results:
-                    context["split_results"][frame.frame_id] = split_path
-                done += len(results)
-                self._update_progress(
-                    job,
-                    message=f"裁切中 ({done}/{total})",
-                    details={"split_done": done},
-                )
-            except Exception as e:
-                logger.warning(f"批量裁切失败: {dxf_path}: {e}")
-                for frame in frames:
-                    frame.add_flag("裁切失败")
-
-        # -- A4成组 --
-        for sheet_set in context["sheet_sets"]:
-            try:
-                dxf_path = sheet_set.master_page.frame_meta.runtime.source_file
-                self._update_progress(
-                    job,
-                    current_file=dxf_path.name,
-                    message=f"A4成组裁切中 ({done + 1}/{total})",
-                    details={"split_done": done + 1},
-                )
-                split_path = self.splitter.clip_sheet_set(
-                    dxf_path,
-                    sheet_set,
-                    split_dir,
-                )
-                context["sheet_set_splits"][sheet_set.cluster_id] = split_path
-                done += 1
-            except Exception as e:
-                logger.warning(f"A4成组裁切失败: {sheet_set.cluster_id}: {e}")
-                sheet_set.flags.append("裁切失败")
-                done += 1
+        """模块5固定走 CAD-DXF 切图阶段。"""
+        self._stage_split_cad_dxf(job, context)
 
     def _stage_split_cad_dxf(self, job: Job, context: dict) -> None:
         """cad_dxf 主路径：按 source_dxf 分组，执行 CAD 内核导出。"""
@@ -407,146 +331,8 @@ class PipelineExecutor:
     # ==================================================================
 
     def _stage_export(self, job: Job, context: dict) -> None:
-        """从中间DXF导出 PDF + DWG 到 output/drawings/"""
-        if self._module5_engine() == "cad_dxf":
-            self._stage_export_cad_dxf(job, context)
-            return
-
-        drawings_dir = job.work_dir / "output" / "drawings"
-        drawings_dir.mkdir(parents=True, exist_ok=True)
-
-        split_results: dict = context.get("split_results", {})
-        sheet_set_splits: dict = context.get("sheet_set_splits", {})
-
-        total = len(split_results) + len(sheet_set_splits)
-        done = 0
-        job.progress.details.update({"export_total": total, "export_done": 0})
-
-        # -- 批量 DXF→DWG（ODA 一次调用转换整个目录）--
-        split_dir = job.work_dir / "work" / "split"
-        self._batch_dxf_to_dwg(split_dir, drawings_dir)
-
-        # -- 单帧：导出 PDF + 查找 DWG --
-        frame_tasks: list[tuple] = []
-        for frame in context["frames"]:
-            split_dxf = split_results.get(frame.frame_id)
-            if not split_dxf:
-                continue
-            name = output_name_for_frame(frame)
-            pdf_path = drawings_dir / f"{name}.pdf"
-            dwg_path = drawings_dir / f"{name}.dwg"
-            clip_bbox = frame.runtime.outer_bbox
-            paper_size_mm = self.splitter._get_paper_size_mm(frame.runtime.paper_variant_id)
-            frame_tasks.append(
-                (frame, split_dxf, name, pdf_path, dwg_path, clip_bbox, paper_size_mm)
-            )
-
-        pdf_engine = getattr(self.splitter, "_pdf_engine", "python")
-        batch_autocad_ok = False
-        if frame_tasks and pdf_engine == "autocad_com":
-            batch_jobs = [
-                (split_dxf, pdf_path, clip_bbox, paper_size_mm)
-                for (_, split_dxf, _, pdf_path, _, clip_bbox, paper_size_mm) in frame_tasks
-            ]
-            try:
-                # 关键优化：同一批单帧任务仅启动一次 AutoCAD
-                self.splitter.autocad_pdf_exporter.export_single_page_batch(batch_jobs)
-                batch_autocad_ok = True
-            except Exception as e:
-                logger.warning(f"AutoCAD 批量PDF出图失败，回退逐张模式: {e}")
-
-        for frame, split_dxf, name, pdf_path, dwg_path, clip_bbox, paper_size_mm in frame_tasks:
-            try:
-                done += 1
-                self._update_progress(
-                    job,
-                    message=f"导出中 ({done}/{total})",
-                    details={"export_done": done},
-                )
-
-                if not (pdf_engine == "autocad_com" and batch_autocad_ok):
-                    self.splitter._export_single_page_routed(
-                        split_dxf,
-                        pdf_path,
-                        clip_bbox=clip_bbox,
-                        paper_size_mm=paper_size_mm,
-                        name=name,
-                    )
-                frame.runtime.pdf_path = pdf_path
-
-                # DWG（已由批量转换产出，确认存在）
-                if dwg_path.exists():
-                    frame.runtime.dwg_path = dwg_path
-                else:
-                    # 单独尝试转换
-                    try:
-                        frame.runtime.dwg_path = self.splitter._convert_to_dwg(
-                            split_dxf,
-                            drawings_dir,
-                            name,
-                        )
-                    except Exception as dwg_err:
-                        logger.warning(f"DWG转换失败: {name}: {dwg_err}")
-                        frame.add_flag("DWG转换失败")
-            except Exception as e:
-                logger.warning(f"导出失败: {frame.frame_id}: {e}")
-                frame.add_flag("导出失败")
-
-        # -- A4成组：导出多页 PDF + 查找 DWG --
-        for sheet_set in context["sheet_sets"]:
-            split_dxf = sheet_set_splits.get(sheet_set.cluster_id)
-            if not split_dxf:
-                continue
-            try:
-                done += 1
-                self._update_progress(
-                    job,
-                    message=f"A4成组导出中 ({done}/{total})",
-                    details={"export_done": done},
-                )
-                name = output_name_for_sheet_set(sheet_set)
-                pdf_path = drawings_dir / f"{name}.pdf"
-                dwg_path = drawings_dir / f"{name}.dwg"
-
-                # 多页PDF（严格窗口打印 + 1:1 A4 图幅）
-                page_bboxes = [p.outer_bbox for p in sheet_set.pages]
-                a4_paper = self.splitter._get_a4_paper_size(page_bboxes[0]) if page_bboxes else None
-                is_fallback = self.splitter._export_multipage_routed(
-                    split_dxf,
-                    pdf_path,
-                    page_bboxes,
-                    paper_size_mm=a4_paper,
-                    name=name,
-                )
-                if is_fallback:
-                    sheet_set.flags.append("A4多页_PDF兜底为单页大图")
-
-                # DWG
-                if dwg_path.exists():
-                    pass  # 已由批量转换产出
-                else:
-                    try:
-                        self.splitter._convert_to_dwg(
-                            split_dxf,
-                            drawings_dir,
-                            name,
-                        )
-                    except Exception as dwg_err:
-                        logger.warning(f"A4 DWG转换失败: {name}: {dwg_err}")
-                        sheet_set.flags.append("DWG转换失败")
-            except Exception as e:
-                logger.warning(f"A4成组导出失败: {sheet_set.cluster_id}: {e}")
-                sheet_set.flags.append("导出失败")
-
-    def _batch_dxf_to_dwg(self, split_dir: Path, output_dir: Path) -> None:
-        """批量 DXF→DWG（单次ODA调用转换整个目录）"""
-        dxf_files = list(split_dir.glob("*.dxf"))
-        if not dxf_files:
-            return
-        try:
-            self.splitter.oda.dxf_to_dwg(dxf_files[0], output_dir)
-        except Exception as e:
-            logger.warning(f"批量DXF→DWG失败: {e}")
+        """模块5固定走 CAD-DXF 导出阶段。"""
+        self._stage_export_cad_dxf(job, context)
 
     def _stage_export_cad_dxf(self, job: Job, context: dict) -> None:
         """cad_dxf 主路径的导出校验与结果回填。"""

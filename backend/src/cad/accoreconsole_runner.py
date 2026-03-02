@@ -81,6 +81,7 @@ class AcCoreConsoleRunner:
         task_data = json.loads(task_json.read_text(encoding="utf-8"))
         self._write_runtime_script(
             runtime_scr=runtime_scr,
+            task_json=task_json,
             lsp_path=lsp_path,
             task_data=task_data,
             result_json=result_json,
@@ -199,12 +200,92 @@ class AcCoreConsoleRunner:
         self,
         *,
         runtime_scr: Path,
+        task_json: Path,
         lsp_path: Path,
         task_data: dict[str, Any],
         result_json: Path,
         module5_trace_log: Path,
     ) -> None:
         """生成本次运行专用 SCR 文件。"""
+        workflow_stage = str(task_data.get("workflow_stage", "split_only")).strip().lower()
+        engines = task_data.get("engines", {})
+        dotnet_bridge = (
+            engines.get("dotnet_bridge", {})
+            if isinstance(engines, dict) and isinstance(engines.get("dotnet_bridge", {}), dict)
+            else {}
+        )
+        selection_engine = (
+            str(engines.get("selection_engine", "lisp")).strip().lower()
+            if isinstance(engines, dict)
+            else "lisp"
+        )
+        plot_engine = (
+            str(engines.get("plot_engine", "lisp")).strip().lower()
+            if isinstance(engines, dict)
+            else "lisp"
+        )
+        use_dotnet = bool(dotnet_bridge.get("enabled", False)) and (
+            (workflow_stage == "split_only" and selection_engine == "dotnet")
+            or (
+                workflow_stage in {"plot_window_only", "plot_from_split_dwg"}
+                and plot_engine == "dotnet"
+            )
+        )
+
+        if use_dotnet:
+            content = self._build_dotnet_runtime_content(
+                task_json=task_json,
+                result_json=result_json,
+                module5_trace_log=module5_trace_log,
+                dotnet_bridge=dotnet_bridge,
+            )
+        else:
+            content = self._build_lisp_runtime_content(
+                lsp_path=lsp_path,
+                task_data=task_data,
+                result_json=result_json,
+                module5_trace_log=module5_trace_log,
+            )
+        content.extend(["_.QUIT", "_N"])
+        runtime_scr.write_text("\n".join(content) + "\n", encoding="utf-8")
+
+    def _build_dotnet_runtime_content(
+        self,
+        *,
+        task_json: Path,
+        result_json: Path,
+        module5_trace_log: Path,
+        dotnet_bridge: dict[str, Any],
+    ) -> list[str]:
+        dll_file = Path(str(dotnet_bridge.get("dll_path", "")))
+        dll_path = self._quote_lisp_path(dll_file)
+        command_name = self._escape_lisp_string(
+            str(dotnet_bridge.get("command_name", "M5BRIDGE_RUN"))
+        )
+        task_json_escaped = self._quote_lisp_path(task_json)
+        result_escaped = self._quote_lisp_path(result_json)
+        trace_escaped = self._quote_lisp_path(module5_trace_log)
+        netload_each_run = bool(dotnet_bridge.get("netload_each_run", True))
+        content = [
+            '(setvar "FILEDIA" 0)',
+            '(setvar "CMDDIA" 0)',
+            '(setvar "SECURELOAD" 0)',
+        ]
+        if netload_each_run:
+            content.append(f'(command "_.NETLOAD" "{dll_path}")')
+        content.append(
+            f'(command "{command_name}" "{task_json_escaped}" "{result_escaped}" "{trace_escaped}")',
+        )
+        return content
+
+    def _build_lisp_runtime_content(
+        self,
+        *,
+        lsp_path: Path,
+        task_data: dict[str, Any],
+        result_json: Path,
+        module5_trace_log: Path,
+    ) -> list[str]:
         lsp_escaped = self._quote_lisp_path(lsp_path)
         lsp_dir_escaped = self._quote_lisp_path(lsp_path.parent)
         result_escaped = self._quote_lisp_path(result_json)
@@ -214,6 +295,8 @@ class AcCoreConsoleRunner:
         output_dir = self._quote_lisp_path(Path(task_data.get("output_dir", "")))
         plot = task_data.get("plot", {})
         selection = task_data.get("selection", {})
+        output = task_data.get("output", {})
+        workflow_stage = str(task_data.get("workflow_stage", "split_only")).strip().lower()
 
         pc3_name = self._escape_lisp_string(str(plot.get("pc3_name", "DWG To PDF.pc3")))
         ctb_name = self._escape_lisp_string(str(plot.get("ctb_name", "monochrome.ctb")))
@@ -226,8 +309,28 @@ class AcCoreConsoleRunner:
 
         bbox_margin = float(selection.get("bbox_margin_percent", 0.015))
         retry_margin = float(selection.get("empty_selection_retry_margin_percent", 0.03))
+        hard_retry_margin = float(selection.get("hard_retry_margin_percent", 0.25))
+        selection_mode = self._escape_lisp_string(str(selection.get("mode", "database")))
+        db_unknown_bbox_policy = self._escape_lisp_string(
+            str(selection.get("db_unknown_bbox_policy", "keep_if_uncertain")),
+        )
+        db_fallback_to_crossing = (
+            "T" if bool(selection.get("db_fallback_to_crossing", True)) else "nil"
+        )
+        pdf_from_split_mode = self._escape_lisp_string(
+            str(output.get("pdf_from_split_dwg_mode", "always")),
+        )
+        plot_preferred_area = self._escape_lisp_string(
+            str(output.get("plot_preferred_area", "extents")),
+        )
+        plot_fallback_area = self._escape_lisp_string(
+            str(output.get("plot_fallback_area", "window")),
+        )
+        split_stage_plot_enabled = (
+            "T" if bool(output.get("split_stage_plot_enabled", False)) else "nil"
+        )
 
-        content = [
+        content: list[str] = [
             '(setvar "FILEDIA" 0)',
             '(setvar "CMDDIA" 0)',
             '(setvar "SECURELOAD" 0)',
@@ -238,6 +341,14 @@ class AcCoreConsoleRunner:
                 f'(module5-set-plot-config "{output_dir}" "{pc3_name}" "{ctb_name}" '
                 f"{use_monochrome} {margin_top:.6f} {margin_bottom:.6f} "
                 f"{margin_left:.6f} {margin_right:.6f} {bbox_margin:.6f} {retry_margin:.6f})"
+            ),
+            (
+                f'(module5-set-selection-config "{selection_mode}" {hard_retry_margin:.6f} '
+                f'"{db_unknown_bbox_policy}" {db_fallback_to_crossing})'
+            ),
+            (
+                f'(module5-set-output-config "{pdf_from_split_mode}" '
+                f'"{plot_preferred_area}" "{plot_fallback_area}" {split_stage_plot_enabled})'
             ),
         ]
 
@@ -255,9 +366,16 @@ class AcCoreConsoleRunner:
             paper_h = float(paper[1]) if len(paper) > 1 else 0.0
             sx = float(frame.get("sx")) if frame.get("sx") is not None else 0.0
             sy = float(frame.get("sy")) if frame.get("sy") is not None else 0.0
+            frame_runner = "module5-run-frame"
+            if workflow_stage == "split_only":
+                frame_runner = "module5-run-frame-split"
+            elif workflow_stage == "plot_from_split_dwg":
+                frame_runner = "module5-run-frame-plot-from-split"
+            elif workflow_stage == "plot_window_only":
+                frame_runner = "module5-run-frame-plot-window"
             content.append(
                 (
-                    f'(module5-run-frame "{frame_id}" "{name}" '
+                    f'({frame_runner} "{frame_id}" "{name}" '
                     f"{xmin:.6f} {ymin:.6f} {xmax:.6f} {ymax:.6f} "
                     f"{vertices[0][0]:.6f} {vertices[0][1]:.6f} "
                     f"{vertices[1][0]:.6f} {vertices[1][1]:.6f} "
@@ -275,7 +393,7 @@ class AcCoreConsoleRunner:
             if not pages:
                 content.append(
                     f'(module5-add-sheet-result "{cluster_id}" "failed" "" "" 0 '
-                    '"A4_MULTI_NO_PAGES" nil)',
+                    '"A4_MULTI_NO_PAGES" nil nil)',
                 )
                 continue
 
@@ -284,26 +402,19 @@ class AcCoreConsoleRunner:
             paper_w = float(first_paper[0]) if len(first_paper) > 0 else 297.0
             paper_h = float(first_paper[1]) if len(first_paper) > 1 else 210.0
             pages_expr = self._pages_to_lisp_list(pages)
+            sheet_runner = "module5-run-sheet-set"
+            if workflow_stage == "split_only":
+                sheet_runner = "module5-run-sheet-set-split"
             content.append(
                 (
-                    f'(module5-run-sheet-set "{cluster_id}" "{name}" '
+                    f'({sheet_runner} "{cluster_id}" "{name}" '
                     f"{pages_expr} "
                     f"{paper_w:.6f} {paper_h:.6f} {page_count})"
                 ),
             )
 
-        content.extend(
-            [
-                "(module5-finalize)",
-            ],
-        )
-        content.extend(
-            [
-                "_.QUIT",
-                "_N",
-            ],
-        )
-        runtime_scr.write_text("\n".join(content) + "\n", encoding="utf-8")
+        content.append("(module5-finalize)")
+        return content
 
     @staticmethod
     def _escape_lisp_string(value: str) -> str:

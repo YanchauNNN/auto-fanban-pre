@@ -58,12 +58,28 @@ class Module5CadRunnerConfig(BaseModel):
     max_parallel_dxf: int = 1
 
 
+class Module5DotNetBridgeConfig(BaseModel):
+    """模块5 .NET 桥接配置"""
+
+    enabled: bool = True
+    dll_path: str = (
+        r"..\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
+    )
+    command_name: str = "M5BRIDGE_RUN"
+    netload_each_run: bool = True
+    fallback_to_lisp_on_error: bool = True
+
+
 class Module5SelectionConfig(BaseModel):
     """模块5选集配置"""
 
-    mode: str = "crossing"
+    engine: str = "dotnet"
+    mode: str = "database"
     bbox_margin_percent: float = 0.015
     empty_selection_retry_margin_percent: float = 0.03
+    hard_retry_margin_percent: float = 0.25
+    db_unknown_bbox_policy: str = "keep_if_uncertain"
+    db_fallback_to_crossing: bool = True
 
 
 class Module5PlotConfig(BaseModel):
@@ -86,8 +102,18 @@ class Module5PlotConfig(BaseModel):
 class Module5OutputConfig(BaseModel):
     """模块5输出策略配置"""
 
+    plot_engine: str = "dotnet"
     a4_multipage_pdf: str = "merge_pages"
     on_frame_fail: str = "flag_and_continue"
+    pdf_from_split_dwg_mode: str = "always"
+    split_stage_plot_enabled: bool = False
+    plot_preferred_area: str = "extents"
+    plot_fallback_area: str = "window"
+    plot_session_mode: str = "per_source_batch"
+    plot_from_source_window_enabled: bool = True
+    plot_fallback_to_split_on_failure: bool = True
+    pdf_validation_min_size_bytes: int = 1024
+    pdf_validation_min_stream_bytes: int = 64
 
 
 class Module5ExportConfig(BaseModel):
@@ -96,6 +122,9 @@ class Module5ExportConfig(BaseModel):
     pdf_engine: str = "python"
     engine: str = "cad_dxf"
     cad_runner: Module5CadRunnerConfig = Field(default_factory=Module5CadRunnerConfig)
+    dotnet_bridge: Module5DotNetBridgeConfig = Field(
+        default_factory=Module5DotNetBridgeConfig,
+    )
     selection: Module5SelectionConfig = Field(default_factory=Module5SelectionConfig)
     plot: Module5PlotConfig = Field(default_factory=Module5PlotConfig)
     output: Module5OutputConfig = Field(default_factory=Module5OutputConfig)
@@ -298,6 +327,12 @@ class RuntimeConfig(BaseSettings):
             if not script_dir.is_absolute():
                 self.module5_export.cad_runner.script_dir = str(
                     (base_dir / script_dir).resolve(),
+                )
+        if self.module5_export.dotnet_bridge.dll_path:
+            dll_path = Path(self.module5_export.dotnet_bridge.dll_path)
+            if not dll_path.is_absolute():
+                self.module5_export.dotnet_bridge.dll_path = str(
+                    (base_dir / dll_path).resolve(),
                 )
 
     def get_job_dir(self, job_id: str) -> Path:

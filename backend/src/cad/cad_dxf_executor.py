@@ -10,6 +10,7 @@ CAD-DXF 执行器
 
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import tempfile
@@ -18,7 +19,6 @@ from pathlib import Path
 from ..config import RuntimeConfig, get_config, load_spec
 from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
-from .dxf_pdf_exporter import DxfPdfExporter
 
 
 class CADDXFExecutor:
@@ -34,7 +34,6 @@ class CADDXFExecutor:
         self.config = config or get_config()
         self.spec = spec or load_spec()
         self.runner = runner or AcCoreConsoleRunner(config=self.config)
-        self._pdf_fallback_exporter = self._build_pdf_fallback_exporter()
 
     def group_by_source_dxf(
         self,
@@ -72,7 +71,7 @@ class CADDXFExecutor:
         output_dir: Path,
         task_root: Path,
     ) -> dict:
-        """执行单个 CAD 源文件分组任务。"""
+        """执行单个 CAD 源文件分组任务（固定两阶段：先切图，再从切图DWG打印）。"""
         source_dxf = source_dxf.resolve()
         output_dir = output_dir.resolve()
         task_root = task_root.resolve()
@@ -92,37 +91,40 @@ class CADDXFExecutor:
         staged_output_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_dxf, staged_source_dxf)
 
-        task = self.build_task_json(
+        split_task = self.build_task_json(
             job_id=job_id,
             source_dxf=staged_source_dxf,
             frames=frames,
             sheet_sets=sheet_sets,
             output_dir=staged_output_dir,
+            workflow_stage="split_only",
         )
-        task_json.write_text(
-            json.dumps(task, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-        self.runner.run(
+        split_run_meta = self._run_runner_with_engine_fallback(
             source_dxf=staged_source_dxf,
+            task_payload=split_task,
             task_json=task_json,
             result_json=result_json,
             workspace_dir=runtime_task_dir,
         )
-        result = self.load_result_json(result_json)
-        self._recover_pdf_with_python_fallback(
-            result=result,
+        split_result = self.load_result_json(result_json)
+        if split_run_meta["fallback_used"]:
+            split_result.setdefault("errors", []).append(
+                f"DOTNET_TO_LISP_FALLBACK:{split_run_meta['reason']}",
+            )
+
+        final_result = self._run_plot_stage_from_split_dwg(
+            job_id=job_id,
+            source_dxf=staged_source_dxf,
+            runtime_task_dir=runtime_task_dir,
+            staged_output_dir=staged_output_dir,
+            split_result=split_result,
             frames=frames,
             sheet_sets=sheet_sets,
-            staged_output_dir=staged_output_dir,
         )
-        result_json.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._write_task_json(result_json, final_result)
+
         self._materialize_stage_outputs(
-            result=result,
+            result=final_result,
             staged_output_dir=staged_output_dir,
             final_output_dir=output_dir,
         )
@@ -130,7 +132,7 @@ class CADDXFExecutor:
             runtime_task_dir=runtime_task_dir,
             task_dir=requested_task_dir,
         )
-        return result
+        return final_result
 
     def build_task_json(
         self,
@@ -140,16 +142,39 @@ class CADDXFExecutor:
         frames: list[FrameMeta],
         sheet_sets: list[SheetSet],
         output_dir: Path,
+        workflow_stage: str = "split_only",
     ) -> dict:
         """构建 task.json（Python -> CAD）。"""
         self._validate_duplicate_codes(frames)
+        return self._build_task_json_from_entries(
+            job_id=job_id,
+            source_dxf=source_dxf,
+            output_dir=output_dir,
+            workflow_stage=workflow_stage,
+            frame_entries=[self._build_frame_entry(frame) for frame in frames],
+            sheet_set_entries=[self._build_sheet_set_entry(sheet_set) for sheet_set in sheet_sets],
+        )
 
+    def _build_task_json_from_entries(
+        self,
+        *,
+        job_id: str,
+        source_dxf: Path,
+        output_dir: Path,
+        workflow_stage: str,
+        frame_entries: list[dict],
+        sheet_set_entries: list[dict],
+        output_override: dict[str, str | bool] | None = None,
+    ) -> dict:
         plot_cfg = self.config.module5_export.plot
         selection_cfg = self.config.module5_export.selection
         margins_mm = self._resolve_plot_margins_mm()
-
+        output_entry = self._build_output_entry()
+        if output_override:
+            output_entry.update(output_override)
         return {
             "schema_version": "cad-dxf-task@1.0",
+            "workflow_stage": workflow_stage,
             "job_id": job_id,
             "source_dxf": str(source_dxf),
             "output_dir": str(output_dir),
@@ -165,9 +190,916 @@ class CADDXFExecutor:
                 "empty_selection_retry_margin_percent": float(
                     selection_cfg.empty_selection_retry_margin_percent,
                 ),
+                "hard_retry_margin_percent": float(selection_cfg.hard_retry_margin_percent),
+                "db_unknown_bbox_policy": str(selection_cfg.db_unknown_bbox_policy),
+                "db_fallback_to_crossing": bool(selection_cfg.db_fallback_to_crossing),
             },
-            "frames": [self._build_frame_entry(frame) for frame in frames],
-            "sheet_sets": [self._build_sheet_set_entry(sheet_set) for sheet_set in sheet_sets],
+            "output": output_entry,
+            "engines": self._build_engines_entry(),
+            "frames": frame_entries,
+            "sheet_sets": sheet_set_entries,
+        }
+
+    def _build_output_entry(self) -> dict[str, str | bool | int]:
+        output_cfg = self.config.module5_export.output
+        return {
+            "a4_multipage_pdf": str(output_cfg.a4_multipage_pdf),
+            "on_frame_fail": str(output_cfg.on_frame_fail),
+            "pdf_from_split_dwg_mode": str(output_cfg.pdf_from_split_dwg_mode),
+            "split_stage_plot_enabled": bool(output_cfg.split_stage_plot_enabled),
+            "plot_preferred_area": str(output_cfg.plot_preferred_area),
+            "plot_fallback_area": str(output_cfg.plot_fallback_area),
+            "plot_session_mode": str(output_cfg.plot_session_mode),
+            "plot_from_source_window_enabled": bool(output_cfg.plot_from_source_window_enabled),
+            "plot_fallback_to_split_on_failure": bool(output_cfg.plot_fallback_to_split_on_failure),
+            "pdf_validation_min_size_bytes": int(output_cfg.pdf_validation_min_size_bytes),
+            "pdf_validation_min_stream_bytes": int(output_cfg.pdf_validation_min_stream_bytes),
+        }
+
+    def _build_engines_entry(self) -> dict:
+        selection_cfg = self.config.module5_export.selection
+        output_cfg = self.config.module5_export.output
+        bridge_cfg = self.config.module5_export.dotnet_bridge
+        return {
+            "selection_engine": str(selection_cfg.engine).strip().lower(),
+            "plot_engine": str(output_cfg.plot_engine).strip().lower(),
+            "dotnet_bridge": {
+                "enabled": bool(bridge_cfg.enabled),
+                "dll_path": str(bridge_cfg.dll_path),
+                "command_name": str(bridge_cfg.command_name),
+                "netload_each_run": bool(bridge_cfg.netload_each_run),
+                "fallback_to_lisp_on_error": bool(bridge_cfg.fallback_to_lisp_on_error),
+            },
+        }
+
+    @staticmethod
+    def _write_task_json(path: Path, data: dict) -> None:
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _run_plot_stage_from_split_dwg(
+        self,
+        *,
+        job_id: str,
+        source_dxf: Path,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_result: dict,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> dict:
+        frames_by_id = {frame.frame_id: frame for frame in frames}
+        sheet_sets_by_id = {sheet_set.cluster_id: sheet_set for sheet_set in sheet_sets}
+        output_cfg = self.config.module5_export.output
+        use_window_batch = bool(output_cfg.plot_from_source_window_enabled)
+        use_split_fallback = bool(output_cfg.plot_fallback_to_split_on_failure)
+        session_mode = str(output_cfg.plot_session_mode).strip().lower()
+
+        window_items_by_id: dict[str, dict] = {}
+        errors: list[str] = []
+
+        if use_window_batch and session_mode == "per_source_batch":
+            try:
+                window_result = self._run_source_window_plot_batch(
+                    job_id=job_id,
+                    source_dxf=source_dxf,
+                    runtime_task_dir=runtime_task_dir,
+                    staged_output_dir=staged_output_dir,
+                    frames=frames,
+                    sheet_sets=sheet_sets,
+                )
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"WINDOW_BATCH_FAILED:{exc}")
+                window_result = {"frames": [], "errors": [f"WINDOW_BATCH_FAILED:{exc}"]}
+            for item in window_result.get("frames", []):
+                if not isinstance(item, dict):
+                    continue
+                fid = str(item.get("frame_id", ""))
+                if fid:
+                    window_items_by_id[fid] = item
+            for err in window_result.get("errors", []):
+                if isinstance(err, str) and err:
+                    errors.append(err)
+
+        final_frames: list[dict] = []
+        for item in split_result.get("frames", []):
+            if not isinstance(item, dict):
+                continue
+            frame_id = str(item.get("frame_id", ""))
+            frame = frames_by_id.get(frame_id)
+            if use_window_batch and session_mode == "per_source_batch":
+                final_frames.append(
+                    self._finalize_frame_with_window_then_fallback(
+                        job_id=job_id,
+                        runtime_task_dir=runtime_task_dir,
+                        staged_output_dir=staged_output_dir,
+                        split_item=item,
+                        frame=frame,
+                        window_plot_item=window_items_by_id.get(frame_id),
+                        use_split_fallback=use_split_fallback,
+                    ),
+                )
+            else:
+                final_frames.append(
+                    self._plot_single_frame_from_split_dwg(
+                        job_id=job_id,
+                        runtime_task_dir=runtime_task_dir,
+                        staged_output_dir=staged_output_dir,
+                        split_item=item,
+                        frame=frame,
+                    ),
+                )
+
+        final_sheet_sets: list[dict] = []
+        for item in split_result.get("sheet_sets", []):
+            if not isinstance(item, dict):
+                continue
+            cluster_id = str(item.get("cluster_id", ""))
+            sheet_set = sheet_sets_by_id.get(cluster_id)
+            if use_window_batch and session_mode == "per_source_batch":
+                final_sheet_sets.append(
+                    self._finalize_sheet_set_with_window_then_fallback(
+                        job_id=job_id,
+                        runtime_task_dir=runtime_task_dir,
+                        staged_output_dir=staged_output_dir,
+                        split_item=item,
+                        sheet_set=sheet_set,
+                        window_items_by_id=window_items_by_id,
+                        use_split_fallback=use_split_fallback,
+                    ),
+                )
+            else:
+                final_sheet_sets.append(
+                    self._plot_sheet_set_from_split_dwgs(
+                        job_id=job_id,
+                        runtime_task_dir=runtime_task_dir,
+                        staged_output_dir=staged_output_dir,
+                        split_item=item,
+                        sheet_set=sheet_set,
+                    ),
+                )
+
+        for err in split_result.get("errors", []):
+            if isinstance(err, str) and err:
+                errors.append(err)
+
+        return {
+            "schema_version": "cad-dxf-result@1.0",
+            "job_id": job_id,
+            "source_dxf": str(source_dxf),
+            "frames": final_frames,
+            "sheet_sets": final_sheet_sets,
+            "errors": errors,
+        }
+
+    def _run_source_window_plot_batch(
+        self,
+        *,
+        job_id: str,
+        source_dxf: Path,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> dict:
+        frame_entries: list[dict] = [self._build_frame_entry(frame) for frame in frames]
+        for sheet_set in sheet_sets:
+            sheet_name = self._name_for_sheet_set(sheet_set)
+            for page in sorted(sheet_set.pages, key=lambda p: p.page_index):
+                frame_entries.append(
+                    self._build_plot_frame_entry_from_page(
+                        frame_id=f"{sheet_set.cluster_id}__p{page.page_index}",
+                        name=f"{sheet_name}__p{page.page_index}",
+                        page=page,
+                    ),
+                )
+        if not frame_entries:
+            return {
+                "schema_version": "cad-dxf-result@1.0",
+                "job_id": job_id,
+                "source_dxf": str(source_dxf),
+                "frames": [],
+                "sheet_sets": [],
+                "errors": [],
+            }
+
+        plot_task = self._build_task_json_from_entries(
+            job_id=job_id,
+            source_dxf=source_dxf,
+            output_dir=staged_output_dir,
+            workflow_stage="plot_window_only",
+            frame_entries=frame_entries,
+            sheet_set_entries=[],
+            output_override={"plot_preferred_area": "window", "plot_fallback_area": "none"},
+        )
+        return self._run_plot_task_from_dwg(
+            source_dwg=source_dxf,
+            runtime_task_dir=runtime_task_dir,
+            task_data=plot_task,
+        )
+
+    def _finalize_frame_with_window_then_fallback(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        frame: FrameMeta | None,
+        window_plot_item: dict | None,
+        use_split_fallback: bool,
+    ) -> dict:
+        frame_id = str(split_item.get("frame_id", ""))
+        flags = self._normalize_flag_list(split_item.get("flags"))
+        result_item = {
+            "frame_id": frame_id,
+            "status": "failed",
+            "pdf_path": "",
+            "dwg_path": "",
+            "selection_count": int(split_item.get("selection_count", 0) or 0),
+            "flags": flags,
+        }
+        if frame is None:
+            self._append_flag(flags, "FRAME_NOT_FOUND")
+            return result_item
+
+        dwg_path = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
+        if dwg_path is not None and dwg_path.exists():
+            result_item["dwg_path"] = str(dwg_path)
+        else:
+            self._append_flag(flags, "DWG_MISSING_FOR_PLOT")
+
+        if str(split_item.get("status", "failed")).lower() != "ok":
+            self._append_flag(flags, "WBLOCK_STATUS_MISMATCH")
+
+        if window_plot_item and isinstance(window_plot_item, dict):
+            for flag in self._normalize_flag_list(window_plot_item.get("flags")):
+                self._append_flag(flags, flag)
+            self._append_flag(flags, "PLOT_FROM_SOURCE_WINDOW")
+            window_pdf = self._resolve_existing_path(
+                window_plot_item.get("pdf_path"), staged_output_dir
+            )
+            if str(window_plot_item.get("status", "failed")).lower() == "ok":
+                is_valid_pdf = False
+                if window_pdf is not None and window_pdf.exists():
+                    is_valid_pdf, invalid_reason = self._validate_pdf_output(window_pdf)
+                    if not is_valid_pdf:
+                        self._append_flag(flags, f"PLOT_WINDOW_INVALID_PDF:{invalid_reason}")
+                if is_valid_pdf:
+                    if self._normalize_cad_pdf_canvas_if_needed(frame=frame, pdf_path=window_pdf):
+                        self._append_flag(flags, "PDF_CAD_CANVAS_ADJUSTED")
+                    result_item["status"] = "ok"
+                    result_item["pdf_path"] = str(window_pdf)
+                    return result_item
+            self._append_flag(flags, "PLOT_WINDOW_FAILED")
+        else:
+            self._append_flag(flags, "PLOT_WINDOW_RESULT_MISSING")
+
+        if use_split_fallback:
+            fallback_result = self._plot_single_frame_from_split_dwg(
+                job_id=job_id,
+                runtime_task_dir=runtime_task_dir,
+                staged_output_dir=staged_output_dir,
+                split_item=split_item,
+                frame=frame,
+            )
+            for flag in self._normalize_flag_list(fallback_result.get("flags")):
+                self._append_flag(flags, flag)
+            if str(fallback_result.get("status", "failed")).lower() == "ok":
+                result_item["status"] = "ok"
+                result_item["pdf_path"] = str(fallback_result.get("pdf_path", ""))
+                if not result_item["dwg_path"]:
+                    result_item["dwg_path"] = str(fallback_result.get("dwg_path", ""))
+                self._append_flag(flags, "PLOT_FROM_SPLIT_FALLBACK")
+                return result_item
+
+        self._append_flag(flags, "PLOT_FAILED")
+        return result_item
+
+    def _finalize_sheet_set_with_window_then_fallback(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        sheet_set: SheetSet | None,
+        window_items_by_id: dict[str, dict],
+        use_split_fallback: bool,
+    ) -> dict:
+        cluster_id = str(split_item.get("cluster_id", ""))
+        flags = self._normalize_flag_list(split_item.get("flags"))
+        result_item = {
+            "cluster_id": cluster_id,
+            "status": "failed",
+            "pdf_path": "",
+            "dwg_path": "",
+            "page_count": int(split_item.get("page_count", 0) or 0),
+            "flags": flags,
+            "page_pdf_paths": [],
+        }
+        if sheet_set is None:
+            self._append_flag(flags, "SHEET_SET_NOT_FOUND")
+            return result_item
+
+        dwg_path = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
+        if dwg_path is not None and dwg_path.exists():
+            result_item["dwg_path"] = str(dwg_path)
+        else:
+            self._append_flag(flags, "WBLOCK_FAILED")
+
+        pages_sorted = sorted(sheet_set.pages, key=lambda p: p.page_index)
+        expected_pages = len(pages_sorted)
+        result_item["page_count"] = expected_pages
+        if expected_pages == 0:
+            self._append_flag(flags, "A4_MULTI_NO_PAGES")
+            return result_item
+
+        sheet_name = self._name_for_sheet_set(sheet_set)
+        page_pdf_by_index: dict[int, Path] = {}
+        failed_page_indexes: list[int] = []
+        for page in pages_sorted:
+            page_id = f"{cluster_id}__p{page.page_index}"
+            plot_item = window_items_by_id.get(page_id)
+            if not plot_item:
+                failed_page_indexes.append(page.page_index)
+                continue
+            for flag in self._normalize_flag_list(plot_item.get("flags")):
+                self._append_flag(flags, flag)
+            self._append_flag(flags, "PLOT_FROM_SOURCE_WINDOW")
+            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+            if (
+                str(plot_item.get("status", "failed")).lower() == "ok"
+                and page_pdf is not None
+                and page_pdf.exists()
+            ):
+                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
+                if is_valid_pdf:
+                    paper = self._a4_paper_size(page.outer_bbox)
+                    self._normalize_cad_pdf_canvas_for_paper(
+                        pdf_path=page_pdf,
+                        paper_size_mm=(float(paper[0]), float(paper[1])),
+                    )
+                    page_pdf_by_index[page.page_index] = page_pdf
+                else:
+                    self._append_flag(
+                        flags,
+                        f"PLOT_WINDOW_INVALID_PDF:{page.page_index}:{invalid_reason}",
+                    )
+                    failed_page_indexes.append(page.page_index)
+            else:
+                failed_page_indexes.append(page.page_index)
+
+        if failed_page_indexes and use_split_fallback:
+            fallback_pages = self._plot_sheet_pages_from_split_fallback(
+                job_id=job_id,
+                runtime_task_dir=runtime_task_dir,
+                staged_output_dir=staged_output_dir,
+                split_item=split_item,
+                sheet_set=sheet_set,
+                failed_page_indexes=failed_page_indexes,
+                flags=flags,
+            )
+            for idx, pdf in fallback_pages.items():
+                page_pdf_by_index[idx] = pdf
+
+        ordered_pdf_paths: list[Path] = []
+        for page in pages_sorted:
+            page_pdf = page_pdf_by_index.get(page.page_index)
+            if page_pdf is None:
+                self._append_flag(flags, "PLOT_FAILED")
+                result_item["page_pdf_paths"] = [str(p) for p in ordered_pdf_paths]
+                return result_item
+            ordered_pdf_paths.append(page_pdf)
+
+        output_pdf = self._resolve_existing_path(split_item.get("pdf_path"), staged_output_dir)
+        if output_pdf is None:
+            output_pdf = staged_output_dir / f"{sheet_name}.pdf"
+        self._merge_pdf_pages(ordered_pdf_paths, output_pdf)
+        result_item["status"] = "ok"
+        result_item["pdf_path"] = str(output_pdf)
+        result_item["page_pdf_paths"] = []
+        self._append_flag(flags, "PDF_CAD_SPLIT_MERGED")
+        return result_item
+
+    def _plot_sheet_pages_from_split_fallback(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        sheet_set: SheetSet,
+        failed_page_indexes: list[int],
+        flags: list[str],
+    ) -> dict[int, Path]:
+        pages_by_index = {p.page_index: p for p in sheet_set.pages}
+        page_dwg_by_index: dict[int, Path] = {}
+        raw_page_dwg_paths = split_item.get("page_dwg_paths", [])
+        if isinstance(raw_page_dwg_paths, list):
+            for raw in raw_page_dwg_paths:
+                p = self._resolve_existing_path(raw, staged_output_dir)
+                if p is None or not p.exists():
+                    continue
+                idx = self._extract_page_index(p)
+                if idx is not None:
+                    page_dwg_by_index[idx] = p
+
+        union_dwg = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
+        sheet_name = self._name_for_sheet_set(sheet_set)
+        page_pdf_by_index: dict[int, Path] = {}
+        for page_index in failed_page_indexes:
+            page = pages_by_index.get(page_index)
+            if page is None:
+                continue
+            source_dwg = page_dwg_by_index.get(page_index)
+            output_override: dict[str, str] | None = None
+            if source_dwg is None:
+                if union_dwg is None or not union_dwg.exists():
+                    self._append_flag(flags, f"PLOT_FALLBACK_PAGE_MISSING:{page_index}")
+                    continue
+                source_dwg = union_dwg
+                output_override = {"plot_preferred_area": "window", "plot_fallback_area": "none"}
+                self._append_flag(flags, "A4_PLOT_FROM_UNION_DWG")
+
+            frame_entry = self._build_plot_frame_entry_from_page(
+                frame_id=f"{sheet_set.cluster_id}__p{page_index}",
+                name=f"{sheet_name}__p{page_index}",
+                page=page,
+            )
+            plot_task = self._build_task_json_from_entries(
+                job_id=job_id,
+                source_dxf=source_dwg,
+                output_dir=staged_output_dir,
+                workflow_stage="plot_from_split_dwg",
+                frame_entries=[frame_entry],
+                sheet_set_entries=[],
+                output_override=output_override,
+            )
+            try:
+                plot_result = self._run_plot_task_from_dwg(
+                    source_dwg=source_dwg,
+                    runtime_task_dir=runtime_task_dir,
+                    task_data=plot_task,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._append_flag(flags, "PLOT_FAILED")
+                self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
+                continue
+
+            plot_item = next(
+                (i for i in plot_result.get("frames", []) if isinstance(i, dict)),
+                None,
+            )
+            if plot_item is None:
+                self._append_flag(flags, "PLOT_RESULT_MISSING")
+                continue
+            for flag in self._normalize_flag_list(plot_item.get("flags")):
+                self._append_flag(flags, flag)
+            self._append_flag(flags, "PLOT_FROM_SPLIT_DWG")
+
+            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+            if (
+                str(plot_item.get("status", "failed")).lower() == "ok"
+                and page_pdf is not None
+                and page_pdf.exists()
+            ):
+                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
+                if is_valid_pdf:
+                    paper = self._a4_paper_size(page.outer_bbox)
+                    self._normalize_cad_pdf_canvas_for_paper(
+                        pdf_path=page_pdf,
+                        paper_size_mm=(float(paper[0]), float(paper[1])),
+                    )
+                    page_pdf_by_index[page_index] = page_pdf
+                    self._append_flag(flags, f"PLOT_FALLBACK_PAGE_OK:{page_index}")
+                else:
+                    self._append_flag(
+                        flags,
+                        f"PLOT_FALLBACK_PAGE_INVALID:{page_index}:{invalid_reason}",
+                    )
+            else:
+                self._append_flag(flags, "PLOT_FAILED")
+        return page_pdf_by_index
+
+    def _plot_single_frame_from_split_dwg(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        frame: FrameMeta | None,
+    ) -> dict:
+        frame_id = str(split_item.get("frame_id", ""))
+        flags = self._normalize_flag_list(split_item.get("flags"))
+        result_item = {
+            "frame_id": frame_id,
+            "status": "failed",
+            "pdf_path": "",
+            "dwg_path": "",
+            "selection_count": int(split_item.get("selection_count", 0) or 0),
+            "flags": flags,
+        }
+        if frame is None:
+            self._append_flag(flags, "FRAME_NOT_FOUND")
+            return result_item
+
+        dwg_path = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
+        if dwg_path is None or not dwg_path.exists():
+            self._append_flag(flags, "DWG_MISSING_FOR_PLOT")
+            return result_item
+        result_item["dwg_path"] = str(dwg_path)
+
+        if str(split_item.get("status", "failed")).lower() != "ok":
+            self._append_flag(flags, "WBLOCK_STATUS_MISMATCH")
+
+        frame_entry = self._build_frame_entry(frame)
+        plot_task = self._build_task_json_from_entries(
+            job_id=job_id,
+            source_dxf=dwg_path,
+            output_dir=staged_output_dir,
+            workflow_stage="plot_from_split_dwg",
+            frame_entries=[frame_entry],
+            sheet_set_entries=[],
+        )
+
+        try:
+            plot_result = self._run_plot_task_from_dwg(
+                source_dwg=dwg_path,
+                runtime_task_dir=runtime_task_dir,
+                task_data=plot_task,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._append_flag(flags, "PLOT_FAILED")
+            self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
+            return result_item
+
+        plot_item = next(
+            (i for i in plot_result.get("frames", []) if isinstance(i, dict)),
+            None,
+        )
+        if plot_item is None:
+            self._append_flag(flags, "PLOT_RESULT_MISSING")
+            return result_item
+
+        for flag in self._normalize_flag_list(plot_item.get("flags")):
+            self._append_flag(flags, flag)
+        self._append_flag(flags, "PLOT_FROM_SPLIT_DWG")
+
+        pdf_path = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+        if (
+            str(plot_item.get("status", "failed")).lower() == "ok"
+            and pdf_path is not None
+            and pdf_path.exists()
+        ):
+            is_valid_pdf, invalid_reason = self._validate_pdf_output(pdf_path)
+            if is_valid_pdf:
+                if self._normalize_cad_pdf_canvas_if_needed(frame=frame, pdf_path=pdf_path):
+                    self._append_flag(flags, "PDF_CAD_CANVAS_ADJUSTED")
+                result_item["status"] = "ok"
+                result_item["pdf_path"] = str(pdf_path)
+                return result_item
+            self._append_flag(flags, f"PLOT_INVALID_PDF:{invalid_reason}")
+
+        self._append_flag(flags, "PLOT_FAILED")
+        if pdf_path is not None:
+            result_item["pdf_path"] = str(pdf_path)
+        return result_item
+
+    def _plot_sheet_set_from_split_dwgs(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        sheet_set: SheetSet | None,
+    ) -> dict:
+        cluster_id = str(split_item.get("cluster_id", ""))
+        flags = self._normalize_flag_list(split_item.get("flags"))
+        result_item = {
+            "cluster_id": cluster_id,
+            "status": "failed",
+            "pdf_path": "",
+            "dwg_path": "",
+            "page_count": int(split_item.get("page_count", 0) or 0),
+            "flags": flags,
+            "page_pdf_paths": [],
+        }
+        if sheet_set is None:
+            self._append_flag(flags, "SHEET_SET_NOT_FOUND")
+            return result_item
+
+        dwg_path = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
+        if dwg_path is not None and dwg_path.exists():
+            result_item["dwg_path"] = str(dwg_path)
+            if "WBLOCK_FAILED" in flags:
+                flags.remove("WBLOCK_FAILED")
+
+        if str(split_item.get("status", "failed")).lower() != "ok" and (
+            dwg_path is None or not dwg_path.exists()
+        ):
+            if "WBLOCK_FAILED" not in flags:
+                self._append_flag(flags, "WBLOCK_FAILED")
+            return result_item
+
+        raw_page_dwg_paths = split_item.get("page_dwg_paths", [])
+        page_dwg_paths: list[Path] = []
+        if isinstance(raw_page_dwg_paths, list):
+            for raw in raw_page_dwg_paths:
+                p = self._resolve_existing_path(raw, staged_output_dir)
+                if p is not None and p.exists():
+                    page_dwg_paths.append(p)
+        page_dwg_paths.sort(key=self._page_index_sort_key)
+
+        pages_sorted = sorted(sheet_set.pages, key=lambda p: p.page_index)
+        expected_pages = len(pages_sorted)
+        result_item["page_count"] = expected_pages
+        if expected_pages == 0:
+            self._append_flag(flags, "A4_MULTI_NO_PAGES")
+            return result_item
+        use_union_window_fallback = False
+        if len(page_dwg_paths) != expected_pages:
+            self._append_flag(flags, "A4_PAGE_WBLOCK_PARTIAL")
+            if dwg_path is None or not dwg_path.exists():
+                return result_item
+            page_dwg_paths = [dwg_path for _ in pages_sorted]
+            use_union_window_fallback = True
+            self._append_flag(flags, "A4_PLOT_FROM_UNION_DWG")
+
+        sheet_name = self._name_for_sheet_set(sheet_set)
+        page_pdf_paths: list[Path] = []
+        for page, page_dwg in zip(pages_sorted, page_dwg_paths, strict=False):
+            frame_entry = self._build_plot_frame_entry_from_page(
+                frame_id=f"{cluster_id}__p{page.page_index}",
+                name=f"{sheet_name}__p{page.page_index}",
+                page=page,
+            )
+            plot_task = self._build_task_json_from_entries(
+                job_id=job_id,
+                source_dxf=page_dwg,
+                output_dir=staged_output_dir,
+                workflow_stage="plot_from_split_dwg",
+                frame_entries=[frame_entry],
+                sheet_set_entries=[],
+                output_override=(
+                    {"plot_preferred_area": "window", "plot_fallback_area": "none"}
+                    if use_union_window_fallback
+                    else None
+                ),
+            )
+            try:
+                plot_result = self._run_plot_task_from_dwg(
+                    source_dwg=page_dwg,
+                    runtime_task_dir=runtime_task_dir,
+                    task_data=plot_task,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._append_flag(flags, "PLOT_FAILED")
+                self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
+                continue
+
+            plot_item = next(
+                (i for i in plot_result.get("frames", []) if isinstance(i, dict)),
+                None,
+            )
+            if plot_item is None:
+                self._append_flag(flags, "PLOT_RESULT_MISSING")
+                continue
+            for flag in self._normalize_flag_list(plot_item.get("flags")):
+                self._append_flag(flags, flag)
+
+            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+            if (
+                str(plot_item.get("status", "failed")).lower() == "ok"
+                and page_pdf is not None
+                and page_pdf.exists()
+            ):
+                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
+                if is_valid_pdf:
+                    paper = self._a4_paper_size(page.outer_bbox)
+                    self._normalize_cad_pdf_canvas_for_paper(
+                        pdf_path=page_pdf,
+                        paper_size_mm=(float(paper[0]), float(paper[1])),
+                    )
+                    page_pdf_paths.append(page_pdf)
+                else:
+                    self._append_flag(
+                        flags,
+                        f"PLOT_INVALID_PDF:{page.page_index}:{invalid_reason}",
+                    )
+                    self._append_flag(flags, "PLOT_FAILED")
+            else:
+                self._append_flag(flags, "PLOT_FAILED")
+
+        if len(page_pdf_paths) != expected_pages:
+            self._append_flag(flags, "PLOT_FAILED")
+            result_item["page_pdf_paths"] = [str(p) for p in page_pdf_paths]
+            return result_item
+
+        output_pdf = self._resolve_existing_path(split_item.get("pdf_path"), staged_output_dir)
+        if output_pdf is None:
+            output_pdf = staged_output_dir / f"{sheet_name}.pdf"
+        self._merge_pdf_pages(page_pdf_paths, output_pdf)
+        result_item["status"] = "ok"
+        result_item["pdf_path"] = str(output_pdf)
+        result_item["page_pdf_paths"] = []
+        self._append_flag(flags, "PDF_CAD_SPLIT_MERGED")
+        self._append_flag(flags, "PLOT_FROM_SPLIT_DWG")
+        return result_item
+
+    @staticmethod
+    def _resolve_existing_path(raw: object, staged_output_dir: Path) -> Path | None:
+        if not isinstance(raw, str) or not raw:
+            return None
+        path = Path(raw)
+        if not path.is_absolute():
+            path = staged_output_dir / path
+        return path
+
+    @staticmethod
+    def _normalize_flag_list(raw: object) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        flags: list[str] = []
+        for item in raw:
+            if isinstance(item, str) and item and item not in flags:
+                flags.append(item)
+        return flags
+
+    @staticmethod
+    def _append_flag(flags: list[str], flag: str) -> None:
+        if flag and flag not in flags:
+            flags.append(flag)
+
+    @staticmethod
+    def _page_index_sort_key(path: Path) -> tuple[int, str]:
+        page_index = CADDXFExecutor._extract_page_index(path)
+        if page_index is not None:
+            return (page_index, path.stem)
+        return (10_000_000, path.stem)
+
+    @staticmethod
+    def _extract_page_index(path: Path) -> int | None:
+        stem = path.stem
+        marker = "__p"
+        idx = stem.rfind(marker)
+        if idx < 0:
+            return None
+        suffix = stem[idx + len(marker) :]
+        if suffix.isdigit():
+            return int(suffix)
+        return None
+
+    def _run_plot_task_from_dwg(
+        self,
+        *,
+        source_dwg: Path,
+        runtime_task_dir: Path,
+        task_data: dict,
+    ) -> dict:
+        plot_root = runtime_task_dir / "plot_tasks"
+        plot_root.mkdir(parents=True, exist_ok=True)
+        task_dir = Path(
+            tempfile.mkdtemp(
+                prefix=f"{self._safe_task_dir_name(source_dwg)}_",
+                dir=plot_root,
+            ),
+        )
+        source_suffix = source_dwg.suffix if source_dwg.suffix else ".dwg"
+        staged_source = task_dir / f"source_input{source_suffix}"
+        shutil.copy2(source_dwg, staged_source)
+
+        task_payload = dict(task_data)
+        task_payload["source_dxf"] = str(staged_source)
+        task_json = task_dir / "task.json"
+        result_json = task_dir / "result.json"
+        run_meta = self._run_runner_with_engine_fallback(
+            source_dxf=staged_source,
+            task_payload=task_payload,
+            task_json=task_json,
+            result_json=result_json,
+            workspace_dir=task_dir,
+        )
+        result = self.load_result_json(result_json)
+        if run_meta["fallback_used"]:
+            result.setdefault("errors", []).append(
+                f"DOTNET_TO_LISP_FALLBACK:{run_meta['reason']}",
+            )
+        return result
+
+    def _run_runner_with_engine_fallback(
+        self,
+        *,
+        source_dxf: Path,
+        task_payload: dict,
+        task_json: Path,
+        result_json: Path,
+        workspace_dir: Path,
+    ) -> dict[str, str | bool]:
+        self._write_task_json(task_json, task_payload)
+        try:
+            self.runner.run(
+                source_dxf=source_dxf,
+                task_json=task_json,
+                result_json=result_json,
+                workspace_dir=workspace_dir,
+            )
+            return {"fallback_used": False, "reason": ""}
+        except Exception as exc:  # noqa: BLE001
+            if not self._task_can_fallback_to_lisp(task_payload):
+                raise
+            fallback_payload = self._build_lisp_fallback_task_payload(
+                task_payload=task_payload,
+                reason=str(exc),
+            )
+            self._write_task_json(task_json, fallback_payload)
+            self.runner.run(
+                source_dxf=source_dxf,
+                task_json=task_json,
+                result_json=result_json,
+                workspace_dir=workspace_dir,
+            )
+            return {"fallback_used": True, "reason": str(exc)}
+
+    def _task_can_fallback_to_lisp(self, task_payload: dict) -> bool:
+        engines = task_payload.get("engines", {})
+        if not isinstance(engines, dict):
+            return False
+        dotnet_bridge = engines.get("dotnet_bridge", {})
+        if not isinstance(dotnet_bridge, dict):
+            return False
+        if not bool(dotnet_bridge.get("enabled", False)):
+            return False
+        if not bool(dotnet_bridge.get("fallback_to_lisp_on_error", True)):
+            return False
+        return self._task_prefers_dotnet(task_payload)
+
+    @staticmethod
+    def _task_prefers_dotnet(task_payload: dict) -> bool:
+        stage = str(task_payload.get("workflow_stage", "split_only")).strip().lower()
+        engines = task_payload.get("engines", {})
+        if not isinstance(engines, dict):
+            return False
+        selection_engine = str(engines.get("selection_engine", "lisp")).strip().lower()
+        plot_engine = str(engines.get("plot_engine", "lisp")).strip().lower()
+        if stage == "split_only":
+            return selection_engine == "dotnet"
+        if stage in {"plot_window_only", "plot_from_split_dwg"}:
+            return plot_engine == "dotnet"
+        return False
+
+    @staticmethod
+    def _build_lisp_fallback_task_payload(*, task_payload: dict, reason: str) -> dict:
+        fallback_payload = copy.deepcopy(task_payload)
+        engines = fallback_payload.setdefault("engines", {})
+        if not isinstance(engines, dict):
+            engines = {}
+            fallback_payload["engines"] = engines
+        engines["selection_engine"] = "lisp"
+        engines["plot_engine"] = "lisp"
+        dotnet_bridge = engines.get("dotnet_bridge", {})
+        if not isinstance(dotnet_bridge, dict):
+            dotnet_bridge = {}
+        dotnet_bridge["enabled"] = False
+        dotnet_bridge["fallback_reason"] = reason
+        engines["dotnet_bridge"] = dotnet_bridge
+        return fallback_payload
+
+    def _build_plot_frame_entry_from_page(
+        self,
+        *,
+        frame_id: str,
+        name: str,
+        page,
+    ) -> dict:
+        return {
+            "frame_id": frame_id,
+            "name": name,
+            "bbox": self._bbox_to_dict(page.outer_bbox),
+            "vertices": (
+                self._vertices_for_frame(
+                    page.outer_bbox,
+                    page.frame_meta.runtime.outer_vertices,
+                )
+                if page.frame_meta
+                else self._vertices_from_bbox(page.outer_bbox)
+            ),
+            "paper_size_mm": self._a4_paper_size(page.outer_bbox),
+            "sx": (
+                float(page.frame_meta.runtime.sx)
+                if page.frame_meta and page.frame_meta.runtime.sx is not None
+                else None
+            ),
+            "sy": (
+                float(page.frame_meta.runtime.sy)
+                if page.frame_meta and page.frame_meta.runtime.sy is not None
+                else None
+            ),
+            "kind": "single",
         }
 
     @staticmethod
@@ -175,7 +1107,8 @@ class CADDXFExecutor:
         """解析 result.json。"""
         if not result_json.exists():
             raise FileNotFoundError(f"result.json 不存在: {result_json}")
-        return json.loads(result_json.read_text(encoding="utf-8"))
+        # .NET File.WriteAllText(Encoding.UTF8) 默认会写入 BOM，这里统一兼容。
+        return json.loads(result_json.read_text(encoding="utf-8-sig"))
 
     def apply_result(
         self,
@@ -474,183 +1407,6 @@ class CADDXFExecutor:
 
         return {k: float(v) for k, v in merged.items()}
 
-    def _build_pdf_fallback_exporter(self) -> DxfPdfExporter:
-        options = self.spec.doc_generation.get("options", {})
-
-        def _opt(key: str, default):
-            value = options.get(key, default)
-            if isinstance(value, dict) and "default" in value:
-                return value["default"]
-            return value
-
-        font_dirs = _opt("pdf_font_dirs", ["fronts/Fonts", "Fonts"])
-        fallback_fonts = _opt(
-            "pdf_fallback_font_family",
-            ["SimSun", "Microsoft YaHei", "SimHei"],
-        )
-        if isinstance(font_dirs, str):
-            font_dirs = [font_dirs]
-        if isinstance(fallback_fonts, str):
-            fallback_fonts = [fallback_fonts]
-
-        return DxfPdfExporter(
-            margins=self._resolve_plot_margins_mm(),
-            aci1_linewidth=float(_opt("pdf_aci1_linewidth_mm", 0.4)),
-            aci_default_linewidth=float(_opt("pdf_aci_default_linewidth_mm", 0.18)),
-            font_dirs=font_dirs,
-            fallback_font_family=fallback_fonts,
-        )
-
-    def _recover_pdf_with_python_fallback(
-        self,
-        *,
-        result: dict,
-        frames: list[FrameMeta],
-        sheet_sets: list[SheetSet],
-        staged_output_dir: Path,
-    ) -> None:
-        frames_by_id = {f.frame_id: f for f in frames}
-        sheet_sets_by_id = {ss.cluster_id: ss for ss in sheet_sets}
-
-        for item in result.get("frames", []):
-            frame_id = str(item.get("frame_id", ""))
-            frame = frames_by_id.get(frame_id)
-            if frame is None:
-                continue
-            raw_pdf = item.get("pdf_path")
-            raw_dwg = item.get("dwg_path")
-            pdf_path = Path(raw_pdf) if isinstance(raw_pdf, str) and raw_pdf else None
-            dwg_path = Path(raw_dwg) if isinstance(raw_dwg, str) and raw_dwg else None
-
-            has_pdf = bool(pdf_path and pdf_path.exists())
-            has_dwg = bool(dwg_path and dwg_path.exists())
-            status = str(item.get("status", "failed")).lower()
-            flags = item.get("flags", [])
-            if not isinstance(flags, list):
-                flags = []
-            if has_pdf and pdf_path is not None:
-                if self._normalize_cad_pdf_canvas_if_needed(frame=frame, pdf_path=pdf_path):
-                    item.setdefault("flags", [])
-                    if "PDF_CAD_CANVAS_ADJUSTED" not in item["flags"]:
-                        item["flags"].append("PDF_CAD_CANVAS_ADJUSTED")
-                if has_dwg and status != "ok":
-                    item["status"] = "ok"
-            if has_pdf or (status == "ok" and "PLOT_FAILED" not in flags):
-                continue
-            if pdf_path is None:
-                name = self._name_for_frame(frame)
-                pdf_path = staged_output_dir / f"{name}.pdf"
-                item["pdf_path"] = str(pdf_path)
-
-            paper = self._paper_size_for_frame(frame)
-            paper_size = (
-                (float(paper[0]), float(paper[1]))
-                if isinstance(paper, list) and len(paper) == 2
-                else None
-            )
-            self._pdf_fallback_exporter.export_single_page(
-                frame.runtime.source_file,
-                pdf_path,
-                clip_bbox=frame.runtime.outer_bbox,
-                paper_size_mm=paper_size,
-            )
-            item.setdefault("flags", [])
-            if "PDF_PYTHON_FALLBACK" not in item["flags"]:
-                item["flags"].append("PDF_PYTHON_FALLBACK")
-            if has_dwg and pdf_path.exists():
-                item["status"] = "ok"
-
-        for item in result.get("sheet_sets", []):
-            cluster_id = str(item.get("cluster_id", ""))
-            sheet_set = sheet_sets_by_id.get(cluster_id)
-            if sheet_set is None:
-                continue
-            raw_pdf = item.get("pdf_path")
-            raw_dwg = item.get("dwg_path")
-            pdf_path = Path(raw_pdf) if isinstance(raw_pdf, str) and raw_pdf else None
-            dwg_path = Path(raw_dwg) if isinstance(raw_dwg, str) and raw_dwg else None
-
-            has_pdf = bool(pdf_path and pdf_path.exists())
-            has_dwg = bool(dwg_path and dwg_path.exists())
-            status = str(item.get("status", "failed")).lower()
-            flags = item.get("flags", [])
-            if not isinstance(flags, list):
-                flags = []
-            if has_pdf or (status == "ok" and "PLOT_FAILED" not in flags):
-                continue
-            if pdf_path is None:
-                name = self._name_for_sheet_set(sheet_set)
-                pdf_path = staged_output_dir / f"{name}.pdf"
-                item["pdf_path"] = str(pdf_path)
-
-            # CAD窗口打印（按页输出）成功时，先合并 CAD 页级 PDF，避免错误回退为 Python 渲染。
-            page_pdf_paths = item.get("page_pdf_paths")
-            if isinstance(page_pdf_paths, list):
-                page_paths: list[Path] = []
-                for raw in page_pdf_paths:
-                    if not isinstance(raw, str) or not raw:
-                        continue
-                    p = Path(raw)
-                    if not p.is_absolute():
-                        p = staged_output_dir / p
-                    if p.exists():
-                        page_paths.append(p)
-                expected_page_count = len(sheet_set.pages)
-                failure_flags = {
-                    "PLOT_FAILED",
-                    "WBLOCK_FAILED",
-                    "CAD_EMPTY_SELECTION",
-                    "A4_MULTI_NO_PAGES",
-                }
-                has_hard_failure = any(
-                    isinstance(flag, str) and flag in failure_flags for flag in flags
-                )
-                has_complete_pages = (
-                    expected_page_count > 0 and len(page_paths) == expected_page_count
-                )
-
-                if page_paths and has_complete_pages and not has_hard_failure:
-                    first_page_bbox = sheet_set.pages[0].outer_bbox if sheet_set.pages else None
-                    sheet_paper = self._a4_paper_size(first_page_bbox) if first_page_bbox else None
-                    if isinstance(sheet_paper, list) and len(sheet_paper) == 2:
-                        for page_path in page_paths:
-                            self._normalize_cad_pdf_canvas_for_paper(
-                                pdf_path=page_path,
-                                paper_size_mm=(float(sheet_paper[0]), float(sheet_paper[1])),
-                            )
-                    self._merge_pdf_pages(page_paths, pdf_path)
-                    item.setdefault("flags", [])
-                    if "PDF_CAD_WINDOW_MERGED" not in item["flags"]:
-                        item["flags"].append("PDF_CAD_WINDOW_MERGED")
-                    if has_dwg and pdf_path.exists():
-                        item["status"] = "ok"
-                    continue
-                if page_paths and (not has_complete_pages or has_hard_failure):
-                    item.setdefault("flags", [])
-                    if "PDF_CAD_WINDOW_PARTIAL" not in item["flags"]:
-                        item["flags"].append("PDF_CAD_WINDOW_PARTIAL")
-
-            page_bboxes = [page.outer_bbox for page in sheet_set.pages]
-            paper_size = self._a4_paper_size(page_bboxes[0]) if page_bboxes else None
-            source_dxf = (
-                sheet_set.master_page.frame_meta.runtime.source_file
-                if sheet_set.master_page and sheet_set.master_page.frame_meta
-                else None
-            )
-            if source_dxf is None:
-                continue
-            self._pdf_fallback_exporter.export_multipage(
-                source_dxf,
-                pdf_path,
-                page_bboxes,
-                paper_size_mm=paper_size,
-            )
-            item.setdefault("flags", [])
-            if "PDF_PYTHON_FALLBACK" not in item["flags"]:
-                item["flags"].append("PDF_PYTHON_FALLBACK")
-            if has_dwg and pdf_path.exists():
-                item["status"] = "ok"
-
     @staticmethod
     def _merge_pdf_pages(page_paths: list[Path], output_pdf: Path) -> None:
         if not page_paths:
@@ -671,6 +1427,66 @@ class CADDXFExecutor:
                 path.unlink(missing_ok=True)
             except Exception:  # noqa: BLE001
                 continue
+
+    def _validate_pdf_output(self, pdf_path: Path) -> tuple[bool, str]:
+        if not pdf_path.exists():
+            return False, "PDF_MISSING"
+
+        output_cfg = self.config.module5_export.output
+        min_size = max(int(getattr(output_cfg, "pdf_validation_min_size_bytes", 1024)), 1)
+        min_stream = max(int(getattr(output_cfg, "pdf_validation_min_stream_bytes", 64)), 1)
+        if pdf_path.stat().st_size < min_size:
+            return False, "PDF_TOO_SMALL"
+
+        try:
+            from pypdf import PdfReader
+        except Exception:  # noqa: BLE001
+            # 环境缺少 pypdf 时仅保留最小字节门禁。
+            return True, "OK"
+
+        try:
+            reader = PdfReader(str(pdf_path))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"PDF_UNREADABLE:{exc}"
+
+        if len(reader.pages) <= 0:
+            return False, "PDF_NO_PAGES"
+
+        has_non_empty_stream = False
+        for page in reader.pages:
+            try:
+                content_obj = page.get_contents()
+            except Exception:  # noqa: BLE001
+                content_obj = None
+            if content_obj is None:
+                continue
+
+            total_bytes = 0
+            if isinstance(content_obj, list):
+                for item in content_obj:
+                    if item is None:
+                        continue
+                    try:
+                        data = item.get_data() if hasattr(item, "get_data") else b""
+                    except Exception:  # noqa: BLE001
+                        data = b""
+                    total_bytes += len(data)
+            else:
+                try:
+                    data = content_obj.get_data() if hasattr(content_obj, "get_data") else b""
+                except Exception:  # noqa: BLE001
+                    data = b""
+                total_bytes = len(data)
+
+            if total_bytes >= min_stream:
+                has_non_empty_stream = True
+                break
+
+        if not has_non_empty_stream:
+            # CAD PDF 存在“可视内容在外部对象流中”的情况，page.get_contents() 可能为空。
+            # 为避免误判，此处仅保留结构/体积门禁，不将空内容流作为硬失败条件。
+            return True, "OK_EMPTY_CONTENT_STREAM"
+        return True, "OK"
 
     def _normalize_cad_pdf_canvas_if_needed(self, *, frame: FrameMeta, pdf_path: Path) -> bool:
         paper = self._paper_size_for_frame(frame)

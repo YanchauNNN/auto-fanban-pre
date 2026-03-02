@@ -67,7 +67,19 @@ class TestRuntimeConfig:
         """测试模块5 AutoCAD 默认配置"""
         assert runtime_config.module5_export.pdf_engine == "python"
         assert runtime_config.module5_export.engine == "cad_dxf"
-        assert runtime_config.module5_export.selection.mode == "crossing"
+        assert runtime_config.module5_export.dotnet_bridge.enabled is True
+        assert runtime_config.module5_export.selection.engine == "dotnet"
+        assert runtime_config.module5_export.output.plot_engine == "dotnet"
+        assert runtime_config.module5_export.selection.mode == "database"
+        assert runtime_config.module5_export.output.pdf_from_split_dwg_mode == "always"
+        assert runtime_config.module5_export.output.split_stage_plot_enabled is False
+        assert runtime_config.module5_export.output.plot_preferred_area == "extents"
+        assert runtime_config.module5_export.output.plot_fallback_area == "window"
+        assert runtime_config.module5_export.output.plot_session_mode == "per_source_batch"
+        assert runtime_config.module5_export.output.plot_from_source_window_enabled is True
+        assert runtime_config.module5_export.output.plot_fallback_to_split_on_failure is True
+        assert runtime_config.module5_export.output.pdf_validation_min_size_bytes == 1024
+        assert runtime_config.module5_export.output.pdf_validation_min_stream_bytes == 64
         assert runtime_config.module5_export.cad_runner.task_timeout_sec == 900
         assert runtime_config.autocad.install_dir == r"D:\Program Files\Autodesk\AutoCAD 2021"
         assert runtime_config.autocad.prog_id_candidates == [

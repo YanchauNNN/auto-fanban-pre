@@ -116,6 +116,16 @@ def main() -> int:
         "key_pdf_001": _pdf_meta(key_001),
         "key_pdf_002": _pdf_meta(key_002),
     }
+    summary["plot_from_split_stats"] = {
+        "from_split_hits": sum(1 for f in job.flags if "PLOT_FROM_SPLIT_DWG" in f),
+        "extents_hits": sum(1 for f in job.flags if "PLOT_EXTENTS_USED" in f),
+        "window_fallback_hits": sum(
+            1 for f in job.flags if "PLOT_WINDOW_FALLBACK" in f
+        ),
+    }
+    summary["legacy_python_path_hits"] = sum(
+        1 for f in job.flags if "PDF_PYTHON_FALLBACK" in f
+    )
 
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if args.summary_json:

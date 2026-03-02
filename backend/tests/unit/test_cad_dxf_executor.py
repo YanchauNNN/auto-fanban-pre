@@ -34,6 +34,19 @@ class _SpecStub:
         return {"CNPE_A1": self._Variant(841.0, 594.0)}
 
 
+def _write_dummy_pdf(path: Path) -> None:
+    from pypdf import PdfWriter
+    from pypdf.generic import NameObject, StreamObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200.0, height=120.0)
+    stream = StreamObject()
+    stream._data = b"q\n" + (b"0 0 m 100 100 l S\n" * 120) + b"Q\n"
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    with open(path, "wb") as f:
+        writer.write(f)
+
+
 class _RunnerSuccessStub:
     """模拟 AcCoreConsole 成功执行并写入 result.json。"""
 
@@ -51,33 +64,79 @@ class _RunnerSuccessStub:
         )
 
         task = json.loads(task_json.read_text(encoding="utf-8"))
+        stage_output = Path(task["output_dir"])
+        stage_output.mkdir(parents=True, exist_ok=True)
+        workflow_stage = task.get("workflow_stage", "split_only")
         frames = []
-        for frame in task.get("frames", []):
-            name = frame["name"]
-            frames.append(
-                {
-                    "frame_id": frame["frame_id"],
-                    "status": "ok",
-                    "pdf_path": str(Path(task["output_dir"]) / f"{name}.pdf"),
-                    "dwg_path": str(Path(task["output_dir"]) / f"{name}.dwg"),
-                    "selection_count": 10,
-                    "flags": [],
-                },
-            )
-
         sheet_sets = []
-        for sheet_set in task.get("sheet_sets", []):
-            name = sheet_set["name"]
-            sheet_sets.append(
-                {
-                    "cluster_id": sheet_set["cluster_id"],
-                    "status": "ok",
-                    "pdf_path": str(Path(task["output_dir"]) / f"{name}.pdf"),
-                    "dwg_path": str(Path(task["output_dir"]) / f"{name}.dwg"),
-                    "page_count": len(sheet_set.get("pages", [])),
-                    "flags": [],
-                },
-            )
+        if workflow_stage == "split_only":
+            for frame in task.get("frames", []):
+                name = frame["name"]
+                dwg_path = stage_output / f"{name}.dwg"
+                dwg_path.write_text("dwg", encoding="utf-8")
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": "",
+                        "dwg_path": str(dwg_path),
+                        "selection_count": 10,
+                        "flags": [],
+                    },
+                )
+
+            for sheet_set in task.get("sheet_sets", []):
+                name = sheet_set["name"]
+                dwg_path = stage_output / f"{name}.dwg"
+                dwg_path.write_text("dwg", encoding="utf-8")
+                page_dwg_paths: list[str] = []
+                for page in sheet_set.get("pages", []):
+                    page_index = int(page.get("page_index", 0))
+                    page_dwg = stage_output / f"{name}__p{page_index}.dwg"
+                    page_dwg.write_text("dwg", encoding="utf-8")
+                    page_dwg_paths.append(str(page_dwg))
+                sheet_sets.append(
+                    {
+                        "cluster_id": sheet_set["cluster_id"],
+                        "status": "ok",
+                        "pdf_path": str(stage_output / f"{name}.pdf"),
+                        "dwg_path": str(dwg_path),
+                        "page_count": len(sheet_set.get("pages", [])),
+                        "flags": [],
+                        "page_dwg_paths": page_dwg_paths,
+                        "page_pdf_paths": [],
+                    },
+                )
+        elif workflow_stage == "plot_from_split_dwg":
+            for frame in task.get("frames", []):
+                name = frame["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                _write_dummy_pdf(pdf_path)
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_EXTENTS_USED"],
+                    },
+                )
+        elif workflow_stage == "plot_window_only":
+            for frame in task.get("frames", []):
+                name = frame["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                _write_dummy_pdf(pdf_path)
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_WINDOW_USED"],
+                    },
+                )
 
         result = {
             "schema_version": "cad-dxf-result@1.0",
@@ -95,84 +154,301 @@ class _RunnerMaterializeStub:
     """模拟 CAD 在 staging 目录生成真实文件。"""
 
     def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        helper = _RunnerSuccessStub()
+        return helper.run(
+            source_dxf=source_dxf,
+            task_json=task_json,
+            result_json=result_json,
+            workspace_dir=workspace_dir,
+        )
+
+
+class _RunnerWindowFailFallbackStub(_RunnerSuccessStub):
+    """窗口批量打印指定页失败，验证 split-dwg 定向回退。"""
+
+    def __init__(self, *, fail_frame_ids: set[str] | None = None) -> None:
+        super().__init__()
+        self.fail_frame_ids = fail_frame_ids or set()
+
+    def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        self.calls.append(
+            {
+                "source_dxf": source_dxf,
+                "task_json": task_json,
+                "result_json": result_json,
+                "workspace_dir": workspace_dir,
+            },
+        )
         task = json.loads(task_json.read_text(encoding="utf-8"))
         stage_output = Path(task["output_dir"])
         stage_output.mkdir(parents=True, exist_ok=True)
-
+        workflow_stage = task.get("workflow_stage", "split_only")
         frames = []
-        for frame in task.get("frames", []):
-            name = frame["name"]
-            pdf_path = stage_output / f"{name}.pdf"
-            dwg_path = stage_output / f"{name}.dwg"
-            pdf_path.write_text("pdf", encoding="utf-8")
-            dwg_path.write_text("dwg", encoding="utf-8")
-            frames.append(
-                {
-                    "frame_id": frame["frame_id"],
-                    "status": "ok",
-                    "pdf_path": str(pdf_path),
-                    "dwg_path": str(dwg_path),
-                    "selection_count": 2,
-                    "flags": [],
-                },
+        sheet_sets = []
+        if workflow_stage == "split_only":
+            helper = _RunnerSuccessStub()
+            return helper.run(
+                source_dxf=source_dxf,
+                task_json=task_json,
+                result_json=result_json,
+                workspace_dir=workspace_dir,
             )
-
+        if workflow_stage == "plot_window_only":
+            for frame in task.get("frames", []):
+                frame_id = frame["frame_id"]
+                name = frame["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                if frame_id in self.fail_frame_ids:
+                    frames.append(
+                        {
+                            "frame_id": frame_id,
+                            "status": "failed",
+                            "pdf_path": str(pdf_path),
+                            "dwg_path": str(source_dxf),
+                            "selection_count": 1,
+                            "flags": ["PLOT_WINDOW_FAILED"],
+                        },
+                    )
+                else:
+                    _write_dummy_pdf(pdf_path)
+                    frames.append(
+                        {
+                            "frame_id": frame_id,
+                            "status": "ok",
+                            "pdf_path": str(pdf_path),
+                            "dwg_path": str(source_dxf),
+                            "selection_count": 1,
+                            "flags": ["PLOT_WINDOW_USED"],
+                        },
+                    )
+        elif workflow_stage == "plot_from_split_dwg":
+            for frame in task.get("frames", []):
+                name = frame["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                _write_dummy_pdf(pdf_path)
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_EXTENTS_USED"],
+                    },
+                )
         result = {
             "schema_version": "cad-dxf-result@1.0",
             "job_id": task["job_id"],
             "source_dxf": task["source_dxf"],
             "frames": frames,
-            "sheet_sets": [],
+            "sheet_sets": sheet_sets,
             "errors": [],
         }
         result_json.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
         return {"exit_code": 0}
 
 
-class _PdfFallbackStub:
-    """记录 Python 回退导出调用。"""
+class _RunnerWindowOkMissingDwgStub(_RunnerSuccessStub):
+    """split 缺少 dwg，但窗口打印成功。"""
 
-    def __init__(self) -> None:
-        self.single_calls: list[dict] = []
-        self.multi_calls: list[dict] = []
-
-    def export_single_page(
-        self,
-        source_dxf: Path,
-        pdf_path: Path,
-        *,
-        clip_bbox: BBox | None = None,
-        paper_size_mm: tuple[float, float] | None = None,
-    ) -> None:
-        self.single_calls.append(
+    def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        self.calls.append(
             {
                 "source_dxf": source_dxf,
-                "pdf_path": pdf_path,
-                "clip_bbox": clip_bbox,
-                "paper_size_mm": paper_size_mm,
+                "task_json": task_json,
+                "result_json": result_json,
+                "workspace_dir": workspace_dir,
             },
         )
-        pdf_path.parent.mkdir(parents=True, exist_ok=True)
-        pdf_path.write_text("single-fallback", encoding="utf-8")
+        task = json.loads(task_json.read_text(encoding="utf-8"))
+        stage_output = Path(task["output_dir"])
+        stage_output.mkdir(parents=True, exist_ok=True)
+        workflow_stage = task.get("workflow_stage", "split_only")
+        frames: list[dict] = []
+        if workflow_stage == "split_only":
+            for frame in task.get("frames", []):
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "failed",
+                        "pdf_path": "",
+                        "dwg_path": str(stage_output / f"{frame['name']}.dwg"),
+                        "selection_count": 0,
+                        "flags": ["WBLOCK_FAILED"],
+                    },
+                )
+        elif workflow_stage == "plot_window_only":
+            for frame in task.get("frames", []):
+                pdf_path = stage_output / f"{frame['name']}.pdf"
+                _write_dummy_pdf(pdf_path)
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_WINDOW_USED"],
+                    },
+                )
+        result_json.write_text(
+            json.dumps(
+                {
+                    "schema_version": "cad-dxf-result@1.0",
+                    "job_id": task["job_id"],
+                    "source_dxf": task["source_dxf"],
+                    "frames": frames,
+                    "sheet_sets": [],
+                    "errors": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return {"exit_code": 0}
 
-    def export_multipage(
-        self,
-        source_dxf: Path,
-        pdf_path: Path,
-        page_bboxes: list[BBox],
-        *,
-        paper_size_mm: list[float] | None = None,
-    ) -> None:
-        self.multi_calls.append(
+
+class _RunnerWindowInvalidPdfFallbackStub(_RunnerSuccessStub):
+    """窗口打印返回无效PDF，验证回退到 split-dwg 打印。"""
+
+    def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        self.calls.append(
             {
                 "source_dxf": source_dxf,
-                "pdf_path": pdf_path,
-                "page_bboxes": page_bboxes,
-                "paper_size_mm": paper_size_mm,
+                "task_json": task_json,
+                "result_json": result_json,
+                "workspace_dir": workspace_dir,
             },
         )
-        pdf_path.parent.mkdir(parents=True, exist_ok=True)
-        pdf_path.write_text("multi-fallback", encoding="utf-8")
+        task = json.loads(task_json.read_text(encoding="utf-8"))
+        stage_output = Path(task["output_dir"])
+        stage_output.mkdir(parents=True, exist_ok=True)
+        workflow_stage = task.get("workflow_stage", "split_only")
+        frames: list[dict] = []
+        if workflow_stage == "split_only":
+            helper = _RunnerSuccessStub()
+            return helper.run(
+                source_dxf=source_dxf,
+                task_json=task_json,
+                result_json=result_json,
+                workspace_dir=workspace_dir,
+            )
+        if workflow_stage == "plot_window_only":
+            for frame in task.get("frames", []):
+                pdf_path = stage_output / f"{frame['name']}.pdf"
+                pdf_path.write_text("invalid-pdf", encoding="utf-8")
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_WINDOW_USED"],
+                    },
+                )
+        elif workflow_stage == "plot_from_split_dwg":
+            for frame in task.get("frames", []):
+                pdf_path = stage_output / f"{frame['name']}.pdf"
+                _write_dummy_pdf(pdf_path)
+                frames.append(
+                    {
+                        "frame_id": frame["frame_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "selection_count": 1,
+                        "flags": ["PLOT_EXTENTS_USED"],
+                    },
+                )
+        result_json.write_text(
+            json.dumps(
+                {
+                    "schema_version": "cad-dxf-result@1.0",
+                    "job_id": task["job_id"],
+                    "source_dxf": task["source_dxf"],
+                    "frames": frames,
+                    "sheet_sets": [],
+                    "errors": [],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return {"exit_code": 0}
+
+
+class _RunnerWindowResultMissingStub(_RunnerSuccessStub):
+    """窗口批量执行成功但未返回对应 frame 结果。"""
+
+    def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        self.calls.append(
+            {
+                "source_dxf": source_dxf,
+                "task_json": task_json,
+                "result_json": result_json,
+                "workspace_dir": workspace_dir,
+            },
+        )
+        task = json.loads(task_json.read_text(encoding="utf-8"))
+        stage_output = Path(task["output_dir"])
+        stage_output.mkdir(parents=True, exist_ok=True)
+        workflow_stage = task.get("workflow_stage", "split_only")
+        if workflow_stage == "split_only":
+            helper = _RunnerSuccessStub()
+            return helper.run(
+                source_dxf=source_dxf,
+                task_json=task_json,
+                result_json=result_json,
+                workspace_dir=workspace_dir,
+            )
+        if workflow_stage == "plot_window_only":
+            result_json.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "cad-dxf-result@1.0",
+                        "job_id": task["job_id"],
+                        "source_dxf": task["source_dxf"],
+                        "frames": [],
+                        "sheet_sets": [],
+                        "errors": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            return {"exit_code": 0}
+        return _RunnerSuccessStub().run(
+            source_dxf=source_dxf,
+            task_json=task_json,
+            result_json=result_json,
+            workspace_dir=workspace_dir,
+        )
+
+
+class _RunnerDotnetFailThenLispSuccessStub(_RunnerSuccessStub):
+    """dotnet 路由抛错，验证 Python 自动回退 lisp。"""
+
+    def run(self, *, source_dxf: Path, task_json: Path, result_json: Path, workspace_dir: Path):
+        self.calls.append(
+            {
+                "source_dxf": source_dxf,
+                "task_json": task_json,
+                "result_json": result_json,
+                "workspace_dir": workspace_dir,
+            },
+        )
+        task = json.loads(task_json.read_text(encoding="utf-8"))
+        engines = task.get("engines", {})
+        dotnet_bridge = engines.get("dotnet_bridge", {}) if isinstance(engines, dict) else {}
+        if isinstance(dotnet_bridge, dict) and dotnet_bridge.get("enabled", False):
+            raise RuntimeError("dotnet bridge unavailable")
+        return _RunnerSuccessStub().run(
+            source_dxf=source_dxf,
+            task_json=task_json,
+            result_json=result_json,
+            workspace_dir=workspace_dir,
+        )
 
 
 def _make_runtime(frame_id: str, source_file: Path, bbox: BBox) -> FrameRuntime:
@@ -275,11 +551,41 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
         output_dir=tmp_path / "out",
     )
 
-    assert task["selection"]["mode"] == "crossing"
+    assert task["selection"]["mode"] == "database"
     assert task["plot"]["pc3_name"] == "DWG To PDF.pc3"
+    assert task["engines"]["selection_engine"] == "dotnet"
+    assert task["engines"]["plot_engine"] == "dotnet"
+    assert task["engines"]["dotnet_bridge"]["enabled"] is True
     assert len(task["frames"]) == 1
     assert len(task["sheet_sets"]) == 1
     assert task["frames"][0]["frame_id"] == "f-1"
+
+
+def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    executor = _make_executor()
+
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+        workflow_stage="plot_from_split_dwg",
+    )
+
+    assert task["workflow_stage"] == "plot_from_split_dwg"
+    assert task["output"]["pdf_from_split_dwg_mode"] == "always"
+    assert task["output"]["plot_preferred_area"] == "extents"
+    assert task["output"]["plot_fallback_area"] == "window"
+    assert task["output"]["split_stage_plot_enabled"] is False
 
 
 def test_plot_margins_mapping_from_doc_generation_spec(tmp_path: Path):
@@ -351,7 +657,6 @@ def test_result_json_backfill_paths(tmp_path: Path):
         internal_code="I-001",
         external_code="E001",
     )
-    sheet_set = _make_sheet_set("cluster-1", frame)
     runner = _RunnerSuccessStub()
     executor = _make_executor(runner=runner)
 
@@ -359,23 +664,38 @@ def test_result_json_backfill_paths(tmp_path: Path):
         job_id="job-1",
         source_dxf=source,
         frames=[frame],
-        sheet_sets=[sheet_set],
+        sheet_sets=[],
         output_dir=output_dir,
         task_root=tmp_path / "tasks",
     )
 
     frames_by_id = {frame.frame_id: frame}
-    sheet_sets_by_id = {sheet_set.cluster_id: sheet_set}
     frame_count, sheet_count = executor.apply_result(
         result=result,
         frames_by_id=frames_by_id,
-        sheet_sets_by_id=sheet_sets_by_id,
+        sheet_sets_by_id={},
     )
 
     assert frame_count == 1
-    assert sheet_count == 1
+    assert sheet_count == 0
     assert frame.runtime.pdf_path is not None
     assert frame.runtime.dwg_path is not None
+
+
+def test_page_index_sort_key_orders_numeric_suffix():
+    paths = [
+        Path("set__p10.dwg"),
+        Path("set__p2.dwg"),
+        Path("set__p1.dwg"),
+        Path("set_invalid.dwg"),
+    ]
+    ordered = sorted(paths, key=CADDXFExecutor._page_index_sort_key)
+    assert [p.name for p in ordered] == [
+        "set__p1.dwg",
+        "set__p2.dwg",
+        "set__p10.dwg",
+        "set_invalid.dwg",
+    ]
 
 
 def test_frame_failure_isolation(tmp_path: Path):
@@ -524,58 +844,34 @@ def test_safe_task_dir_name_strips_non_ascii():
     assert all(ch.isascii() for ch in name)
 
 
-def test_sheet_set_partial_page_pdfs_should_fallback_not_merge(tmp_path: Path):
+def test_execute_source_dxf_runs_split_then_plot_without_python_fallback(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
     frame = _make_frame(
-        frame_id="f-1",
-        source_file=source,
-        internal_code="I-001",
-        external_code="E001",
+        frame_id="f-1", source_file=source, internal_code="I-001", external_code="E001"
     )
-    sheet_set = _make_sheet_set_two_pages("cluster-1", frame)
-    executor = _make_executor()
-    fallback_stub = _PdfFallbackStub()
-    executor._pdf_fallback_exporter = fallback_stub
+    runner = _RunnerSuccessStub()
+    executor = _make_executor(runner=runner)
+    output_dir = tmp_path / "drawings"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    staged_output_dir = tmp_path / "stage-out"
-    staged_output_dir.mkdir(parents=True, exist_ok=True)
-    partial_page_pdf = staged_output_dir / "set__p1.pdf"
-    # 故意写入非 PDF 内容：若错误触发合并，会在此处抛错导致测试失败。
-    partial_page_pdf.write_text("not-a-pdf", encoding="utf-8")
-    dwg_path = staged_output_dir / "set.dwg"
-    dwg_path.write_text("dwg", encoding="utf-8")
-    merged_pdf = staged_output_dir / "set.pdf"
-
-    result = {
-        "frames": [],
-        "sheet_sets": [
-            {
-                "cluster_id": "cluster-1",
-                "status": "failed",
-                "pdf_path": str(merged_pdf),
-                "dwg_path": str(dwg_path),
-                "page_count": 2,
-                "flags": ["PLOT_FAILED"],
-                "page_pdf_paths": [str(partial_page_pdf)],
-            },
-        ],
-        "errors": [],
-    }
-
-    executor._recover_pdf_with_python_fallback(
-        result=result,
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
         frames=[frame],
-        sheet_sets=[sheet_set],
-        staged_output_dir=staged_output_dir,
+        sheet_sets=[],
+        output_dir=output_dir,
+        task_root=tmp_path / "tasks",
     )
 
-    item = result["sheet_sets"][0]
-    assert len(fallback_stub.multi_calls) == 1
-    assert "PDF_CAD_WINDOW_MERGED" not in item["flags"]
-    assert "PDF_CAD_WINDOW_PARTIAL" in item["flags"]
-    assert "PDF_PYTHON_FALLBACK" in item["flags"]
-    assert merged_pdf.exists()
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert stages[0] == "split_only"
+    assert "plot_window_only" in stages
+    assert "plot_from_split_dwg" not in stages
+    assert "PDF_PYTHON_FALLBACK" not in result["frames"][0]["flags"]
 
 
 def test_normalize_canvas_swaps_target_size_after_rotation(tmp_path: Path):
@@ -605,3 +901,216 @@ def test_normalize_canvas_swaps_target_size_after_rotation(tmp_path: Path):
     assert width_mm == pytest.approx(240.0, abs=2.0)
     assert height_mm == pytest.approx(327.0, abs=2.0)
     assert height_mm > 296.0
+
+
+def test_window_batch_failure_falls_back_to_split_for_single_frame(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    runner = _RunnerWindowFailFallbackStub(fail_frame_ids={"f-1"})
+    executor = _make_executor(runner=runner)
+    output_dir = tmp_path / "drawings"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=output_dir,
+        task_root=tmp_path / "tasks",
+    )
+
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert stages[0] == "split_only"
+    assert "plot_window_only" in stages
+    assert "plot_from_split_dwg" in stages
+    assert result["frames"][0]["status"] == "ok"
+    assert "PLOT_FROM_SPLIT_FALLBACK" in result["frames"][0]["flags"]
+
+
+def test_dotnet_engine_error_auto_falls_back_to_lisp(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    runner = _RunnerDotnetFailThenLispSuccessStub()
+    executor = _make_executor(runner=runner)
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+    assert result["frames"][0]["status"] == "ok"
+    assert any(
+        isinstance(err, str) and err.startswith("DOTNET_TO_LISP_FALLBACK:")
+        for err in result["errors"]
+    )
+
+
+def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    sheet_set = _make_sheet_set_two_pages("cluster-1", frame)
+    # 仅让第2页窗口打印失败，验证定向回退。
+    runner = _RunnerWindowFailFallbackStub(fail_frame_ids={"cluster-1__p2"})
+    executor = _make_executor(runner=runner)
+    output_dir = tmp_path / "drawings"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[sheet_set],
+        output_dir=output_dir,
+        task_root=tmp_path / "tasks",
+    )
+
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert "plot_window_only" in stages
+    assert "plot_from_split_dwg" in stages
+    assert result["sheet_sets"][0]["status"] == "ok"
+    assert "PLOT_FALLBACK_PAGE_OK:2" in result["sheet_sets"][0]["flags"]
+
+
+def test_window_success_with_missing_split_dwg_still_marks_ok(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    executor = _make_executor(runner=_RunnerWindowOkMissingDwgStub())
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+    item = result["frames"][0]
+    assert item["status"] == "ok"
+    assert "DWG_MISSING_FOR_PLOT" in item["flags"]
+    assert Path(item["pdf_path"]).exists()
+
+
+def test_window_invalid_pdf_falls_back_to_split_plot(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    runner = _RunnerWindowInvalidPdfFallbackStub()
+    executor = _make_executor(runner=runner)
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert "plot_from_split_dwg" in stages
+    assert result["frames"][0]["status"] == "ok"
+    assert any(
+        str(flag).startswith("PLOT_WINDOW_INVALID_PDF:") for flag in result["frames"][0]["flags"]
+    )
+
+
+def test_window_invalid_pdf_without_fallback_marks_failed(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    cfg = RuntimeConfig()
+    cfg.module5_export.output.plot_fallback_to_split_on_failure = False
+    runner = _RunnerWindowInvalidPdfFallbackStub()
+    executor = _make_executor(config=cfg, runner=runner)
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert "plot_from_split_dwg" not in stages
+    assert result["frames"][0]["status"] == "failed"
+
+
+def test_missing_window_result_falls_back_to_split_plot(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    runner = _RunnerWindowResultMissingStub()
+    executor = _make_executor(runner=runner)
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+    assert result["frames"][0]["status"] == "ok"
+    assert "PLOT_WINDOW_RESULT_MISSING" in result["frames"][0]["flags"]
+    assert "PLOT_FROM_SPLIT_FALLBACK" in result["frames"][0]["flags"]
+
+
+def test_load_result_json_accepts_utf8_bom(tmp_path: Path):
+    result_json = tmp_path / "result.json"
+    payload = {"schema_version": "cad-dxf-result@1.0", "frames": [], "sheet_sets": []}
+    result_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8-sig")
+
+    loaded = CADDXFExecutor.load_result_json(result_json)
+
+    assert loaded["schema_version"] == "cad-dxf-result@1.0"
+    assert loaded["frames"] == []
