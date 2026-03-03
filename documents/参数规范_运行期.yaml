@@ -71,12 +71,12 @@ runtime_options:
         desc: "窗口打印页边距（mm）"
     output:
       plot_engine: { type: enum, default: "dotnet", desc: "窗口打印执行引擎：dotnet/lisp" }
-      a4_multipage_pdf: { type: enum, default: "merge_pages", desc: "A4成组PDF输出策略：merge_pages/single_page_fallback" }
+      a4_multipage_pdf: { type: enum, default: "dotnet_multipage", desc: "A4成组PDF输出策略：dotnet_multipage（.NET直接输出单个多页PDF）" }
       on_frame_fail: { type: enum, default: "flag_and_continue", desc: "单帧失败策略：flag_and_continue/abort_dxf" }
       pdf_from_split_dwg_mode: { type: enum, default: "always", desc: "是否从切图DWG导出PDF：always(固定主链路)/off(仅调试禁用)" }
       split_stage_plot_enabled: { type: bool, default: false, desc: "切图阶段是否同时打印PDF（默认关闭，固定两阶段执行）" }
-      plot_preferred_area: { type: enum, default: "extents", desc: "切图DWG打印主策略：extents/window" }
-      plot_fallback_area: { type: enum, default: "window", desc: "切图DWG打印回退策略：window/none" }
+      plot_preferred_area: { type: enum, default: "window", desc: "切图DWG打印主策略：window/extents（纯CAD图幅控制默认window）" }
+      plot_fallback_area: { type: enum, default: "none", desc: "切图DWG打印回退策略：none/window（严格图幅默认none）" }
       plot_session_mode: { type: enum, default: "per_source_batch", desc: "打印会话模式：per_source_batch(每个source_dxf一次窗口批量打印)" }
       plot_from_source_window_enabled: { type: bool, default: true, desc: "是否启用原始DWG窗口批量打印主路径" }
       plot_fallback_to_split_on_failure: { type: bool, default: true, desc: "窗口主路径失败时是否仅对失败页/失败帧回退到切图DWG打印" }

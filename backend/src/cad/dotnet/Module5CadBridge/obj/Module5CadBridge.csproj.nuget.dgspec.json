@@ -42,7 +42,7 @@
       "frameworks": {
         "net48": {
           "targetAlias": "net48",
-          "runtimeIdentifierGraphPath": "C:\\Users\\lenovo\\AppData\\Local\\dotnet-sdk-8.0.418\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
         }
       }
     }

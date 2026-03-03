@@ -112,12 +112,12 @@ doc_generation:
     module5_db_unknown_bbox_policy: { type: str, default: "keep_if_uncertain", desc: "数据库级选集中，无法计算bbox实体处理策略：keep_if_uncertain/drop" }
     module5_db_fallback_to_crossing: { type: bool, default: true, desc: "数据库级选集失败时是否回退crossing命令选集" }
     module5_plot_engine: { type: str, default: "dotnet", desc: "窗口打印执行引擎：dotnet/lisp" }
-    module5_output_a4_multipage_pdf: { type: str, default: "merge_pages", desc: "A4成组PDF输出策略：merge_pages/single_page_fallback" }
+    module5_output_a4_multipage_pdf: { type: str, default: "dotnet_multipage", desc: "A4成组PDF输出策略：dotnet_multipage（.NET直接输出单个多页PDF）" }
     module5_output_on_frame_fail: { type: str, default: "flag_and_continue", desc: "单帧失败策略：flag_and_continue/abort_dxf" }
     module5_output_pdf_from_split_dwg_mode: { type: str, default: "always", desc: "模块5 PDF链路策略：always(固定从切图DWG打印)/off(仅调试禁用)" }
     module5_output_split_stage_plot_enabled: { type: bool, default: false, desc: "切图阶段是否同时打印PDF（默认false，仅执行WBLOCK）" }
-    module5_output_plot_preferred_area: { type: str, default: "extents", desc: "切图DWG打印主策略：extents/window" }
-    module5_output_plot_fallback_area: { type: str, default: "window", desc: "切图DWG打印回退策略：window/none" }
+    module5_output_plot_preferred_area: { type: str, default: "window", desc: "切图DWG打印主策略：window/extents（纯CAD图幅控制默认window）" }
+    module5_output_plot_fallback_area: { type: str, default: "none", desc: "切图DWG打印回退策略：none/window（严格图幅默认none）" }
     module5_output_plot_session_mode: { type: str, default: "per_source_batch", desc: "打印会话模式：per_source_batch（每个source_dxf一次窗口批量打印）" }
     module5_output_plot_from_source_window_enabled: { type: bool, default: true, desc: "是否启用原始DWG窗口批量打印主路径" }
     module5_output_plot_fallback_to_split_on_failure: { type: bool, default: true, desc: "窗口主路径失败时仅对失败帧/失败页回退到切图DWG打印" }

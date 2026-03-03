@@ -34,15 +34,25 @@ class _SpecStub:
         return {"CNPE_A1": self._Variant(841.0, 594.0)}
 
 
-def _write_dummy_pdf(path: Path) -> None:
+def _mm_to_pt(mm: float) -> float:
+    return float(mm) * 72.0 / 25.4
+
+
+def _write_dummy_pdf(
+    path: Path,
+    *,
+    page_sizes_mm: list[tuple[float, float]] | None = None,
+) -> None:
     from pypdf import PdfWriter
     from pypdf.generic import NameObject, StreamObject
 
     writer = PdfWriter()
-    page = writer.add_blank_page(width=200.0, height=120.0)
-    stream = StreamObject()
-    stream._data = b"q\n" + (b"0 0 m 100 100 l S\n" * 120) + b"Q\n"
-    page[NameObject("/Contents")] = writer._add_object(stream)
+    sizes = page_sizes_mm or [(841.0, 594.0)]
+    for width_mm, height_mm in sizes:
+        page = writer.add_blank_page(width=_mm_to_pt(width_mm), height=_mm_to_pt(height_mm))
+        stream = StreamObject()
+        stream._data = b"q\n" + (b"0 0 m 100 100 l S\n" * 120) + b"Q\n"
+        page[NameObject("/Contents")] = writer._add_object(stream)
     with open(path, "wb") as f:
         writer.write(f)
 
@@ -111,7 +121,10 @@ class _RunnerSuccessStub:
             for frame in task.get("frames", []):
                 name = frame["name"]
                 pdf_path = stage_output / f"{name}.pdf"
-                _write_dummy_pdf(pdf_path)
+                paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                width = float(paper[0]) if len(paper) > 0 else 841.0
+                height = float(paper[1]) if len(paper) > 1 else 594.0
+                _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -122,11 +135,35 @@ class _RunnerSuccessStub:
                         "flags": ["PLOT_EXTENTS_USED"],
                     },
                 )
+            for sheet_set in task.get("sheet_sets", []):
+                name = sheet_set["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                page_sizes = []
+                for page in sheet_set.get("pages", []):
+                    paper = page.get("paper_size_mm") or [297.0, 210.0]
+                    width = float(paper[0]) if len(paper) > 0 else 297.0
+                    height = float(paper[1]) if len(paper) > 1 else 210.0
+                    page_sizes.append((width, height))
+                _write_dummy_pdf(pdf_path, page_sizes_mm=page_sizes or [(297.0, 210.0)])
+                sheet_sets.append(
+                    {
+                        "cluster_id": sheet_set["cluster_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "page_count": len(sheet_set.get("pages", [])),
+                        "flags": ["PLOT_EXTENTS_USED", "PLOT_MULTIPAGE_USED"],
+                        "page_pdf_paths": [],
+                    },
+                )
         elif workflow_stage == "plot_window_only":
             for frame in task.get("frames", []):
                 name = frame["name"]
                 pdf_path = stage_output / f"{name}.pdf"
-                _write_dummy_pdf(pdf_path)
+                paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                width = float(paper[0]) if len(paper) > 0 else 841.0
+                height = float(paper[1]) if len(paper) > 1 else 594.0
+                _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -135,6 +172,27 @@ class _RunnerSuccessStub:
                         "dwg_path": str(source_dxf),
                         "selection_count": 1,
                         "flags": ["PLOT_WINDOW_USED"],
+                    },
+                )
+            for sheet_set in task.get("sheet_sets", []):
+                name = sheet_set["name"]
+                pdf_path = stage_output / f"{name}.pdf"
+                page_sizes = []
+                for page in sheet_set.get("pages", []):
+                    paper = page.get("paper_size_mm") or [297.0, 210.0]
+                    width = float(paper[0]) if len(paper) > 0 else 297.0
+                    height = float(paper[1]) if len(paper) > 1 else 210.0
+                    page_sizes.append((width, height))
+                _write_dummy_pdf(pdf_path, page_sizes_mm=page_sizes or [(297.0, 210.0)])
+                sheet_sets.append(
+                    {
+                        "cluster_id": sheet_set["cluster_id"],
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "page_count": len(sheet_set.get("pages", [])),
+                        "flags": ["PLOT_WINDOW_USED", "PLOT_MULTIPAGE_USED"],
+                        "page_pdf_paths": [],
                     },
                 )
 
@@ -210,7 +268,10 @@ class _RunnerWindowFailFallbackStub(_RunnerSuccessStub):
                         },
                     )
                 else:
-                    _write_dummy_pdf(pdf_path)
+                    paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                    width = float(paper[0]) if len(paper) > 0 else 841.0
+                    height = float(paper[1]) if len(paper) > 1 else 594.0
+                    _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                     frames.append(
                         {
                             "frame_id": frame_id,
@@ -221,11 +282,51 @@ class _RunnerWindowFailFallbackStub(_RunnerSuccessStub):
                             "flags": ["PLOT_WINDOW_USED"],
                         },
                     )
+            for sheet_set in task.get("sheet_sets", []):
+                cluster_id = str(sheet_set.get("cluster_id", ""))
+                name = str(sheet_set.get("name", ""))
+                pdf_path = stage_output / f"{name}.pdf"
+                if cluster_id in self.fail_frame_ids or any(
+                    str(fid).startswith(f"{cluster_id}__p") for fid in self.fail_frame_ids
+                ):
+                    sheet_sets.append(
+                        {
+                            "cluster_id": cluster_id,
+                            "status": "failed",
+                            "pdf_path": str(pdf_path),
+                            "dwg_path": str(source_dxf),
+                            "page_count": len(sheet_set.get("pages", [])),
+                            "flags": ["PLOT_WINDOW_FAILED"],
+                            "page_pdf_paths": [],
+                        },
+                    )
+                else:
+                    page_sizes = []
+                    for page in sheet_set.get("pages", []):
+                        paper = page.get("paper_size_mm") or [297.0, 210.0]
+                        width = float(paper[0]) if len(paper) > 0 else 297.0
+                        height = float(paper[1]) if len(paper) > 1 else 210.0
+                        page_sizes.append((width, height))
+                    _write_dummy_pdf(pdf_path, page_sizes_mm=page_sizes or [(297.0, 210.0)])
+                    sheet_sets.append(
+                        {
+                            "cluster_id": cluster_id,
+                            "status": "ok",
+                            "pdf_path": str(pdf_path),
+                            "dwg_path": str(source_dxf),
+                            "page_count": len(sheet_set.get("pages", [])),
+                            "flags": ["PLOT_WINDOW_USED", "PLOT_MULTIPAGE_USED"],
+                            "page_pdf_paths": [],
+                        },
+                    )
         elif workflow_stage == "plot_from_split_dwg":
             for frame in task.get("frames", []):
                 name = frame["name"]
                 pdf_path = stage_output / f"{name}.pdf"
-                _write_dummy_pdf(pdf_path)
+                paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                width = float(paper[0]) if len(paper) > 0 else 841.0
+                height = float(paper[1]) if len(paper) > 1 else 594.0
+                _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -234,6 +335,28 @@ class _RunnerWindowFailFallbackStub(_RunnerSuccessStub):
                         "dwg_path": str(source_dxf),
                         "selection_count": 1,
                         "flags": ["PLOT_EXTENTS_USED"],
+                    },
+                )
+            for sheet_set in task.get("sheet_sets", []):
+                cluster_id = str(sheet_set.get("cluster_id", ""))
+                name = str(sheet_set.get("name", ""))
+                pdf_path = stage_output / f"{name}.pdf"
+                page_sizes = []
+                for page in sheet_set.get("pages", []):
+                    paper = page.get("paper_size_mm") or [297.0, 210.0]
+                    width = float(paper[0]) if len(paper) > 0 else 297.0
+                    height = float(paper[1]) if len(paper) > 1 else 210.0
+                    page_sizes.append((width, height))
+                _write_dummy_pdf(pdf_path, page_sizes_mm=page_sizes or [(297.0, 210.0)])
+                sheet_sets.append(
+                    {
+                        "cluster_id": cluster_id,
+                        "status": "ok",
+                        "pdf_path": str(pdf_path),
+                        "dwg_path": str(source_dxf),
+                        "page_count": len(sheet_set.get("pages", [])),
+                        "flags": ["PLOT_EXTENTS_USED", "PLOT_MULTIPAGE_USED"],
+                        "page_pdf_paths": [],
                     },
                 )
         result = {
@@ -280,7 +403,10 @@ class _RunnerWindowOkMissingDwgStub(_RunnerSuccessStub):
         elif workflow_stage == "plot_window_only":
             for frame in task.get("frames", []):
                 pdf_path = stage_output / f"{frame['name']}.pdf"
-                _write_dummy_pdf(pdf_path)
+                paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                width = float(paper[0]) if len(paper) > 0 else 841.0
+                height = float(paper[1]) if len(paper) > 1 else 594.0
+                _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -350,7 +476,10 @@ class _RunnerWindowInvalidPdfFallbackStub(_RunnerSuccessStub):
         elif workflow_stage == "plot_from_split_dwg":
             for frame in task.get("frames", []):
                 pdf_path = stage_output / f"{frame['name']}.pdf"
-                _write_dummy_pdf(pdf_path)
+                paper = frame.get("paper_size_mm") or [841.0, 594.0]
+                width = float(paper[0]) if len(paper) > 0 else 841.0
+                height = float(paper[1]) if len(paper) > 1 else 594.0
+                _write_dummy_pdf(pdf_path, page_sizes_mm=[(width, height)])
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -559,6 +688,8 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert len(task["frames"]) == 1
     assert len(task["sheet_sets"]) == 1
     assert task["frames"][0]["frame_id"] == "f-1"
+    assert task["frames"][0]["paper_variant_id"] == "CNPE_A1"
+    assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A4H"
 
 
 def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):
@@ -583,8 +714,8 @@ def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):
 
     assert task["workflow_stage"] == "plot_from_split_dwg"
     assert task["output"]["pdf_from_split_dwg_mode"] == "always"
-    assert task["output"]["plot_preferred_area"] == "extents"
-    assert task["output"]["plot_fallback_area"] == "window"
+    assert task["output"]["plot_preferred_area"] == "window"
+    assert task["output"]["plot_fallback_area"] == "none"
     assert task["output"]["split_stage_plot_enabled"] is False
 
 
@@ -874,33 +1005,25 @@ def test_execute_source_dxf_runs_split_then_plot_without_python_fallback(tmp_pat
     assert "PDF_PYTHON_FALLBACK" not in result["frames"][0]["flags"]
 
 
-def test_normalize_canvas_swaps_target_size_after_rotation(tmp_path: Path):
-    pypdf = pytest.importorskip("pypdf")
-
+def test_validate_pdf_dimensions_enforces_orientation(tmp_path: Path):
+    pytest.importorskip("pypdf")
     executor = _make_executor()
-
     pdf_path = tmp_path / "portrait.pdf"
-    writer = pypdf.PdfWriter()
-    writer.add_blank_page(
-        width=CADDXFExecutor._mm_to_pt(210.0),
-        height=CADDXFExecutor._mm_to_pt(297.0),
-    )
-    with open(pdf_path, "wb") as f:
-        writer.write(f)
+    _write_dummy_pdf(pdf_path, page_sizes_mm=[(210.0, 297.0)])
 
-    changed = executor._normalize_cad_pdf_canvas_for_paper(
+    ok_exact, reason_exact = executor._validate_pdf_dimensions(
         pdf_path=pdf_path,
-        paper_size_mm=(297.0, 210.0),
+        expected_pages_mm=[(210.0, 297.0)],
     )
-    assert changed is True
+    assert ok_exact is True
+    assert reason_exact == "OK"
 
-    reader = pypdf.PdfReader(str(pdf_path))
-    page = reader.pages[0]
-    width_mm = float(page.mediabox.width) * 25.4 / 72.0
-    height_mm = float(page.mediabox.height) * 25.4 / 72.0
-    assert width_mm == pytest.approx(240.0, abs=2.0)
-    assert height_mm == pytest.approx(327.0, abs=2.0)
-    assert height_mm > 296.0
+    ok_swap, reason_swap = executor._validate_pdf_dimensions(
+        pdf_path=pdf_path,
+        expected_pages_mm=[(297.0, 210.0)],
+    )
+    assert ok_swap is False
+    assert reason_swap.startswith("PAGE_SIZE_MISMATCH:")
 
 
 def test_window_batch_failure_falls_back_to_split_for_single_frame(tmp_path: Path):
@@ -995,7 +1118,7 @@ def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):
     assert "plot_window_only" in stages
     assert "plot_from_split_dwg" in stages
     assert result["sheet_sets"][0]["status"] == "ok"
-    assert "PLOT_FALLBACK_PAGE_OK:2" in result["sheet_sets"][0]["flags"]
+    assert "PLOT_FROM_SPLIT_FALLBACK" in result["sheet_sets"][0]["flags"]
 
 
 def test_window_success_with_missing_split_dwg_still_marks_ok(tmp_path: Path):

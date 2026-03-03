@@ -220,6 +220,7 @@ internal sealed class BridgeFrameTask
     public string FrameId { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public string PaperVariantId { get; private set; } = string.Empty;
     public double PaperWidthMm { get; private set; }
     public double PaperHeightMm { get; private set; }
     public double Sx { get; private set; }
@@ -232,6 +233,7 @@ internal sealed class BridgeFrameTask
             FrameId = BridgeValue.GetString(data, "frame_id", string.Empty),
             Name = BridgeValue.GetString(data, "name", string.Empty),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
             Sx = BridgeValue.GetDouble(data, "sx", 0.0),
             Sy = BridgeValue.GetDouble(data, "sy", 0.0),
         };
@@ -274,14 +276,26 @@ internal sealed class BridgePageTask
 {
     public int PageIndex { get; private set; }
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public string PaperVariantId { get; private set; } = string.Empty;
+    public double PaperWidthMm { get; private set; }
+    public double PaperHeightMm { get; private set; }
+    public double Sx { get; private set; }
+    public double Sy { get; private set; }
 
     public static BridgePageTask FromDictionary(Dictionary<string, object> data)
     {
-        return new BridgePageTask
+        var task = new BridgePageTask
         {
             PageIndex = BridgeValue.GetInt(data, "page_index", 0),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
+            Sx = BridgeValue.GetDouble(data, "sx", 0.0),
+            Sy = BridgeValue.GetDouble(data, "sy", 0.0),
         };
+        var paper = BridgeValue.AsObjectList(data.TryGetValue("paper_size_mm", out var paperObj) ? paperObj : null);
+        task.PaperWidthMm = paper.Count > 0 ? BridgeValue.ToDouble(paper[0], 0.0) : 0.0;
+        task.PaperHeightMm = paper.Count > 1 ? BridgeValue.ToDouble(paper[1], 0.0) : 0.0;
+        return task;
     }
 }
 
@@ -343,6 +357,7 @@ internal sealed class BridgeSelectionConfig
 internal sealed class BridgeOutputConfig
 {
     public string PlotPreferredArea { get; private set; } = "extents";
+    public string PlotFallbackArea { get; private set; } = "window";
 
     public static BridgeOutputConfig FromObject(object? obj)
     {
@@ -355,6 +370,7 @@ internal sealed class BridgeOutputConfig
         return new BridgeOutputConfig
         {
             PlotPreferredArea = BridgeValue.GetString(data, "plot_preferred_area", "extents"),
+            PlotFallbackArea = BridgeValue.GetString(data, "plot_fallback_area", "window"),
         };
     }
 }

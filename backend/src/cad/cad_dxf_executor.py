@@ -15,10 +15,14 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..config import RuntimeConfig, get_config, load_spec
 from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
+
+if TYPE_CHECKING:
+    from ..config.spec_loader import BusinessSpec
 
 
 class CADDXFExecutor:
@@ -32,8 +36,9 @@ class CADDXFExecutor:
         spec=None,
     ) -> None:
         self.config = config or get_config()
-        self.spec = spec or load_spec()
+        self.spec: BusinessSpec = spec or load_spec()
         self.runner = runner or AcCoreConsoleRunner(config=self.config)
+        self._paper_variant_cache: list[tuple[str, float, float]] | None = None
 
     def group_by_source_dxf(
         self,
@@ -107,6 +112,7 @@ class CADDXFExecutor:
             workspace_dir=runtime_task_dir,
         )
         split_result = self.load_result_json(result_json)
+        self._enrich_dotnet_result_metadata(split_result)
         if split_run_meta["fallback_used"]:
             split_result.setdefault("errors", []).append(
                 f"DOTNET_TO_LISP_FALLBACK:{split_run_meta['reason']}",
@@ -257,7 +263,8 @@ class CADDXFExecutor:
         use_split_fallback = bool(output_cfg.plot_fallback_to_split_on_failure)
         session_mode = str(output_cfg.plot_session_mode).strip().lower()
 
-        window_items_by_id: dict[str, dict] = {}
+        window_frame_items_by_id: dict[str, dict] = {}
+        window_sheet_items_by_id: dict[str, dict] = {}
         errors: list[str] = []
 
         if use_window_batch and session_mode == "per_source_batch":
@@ -272,13 +279,23 @@ class CADDXFExecutor:
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"WINDOW_BATCH_FAILED:{exc}")
-                window_result = {"frames": [], "errors": [f"WINDOW_BATCH_FAILED:{exc}"]}
+                window_result = {
+                    "frames": [],
+                    "sheet_sets": [],
+                    "errors": [f"WINDOW_BATCH_FAILED:{exc}"],
+                }
             for item in window_result.get("frames", []):
                 if not isinstance(item, dict):
                     continue
                 fid = str(item.get("frame_id", ""))
                 if fid:
-                    window_items_by_id[fid] = item
+                    window_frame_items_by_id[fid] = item
+            for item in window_result.get("sheet_sets", []):
+                if not isinstance(item, dict):
+                    continue
+                cluster_id = str(item.get("cluster_id", ""))
+                if cluster_id:
+                    window_sheet_items_by_id[cluster_id] = item
             for err in window_result.get("errors", []):
                 if isinstance(err, str) and err:
                     errors.append(err)
@@ -297,7 +314,7 @@ class CADDXFExecutor:
                         staged_output_dir=staged_output_dir,
                         split_item=item,
                         frame=frame,
-                        window_plot_item=window_items_by_id.get(frame_id),
+                        window_plot_item=window_frame_items_by_id.get(frame_id),
                         use_split_fallback=use_split_fallback,
                     ),
                 )
@@ -326,7 +343,7 @@ class CADDXFExecutor:
                         staged_output_dir=staged_output_dir,
                         split_item=item,
                         sheet_set=sheet_set,
-                        window_items_by_id=window_items_by_id,
+                        window_plot_item=window_sheet_items_by_id.get(cluster_id),
                         use_split_fallback=use_split_fallback,
                     ),
                 )
@@ -365,17 +382,10 @@ class CADDXFExecutor:
         sheet_sets: list[SheetSet],
     ) -> dict:
         frame_entries: list[dict] = [self._build_frame_entry(frame) for frame in frames]
-        for sheet_set in sheet_sets:
-            sheet_name = self._name_for_sheet_set(sheet_set)
-            for page in sorted(sheet_set.pages, key=lambda p: p.page_index):
-                frame_entries.append(
-                    self._build_plot_frame_entry_from_page(
-                        frame_id=f"{sheet_set.cluster_id}__p{page.page_index}",
-                        name=f"{sheet_name}__p{page.page_index}",
-                        page=page,
-                    ),
-                )
-        if not frame_entries:
+        sheet_set_entries: list[dict] = [
+            self._build_sheet_set_entry(sheet_set) for sheet_set in sheet_sets
+        ]
+        if not frame_entries and not sheet_set_entries:
             return {
                 "schema_version": "cad-dxf-result@1.0",
                 "job_id": job_id,
@@ -391,7 +401,7 @@ class CADDXFExecutor:
             output_dir=staged_output_dir,
             workflow_stage="plot_window_only",
             frame_entries=frame_entries,
-            sheet_set_entries=[],
+            sheet_set_entries=sheet_set_entries,
             output_override={"plot_preferred_area": "window", "plot_fallback_area": "none"},
         )
         return self._run_plot_task_from_dwg(
@@ -447,9 +457,19 @@ class CADDXFExecutor:
                     is_valid_pdf, invalid_reason = self._validate_pdf_output(window_pdf)
                     if not is_valid_pdf:
                         self._append_flag(flags, f"PLOT_WINDOW_INVALID_PDF:{invalid_reason}")
+                    else:
+                        expected_size = self._paper_size_for_frame(frame)
+                        if expected_size and len(expected_size) == 2:
+                            size_ok, size_reason = self._validate_pdf_dimensions(
+                                pdf_path=window_pdf,
+                                expected_pages_mm=[
+                                    (float(expected_size[0]), float(expected_size[1])),
+                                ],
+                            )
+                            if not size_ok:
+                                is_valid_pdf = False
+                                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
                 if is_valid_pdf:
-                    if self._normalize_cad_pdf_canvas_if_needed(frame=frame, pdf_path=window_pdf):
-                        self._append_flag(flags, "PDF_CAD_CANVAS_ADJUSTED")
                     result_item["status"] = "ok"
                     result_item["pdf_path"] = str(window_pdf)
                     return result_item
@@ -486,7 +506,7 @@ class CADDXFExecutor:
         staged_output_dir: Path,
         split_item: dict,
         sheet_set: SheetSet | None,
-        window_items_by_id: dict[str, dict],
+        window_plot_item: dict | None,
         use_split_fallback: bool,
     ) -> dict:
         cluster_id = str(split_item.get("cluster_id", ""))
@@ -517,172 +537,60 @@ class CADDXFExecutor:
             self._append_flag(flags, "A4_MULTI_NO_PAGES")
             return result_item
 
-        sheet_name = self._name_for_sheet_set(sheet_set)
-        page_pdf_by_index: dict[int, Path] = {}
-        failed_page_indexes: list[int] = []
-        for page in pages_sorted:
-            page_id = f"{cluster_id}__p{page.page_index}"
-            plot_item = window_items_by_id.get(page_id)
-            if not plot_item:
-                failed_page_indexes.append(page.page_index)
-                continue
-            for flag in self._normalize_flag_list(plot_item.get("flags")):
+        expected_page_sizes = [
+            tuple(map(float, self._a4_paper_size(page.outer_bbox))) for page in pages_sorted
+        ]
+
+        if window_plot_item and isinstance(window_plot_item, dict):
+            for flag in self._normalize_flag_list(window_plot_item.get("flags")):
                 self._append_flag(flags, flag)
             self._append_flag(flags, "PLOT_FROM_SOURCE_WINDOW")
-            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+            window_pdf = self._resolve_existing_path(
+                window_plot_item.get("pdf_path"), staged_output_dir
+            )
             if (
-                str(plot_item.get("status", "failed")).lower() == "ok"
-                and page_pdf is not None
-                and page_pdf.exists()
+                str(window_plot_item.get("status", "failed")).lower() == "ok"
+                and window_pdf is not None
+                and window_pdf.exists()
             ):
-                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
-                if is_valid_pdf:
-                    paper = self._a4_paper_size(page.outer_bbox)
-                    self._normalize_cad_pdf_canvas_for_paper(
-                        pdf_path=page_pdf,
-                        paper_size_mm=(float(paper[0]), float(paper[1])),
+                valid_pdf, reason = self._validate_pdf_output(window_pdf)
+                if valid_pdf:
+                    size_ok, size_reason = self._validate_pdf_dimensions(
+                        pdf_path=window_pdf,
+                        expected_pages_mm=expected_page_sizes,
                     )
-                    page_pdf_by_index[page.page_index] = page_pdf
+                    if size_ok:
+                        result_item["status"] = "ok"
+                        result_item["pdf_path"] = str(window_pdf)
+                        return result_item
+                    self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
                 else:
-                    self._append_flag(
-                        flags,
-                        f"PLOT_WINDOW_INVALID_PDF:{page.page_index}:{invalid_reason}",
-                    )
-                    failed_page_indexes.append(page.page_index)
+                    self._append_flag(flags, f"PLOT_WINDOW_INVALID_PDF:{reason}")
             else:
-                failed_page_indexes.append(page.page_index)
+                self._append_flag(flags, "PLOT_WINDOW_FAILED")
+        else:
+            self._append_flag(flags, "PLOT_WINDOW_RESULT_MISSING")
 
-        if failed_page_indexes and use_split_fallback:
-            fallback_pages = self._plot_sheet_pages_from_split_fallback(
+        if use_split_fallback:
+            fallback_result = self._plot_sheet_set_from_split_dwgs(
                 job_id=job_id,
                 runtime_task_dir=runtime_task_dir,
                 staged_output_dir=staged_output_dir,
                 split_item=split_item,
                 sheet_set=sheet_set,
-                failed_page_indexes=failed_page_indexes,
-                flags=flags,
             )
-            for idx, pdf in fallback_pages.items():
-                page_pdf_by_index[idx] = pdf
-
-        ordered_pdf_paths: list[Path] = []
-        for page in pages_sorted:
-            page_pdf = page_pdf_by_index.get(page.page_index)
-            if page_pdf is None:
-                self._append_flag(flags, "PLOT_FAILED")
-                result_item["page_pdf_paths"] = [str(p) for p in ordered_pdf_paths]
-                return result_item
-            ordered_pdf_paths.append(page_pdf)
-
-        output_pdf = self._resolve_existing_path(split_item.get("pdf_path"), staged_output_dir)
-        if output_pdf is None:
-            output_pdf = staged_output_dir / f"{sheet_name}.pdf"
-        self._merge_pdf_pages(ordered_pdf_paths, output_pdf)
-        result_item["status"] = "ok"
-        result_item["pdf_path"] = str(output_pdf)
-        result_item["page_pdf_paths"] = []
-        self._append_flag(flags, "PDF_CAD_SPLIT_MERGED")
-        return result_item
-
-    def _plot_sheet_pages_from_split_fallback(
-        self,
-        *,
-        job_id: str,
-        runtime_task_dir: Path,
-        staged_output_dir: Path,
-        split_item: dict,
-        sheet_set: SheetSet,
-        failed_page_indexes: list[int],
-        flags: list[str],
-    ) -> dict[int, Path]:
-        pages_by_index = {p.page_index: p for p in sheet_set.pages}
-        page_dwg_by_index: dict[int, Path] = {}
-        raw_page_dwg_paths = split_item.get("page_dwg_paths", [])
-        if isinstance(raw_page_dwg_paths, list):
-            for raw in raw_page_dwg_paths:
-                p = self._resolve_existing_path(raw, staged_output_dir)
-                if p is None or not p.exists():
-                    continue
-                idx = self._extract_page_index(p)
-                if idx is not None:
-                    page_dwg_by_index[idx] = p
-
-        union_dwg = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
-        sheet_name = self._name_for_sheet_set(sheet_set)
-        page_pdf_by_index: dict[int, Path] = {}
-        for page_index in failed_page_indexes:
-            page = pages_by_index.get(page_index)
-            if page is None:
-                continue
-            source_dwg = page_dwg_by_index.get(page_index)
-            output_override: dict[str, str] | None = None
-            if source_dwg is None:
-                if union_dwg is None or not union_dwg.exists():
-                    self._append_flag(flags, f"PLOT_FALLBACK_PAGE_MISSING:{page_index}")
-                    continue
-                source_dwg = union_dwg
-                output_override = {"plot_preferred_area": "window", "plot_fallback_area": "none"}
-                self._append_flag(flags, "A4_PLOT_FROM_UNION_DWG")
-
-            frame_entry = self._build_plot_frame_entry_from_page(
-                frame_id=f"{sheet_set.cluster_id}__p{page_index}",
-                name=f"{sheet_name}__p{page_index}",
-                page=page,
-            )
-            plot_task = self._build_task_json_from_entries(
-                job_id=job_id,
-                source_dxf=source_dwg,
-                output_dir=staged_output_dir,
-                workflow_stage="plot_from_split_dwg",
-                frame_entries=[frame_entry],
-                sheet_set_entries=[],
-                output_override=output_override,
-            )
-            try:
-                plot_result = self._run_plot_task_from_dwg(
-                    source_dwg=source_dwg,
-                    runtime_task_dir=runtime_task_dir,
-                    task_data=plot_task,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self._append_flag(flags, "PLOT_FAILED")
-                self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
-                continue
-
-            plot_item = next(
-                (i for i in plot_result.get("frames", []) if isinstance(i, dict)),
-                None,
-            )
-            if plot_item is None:
-                self._append_flag(flags, "PLOT_RESULT_MISSING")
-                continue
-            for flag in self._normalize_flag_list(plot_item.get("flags")):
+            for flag in self._normalize_flag_list(fallback_result.get("flags")):
                 self._append_flag(flags, flag)
-            self._append_flag(flags, "PLOT_FROM_SPLIT_DWG")
+            if str(fallback_result.get("status", "failed")).lower() == "ok":
+                result_item["status"] = "ok"
+                result_item["pdf_path"] = str(fallback_result.get("pdf_path", ""))
+                if not result_item["dwg_path"]:
+                    result_item["dwg_path"] = str(fallback_result.get("dwg_path", ""))
+                self._append_flag(flags, "PLOT_FROM_SPLIT_FALLBACK")
+                return result_item
 
-            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
-            if (
-                str(plot_item.get("status", "failed")).lower() == "ok"
-                and page_pdf is not None
-                and page_pdf.exists()
-            ):
-                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
-                if is_valid_pdf:
-                    paper = self._a4_paper_size(page.outer_bbox)
-                    self._normalize_cad_pdf_canvas_for_paper(
-                        pdf_path=page_pdf,
-                        paper_size_mm=(float(paper[0]), float(paper[1])),
-                    )
-                    page_pdf_by_index[page_index] = page_pdf
-                    self._append_flag(flags, f"PLOT_FALLBACK_PAGE_OK:{page_index}")
-                else:
-                    self._append_flag(
-                        flags,
-                        f"PLOT_FALLBACK_PAGE_INVALID:{page_index}:{invalid_reason}",
-                    )
-            else:
-                self._append_flag(flags, "PLOT_FAILED")
-        return page_pdf_by_index
+        self._append_flag(flags, "PLOT_FAILED")
+        return result_item
 
     def _plot_single_frame_from_split_dwg(
         self,
@@ -756,13 +664,26 @@ class CADDXFExecutor:
             and pdf_path.exists()
         ):
             is_valid_pdf, invalid_reason = self._validate_pdf_output(pdf_path)
-            if is_valid_pdf:
-                if self._normalize_cad_pdf_canvas_if_needed(frame=frame, pdf_path=pdf_path):
-                    self._append_flag(flags, "PDF_CAD_CANVAS_ADJUSTED")
-                result_item["status"] = "ok"
-                result_item["pdf_path"] = str(pdf_path)
-                return result_item
-            self._append_flag(flags, f"PLOT_INVALID_PDF:{invalid_reason}")
+            if not is_valid_pdf:
+                self._append_flag(flags, f"PLOT_INVALID_PDF:{invalid_reason}")
+            else:
+                expected_size = self._paper_size_for_frame(frame)
+                if not expected_size or len(expected_size) != 2:
+                    result_item["status"] = "ok"
+                    result_item["pdf_path"] = str(pdf_path)
+                    return result_item
+
+                size_ok, size_reason = self._validate_pdf_dimensions(
+                    pdf_path=pdf_path,
+                    expected_pages_mm=[
+                        (float(expected_size[0]), float(expected_size[1])),
+                    ],
+                )
+                if size_ok:
+                    result_item["status"] = "ok"
+                    result_item["pdf_path"] = str(pdf_path)
+                    return result_item
+                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
 
         self._append_flag(flags, "PLOT_FAILED")
         if pdf_path is not None:
@@ -794,26 +715,10 @@ class CADDXFExecutor:
             return result_item
 
         dwg_path = self._resolve_existing_path(split_item.get("dwg_path"), staged_output_dir)
-        if dwg_path is not None and dwg_path.exists():
-            result_item["dwg_path"] = str(dwg_path)
-            if "WBLOCK_FAILED" in flags:
-                flags.remove("WBLOCK_FAILED")
-
-        if str(split_item.get("status", "failed")).lower() != "ok" and (
-            dwg_path is None or not dwg_path.exists()
-        ):
-            if "WBLOCK_FAILED" not in flags:
-                self._append_flag(flags, "WBLOCK_FAILED")
+        if dwg_path is None or not dwg_path.exists():
+            self._append_flag(flags, "WBLOCK_FAILED")
             return result_item
-
-        raw_page_dwg_paths = split_item.get("page_dwg_paths", [])
-        page_dwg_paths: list[Path] = []
-        if isinstance(raw_page_dwg_paths, list):
-            for raw in raw_page_dwg_paths:
-                p = self._resolve_existing_path(raw, staged_output_dir)
-                if p is not None and p.exists():
-                    page_dwg_paths.append(p)
-        page_dwg_paths.sort(key=self._page_index_sort_key)
+        result_item["dwg_path"] = str(dwg_path)
 
         pages_sorted = sorted(sheet_set.pages, key=lambda p: p.page_index)
         expected_pages = len(pages_sorted)
@@ -821,94 +726,75 @@ class CADDXFExecutor:
         if expected_pages == 0:
             self._append_flag(flags, "A4_MULTI_NO_PAGES")
             return result_item
-        use_union_window_fallback = False
-        if len(page_dwg_paths) != expected_pages:
-            self._append_flag(flags, "A4_PAGE_WBLOCK_PARTIAL")
-            if dwg_path is None or not dwg_path.exists():
-                return result_item
-            page_dwg_paths = [dwg_path for _ in pages_sorted]
-            use_union_window_fallback = True
-            self._append_flag(flags, "A4_PLOT_FROM_UNION_DWG")
 
-        sheet_name = self._name_for_sheet_set(sheet_set)
-        page_pdf_paths: list[Path] = []
-        for page, page_dwg in zip(pages_sorted, page_dwg_paths, strict=False):
-            frame_entry = self._build_plot_frame_entry_from_page(
-                frame_id=f"{cluster_id}__p{page.page_index}",
-                name=f"{sheet_name}__p{page.page_index}",
-                page=page,
+        plot_task = self._build_task_json_from_entries(
+            job_id=job_id,
+            source_dxf=dwg_path,
+            output_dir=staged_output_dir,
+            workflow_stage="plot_from_split_dwg",
+            frame_entries=[],
+            sheet_set_entries=[self._build_sheet_set_entry(sheet_set)],
+            output_override={"plot_preferred_area": "window", "plot_fallback_area": "none"},
+        )
+        try:
+            plot_result = self._run_plot_task_from_dwg(
+                source_dwg=dwg_path,
+                runtime_task_dir=runtime_task_dir,
+                task_data=plot_task,
             )
-            plot_task = self._build_task_json_from_entries(
-                job_id=job_id,
-                source_dxf=page_dwg,
-                output_dir=staged_output_dir,
-                workflow_stage="plot_from_split_dwg",
-                frame_entries=[frame_entry],
-                sheet_set_entries=[],
-                output_override=(
-                    {"plot_preferred_area": "window", "plot_fallback_area": "none"}
-                    if use_union_window_fallback
-                    else None
-                ),
-            )
-            try:
-                plot_result = self._run_plot_task_from_dwg(
-                    source_dwg=page_dwg,
-                    runtime_task_dir=runtime_task_dir,
-                    task_data=plot_task,
-                )
-            except Exception as exc:  # noqa: BLE001
-                self._append_flag(flags, "PLOT_FAILED")
-                self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
-                continue
-
-            plot_item = next(
-                (i for i in plot_result.get("frames", []) if isinstance(i, dict)),
-                None,
-            )
-            if plot_item is None:
-                self._append_flag(flags, "PLOT_RESULT_MISSING")
-                continue
-            for flag in self._normalize_flag_list(plot_item.get("flags")):
-                self._append_flag(flags, flag)
-
-            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
-            if (
-                str(plot_item.get("status", "failed")).lower() == "ok"
-                and page_pdf is not None
-                and page_pdf.exists()
-            ):
-                is_valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
-                if is_valid_pdf:
-                    paper = self._a4_paper_size(page.outer_bbox)
-                    self._normalize_cad_pdf_canvas_for_paper(
-                        pdf_path=page_pdf,
-                        paper_size_mm=(float(paper[0]), float(paper[1])),
-                    )
-                    page_pdf_paths.append(page_pdf)
-                else:
-                    self._append_flag(
-                        flags,
-                        f"PLOT_INVALID_PDF:{page.page_index}:{invalid_reason}",
-                    )
-                    self._append_flag(flags, "PLOT_FAILED")
-            else:
-                self._append_flag(flags, "PLOT_FAILED")
-
-        if len(page_pdf_paths) != expected_pages:
+        except Exception as exc:  # noqa: BLE001
             self._append_flag(flags, "PLOT_FAILED")
-            result_item["page_pdf_paths"] = [str(p) for p in page_pdf_paths]
+            self._append_flag(flags, f"PLOT_EXCEPTION:{exc}")
             return result_item
 
-        output_pdf = self._resolve_existing_path(split_item.get("pdf_path"), staged_output_dir)
-        if output_pdf is None:
-            output_pdf = staged_output_dir / f"{sheet_name}.pdf"
-        self._merge_pdf_pages(page_pdf_paths, output_pdf)
-        result_item["status"] = "ok"
-        result_item["pdf_path"] = str(output_pdf)
-        result_item["page_pdf_paths"] = []
-        self._append_flag(flags, "PDF_CAD_SPLIT_MERGED")
+        plot_item = next(
+            (
+                i
+                for i in plot_result.get("sheet_sets", [])
+                if isinstance(i, dict) and str(i.get("cluster_id", "")) == cluster_id
+            ),
+            None,
+        )
+        if plot_item is None:
+            self._append_flag(flags, "PLOT_RESULT_MISSING")
+            return result_item
+
+        for flag in self._normalize_flag_list(plot_item.get("flags")):
+            self._append_flag(flags, flag)
         self._append_flag(flags, "PLOT_FROM_SPLIT_DWG")
+
+        pdf_path = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+        if (
+            str(plot_item.get("status", "failed")).lower() == "ok"
+            and pdf_path is not None
+            and pdf_path.exists()
+        ):
+            is_valid_pdf, invalid_reason = self._validate_pdf_output(pdf_path)
+            if not is_valid_pdf:
+                self._append_flag(flags, f"PLOT_INVALID_PDF:{invalid_reason}")
+                self._append_flag(flags, "PLOT_FAILED")
+                return result_item
+
+            expected_page_sizes = [
+                tuple(map(float, self._a4_paper_size(page.outer_bbox))) for page in pages_sorted
+            ]
+            size_ok, size_reason = self._validate_pdf_dimensions(
+                pdf_path=pdf_path,
+                expected_pages_mm=expected_page_sizes,
+            )
+            if not size_ok:
+                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
+                self._append_flag(flags, "PLOT_FAILED")
+                return result_item
+
+            result_item["status"] = "ok"
+            result_item["pdf_path"] = str(pdf_path)
+            result_item["page_pdf_paths"] = []
+            return result_item
+
+        self._append_flag(flags, "PLOT_FAILED")
+        if pdf_path is not None:
+            result_item["pdf_path"] = str(pdf_path)
         return result_item
 
     @staticmethod
@@ -985,6 +871,7 @@ class CADDXFExecutor:
             workspace_dir=task_dir,
         )
         result = self.load_result_json(result_json)
+        self._enrich_dotnet_result_metadata(result)
         if run_meta["fallback_used"]:
             result.setdefault("errors", []).append(
                 f"DOTNET_TO_LISP_FALLBACK:{run_meta['reason']}",
@@ -1181,6 +1068,7 @@ class CADDXFExecutor:
                 frame.runtime.outer_bbox, frame.runtime.outer_vertices
             ),
             "paper_size_mm": self._paper_size_for_frame(frame),
+            "paper_variant_id": frame.runtime.paper_variant_id,
             "sx": float(frame.runtime.sx) if frame.runtime.sx is not None else None,
             "sy": float(frame.runtime.sy) if frame.runtime.sy is not None else None,
             "kind": "single",
@@ -1200,6 +1088,7 @@ class CADDXFExecutor:
                     else self._vertices_from_bbox(page.outer_bbox)
                 ),
                 "paper_size_mm": self._a4_paper_size(page.outer_bbox),
+                "paper_variant_id": self._a4_variant_id(page.outer_bbox),
                 "sx": (
                     float(page.frame_meta.runtime.sx)
                     if page.frame_meta and page.frame_meta.runtime.sx is not None
@@ -1267,6 +1156,102 @@ class CADDXFExecutor:
         if bbox.width >= bbox.height:
             return [297.0, 210.0]
         return [210.0, 297.0]
+
+    @staticmethod
+    def _a4_variant_id(bbox: BBox) -> str:
+        # 约定：A4 横向按 CNPE_A4H，竖向按 CNPE_A4
+        if bbox.width >= bbox.height:
+            return "CNPE_A4H"
+        return "CNPE_A4"
+
+    def _enrich_dotnet_result_metadata(self, result: dict) -> None:
+        errors = result.get("errors")
+        if isinstance(errors, list):
+            enriched_errors: list[str] = []
+            for item in errors:
+                if isinstance(item, str) and item:
+                    enriched_errors.append(self._annotate_precheck_error_with_variant(item))
+            result["errors"] = enriched_errors
+
+        for section in ("frames", "sheet_sets"):
+            entries = result.get(section)
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                flags = entry.get("flags")
+                if not isinstance(flags, list):
+                    continue
+                enriched_flags: list[str] = []
+                for flag in flags:
+                    if not isinstance(flag, str) or not flag:
+                        continue
+                    enriched = self._annotate_media_not_matched_flag(flag)
+                    if enriched not in enriched_flags:
+                        enriched_flags.append(enriched)
+                entry["flags"] = enriched_flags
+
+    def _annotate_precheck_error_with_variant(self, err: str) -> str:
+        marker = "PLOT_MEDIA_PRECHECK_MISSING:"
+        if not err.startswith(marker) or ":variants=" in err:
+            return err
+        size_token = err[len(marker) :].split(":", 1)[0]
+        variant_names = self._variant_names_for_size_token(size_token)
+        if not variant_names:
+            return err
+        return f"{err}:variants={','.join(variant_names)}"
+
+    def _annotate_media_not_matched_flag(self, flag: str) -> str:
+        marker = "MEDIA_NOT_MATCHED_"
+        idx = flag.find(marker)
+        if idx < 0 or "(variants=" in flag:
+            return flag
+        size_token = flag[idx + len(marker) :].strip()
+        variant_names = self._variant_names_for_size_token(size_token)
+        if not variant_names:
+            return flag
+        return f"{flag}(variants={','.join(variant_names)})"
+
+    def _variant_names_for_size_token(self, size_token: str) -> list[str]:
+        parts = size_token.split("x", 1)
+        if len(parts) != 2:
+            return []
+        try:
+            width = float(parts[0].strip())
+            height = float(parts[1].strip())
+        except ValueError:
+            return []
+        return self._variant_names_for_size(width, height)
+
+    def _variant_names_for_size(self, width_mm: float, height_mm: float) -> list[str]:
+        tolerance = 0.5
+        exact: list[str] = []
+        swapped: list[str] = []
+        for name, variant_w, variant_h in self._paper_variants_cache():
+            if abs(variant_w - width_mm) <= tolerance and abs(variant_h - height_mm) <= tolerance:
+                exact.append(name)
+                continue
+            if abs(variant_w - height_mm) <= tolerance and abs(variant_h - width_mm) <= tolerance:
+                swapped.append(name)
+        if exact:
+            return sorted(exact)
+        if swapped:
+            return sorted(swapped)
+        return []
+
+    def _paper_variants_cache(self) -> list[tuple[str, float, float]]:
+        if self._paper_variant_cache is not None:
+            return self._paper_variant_cache
+        variants = self.spec.get_paper_variants()
+        cache: list[tuple[str, float, float]] = []
+        for name, variant in variants.items():
+            try:
+                cache.append((name, float(variant.W), float(variant.H)))
+            except Exception:  # noqa: BLE001
+                continue
+        self._paper_variant_cache = cache
+        return cache
 
     def _validate_duplicate_codes(self, frames: list[FrameMeta]) -> None:
         policy = self.config.multi_dwg_policy.code_conflict
@@ -1407,27 +1392,6 @@ class CADDXFExecutor:
 
         return {k: float(v) for k, v in merged.items()}
 
-    @staticmethod
-    def _merge_pdf_pages(page_paths: list[Path], output_pdf: Path) -> None:
-        if not page_paths:
-            raise ValueError("无可合并的页级PDF")
-        try:
-            from pypdf import PdfWriter
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError("pypdf 未安装，无法合并页级PDF") from exc
-
-        writer = PdfWriter()
-        for path in page_paths:
-            writer.append(str(path))
-        output_pdf.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_pdf, "wb") as f:
-            writer.write(f)
-        for path in page_paths:
-            try:
-                path.unlink(missing_ok=True)
-            except Exception:  # noqa: BLE001
-                continue
-
     def _validate_pdf_output(self, pdf_path: Path) -> tuple[bool, str]:
         if not pdf_path.exists():
             return False, "PDF_MISSING"
@@ -1488,83 +1452,47 @@ class CADDXFExecutor:
             return True, "OK_EMPTY_CONTENT_STREAM"
         return True, "OK"
 
-    def _normalize_cad_pdf_canvas_if_needed(self, *, frame: FrameMeta, pdf_path: Path) -> bool:
-        paper = self._paper_size_for_frame(frame)
-        if not isinstance(paper, list) or len(paper) != 2:
-            return False
-        return self._normalize_cad_pdf_canvas_for_paper(
-            pdf_path=pdf_path,
-            paper_size_mm=(float(paper[0]), float(paper[1])),
-        )
-
-    def _normalize_cad_pdf_canvas_for_paper(
+    def _validate_pdf_dimensions(
         self,
         *,
         pdf_path: Path,
-        paper_size_mm: tuple[float, float],
-    ) -> bool:
+        expected_pages_mm: list[tuple[float, float]],
+        tolerance_mm: float = 1.0,
+    ) -> tuple[bool, str]:
+        if not expected_pages_mm:
+            return False, "EXPECTED_PAGES_EMPTY"
         try:
-            from pypdf import PdfReader, PdfWriter
+            from pypdf import PdfReader
         except Exception:  # noqa: BLE001
-            return False
-
-        margins = self._resolve_plot_margins_mm()
-        expected_w_mm = float(paper_size_mm[0]) + float(margins["left"]) + float(margins["right"])
-        expected_h_mm = float(paper_size_mm[1]) + float(margins["top"]) + float(margins["bottom"])
+            # 运行环境无 pypdf 时跳过尺寸校验，保留结构门禁结果。
+            return True, "SKIP_SIZE_CHECK_NO_PYPDF"
 
         try:
             reader = PdfReader(str(pdf_path))
-        except Exception:  # noqa: BLE001
-            return False
-        if len(reader.pages) != 1:
-            return False
+        except Exception as exc:  # noqa: BLE001
+            return False, f"PDF_UNREADABLE:{exc}"
 
-        page = reader.pages[0]
-        actual_w_mm = float(page.mediabox.width) * 25.4 / 72.0
-        actual_h_mm = float(page.mediabox.height) * 25.4 / 72.0
-        tol_mm = 1.5
+        if len(reader.pages) != len(expected_pages_mm):
+            return (
+                False,
+                f"PAGE_COUNT_MISMATCH:{len(reader.pages)}!={len(expected_pages_mm)}",
+            )
 
-        def _close(a: float, b: float) -> bool:
-            return abs(a - b) <= tol_mm
+        for idx, page in enumerate(reader.pages, start=1):
+            expected_w, expected_h = expected_pages_mm[idx - 1]
+            actual_w_mm = float(page.mediabox.width) * 25.4 / 72.0
+            actual_h_mm = float(page.mediabox.height) * 25.4 / 72.0
+            if (
+                abs(actual_w_mm - expected_w) > tolerance_mm
+                or abs(actual_h_mm - expected_h) > tolerance_mm
+            ):
+                return (
+                    False,
+                    "PAGE_SIZE_MISMATCH:"
+                    f"{idx}:"
+                    f"{actual_w_mm:.3f}x{actual_h_mm:.3f}"
+                    f"!="
+                    f"{expected_w:.3f}x{expected_h:.3f}",
+                )
 
-        if _close(actual_w_mm, expected_w_mm) and _close(actual_h_mm, expected_h_mm):
-            return False
-
-        # 仅在接近基础图幅（无页边距）时扩展画布，避免误改正常文件。
-        base_w_mm = float(paper_size_mm[0])
-        base_h_mm = float(paper_size_mm[1])
-        is_base_size = (_close(actual_w_mm, base_w_mm) and _close(actual_h_mm, base_h_mm)) or (
-            _close(actual_w_mm, base_h_mm) and _close(actual_h_mm, base_w_mm)
-        )
-        if not is_base_size:
-            return False
-
-        rotated_for_orientation = False
-        if (actual_h_mm > actual_w_mm and expected_w_mm > expected_h_mm) or (
-            actual_w_mm > actual_h_mm and expected_h_mm > expected_w_mm
-        ):
-            page.rotate(90)
-            rotated_for_orientation = True
-
-        target_w_mm = expected_w_mm
-        target_h_mm = expected_h_mm
-        if rotated_for_orientation:
-            # 旋转仅设置页面显示方向，不会改变内容坐标系；需交换画布宽高防止裁切。
-            target_w_mm, target_h_mm = target_h_mm, target_w_mm
-
-        target_w_pt = self._mm_to_pt(target_w_mm)
-        target_h_pt = self._mm_to_pt(target_h_mm)
-        left_pt = self._mm_to_pt(float(margins["left"]))
-        bottom_pt = self._mm_to_pt(float(margins["bottom"]))
-        page.mediabox.lower_left = (-left_pt, -bottom_pt)
-        page.mediabox.upper_right = (target_w_pt - left_pt, target_h_pt - bottom_pt)
-
-        writer = PdfWriter()
-        writer.add_page(page)
-        with open(pdf_path, "wb") as f:
-            writer.write(f)
-        return True
-
-    @staticmethod
-    def _mm_to_pt(mm: float) -> float:
-        return mm * 72.0 / 25.4
+        return True, "OK"

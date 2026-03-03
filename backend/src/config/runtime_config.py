@@ -103,12 +103,12 @@ class Module5OutputConfig(BaseModel):
     """模块5输出策略配置"""
 
     plot_engine: str = "dotnet"
-    a4_multipage_pdf: str = "merge_pages"
+    a4_multipage_pdf: str = "dotnet_multipage"
     on_frame_fail: str = "flag_and_continue"
     pdf_from_split_dwg_mode: str = "always"
     split_stage_plot_enabled: bool = False
-    plot_preferred_area: str = "extents"
-    plot_fallback_area: str = "window"
+    plot_preferred_area: str = "window"
+    plot_fallback_area: str = "none"
     plot_session_mode: str = "per_source_batch"
     plot_from_source_window_enabled: bool = True
     plot_fallback_to_split_on_failure: bool = True

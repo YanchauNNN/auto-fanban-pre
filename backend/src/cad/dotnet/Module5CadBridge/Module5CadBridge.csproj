@@ -5,6 +5,9 @@
     <Nullable>enable</Nullable>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <AutoCADInstallDir Condition="'$(AutoCADInstallDir)' == ''">D:\Program Files\Autodesk\AutoCAD 2021</AutoCADInstallDir>
+    <AutomaticallyUseReferenceAssemblyPackages>false</AutomaticallyUseReferenceAssemblyPackages>
+    <FrameworkPathOverride
+      Condition="'$(FrameworkPathOverride)' == '' and Exists('$(MSBuildThisFileDirectory)..\.build_packages\microsoft.netframework.referenceassemblies.net48.1.0.3\build\.NETFramework\v4.8\')">$(MSBuildThisFileDirectory)..\.build_packages\microsoft.netframework.referenceassemblies.net48.1.0.3\build\.NETFramework\v4.8\</FrameworkPathOverride>
     <Platforms>x64</Platforms>
   </PropertyGroup>
 
