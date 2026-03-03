@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ class ODAConfig(BaseModel):
 class Module5CadRunnerConfig(BaseModel):
     """模块5 CAD运行器配置"""
 
-    accoreconsole_exe: str = r"D:\Program Files\Autodesk\AutoCAD 2021\accoreconsole.exe"
+    accoreconsole_exe: str = r"D:\Program Files\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
     script_dir: str = r"..\backend\src\cad\scripts"
     task_timeout_sec: int = 900
     retry: int = 1
@@ -85,16 +86,22 @@ class Module5SelectionConfig(BaseModel):
 class Module5PlotConfig(BaseModel):
     """模块5打印配置"""
 
-    pc3_name: str = "DWG To PDF.pc3"
+    pc3_name: str = "打印PDF2.pc3"
     ctb_name: str = "monochrome.ctb"
     paper_from_frame: bool = True
     use_monochrome: bool = True
+    center_plot: bool = False
+    plot_offset_mm: dict[str, float] = Field(
+        default_factory=lambda: {"x": 0.0, "y": 0.0},
+    )
+    scale_mode: str = "manual_integer_from_geometry"
+    scale_integer_rounding: str = "floor"
     margins_mm: dict[str, float] = Field(
         default_factory=lambda: {
-            "top": 20.0,
-            "bottom": 10.0,
-            "left": 20.0,
-            "right": 10.0,
+            "top": 0.0,
+            "bottom": 0.0,
+            "left": 0.0,
+            "right": 0.0,
         },
     )
 
@@ -133,7 +140,7 @@ class Module5ExportConfig(BaseModel):
 class AutoCADConfig(BaseModel):
     """AutoCAD 运行配置（模块5增量链路）"""
 
-    install_dir: str = r"D:\Program Files\Autodesk\AutoCAD 2021"
+    install_dir: str = r"D:\Program Files\AUTOCAD\AutoCAD 2022"
     prog_id_candidates: list[str] = Field(
         default_factory=lambda: [
             "AutoCAD.Application.24.1",
@@ -143,8 +150,10 @@ class AutoCADConfig(BaseModel):
     )
     visible: bool = False
     plot_timeout_sec: int = 300
-    ctb_path: str = r"Plotters\Plot Styles\monochrome.ctb"
-    pc3_name: str = "DWG To PDF.pc3"
+    ctb_path: str = (
+        r"C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles\monochrome.ctb"
+    )
+    pc3_name: str = "打印PDF2.pc3"
     retry: int = 1
 
 
@@ -243,26 +252,30 @@ class RuntimeConfig(BaseSettings):
 
         runtime_opts = data.get("runtime_options", {})
 
-        config = cls(
-            concurrency=ConcurrencyConfig(**cls._extract(runtime_opts, "concurrency")),
-            timeouts=TimeoutConfig(**cls._extract(runtime_opts, "timeouts")),
-            retries=RetryConfig(**cls._extract(runtime_opts, "retries")),
-            oda=ODAConfig(**cls._extract(runtime_opts, "oda_converter")),
-            module5_export=Module5ExportConfig(
+        yaml_values = {
+            "concurrency": ConcurrencyConfig(**cls._extract(runtime_opts, "concurrency")),
+            "timeouts": TimeoutConfig(**cls._extract(runtime_opts, "timeouts")),
+            "retries": RetryConfig(**cls._extract(runtime_opts, "retries")),
+            "oda": ODAConfig(**cls._extract(runtime_opts, "oda_converter")),
+            "module5_export": Module5ExportConfig(
                 **cls._extract(runtime_opts, "module5_export"),
             ),
-            autocad=AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
-            pdf_engine=PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
-            upload_limits=UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
-            lifecycle=LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
-            logging=LoggingConfig(**cls._extract(runtime_opts, "logging")),
-            multi_dwg_policy=MultiDwgPolicyConfig(
+            "autocad": AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
+            "pdf_engine": PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
+            "upload_limits": UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
+            "lifecycle": LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
+            "logging": LoggingConfig(**cls._extract(runtime_opts, "logging")),
+            "multi_dwg_policy": MultiDwgPolicyConfig(
                 **cls._extract(runtime_opts, "multi_dwg_policy"),
             ),
-            dxf_pdf_export=DxfPdfExportConfig(
+            "dxf_pdf_export": DxfPdfExportConfig(
                 **cls._extract(runtime_opts, "dxf_pdf_export"),
             ),
-        )
+        }
+
+        # BaseSettings 直接传参会压过环境变量；这里先按 YAML 组装，再显式应用 FANBAN_* 覆盖。
+        config = cls.model_validate(yaml_values)
+        config._apply_env_overrides()
 
         config._resolve_paths(base_dir=path.parent)
         return config
@@ -294,6 +307,46 @@ class RuntimeConfig(BaseSettings):
                 result[k] = extracted
             return result
         return node
+
+    @staticmethod
+    def _parse_env_value(raw: str) -> Any:
+        """尽量按 YAML 字面量解析环境变量值（bool/int/list 等）。"""
+        parsed = yaml.safe_load(raw)
+        return raw if parsed is None else parsed
+
+    def _apply_env_overrides(self) -> None:
+        """应用 FANBAN_* 覆盖（支持 __ 嵌套路径）。"""
+        prefix = "FANBAN_"
+        for env_key, env_val in os.environ.items():
+            if not env_key.startswith(prefix):
+                continue
+            path_tokens = [x.lower() for x in env_key[len(prefix) :].split("__") if x]
+            if not path_tokens:
+                continue
+            self._set_nested_value(path_tokens, self._parse_env_value(env_val))
+
+    def _set_nested_value(self, path_tokens: list[str], value: Any) -> None:
+        """按路径 token 在配置对象内写值，忽略未知键。"""
+        cursor: Any = self
+        for token in path_tokens[:-1]:
+            if isinstance(cursor, BaseModel):
+                if not hasattr(cursor, token):
+                    return
+                cursor = getattr(cursor, token)
+                continue
+            if isinstance(cursor, dict):
+                if token not in cursor:
+                    return
+                cursor = cursor[token]
+                continue
+            return
+
+        leaf = path_tokens[-1]
+        if isinstance(cursor, BaseModel):
+            if hasattr(cursor, leaf):
+                setattr(cursor, leaf, value)
+        elif isinstance(cursor, dict):
+            cursor[leaf] = value
 
     def _resolve_paths(self, base_dir: Path) -> None:
         """解析相对路径配置为绝对路径（基于配置文件所在目录）"""

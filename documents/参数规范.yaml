@@ -8,7 +8,7 @@
 # ============================================================================
 
 schema_version: "2.0"
-last_updated: "2026-03-02"
+last_updated: "2026-03-03"
 
 # ============================================================================
 # 一、通用枚举定义
@@ -71,7 +71,7 @@ doc_generation:
     enabled:        { type: bool, default: true,  desc: "文档生成总开关（true时全部生成）" }
     export_pdf:     { type: bool, default: true,  desc: "是否导出PDF（必须）" }
     pdf_engine:     { type: enum, default: "office_com", desc: "PDF引擎（含OLE时推荐office_com）" }
-    pdf_margin_mm:  { type: object, default: { top: 20, bottom: 10, left: 20, right: 10 }, desc: "DXF→PDF 打印页边距（单位mm，指PDF页面边缘到图框最大外框线的距离）" }
+    pdf_margin_mm:  { type: object, default: { top: 0, bottom: 0, left: 0, right: 0 }, desc: "DXF→PDF 打印页边距（单位mm）；模块5 CAD 路径固定为 0，窗口范围直接使用图框顶点转换结果" }
 
     # DXF→PDF 黑白打印样式（纯 Python 渲染）
     pdf_monochrome:        { type: bool,   default: true, desc: "全部颜色输出黑色" }
@@ -83,17 +83,17 @@ doc_generation:
 
     # 模块5（CAD）导出链路控制
     module5_pdf_engine: { type: "enum[module5_pdf_engine]", default: "python", desc: "模块5历史参数（已废止，不再参与切图/打印路由）" }
-    autocad_install_dir: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于 Fonts/CTB/PC3 路径推导）" }
+    autocad_install_dir: { type: str, default: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022", desc: "AutoCAD 安装目录（用于 Fonts/CTB/PC3 路径推导）" }
     autocad_prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     autocad_visible: { type: bool, default: false, desc: "AutoCAD COM 是否显示主窗口" }
     autocad_plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 绘图超时（秒）" }
-    autocad_ctb_path: { type: str, default: "Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径（相对路径默认基于 autocad_install_dir）" }
-    autocad_pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "PC3 配置名" }
+    autocad_ctb_path: { type: str, default: "C:\\Users\\Yan\\AppData\\Roaming\\Autodesk\\AutoCAD 2022\\R24.1\\chs\\Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径（建议使用机器真实绝对路径）" }
+    autocad_pc3_name: { type: str, default: "打印PDF2.pc3", desc: "PC3 配置名（与图幅纸张映射规则一致）" }
     autocad_retry: { type: int, default: 1, desc: "AutoCAD 绘图失败重试次数" }
 
     # 模块5 CAD-DXF 主执行链路（运行期扩展）
     module5_engine: { type: str, default: "cad_dxf", desc: "模块5主执行引擎（固定cad_dxf）" }
-    module5_cad_runner_accoreconsole_exe: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
+    module5_cad_runner_accoreconsole_exe: { type: str, default: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
     module5_cad_runner_script_dir: { type: str, default: "..\\backend\\src\\cad\\scripts", desc: "模块5 CAD脚本目录（lsp/scr）" }
     module5_cad_runner_task_timeout_sec: { type: int, default: 900, desc: "单个 source_dxf 执行超时（秒）" }
     module5_cad_runner_retry: { type: int, default: 1, desc: "AcCoreConsole 执行失败重试次数" }
@@ -749,22 +749,27 @@ titleblock_extract:
   # --------------------------------------------------------------------------
   paper_variants:
     # 大图幅（使用 BASE10 ROI profile）
-    CNPE_A0:       { W: 1189.0, H: 841.0,  profile: BASE10 }
-    CNPE_A0+1/2:   { W: 1784.0, H: 841.0,  profile: BASE10 }
-    CNPE_A0+1/4:   { W: 1487.0, H: 841.0,  profile: BASE10 }
-    CNPE_A0+1/8:   { W: 1338.0, H: 841.0,  profile: BASE10 }
-    CNPE_A0H:      { W: 841.0,  H: 1189.0, profile: BASE10 }
-    CNPE_A1:       { W: 841.0,  H: 594.0,  profile: BASE10 }
-    CNPE_A1+1/1:   { W: 1682.0, H: 594.0,  profile: BASE10 }
-    CNPE_A1+1/2:   { W: 1261.0, H: 594.0,  profile: BASE10 }
-    CNPE_A1+1/4:   { W: 1051.0, H: 594.0,  profile: BASE10 }
-    CNPE_A1H:      { W: 594.0,  H: 841.0,  profile: BASE10 }
-    CNPE_A2:       { W: 594.0,  H: 420.0,  profile: BASE10 }
-    CNPE_A2H:      { W: 420.0,  H: 594.0,  profile: BASE10 }
-    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10 }
+    CNPE_A0:       { W: 1189.0, H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A0}
+    CNPE_A0+1/2:   { W: 1784.0, H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A0+0.5 }
+    CNPE_A0+1/4:   { W: 1487.0, H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A0+0.25 }
+    CNPE_A0+1/8:   { W: 1338.0, H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A0+0.125 }
+    CNPE_A0H:      { W: 841.0,  H: 1189.0, profile: BASE10, 打印PDF2.pc3文件中对应纸张: A0,竖向打印 }
+    CNPE_A1:       { W: 841.0,  H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1 }
+    CNPE_A1+1/1:   { W: 1682.0, H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1+1 }
+    CNPE_A1+1/2:   { W: 1261.0, H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1+0.5 }
+    CNPE_A1+1/4:   { W: 1051.0, H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1+0.25 }
+    CNPE_A1H:      { W: 594.0,  H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1竖向打印 }
+    CNPE_A2:       { W: 594.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2 }
+    CNPE_A2H:      { W: 420.0,  H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2竖向打印 }
+    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5 }
     # 小图幅（使用 SMALL5 ROI profile）
-    CNPE_A3:       { W: 420.0,  H: 297.0,  profile: SMALL5 }
-    CNPE_A4:       { W: 210.0,  H: 297.0,  profile: SMALL5 }
+    CNPE_A3:       { W: 420.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A3 }
+    CNPE_A4:       { W: 210.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A4 }
+    # 打印规则固化（模块5 CAD 路径）
+    # 1) 图幅方向按 W/H 判定：W > H 为横向打印，W <= H 为竖向打印。
+    # 2) 纸张匹配优先使用“打印PDF2.pc3文件中对应纸张”字段，不再仅依赖纸张尺寸近似。
+    # 3) 窗口范围由识别图框顶点转换得到；页边距为 0；不居中；偏移固定 0,0。
+    # 4) 打印比例使用几何实测比例（sx/sy）取整后的整数值，不读取图签比例文字。
 
   # --------------------------------------------------------------------------
   # 3.4 外框识别配置

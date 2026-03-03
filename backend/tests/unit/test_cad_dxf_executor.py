@@ -21,7 +21,14 @@ class _SpecStub:
         self.doc_generation = {
             "options": {
                 "pdf_margin_mm": margins
-                or {"top": 20.0, "bottom": 10.0, "left": 20.0, "right": 10.0},
+                or {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0},
+            },
+        }
+        self.titleblock_extract = {
+            "paper_variants": {
+                "CNPE_A1": {"打印PDF2.pc3文件中对应纸张": "A1"},
+                "CNPE_A4": {"打印PDF2.pc3文件中对应纸张": "A4"},
+                "CNPE_A4H": {"打印PDF2.pc3文件中对应纸张": "A4,横向打印"},
             },
         }
 
@@ -681,7 +688,11 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     )
 
     assert task["selection"]["mode"] == "database"
-    assert task["plot"]["pc3_name"] == "DWG To PDF.pc3"
+    assert task["plot"]["pc3_name"] == "打印PDF2.pc3"
+    assert task["plot"]["center_plot"] is False
+    assert task["plot"]["plot_offset_mm"] == {"x": 0.0, "y": 0.0}
+    assert task["plot"]["scale_mode"] == "manual_integer_from_geometry"
+    assert task["plot"]["scale_integer_rounding"] == "floor"
     assert task["engines"]["selection_engine"] == "dotnet"
     assert task["engines"]["plot_engine"] == "dotnet"
     assert task["engines"]["dotnet_bridge"]["enabled"] is True
@@ -689,7 +700,9 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert len(task["sheet_sets"]) == 1
     assert task["frames"][0]["frame_id"] == "f-1"
     assert task["frames"][0]["paper_variant_id"] == "CNPE_A1"
+    assert task["frames"][0]["paper_media_name"] == "A1"
     assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A4H"
+    assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A4"
 
 
 def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):

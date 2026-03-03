@@ -140,7 +140,12 @@ def _first_existing_file(paths: Iterable[Path]) -> Path | None:
 
 def _default_install_candidates() -> list[Path]:
     versions = ("2026", "2025", "2024", "2023", "2022", "2021")
-    roots = (Path(r"D:\Program Files\Autodesk"), Path(r"C:\Program Files\Autodesk"))
+    roots = (
+        Path(r"D:\Program Files\AUTOCAD"),
+        Path(r"C:\Program Files\AUTOCAD"),
+        Path(r"D:\Program Files\Autodesk"),
+        Path(r"C:\Program Files\Autodesk"),
+    )
     result: list[Path] = []
     for root in roots:
         for year in versions:

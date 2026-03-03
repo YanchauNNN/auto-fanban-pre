@@ -70,6 +70,16 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.dotnet_bridge.enabled is True
         assert runtime_config.module5_export.selection.engine == "dotnet"
         assert runtime_config.module5_export.output.plot_engine == "dotnet"
+        assert runtime_config.module5_export.plot.center_plot is False
+        assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
+        assert runtime_config.module5_export.plot.scale_mode == "manual_integer_from_geometry"
+        assert runtime_config.module5_export.plot.scale_integer_rounding == "floor"
+        assert runtime_config.module5_export.plot.margins_mm == {
+            "top": 0.0,
+            "bottom": 0.0,
+            "left": 0.0,
+            "right": 0.0,
+        }
         assert runtime_config.module5_export.selection.mode == "database"
         assert runtime_config.module5_export.output.a4_multipage_pdf == "dotnet_multipage"
         assert runtime_config.module5_export.output.pdf_from_split_dwg_mode == "always"
@@ -82,10 +92,10 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.output.pdf_validation_min_size_bytes == 1024
         assert runtime_config.module5_export.output.pdf_validation_min_stream_bytes == 64
         assert runtime_config.module5_export.cad_runner.task_timeout_sec == 900
-        assert runtime_config.autocad.install_dir == r"D:\Program Files\Autodesk\AutoCAD 2021"
+        assert runtime_config.autocad.install_dir == r"D:\Program Files\AUTOCAD\AutoCAD 2022"
         assert runtime_config.autocad.prog_id_candidates == [
             "AutoCAD.Application.24.1",
             "AutoCAD.Application.24.0",
             "AutoCAD.Application",
         ]
-        assert runtime_config.autocad.pc3_name == "DWG To PDF.pc3"
+        assert runtime_config.autocad.pc3_name == "打印PDF2.pc3"

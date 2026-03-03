@@ -7,7 +7,7 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2026-03-02"
+last_updated: "2026-03-03"
 
 runtime_options:
   # --------------------------------------------------------------------------
@@ -40,7 +40,7 @@ runtime_options:
     pdf_engine: { type: enum, default: "python", desc: "模块5历史参数（已废止，不再参与切图/打印路由）" }
     engine: { type: enum, default: "cad_dxf", desc: "模块5主执行引擎（固定cad_dxf）" }
     cad_runner:
-      accoreconsole_exe: { type: str, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
+      accoreconsole_exe: { type: str, default: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\accoreconsole.exe", desc: "AcCoreConsole 可执行文件绝对路径" }
       script_dir: { type: str, default: "..\\backend\\src\\cad\\scripts", desc: "模块5 CAD脚本目录（包含 lsp/scr）" }
       task_timeout_sec: { type: int, default: 900, desc: "单个 source_dxf 执行超时（秒）" }
       retry: { type: int, default: 1, desc: "AcCoreConsole 执行失败重试次数" }
@@ -61,14 +61,21 @@ runtime_options:
       db_unknown_bbox_policy: { type: enum, default: "keep_if_uncertain", desc: "数据库级选集中，无法计算bbox实体的处理策略：keep_if_uncertain/drop" }
       db_fallback_to_crossing: { type: bool, default: true, desc: "数据库级选集失败时是否回退到crossing命令选集" }
     plot:
-      pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "CAD 打印设备 PC3 名称" }
+      pc3_name: { type: str, default: "打印PDF2.pc3", desc: "CAD 打印设备 PC3 名称（按图幅匹配规则使用）" }
       ctb_name: { type: str, default: "monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
       paper_from_frame: { type: bool, default: true, desc: "是否按图框纸张推导打印图幅" }
       use_monochrome: { type: bool, default: true, desc: "是否强制黑白打印" }
+      center_plot: { type: bool, default: false, desc: "是否居中打印；模块5 CAD 路径固定 false" }
+      plot_offset_mm:
+        type: object
+        default: { x: 0.0, y: 0.0 }
+        desc: "打印偏移（毫米）；模块5 CAD 路径固定为 0,0"
+      scale_mode: { type: enum, default: "manual_integer_from_geometry", desc: "比例策略：manual_integer_from_geometry/scale_to_fit，默认按几何实测比例取整手动输入" }
+      scale_integer_rounding: { type: enum, default: "floor", desc: "manual_integer_from_geometry 的整数化方式：floor/round/ceil，默认 floor" }
       margins_mm:
         type: object
-        default: { top: 20, bottom: 10, left: 20, right: 10 }
-        desc: "窗口打印页边距（mm）"
+        default: { top: 0, bottom: 0, left: 0, right: 0 }
+        desc: "窗口打印页边距（mm）；模块5 CAD 路径固定 0"
     output:
       plot_engine: { type: enum, default: "dotnet", desc: "窗口打印执行引擎：dotnet/lisp" }
       a4_multipage_pdf: { type: enum, default: "dotnet_multipage", desc: "A4成组PDF输出策略：dotnet_multipage（.NET直接输出单个多页PDF）" }
@@ -84,12 +91,12 @@ runtime_options:
       pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
   autocad:
-    install_dir: { type: str, required: false, default: "D:\\Program Files\\Autodesk\\AutoCAD 2021", desc: "AutoCAD 安装目录（用于字体目录和打印配置路径推导）" }
+    install_dir: { type: str, required: false, default: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022", desc: "AutoCAD 安装目录（用于字体目录和打印配置路径推导）" }
     prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     visible: { type: bool, default: false, desc: "是否显示 AutoCAD 主窗口（调试时可设 true）" }
     plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 打印超时（秒）" }
-    ctb_path: { type: str, required: false, default: "Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径；相对路径按 install_dir 解析" }
-    pc3_name: { type: str, default: "DWG To PDF.pc3", desc: "AutoCAD 使用的 PC3 配置名" }
+    ctb_path: { type: str, required: false, default: "C:\\Users\\Yan\\AppData\\Roaming\\Autodesk\\AutoCAD 2022\\R24.1\\chs\\Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径；优先建议填写真实绝对路径" }
+    pc3_name: { type: str, default: "打印PDF2.pc3", desc: "AutoCAD 使用的 PC3 配置名" }
     retry: { type: int, default: 1, desc: "AutoCAD 打印失败重试次数" }
 
   pdf_engine:
@@ -194,4 +201,3 @@ runtime_options:
     screening:                 { type: int,   default: 100,   desc: "淡显百分比(1~100)" }
     font_dirs:                 { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "字体搜索目录（追加到 ezdxf.options.support_dirs）" }
     fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
-

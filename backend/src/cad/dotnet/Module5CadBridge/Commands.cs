@@ -220,7 +220,9 @@ internal sealed class BridgeFrameTask
     public string FrameId { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public List<BridgePoint> Vertices { get; private set; } = new();
     public string PaperVariantId { get; private set; } = string.Empty;
+    public string PaperMediaName { get; private set; } = string.Empty;
     public double PaperWidthMm { get; private set; }
     public double PaperHeightMm { get; private set; }
     public double Sx { get; private set; }
@@ -233,7 +235,9 @@ internal sealed class BridgeFrameTask
             FrameId = BridgeValue.GetString(data, "frame_id", string.Empty),
             Name = BridgeValue.GetString(data, "name", string.Empty),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            Vertices = BridgePoint.FromObjectList(data.TryGetValue("vertices", out var verticesObj) ? verticesObj : null),
             PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
+            PaperMediaName = BridgeValue.GetString(data, "paper_media_name", string.Empty),
             Sx = BridgeValue.GetDouble(data, "sx", 0.0),
             Sy = BridgeValue.GetDouble(data, "sy", 0.0),
         };
@@ -276,7 +280,9 @@ internal sealed class BridgePageTask
 {
     public int PageIndex { get; private set; }
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public List<BridgePoint> Vertices { get; private set; } = new();
     public string PaperVariantId { get; private set; } = string.Empty;
+    public string PaperMediaName { get; private set; } = string.Empty;
     public double PaperWidthMm { get; private set; }
     public double PaperHeightMm { get; private set; }
     public double Sx { get; private set; }
@@ -288,7 +294,9 @@ internal sealed class BridgePageTask
         {
             PageIndex = BridgeValue.GetInt(data, "page_index", 0),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            Vertices = BridgePoint.FromObjectList(data.TryGetValue("vertices", out var verticesObj) ? verticesObj : null),
             PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
+            PaperMediaName = BridgeValue.GetString(data, "paper_media_name", string.Empty),
             Sx = BridgeValue.GetDouble(data, "sx", 0.0),
             Sy = BridgeValue.GetDouble(data, "sy", 0.0),
         };
@@ -303,10 +311,15 @@ internal sealed class BridgePlotConfig
 {
     public string Pc3Name { get; private set; } = "DWG To PDF.pc3";
     public string CtbName { get; private set; } = "monochrome.ctb";
-    public double MarginTopMm { get; private set; } = 20.0;
-    public double MarginBottomMm { get; private set; } = 10.0;
-    public double MarginLeftMm { get; private set; } = 20.0;
-    public double MarginRightMm { get; private set; } = 10.0;
+    public bool CenterPlot { get; private set; } = false;
+    public double PlotOffsetXmm { get; private set; } = 0.0;
+    public double PlotOffsetYmm { get; private set; } = 0.0;
+    public string ScaleMode { get; private set; } = "manual_integer_from_geometry";
+    public string ScaleIntegerRounding { get; private set; } = "floor";
+    public double MarginTopMm { get; private set; } = 0.0;
+    public double MarginBottomMm { get; private set; } = 0.0;
+    public double MarginLeftMm { get; private set; } = 0.0;
+    public double MarginRightMm { get; private set; } = 0.0;
 
     public static BridgePlotConfig FromObject(object? obj)
     {
@@ -317,14 +330,20 @@ internal sealed class BridgePlotConfig
         }
 
         var margins = BridgeValue.AsDictionary(data.TryGetValue("margins_mm", out var marginsObj) ? marginsObj : null);
+        var offsets = BridgeValue.AsDictionary(data.TryGetValue("plot_offset_mm", out var offsetObj) ? offsetObj : null);
         return new BridgePlotConfig
         {
             Pc3Name = BridgeValue.GetString(data, "pc3_name", "DWG To PDF.pc3"),
             CtbName = BridgeValue.GetString(data, "ctb_name", "monochrome.ctb"),
-            MarginTopMm = BridgeValue.GetDouble(margins, "top", 20.0),
-            MarginBottomMm = BridgeValue.GetDouble(margins, "bottom", 10.0),
-            MarginLeftMm = BridgeValue.GetDouble(margins, "left", 20.0),
-            MarginRightMm = BridgeValue.GetDouble(margins, "right", 10.0),
+            CenterPlot = BridgeValue.GetBool(data, "center_plot", false),
+            PlotOffsetXmm = BridgeValue.GetDouble(offsets, "x", 0.0),
+            PlotOffsetYmm = BridgeValue.GetDouble(offsets, "y", 0.0),
+            ScaleMode = BridgeValue.GetString(data, "scale_mode", "manual_integer_from_geometry"),
+            ScaleIntegerRounding = BridgeValue.GetString(data, "scale_integer_rounding", "floor"),
+            MarginTopMm = BridgeValue.GetDouble(margins, "top", 0.0),
+            MarginBottomMm = BridgeValue.GetDouble(margins, "bottom", 0.0),
+            MarginLeftMm = BridgeValue.GetDouble(margins, "left", 0.0),
+            MarginRightMm = BridgeValue.GetDouble(margins, "right", 0.0),
         };
     }
 }
@@ -418,6 +437,48 @@ internal sealed class BridgeBBox
     }
 }
 
+internal sealed class BridgePoint
+{
+    public BridgePoint(double x, double y)
+    {
+        X = x;
+        Y = y;
+    }
+
+    public double X { get; }
+    public double Y { get; }
+
+    public static List<BridgePoint> FromObjectList(object? obj)
+    {
+        var result = new List<BridgePoint>();
+        foreach (var item in BridgeValue.AsObjectEnumerable(obj))
+        {
+            var dict = BridgeValue.AsDictionary(item);
+            if (dict != null)
+            {
+                result.Add(
+                    new BridgePoint(
+                        BridgeValue.GetDouble(dict, "x", 0.0),
+                        BridgeValue.GetDouble(dict, "y", 0.0)
+                    )
+                );
+                continue;
+            }
+
+            var values = BridgeValue.AsObjectList(item);
+            if (values.Count >= 2)
+            {
+                result.Add(new BridgePoint(
+                    BridgeValue.ToDouble(values[0], 0.0),
+                    BridgeValue.ToDouble(values[1], 0.0)
+                ));
+            }
+        }
+
+        return result;
+    }
+}
+
 internal static class BridgeValue
 {
     public static Dictionary<string, object>? AsDictionary(object? value)
@@ -503,6 +564,26 @@ internal static class BridgeValue
         }
 
         return (int)Math.Round(ToDouble(value, defaultValue), MidpointRounding.AwayFromZero);
+    }
+
+    public static bool GetBool(Dictionary<string, object>? dict, string key, bool defaultValue)
+    {
+        if (dict == null || !dict.TryGetValue(key, out var value) || value == null)
+        {
+            return defaultValue;
+        }
+
+        if (value is bool b)
+        {
+            return b;
+        }
+
+        if (value is string s && bool.TryParse(s, out var parsed))
+        {
+            return parsed;
+        }
+
+        return defaultValue;
     }
 
     public static double ToDouble(object value, double defaultValue)

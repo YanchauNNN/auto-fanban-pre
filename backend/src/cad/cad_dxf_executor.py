@@ -188,6 +188,14 @@ class CADDXFExecutor:
                 "pc3_name": plot_cfg.pc3_name,
                 "ctb_name": plot_cfg.ctb_name,
                 "use_monochrome": bool(plot_cfg.use_monochrome),
+                "center_plot": bool(getattr(plot_cfg, "center_plot", False)),
+                "plot_offset_mm": dict(getattr(plot_cfg, "plot_offset_mm", {"x": 0.0, "y": 0.0})),
+                "scale_mode": str(
+                    getattr(plot_cfg, "scale_mode", "manual_integer_from_geometry"),
+                ),
+                "scale_integer_rounding": str(
+                    getattr(plot_cfg, "scale_integer_rounding", "floor"),
+                ),
                 "margins_mm": margins_mm,
             },
             "selection": {
@@ -1069,6 +1077,9 @@ class CADDXFExecutor:
             ),
             "paper_size_mm": self._paper_size_for_frame(frame),
             "paper_variant_id": frame.runtime.paper_variant_id,
+            "paper_media_name": self._paper_media_name_for_variant(
+                frame.runtime.paper_variant_id,
+            ),
             "sx": float(frame.runtime.sx) if frame.runtime.sx is not None else None,
             "sy": float(frame.runtime.sy) if frame.runtime.sy is not None else None,
             "kind": "single",
@@ -1089,6 +1100,9 @@ class CADDXFExecutor:
                 ),
                 "paper_size_mm": self._a4_paper_size(page.outer_bbox),
                 "paper_variant_id": self._a4_variant_id(page.outer_bbox),
+                "paper_media_name": self._paper_media_name_for_variant(
+                    self._a4_variant_id(page.outer_bbox),
+                ),
                 "sx": (
                     float(page.frame_meta.runtime.sx)
                     if page.frame_meta and page.frame_meta.runtime.sx is not None
@@ -1163,6 +1177,33 @@ class CADDXFExecutor:
         if bbox.width >= bbox.height:
             return "CNPE_A4H"
         return "CNPE_A4"
+
+    def _paper_media_name_for_variant(self, variant_id: str | None) -> str | None:
+        if not variant_id:
+            return None
+        titleblock_extract = getattr(self.spec, "titleblock_extract", {})
+        if not isinstance(titleblock_extract, dict):
+            return None
+        raw_variants = titleblock_extract.get("paper_variants", {})
+        if not isinstance(raw_variants, dict):
+            return None
+        variant = raw_variants.get(variant_id)
+        if variant is None and variant_id.upper().endswith("H"):
+            variant = raw_variants.get(variant_id[:-1])
+        if not isinstance(variant, dict):
+            return None
+        media_hint = variant.get("打印PDF2.pc3文件中对应纸张")
+        if not isinstance(media_hint, str):
+            return None
+        normalized = media_hint.strip()
+        if not normalized:
+            return None
+
+        normalized = normalized.replace("竖向打印", "").replace("横向打印", "")
+        normalized = normalized.replace("（", "(").replace("）", ")")
+        normalized = normalized.replace("，", ",")
+        normalized = normalized.split(",", 1)[0].strip()
+        return normalized or None
 
     def _enrich_dotnet_result_metadata(self, result: dict) -> None:
         errors = result.get("errors")
@@ -1382,10 +1423,10 @@ class CADDXFExecutor:
 
         merged = {}
         for k, default_value in (
-            ("top", 20.0),
-            ("bottom", 10.0),
-            ("left", 20.0),
-            ("right", 10.0),
+            ("top", 0.0),
+            ("bottom", 0.0),
+            ("left", 0.0),
+            ("right", 0.0),
         ):
             # 业务规范优先；缺失时回退到运行期配置。
             merged[k] = spec_margins.get(k, runtime_margins.get(k, default_value))

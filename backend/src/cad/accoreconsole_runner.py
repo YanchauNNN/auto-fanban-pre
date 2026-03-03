@@ -10,6 +10,7 @@ AcCoreConsole 运行器
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import time
 from dataclasses import dataclass
@@ -17,6 +18,9 @@ from pathlib import Path
 from typing import Any
 
 from ..config import RuntimeConfig, get_config
+from .autocad_path_resolver import resolve_autocad_paths
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -42,6 +46,16 @@ class AcCoreConsoleRunner:
         self.accoreconsole_exe = self._resolve_runner_path(
             runner_cfg.accoreconsole_exe,
         )
+        if not self.accoreconsole_exe.exists():
+            detected = resolve_autocad_paths(
+                configured_install_dir=self.config.autocad.install_dir,
+            ).accoreconsole_exe
+            if detected is not None and detected.exists():
+                self.accoreconsole_exe = detected.resolve()
+                logger.warning(
+                    "cad_runner.accoreconsole_exe 不存在，已回退到自动探测路径: %s",
+                    self.accoreconsole_exe,
+                )
         self.script_dir = self._resolve_runner_path(runner_cfg.script_dir)
         self.task_timeout_sec = int(runner_cfg.task_timeout_sec)
         self.retry = int(runner_cfg.retry)
