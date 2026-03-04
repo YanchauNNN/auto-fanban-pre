@@ -310,12 +310,14 @@ internal sealed class BridgePageTask
 internal sealed class BridgePlotConfig
 {
     public string Pc3Name { get; private set; } = "DWG To PDF.pc3";
+    public string Pc3ResolvedPath { get; private set; } = string.Empty;
+    public List<string> Pc3SearchDirs { get; private set; } = new();
     public string CtbName { get; private set; } = "monochrome.ctb";
     public bool CenterPlot { get; private set; } = false;
     public double PlotOffsetXmm { get; private set; } = 0.0;
     public double PlotOffsetYmm { get; private set; } = 0.0;
     public string ScaleMode { get; private set; } = "manual_integer_from_geometry";
-    public string ScaleIntegerRounding { get; private set; } = "floor";
+    public string ScaleIntegerRounding { get; private set; } = "round";
     public double MarginTopMm { get; private set; } = 0.0;
     public double MarginBottomMm { get; private set; } = 0.0;
     public double MarginLeftMm { get; private set; } = 0.0;
@@ -334,12 +336,20 @@ internal sealed class BridgePlotConfig
         return new BridgePlotConfig
         {
             Pc3Name = BridgeValue.GetString(data, "pc3_name", "DWG To PDF.pc3"),
+            Pc3ResolvedPath = BridgeValue.GetString(data, "pc3_resolved_path", string.Empty),
+            Pc3SearchDirs = BridgeValue.AsObjectEnumerable(
+                    data.TryGetValue("pc3_search_dirs", out var pc3DirsObj) ? pc3DirsObj : null
+                )
+                .Select(item => item?.ToString() ?? string.Empty)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             CtbName = BridgeValue.GetString(data, "ctb_name", "monochrome.ctb"),
             CenterPlot = BridgeValue.GetBool(data, "center_plot", false),
             PlotOffsetXmm = BridgeValue.GetDouble(offsets, "x", 0.0),
             PlotOffsetYmm = BridgeValue.GetDouble(offsets, "y", 0.0),
             ScaleMode = BridgeValue.GetString(data, "scale_mode", "manual_integer_from_geometry"),
-            ScaleIntegerRounding = BridgeValue.GetString(data, "scale_integer_rounding", "floor"),
+            ScaleIntegerRounding = BridgeValue.GetString(data, "scale_integer_rounding", "round"),
             MarginTopMm = BridgeValue.GetDouble(margins, "top", 0.0),
             MarginBottomMm = BridgeValue.GetDouble(margins, "bottom", 0.0),
             MarginLeftMm = BridgeValue.GetDouble(margins, "left", 0.0),

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING
 from ..config import RuntimeConfig, get_config, load_spec
 from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
+from .autocad_path_resolver import resolve_autocad_paths
 
 if TYPE_CHECKING:
     from ..config.spec_loader import BusinessSpec
@@ -175,6 +177,7 @@ class CADDXFExecutor:
         plot_cfg = self.config.module5_export.plot
         selection_cfg = self.config.module5_export.selection
         margins_mm = self._resolve_plot_margins_mm()
+        pc3_resolved_path, pc3_search_dirs = self._resolve_pc3_runtime_context(plot_cfg.pc3_name)
         output_entry = self._build_output_entry()
         if output_override:
             output_entry.update(output_override)
@@ -186,6 +189,8 @@ class CADDXFExecutor:
             "output_dir": str(output_dir),
             "plot": {
                 "pc3_name": plot_cfg.pc3_name,
+                "pc3_resolved_path": pc3_resolved_path,
+                "pc3_search_dirs": pc3_search_dirs,
                 "ctb_name": plot_cfg.ctb_name,
                 "use_monochrome": bool(plot_cfg.use_monochrome),
                 "center_plot": bool(getattr(plot_cfg, "center_plot", False)),
@@ -194,7 +199,7 @@ class CADDXFExecutor:
                     getattr(plot_cfg, "scale_mode", "manual_integer_from_geometry"),
                 ),
                 "scale_integer_rounding": str(
-                    getattr(plot_cfg, "scale_integer_rounding", "floor"),
+                    getattr(plot_cfg, "scale_integer_rounding", "round"),
                 ),
                 "margins_mm": margins_mm,
             },
@@ -213,6 +218,54 @@ class CADDXFExecutor:
             "frames": frame_entries,
             "sheet_sets": sheet_set_entries,
         }
+
+    def _resolve_pc3_runtime_context(self, pc3_name: str) -> tuple[str | None, list[str]]:
+        pc3_token = str(pc3_name or "").strip()
+        if not pc3_token:
+            return None, []
+
+        path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
+        search_dirs: list[Path] = []
+
+        def add_dir(path: Path | None) -> None:
+            if path is None:
+                return
+            try:
+                resolved = path.resolve()
+            except Exception:  # noqa: BLE001
+                return
+            if not resolved.exists() or not resolved.is_dir():
+                return
+            if resolved not in search_dirs:
+                search_dirs.append(resolved)
+
+        add_dir(path_info.plotters_dir)
+        if path_info.install_dir is not None:
+            add_dir(path_info.install_dir / "Plotters")
+
+        appdata = os.getenv("APPDATA")
+        if appdata:
+            autodesk_root = Path(appdata) / "Autodesk"
+            if autodesk_root.exists() and autodesk_root.is_dir():
+                for plotters_dir in autodesk_root.rglob("Plotters"):
+                    if plotters_dir.is_dir():
+                        add_dir(plotters_dir)
+
+        resolved_path: str | None = None
+        candidate = Path(pc3_token)
+        if candidate.is_absolute():
+            try:
+                resolved_path = str(candidate.resolve())
+            except Exception:  # noqa: BLE001
+                resolved_path = str(candidate)
+        else:
+            for base_dir in search_dirs:
+                pc3_path = base_dir / pc3_token
+                if pc3_path.exists() and pc3_path.is_file():
+                    resolved_path = str(pc3_path.resolve())
+                    break
+
+        return resolved_path, [str(path) for path in search_dirs]
 
     def _build_output_entry(self) -> dict[str, str | bool | int]:
         output_cfg = self.config.module5_export.output
@@ -466,17 +519,13 @@ class CADDXFExecutor:
                     if not is_valid_pdf:
                         self._append_flag(flags, f"PLOT_WINDOW_INVALID_PDF:{invalid_reason}")
                     else:
-                        expected_size = self._paper_size_for_frame(frame)
-                        if expected_size and len(expected_size) == 2:
-                            size_ok, size_reason = self._validate_pdf_dimensions(
-                                pdf_path=window_pdf,
-                                expected_pages_mm=[
-                                    (float(expected_size[0]), float(expected_size[1])),
-                                ],
-                            )
-                            if not size_ok:
-                                is_valid_pdf = False
-                                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
+                        page_ok, page_reason = self._validate_pdf_page_count(
+                            pdf_path=window_pdf,
+                            expected_pages=1,
+                        )
+                        if not page_ok:
+                            is_valid_pdf = False
+                            self._append_flag(flags, f"PDF_PAGE_CHECK_FAILED:{page_reason}")
                 if is_valid_pdf:
                     result_item["status"] = "ok"
                     result_item["pdf_path"] = str(window_pdf)
@@ -545,10 +594,6 @@ class CADDXFExecutor:
             self._append_flag(flags, "A4_MULTI_NO_PAGES")
             return result_item
 
-        expected_page_sizes = [
-            tuple(map(float, self._a4_paper_size(page.outer_bbox))) for page in pages_sorted
-        ]
-
         if window_plot_item and isinstance(window_plot_item, dict):
             for flag in self._normalize_flag_list(window_plot_item.get("flags")):
                 self._append_flag(flags, flag)
@@ -563,15 +608,15 @@ class CADDXFExecutor:
             ):
                 valid_pdf, reason = self._validate_pdf_output(window_pdf)
                 if valid_pdf:
-                    size_ok, size_reason = self._validate_pdf_dimensions(
+                    size_ok, size_reason = self._validate_pdf_page_count(
                         pdf_path=window_pdf,
-                        expected_pages_mm=expected_page_sizes,
+                        expected_pages=expected_pages,
                     )
                     if size_ok:
                         result_item["status"] = "ok"
                         result_item["pdf_path"] = str(window_pdf)
                         return result_item
-                    self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
+                    self._append_flag(flags, f"PDF_PAGE_CHECK_FAILED:{size_reason}")
                 else:
                     self._append_flag(flags, f"PLOT_WINDOW_INVALID_PDF:{reason}")
             else:
@@ -675,23 +720,16 @@ class CADDXFExecutor:
             if not is_valid_pdf:
                 self._append_flag(flags, f"PLOT_INVALID_PDF:{invalid_reason}")
             else:
-                expected_size = self._paper_size_for_frame(frame)
-                if not expected_size or len(expected_size) != 2:
+                page_ok, page_reason = self._validate_pdf_page_count(
+                    pdf_path=pdf_path,
+                    expected_pages=1,
+                )
+                if page_ok:
                     result_item["status"] = "ok"
                     result_item["pdf_path"] = str(pdf_path)
                     return result_item
 
-                size_ok, size_reason = self._validate_pdf_dimensions(
-                    pdf_path=pdf_path,
-                    expected_pages_mm=[
-                        (float(expected_size[0]), float(expected_size[1])),
-                    ],
-                )
-                if size_ok:
-                    result_item["status"] = "ok"
-                    result_item["pdf_path"] = str(pdf_path)
-                    return result_item
-                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
+                self._append_flag(flags, f"PDF_PAGE_CHECK_FAILED:{page_reason}")
 
         self._append_flag(flags, "PLOT_FAILED")
         if pdf_path is not None:
@@ -783,15 +821,12 @@ class CADDXFExecutor:
                 self._append_flag(flags, "PLOT_FAILED")
                 return result_item
 
-            expected_page_sizes = [
-                tuple(map(float, self._a4_paper_size(page.outer_bbox))) for page in pages_sorted
-            ]
-            size_ok, size_reason = self._validate_pdf_dimensions(
+            size_ok, size_reason = self._validate_pdf_page_count(
                 pdf_path=pdf_path,
-                expected_pages_mm=expected_page_sizes,
+                expected_pages=expected_pages,
             )
             if not size_ok:
-                self._append_flag(flags, f"PAPER_SIZE_MISMATCH:{size_reason}")
+                self._append_flag(flags, f"PDF_PAGE_CHECK_FAILED:{size_reason}")
                 self._append_flag(flags, "PLOT_FAILED")
                 return result_item
 
@@ -1536,4 +1571,26 @@ class CADDXFExecutor:
                     f"{expected_w:.3f}x{expected_h:.3f}",
                 )
 
+        return True, "OK"
+
+    def _validate_pdf_page_count(
+        self,
+        *,
+        pdf_path: Path,
+        expected_pages: int,
+    ) -> tuple[bool, str]:
+        if expected_pages <= 0:
+            return False, "EXPECTED_PAGES_INVALID"
+        try:
+            from pypdf import PdfReader
+        except Exception:  # noqa: BLE001
+            return True, "SKIP_PAGE_COUNT_CHECK_NO_PYPDF"
+
+        try:
+            reader = PdfReader(str(pdf_path))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"PDF_UNREADABLE:{exc}"
+
+        if len(reader.pages) != expected_pages:
+            return False, f"PAGE_COUNT_MISMATCH:{len(reader.pages)}!={expected_pages}"
         return True, "OK"

@@ -95,7 +95,7 @@ class Module5PlotConfig(BaseModel):
         default_factory=lambda: {"x": 0.0, "y": 0.0},
     )
     scale_mode: str = "manual_integer_from_geometry"
-    scale_integer_rounding: str = "floor"
+    scale_integer_rounding: str = "round"
     margins_mm: dict[str, float] = Field(
         default_factory=lambda: {
             "top": 0.0,

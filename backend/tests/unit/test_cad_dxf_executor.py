@@ -689,10 +689,12 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
 
     assert task["selection"]["mode"] == "database"
     assert task["plot"]["pc3_name"] == "打印PDF2.pc3"
+    assert "pc3_resolved_path" in task["plot"]
+    assert isinstance(task["plot"]["pc3_search_dirs"], list)
     assert task["plot"]["center_plot"] is False
     assert task["plot"]["plot_offset_mm"] == {"x": 0.0, "y": 0.0}
     assert task["plot"]["scale_mode"] == "manual_integer_from_geometry"
-    assert task["plot"]["scale_integer_rounding"] == "floor"
+    assert task["plot"]["scale_integer_rounding"] == "round"
     assert task["engines"]["selection_engine"] == "dotnet"
     assert task["engines"]["plot_engine"] == "dotnet"
     assert task["engines"]["dotnet_bridge"]["enabled"] is True

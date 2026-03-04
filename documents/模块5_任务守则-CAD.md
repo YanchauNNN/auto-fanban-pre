@@ -1,382 +1,286 @@
-# 模块5_任务守则-CAD（DXF 原生执行版）
+# 模块5_任务守则-CAD（当前机器实配留档版）
 
-> 适用：新对话 AI 接手模块5改造  
-> 目标：**模块5统一改为“CAD 打开 DXF 执行切割与打印”**，不再以 Python 几何删实体方式为主链路，注意现有路径不要删除，仅新增路径作为尝试，旧路径作为备用  
-> 重要前提：**本守则明确“不考虑 DWG→DXF 损失问题”**，输入 DXF 视为可信源  
-> 范围：仅模块5（`SPLIT_AND_RENAME` + `EXPORT_PDF_AND_DWG` 相关链路）
-
----
-
-## 0) 决策与边界（先读，必须遵守）
-
-- **强制决策**：模块5主链路 = `CAD 引擎执行 + DXF 输入`。
-- **禁止主链路**：`ezdxf 复制后删除框外实体`（不要删除，仅保留为 emergency fallback，不参与默认路径）。
-- **选择语义**：必须用 **Crossing（交叉窗）**，不是 Window（完全包含）。
-- **处理对象**：单帧 + A4 成组都在 CAD 内执行导出（DWG + PDF）。
-- **性能目标**：同一 DXF 文件内的所有图框，**一次 CAD 会话**完成，不得按帧重启 CAD。
-- **失败隔离**：单帧失败仅打 flag，不中断该 DXF 其余帧；单 DXF 失败不影响其他 DXF。
+> 适用范围：`E:\project\auto-fanban-pre` 仓库，模块5（CAD-DXF 执行链路）
+> 
+> 目标：让后续 AI 维护者在不依赖上下文记忆的情况下，按本文即可定位路径、执行任务、排查问题。
+> 
+> 更新时间：`2026-03-04`
 
 ---
 
-## 1) 当前仓库基线与问题定位
+## 0) 决策与边界（必须遵守）
 
-### 1.1 当前代码事实（必须知道）
-
-- `backend/src/cad/splitter.py` 现有主裁切逻辑是“复制 DXF + 删除框外实体”：
-  - `_clip_by_copy_and_delete()`
-  - `_should_delete_entity()`
-- `backend/src/pipeline/executor.py` 目前先 `DWG->DXF`，后走 splitter 裁切/导出。
-- `backend/src/cad/autocad_pdf_exporter.py` 已有 AutoCAD COM 打印能力，但未承担“CAD 内切割（WBLOCK）”。
-
-### 1.2 本次改造的核心变化
-
-- 从“Python 侧做几何裁切”改为“CAD 内核做交叉窗选集 + WBLOCK + PLOT”。
-- Python 改为“任务编排器”，CAD 改为“执行器”。
+- 主链路固定：`.NET + AutoCAD Core Console`。
+- 不允许“压错/吞错”：出现报错必须记录根因，不做静默忽略。
+- 打印链路规则：
+  - 先按名称匹配 PC3 纸张。
+  - 打印窗口来自 DXF 识别图框顶点（WCS），打印使用 Window 模式。
+  - `center_plot=false`，`plot_offset=(0,0)`，`margins_mm=0`。
+  - 比例为 `manual_integer_from_geometry`，并执行整数化规则。
+- 引擎策略：优先 .NET；只有 .NET 失败时才允许回退 LISP（由配置控制）。
 
 ---
 
-## 2) 技术路线（明确主路径）
+## 1) 当前机器真实路径（绝对路径，逐项核对）
 
-## 2.1 总体架构
+## 1.1 仓库与运行环境
 
-```
-模块2/3/4 (已有)
-  -> 提供 FrameMeta / SheetSet / outer_bbox / page_index / 命名字段
-  -> 模块5 Python编排层构建 CAD 任务(JSON)
-  -> AcCoreConsole 启动 CAD 内核执行脚本（打开DXF）
-  -> CAD 内执行：
-       Crossing 选集 -> WBLOCK 输出 DWG
-       Window/同bbox 打印 -> PDF
-  -> 回写 result.json
-  -> Python 回填 frame.runtime.pdf_path / dwg_path 与 flags
-```
+- 仓库根目录：`E:\project\auto-fanban-pre`
+- 后端目录：`E:\project\auto-fanban-pre\backend`
+- Python 虚拟环境：`E:\project\auto-fanban-pre\backend\.venv`
+- 常用解释器：`E:\project\auto-fanban-pre\backend\.venv\Scripts\python.exe`
 
-## 2.2 推荐执行引擎优先级
+## 1.2 关键配置文件
 
-- **优先**：`AcCoreConsole.exe + .scr + AutoLISP`（无 UI、批处理稳定、可托管）。
-- 次选：AutoCAD COM（已有实现，可留作 fallback，不做主链路）。
+- 业务参数：`E:\project\auto-fanban-pre\documents\参数规范.yaml`
+- 运行期参数：`E:\project\auto-fanban-pre\documents\参数规范_运行期.yaml`
+- 运行配置代码：`E:\project\auto-fanban-pre\backend\src\config\runtime_config.py`
 
----
+## 1.3 AutoCAD 与执行器
 
-## 3) 必改文件清单（新 AI 按此执行）
+- AutoCAD 安装目录：`D:\Program Files\AUTOCAD\AutoCAD 2022`
+- `acad.exe`：`D:\Program Files\AUTOCAD\AutoCAD 2022\acad.exe`
+- `accoreconsole.exe`：`D:\Program Files\AUTOCAD\AutoCAD 2022\accoreconsole.exe`
+- AutoCAD Fonts：`D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts`
 
-## 3.1 新增文件
+## 1.4 PC3 / CTB 路径
 
-- `backend/src/cad/cad_dxf_executor.py`
-  - 职责：组装任务、按 DXF 分组调用 CAD 执行、解析结果、回填路径与 flags。
-- `backend/src/cad/accoreconsole_runner.py`
-  - 职责：生成 `.scr`、调用 `accoreconsole.exe`、管理超时/重试/日志文件。
-- `backend/src/cad/scripts/module5_cad_executor.lsp`
-  - 职责：在 CAD 内读取任务 JSON，逐帧执行 crossing 选集、WBLOCK、PLOT。
-- `backend/src/cad/scripts/module5_bootstrap.scr`
-  - 职责：加载 LISP 并调用入口函数（参数：task.json/result.json）。
-- `backend/tests/unit/test_cad_dxf_executor.py`
-  - 职责：任务构建、命名、flag 映射、结果解析、失败隔离。
+- Plotters 目录：`C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters`
+- Plot Styles 目录：`C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles`
+- 当前业务 PC3（必须存在）：`C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\打印PDF2.pc3`
+- 当前 CTB：`C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles\monochrome.ctb`
+- AutoCAD 默认可发现 PC3（解析器参考）：`C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\DWG To PDF.pc3`
 
-## 3.2 修改文件
+## 1.5 模块5脚本与 .NET 桥接
 
-- `backend/src/cad/splitter.py`
-  - 保留对外接口，但默认分支改为调用 `CADDXFExecutor`。
-  - 将 `_clip_by_copy_and_delete()` 标记为 fallback，不参与主链路。
-- `backend/src/pipeline/executor.py`
-  - Stage7/8 职责调整为“构建 CAD 批任务 + 执行 + 回填”。
-  - 保留阶段名不变，避免破坏进度条/前端依赖。
-- `backend/src/config/runtime_config.py`
-  - 增加 CAD-DXF 执行参数模型（见第4节）。
-- `documents/参数规范_运行期.yaml`
-  - 增加 `module5_export.engine = cad_dxf` 等参数（见第4节）。
+- CAD 脚本目录：`E:\project\auto-fanban-pre\backend\src\cad\scripts`
+- LISP 主脚本：`E:\project\auto-fanban-pre\backend\src\cad\scripts\module5_cad_executor.lsp`
+- SCR 引导脚本：`E:\project\auto-fanban-pre\backend\src\cad\scripts\module5_bootstrap.scr`
+- .NET 项目：`E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\Module5CadBridge.csproj`
+- .NET DLL（运行时加载）：`E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll`
+
+## 1.6 任务中间产物路径
+
+- 任务根目录：`E:\project\auto-fanban-pre\storage\jobs`
+- 模块5运行时临时根目录：`C:\Users\Yan\AppData\Local\Temp\fanban_module5_cad_tasks`
+- 每次任务会生成：
+  - `task.json`
+  - `result.json`
+  - `module5_trace.log`
+  - `accoreconsole.log`
+  - `cad_stage_output\*.pdf/*.dwg`
 
 ---
 
-## 4) 运行配置（必须新增并接线）
+## 2) 当前主流程（按代码真实实现，不按历史文档想象）
 
-在 `runtime_options` 下新增（或扩展）：
+## 2.1 总体两阶段
 
-- `module5_export.engine`: `cad_dxf | autocad_com | python_fallback`
-  - 默认：`cad_dxf`
-- `module5_export.cad_runner`: 
-  - `accoreconsole_exe`（绝对路径）
-  - `script_dir`（脚本目录）
-  - `task_timeout_sec`（单 DXF 超时）
-  - `retry`（单 DXF 重试次数）
-  - `locale`（如 `en-US`）
-  - `max_parallel_dxf`（并发 DXF 数）
-- `module5_export.selection`:
-  - `mode: crossing`
-  - `bbox_margin_percent`（例如 0.015）
-  - `empty_selection_retry_margin_percent`（例如 0.03）
-- `module5_export.plot`:
-  - `pc3_name`
-  - `ctb_name`
-  - `paper_from_frame: true`
-  - `use_monochrome: true`
-- `module5_export.output`:
-  - `a4_multipage_pdf: merge_pages`
-  - `on_frame_fail: flag_and_continue`
+1. `split_only`
+- 入口：`CADDXFExecutor.execute_source_dxf()`
+- 作用：按 frame/sheet_set 选集并 WBLOCK，产出 split DWG（不在此阶段判最终成败）。
+
+2. `plot_window_only` 或 `plot_from_split_dwg`
+- 默认主路径：`plot_window_only`（从原始 source DWG 窗口批量打印）。
+- 失败回退：`plot_from_split_dwg`（从 split DWG 打印）。
+
+## 2.2 引擎优先级
+
+- 选择引擎：`module5_export.selection.engine=dotnet`
+- 打印引擎：`module5_export.output.plot_engine=dotnet`
+- .NET 回退 LISP：`module5_export.dotnet_bridge.fallback_to_lisp_on_error=true`
+
+判定原则：
+- 只要 .NET 成功，结果即为主结果。
+- 只有 .NET 抛错且允许回退时，才切换到 LISP。
+
+## 2.3 A4 成组打印关键点
+
+- 多页打印由 `.NET PlotEngine` 统一输出多页 PDF（`PLOT_MULTIPAGE_USED`）。
+- 每页窗口来自 `sheet_set.pages[].bbox/vertices`。
+- 页面方向由图框宽高关系决定（`W>H=landscape，否则 portrait`），旋转由媒体方向与目标方向差异决定。
 
 ---
 
-## 5) 数据契约（必须落地）
+## 3) 当前生效配置（核心参数）
 
-## 5.1 task.json（Python -> CAD）
+数据来源：`documents/参数规范_运行期.yaml` + `runtime_config.py`
 
-建议结构：
+- `module5_export.cad_runner.accoreconsole_exe = D:\Program Files\AUTOCAD\AutoCAD 2022\accoreconsole.exe`
+- `module5_export.cad_runner.script_dir = E:\project\auto-fanban-pre\backend\src\cad\scripts`
+- `module5_export.dotnet_bridge.dll_path = E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll`
+- `module5_export.plot.pc3_name = 打印PDF2.pc3`
+- `module5_export.plot.ctb_name = monochrome.ctb`
+- `module5_export.plot.center_plot = false`
+- `module5_export.plot.plot_offset_mm = {x:0.0, y:0.0}`
+- `module5_export.plot.margins_mm = {top:0, bottom:0, left:0, right:0}`
+- `module5_export.plot.scale_mode = manual_integer_from_geometry`
+- `module5_export.plot.scale_integer_rounding = round`
+- `module5_export.output.plot_preferred_area = window`
+- `module5_export.output.plot_fallback_area = none`
+- `module5_export.output.plot_session_mode = per_source_batch`
+- `module5_export.output.plot_from_source_window_enabled = true`
+- `module5_export.output.plot_fallback_to_split_on_failure = true`
 
-```json
-{
-  "schema_version": "cad-dxf-task@1.0",
-  "job_id": "uuid",
-  "source_dxf": "abs/path/source.dxf",
-  "output_dir": "abs/path/output/drawings",
-  "plot": {
-    "pc3_name": "DWG To PDF.pc3",
-    "ctb_name": "monochrome.ctb",
-    "margins_mm": {"top":20, "bottom":10, "left":20, "right":10}
-  },
-  "selection": {
-    "mode": "crossing",
-    "bbox_margin_percent": 0.015,
-    "empty_selection_retry_margin_percent": 0.03
-  },
-  "frames": [
-    {
-      "frame_id": "uuid",
-      "name": "external(internal)",
-      "bbox": {"xmin":0,"ymin":0,"xmax":100,"ymax":50},
-      "paper_size_mm": [841,594],
-      "kind": "single"
-    }
-  ],
-  "sheet_sets": [
-    {
-      "cluster_id": "uuid",
-      "name": "external(internal)",
-      "pages": [
-        {
-          "page_index": 1,
-          "bbox": {"xmin":0,"ymin":0,"xmax":100,"ymax":50},
-          "paper_size_mm": [297,210]
-        }
-      ]
-    }
-  ]
-}
+---
+
+## 4) AI 维护标准执行步骤（照抄即可跑）
+
+## 4.1 预检查（路径/环境）
+
+1. 校验关键文件存在：
+- `accoreconsole.exe`
+- `打印PDF2.pc3`
+- `monochrome.ctb`
+- `Module5CadBridge.dll`
+- `module5_cad_executor.lsp`
+
+2. 校验 Python 环境：
+- 使用 `E:\project\auto-fanban-pre\backend\.venv\Scripts\python.exe`
+
+3. 校验配置读取：
+- 工作目录必须在仓库根 `E:\project\auto-fanban-pre`。
+
+## 4.2 编译 .NET（改过 C# 必做）
+
+```powershell
+"E:\project\auto-fanban-pre\Dependency Library\.dotnet\sdk-local\dotnet.exe" build E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\Module5CadBridge.csproj -c Release
 ```
 
-## 5.2 result.json（CAD -> Python）
+## 4.3 运行样本回归（最小集）
 
-建议结构：
+```powershell
+E:\project\auto-fanban-pre\backend\.venv\Scripts\python.exe E:\project\auto-fanban-pre\tools\run_dwg_split_only.py "E:\project\auto-fanban-pre\test\dwg\2016仿真图.dwg" --project-no 2016
+E:\project\auto-fanban-pre\backend\.venv\Scripts\python.exe E:\project\auto-fanban-pre\tools\run_dwg_split_only.py "E:\project\auto-fanban-pre\test\dwg\1818仿真图.dwg" --project-no 1818
+```
 
-```json
-{
-  "schema_version": "cad-dxf-result@1.0",
-  "job_id": "uuid",
-  "source_dxf": "abs/path/source.dxf",
-  "frames": [
-    {
-      "frame_id": "uuid",
-      "status": "ok|failed",
-      "pdf_path": "abs/path/xx.pdf",
-      "dwg_path": "abs/path/xx.dwg",
-      "selection_count": 1234,
-      "flags": []
-    }
-  ],
-  "sheet_sets": [
-    {
-      "cluster_id": "uuid",
-      "status": "ok|failed",
-      "pdf_path": "abs/path/xx.pdf",
-      "dwg_path": "abs/path/xx.dwg",
-      "page_count": 7,
-      "flags": []
-    }
-  ],
-  "errors": []
-}
+## 4.4 必查输出
+
+- `storage/jobs/<job_id>/output/drawings/*.pdf/*.dwg` 数量匹配。
+- `storage/jobs/<job_id>/work/cad_tasks/*/module5_trace.log` 中：
+  - `PLOT_FROM_SOURCE_WINDOW` 或 `PLOT_FROM_SPLIT_DWG`
+  - `target_orientation/media_orientation/rotate`
+  - `media=...`（是否命中预期纸张名）
+
+---
+
+## 5) 日志定位规范（AI 读日志必须按这个顺序）
+
+1. 先看任务汇总 JSON（命令输出中的 `job_id`）。
+2. 看 `storage/jobs/<job_id>/work/cad_tasks/*/result.json`。
+3. 看 `storage/jobs/<job_id>/work/cad_tasks/*/module5_trace.log`。
+4. 若是窗口批量路径，再看：
+- `C:\Users\Yan\AppData\Local\Temp\fanban_module5_cad_tasks\<task_id>\plot_tasks\<subtask>\module5_trace.log`
+
+关键关键词：
+- `[DOTNET][PLOT][CFG]`
+- `[DOTNET][PLOT][BUILD]`
+- `[DOTNET][PLOT][MULTI]`
+- `PLOT_FROM_SOURCE_WINDOW`
+- `PLOT_FROM_SPLIT_DWG`
+- `MEDIA_NOT_MATCHED`
+
+---
+
+## 6) 常见问题 -> 根因 -> 处理动作
+
+## 6.1 “PDF 看起来像窗口选错了”
+
+常见根因：
+- 不是窗口框错，而是命中媒体可打印区域过小（例如命中 `ISO_A4` 而非业务 PC3 纸张名）。
+
+处理：
+1. 查 `BUILD` 行的 `media=...`。
+2. 对照 `参数规范.yaml` 纸张名称映射。
+3. 若命中错误媒体，先修名称匹配优先级，再复跑。
+
+## 6.2 “A4 方向不对（应竖向却被横向）”
+
+根因：
+- 目标方向与媒体方向判定/旋转逻辑冲突。
+
+处理：
+1. 看 `target_orientation` 与 `media_orientation`。
+2. 看 `rotate=0/90` 是否符合 `W>H` 规则。
+3. 若不符合，改 `PlotEngine.cs` 中方向判定与旋转逻辑，不改业务框架识别逻辑。
+
+## 6.3 “大量 PLOT 失败”
+
+根因方向：
+- PC3 路径不可达。
+- 纸张名在 PC3 中不存在。
+- AutoCAD 环境未加载正确 Plotters。
+
+处理：
+1. 先看 `[DOTNET][PLOT][CFG] pc3_resolved_path=`。
+2. 再看 `[DOTNET][PLOT][MEDIA]` 的 available sample。
+3. 再确认 `打印PDF2.pc3` 里纸张名称与映射是否一致。
+
+## 6.4 “.NET 与 LISP 混用导致结果不稳定”
+
+处理：
+- 明确一轮任务只看最终 flags：
+  - 有 `DOTNET_TO_LISP_FALLBACK` 说明确实发生回退。
+  - 无该标记即为纯 .NET 路径。
+
+---
+
+## 7) 禁止事项（维护红线）
+
+- 禁止直接删除或静默绕过报错逻辑。
+- 禁止未经验证就改 `plot_preferred_area/window` 语义。
+- 禁止把“名称匹配纸张”退回“纯尺寸近似匹配”。
+- 禁止在未查 trace 的情况下判断“窗口错/比例错”。
+
+---
+
+## 8) 验收标准（改动完成后必须全部满足）
+
+- `2016仿真图`、`1818仿真图` 均可跑通，`pdf_count == dwg_count`（按样本预期）。
+- A4 多页 PDF 页数正确，方向与图框宽高关系一致。
+- trace 中可看到完整 BUILD 证据：`media + orientation + rotate + bbox_wcs/bbox_dcs`。
+- 未出现“压错通过”：所有失败都有具体 flag 或 error 文本。
+
+---
+
+## 9) 维护记录模板（每次改动后必须补）
+
+按以下模板附在提交说明或任务记录：
+
+```text
+[模块5维护记录]
+日期:
+操作者:
+改动文件:
+改动目标:
+关键路径是否变化(是/否):
+2016回归结果:
+1818回归结果:
+是否发生DOTNET_TO_LISP_FALLBACK:
+遗留问题:
 ```
 
 ---
 
-## 6) CAD 侧执行细则（核心算法）
+## 10) 快速命令清单（可直接复制）
 
-## 6.1 单图框导出
+```powershell
+# 1) 编译 .NET 桥接
+cd /d E:\project\auto-fanban-pre
+"Dependency Library\.dotnet\sdk-local\dotnet.exe" build backend\src\cad\dotnet\Module5CadBridge\Module5CadBridge.csproj -c Release
 
-对每个 frame：
+# 2) 跑 2016
+backend\.venv\Scripts\python.exe tools\run_dwg_split_only.py "test\dwg\2016仿真图.dwg" --project-no 2016
 
-1. 读取 bbox，按 `bbox_margin_percent` 扩边。
-2. `ZOOM` 到 bbox（避免可见性导致 `ssget` 漏选）。
-3. Crossing 选集：
-   - `ss = (ssget "_C" p1 p2)`
-4. 若 `ss` 为空：
-   - 使用 `empty_selection_retry_margin_percent` 再扩边重试一次。
-5. 仍为空：
-   - 写 `status=failed` + flag `CAD选集为空`，继续下一个 frame。
-6. 非空则执行：
-   - `-WBLOCK` 导出 DWG（Retain 模式，避免污染源图）
-   - `-PLOT` 按同 bbox 打印 PDF（窗口打印）
-7. 校验产物文件是否存在且大小>0。
+# 3) 跑 1818
+backend\.venv\Scripts\python.exe tools\run_dwg_split_only.py "test\dwg\1818仿真图.dwg" --project-no 1818
 
-## 6.2 A4 成组导出
-
-两种都可，推荐第一种：
-
-- 推荐：按 `page_index` 逐页窗口打印临时 PDF，最后合并成一个多页 PDF。
-- DWG：对 `pages[]` 做 union bbox 的 crossing 选集，`-WBLOCK` 一次导出成组 DWG。
-
-兜底策略：
-
-- 任一页失败：记录页级错误，整组 `status=failed`，但不中断其他组。
-
-## 6.3 Crossing 语义约束
-
-- 必须使用 Crossing（`_C`），不要使用 `_W`。
-- 原因：`_C` = 选中“在窗内 + 与窗边界相交”的对象，符合业务“范围内涉及元素都选中”。
+# 4) 查看最新临时任务目录
+powershell -NoProfile -Command "Get-ChildItem $env:TEMP\fanban_module5_cad_tasks -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 3 FullName,LastWriteTime"
+```
 
 ---
 
-## 7) Python 侧编排细则
-
-## 7.1 分组策略
-
-- 以 `source_dxf` 分组（同一 DXF 一次 CAD 会话）。
-- 每组构建一个 `task.json` 并单独执行，确保故障隔离。
-
-## 7.2 命名规则
-
-- 单图：`external_code(internal_code)` 优先；缺失时回退 `frame_id[:8]`。
-- 成组：`sheet_set.master` 对应编码优先；缺失回退 `sheet_set_{cluster_id[:8]}`。
-
-## 7.3 flag 映射（建议）
-
-- `CAD选集为空`
-- `WBLOCK失败`
-- `PLOT失败`
-- `PDF为空文件`
-- `DWG缺失`
-- `A4多页_部分页失败`
-- `DXF执行超时`
-
----
-
-## 8) 阶段职责建议（尽量少改架构）
-
-## 8.1 Stage7（SPLIT_AND_RENAME）
-
-- 改为：构建 CAD 任务 + 执行 CAD 导出（生成最终 PDF+DWG）。
-- 不再产出“中间 split DXF”作为主路径。
-
-## 8.2 Stage8（EXPORT_PDF_AND_DWG）
-
-- 改为：一致性校验与统计补录（文件存在、页数、flags 聚合）。
-- 保留阶段是为了兼容现有进度条与上层接口。
-
----
-
-## 9) 测试要求（必须新增）
-
-## 9.1 单测（无需真实 CAD）
-
-- `test_build_task_json_from_frames_and_sheet_sets`
-- `test_group_by_source_dxf`
-- `test_result_json_backfill_paths`
-- `test_frame_failure_isolation`
-- `test_sheet_set_partial_failure_flags`
-- `test_name_collision_policy`
-
-通过 mock runner 验证：
-
-- `AcCoreConsoleRunner.run(task_path)` 的输入输出契约
-- 超时/重试逻辑
-
-## 9.2 集成测试（有 CAD 环境）
-
-- 样例 DXF（含普通帧 + A4 成组）一键跑通。
-- 验证：
-  - 同一 DXF 内多帧只启动一次 CAD 会话
-  - PDF、DWG 都存在且可打开
-  - A4 多页顺序正确
-  - 任一帧失败不影响其他帧
-
----
-
-## 10) 验收标准（必须全部满足）
-
-- 主链路不再依赖 `_clip_by_copy_and_delete()`。
-- 产物来自 CAD 内核选集与打印，不是 Python 渲染兜底结果。
-- “范围内涉及元素都选中”在实测样例可复现（边界相交对象被选中）。
-- 同一 DXF 多帧处理没有“每帧重启 CAD”。
-- 模块5测试通过，且不破坏现有单测回归。
-
----
-
-## 11) 实施顺序（建议给新 AI 的执行步骤）
-
-1. 新建 `CADDXFExecutor` 与 `AcCoreConsoleRunner`（先打通空任务）。
-2. 落地 `task.json/result.json` 契约，先做单帧导出通路。
-3. 接入 A4 成组（多页 PDF 合并 + 成组 DWG）。
-4. 改 `executor.py` 的 Stage7/8 逻辑。
-5. 新增单测与 mock runner 测试。
-6. 最后用真实 CAD 样例做 smoke 回归。
-
----
-
-## 12) 参考资料与检索指引（给新 AI）
-
-> 说明：部分 Autodesk Help 页面有 JS 防护或区域限制；若打不开，按“关键词”搜索同名页面。
-
-### 12.1 WBLOCK 与对象导出
-
-- Autodesk Support（可访问）：  
-  `https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/Export-Objects-to-Drawing-File-with-WBLOCK-Command.html`
-- Autodesk Help（可能受限，关键词检索）：  
-  `AutoCAD -WBLOCK (Command) Retain Delete Convert to block`
-
-### 12.2 Crossing 选集（关键语义）
-
-- Lee Mac `ssget` 参考（可访问）：  
-  `https://lee-mac.com/ssget.html`
-- CorelCAD `ssget` 参考（可访问）：  
-  `https://product.corel.com/help/CorelCAD-2015/EN/Documentation/html/lisp_function_ssget.htm`
-- 关键词：  
-  `ssget "_C" crossing window`  
-  `ssget "_W" window fully inside`
-
-### 12.3 AcCoreConsole 批处理
-
-- 入门案例（可访问）：  
-  `https://autocadtips1.com/2013/01/30/up-and-running-with-the-2013-core-console/`
-- 社区样例仓库（可访问）：  
-  `https://github.com/albisserAdrian/acadCC`
-- 关键词：  
-  `accoreconsole /i /s /l en-US`  
-  `AutoCAD Core Console batch script`
-
-### 12.4 命令行 -PLOT
-
-- BricsCAD 命令行文档（结构与 AutoCAD 类似，适合理解脚本参数流）：  
-  `https://help.bricsys.com/en-us/document/command-reference/p/-plot-command`
-- 关键词：  
-  `AutoCAD -PLOT command line Window PDF script`
-
-### 12.5 托管稳定性背景（为何优先 CoreConsole）
-
-- StackOverflow（可访问）：  
-  `https://stackoverflow.com/questions/21768170/how-to-start-autocad-from-net-using-windows-service`
-- Microsoft Session 0（可访问）：  
-  `https://learn.microsoft.com/en-us/previous-versions/windows/hardware/design/dn653293(v=vs.85)`
-
----
-
-## 13) 交付清单（完成时必须具备）
-
-- 新增：`cad_dxf_executor.py`、`accoreconsole_runner.py`、CAD 脚本文件（`.lsp` + `.scr`）。
-- 修改：`splitter.py`、`executor.py`、`runtime_config.py`、`参数规范_运行期.yaml`。
-- 新增测试：`test_cad_dxf_executor.py`。
-- 文档回填：在模块5工作总结中记录“CAD-DXF 主链路上线”与已知限制。
-
----
-
-> 本守则是“模块5 CAD-DXF 主链路”的单一执行标准。  
-> 若出现实现分歧，以本文件“0) 决策与边界”优先。
-
+> 本文件是模块5当前机器的“执行实况标准文档”。
+> 
+> 后续任何 AI 维护都应先对照第 1 章路径，再执行第 4 章流程，再按第 8 章验收。

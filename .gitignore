@@ -7,3 +7,7 @@ test/
 
 # Runtime artifacts
 storage/
+tmp/
+
+# Local dependency mirrors (do not commit)
+Dependency Library/

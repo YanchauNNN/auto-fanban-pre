@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {}
+    "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {}
   },
   "projects": {
-    "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {
+    "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
+        "projectUniqueName": "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
         "projectName": "Module5CadBridge",
-        "projectPath": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
-        "packagesPath": "C:\\Users\\lenovo\\.nuget\\packages\\",
-        "outputPath": "D:\\Programs\\auto-fanban\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\obj\\",
+        "projectPath": "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Module5CadBridge.csproj",
+        "packagesPath": "C:\\Users\\Yan\\.nuget\\packages\\",
+        "outputPath": "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\lenovo\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\Yan\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net48"
@@ -42,7 +42,7 @@
       "frameworks": {
         "net48": {
           "targetAlias": "net48",
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "E:\\project\\auto-fanban-pre\\Dependency Library\\.dotnet\\sdk-local\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
         }
       }
     }

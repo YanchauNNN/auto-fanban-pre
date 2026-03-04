@@ -6,3 +6,11 @@ D:\Programs\auto-fanban\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\
 D:\Programs\auto-fanban\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.pdb
 D:\Programs\auto-fanban\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.dll
 D:\Programs\auto-fanban\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.pdb
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.pdb
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.csproj.AssemblyReference.cache
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.GeneratedMSBuildEditorConfig.editorconfig
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.csproj.CoreCompileInputs.cache
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.sourcelink.json
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.dll
+E:\project\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\net48\Module5CadBridge.pdb

@@ -15,12 +15,11 @@ namespace Module5CadBridge;
 
 internal sealed class PlotEngine
 {
-    private const double MediaToleranceMm = 1.0;
     private readonly BridgeTask _task;
     private readonly BridgeTraceLogger _trace;
     private readonly Dictionary<string, List<string>> _strictMediaCandidatesCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _missingMediaLogged = new(StringComparer.OrdinalIgnoreCase);
-    private List<string>? _availableMediaNamesCache;
+    private List<MediaDescriptor>? _availableMediaDescriptorsCache;
 
     public PlotEngine(BridgeTask task, BridgeTraceLogger trace)
     {
@@ -30,6 +29,7 @@ internal sealed class PlotEngine
 
     public void Execute(Database db, BridgeResultEnvelope result)
     {
+        LogPlotContext();
         RunMediaPrecheck(db, result);
 
         foreach (var frame in _task.Frames)
@@ -41,6 +41,18 @@ internal sealed class PlotEngine
         {
             result.SheetSets.Add(PlotSheetSet(db, sheetSet));
         }
+    }
+
+    private void LogPlotContext()
+    {
+        var pc3Name = string.IsNullOrWhiteSpace(_task.Plot.Pc3Name) ? "-" : _task.Plot.Pc3Name;
+        var pc3Path = string.IsNullOrWhiteSpace(_task.Plot.Pc3ResolvedPath) ? "-" : _task.Plot.Pc3ResolvedPath;
+        var searchDirs = _task.Plot.Pc3SearchDirs.Count > 0
+            ? string.Join(" | ", _task.Plot.Pc3SearchDirs)
+            : "-";
+        _trace.Log(
+            $"[DOTNET][PLOT][CFG] pc3_name={pc3Name} pc3_resolved_path={pc3Path} pc3_search_dirs={searchDirs} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode} scale_rounding={_task.Plot.ScaleIntegerRounding}"
+        );
     }
 
     private Dictionary<string, object> PlotFrame(Database db, BridgeFrameTask frame)
@@ -219,12 +231,15 @@ internal sealed class PlotEngine
     {
         error = string.Empty;
         Directory.CreateDirectory(Path.GetDirectoryName(pdfPath) ?? ".");
+        var frameWindow = BuildWindowBBox(frame.Vertices, frame.BBox);
+        var targetLandscape = frameWindow.Width > frameWindow.Height;
         var mediaCandidates = GetStrictMediaCandidates(
             db,
             frame.PaperVariantId,
             frame.PaperMediaName,
             frame.PaperWidthMm,
-            frame.PaperHeightMm
+            frame.PaperHeightMm,
+            targetLandscape
         );
         if (mediaCandidates.Count <= 0)
         {
@@ -288,12 +303,15 @@ internal sealed class PlotEngine
         var pageInfos = new List<PlotInfo>();
         foreach (var page in pages)
         {
+            var pageWindow = BuildWindowBBox(page.Vertices, page.BBox);
+            var targetLandscape = pageWindow.Width > pageWindow.Height;
             var mediaCandidates = GetStrictMediaCandidates(
                 db,
                 page.PaperVariantId,
                 page.PaperMediaName,
                 page.PaperWidthMm,
-                page.PaperHeightMm
+                page.PaperHeightMm,
+                targetLandscape
             );
             if (mediaCandidates.Count <= 0)
             {
@@ -493,17 +511,18 @@ internal sealed class PlotEngine
             TrySetPlotOffset(validator, settings, _task.Plot.PlotOffsetXmm, _task.Plot.PlotOffsetYmm);
             validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Extents);
             var windowBBox = BuildWindowBBox(vertices, bbox);
-            var paperLandscape = paperWidthMm > paperHeightMm;
+            var targetLandscape = windowBBox.Width > windowBBox.Height;
             var useRotatedOrientation = false;
+            bool? mediaLandscape = null;
             if (TryExtractMediaSizeMm(mediaName, out var mediaWidthMm, out var mediaHeightMm))
             {
-                var mediaLandscape = mediaWidthMm > mediaHeightMm;
-                useRotatedOrientation = mediaLandscape != paperLandscape;
+                mediaLandscape = mediaWidthMm > mediaHeightMm;
+                useRotatedOrientation = mediaLandscape.Value != targetLandscape;
             }
             else
             {
-                var bboxLandscape = windowBBox.Width > windowBBox.Height;
-                useRotatedOrientation = bboxLandscape != paperLandscape;
+                var paperLandscape = paperWidthMm > paperHeightMm;
+                useRotatedOrientation = paperLandscape != targetLandscape;
             }
             validator.SetPlotRotation(
                 settings,
@@ -516,15 +535,20 @@ internal sealed class PlotEngine
                 validator.SetCurrentStyleSheet(settings, _task.Plot.CtbName);
             }
 
+            Extents2d? windowDcs = null;
             if (useWindow)
             {
-                var windowDcs = ToDcsWindow(editor, windowBBox);
-                validator.SetPlotWindowArea(settings, windowDcs);
+                windowDcs = ToDcsWindow(editor, windowBBox);
+                validator.SetPlotWindowArea(settings, windowDcs.Value);
                 validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
             }
 
+            var targetOrientation = targetLandscape ? "landscape" : "portrait";
+            var mediaOrientation = mediaLandscape.HasValue
+                ? (mediaLandscape.Value ? "landscape" : "portrait")
+                : "unknown";
             _trace.Log(
-                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} rotate={(useRotatedOrientation ? 90 : 0)} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
+                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} target_orientation={targetOrientation} media_orientation={mediaOrientation} rotate={(useRotatedOrientation ? 90 : 0)} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} bbox_wcs={windowBBox.Xmin:F3},{windowBBox.Ymin:F3},{windowBBox.Xmax:F3},{windowBBox.Ymax:F3} bbox_dcs={(windowDcs.HasValue ? $"{windowDcs.Value.MinPoint.X:F3},{windowDcs.Value.MinPoint.Y:F3},{windowDcs.Value.MaxPoint.X:F3},{windowDcs.Value.MaxPoint.Y:F3}" : "-")} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
             );
 
             plotInfo = new PlotInfo
@@ -606,18 +630,20 @@ internal sealed class PlotEngine
         }
 
         var measuredScale = candidates.Count > 0 ? candidates.Max() : 1.0;
+        // Round to one decimal first to remove floating-point noise, then integerize.
+        var snappedScale = Math.Round(measuredScale, 1, MidpointRounding.AwayFromZero);
         int rounded;
         if (_task.Plot.ScaleIntegerRounding.Equals("ceil", StringComparison.OrdinalIgnoreCase))
         {
-            rounded = (int)Math.Ceiling(measuredScale);
+            rounded = (int)Math.Ceiling(snappedScale);
         }
         else if (_task.Plot.ScaleIntegerRounding.Equals("round", StringComparison.OrdinalIgnoreCase))
         {
-            rounded = (int)Math.Round(measuredScale, MidpointRounding.AwayFromZero);
+            rounded = (int)Math.Round(snappedScale, MidpointRounding.AwayFromZero);
         }
         else
         {
-            rounded = (int)Math.Floor(measuredScale);
+            rounded = (int)Math.Floor(snappedScale);
         }
 
         return Math.Max(1, rounded);
@@ -664,9 +690,24 @@ internal sealed class PlotEngine
 
     private static Extents2d ToDcsWindow(Editor editor, BridgeBBox bbox)
     {
-        _ = editor;
-        var p1 = new Point2d(bbox.Xmin, bbox.Ymin);
-        var p2 = new Point2d(bbox.Xmax, bbox.Ymax);
+        var p1 = new Point3d(bbox.Xmin, bbox.Ymin, 0.0);
+        var p2 = new Point3d(bbox.Xmax, bbox.Ymax, 0.0);
+
+        try
+        {
+            using var view = editor.GetCurrentView();
+            var wcsToDcs = Matrix3d.PlaneToWorld(view.ViewDirection);
+            wcsToDcs = Matrix3d.Displacement(view.Target - Point3d.Origin) * wcsToDcs;
+            wcsToDcs = Matrix3d.Rotation(-view.ViewTwist, view.ViewDirection, view.Target) * wcsToDcs;
+            wcsToDcs = wcsToDcs.Inverse();
+            p1 = p1.TransformBy(wcsToDcs);
+            p2 = p2.TransformBy(wcsToDcs);
+        }
+        catch
+        {
+            // Keep raw WCS points as fallback to avoid hard-fail in plotting.
+        }
+
         return new Extents2d(
             Math.Min(p1.X, p2.X),
             Math.Min(p1.Y, p2.Y),
@@ -680,27 +721,35 @@ internal sealed class PlotEngine
         string paperVariantId,
         string paperMediaName,
         double paperWidthMm,
-        double paperHeightMm
+        double paperHeightMm,
+        bool targetLandscape
     )
     {
-        if (paperWidthMm <= 1e-6 || paperHeightMm <= 1e-6)
+        if (string.IsNullOrWhiteSpace(paperMediaName) && string.IsNullOrWhiteSpace(paperVariantId))
         {
             return new List<string>();
         }
 
-        var cacheKey = BuildPaperKey(paperVariantId, paperMediaName, paperWidthMm, paperHeightMm);
+        var cacheKey = BuildPaperKey(
+            paperVariantId,
+            paperMediaName,
+            paperWidthMm,
+            paperHeightMm,
+            targetLandscape
+        );
         if (_strictMediaCandidatesCache.TryGetValue(cacheKey, out var cached))
         {
             return new List<string>(cached);
         }
 
-        var availableMediaNames = GetAvailableMediaNames(db);
+        var availableMediaDescriptors = GetAvailableMediaDescriptors(db);
         var resolved = ResolveMediaCandidates(
             paperVariantId,
             paperMediaName,
             paperWidthMm,
             paperHeightMm,
-            availableMediaNames
+            availableMediaDescriptors,
+            targetLandscape
         );
         if (resolved.Count > 0)
         {
@@ -712,10 +761,16 @@ internal sealed class PlotEngine
         {
             var variantTag = string.IsNullOrWhiteSpace(paperVariantId) ? "-" : paperVariantId;
             var mediaTag = string.IsNullOrWhiteSpace(paperMediaName) ? "-" : paperMediaName;
-            if (availableMediaNames.Count > 0)
+            if (availableMediaDescriptors.Count > 0)
             {
+                var sample = string.Join(
+                    " | ",
+                    availableMediaDescriptors
+                        .Take(30)
+                        .Select(MediaDescriptor.ToDebugLabel)
+                );
                 _trace.Log(
-                    $"[DOTNET][PLOT][MEDIA] variant={variantTag} media_hint={mediaTag} target={paperWidthMm:F3}x{paperHeightMm:F3} available_count={availableMediaNames.Count} sample={string.Join(" | ", availableMediaNames.Take(30))}"
+                    $"[DOTNET][PLOT][MEDIA] variant={variantTag} media_hint={mediaTag} target={paperWidthMm:F3}x{paperHeightMm:F3} available_count={availableMediaDescriptors.Count} sample={sample}"
                 );
             }
             else
@@ -735,86 +790,116 @@ internal sealed class PlotEngine
         string paperMediaName,
         double paperWidthMm,
         double paperHeightMm,
-        List<string> availableMediaNames
+        List<MediaDescriptor> availableMediaDescriptors,
+        bool? targetLandscape
     )
     {
+        var hasExplicitHint = !string.IsNullOrWhiteSpace(NormalizeMediaHintToken(paperMediaName));
         var explicitHintMatched = ResolveExplicitHintMediaCandidates(
             paperMediaName,
-            paperWidthMm,
-            paperHeightMm,
-            availableMediaNames
+            availableMediaDescriptors,
+            targetLandscape
         );
-        if (explicitHintMatched.Count > 0)
+        if (hasExplicitHint)
         {
             return explicitHintMatched;
         }
 
         var nameMatched = ResolveNameMatchedMediaCandidates(
             paperVariantId,
-            paperWidthMm,
-            paperHeightMm,
-            availableMediaNames
+            availableMediaDescriptors,
+            targetLandscape
         );
         if (nameMatched.Count > 0)
         {
             return nameMatched;
         }
 
-        return ResolveStrictMediaCandidates(paperWidthMm, paperHeightMm, availableMediaNames);
+        // Business rule: media selection is name-based only. No size fallback.
+        return new List<string>();
     }
 
     private List<string> ResolveExplicitHintMediaCandidates(
         string paperMediaName,
-        double paperWidthMm,
-        double paperHeightMm,
-        List<string> availableMediaNames
+        List<MediaDescriptor> availableMediaDescriptors,
+        bool? targetLandscape
     )
     {
         var hintToken = NormalizeMediaHintToken(paperMediaName);
-        if (string.IsNullOrWhiteSpace(hintToken) || availableMediaNames.Count <= 0)
+        if (string.IsNullOrWhiteSpace(hintToken) || availableMediaDescriptors.Count <= 0)
         {
             return new List<string>();
         }
 
-        var desiredLandscape = paperWidthMm > paperHeightMm;
-        var candidates = new List<(string Name, int OrientationScore, int PrefixScore, double Delta)>();
-        foreach (var mediaName in availableMediaNames)
+        var normalizedHintName = NormalizeMediaNameForComparison(paperMediaName);
+        var candidates = new List<(string Name, int NameScore, int ExactScore, int PrefixScore, int OrientationScore)>();
+        foreach (var media in availableMediaDescriptors)
         {
-            if (!IsMediaNameMatchedByHint(mediaName, hintToken))
+            if (!IsMediaDescriptorMatchedByHint(media, hintToken))
             {
                 continue;
             }
 
-            var orientationScore = 2;
-            var delta = double.MaxValue;
-            if (TryExtractMediaSizeMm(mediaName, out var mediaW, out var mediaH))
+            var nameScore = 1;
+            if (!string.IsNullOrWhiteSpace(normalizedHintName))
             {
-                var mediaLandscape = mediaW > mediaH;
-                var mediaIsSquare = Math.Abs(mediaW - mediaH) <= MediaToleranceMm;
-                if (!mediaIsSquare && mediaLandscape != desiredLandscape)
+                var normalizedBest = NormalizeMediaNameForComparison(media.BestName);
+                var normalizedCanonical = NormalizeMediaNameForComparison(media.CanonicalName);
+                if (normalizedBest.Equals(normalizedHintName, StringComparison.OrdinalIgnoreCase)
+                    || normalizedCanonical.Equals(normalizedHintName, StringComparison.OrdinalIgnoreCase))
                 {
-                    continue;
+                    nameScore = 0;
                 }
-                orientationScore = 0;
-                delta = Math.Abs(mediaW - paperWidthMm) + Math.Abs(mediaH - paperHeightMm);
             }
 
-            var compactName = mediaName.Replace(" ", string.Empty);
+            var orientationScore = 2;
+            if (
+                targetLandscape.HasValue
+                && TryExtractMediaSizeMm(media.CanonicalName, out var mediaW, out var mediaH)
+            )
+            {
+                var mediaLandscape = mediaW > mediaH;
+                orientationScore = mediaLandscape == targetLandscape.Value ? 0 : 1;
+            }
+
+            var exactScore = 1;
+            if (TryExtractMediaPaperTokenFromDescriptor(media, out var mediaToken))
+            {
+                exactScore = mediaToken.Equals(hintToken, StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+            }
+
+            var compactName = media.BestName.Replace(" ", string.Empty);
             var compactHint = hintToken.Replace(" ", string.Empty);
             var prefixScore = compactName.StartsWith(compactHint, StringComparison.OrdinalIgnoreCase)
                 ? 0
                 : 1;
-            candidates.Add((mediaName, orientationScore, prefixScore, delta));
+            candidates.Add((media.CanonicalName, nameScore, exactScore, prefixScore, orientationScore));
         }
 
         return candidates
-            .OrderBy(c => c.OrientationScore)
+            .OrderBy(c => c.NameScore)
+            .ThenBy(c => c.ExactScore)
             .ThenBy(c => c.PrefixScore)
-            .ThenBy(c => c.Delta)
+            .ThenBy(c => c.OrientationScore)
             .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .Select(c => c.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static bool IsMediaDescriptorMatchedByHint(MediaDescriptor media, string hintToken)
+    {
+        if (IsMediaNameMatchedByHint(media.CanonicalName, hintToken))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(media.LocaleName) && IsMediaNameMatchedByHint(media.LocaleName, hintToken))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsMediaNameMatchedByHint(string mediaName, string hintToken)
@@ -842,7 +927,7 @@ internal sealed class PlotEngine
             @"[^A-Z0-9\+\./]",
             string.Empty
         );
-        return normalizedMedia.IndexOf(normalizedHint, StringComparison.OrdinalIgnoreCase) >= 0;
+        return normalizedMedia.Equals(normalizedHint, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeMediaHintToken(string paperMediaName)
@@ -869,24 +954,36 @@ internal sealed class PlotEngine
         );
     }
 
+    private static string NormalizeMediaNameForComparison(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return Regex.Replace(
+            value.ToUpperInvariant(),
+            @"[^A-Z0-9\+\./]",
+            string.Empty
+        );
+    }
+
     private List<string> ResolveNameMatchedMediaCandidates(
         string paperVariantId,
-        double paperWidthMm,
-        double paperHeightMm,
-        List<string> availableMediaNames
+        List<MediaDescriptor> availableMediaDescriptors,
+        bool? targetLandscape
     )
     {
         var aliases = BuildVariantNameAliases(paperVariantId);
-        if (aliases.Count <= 0 || availableMediaNames.Count <= 0)
+        if (aliases.Count <= 0 || availableMediaDescriptors.Count <= 0)
         {
             return new List<string>();
         }
 
-        var desiredLandscape = paperWidthMm > paperHeightMm;
-        var candidates = new List<(string Name, int OrientationScore, int PrefixScore, double Delta)>();
-        foreach (var mediaName in availableMediaNames)
+        var candidates = new List<(string Name, int OrientationScore, int PrefixScore)>();
+        foreach (var media in availableMediaDescriptors)
         {
-            if (!TryExtractMediaPaperToken(mediaName, out var mediaToken))
+            if (!TryExtractMediaPaperTokenFromDescriptor(media, out var mediaToken))
             {
                 continue;
             }
@@ -897,20 +994,16 @@ internal sealed class PlotEngine
             }
 
             var orientationScore = 2;
-            var delta = double.MaxValue;
-            if (TryExtractMediaSizeMm(mediaName, out var mediaW, out var mediaH))
+            if (
+                targetLandscape.HasValue
+                && TryExtractMediaSizeMm(media.CanonicalName, out var mediaW, out var mediaH)
+            )
             {
                 var mediaLandscape = mediaW > mediaH;
-                var mediaIsSquare = Math.Abs(mediaW - mediaH) <= MediaToleranceMm;
-                if (!mediaIsSquare && mediaLandscape != desiredLandscape)
-                {
-                    continue;
-                }
-                orientationScore = 0;
-                delta = Math.Abs(mediaW - paperWidthMm) + Math.Abs(mediaH - paperHeightMm);
+                orientationScore = mediaLandscape == targetLandscape.Value ? 0 : 1;
             }
 
-            var compactName = mediaName.Replace(" ", string.Empty);
+            var compactName = media.BestName.Replace(" ", string.Empty);
             var compactToken = mediaToken.Replace(" ", string.Empty);
             var prefixScore = compactName.StartsWith(
                 compactToken,
@@ -919,62 +1012,16 @@ internal sealed class PlotEngine
                 ? 0
                 : 1;
 
-            candidates.Add((mediaName, orientationScore, prefixScore, delta));
+            candidates.Add((media.CanonicalName, orientationScore, prefixScore));
         }
 
         return candidates
             .OrderBy(c => c.OrientationScore)
             .ThenBy(c => c.PrefixScore)
-            .ThenBy(c => c.Delta)
             .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .Select(c => c.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-
-    private List<string> ResolveStrictMediaCandidates(
-        double paperWidthMm,
-        double paperHeightMm,
-        List<string> availableMediaNames
-    )
-    {
-        var candidates = new List<(string Name, int OrientationScore, double Delta)>();
-        var paperIsSquare = Math.Abs(paperWidthMm - paperHeightMm) <= MediaToleranceMm;
-        foreach (var mediaName in availableMediaNames)
-        {
-            if (!TryExtractMediaSizeMm(mediaName, out var mediaW, out var mediaH))
-            {
-                continue;
-            }
-
-            if (IsNearPair(mediaW, mediaH, paperWidthMm, paperHeightMm, MediaToleranceMm))
-            {
-                var delta = Math.Abs(mediaW - paperWidthMm) + Math.Abs(mediaH - paperHeightMm);
-                candidates.Add((mediaName, 0, delta));
-                continue;
-            }
-
-            if (paperIsSquare
-                && IsNearPair(mediaW, mediaH, paperHeightMm, paperWidthMm, MediaToleranceMm))
-            {
-                var delta = Math.Abs(mediaW - paperHeightMm) + Math.Abs(mediaH - paperWidthMm);
-                candidates.Add((mediaName, 1, delta));
-            }
-        }
-
-        var strictFromMediaList = candidates
-            .OrderBy(c => c.OrientationScore)
-            .ThenBy(c => c.Delta)
-            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(c => c.Name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (strictFromMediaList.Count > 0)
-        {
-            return strictFromMediaList;
-        }
-
-        return new List<string>();
     }
 
     private void RunMediaPrecheck(Database db, BridgeResultEnvelope result)
@@ -985,7 +1032,7 @@ internal sealed class PlotEngine
             return;
         }
 
-        var availableMediaNames = GetAvailableMediaNames(db);
+        var availableMediaDescriptors = GetAvailableMediaDescriptors(db);
         var missing = new List<PaperRequestInfo>();
         foreach (var item in requested.Values)
         {
@@ -994,7 +1041,8 @@ internal sealed class PlotEngine
                 item.MediaName,
                 item.WidthMm,
                 item.HeightMm,
-                availableMediaNames
+                availableMediaDescriptors,
+                null
             );
             if (candidates.Count <= 0)
             {
@@ -1077,14 +1125,16 @@ internal sealed class PlotEngine
         return result;
     }
 
-    private List<string> GetAvailableMediaNames(Database db)
+    private List<MediaDescriptor> GetAvailableMediaDescriptors(Database db)
     {
-        if (_availableMediaNamesCache != null)
+        if (_availableMediaDescriptorsCache != null)
         {
-            return new List<string>(_availableMediaNamesCache);
+            return _availableMediaDescriptorsCache
+                .Select(item => item.Clone())
+                .ToList();
         }
 
-        var mediaNames = new List<string>();
+        var mediaNames = new List<MediaDescriptor>();
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
@@ -1117,7 +1167,17 @@ internal sealed class PlotEngine
             {
                 if (!string.IsNullOrWhiteSpace(mediaName))
                 {
-                    mediaNames.Add(mediaName);
+                    var localeName = string.Empty;
+                    try
+                    {
+                        localeName = validator.GetLocaleMediaName(settings, mediaName);
+                    }
+                    catch
+                    {
+                        localeName = string.Empty;
+                    }
+
+                    mediaNames.Add(new MediaDescriptor(mediaName, localeName));
                 }
             }
 
@@ -1128,10 +1188,34 @@ internal sealed class PlotEngine
             _trace.Log($"[DOTNET][PLOT][WARN] get media list failed: {ex.Message}");
         }
 
-        _availableMediaNamesCache = mediaNames
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        _availableMediaDescriptorsCache = mediaNames
+            .GroupBy(item => item.CanonicalName, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var first = group.First();
+                var locale = group
+                    .Select(item => item.LocaleName)
+                    .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item))
+                    ?? first.LocaleName;
+                return new MediaDescriptor(first.CanonicalName, locale);
+            })
             .ToList();
-        return new List<string>(_availableMediaNamesCache);
+        return _availableMediaDescriptorsCache
+            .Select(item => item.Clone())
+            .ToList();
+    }
+
+    private static string BuildPaperKey(
+        string paperVariantId,
+        string paperMediaName,
+        double widthMm,
+        double heightMm,
+        bool targetLandscape
+    )
+    {
+        var baseKey = BuildPaperKey(paperVariantId, paperMediaName, widthMm, heightMm);
+        var orientation = targetLandscape ? "L" : "P";
+        return $"{baseKey}|{orientation}";
     }
 
     private static string BuildPaperKey(
@@ -1153,6 +1237,36 @@ internal sealed class PlotEngine
     private static string BuildPaperKey(double widthMm, double heightMm)
     {
         return $"{widthMm:F3}x{heightMm:F3}";
+    }
+
+    private sealed class MediaDescriptor
+    {
+        public MediaDescriptor(string canonicalName, string localeName)
+        {
+            CanonicalName = canonicalName ?? string.Empty;
+            LocaleName = localeName ?? string.Empty;
+        }
+
+        public string CanonicalName { get; }
+        public string LocaleName { get; }
+
+        public string BestName => string.IsNullOrWhiteSpace(LocaleName) ? CanonicalName : LocaleName;
+
+        public MediaDescriptor Clone()
+        {
+            return new MediaDescriptor(CanonicalName, LocaleName);
+        }
+
+        public static string ToDebugLabel(MediaDescriptor media)
+        {
+            if (string.IsNullOrWhiteSpace(media.LocaleName)
+                || media.CanonicalName.Equals(media.LocaleName, StringComparison.OrdinalIgnoreCase))
+            {
+                return media.CanonicalName;
+            }
+
+            return $"{media.CanonicalName}=>{media.LocaleName}";
+        }
     }
 
     private sealed class PaperRequestInfo
@@ -1273,6 +1387,17 @@ internal sealed class PlotEngine
         return !string.IsNullOrWhiteSpace(token);
     }
 
+    private static bool TryExtractMediaPaperTokenFromDescriptor(MediaDescriptor media, out string token)
+    {
+        if (!string.IsNullOrWhiteSpace(media.LocaleName)
+            && TryExtractMediaPaperToken(media.LocaleName, out token))
+        {
+            return true;
+        }
+
+        return TryExtractMediaPaperToken(media.CanonicalName, out token);
+    }
+
     private static string NormalizePaperToken(string rawToken)
     {
         var token = rawToken.Trim().ToUpperInvariant().Replace(" ", string.Empty);
@@ -1376,7 +1501,7 @@ internal sealed class PlotEngine
             yield return $"UserDefinedMetric ({w} x {h}mm)";
             yield return $"UserDefinedMetric ({w} x {h} mm)";
             yield return $"UserDefinedMetric ({w} x {h} MM)";
-            yield return $"UserDefinedMetric ({w} x {h} 毫米)";
+            yield return $"UserDefinedMetric ({w} x {h} \u6BEB\u7C73)";
             yield return $"UserDefinedMetric ({w}_x_{h}_MM)";
         }
 
@@ -1405,7 +1530,7 @@ internal sealed class PlotEngine
         {
             match = Regex.Match(
                 normalized,
-                @"\((?<w>\d+(?:\.\d+)?)\s*[xX×]\s*(?<h>\d+(?:\.\d+)?)\s*(?:mm|MM|毫米)?\)",
+                @"\((?<w>\d+(?:\.\d+)?)\s*[xX\u00D7]\s*(?<h>\d+(?:\.\d+)?)\s*(?:mm|MM|\u6BEB\u7C73)?\)",
                 RegexOptions.IgnoreCase
             );
             if (match.Success)
@@ -1442,7 +1567,7 @@ internal sealed class PlotEngine
             {
                 match = Regex.Match(
                     normalized,
-                    @"\((?<w>\d+(?:\.\d+)?)\s*[xX×]\s*(?<h>\d+(?:\.\d+)?)\s*(?:Inches|INCHES)\)",
+                    @"\((?<w>\d+(?:\.\d+)?)\s*[xX\u00D7]\s*(?<h>\d+(?:\.\d+)?)\s*(?:Inches|INCHES)\)",
                     RegexOptions.IgnoreCase
                 );
             }
@@ -1500,18 +1625,6 @@ internal sealed class PlotEngine
         return true;
     }
 
-    private static bool IsNearPair(
-        double actualW,
-        double actualH,
-        double expectedW,
-        double expectedH,
-        double toleranceMm
-    )
-    {
-        return Math.Abs(actualW - expectedW) <= toleranceMm
-               && Math.Abs(actualH - expectedH) <= toleranceMm;
-    }
-
     private static string SanitizeFlagText(string value)
     {
         return value
@@ -1521,3 +1634,4 @@ internal sealed class PlotEngine
             .Trim();
     }
 }
+

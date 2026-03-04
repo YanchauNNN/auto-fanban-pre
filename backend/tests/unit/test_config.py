@@ -73,7 +73,7 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.plot.center_plot is False
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.scale_mode == "manual_integer_from_geometry"
-        assert runtime_config.module5_export.plot.scale_integer_rounding == "floor"
+        assert runtime_config.module5_export.plot.scale_integer_rounding == "round"
         assert runtime_config.module5_export.plot.margins_mm == {
             "top": 0.0,
             "bottom": 0.0,
