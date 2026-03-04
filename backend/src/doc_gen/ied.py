@@ -68,10 +68,7 @@ class IEDGenerator(IIEDGenerator):
 
         # 使用指定的sheet
         sheet_name = bindings.get("sheet", "IED导入模板 (修改)")
-        if sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-        else:
-            ws = wb.active
+        ws = wb[sheet_name] if sheet_name in wb.sheetnames else wb.active
 
         start_row = bindings.get("start_row", 2)
         columns = bindings.get("columns", {})
@@ -93,6 +90,7 @@ class IEDGenerator(IIEDGenerator):
         """准备全局数据"""
         params = ctx.params
         derived = ctx.derived
+        discipline_office = self._normalize_discipline_office(params.ied_discipline_office)
 
         return {
             "ied_change_flag": params.ied_change_flag,
@@ -100,9 +98,30 @@ class IEDGenerator(IIEDGenerator):
             "ied_status": params.ied_status,
             "wbs_code": params.wbs_code,
             "album_internal_code": derived.album_internal_code,
+            "ied_design_type": params.ied_design_type,
+            "ied_responsible_unit": params.ied_responsible_unit,
+            "ied_discipline_office": discipline_office,
+            "ied_chief_designer": params.ied_chief_designer,
+            "ied_person_qual_category": params.ied_person_qual_category,
+            "ied_fu_flag": params.ied_fu_flag,
+            "ied_internal_tag": params.ied_internal_tag,
+            "ied_prepared_by": params.ied_prepared_by,
+            "ied_prepared_by_2": params.ied_prepared_by_2,
+            "ied_prepared_date": params.ied_prepared_date,
+            "ied_checked_by": params.ied_checked_by,
+            "ied_checked_date": params.ied_checked_date,
+            "ied_discipline_leader": params.ied_discipline_leader,
+            "ied_discipline_leader_date": params.ied_discipline_leader_date,
+            "ied_reviewed_by": params.ied_reviewed_by,
+            "ied_reviewed_date": params.ied_reviewed_date,
+            "ied_approved_by": params.ied_approved_by,
+            "ied_approved_date": params.ied_approved_date,
+            "ied_submitted_plan_date": params.ied_submitted_plan_date,
+            "ied_publish_plan_date": params.ied_publish_plan_date,
+            "ied_external_plan_date": params.ied_external_plan_date,
+            "ied_fu_plan_date": params.ied_fu_plan_date,
             "classification": params.classification,
             "work_hours": params.work_hours,
-            # ... 其他IED参数
         }
 
     def _build_rows(self, ctx: DocContext) -> list[dict]:
@@ -164,11 +183,45 @@ class IEDGenerator(IIEDGenerator):
             source = col_config.get("source", "")
             is_global = col_config.get("global", False)
 
-            if is_global:
-                value = global_data.get(source, "")
-            elif source in row_data:
-                value = row_data[source]
-            else:
-                value = ""
+            value = self._resolve_value(
+                source=source,
+                is_global=is_global,
+                row_data=row_data,
+                global_data=global_data,
+                ctx=ctx,
+            )
 
             ws[f"{col_letter}{row}"] = value
+
+    def _resolve_value(
+        self,
+        *,
+        source: str,
+        is_global: bool,
+        row_data: dict,
+        global_data: dict,
+        ctx: DocContext,
+    ) -> str:
+        if is_global:
+            return global_data.get(source, "") or ""
+
+        if source in row_data:
+            value = row_data.get(source, "")
+            if source == "title_en" and not ctx.is_1818:
+                return ""
+            return value or ""
+
+        if source in global_data:
+            return global_data.get(source, "") or ""
+
+        return ""
+
+    def _normalize_discipline_office(self, office: str | None) -> str:
+        if office is None:
+            return ""
+        text = office.strip()
+        if text == "":
+            return ""
+        if "-" in text:
+            return text.rsplit("-", 1)[-1].strip()
+        return text

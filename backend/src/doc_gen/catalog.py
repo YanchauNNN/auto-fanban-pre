@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -102,6 +103,10 @@ class CatalogGenerator(ICatalogGenerator):
             self._write_detail_row(ws, current_row, row_data, bindings, ctx)
             current_row += 1
 
+        # 动态设置打印区域，保证目录计页与实际行数一致
+        last_row = max(start_row, current_row - 1)
+        ws.print_area = f"$A$1:$I${last_row}"
+
         # 保存
         wb.save(output_path)
 
@@ -179,9 +184,9 @@ class CatalogGenerator(ICatalogGenerator):
                 params.upgrade_start_seq is not None
                 and params.upgrade_end_seq is not None
                 and seq_no is not None
+                and params.upgrade_start_seq <= seq_no <= params.upgrade_end_seq
             ):
-                if params.upgrade_start_seq <= seq_no <= params.upgrade_end_seq:
-                    upgrade_note = params.upgrade_note_text
+                upgrade_note = params.upgrade_note_text
 
             rows.append({
                 "type": "drawing",
@@ -224,7 +229,10 @@ class CatalogGenerator(ICatalogGenerator):
             title = data.get("title_cn", "")
             if ctx.is_1818 and data.get("title_en"):
                 title = f"{title}\n{data['title_en']}"
-                ws[f"E{row}"].alignment = ws[f"E{row}"].alignment.copy(wrapText=True)
+                cell = ws[f"E{row}"]
+                alignment = copy(cell.alignment)
+                alignment.wrapText = True
+                cell.alignment = alignment
             ws[f"E{row}"] = title
 
         # F: 版次
@@ -245,6 +253,12 @@ class CatalogGenerator(ICatalogGenerator):
 
     def _count_pages(self, xlsx_path: Path) -> int:
         """计算目录页数"""
+        # 优先尝试 Excel COM 的分页信息
+        try:
+            return self._count_pages_via_com(xlsx_path)
+        except Exception:
+            pass
+
         # 优先尝试Excel分页信息
         try:
             wb = load_workbook(xlsx_path)
@@ -266,6 +280,27 @@ class CatalogGenerator(ICatalogGenerator):
             return count
         except Exception:
             return 1  # 默认1页
+
+    def _count_pages_via_com(self, xlsx_path: Path) -> int:
+        try:
+            import win32com.client
+        except ImportError as exc:
+            raise RuntimeError("pywin32 不可用") from exc
+
+        excel = None
+        wb = None
+        try:
+            excel = win32com.client.Dispatch("Excel.Application")
+            excel.Visible = False
+            wb = excel.Workbooks.Open(str(xlsx_path.absolute()))
+            ws = wb.Worksheets(1)
+            page_count = int(ws.HPageBreaks.Count) + 1
+            return max(1, page_count)
+        finally:
+            if wb:
+                wb.Close(False)
+            if excel:
+                excel.Quit()
 
     def _backfill_page_count(
         self,

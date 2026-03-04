@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import uuid4
+
+from openpyxl import Workbook, load_workbook
+
+from src.doc_gen.catalog import CatalogGenerator
+from src.models import (
+    BBox,
+    DerivedFields,
+    DocContext,
+    FrameMeta,
+    FrameRuntime,
+    GlobalDocParams,
+    TitleblockFields,
+)
+
+
+class DummyPDFExporter:
+    def export_xlsx_to_pdf(self, xlsx_path: Path, pdf_path: Path) -> None:
+        pdf_path.write_bytes(b"%PDF-1.4\n%dummy\n")
+
+    def count_pdf_pages(self, pdf_path: Path) -> int:
+        return 2
+
+
+def _make_frame(seq: int) -> FrameMeta:
+    code = f"1234567-JG001-{seq:03d}"
+    runtime = FrameRuntime(
+        frame_id=str(uuid4()),
+        source_file=Path("demo.dxf"),
+        outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+    )
+    titleblock = TitleblockFields(
+        internal_code=code,
+        external_code=f"JD1NHT11{seq:03d}B25C42SD",
+        title_cn=f"图纸{seq}",
+        title_en=f"Drawing {seq}",
+        revision="A",
+        status="CFC",
+        page_total=1,
+    )
+    return FrameMeta(runtime=runtime, titleblock=titleblock)
+
+
+def _build_context(project_no: str = "2016") -> DocContext:
+    params = GlobalDocParams(
+        project_no=project_no,
+        engineering_no="1234",
+        subitem_no="JG001",
+        album_title_cn="测试图册",
+        album_title_en="Test Album",
+        cover_revision="A",
+        doc_status="CFC",
+        upgrade_start_seq=2,
+        upgrade_end_seq=3,
+        upgrade_note_text="升版",
+    )
+    derived = DerivedFields(
+        cover_internal_code="1234567-JG001-FM",
+        catalog_internal_code="1234567-JG001-TM",
+        cover_external_code="JD1NHT11F01B25C42SD",
+        catalog_external_code="JD1NHT11T01B25C42SD",
+        cover_title_cn="测试图册封面",
+        catalog_title_cn="测试图册目录",
+        cover_title_en="Test Album Cover",
+        catalog_title_en="Test Album Contents",
+        catalog_revision="A",
+    )
+    frames = [_make_frame(3), _make_frame(1), _make_frame(2)]
+    return DocContext(params=params, derived=derived, frames=frames)
+
+
+def test_catalog_row_order_and_upgrade_note() -> None:
+    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["type"] == "cover"
+    assert rows[1]["type"] == "catalog"
+    assert [r["internal_code"] for r in rows[2:]] == [
+        "1234567-JG001-001",
+        "1234567-JG001-002",
+        "1234567-JG001-003",
+    ]
+    assert rows[2]["upgrade_note"] == ""
+    assert rows[3]["upgrade_note"] == "升版"
+    assert rows[4]["upgrade_note"] == "升版"
+
+
+def test_catalog_1818_title_in_same_cell_with_newline() -> None:
+    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context(project_no="1818")
+    wb = Workbook()
+    ws = wb.active
+    bindings = gen.spec.get_catalog_bindings()
+
+    row_data = {
+        "internal_code": "1234567-JG001-001",
+        "external_code": "JD1NHT11001B25C42SD",
+        "title_cn": "中文标题",
+        "title_en": "English Title",
+        "revision": "A",
+        "status": "CFC",
+        "page_total": 1,
+        "upgrade_note": "",
+    }
+    gen._write_detail_row(ws, 9, row_data, bindings, ctx)
+
+    assert ws["E9"].value == "中文标题\nEnglish Title"
+
+
+def test_catalog_backfill_page_count(temp_dir: Path) -> None:
+    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "目录.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/目录模板文件.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+    gen._backfill_page_count(output_xlsx, 3, bindings)
+
+    ws = load_workbook(output_xlsx).active
+    assert ws["H10"].value == 3
+

@@ -15,10 +15,12 @@ from .cover import CoverGenerator
 from .derivation import DerivationEngine
 from .design import DesignFileGenerator
 from .ied import IEDGenerator
+from .param_validator import DocParamValidator
 from .pdf_engine import PDFExporter
 
 __all__ = [
     "DerivationEngine",
+    "DocParamValidator",
     "CoverGenerator",
     "CatalogGenerator",
     "DesignFileGenerator",

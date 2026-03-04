@@ -141,6 +141,8 @@ class DesignFileGenerator(IDesignFileGenerator):
             "paper_size_text": "A4文件",
             "page_total": 1,
             "status": params.doc_status,
+            "discipline": params.discipline,
+            "design_phase": derived.design_phase,
         })
 
         # 目录行
@@ -154,6 +156,8 @@ class DesignFileGenerator(IDesignFileGenerator):
             "paper_size_text": "A4文件",
             "page_total": derived.catalog_page_total or 1,
             "status": params.doc_status,
+            "discipline": params.discipline,
+            "design_phase": derived.design_phase,
         })
 
         # 图纸行
@@ -169,6 +173,8 @@ class DesignFileGenerator(IDesignFileGenerator):
                 "paper_size_text": tb.paper_size_text,
                 "page_total": tb.page_total or 1,
                 "status": tb.status,
+                "discipline": tb.discipline or params.discipline,
+                "design_phase": derived.design_phase,
             })
 
         return rows
@@ -188,13 +194,34 @@ class DesignFileGenerator(IDesignFileGenerator):
             source = col_config.get("source", "")
             is_global = col_config.get("global", False)
 
-            # 确定值
-            if is_global:
-                value = global_data.get(source, "")
-            elif source in row_data:
-                value = row_data[source]
-            else:
-                value = ""
+            value = self._resolve_value(
+                source=source,
+                is_global=is_global,
+                row_data=row_data,
+                global_data=global_data,
+            )
 
             # 写入
             ws[f"{col_letter}{row}"] = value
+
+    def _resolve_value(
+        self,
+        *,
+        source: str,
+        is_global: bool,
+        row_data: dict,
+        global_data: dict,
+    ) -> str:
+        if source == "discipline_code_map[discipline]":
+            return global_data.get("discipline_code", "") or ""
+
+        if is_global:
+            return global_data.get(source, "") or ""
+
+        if source in row_data:
+            return row_data.get(source, "") or ""
+
+        if source in global_data:
+            return global_data.get(source, "") or ""
+
+        return ""

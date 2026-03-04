@@ -59,7 +59,28 @@ class GlobalDocParams(BaseModel):
     ied_status: str = "发布"
     ied_doc_type: str | None = None
     ied_change_flag: str | None = None
-    # ... 其他IED参数省略，按需扩展
+    ied_design_type: str | None = None
+    ied_responsible_unit: str | None = None
+    ied_discipline_office: str | None = None
+    ied_chief_designer: str | None = None
+    ied_person_qual_category: str = "一般核安全物项-民用"
+    ied_fu_flag: str = "N"
+    ied_internal_tag: str = "否"
+    ied_prepared_by: str | None = None
+    ied_prepared_by_2: str | None = None
+    ied_prepared_date: str | None = None
+    ied_checked_by: str | None = None
+    ied_checked_date: str | None = None
+    ied_discipline_leader: str | None = None
+    ied_discipline_leader_date: str | None = None
+    ied_reviewed_by: str | None = None
+    ied_reviewed_date: str | None = None
+    ied_approved_by: str | None = None
+    ied_approved_date: str | None = None
+    ied_submitted_plan_date: str | None = None
+    ied_publish_plan_date: str | None = None
+    ied_external_plan_date: str | None = None
+    ied_fu_plan_date: str | None = None
 
 
 class DerivedFields(BaseModel):

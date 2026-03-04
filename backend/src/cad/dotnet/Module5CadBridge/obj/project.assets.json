@@ -48,7 +48,7 @@
     "frameworks": {
       "net48": {
         "targetAlias": "net48",
-        "runtimeIdentifierGraphPath": "E:\\project\\auto-fanban-pre\\Dependency Library\\.dotnet\\sdk-local\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.418\\RuntimeIdentifierGraph.json"
       }
     }
   }

@@ -23,7 +23,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..cad import (
     A4MultipageGrouper,
@@ -41,6 +41,7 @@ from ..doc_gen import (
     DesignFileGenerator,
     IEDGenerator,
 )
+from ..doc_gen.param_validator import DocParamValidator
 from ..models import DocContext, GlobalDocParams
 from .packager import Packager
 from .stages import DELIVERABLE_STAGES, StageEnum
@@ -67,6 +68,7 @@ class PipelineExecutor:
         self.a4_grouper = A4MultipageGrouper()
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.derivation = DerivationEngine()
+        self.doc_param_validator = DocParamValidator()
         self.cover_gen = CoverGenerator()
         self.catalog_gen = CatalogGenerator()
         self.design_gen = DesignFileGenerator()
@@ -401,6 +403,15 @@ class PipelineExecutor:
         ied_dir.mkdir(parents=True, exist_ok=True)
 
         doc_ctx = self._build_doc_context(job, context)
+        validation_errors = self.doc_param_validator.validate(doc_ctx)
+        if validation_errors:
+            for err in validation_errors:
+                logger.error("文档参数校验失败: %s", err)
+                if err not in job.errors:
+                    job.errors.append(err)
+            job.add_flag("文档参数校验失败")
+            return
+
         doc_ctx.derived = self.derivation.compute(doc_ctx)
 
         try:
@@ -439,7 +450,17 @@ class PipelineExecutor:
         job.artifacts.docs_dir = docs_dir
 
     def _build_doc_context(self, job: Job, context: dict) -> DocContext:
-        params = GlobalDocParams(project_no=job.project_no, **job.params)
+        merged_params = dict(job.params)
+        frame_001 = self._find_frame_001(context.get("frames", []))
+        if frame_001:
+            tb = frame_001.titleblock
+            self._fill_if_missing(merged_params, "engineering_no", tb.engineering_no)
+            self._fill_if_missing(merged_params, "subitem_no", tb.subitem_no)
+            self._fill_if_missing(merged_params, "discipline", tb.discipline)
+            self._fill_if_missing(merged_params, "revision", tb.revision)
+            self._fill_if_missing(merged_params, "doc_status", tb.status)
+
+        params = GlobalDocParams(project_no=job.project_no, **merged_params)
         return DocContext(
             params=params,
             frames=context["frames"],
@@ -448,6 +469,22 @@ class PipelineExecutor:
             mappings=self.spec.get_mappings(),
             options=job.options,
         )
+
+    @staticmethod
+    def _find_frame_001(frames: list[Any]) -> Any | None:
+        for frame in frames:
+            internal_code = frame.titleblock.internal_code
+            if internal_code and internal_code.endswith("-001"):
+                return frame
+        return None
+
+    @staticmethod
+    def _fill_if_missing(target: dict, key: str, value: object | None) -> None:
+        if value is None:
+            return
+        current = target.get(key)
+        if current is None or (isinstance(current, str) and current.strip() == ""):
+            target[key] = value
 
     def _stage_package(self, job: Job, context: dict) -> None:
         self._update_progress(job, message="打包中")

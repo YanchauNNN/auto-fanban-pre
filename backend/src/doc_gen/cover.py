@@ -22,15 +22,26 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+import zipfile
+from collections.abc import Callable
+from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 from ..config import load_spec
+from ..config.spec_loader import CoverBinding
 from ..interfaces import GenerationError, ICoverGenerator
 from .pdf_engine import PDFExporter
 
 if TYPE_CHECKING:
     from ..models import DocContext
+
+_CELL_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
 
 
 class CoverGenerator(ICoverGenerator):
@@ -71,7 +82,11 @@ class CoverGenerator(ICoverGenerator):
 
     def _get_template_path(self, ctx: DocContext) -> str:
         """获取模板路径"""
-        variant = ctx.params.cover_variant if ctx.params.cover_variant != "通用" else ""
+        variant = ""
+        if ctx.params.cover_variant == "压力容器":
+            variant = "压力容器版"
+        elif ctx.params.cover_variant == "核安全设备":
+            variant = "核安全设备版"
         return self.spec.get_template_path(
             "cover",
             ctx.params.project_no,
@@ -110,17 +125,291 @@ class CoverGenerator(ICoverGenerator):
         ctx: DocContext,
     ) -> None:
         """写入封面文档"""
-        # TODO: 实现Word+内嵌Excel写入
-        # 需要使用python-docx + oletools或COM自动化
-
-        # 暂时仅复制模板
-        import shutil
         shutil.copy(template_path, output_path)
 
-        # 实际实现需要：
-        # 1. 打开docx
-        # 2. 找到内嵌的Excel OLE对象
-        # 3. 修改Excel中的单元格
-        # 4. 处理标题分割（cn_split/en_split规则）
-        # 5. 处理外部编码19位逐格写入
-        # 6. 保存docx
+        try:
+            embedded_xlsx = self._find_embedded_xlsx(output_path)
+            if embedded_xlsx:
+                self._write_cover_via_embedded_xlsx(
+                    output_path=output_path,
+                    embedded_xlsx_path=embedded_xlsx,
+                    bindings=bindings,
+                    data=data,
+                )
+                return
+
+            # 1818 模板当前为 oleObject1.bin，走 COM 写入。
+            self._write_cover_via_com(output_path=output_path, bindings=bindings, data=data)
+        except Exception as exc:
+            raise GenerationError(f"封面写入失败: {exc}") from exc
+
+    def _write_cover_via_embedded_xlsx(
+        self,
+        *,
+        output_path: Path,
+        embedded_xlsx_path: str,
+        bindings: dict[str, CoverBinding],
+        data: dict[str, Any],
+    ) -> None:
+        with zipfile.ZipFile(output_path, "r") as zf:
+            package = {name: zf.read(name) for name in zf.namelist()}
+
+        workbook_bytes = package.get(embedded_xlsx_path)
+        if workbook_bytes is None:
+            raise GenerationError(f"嵌入工作簿不存在: {embedded_xlsx_path}")
+
+        wb = load_workbook(BytesIO(workbook_bytes))
+        ws = wb["封面"] if "封面" in wb.sheetnames else wb.active
+
+        def read_cell(cell: str) -> Any:
+            return ws[cell].value
+
+        def write_cell(cell: str, value: Any) -> None:
+            ws[cell] = value
+
+        self._apply_bindings(bindings, data, read_cell, write_cell)
+
+        buf = BytesIO()
+        wb.save(buf)
+        package[embedded_xlsx_path] = buf.getvalue()
+
+        with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for name, payload in package.items():
+                zf.writestr(name, payload)
+
+    def _write_cover_via_com(
+        self,
+        *,
+        output_path: Path,
+        bindings: dict[str, CoverBinding],
+        data: dict[str, Any],
+    ) -> None:
+        try:
+            import win32com.client
+        except ImportError as exc:
+            raise GenerationError("缺少 pywin32，无法写入 OLE 封面模板") from exc
+
+        word = None
+        doc = None
+        try:
+            word = win32com.client.Dispatch("Word.Application")
+            word.Visible = False
+            doc = word.Documents.Open(str(output_path.absolute()))
+            ws = self._get_embedded_excel_sheet(doc)
+            if ws is None:
+                raise GenerationError("未找到封面中的嵌入 Excel 对象")
+
+            def read_cell(cell: str) -> Any:
+                return ws.Range(cell).Value
+
+            def write_cell(cell: str, value: Any) -> None:
+                ws.Range(cell).Value = value
+
+            self._apply_bindings(bindings, data, read_cell, write_cell)
+            doc.Save()
+        finally:
+            if doc is not None:
+                doc.Close(False)
+            if word is not None:
+                word.Quit()
+
+    def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
+        for collection_name in ("InlineShapes", "Shapes"):
+            collection = getattr(doc, collection_name, None)
+            if collection is None:
+                continue
+            try:
+                count = int(collection.Count)
+            except Exception:
+                continue
+
+            for idx in range(1, count + 1):
+                try:
+                    shape = collection.Item(idx)
+                    ole_obj = shape.OLEFormat.Object
+                except Exception:
+                    continue
+
+                sheet = self._to_excel_sheet(ole_obj)
+                if sheet is not None:
+                    return sheet
+        return None
+
+    def _to_excel_sheet(self, ole_obj: Any) -> Any | None:
+        if ole_obj is None:
+            return None
+
+        try:
+            parent = getattr(ole_obj, "Parent", None)
+            if parent is not None and hasattr(parent, "Worksheets"):
+                return parent.Worksheets(1)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(ole_obj, "Worksheets"):
+                return ole_obj.Worksheets(1)
+        except Exception:
+            pass
+
+        if hasattr(ole_obj, "Range"):
+            return ole_obj
+
+        return None
+
+    def _find_embedded_xlsx(self, docx_path: Path) -> str | None:
+        with zipfile.ZipFile(docx_path, "r") as zf:
+            for name in zf.namelist():
+                if name.startswith("word/embeddings/") and name.lower().endswith(".xlsx"):
+                    return name
+        return None
+
+    def _apply_bindings(
+        self,
+        bindings: dict[str, CoverBinding],
+        data: dict[str, Any],
+        read_cell: Callable[[str], Any],
+        write_cell: Callable[[str, Any], None],
+    ) -> None:
+        for key, binding in bindings.items():
+            if key == "册次":
+                continue
+
+            cell_ref = binding.cell
+            value = data.get(key)
+
+            if key == "cover_external_code":
+                self._write_external_code_chars(
+                    cell_ref,
+                    value if isinstance(value, str) else "",
+                    write_cell,
+                )
+                continue
+
+            if binding.split_rule and "+" in cell_ref:
+                left_cell, right_cell = self._split_two_cells_ref(cell_ref)
+                left, right = self._split_text_by_rule(str(value or ""), binding.split_rule)
+                write_cell(left_cell, left)
+                write_cell(right_cell, right)
+                continue
+
+            target_cell = self._first_cell(cell_ref)
+            if binding.write_mode == "append_after_label":
+                if self._is_empty(value):
+                    continue
+                current = read_cell(target_cell)
+                merged = self._append_after_label(
+                    current=str(current or ""),
+                    label=binding.label or "",
+                    value=str(value),
+                )
+                write_cell(target_cell, merged)
+                continue
+
+            if not self._is_empty(value):
+                write_cell(target_cell, value)
+
+    @staticmethod
+    def _is_empty(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        return False
+
+    def _split_text_by_rule(self, text: str, split_rule: str) -> tuple[str, str]:
+        if split_rule.startswith("cn_split"):
+            return self._split_cn_two_cells(text)
+        if split_rule.startswith("en_split"):
+            return self._split_en_two_cells(text)
+        return text, ""
+
+    def _split_cn_two_cells(self, text: str) -> tuple[str, str]:
+        s = text.strip()
+        if not s:
+            return "", ""
+        mid = len(s) // 2
+        candidates = [idx for idx in range(1, len(s)) if self._is_cjk(s[idx])]
+        if not candidates:
+            return s, ""
+        idx = min(candidates, key=lambda n: abs(n - mid))
+        return s[:idx].rstrip(), s[idx:].lstrip()
+
+    def _split_en_two_cells(self, text: str) -> tuple[str, str]:
+        s = re.sub(r"\s+", " ", text.strip())
+        if not s:
+            return "", ""
+        mid = len(s) // 2
+        candidates = [m.start() for m in re.finditer(r"\s+", s)]
+        if not candidates:
+            return s, ""
+
+        def score(i: int) -> tuple[int, int]:
+            right = s[i:].lstrip()
+            right_ok = 0 if (right and right[0].isalpha()) else 1
+            return right_ok, abs(i - mid)
+
+        idx = min(candidates, key=score)
+        return s[:idx].rstrip(), s[idx:].lstrip()
+
+    @staticmethod
+    def _is_cjk(ch: str) -> bool:
+        if not ch:
+            return False
+        code = ord(ch)
+        return 0x4E00 <= code <= 0x9FFF
+
+    def _write_external_code_chars(
+        self,
+        range_ref: str,
+        code: str,
+        write_cell: Callable[[str, Any], None],
+    ) -> None:
+        start_ref, end_ref = self._split_range_ref(range_ref)
+        start_col, start_row = self._parse_cell_ref(start_ref)
+        end_col, end_row = self._parse_cell_ref(end_ref)
+        if start_row != end_row:
+            raise GenerationError(f"外部编码落点必须是单行范围: {range_ref}")
+
+        start_idx = column_index_from_string(start_col)
+        end_idx = column_index_from_string(end_col)
+        if end_idx < start_idx:
+            start_idx, end_idx = end_idx, start_idx
+
+        chars = list((code or "")[:19].ljust(19))
+        for i, col_idx in enumerate(range(start_idx, end_idx + 1)):
+            char = chars[i] if i < len(chars) else ""
+            write_cell(f"{get_column_letter(col_idx)}{start_row}", char)
+
+    def _append_after_label(self, current: str, label: str, value: str) -> str:
+        if not current:
+            return f"{label}{value}" if label else value
+        if label and label in current:
+            prefix, _, _ = current.partition(label)
+            return f"{prefix}{label}{value}"
+        if current.endswith(value):
+            return current
+        return f"{current}{value}"
+
+    def _first_cell(self, cell_ref: str) -> str:
+        if "+" in cell_ref:
+            return cell_ref.split("+", 1)[0].strip()
+        if ":" in cell_ref:
+            return cell_ref.split(":", 1)[0].strip()
+        return cell_ref.strip()
+
+    def _split_two_cells_ref(self, cell_ref: str) -> tuple[str, str]:
+        left, right = cell_ref.split("+", 1)
+        return left.strip(), right.strip()
+
+    def _split_range_ref(self, ref: str) -> tuple[str, str]:
+        if ":" not in ref:
+            return ref.strip(), ref.strip()
+        left, right = ref.split(":", 1)
+        return left.strip(), right.strip()
+
+    def _parse_cell_ref(self, ref: str) -> tuple[str, int]:
+        m = _CELL_RE.match(ref)
+        if m is None:
+            raise GenerationError(f"非法单元格引用: {ref}")
+        return m.group(1).upper(), int(m.group(2))
