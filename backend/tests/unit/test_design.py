@@ -94,11 +94,13 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["O2"].value == "JG"
     assert ws["Q2"].value == "施工图设计"
     assert ws["T2"].value == 1
+    assert ws["U2"].value == "图纸"
 
     # 第3行：目录
     assert ws["D3"].value == "JD1NHT11T01B25C42SD"
     assert ws["E3"].value == "1234567-JG001-TM"
     assert ws["T3"].value == 3
+    assert ws["U3"].value == "图纸"
 
     # 第4行：图纸
     assert ws["D4"].value == "JD1NHT11001B25C42SD"
@@ -106,4 +108,15 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["G4"].value == "图纸1"
     assert ws["N4"].value == "结构"
     assert ws["Z4"].value == "88"
+    assert ws["U4"].value == "图纸"
 
+
+def test_design_generate_xlsx_only_without_pdf(temp_dir: Path) -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+
+    output_xlsx = gen.generate(ctx, temp_dir)
+
+    assert output_xlsx == temp_dir / "设计文件.xlsx"
+    assert output_xlsx.exists()
+    assert not (temp_dir / "设计文件.pdf").exists()

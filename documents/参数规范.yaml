@@ -62,14 +62,14 @@ enums:
 doc_generation:
   description: |
     文档生成模块负责基于图签提取结果生成：封面(Word+PDF)、目录(Excel+PDF)、
-    设计文件(Excel+PDF)、IED计划(仅Excel，单独输出，不导出PDF且不打包入package.zip)。DXF 仅作为中间文件，不对用户输出。
+    设计文件(仅Excel)、IED计划(仅Excel，单独输出，不导出PDF且不打包入package.zip)。DXF 仅作为中间文件，不对用户输出。
 
   # --------------------------------------------------------------------------
   # 2.1 生成选项
   # --------------------------------------------------------------------------
   options:
     enabled:        { type: bool, default: true,  desc: "文档生成总开关（true时全部生成）" }
-    export_pdf:     { type: bool, default: true,  desc: "是否导出PDF（必须）" }
+    export_pdf:     { type: bool, default: true,  desc: "是否导出封面/目录PDF（必须）" }
     pdf_engine:     { type: enum, default: "office_com", desc: "PDF引擎（含OLE时推荐office_com）" }
     pdf_margin_mm:  { type: object, default: { top: 0, bottom: 0, left: 0, right: 0 }, desc: "DXF→PDF 打印页边距（单位mm）；模块5 CAD 路径固定为 0，窗口范围直接使用图框顶点转换结果" }
 

@@ -6,13 +6,12 @@ from pathlib import Path
 import yaml
 
 
-def _collect_yaml_global_keys(spec: dict) -> set[str]:
-    """适配v2.0 YAML结构，优先尝试顶层doc_generation，兜底旧版sections路径"""
+def _collect_yaml_global_fields(spec: dict) -> dict[str, dict]:
+    """适配v2.0 YAML结构，返回 GlobalDocParams 字段及其规则定义"""
     if "doc_generation" in spec:
         doc = spec["doc_generation"]
         params = doc.get("params", {})
-        # 收集所有嵌套字段的keys
-        keys = set()
+        fields: dict[str, dict] = {}
         for category in [
             "project",
             "from_titleblock",
@@ -22,13 +21,22 @@ def _collect_yaml_global_keys(spec: dict) -> set[str]:
             "ied",
         ]:
             if category in params:
-                keys.update(params[category].keys())
-        return keys
+                group = params[category]
+                if isinstance(group, dict):
+                    for key, rule in group.items():
+                        if isinstance(rule, dict):
+                            fields[key] = rule
+                        else:
+                            fields[key] = {}
+        return fields
     # 兜底旧版路径
     if "sections" in spec and "doc_generation_spec" in spec["sections"]:
         doc = spec["sections"]["doc_generation_spec"]
         fields = doc["objects"]["GlobalDocParams"]["fields"]
-        return set(fields.keys())
+        return {
+            k: (v if isinstance(v, dict) else {})
+            for k, v in fields.items()
+        }
     raise KeyError("无法找到 doc_generation 或 sections.doc_generation_spec")
 
 
@@ -108,7 +116,8 @@ def main() -> int:
     md = md_path.read_text(encoding="utf-8")
     spec = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
 
-    global_keys = _collect_yaml_global_keys(spec)
+    global_fields = _collect_yaml_global_fields(spec)
+    global_keys = set(global_fields.keys())
     titleblock_keys = _collect_yaml_titleblock_keys(spec)
     derived_keys = _collect_yaml_derived_keys(spec)
 
@@ -136,7 +145,19 @@ def main() -> int:
             if isinstance(v, dict) and v.get("deprecated") is True
         }
 
-    yaml_only_global = sorted((global_keys - deprecated) - md_key_like)
+    required_global_keys = {
+        k
+        for k, v in global_fields.items()
+        if isinstance(v, dict)
+        and (
+            v.get("required") is True
+            or ("required_when" in v and str(v.get("required_when", "")).strip() != "")
+        )
+    }
+    optional_global_keys = global_keys - required_global_keys
+
+    yaml_only_global_required = sorted((required_global_keys - deprecated) - md_key_like)
+    yaml_only_global_optional = sorted((optional_global_keys - deprecated) - md_key_like)
 
     print("YAML GlobalDocParams keys:", len(global_keys))
     print("YAML TitleblockFields keys:", len(titleblock_keys))
@@ -153,10 +174,18 @@ def main() -> int:
     print()
 
     print(
-        "YAML GlobalDocParams missing in MD table (excluding deprecated):",
-        len(yaml_only_global),
+        "YAML GlobalDocParams required/required_when missing in MD table (excluding deprecated):",
+        len(yaml_only_global_required),
     )
-    for k in yaml_only_global:
+    for k in yaml_only_global_required:
+        print("  -", k)
+    print()
+
+    print(
+        "YAML GlobalDocParams optional(required=false) missing in MD table (info):",
+        len(yaml_only_global_optional),
+    )
+    for k in yaml_only_global_optional:
         print("  -", k)
 
     # Non-zero exit if there are MD-only keys (declared but not supported by YAML)

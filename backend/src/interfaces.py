@@ -208,7 +208,7 @@ class IDesignFileGenerator(ABC):
     """设计文件生成器接口"""
 
     @abstractmethod
-    def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path]:
+    def generate(self, ctx: DocContext, output_dir: Path) -> Path:
         """
         生成设计文件
 
@@ -217,7 +217,7 @@ class IDesignFileGenerator(ABC):
             output_dir: 输出目录
 
         Returns:
-            (xlsx路径, pdf路径)
+            xlsx路径
         """
         ...
 

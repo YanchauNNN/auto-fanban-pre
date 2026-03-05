@@ -5,7 +5,7 @@
 - derivation: 派生字段计算
 - cover: 封面生成（Word+PDF）
 - catalog: 目录生成（Excel+PDF）
-- design: 设计文件生成（Excel+PDF）
+- design: 设计文件生成（仅Excel）
 - ied: IED计划生成（仅Excel）
 - pdf_engine: PDF导出引擎
 """

@@ -4,7 +4,7 @@
 职责：
 1. 打开设计文件模板
 2. 写入所有行（封面+目录+图纸）
-3. 导出PDF
+3. 仅输出Excel（不导出PDF）
 
 依赖：
 - openpyxl: Excel操作
@@ -26,7 +26,6 @@ from openpyxl import load_workbook
 
 from ..config import load_spec
 from ..interfaces import GenerationError, IDesignFileGenerator
-from .pdf_engine import PDFExporter
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -38,12 +37,13 @@ class DesignFileGenerator(IDesignFileGenerator):
     def __init__(
         self,
         spec_path: str | None = None,
-        pdf_exporter: PDFExporter | None = None,
+        pdf_exporter=None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
-        self.pdf_exporter = pdf_exporter or PDFExporter()
+        # 保留参数以兼容历史构造调用；设计文件已不再导出PDF。
+        self.pdf_exporter = pdf_exporter
 
-    def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path]:
+    def generate(self, ctx: DocContext, output_dir: Path) -> Path:
         """生成设计文件"""
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,11 +59,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         output_xlsx = output_dir / "设计文件.xlsx"
         self._write_design(template_path, output_xlsx, bindings, ctx)
 
-        # 4. 导出PDF
-        output_pdf = output_dir / "设计文件.pdf"
-        self.pdf_exporter.export_xlsx_to_pdf(output_xlsx, output_pdf)
-
-        return output_xlsx, output_pdf
+        return output_xlsx
 
     def _write_design(
         self,
