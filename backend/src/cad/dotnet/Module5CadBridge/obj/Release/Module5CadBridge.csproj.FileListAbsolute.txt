@@ -1,1 +1,0 @@
-D:\Programs\auto-fanban\auto-fanban-pre\backend\src\cad\dotnet\Module5CadBridge\obj\Release\Module5CadBridge.csprojResolveAssemblyReference.cache
