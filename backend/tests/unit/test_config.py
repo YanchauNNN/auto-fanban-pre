@@ -4,7 +4,9 @@
 每个模块完成后必须运行：pytest tests/unit/test_config.py -v
 """
 
-from src.config import BusinessSpec, RuntimeConfig
+from pathlib import Path
+
+from src.config import BusinessSpec, RuntimeConfig, SpecLoader, load_spec, reload_config
 
 
 class TestSpecLoader:
@@ -48,6 +50,22 @@ class TestSpecLoader:
         # 检查专业代码映射
         if "discipline_to_code" in mappings:
             assert mappings["discipline_to_code"].get("结构") == "JG"
+
+    def test_load_spec_uses_env_override_when_default_path_missing(self, tmp_path: Path, monkeypatch):
+        """打包运行时应优先读取 FANBAN_SPEC_PATH 指向的规范文件"""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        spec_file = tmp_path / "bundle" / "documents" / "参数规范.yaml"
+        spec_file.parent.mkdir(parents=True)
+        spec_file.write_text("schema_version: '9.9'\n", encoding="utf-8")
+
+        monkeypatch.chdir(run_dir)
+        monkeypatch.setenv("FANBAN_SPEC_PATH", str(spec_file))
+        SpecLoader.load.cache_clear()
+
+        loaded = load_spec()
+
+        assert loaded.schema_version == "9.9"
 
 
 class TestRuntimeConfig:
@@ -99,3 +117,31 @@ class TestRuntimeConfig:
             "AutoCAD.Application",
         ]
         assert runtime_config.autocad.pc3_name == "打印PDF2.pc3"
+
+    def test_reload_config_uses_env_override_when_default_runtime_spec_missing(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """打包运行时应优先读取 FANBAN_RUNTIME_SPEC_PATH 指向的运行期规范"""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        runtime_spec = tmp_path / "bundle" / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  concurrency:
+    max_workers:
+      type: int
+      default: 7
+""".strip(),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(run_dir)
+        monkeypatch.setenv("FANBAN_RUNTIME_SPEC_PATH", str(runtime_spec))
+
+        config = reload_config()
+
+        assert config.concurrency.max_workers == 7

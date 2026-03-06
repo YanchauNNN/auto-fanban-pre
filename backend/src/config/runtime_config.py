@@ -400,24 +400,37 @@ class RuntimeConfig(BaseSettings):
 
 # 全局配置实例
 _config: RuntimeConfig | None = None
+DEFAULT_RUNTIME_SPEC_PATH = Path("documents/参数规范_运行期.yaml")
+FALLBACK_RUNTIME_SPEC_PATH = Path("config/参数规范_运行期.yaml")
+RUNTIME_SPEC_PATH_ENV_VAR = "FANBAN_RUNTIME_SPEC_PATH"
 
 
 def get_config() -> RuntimeConfig:
     """获取全局配置（惰性加载）"""
     global _config
     if _config is None:
-        default_path = Path("documents/参数规范_运行期.yaml")
-        if not default_path.exists():
-            fallback_path = Path("config/参数规范_运行期.yaml")
-            if fallback_path.exists():
-                default_path = fallback_path
-        _config = RuntimeConfig.from_yaml(default_path)
+        _config = RuntimeConfig.from_yaml(_resolve_runtime_spec_path())
     return _config
 
 
 def reload_config(yaml_path: str | Path | None = None) -> RuntimeConfig:
     """重新加载配置"""
     global _config
-    path = yaml_path or "documents/参数规范_运行期.yaml"
+    path = _resolve_runtime_spec_path(yaml_path)
     _config = RuntimeConfig.from_yaml(path)
     return _config
+
+
+def _resolve_runtime_spec_path(yaml_path: str | Path | None = None) -> Path:
+    if yaml_path is not None:
+        return Path(yaml_path)
+
+    env_path = os.getenv(RUNTIME_SPEC_PATH_ENV_VAR)
+    if env_path:
+        return Path(env_path)
+
+    if DEFAULT_RUNTIME_SPEC_PATH.exists():
+        return DEFAULT_RUNTIME_SPEC_PATH
+    if FALLBACK_RUNTIME_SPEC_PATH.exists():
+        return FALLBACK_RUNTIME_SPEC_PATH
+    return DEFAULT_RUNTIME_SPEC_PATH

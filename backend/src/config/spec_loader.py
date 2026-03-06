@@ -14,12 +14,17 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+DEFAULT_SPEC_PATH = Path("documents/参数规范.yaml")
+SPEC_PATH_ENV_VAR = "FANBAN_SPEC_PATH"
 
 
 class PaperVariant(BaseModel):
@@ -152,9 +157,9 @@ class SpecLoader:
 
     @classmethod
     @lru_cache(maxsize=1)
-    def load(cls, spec_path: str | Path = "documents/参数规范.yaml") -> BusinessSpec:
+    def load(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
         """加载并缓存规范"""
-        path = Path(spec_path)
+        path = _resolve_spec_path(spec_path)
         if not path.exists():
             raise FileNotFoundError(f"规范文件不存在: {path}")
 
@@ -164,13 +169,22 @@ class SpecLoader:
         return BusinessSpec(**data)
 
     @classmethod
-    def reload(cls, spec_path: str | Path = "documents/参数规范.yaml") -> BusinessSpec:
+    def reload(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
         """强制重新加载（清除缓存）"""
         cls.load.cache_clear()
         return cls.load(spec_path)
 
 
 # 便捷函数
-def load_spec(spec_path: str | Path = "documents/参数规范.yaml") -> BusinessSpec:
+def load_spec(spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
     """加载业务规范"""
     return SpecLoader.load(spec_path)
+
+
+def _resolve_spec_path(spec_path: str | Path) -> Path:
+    path = Path(spec_path)
+    if path == DEFAULT_SPEC_PATH:
+        env_path = os.getenv(SPEC_PATH_ENV_VAR)
+        if env_path:
+            return Path(env_path)
+    return path

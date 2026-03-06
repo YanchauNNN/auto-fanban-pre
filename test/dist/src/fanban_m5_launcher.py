@@ -10,9 +10,9 @@ from pathlib import Path
 from uuid import uuid4
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-BACKEND_ROOT = PROJECT_ROOT / "backend"
-if str(BACKEND_ROOT) not in sys.path:
+SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+BACKEND_ROOT = SOURCE_PROJECT_ROOT / "backend"
+if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from src.models import Job, JobType  # noqa: E402
@@ -28,22 +28,26 @@ class LauncherRunResult:
 
 
 def configure_runtime_environment() -> Path:
-    runtime_root = resolve_runtime_root()
-    os.chdir(runtime_root)
-    os.environ.setdefault("FANBAN_SPEC_PATH", str(runtime_root / "documents" / "参数规范.yaml"))
+    app_root = resolve_runtime_root()
+    bundle_root = resolve_bundle_root()
+    os.chdir(app_root)
+    os.environ.setdefault("FANBAN_SPEC_PATH", str(bundle_root / "documents" / "参数规范.yaml"))
     os.environ.setdefault(
         "FANBAN_RUNTIME_SPEC_PATH",
-        str(runtime_root / "documents" / "参数规范_运行期.yaml"),
+        str(bundle_root / "documents" / "参数规范_运行期.yaml"),
     )
-    os.environ.setdefault("FANBAN_ODA__EXE_PATH", str(runtime_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe"))
+    os.environ.setdefault(
+        "FANBAN_ODA__EXE_PATH",
+        str(bundle_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe"),
+    )
     os.environ.setdefault(
         "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR",
-        str(runtime_root / "backend" / "src" / "cad" / "scripts"),
+        str(bundle_root / "backend" / "src" / "cad" / "scripts"),
     )
     os.environ.setdefault(
         "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH",
         str(
-            runtime_root
+            bundle_root
             / "backend"
             / "src"
             / "cad"
@@ -55,8 +59,8 @@ def configure_runtime_environment() -> Path:
             / "Module5CadBridge.dll"
         ),
     )
-    os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(runtime_root / "assets"))
-    return runtime_root
+    os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(bundle_root / "assets"))
+    return app_root
 
 
 def build_split_only_job(
@@ -99,7 +103,7 @@ def run_split_only_job(
     executor.cad_dxf_executor.config.multi_dwg_policy.code_conflict = "warn"
     executor.execute(job)
 
-    job_dir = (PROJECT_ROOT / "storage" / "jobs" / job.job_id).resolve()
+    job_dir = (resolve_runtime_root() / "storage" / "jobs" / job.job_id).resolve()
     copied = 0
     target_dir = None
     if selected_output_dir is not None:
@@ -134,7 +138,7 @@ def copy_job_outputs_to_selected_dir(*, job_dir: Path, selected_output_dir: Path
 
 def list_recent_jobs(*, storage_dir: Path | None = None, limit: int = 20) -> list[dict]:
     configure_runtime_environment()
-    storage_root = Path(storage_dir) if storage_dir is not None else (PROJECT_ROOT / "storage")
+    storage_root = Path(storage_dir) if storage_dir is not None else (resolve_runtime_root() / "storage")
     jobs_root = storage_root / "jobs"
     if not jobs_root.exists():
         return []
@@ -190,4 +194,13 @@ def _new_job_id() -> str:
 def resolve_runtime_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return PROJECT_ROOT
+    return SOURCE_PROJECT_ROOT
+
+
+def resolve_bundle_root() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass).resolve()
+        return (resolve_runtime_root() / "_internal").resolve()
+    return SOURCE_PROJECT_ROOT
