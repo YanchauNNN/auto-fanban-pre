@@ -1,13 +1,27 @@
 # Local font packs (do not commit)
 fronts/Fonts/
 Fonts/
+__pycache__/
+*.pyc
 
 # Test files (do not commit)
-test/
+test/*
+!test/dist/
+test/dist/*
+!test/dist/src/
+!test/dist/src/**
+test/dist/src/__pycache__/
+test/dist/src/*.pyc
 
 # Runtime artifacts
 storage/
 tmp/
+/build/
+/dist/
+plot.log
 
 # Local dependency mirrors (do not commit)
 Dependency Library/
+
+# .NET build intermediates (do not commit)
+backend/src/cad/dotnet/Module5CadBridge/obj/

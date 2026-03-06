@@ -1020,6 +1020,45 @@ def test_execute_source_dxf_runs_split_then_plot_without_python_fallback(tmp_pat
     assert "PDF_PYTHON_FALLBACK" not in result["frames"][0]["flags"]
 
 
+def test_execute_source_dxf_ensures_plot_resources_before_building_task(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-ensure",
+        source_file=source,
+        internal_code="I-ENSURE",
+        external_code="E-ENSURE",
+    )
+    runner = _RunnerSuccessStub()
+    executor = _make_executor(runner=runner)
+    order: list[str] = []
+    original_build = CADDXFExecutor.build_task_json
+
+    def _ensure(self):
+        order.append("ensure")
+
+    def _build(self, *args, **kwargs):
+        order.append("build")
+        return original_build(self, *args, **kwargs)
+
+    monkeypatch.setattr(CADDXFExecutor, "_ensure_plot_resources_ready", _ensure, raising=False)
+    monkeypatch.setattr(CADDXFExecutor, "build_task_json", _build)
+
+    executor.execute_source_dxf(
+        job_id="job-ensure",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+        task_root=tmp_path / "tasks",
+    )
+
+    assert order[:2] == ["ensure", "build"]
+
+
 def test_validate_pdf_dimensions_enforces_orientation(tmp_path: Path):
     pytest.importorskip("pypdf")
     executor = _make_executor()

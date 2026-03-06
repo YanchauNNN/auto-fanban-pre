@@ -23,7 +23,7 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
         "source_dxf": str(tmp_path / "src.dxf"),
         "output_dir": str(tmp_path / "out"),
         "plot": {
-            "pc3_name": "DWG To PDF.pc3",
+            "pc3_name": "打印PDF2.pc3",
             "ctb_name": "monochrome.ctb",
             "use_monochrome": True,
             "margins_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10},
@@ -88,6 +88,38 @@ def test_write_runtime_script_contains_frame_and_sheet_calls(tmp_path: Path):
     assert "(module5-finalize)" in content
 
 
+def test_write_runtime_script_defaults_to_pdf2_when_plot_config_missing(tmp_path: Path):
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    runtime_scr = tmp_path / "runtime.scr"
+    lsp_path = tmp_path / "module5_cad_executor.lsp"
+    lsp_path.write_text("(princ)\n", encoding="utf-8")
+    task_json = tmp_path / "task.json"
+    result_json = tmp_path / "result.json"
+    trace_log = tmp_path / "module5_trace.log"
+
+    runner._write_runtime_script(
+        runtime_scr=runtime_scr,
+        task_json=task_json,
+        lsp_path=lsp_path,
+        task_data={
+            "workflow_stage": "split_only",
+            "job_id": "job-default-pc3",
+            "source_dxf": str(tmp_path / "src.dxf"),
+            "output_dir": str(tmp_path / "out"),
+            "selection": {},
+            "output": {},
+            "frames": [],
+            "sheet_sets": [],
+        },
+        result_json=result_json,
+        module5_trace_log=trace_log,
+    )
+
+    content = runtime_scr.read_text(encoding="utf-8")
+    assert "打印PDF2.pc3" in content
+    assert "DWG To PDF.pc3" not in content
+
+
 def test_write_runtime_script_uses_dotnet_bridge_when_enabled(tmp_path: Path):
     runner = AcCoreConsoleRunner(config=RuntimeConfig())
     runtime_scr = tmp_path / "runtime.scr"
@@ -150,7 +182,7 @@ def test_run_accepts_timeout_when_result_exists(tmp_path: Path, monkeypatch):
                 "source_dxf": str(source),
                 "output_dir": str(workspace / "out"),
                 "plot": {
-                    "pc3_name": "DWG To PDF.pc3",
+                    "pc3_name": "打印PDF2.pc3",
                     "ctb_name": "monochrome.ctb",
                     "use_monochrome": True,
                     "margins_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10},
@@ -207,7 +239,7 @@ def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):
                 "source_dxf": str(source),
                 "output_dir": str(workspace / "out"),
                 "plot": {
-                    "pc3_name": "DWG To PDF.pc3",
+                    "pc3_name": "打印PDF2.pc3",
                     "ctb_name": "monochrome.ctb",
                     "use_monochrome": True,
                     "margins_mm": {"top": 20, "bottom": 10, "left": 20, "right": 10},

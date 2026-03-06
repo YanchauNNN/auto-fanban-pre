@@ -309,7 +309,7 @@ internal sealed class BridgePageTask
 
 internal sealed class BridgePlotConfig
 {
-    public string Pc3Name { get; private set; } = "DWG To PDF.pc3";
+    public string Pc3Name { get; private set; } = "打印PDF2.pc3";
     public string Pc3ResolvedPath { get; private set; } = string.Empty;
     public List<string> Pc3SearchDirs { get; private set; } = new();
     public string CtbName { get; private set; } = "monochrome.ctb";
@@ -335,7 +335,7 @@ internal sealed class BridgePlotConfig
         var offsets = BridgeValue.AsDictionary(data.TryGetValue("plot_offset_mm", out var offsetObj) ? offsetObj : null);
         return new BridgePlotConfig
         {
-            Pc3Name = BridgeValue.GetString(data, "pc3_name", "DWG To PDF.pc3"),
+            Pc3Name = BridgeValue.GetString(data, "pc3_name", "打印PDF2.pc3"),
             Pc3ResolvedPath = BridgeValue.GetString(data, "pc3_resolved_path", string.Empty),
             Pc3SearchDirs = BridgeValue.AsObjectEnumerable(
                     data.TryGetValue("pc3_search_dirs", out var pc3DirsObj) ? pc3DirsObj : null

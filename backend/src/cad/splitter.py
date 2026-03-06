@@ -163,7 +163,7 @@ class FrameSplitter(IFrameSplitter):
             visible=getattr(acad_cfg, "visible", False),
             plot_timeout_sec=getattr(acad_cfg, "plot_timeout_sec", 180),
             ctb_name=ctb_name,
-            pc3_name=getattr(acad_cfg, "pc3_name", "DWG To PDF.pc3"),
+            pc3_name=getattr(acad_cfg, "pc3_name", "打印PDF2.pc3"),
             retry=getattr(acad_cfg, "retry", 1),
             margins=self.margins,
         )

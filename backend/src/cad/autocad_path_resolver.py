@@ -28,6 +28,7 @@ class AutoCADPathInfo:
     plot_styles_dir: Path | None
     monochrome_ctb_path: Path | None
     pc3_path: Path | None
+    fallback_pdf_pc3_path: Path | None = None
 
 
 def resolve_autocad_paths(
@@ -76,14 +77,15 @@ def resolve_autocad_paths(
             plot_styles_dir=None,
             monochrome_ctb_path=None,
             pc3_path=None,
+            fallback_pdf_pc3_path=None,
         )
 
     fonts_dir = _first_existing_dir([install_dir / "Fonts"])
     user_plotters = _discover_user_plotter_dirs(_extract_year_hint(install_dir.name))
-    plotters_candidates = [install_dir / "Plotters", *user_plotters]
+    plotters_candidates = [*user_plotters, install_dir / "Plotters"]
     plot_styles_candidates = [
-        install_dir / "Plotters" / "Plot Styles",
         *(p / "Plot Styles" for p in user_plotters),
+        install_dir / "Plotters" / "Plot Styles",
     ]
     plotters_dir = _first_existing_dir(plotters_candidates)
     plot_styles_dir = _first_existing_dir(plot_styles_candidates)
@@ -97,16 +99,22 @@ def resolve_autocad_paths(
         plot_styles_dir=plot_styles_dir,
         monochrome_ctb_path=_first_existing_file(
             [
-                install_dir / "Plotters" / "Plot Styles" / "monochrome.ctb",
                 *(p / "Plot Styles" / "monochrome.ctb" for p in user_plotters),
+                install_dir / "Plotters" / "Plot Styles" / "monochrome.ctb",
             ],
         ),
         pc3_path=_first_existing_file(
             [
-                install_dir / "Plotters" / "DWG To PDF.pc3",
-                install_dir / "Plotters" / "AutoCAD PDF (General Documentation).pc3",
+                *(p / "打印PDF2.pc3" for p in user_plotters),
+                install_dir / "Plotters" / "打印PDF2.pc3",
+            ],
+        ),
+        fallback_pdf_pc3_path=_first_existing_file(
+            [
                 *(p / "DWG To PDF.pc3" for p in user_plotters),
                 *(p / "AutoCAD PDF (General Documentation).pc3" for p in user_plotters),
+                install_dir / "Plotters" / "DWG To PDF.pc3",
+                install_dir / "Plotters" / "AutoCAD PDF (General Documentation).pc3",
             ],
         ),
     )

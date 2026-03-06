@@ -22,6 +22,7 @@ from ..config import RuntimeConfig, get_config, load_spec
 from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
+from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 
 if TYPE_CHECKING:
     from ..config.spec_loader import BusinessSpec
@@ -41,6 +42,7 @@ class CADDXFExecutor:
         self.spec: BusinessSpec = spec or load_spec()
         self.runner = runner or AcCoreConsoleRunner(config=self.config)
         self._paper_variant_cache: list[tuple[str, float, float]] | None = None
+        self._plot_resource_context: PlotResourceContext | None = None
 
     def group_by_source_dxf(
         self,
@@ -87,6 +89,8 @@ class CADDXFExecutor:
 
         requested_task_dir = task_root / self._safe_task_dir_name(source_dxf)
         requested_task_dir.mkdir(parents=True, exist_ok=True)
+
+        self._ensure_plot_resources_ready()
 
         runtime_task_dir = self._make_runtime_task_dir(source_dxf)
         runtime_task_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +243,8 @@ class CADDXFExecutor:
             if resolved not in search_dirs:
                 search_dirs.append(resolved)
 
+        if self._plot_resource_context is not None:
+            add_dir(self._plot_resource_context.plotters_dir)
         add_dir(path_info.plotters_dir)
         if path_info.install_dir is not None:
             add_dir(path_info.install_dir / "Plotters")
@@ -259,13 +265,27 @@ class CADDXFExecutor:
             except Exception:  # noqa: BLE001
                 resolved_path = str(candidate)
         else:
+            if (
+                self._plot_resource_context is not None
+                and self._plot_resource_context.pc3_path.name == pc3_token
+            ):
+                resolved_path = str(self._plot_resource_context.pc3_path.resolve())
             for base_dir in search_dirs:
+                if resolved_path is not None:
+                    break
                 pc3_path = base_dir / pc3_token
                 if pc3_path.exists() and pc3_path.is_file():
                     resolved_path = str(pc3_path.resolve())
                     break
 
         return resolved_path, [str(path) for path in search_dirs]
+
+    def _ensure_plot_resources_ready(self) -> PlotResourceContext:
+        if self._plot_resource_context is not None:
+            return self._plot_resource_context
+        path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
+        self._plot_resource_context = ensure_plot_resources(path_info=path_info)
+        return self._plot_resource_context
 
     def _build_output_entry(self) -> dict[str, str | bool | int]:
         output_cfg = self.config.module5_export.output

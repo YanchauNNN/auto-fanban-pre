@@ -312,7 +312,7 @@ class AcCoreConsoleRunner:
         output = task_data.get("output", {})
         workflow_stage = str(task_data.get("workflow_stage", "split_only")).strip().lower()
 
-        pc3_name = self._escape_lisp_string(str(plot.get("pc3_name", "DWG To PDF.pc3")))
+        pc3_name = self._escape_lisp_string(str(plot.get("pc3_name", "打印PDF2.pc3")))
         ctb_name = self._escape_lisp_string(str(plot.get("ctb_name", "monochrome.ctb")))
         use_monochrome = "T" if bool(plot.get("use_monochrome", True)) else "nil"
         margins = plot.get("margins_mm", {})

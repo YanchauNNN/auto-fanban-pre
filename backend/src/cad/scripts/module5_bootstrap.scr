@@ -1,6 +1,6 @@
 (load "module5_cad_executor.lsp")
 (module5-reset "result.json" "debug_job" "source.dxf" "module5.log")
-(module5-set-plot-config "." "DWG To PDF.pc3" "monochrome.ctb" T 20 10 20 10 0.015 0.03)
+(module5-set-plot-config "." "打印PDF2.pc3" "monochrome.ctb" T 20 10 20 10 0.015 0.03)
 (module5-finalize)
 _.QUIT
 _N

@@ -18,6 +18,7 @@ from .cad_dxf_executor import CADDXFExecutor
 from .dxf_pdf_exporter import DxfPdfExporter
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
+from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 from .splitter import FrameSplitter
 from .titleblock_extractor import TitleblockExtractor
 
@@ -32,4 +33,6 @@ __all__ = [
     "DxfPdfExporter",
     "AutoCADPathInfo",
     "resolve_autocad_paths",
+    "PlotResourceContext",
+    "ensure_plot_resources",
 ]

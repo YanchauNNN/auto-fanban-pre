@@ -3,7 +3,7 @@ AutoCAD COM PDF 导出器 — 原生打印链路
 
 策略：
 - 通过 AutoCAD ActiveX COM 接口打开裁切后的 DXF
-- 使用 DWG To PDF.pc3 配合 monochrome.ctb 打印为 PDF
+- 使用 打印PDF2.pc3 配合 monochrome.ctb 打印为 PDF
 - 相比纯 Python 渲染（ezdxf+matplotlib），字体/线宽/图层与 CAD 原图一致
 - ProgID 按版本回退：24.1(2022) → 24.0(2021) → AutoCAD.Application(通用)
 - 超时保护：打印线程超时后强制 Quit AutoCAD
@@ -43,7 +43,7 @@ _BM_CLICK = 0x00F5  # Button click message
 _RPC_CALL_REJECTED = -2147418111
 
 
-# ISO / ANSI 纸张规格名（DWG To PDF.pc3 常见可用格式）
+# ISO / ANSI 纸张规格名（打印PDF2.pc3 可用格式）
 _MEDIA_MAP: list[tuple[tuple[float, float], str]] = [
     ((1189, 841), "ISO_A0_(1189.00_x_841.00_MM)"),
     ((841, 1189), "ISO_A0_(841.00_x_1189.00_MM)"),
@@ -93,7 +93,7 @@ class AutoCADPdfExporter:
         visible: bool = False,
         plot_timeout_sec: int = 180,
         ctb_name: str = "monochrome.ctb",
-        pc3_name: str = "DWG To PDF.pc3",
+        pc3_name: str = "打印PDF2.pc3",
         retry: int = 1,
         margins: dict[str, float] | None = None,
     ):

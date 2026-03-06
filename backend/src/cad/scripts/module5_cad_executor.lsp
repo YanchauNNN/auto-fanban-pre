@@ -16,7 +16,7 @@
 (setq *m5-log-path* "")
 
 (setq *m5-output-dir* "")
-(setq *m5-pc3* "DWG To PDF.pc3")
+(setq *m5-pc3* "打印PDF2.pc3")
 (setq *m5-ctb* "monochrome.ctb")
 (setq *m5-use-monochrome* T)
 (setq *m5-margin-top* 20.0)
