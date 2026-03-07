@@ -693,6 +693,7 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert isinstance(task["plot"]["pc3_search_dirs"], list)
     assert task["plot"]["center_plot"] is False
     assert task["plot"]["plot_offset_mm"] == {"x": 0.0, "y": 0.0}
+    assert task["plot"]["plot_window_top_right_expand_ratio"] == 0.0001
     assert task["plot"]["scale_mode"] == "manual_integer_from_geometry"
     assert task["plot"]["scale_integer_rounding"] == "round"
     assert task["engines"]["selection_engine"] == "dotnet"

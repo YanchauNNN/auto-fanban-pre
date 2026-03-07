@@ -199,6 +199,9 @@ class CADDXFExecutor:
                 "use_monochrome": bool(plot_cfg.use_monochrome),
                 "center_plot": bool(getattr(plot_cfg, "center_plot", False)),
                 "plot_offset_mm": dict(getattr(plot_cfg, "plot_offset_mm", {"x": 0.0, "y": 0.0})),
+                "plot_window_top_right_expand_ratio": float(
+                    getattr(plot_cfg, "plot_window_top_right_expand_ratio", 0.0),
+                ),
                 "scale_mode": str(
                     getattr(plot_cfg, "scale_mode", "manual_integer_from_geometry"),
                 ),

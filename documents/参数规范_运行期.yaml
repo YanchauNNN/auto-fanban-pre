@@ -70,6 +70,7 @@ runtime_options:
         type: object
         default: { x: 0.0, y: 0.0 }
         desc: "打印偏移（毫米）；模块5 CAD 路径固定为 0,0"
+      plot_window_top_right_expand_ratio: { type: float, default: 0.0001, desc: "仅打印窗口右上角比例外扩；xmax += width*ratio，ymax += height*ratio；用于缓解上边/右边压边，默认万分之一" }
       scale_mode: { type: enum, default: "manual_integer_from_geometry", desc: "比例策略：manual_integer_from_geometry/scale_to_fit，默认按几何实测比例取整手动输入" }
       scale_integer_rounding: { type: enum, default: "round", desc: "manual_integer_from_geometry 的整数化方式：floor/round/ceil；先按小数点后1位四舍五入，再执行整数化，默认 round" }
       margins_mm:

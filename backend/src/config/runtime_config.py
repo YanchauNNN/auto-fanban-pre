@@ -94,6 +94,7 @@ class Module5PlotConfig(BaseModel):
     plot_offset_mm: dict[str, float] = Field(
         default_factory=lambda: {"x": 0.0, "y": 0.0},
     )
+    plot_window_top_right_expand_ratio: float = 0.0001
     scale_mode: str = "manual_integer_from_geometry"
     scale_integer_rounding: str = "round"
     margins_mm: dict[str, float] = Field(
