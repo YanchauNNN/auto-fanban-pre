@@ -57,3 +57,12 @@ def test_detect_frames_missing_file_raises() -> None:
     detector = FrameDetector()
     with pytest.raises(DetectionError):
         detector.detect_frames(Path("missing-file.dxf"))
+
+
+def test_frame_detector_supports_tsz_plot_mark_aliases() -> None:
+    detector = FrameDetector()
+    layers = detector.candidate_finder.layer_order
+
+    assert "_TSZ_PLOT_MARK" in layers
+    assert "_TSZ-PLOT_MARK" in layers
+    assert layers.index("_TSZ_PLOT_MARK") < layers.index("_TSZ-PLOT_MARK")
