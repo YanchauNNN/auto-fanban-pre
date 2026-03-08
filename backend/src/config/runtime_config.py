@@ -277,7 +277,7 @@ class RuntimeConfig(BaseSettings):
         # BaseSettings 直接传参会压过环境变量；这里先按 YAML 组装，再显式应用 FANBAN_* 覆盖。
         config = cls.model_validate(yaml_values)
         config._apply_env_overrides()
-
+        config._normalize_root_paths(base_dir=path.parent)
         config._resolve_paths(base_dir=path.parent)
         return config
 
@@ -388,6 +388,17 @@ class RuntimeConfig(BaseSettings):
                 self.module5_export.dotnet_bridge.dll_path = str(
                     (base_dir / dll_path).resolve(),
                 )
+
+    def _normalize_root_paths(self, base_dir: Path) -> None:
+        """???????????????????? Path???????????"""
+        self.base_dir = self._coerce_path(self.base_dir)
+        self.storage_dir = self._coerce_path(self.storage_dir)
+        self.spec_path = self._coerce_path(self.spec_path)
+        self.runtime_spec_path = self._coerce_path(self.runtime_spec_path)
+
+    @staticmethod
+    def _coerce_path(value: str | Path) -> Path:
+        return value if isinstance(value, Path) else Path(value)
 
     def get_job_dir(self, job_id: str) -> Path:
         """获取任务工作目录"""

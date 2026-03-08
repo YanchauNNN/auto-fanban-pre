@@ -7,14 +7,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     """任务状态枚举"""
     QUEUED = "queued"
     RUNNING = "running"
@@ -23,7 +23,7 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class JobType(str, Enum):
+class JobType(StrEnum):
     """任务类型"""
     DELIVERABLE = "deliverable"       # 流水线A: 交付包生成
     AUDIT_REPLACE = "audit_replace"   # 流水线B: 词库检查/替换
@@ -52,6 +52,8 @@ class Job(BaseModel):
     job_id: str = Field(..., description="UUID")
     job_type: JobType
     project_no: str
+    batch_id: str | None = None
+    source_filename: str | None = None
 
     # 输入
     input_files: list[Path] = Field(default_factory=list)

@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,8 @@ class JobManager(IJobManager):
         input_files: list[Path] | None = None,
         options: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        batch_id: str | None = None,
+        source_filename: str | None = None,
     ) -> Job:
         """创建任务"""
         job_id = str(uuid.uuid4())
@@ -47,6 +50,8 @@ class JobManager(IJobManager):
             job_id=job_id,
             job_type=JobType(job_type),
             project_no=project_no,
+            batch_id=batch_id,
+            source_filename=source_filename,
             input_files=input_files or [],
             options=options or {},
             params=params or {},
@@ -107,14 +112,46 @@ class JobManager(IJobManager):
 
         return jobs[:limit]
 
+    def load_all_jobs(self) -> list[Job]:
+        """从磁盘加载全部任务并刷新内存缓存"""
+        jobs_root = self.config.storage_dir / "jobs"
+        if not jobs_root.exists():
+            jobs = list(self._jobs.values())
+            jobs.sort(key=lambda j: j.created_at, reverse=True)
+            return jobs
+
+        loaded_by_id: dict[str, Job] = dict(self._jobs)
+        for job_file in sorted(jobs_root.glob("*/job.json")):
+            try:
+                with open(job_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                job = Job(**data)
+            except Exception:
+                continue
+            self._jobs[job.job_id] = job
+            loaded_by_id[job.job_id] = job
+
+        loaded = list(loaded_by_id.values())
+        loaded.sort(key=lambda j: j.created_at, reverse=True)
+        return loaded
+
     def _persist_job(self, job: Job) -> None:
         """持久化任务"""
         job_dir = self.config.get_job_dir(job.job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 
         job_file = job_dir / "job.json"
-        with open(job_file, "w", encoding="utf-8") as f:
+        tmp_file = job_dir / "job.json.tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(job.model_dump(mode="json"), f, ensure_ascii=False, indent=2, default=str)
+        for attempt in range(5):
+            try:
+                tmp_file.replace(job_file)
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.02)
 
     def _load_job(self, job_id: str) -> Job | None:
         """从磁盘加载任务"""

@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from ..config import load_spec
-from ..models import DocContext
+from ..models import DocContext, GlobalDocParams
 
 _COND_RE = re.compile(
     r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*['"]([^'"]*)['"]\s*$""",
@@ -42,7 +42,25 @@ class DocParamValidator:
 
         return errors
 
-    def _flatten_param_rules(self) -> dict[str, dict[str, Any]]:
+    def validate_frontend_params(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
+        """按 YAML 中 `source: frontend` 规则校验前端提交参数。"""
+        errors: dict[str, list[str]] = {}
+        normalized = self._normalize_frontend_values(raw_params)
+        field_rules = self._flatten_param_rules(source="frontend")
+
+        for field_name, rule in field_rules.items():
+            value = normalized.get(field_name)
+            if self._is_required(rule, normalized) and self._is_empty(value):
+                errors.setdefault(field_name, []).append("required")
+                continue
+
+            fmt = rule.get("format")
+            if fmt and not self._is_empty(value) and not self._validate_format(str(value), str(fmt)):
+                errors.setdefault(field_name, []).append(f"format:{fmt}")
+
+        return errors
+
+    def _flatten_param_rules(self, source: str | None = None) -> dict[str, dict[str, Any]]:
         params_cfg = self.spec.doc_generation.get("params", {})
         flat: dict[str, dict[str, Any]] = {}
 
@@ -51,9 +69,22 @@ class DocParamValidator:
                 continue
             for field_name, rule in section.items():
                 if isinstance(rule, dict):
+                    if source is not None and rule.get("source") != source:
+                        continue
                     flat[field_name] = rule
 
         return flat
+
+    def _normalize_frontend_values(self, raw_params: dict[str, Any]) -> dict[str, Any]:
+        if "project_no" not in raw_params or self._is_empty(raw_params.get("project_no")):
+            return dict(raw_params)
+
+        try:
+            params = GlobalDocParams(**raw_params)
+        except Exception:
+            return dict(raw_params)
+
+        return params.model_dump()
 
     def _is_required(self, rule: dict[str, Any], values: dict[str, Any]) -> bool:
         if bool(rule.get("required")):
