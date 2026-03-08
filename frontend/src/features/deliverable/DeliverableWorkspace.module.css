@@ -1,0 +1,174 @@
+.workspacePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(33, 74, 126, 0.16);
+  background:
+    linear-gradient(180deg, rgba(237, 244, 251, 0.98), rgba(248, 251, 255, 0.98)),
+    linear-gradient(90deg, rgba(28, 77, 139, 0.03) 1px, transparent 1px),
+    linear-gradient(rgba(28, 77, 139, 0.03) 1px, transparent 1px);
+  background-size: auto, 24px 24px, 24px 24px;
+  border-radius: 28px;
+  box-shadow: 0 18px 45px rgba(10, 39, 73, 0.08);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #4f76a3;
+}
+
+.description {
+  margin: 0.45rem 0 0;
+  color: #496b92;
+  max-width: 42rem;
+}
+
+.secondaryButton,
+.primaryButton {
+  border-radius: 999px;
+  padding: 0.85rem 1.25rem;
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: linear-gradient(135deg, #144987, #2467b1);
+  color: #f8fbff;
+}
+
+.secondaryButton {
+  background: rgba(20, 73, 135, 0.08);
+  color: #174781;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.uploadSection,
+.section {
+  border: 1px solid rgba(33, 74, 126, 0.12);
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 20px;
+  padding: 1rem 1.1rem;
+}
+
+.uploadLabel,
+.fieldLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+  font-weight: 700;
+  color: #14395e;
+}
+
+.fieldLabel em {
+  font-style: normal;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(194, 107, 37, 0.14);
+  color: #8a4714;
+}
+
+.uploadHint,
+.helperText {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: #5a7899;
+}
+
+.fileList {
+  list-style: none;
+  padding: 0;
+  margin: 0.9rem 0 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.fileList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: 14px;
+  background: rgba(20, 73, 135, 0.05);
+  color: #14395e;
+}
+
+.formErrorPanel {
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  background: rgba(167, 61, 39, 0.08);
+  color: #842f1f;
+}
+
+.sectionHeader h3 {
+  margin: 0 0 0.85rem;
+  color: #123e69;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.input,
+.select,
+.searchInput,
+.uploadSection input[type="file"] {
+  width: 100%;
+  border: 1px solid rgba(33, 74, 126, 0.16);
+  border-radius: 14px;
+  padding: 0.78rem 0.9rem;
+  background: rgba(251, 253, 255, 0.94);
+  color: #14395e;
+}
+
+.searchableSelect {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.errorText {
+  margin-top: 0.4rem;
+  color: #982f1f;
+  font-size: 0.88rem;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 960px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
+  }
+}
