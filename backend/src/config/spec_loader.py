@@ -156,10 +156,10 @@ class SpecLoader:
         return cls._instance
 
     @classmethod
-    @lru_cache(maxsize=1)
-    def load(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
-        """加载并缓存规范"""
-        path = _resolve_spec_path(spec_path)
+    @lru_cache(maxsize=8)
+    def _load_cached(cls, resolved_path: str) -> BusinessSpec:
+        """按解析后的真实路径缓存规范，避免默认参数缓存污染环境覆盖场景。"""
+        path = Path(resolved_path)
         if not path.exists():
             raise FileNotFoundError(f"规范文件不存在: {path}")
 
@@ -169,10 +169,21 @@ class SpecLoader:
         return BusinessSpec(**data)
 
     @classmethod
+    def load(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
+        """加载并缓存规范"""
+        path = _resolve_spec_path(spec_path)
+        return cls._load_cached(_cache_key(path))
+
+    @classmethod
     def reload(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
         """强制重新加载（清除缓存）"""
-        cls.load.cache_clear()
+        cls.clear_cache()
         return cls.load(spec_path)
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """清空内部缓存。"""
+        cls._load_cached.cache_clear()
 
 
 # 便捷函数
@@ -188,3 +199,10 @@ def _resolve_spec_path(spec_path: str | Path) -> Path:
         if env_path:
             return Path(env_path)
     return path
+
+
+def _cache_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except Exception:
+        return str(path.absolute())

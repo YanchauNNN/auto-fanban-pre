@@ -190,6 +190,26 @@ def test_list_recent_jobs_defaults_to_app_storage_when_frozen(tmp_path: Path, mo
     assert [job["job_id"] for job in jobs] == ["job-frozen-1"]
 
 
+def test_list_recent_jobs_does_not_change_cwd(tmp_path: Path, monkeypatch):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+
+    old_cwd = Path.cwd()
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+    monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+
+    jobs = launcher.list_recent_jobs(limit=5)
+
+    assert jobs == []
+    assert Path.cwd() == old_cwd
+
+
 def test_configure_runtime_environment_keeps_storage_dir_usable_in_runtime_config(
     tmp_path: Path,
     monkeypatch,

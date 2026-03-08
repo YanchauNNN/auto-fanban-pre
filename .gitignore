@@ -25,3 +25,6 @@ Dependency Library/
 
 # .NET build intermediates (do not commit)
 backend/src/cad/dotnet/Module5CadBridge/obj/
+
+# Local git worktrees (do not commit)
+.worktrees/

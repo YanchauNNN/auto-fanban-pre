@@ -6,7 +6,7 @@
 
 from pathlib import Path
 
-from src.config import BusinessSpec, RuntimeConfig, SpecLoader, load_spec, reload_config
+from src.config import BusinessSpec, RuntimeConfig, SpecLoader, get_config, load_spec, reload_config
 
 
 class TestSpecLoader:
@@ -61,11 +61,32 @@ class TestSpecLoader:
 
         monkeypatch.chdir(run_dir)
         monkeypatch.setenv("FANBAN_SPEC_PATH", str(spec_file))
-        SpecLoader.load.cache_clear()
+        SpecLoader.clear_cache()
 
         loaded = load_spec()
 
         assert loaded.schema_version == "9.9"
+
+    def test_env_override_does_not_leak_spec_cache(self, tmp_path: Path, monkeypatch):
+        """临时 FANBAN_SPEC_PATH 不能污染后续测试进程内的真实规范加载"""
+        repo_root = Path(__file__).resolve().parents[3]
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        spec_file = tmp_path / "bundle" / "documents" / "参数规范.yaml"
+        spec_file.parent.mkdir(parents=True)
+        spec_file.write_text("schema_version: '9.9'\n", encoding="utf-8")
+
+        monkeypatch.chdir(run_dir)
+        monkeypatch.setenv("FANBAN_SPEC_PATH", str(spec_file))
+        SpecLoader.clear_cache()
+        assert load_spec().schema_version == "9.9"
+
+        monkeypatch.delenv("FANBAN_SPEC_PATH", raising=False)
+        monkeypatch.chdir(repo_root)
+
+        reloaded = load_spec()
+
+        assert reloaded.schema_version == "2.0"
 
 
 class TestRuntimeConfig:
@@ -146,3 +167,34 @@ runtime_options:
         config = reload_config()
 
         assert config.concurrency.max_workers == 7
+
+    def test_env_override_does_not_leak_runtime_config(self, tmp_path: Path, monkeypatch):
+        """临时 FANBAN_RUNTIME_SPEC_PATH 不能污染后续测试进程内的默认运行期配置"""
+        repo_root = Path(__file__).resolve().parents[3]
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        runtime_spec = tmp_path / "bundle" / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  concurrency:
+    max_workers:
+      type: int
+      default: 7
+""".strip(),
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(run_dir)
+        monkeypatch.setenv("FANBAN_RUNTIME_SPEC_PATH", str(runtime_spec))
+        config = reload_config()
+        assert config.concurrency.max_workers == 7
+
+        monkeypatch.delenv("FANBAN_RUNTIME_SPEC_PATH", raising=False)
+        monkeypatch.chdir(repo_root)
+
+        restored = get_config()
+
+        assert restored.concurrency.max_workers == 2
+

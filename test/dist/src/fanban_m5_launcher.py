@@ -137,8 +137,12 @@ def copy_job_outputs_to_selected_dir(*, job_dir: Path, selected_output_dir: Path
 
 
 def list_recent_jobs(*, storage_dir: Path | None = None, limit: int = 20) -> list[dict]:
-    configure_runtime_environment()
-    storage_root = Path(storage_dir) if storage_dir is not None else (resolve_runtime_root() / "storage")
+    current_cwd = Path.cwd()
+    try:
+        configure_runtime_environment()
+        storage_root = Path(storage_dir) if storage_dir is not None else (resolve_runtime_root() / "storage")
+    finally:
+        os.chdir(current_cwd)
     jobs_root = storage_root / "jobs"
     if not jobs_root.exists():
         return []
