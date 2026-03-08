@@ -94,6 +94,17 @@ def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> 
     assert "worker_alive" in payload
 
 
+def test_health_endpoint_allows_local_frontend_origin(monkeypatch, tmp_path: Path) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.get(
+            "/api/system/health",
+            headers={"Origin": "http://127.0.0.1:5175"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5175"
+
+
 def test_form_schema_returns_deliverable_fields_and_options(
     monkeypatch,
     tmp_path: Path,

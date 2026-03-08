@@ -12,6 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useState } from "react";
 import { create } from "zustand";
 import {
   BrowserRouter,
@@ -43,11 +44,32 @@ const useUiStore = create<UiStore>((set) => ({
 }));
 
 const queryClient = new QueryClient();
+const JOB_STATUS_FILTERS: Array<{ label: string; value?: string }> = [
+  { label: "全部" },
+  { label: "排队中", value: "queued" },
+  { label: "运行中", value: "running" },
+  { label: "成功", value: "succeeded" },
+  { label: "失败", value: "failed" },
+];
+
+const STATUS_META: Record<string, { label: string; tone: string }> = {
+  queued: { label: "排队中", tone: "queued" },
+  running: { label: "运行中", tone: "running" },
+  cancel_requested: { label: "取消中", tone: "queued" },
+  cancelled: { label: "已取消", tone: "default" },
+  succeeded: { label: "成功", tone: "succeeded" },
+  failed: { label: "失败", tone: "failed" },
+};
 
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter
+        future={{
+          v7_relativeSplatPath: true,
+          v7_startTransition: true,
+        }}
+      >
         <Routes>
           <Route element={<WorkspacePage />} path="/" />
           <Route element={<JobDetailPage />} path="/jobs/:jobId" />
@@ -64,6 +86,7 @@ function WorkspacePage() {
   const setActiveTaskKind = useUiStore((state) => state.setActiveTaskKind);
   const highlightedBatchId = useUiStore((state) => state.highlightedBatchId);
   const setHighlightedBatchId = useUiStore((state) => state.setHighlightedBatchId);
+  const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -78,8 +101,8 @@ function WorkspacePage() {
   });
 
   const jobsQuery = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => adapter.listJobs(),
+    queryKey: ["jobs", jobsStatusFilter ?? "all"],
+    queryFn: () => adapter.listJobs(jobsStatusFilter),
     refetchInterval: (query) => {
       const items = ((query.state.data as JobList | undefined)?.items ?? []);
       const hasActive = items.some((item) =>
@@ -189,6 +212,22 @@ function WorkspacePage() {
           </button>
         </header>
 
+        <div className={styles.filterRow}>
+          {JOB_STATUS_FILTERS.map((filter) => {
+            const active = (jobsStatusFilter ?? "") === (filter.value ?? "");
+            return (
+              <button
+                key={filter.label}
+                className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
+                type="button"
+                onClick={() => setJobsStatusFilter(filter.value)}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className={styles.jobsPanel}>
           {jobsQuery.data?.items.length ? (
             jobsQuery.data.items.map((job) => (
@@ -199,7 +238,7 @@ function WorkspacePage() {
               >
                 <div className={styles.jobCardHeader}>
                   <strong>{job.sourceFilename}</strong>
-                  <span className={styles.statusPill}>{job.status}</span>
+                  <StatusPill status={job.status} />
                 </div>
                 <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
                 <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
@@ -237,6 +276,7 @@ function JobDetailPage() {
   });
 
   const detail = detailQuery.data;
+  const hasWarnings = Boolean(detail && (detail.flags.length > 0 || detail.errors.length > 0));
 
   return (
     <div className={styles.detailPage}>
@@ -254,14 +294,27 @@ function JobDetailPage() {
                 {detail.jobId} · {detail.projectNo ?? "未标记项目"}
               </p>
             </div>
-            <span className={styles.statusPill}>{detail.status}</span>
+            <StatusPill status={detail.status} />
           </header>
+
+          {hasWarnings ? (
+            <section className={styles.warningBanner}>
+              <strong>
+                {detail.status === "succeeded"
+                  ? "任务已完成，但仍有告警或缺失项需要处理。"
+                  : "任务存在告警或错误，请先检查后再继续处理。"}
+              </strong>
+              <span>
+                flags {detail.flags.length} 项 · errors {detail.errors.length} 项
+              </span>
+            </section>
+          ) : null}
 
           <div className={styles.detailGrid}>
             <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
             <InfoBlock label="进度" value={`${detail.percent}%`} />
             <InfoBlock label="当前文件" value={detail.currentFile ?? "—"} />
-            <InfoBlock label="创建时间" value={detail.createdAt} />
+            <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
           </div>
 
           <div className={styles.progressBarLarge}>
@@ -394,4 +447,47 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const meta = STATUS_META[status] ?? { label: status, tone: "default" };
+
+  return (
+    <span className={`${styles.statusPill} ${statusToneClass(meta.tone)}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function statusToneClass(tone: string) {
+  if (tone === "queued") {
+    return styles.statusQueued;
+  }
+  if (tone === "running") {
+    return styles.statusRunning;
+  }
+  if (tone === "succeeded") {
+    return styles.statusSucceeded;
+  }
+  if (tone === "failed") {
+    return styles.statusFailed;
+  }
+  return styles.statusDefault;
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
 }

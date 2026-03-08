@@ -83,6 +83,19 @@ class GlobalDocParams(BaseModel):
     ied_fu_plan_date: str | None = None
 
 
+def normalize_global_doc_params(raw_params: dict[str, Any]) -> dict[str, Any]:
+    """Coerce blank optional values to None before model validation."""
+    normalized = dict(raw_params)
+
+    for field_name, field in GlobalDocParams.model_fields.items():
+        if normalized.get(field_name) != "":
+            continue
+        if field.default is None:
+            normalized[field_name] = None
+
+    return normalized
+
+
 class DerivedFields(BaseModel):
     """派生字段（由规则计算）"""
     # 编码派生

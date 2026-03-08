@@ -73,7 +73,11 @@ type RawFormSchema = {
 };
 
 export class HttpAdapter implements ApiAdapter {
-  constructor(private readonly baseUrl = "") {}
+  private readonly normalizedBaseUrl: string;
+
+  constructor(private readonly baseUrl = "") {
+    this.normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  }
 
   async getHealth(): Promise<HealthStatus> {
     const payload = await this.fetchJson<{
@@ -176,17 +180,17 @@ export class HttpAdapter implements ApiAdapter {
         iedAvailable: payload.artifacts.ied_available,
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
-        packageDownloadUrl: payload.artifacts.package_download_url,
-        iedDownloadUrl: payload.artifacts.ied_download_url,
-        reportDownloadUrl: payload.artifacts.report_download_url,
-        replacedDwgDownloadUrl: payload.artifacts.replaced_dwg_download_url,
+        packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
+        iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
+        reportDownloadUrl: this.resolveUrl(payload.artifacts.report_download_url),
+        replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
       },
       retryAvailable: payload.retry_available,
     };
   }
 
   private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, init);
+    const response = await fetch(this.buildUrl(path), init);
     const text = await response.text();
     const payload = text ? (JSON.parse(text) as unknown) : null;
 
@@ -202,5 +206,19 @@ export class HttpAdapter implements ApiAdapter {
     }
 
     return payload as T;
+  }
+
+  private buildUrl(path: string) {
+    if (/^https?:\/\//i.test(path)) {
+      return path;
+    }
+    return `${this.normalizedBaseUrl}${path}`;
+  }
+
+  private resolveUrl(path: string | null | undefined) {
+    if (!path) {
+      return path;
+    }
+    return this.buildUrl(path);
   }
 }

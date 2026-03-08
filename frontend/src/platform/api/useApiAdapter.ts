@@ -1,10 +1,13 @@
 import { useMemo } from "react";
 
+import { resolveApiBaseUrl } from "./apiBaseUrl";
 import { HttpAdapter } from "./httpAdapter";
 
 export function useApiAdapter() {
+  const baseUrl = resolveApiBaseUrl(import.meta.env);
+
   return useMemo(
-    () => new HttpAdapter(import.meta.env.VITE_API_BASE_URL ?? ""),
-    [],
+    () => new HttpAdapter(baseUrl),
+    [baseUrl],
   );
 }
