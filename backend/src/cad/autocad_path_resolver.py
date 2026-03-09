@@ -123,6 +123,8 @@ def resolve_autocad_paths(
 def _append_candidate(candidates: list[Path], raw: str | Path | None) -> None:
     if raw is None:
         return
+    if isinstance(raw, str) and not raw.strip():
+        return
     path = Path(raw).expanduser()
     key = str(path).strip()
     if not key:
@@ -149,6 +151,8 @@ def _first_existing_file(paths: Iterable[Path]) -> Path | None:
 def _default_install_candidates() -> list[Path]:
     versions = ("2026", "2025", "2024", "2023", "2022", "2021")
     roots = (
+        Path(r"D:\AUTOCAD"),
+        Path(r"C:\AUTOCAD"),
         Path(r"D:\Program Files\AUTOCAD"),
         Path(r"C:\Program Files\AUTOCAD"),
         Path(r"D:\Program Files\Autodesk"),

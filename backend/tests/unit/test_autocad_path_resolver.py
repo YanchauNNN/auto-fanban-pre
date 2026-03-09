@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.cad.autocad_path_resolver import resolve_autocad_paths
+from src.cad.autocad_path_resolver import _default_install_candidates, resolve_autocad_paths
 
 
 class TestAutoCADPathResolver:
@@ -58,20 +58,23 @@ class TestAutoCADPathResolver:
         assert info.pc3_path == user_plotters / "打印PDF2.pc3"
         assert info.monochrome_ctb_path == user_plot_styles / "monochrome.ctb"
 
-    def test_resolve_from_extra_candidates(self, temp_dir: Path):
+    def test_resolve_from_extra_candidates(self, temp_dir: Path, monkeypatch):
         install_dir = temp_dir / "AutoCAD 2022"
         (install_dir / "Fonts").mkdir(parents=True)
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
 
         info = resolve_autocad_paths(
             configured_install_dir=None,
             extra_candidates=[install_dir],
             registry_candidates=[],
+            include_default_candidates=False,
         )
 
         assert info.install_dir == install_dir
         assert info.fonts_dir == install_dir / "Fonts"
 
-    def test_resolve_no_match(self):
+    def test_resolve_no_match(self, monkeypatch):
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
         info = resolve_autocad_paths(
             configured_install_dir="Z:/not-exists/autocad",
             extra_candidates=[],
@@ -82,3 +85,8 @@ class TestAutoCADPathResolver:
         assert info.install_dir is None
         assert info.fonts_dir is None
         assert info.acad_exe is None
+
+    def test_default_candidates_include_plain_autocad_roots(self):
+        candidates = _default_install_candidates()
+
+        assert Path(r"D:\AUTOCAD\AutoCAD 2022") in candidates

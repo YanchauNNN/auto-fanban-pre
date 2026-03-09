@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.config import reload_config
 
@@ -156,6 +157,51 @@ def test_configure_runtime_environment_uses_internal_bundle_root_when_frozen(
         os.chdir(old_cwd)
 
 
+def test_configure_runtime_environment_sets_detected_autocad_paths_when_frozen(
+    tmp_path: Path,
+    monkeypatch,
+):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+    detected_install_dir = Path(r"D:\AUTOCAD\AutoCAD 2022")
+    detected_accore = detected_install_dir / "accoreconsole.exe"
+    detected_ctb = (
+        Path(r"C:\Users\Test\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles")
+        / "monochrome.ctb"
+    )
+
+    old_cwd = Path.cwd()
+    try:
+        monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+        monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+        monkeypatch.delenv("FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE", raising=False)
+        monkeypatch.delenv("FANBAN_AUTOCAD__CTB_PATH", raising=False)
+        monkeypatch.setattr(
+            launcher,
+            "resolve_autocad_paths",
+            lambda configured_install_dir=None: SimpleNamespace(
+                install_dir=detected_install_dir,
+                accoreconsole_exe=detected_accore,
+                monochrome_ctb_path=detected_ctb,
+            ),
+        )
+
+        launcher.configure_runtime_environment()
+
+        assert Path(os.environ["FANBAN_AUTOCAD_INSTALL_DIR"]) == detected_install_dir
+        assert Path(os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"]) == detected_accore
+        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == detected_ctb
+    finally:
+        os.chdir(old_cwd)
+
+
 def test_list_recent_jobs_defaults_to_app_storage_when_frozen(tmp_path: Path, monkeypatch):
     launcher = _load_launcher()
     exe_dir = tmp_path / "fanban_m5"
@@ -188,6 +234,47 @@ def test_list_recent_jobs_defaults_to_app_storage_when_frozen(tmp_path: Path, mo
     jobs = launcher.list_recent_jobs(limit=5)
 
     assert [job["job_id"] for job in jobs] == ["job-frozen-1"]
+
+
+def test_resolve_job_dir_uses_runtime_root_when_frozen(tmp_path: Path, monkeypatch):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+    monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+
+    assert launcher.resolve_job_dir("job-42") == exe_dir.resolve() / "storage" / "jobs" / "job-42"
+
+
+def test_read_job_live_snapshot_returns_summary_and_trace(tmp_path: Path):
+    launcher = _load_launcher()
+    job_dir = tmp_path / "storage" / "jobs" / "job-1"
+    task_dir = job_dir / "work" / "cad_tasks" / "task-a"
+    task_dir.mkdir(parents=True)
+    (job_dir / "job.json").write_text(
+        json.dumps(
+            {
+                "job_id": "job-1",
+                "status": "running",
+                "progress": {"stage": "DETECT_FRAMES", "percent": 40},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (task_dir / "module5_trace.log").write_text("line-1\nline-2\n", encoding="utf-8")
+
+    snapshot = launcher.read_job_live_snapshot(job_dir=job_dir)
+
+    assert snapshot["summary"]["job_id"] == "job-1"
+    assert snapshot["summary"]["status"] == "running"
+    assert "line-2" in snapshot["trace"]
 
 
 def test_list_recent_jobs_does_not_change_cwd(tmp_path: Path, monkeypatch):

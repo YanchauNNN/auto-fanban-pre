@@ -164,7 +164,7 @@ runtime_options:
       desc: "锚点ROI右下角偏移按项目覆盖（用于ROI还原；按profile分组）"
     line_rebuild_limits:
       type: "dict[str,int]"
-      default: { max_segments: 5000, max_coord_pairs: 50000 }
+      default: { max_segments: 500000, max_coord_pairs: 1000000 }
       desc: "LINE重建矩形的上限（geometry_first 模式生效）"
 
   # --------------------------------------------------------------------------

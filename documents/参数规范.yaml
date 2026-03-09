@@ -790,8 +790,8 @@ titleblock_extract:
       min_area_rank: "按面积排序取top-N"
       orthogonality_tol_deg: 1.0
     line_rebuild_limits:
-      max_segments: 5000
-      max_coord_pairs: 50000
+      max_segments: 500000
+      max_coord_pairs: 1000000
     multi_frame_per_dxf: true
 
   # --------------------------------------------------------------------------

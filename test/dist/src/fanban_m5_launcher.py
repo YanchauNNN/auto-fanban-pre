@@ -15,6 +15,7 @@ BACKEND_ROOT = SOURCE_PROJECT_ROOT / "backend"
 if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from src.cad.autocad_path_resolver import resolve_autocad_paths  # noqa: E402
 from src.models import Job, JobType  # noqa: E402
 from src.pipeline.executor import PipelineExecutor  # noqa: E402
 
@@ -60,6 +61,16 @@ def configure_runtime_environment() -> Path:
         ),
     )
     os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(bundle_root / "assets"))
+    autodetected = resolve_autocad_paths()
+    if autodetected.install_dir is not None:
+        os.environ.setdefault("FANBAN_AUTOCAD_INSTALL_DIR", str(autodetected.install_dir))
+    if autodetected.accoreconsole_exe is not None:
+        os.environ.setdefault(
+            "FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE",
+            str(autodetected.accoreconsole_exe),
+        )
+    if autodetected.monochrome_ctb_path is not None:
+        os.environ.setdefault("FANBAN_AUTOCAD__CTB_PATH", str(autodetected.monochrome_ctb_path))
     return app_root
 
 
@@ -121,6 +132,10 @@ def run_split_only_job(
     )
 
 
+def new_job_id() -> str:
+    return _new_job_id()
+
+
 def copy_job_outputs_to_selected_dir(*, job_dir: Path, selected_output_dir: Path) -> int:
     drawings_dir = Path(job_dir) / "output" / "drawings"
     if not drawings_dir.exists():
@@ -169,6 +184,10 @@ def list_recent_jobs(*, storage_dir: Path | None = None, limit: int = 20) -> lis
     return jobs[:limit]
 
 
+def resolve_job_dir(job_id: str) -> Path:
+    return (resolve_runtime_root() / "storage" / "jobs" / job_id).resolve()
+
+
 def read_job_trace_excerpt(*, job_dir: Path, max_lines: int = 200) -> str:
     task_root = Path(job_dir) / "work" / "cad_tasks"
     if not task_root.exists():
@@ -188,6 +207,24 @@ def read_job_summary(*, job_dir: Path) -> dict:
     if not job_file.exists():
         return {}
     return json.loads(job_file.read_text(encoding="utf-8"))
+
+
+def read_job_live_snapshot(
+    *,
+    job_dir: Path | None = None,
+    job_id: str | None = None,
+    max_trace_lines: int = 200,
+) -> dict:
+    if job_dir is None:
+        if not job_id:
+            raise ValueError("job_dir or job_id is required")
+        job_dir = resolve_job_dir(job_id)
+    resolved_job_dir = Path(job_dir)
+    return {
+        "job_dir": str(resolved_job_dir),
+        "summary": read_job_summary(job_dir=resolved_job_dir),
+        "trace": read_job_trace_excerpt(job_dir=resolved_job_dir, max_lines=max_trace_lines),
+    }
 
 
 def _new_job_id() -> str:
