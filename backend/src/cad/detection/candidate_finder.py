@@ -101,6 +101,7 @@ class CandidateFinder:
             layer_poly_candidates: list[BBox] = []
             layer_poly_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
             layer_line_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+            layer_hit = False
             for entity_type in self.entity_order:
                 if entity_type in {"LWPOLYLINE", "POLYLINE"}:
                     for entity in self._iter_layer_entities(msp, layer, entity_type):
@@ -131,10 +132,16 @@ class CandidateFinder:
                     ]
                     invalid_count = len(layer_poly_candidates) - len(valid)
                     poly_candidates.extend(valid)
+                    layer_hit = layer_hit or bool(valid)
                     if invalid_count == 0:
+                        if layer_hit:
+                            return self._finalize_candidates(poly_candidates + line_candidates)
                         continue
                 else:
                     poly_candidates.extend(layer_poly_candidates)
+                    layer_hit = layer_hit or bool(layer_poly_candidates)
+                    if layer_hit:
+                        return self._finalize_candidates(poly_candidates + line_candidates)
                     continue
             if allow_line_rebuild and (layer_poly_segments or layer_line_segments):
                 combined_segments = layer_poly_segments + layer_line_segments
@@ -150,29 +157,33 @@ class CandidateFinder:
                         bbox for bbox in poly_rects if self._is_valid_size(bbox)
                     ]
                     line_candidates.extend(valid_poly_rects)
+                    layer_hit = layer_hit or bool(valid_poly_rects)
                     if valid_poly_rects:
-                        continue
+                        return self._finalize_candidates(poly_candidates + line_candidates)
                     if layer_line_segments:
                         line_rects = self._rebuild_from_segments(
                             layer_line_segments, context=f"layer={layer}:line_only"
                         )
-                        line_candidates.extend(
-                            [bbox for bbox in line_rects if self._is_valid_size(bbox)]
-                        )
-                else:
-                    line_candidates.extend(
-                        [
-                            bbox
-                            for bbox in self._rebuild_from_segments(
-                                combined_segments, context=f"layer={layer}"
-                            )
-                            if self._is_valid_size(bbox)
+                        valid_line_rects = [
+                            bbox for bbox in line_rects if self._is_valid_size(bbox)
                         ]
-                    )
+                        line_candidates.extend(valid_line_rects)
+                        layer_hit = layer_hit or bool(valid_line_rects)
+                else:
+                    valid_line_rects = [
+                        bbox
+                        for bbox in self._rebuild_from_segments(
+                            combined_segments, context=f"layer={layer}"
+                        )
+                        if self._is_valid_size(bbox)
+                    ]
+                    line_candidates.extend(valid_line_rects)
+                    layer_hit = layer_hit or bool(valid_line_rects)
 
-        candidates = self._dedupe_candidates(poly_candidates + line_candidates)
-        candidates.sort(key=lambda b: b.width * b.height, reverse=True)
-        return candidates
+            if layer_hit:
+                return self._finalize_candidates(poly_candidates + line_candidates)
+
+        return self._finalize_candidates(poly_candidates + line_candidates)
 
     def _extract_bbox(self, entity) -> BBox | None:
         """从polyline提取外接矩形"""
@@ -233,6 +244,11 @@ class CandidateFinder:
             seen.add(key)
             unique.append(bbox)
         return unique
+
+    def _finalize_candidates(self, candidates: list[BBox]) -> list[BBox]:
+        finalized = self._dedupe_candidates(candidates)
+        finalized.sort(key=lambda b: b.width * b.height, reverse=True)
+        return finalized
 
     def _iter_layer_entities(self, msp, layer: str, entity_type: str):
         query = f'{entity_type}[layer=="{layer}"]'

@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import ezdxf
+
 from src.cad.titleblock_extractor import TextItem, TitleblockExtractor
 from src.models import BBox, FrameMeta, FrameRuntime
 
@@ -91,3 +93,46 @@ def test_scale_mismatch_flag() -> None:
 
     assert frame.runtime.scale_mismatch is True
     assert extractor.scale_mismatch_flag in frame.runtime.flags
+
+
+def test_extract_fields_reuses_loaded_text_items_for_same_dxf(
+    tmp_path, monkeypatch
+) -> None:
+    dxf_path = tmp_path / "sample.dxf"
+    doc = ezdxf.new("R2018")
+    doc.modelspace().add_text("ANCHOR", dxfattribs={"insert": (10, 10), "height": 2.5})
+    doc.saveas(dxf_path)
+
+    extractor = TitleblockExtractor()
+    extractor.anchor_texts = []
+
+    original_readfile = ezdxf.readfile
+    calls = {"count": 0}
+
+    def counting_readfile(path):
+        calls["count"] += 1
+        return original_readfile(path)
+
+    monkeypatch.setattr("src.cad.titleblock_extractor.ezdxf.readfile", counting_readfile)
+
+    frame1 = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f1",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=100.0),
+            roi_profile_id="BASE10",
+        )
+    )
+    frame2 = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f2",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=100.0),
+            roi_profile_id="BASE10",
+        )
+    )
+
+    extractor.extract_fields(dxf_path, frame1)
+    extractor.extract_fields(dxf_path, frame2)
+
+    assert calls["count"] == 1

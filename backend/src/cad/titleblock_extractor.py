@@ -76,19 +76,14 @@ class TitleblockExtractor(ITitleblockExtractor):
         self.scale_tol_rel = float(scale_mismatch.get("rel_tol", 0.02))
         self.scale_mismatch_flag = str(scale_mismatch.get("flag_name", "比例不一致"))
         self.point_only_fields = {"revision", "status", "date", "page_info"}
+        self._text_item_cache: dict[tuple[str, int, int], list[TextItem]] = {}
 
     def extract_fields(self, dxf_path: Path, frame: FrameMeta) -> FrameMeta:
         """提取单个图框的图签字段"""
         if not dxf_path.exists():
             raise ExtractionError(f"DXF文件不存在: {dxf_path}")
 
-        try:
-            doc = ezdxf.readfile(str(dxf_path))
-        except Exception as e:
-            raise ExtractionError(f"DXF解析失败: {e}") from e
-
-        msp = doc.modelspace()
-        text_items = list(self._iter_text_items(msp))
+        text_items = self._load_text_items(dxf_path)
 
         profile_id = frame.runtime.roi_profile_id or "BASE10"
         profile = self.spec.get_roi_profile(profile_id)
@@ -200,6 +195,23 @@ class TitleblockExtractor(ITitleblockExtractor):
         frame.raw_extracts = raw_extracts
         self._check_scale_mismatch(frame)
         return frame
+
+    def _load_text_items(self, dxf_path: Path) -> list[TextItem]:
+        resolved = dxf_path.resolve()
+        stat = resolved.stat()
+        cache_key = (str(resolved), stat.st_mtime_ns, stat.st_size)
+        cached = self._text_item_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            doc = ezdxf.readfile(str(resolved))
+        except Exception as e:
+            raise ExtractionError(f"DXF解析失败: {e}") from e
+
+        text_items = list(self._iter_text_items(doc.modelspace()))
+        self._text_item_cache = {cache_key: text_items}
+        return text_items
 
     @staticmethod
     def _is_a4_frame(frame: FrameMeta) -> bool:

@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # CNPE 图纸处理系统 - 运行期参数规范 v1.0
 # ============================================================================
 # 说明：
@@ -92,11 +92,11 @@ runtime_options:
       pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
   autocad:
-    install_dir: { type: str, required: false, default: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022", desc: "AutoCAD 安装目录（用于字体目录和打印配置路径推导）" }
+    install_dir: { type: str, required: false, default: "", desc: "AutoCAD 安装目录；留空时自动探测本机安装" }
     prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     visible: { type: bool, default: false, desc: "是否显示 AutoCAD 主窗口（调试时可设 true）" }
     plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 打印超时（秒）" }
-    ctb_path: { type: str, required: false, default: "C:\\Users\\Yan\\AppData\\Roaming\\Autodesk\\AutoCAD 2022\\R24.1\\chs\\Plotters\\Plot Styles\\monochrome.ctb", desc: "CTB 路径；优先建议填写真实绝对路径" }
+    ctb_path: { type: str, required: false, default: "", desc: "CTB 路径；留空时自动探测本机 Plot Styles 中的 monochrome.ctb" }
     pc3_name: { type: str, default: "打印PDF2.pc3", desc: "AutoCAD 使用的 PC3 配置名" }
     retry: { type: int, default: 1, desc: "AutoCAD 打印失败重试次数" }
 
@@ -202,3 +202,5 @@ runtime_options:
     screening:                 { type: int,   default: 100,   desc: "淡显百分比(1~100)" }
     font_dirs:                 { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "字体搜索目录（追加到 ezdxf.options.support_dirs）" }
     fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
+
+

@@ -16,6 +16,7 @@ if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from src.cad.autocad_path_resolver import resolve_autocad_paths  # noqa: E402
+from src.config import reload_config  # noqa: E402
 from src.models import Job, JobType  # noqa: E402
 from src.pipeline.executor import PipelineExecutor  # noqa: E402
 
@@ -63,14 +64,14 @@ def configure_runtime_environment() -> Path:
     os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(bundle_root / "assets"))
     autodetected = resolve_autocad_paths()
     if autodetected.install_dir is not None:
-        os.environ.setdefault("FANBAN_AUTOCAD_INSTALL_DIR", str(autodetected.install_dir))
+        os.environ["FANBAN_AUTOCAD_INSTALL_DIR"] = str(autodetected.install_dir)
     if autodetected.accoreconsole_exe is not None:
-        os.environ.setdefault(
-            "FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE",
-            str(autodetected.accoreconsole_exe),
+        os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"] = str(
+            autodetected.accoreconsole_exe
         )
     if autodetected.monochrome_ctb_path is not None:
-        os.environ.setdefault("FANBAN_AUTOCAD__CTB_PATH", str(autodetected.monochrome_ctb_path))
+        os.environ["FANBAN_AUTOCAD__CTB_PATH"] = str(autodetected.monochrome_ctb_path)
+    reload_config()
     return app_root
 
 

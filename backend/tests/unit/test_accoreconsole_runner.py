@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.cad.accoreconsole_runner import AcCoreConsoleRunner
 from src.config import RuntimeConfig
@@ -213,6 +214,28 @@ def test_run_accepts_timeout_when_result_exists(tmp_path: Path, monkeypatch):
 
     assert result.exit_code == 0
     assert result.result_json == result_json.resolve()
+
+
+def test_runner_uses_detected_accoreconsole_when_config_path_blank(tmp_path: Path, monkeypatch):
+    cfg = RuntimeConfig()
+    cfg.module5_export.cad_runner.accoreconsole_exe = ""
+    cfg.autocad.install_dir = ""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    (script_dir / "module5_cad_executor.lsp").write_text("(princ)\n", encoding="utf-8")
+    cfg.module5_export.cad_runner.script_dir = str(script_dir)
+    detected_exe = tmp_path / "AutoCAD 2022" / "accoreconsole.exe"
+    detected_exe.parent.mkdir(parents=True)
+    detected_exe.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.cad.accoreconsole_runner.resolve_autocad_paths",
+        lambda configured_install_dir=None: SimpleNamespace(accoreconsole_exe=detected_exe),
+    )
+
+    runner = AcCoreConsoleRunner(config=cfg)
+
+    assert runner.accoreconsole_exe == detected_exe.resolve()
 
 
 def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):

@@ -1,4 +1,4 @@
-"""
+﻿"""
 pytest 配置与公共 fixtures
 
 使用方式：
@@ -9,6 +9,7 @@ pytest 配置与公共 fixtures
 from __future__ import annotations
 
 import tempfile
+import os
 import uuid
 from collections.abc import Generator
 from pathlib import Path
@@ -16,7 +17,7 @@ from pathlib import Path
 import ezdxf
 import pytest
 
-from src.config import BusinessSpec, RuntimeConfig, SpecLoader
+from src.config import BusinessSpec, RuntimeConfig, SpecLoader, reload_config
 from src.models import (
     BBox,
     DerivedFields,
@@ -48,6 +49,23 @@ def spec() -> BusinessSpec:
 def runtime_config() -> RuntimeConfig:
     """运行期配置"""
     return RuntimeConfig()
+
+@pytest.fixture(autouse=True)
+def _isolate_fanban_env(monkeypatch):
+    """Ensure FANBAN_* env/config state does not leak across tests."""
+    original_cwd = Path.cwd()
+    for key in [name for name in os.environ if name.startswith("FANBAN_")]:
+        monkeypatch.delenv(key, raising=False)
+    SpecLoader.clear_cache()
+    reload_config()
+    yield
+    SpecLoader.clear_cache()
+    reload_config()
+    try:
+        os.chdir(original_cwd)
+    except FileNotFoundError:
+        pass
+
 
 
 def _create_mock_spec() -> BusinessSpec:

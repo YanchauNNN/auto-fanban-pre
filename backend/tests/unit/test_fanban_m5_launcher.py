@@ -202,6 +202,91 @@ def test_configure_runtime_environment_sets_detected_autocad_paths_when_frozen(
         os.chdir(old_cwd)
 
 
+def test_configure_runtime_environment_overwrites_stale_autocad_defaults_when_detected(
+    tmp_path: Path,
+    monkeypatch,
+):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+    detected_install_dir = Path(r"C:\Program Files\Autodesk\AutoCAD 2022")
+    detected_accore = detected_install_dir / "accoreconsole.exe"
+    detected_ctb = Path(r"C:\Users\Test\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles\monochrome.ctb")
+
+    old_cwd = Path.cwd()
+    try:
+        monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+        monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+        monkeypatch.setenv("FANBAN_AUTOCAD_INSTALL_DIR", r"D:\Program Files\AUTOCAD\AutoCAD 2022")
+        monkeypatch.setenv(
+            "FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE",
+            r"D:\Program Files\AUTOCAD\AutoCAD 2022\accoreconsole.exe",
+        )
+        monkeypatch.setenv("FANBAN_AUTOCAD__CTB_PATH", r"D:\legacy\monochrome.ctb")
+        monkeypatch.setattr(
+            launcher,
+            "resolve_autocad_paths",
+            lambda configured_install_dir=None: SimpleNamespace(
+                install_dir=detected_install_dir,
+                accoreconsole_exe=detected_accore,
+                monochrome_ctb_path=detected_ctb,
+            ),
+        )
+
+        launcher.configure_runtime_environment()
+
+        assert Path(os.environ["FANBAN_AUTOCAD_INSTALL_DIR"]) == detected_install_dir
+        assert Path(os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"]) == detected_accore
+        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == detected_ctb
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_configure_runtime_environment_reloads_config_after_setting_env(
+    tmp_path: Path,
+    monkeypatch,
+):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+    calls: list[str] = []
+
+    old_cwd = Path.cwd()
+    try:
+        monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+        monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+        monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+        monkeypatch.setattr(
+            launcher,
+            "resolve_autocad_paths",
+            lambda configured_install_dir=None: SimpleNamespace(
+                install_dir=Path(r"C:\Program Files\Autodesk\AutoCAD 2022"),
+                accoreconsole_exe=Path(r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe"),
+                monochrome_ctb_path=Path(r"C:\Users\Test\monochrome.ctb"),
+            ),
+        )
+        monkeypatch.setattr(
+            launcher,
+            "reload_config",
+            lambda: calls.append("reload_config"),
+        )
+
+        launcher.configure_runtime_environment()
+
+        assert calls == ["reload_config"]
+    finally:
+        os.chdir(old_cwd)
+
+
 def test_list_recent_jobs_defaults_to_app_storage_when_frozen(tmp_path: Path, monkeypatch):
     launcher = _load_launcher()
     exe_dir = tmp_path / "fanban_m5"

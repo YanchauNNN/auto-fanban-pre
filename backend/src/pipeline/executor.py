@@ -119,6 +119,7 @@ class PipelineExecutor:
 
             # 聚合 frame/sheet_set flags 到 job
             self._aggregate_flags(job, context)
+            self._raise_if_fatal_export_errors(job)
 
             job.mark_succeeded()
             self._update_progress(job, message="任务完成", force=True)
@@ -506,6 +507,26 @@ class PipelineExecutor:
         for ss in context.get("sheet_sets", []):
             for flag in ss.flags:
                 job.add_flag(f"[{output_name_for_sheet_set(ss)}] {flag}")
+
+    @staticmethod
+    def _raise_if_fatal_export_errors(job: Job) -> None:
+        fatal_markers = ("DXF执行失败", "CAD结果错误", "PDF缺失", "DWG缺失", "导出失败")
+        fatal_flags = [flag for flag in job.flags if any(marker in flag for marker in fatal_markers)]
+
+        details = job.progress.details
+        export_total = int(details.get("export_total", 0) or 0)
+        export_done = int(details.get("export_done", 0) or 0)
+        incomplete_export = export_total > 0 and export_done < export_total
+
+        if not fatal_flags and not incomplete_export:
+            return
+
+        reasons: list[str] = []
+        if fatal_flags:
+            reasons.append(fatal_flags[0])
+        if incomplete_export:
+            reasons.append(f"export_done={export_done}/{export_total}")
+        raise RuntimeError(f"CAD导出失败: {'; '.join(reasons)}")
 
     # ==================================================================
     # 进度更新

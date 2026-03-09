@@ -43,14 +43,14 @@ class AcCoreConsoleRunner:
         self.config = config or get_config()
         runner_cfg = self.config.module5_export.cad_runner
 
-        self.accoreconsole_exe = self._resolve_runner_path(
+        self.accoreconsole_exe = self._resolve_optional_file_path(
             runner_cfg.accoreconsole_exe,
         )
-        if not self.accoreconsole_exe.exists():
+        if self.accoreconsole_exe is None or not self.accoreconsole_exe.is_file():
             detected = resolve_autocad_paths(
                 configured_install_dir=self.config.autocad.install_dir,
             ).accoreconsole_exe
-            if detected is not None and detected.exists():
+            if detected is not None and detected.is_file():
                 self.accoreconsole_exe = detected.resolve()
                 logger.warning(
                     "cad_runner.accoreconsole_exe 不存在，已回退到自动探测路径: %s",
@@ -80,9 +80,9 @@ class AcCoreConsoleRunner:
             raise FileNotFoundError(f"source_dxf 不存在: {source_dxf}")
         if not task_json.exists():
             raise FileNotFoundError(f"task_json 不存在: {task_json}")
-        if not self.accoreconsole_exe.exists():
+        if self.accoreconsole_exe is None or not self.accoreconsole_exe.is_file():
             raise FileNotFoundError(
-                f"accoreconsole.exe 不存在: {self.accoreconsole_exe}",
+                f"accoreconsole.exe 不存在: {self.accoreconsole_exe or '<auto-detect failed>'}",
             )
 
         lsp_path = (self.script_dir / "module5_cad_executor.lsp").resolve()
@@ -204,6 +204,13 @@ class AcCoreConsoleRunner:
             if candidate.exists():
                 return candidate
         return candidates[0]
+
+    @classmethod
+    def _resolve_optional_file_path(cls, raw_path: str) -> Path | None:
+        if not str(raw_path or "").strip():
+            return None
+        path = cls._resolve_runner_path(raw_path)
+        return path if path.is_file() else None
 
     @staticmethod
     def _quote_lisp_path(path: Path) -> str:

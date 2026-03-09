@@ -1,4 +1,4 @@
-"""
+﻿"""
 运行期配置 - 读取 documents/参数规范_运行期.yaml
 
 职责：
@@ -51,7 +51,7 @@ class ODAConfig(BaseModel):
 class Module5CadRunnerConfig(BaseModel):
     """模块5 CAD运行器配置"""
 
-    accoreconsole_exe: str = r"D:\Program Files\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
+    accoreconsole_exe: str = ""
     script_dir: str = r"..\backend\src\cad\scripts"
     task_timeout_sec: int = 900
     retry: int = 1
@@ -141,7 +141,7 @@ class Module5ExportConfig(BaseModel):
 class AutoCADConfig(BaseModel):
     """AutoCAD 运行配置（模块5增量链路）"""
 
-    install_dir: str = r"D:\Program Files\AUTOCAD\AutoCAD 2022"
+    install_dir: str = ""
     prog_id_candidates: list[str] = Field(
         default_factory=lambda: [
             "AutoCAD.Application.24.1",
@@ -151,9 +151,7 @@ class AutoCADConfig(BaseModel):
     )
     visible: bool = False
     plot_timeout_sec: int = 300
-    ctb_path: str = (
-        r"C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles\monochrome.ctb"
-    )
+    ctb_path: str = ""
     pc3_name: str = "打印PDF2.pc3"
     retry: int = 1
 
@@ -457,3 +455,5 @@ def _normalize_runtime_spec_path(path: Path) -> Path:
         return path.resolve()
     except Exception:
         return path.absolute()
+
+

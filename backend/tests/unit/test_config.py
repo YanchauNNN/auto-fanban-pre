@@ -1,4 +1,4 @@
-"""
+﻿"""
 配置加载单元测试
 
 每个模块完成后必须运行：pytest tests/unit/test_config.py -v
@@ -132,7 +132,8 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.output.pdf_validation_min_size_bytes == 1024
         assert runtime_config.module5_export.output.pdf_validation_min_stream_bytes == 64
         assert runtime_config.module5_export.cad_runner.task_timeout_sec == 900
-        assert runtime_config.autocad.install_dir == r"D:\Program Files\AUTOCAD\AutoCAD 2022"
+        assert runtime_config.autocad.install_dir == ""
+        assert runtime_config.autocad.ctb_path == ""
         assert runtime_config.autocad.prog_id_candidates == [
             "AutoCAD.Application.24.1",
             "AutoCAD.Application.24.0",

@@ -43,20 +43,20 @@ def test_line_rebuild_conditionally_with_polyline(monkeypatch: pytest.MonkeyPatc
         bboxes = finder.find_rectangles(msp)
         return contexts, bboxes
 
-    # 1) 全部合法：L1 跳过段重建，L2 仍需重建
+    # 1) 全部合法：L1 命中后直接返回，不再扫描 L2
     contexts, bboxes = run_with_validator(lambda _bbox: True)
     assert any(abs(b.width - 200) < 1e-6 and abs(b.height - 100) < 1e-6 for b in bboxes)
     assert "layer=L1" not in contexts
-    assert "layer=L2" in contexts
+    assert "layer=L2" not in contexts
 
-    # 2) L1 闭合多段线非法：触发段重建
+    # 2) L1 闭合多段线非法：降级到 L1 同层段重建，仍不继续扫描 L2
     def validator(bbox):
         return not (abs(bbox.xmin) < 1e-6 and abs(bbox.ymin) < 1e-6)
 
     contexts, bboxes = run_with_validator(validator)
     assert any(abs(b.width - 200) < 1e-6 and abs(b.height - 100) < 1e-6 for b in bboxes)
     assert "layer=L1" in contexts
-    assert "layer=L2" in contexts
+    assert "layer=L2" not in contexts
 
 
 def test_global_skips_line_rebuild_when_poly_exists(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,3 +94,35 @@ def test_line_rebuild_logs_when_segments_exceed(caplog: pytest.LogCaptureFixture
 
     assert rects == []
     assert "LINE重建跳过" in caplog.text
+
+
+def test_layer_priority_stops_after_first_valid_layer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc = ezdxf.new()
+    doc.layers.new("HIGH")
+    doc.layers.new("LOW")
+    msp = doc.modelspace()
+
+    add_rect_polyline(msp, "HIGH", 0, 0, 200, 100)
+    add_rect_lines(msp, "LOW", 0, 200, 200, 300)
+
+    finder = CandidateFinder(
+        layer_order=["HIGH", "LOW"],
+        entity_order=["LWPOLYLINE", "POLYLINE", "LINE"],
+    )
+    contexts: list[str | None] = []
+    original = finder._rebuild_from_segments
+
+    def wrapped(segments, *, context=None):
+        contexts.append(context)
+        return original(segments, context=context)
+
+    monkeypatch.setattr(finder, "_rebuild_from_segments", wrapped)
+
+    bboxes = finder.find_rectangles(msp)
+
+    assert len(bboxes) == 1
+    assert abs(bboxes[0].xmin - 0.0) < 1e-6
+    assert abs(bboxes[0].ymin - 0.0) < 1e-6
+    assert "layer=LOW" not in contexts

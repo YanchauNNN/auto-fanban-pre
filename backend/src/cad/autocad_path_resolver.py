@@ -66,7 +66,7 @@ def resolve_autocad_paths(
         for candidate in _default_install_candidates():
             _append_candidate(candidates, candidate)
 
-    install_dir = _first_existing_dir(candidates)
+    install_dir = _first_resolved_install_dir(candidates)
     if install_dir is None:
         return AutoCADPathInfo(
             install_dir=None,
@@ -139,6 +139,59 @@ def _first_existing_dir(paths: Iterable[Path]) -> Path | None:
         if path.exists() and path.is_dir():
             return path
     return None
+
+
+def _first_resolved_install_dir(paths: Iterable[Path]) -> Path | None:
+    best_match: tuple[int, Path] | None = None
+    for path in paths:
+        resolved = _resolve_install_dir_candidate(path)
+        if resolved is None:
+            continue
+        score = _install_dir_score(resolved)
+        if best_match is None or score > best_match[0]:
+            best_match = (score, resolved)
+    return best_match[1] if best_match is not None else None
+
+
+def _resolve_install_dir_candidate(path: Path) -> Path | None:
+    candidates = _expand_install_dir_candidates(path)
+    best_match: tuple[int, Path] | None = None
+    for candidate in candidates:
+        score = _install_dir_score(candidate)
+        if score <= 0:
+            continue
+        if best_match is None or score > best_match[0]:
+            best_match = (score, candidate)
+    return best_match[1] if best_match is not None else None
+
+
+def _expand_install_dir_candidates(path: Path) -> list[Path]:
+    if not path.exists():
+        return []
+
+    if path.is_file():
+        if path.name.lower() in {"acad.exe", "acadlt.exe", "accoreconsole.exe"}:
+            return [path.parent]
+        return []
+
+    candidates: list[Path] = []
+    for candidate in (
+        path,
+        path / "Root",
+        path / "PF" / "Root",
+        path / "Program Files" / "Root",
+    ):
+        if candidate.exists() and candidate.is_dir() and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _install_dir_score(path: Path) -> int:
+    if (path / "accoreconsole.exe").exists():
+        return 3
+    if (path / "acad.exe").exists() or (path / "acadlt.exe").exists():
+        return 2
+    return 0
 
 
 def _first_existing_file(paths: Iterable[Path]) -> Path | None:
