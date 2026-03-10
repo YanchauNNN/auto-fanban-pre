@@ -83,12 +83,21 @@ class AnchorCalibratedLocator:
 
         outer_frame_cfg = self.spec.titleblock_extract.get("outer_frame", {})
         layer_priority = outer_frame_cfg.get("layer_priority", {})
-        layers = layer_priority.get("layers")
-        if not layers:
-            primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
-            secondary = layer_priority.get("secondary_layer", "0")
-            layers = [primary, secondary]
-        self.layer_order = [str(layer_name) for layer_name in layers if layer_name]
+        global_layers = layer_priority.get("global_layers")
+        local_only_layers = layer_priority.get("local_only_layers")
+        if not global_layers and not local_only_layers:
+            layers = layer_priority.get("layers")
+            if not layers:
+                primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
+                secondary = layer_priority.get("secondary_layer", "0")
+                layers = [primary, secondary]
+            global_layers = list(layers)
+            local_only_layers = []
+        self.global_layers = [str(layer_name) for layer_name in (global_layers or []) if layer_name]
+        self.local_only_layers = [
+            str(layer_name) for layer_name in (local_only_layers or []) if layer_name
+        ]
+        self.layer_order = self.global_layers + self.local_only_layers
         entity_order = layer_priority.get("entity_order", ["LWPOLYLINE", "POLYLINE", "LINE"])
         self.entity_order = [str(e) for e in entity_order if e]
         line_limits = outer_frame_cfg.get("line_rebuild_limits", {})
@@ -101,6 +110,8 @@ class AnchorCalibratedLocator:
 
         a4_cfg = self.spec.a4_multipage.get("cluster_building", {})
         self.a4_gap_factor = float(a4_cfg.get("gap_threshold_factor", 0.5))
+        self.coord_tol = float(getattr(self.candidate_finder, "coord_tol", 0.5))
+        self.last_detection_stats: dict[str, object] = {}
 
         self.logger = logging.getLogger(__name__)
 
@@ -109,184 +120,99 @@ class AnchorCalibratedLocator:
         text_items = list(AnchorFirstLocator._iter_text_items(msp))
         anchor_items = [t for t in text_items if self._match_any_text(t.text, self.anchor_texts)]
         if not anchor_items:
-            raise DetectionError(f"DETECT_FRAMES/ANCHOR_SCAN: 未找到锚点文本 dxf={dxf_path.name}")
-        rb_targets = self._build_rb_targets(anchor_items)
+            frames = self._locate_without_anchors(msp, dxf_path)
+            self.last_detection_stats = {
+                "anchors_total": 0,
+                "resolved_after_global_layers": len(frames),
+                "unresolved_before_local_layers": 0,
+                "local_windows_total": 0,
+                "local_window_hits_by_layer": {},
+                "used_local_only_layers": [],
+            }
+            return frames
 
-        if not rb_targets:
-            raise DetectionError(f"DETECT_FRAMES/RB_LOCATE: 无法定位图框右下角 dxf={dxf_path.name}")
+        selected_by_anchor: dict[int, CandidateFrame] = {}
+        candidates: list[CandidateFrame] = []
+        seen_candidates: set[tuple[float, float, float, float, str, str, str]] = set()
 
-        targets_by_anchor: dict[int, list[dict]] = {}
-        for target in rb_targets:
-            targets_by_anchor.setdefault(target["anchor_id"], []).append(target)
+        for layer in self.global_layers:
+            layer_candidates = self._build_candidates_for_layers(msp, [layer])
+            self._merge_candidates(candidates, layer_candidates, seen_candidates)
+            self._resolve_anchor_matches(anchor_items, candidates, selected_by_anchor)
+            if len(selected_by_anchor) >= len(anchor_items):
+                break
+
+        resolved_after_global = len(selected_by_anchor)
+        unresolved_ids = [
+            idx for idx in range(1, len(anchor_items) + 1) if idx not in selected_by_anchor
+        ]
+        local_windows = self._build_local_windows(anchor_items, unresolved_ids)
+        local_window_hits_by_layer: dict[str, int] = {}
+        used_local_only_layers: list[str] = []
+
+        if unresolved_ids and self.local_only_layers:
+            self.logger.info(
+                "进入低优先局部补检(RB): dxf=%s unresolved=%d windows=%d layers=%s",
+                dxf_path.name,
+                len(unresolved_ids),
+                len(local_windows),
+                ",".join(self.local_only_layers),
+            )
+            for layer in self.local_only_layers:
+                layer_hits = 0
+                layer_used = False
+                for window_info in local_windows:
+                    layer_candidates = self._build_candidates_for_layers(
+                        msp,
+                        [layer],
+                        window=window_info["window"],
+                        localize_line_rebuild=True,
+                    )
+                    if not layer_candidates:
+                        continue
+                    layer_used = True
+                    self._merge_candidates(candidates, layer_candidates, seen_candidates)
+                    before = len(selected_by_anchor)
+                    self._resolve_anchor_matches(
+                        anchor_items,
+                        candidates,
+                        selected_by_anchor,
+                        anchor_ids=window_info["anchor_ids"],
+                    )
+                    layer_hits += len(selected_by_anchor) - before
+                    if len(selected_by_anchor) >= len(anchor_items):
+                        break
+                if layer_used:
+                    used_local_only_layers.append(layer)
+                local_window_hits_by_layer[layer] = layer_hits
+                if len(selected_by_anchor) >= len(anchor_items):
+                    break
 
         frames: list[FrameMeta] = []
         used_candidates: set[tuple[float, float, float, float]] = set()
-        selected_by_anchor: dict[int, CandidateFrame] = {}
-        found_geom = False
-        poly_cache: dict[tuple[str, str], list[dict]] = {}
-        line_cache: dict[str, list[tuple[tuple[float, float], tuple[float, float]]]] = {}
-        a4_cache: dict[
-            str,
-            tuple[
-                list[CandidateFrame], dict[tuple[float, float, float, float], list[CandidateFrame]]
-            ],
-        ] = {}
-        line_rectangles: list[BBox] | None = None
+        for anchor_id in sorted(selected_by_anchor.keys()):
+            self._append_candidate_frame(selected_by_anchor[anchor_id], dxf_path, frames, used_candidates)
 
-        for layer in self.layer_order:
-            if len(selected_by_anchor) >= len(targets_by_anchor):
-                break
-            for entity_type in self.entity_order:
-                if len(selected_by_anchor) >= len(targets_by_anchor):
-                    break
-                if entity_type in {"LWPOLYLINE", "POLYLINE"}:
-                    cache_key = (layer, entity_type)
-                    if cache_key not in poly_cache:
-                        poly_cache[cache_key] = self._query_polylines(msp, layer, entity_type)
-                    polylines = poly_cache[cache_key]
-                    if not polylines:
-                        continue
-                    for anchor_id, targets in targets_by_anchor.items():
-                        if anchor_id in selected_by_anchor:
-                            continue
-                        best: CandidateFrame | None = None
-                        for target in targets:
-                            matches = self._match_polylines(
-                                polylines,
-                                target["rb_x"],
-                                target["rb_y"],
-                                target["scale"],
-                                target["profile_id"],
-                                layer,
-                            )
-                            if not matches:
-                                continue
-                            found_geom = True
-                            candidate = min(matches, key=lambda c: (c.fit_error, c.area))
-                            if best is None or (candidate.fit_error, candidate.area) < (
-                                best.fit_error,
-                                best.area,
-                            ):
-                                best = candidate
-                        if best:
-                            selected_by_anchor[anchor_id] = best
-                            self.logger.info(
-                                "锚点直推: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
-                                anchor_id,
-                                best.paper_variant_id,
-                                best.sx,
-                                best.sy,
-                                best.roi_profile_id,
-                                best.bbox.xmin,
-                                best.bbox.ymin,
-                                best.bbox.xmax,
-                                best.bbox.ymax,
-                            )
-                elif entity_type == "LINE":
-                    if layer not in line_cache:
-                        line_cache[layer] = self._query_lines(msp, layer)
-                    lines = line_cache[layer]
-                    if not lines:
-                        continue
-                    for anchor_id, targets in targets_by_anchor.items():
-                        if anchor_id in selected_by_anchor:
-                            continue
-                        best: CandidateFrame | None = None
-                        for target in targets:
-                            matches = self._match_lines(
-                                lines,
-                                target["rb_x"],
-                                target["rb_y"],
-                                target["scale"],
-                                target["profile_id"],
-                                layer,
-                            )
-                            if not matches:
-                                continue
-                            found_geom = True
-                            candidate = min(matches, key=lambda c: (c.fit_error, c.area))
-                            if best is None or (candidate.fit_error, candidate.area) < (
-                                best.fit_error,
-                                best.area,
-                            ):
-                                best = candidate
-                        if best:
-                            selected_by_anchor[anchor_id] = best
-                            self.logger.info(
-                                "锚点直推: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
-                                anchor_id,
-                                best.paper_variant_id,
-                                best.sx,
-                                best.sy,
-                                best.roi_profile_id,
-                                best.bbox.xmin,
-                                best.bbox.ymin,
-                                best.bbox.xmax,
-                                best.bbox.ymax,
-                            )
-
-        if len(selected_by_anchor) < len(targets_by_anchor):
-            line_rectangles = self._build_line_rectangles(msp)
-            if line_rectangles:
-                for anchor_id, targets in targets_by_anchor.items():
-                    if anchor_id in selected_by_anchor:
-                        continue
-                    best: CandidateFrame | None = None
-                    for target in targets:
-                        matches = self._match_rectangles(
-                            line_rectangles,
-                            target["rb_x"],
-                            target["rb_y"],
-                            target["scale"],
-                            target["profile_id"],
-                            layer="*",
-                        )
-                        if not matches:
-                            continue
-                        found_geom = True
-                        candidate = min(matches, key=lambda c: (c.fit_error, c.area))
-                        if best is None or (candidate.fit_error, candidate.area) < (
-                            best.fit_error,
-                            best.area,
-                        ):
-                            best = candidate
-                    if best:
-                        selected_by_anchor[anchor_id] = best
-                        self.logger.info(
-                            "锚点直推(线段重建): index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
-                            anchor_id,
-                            best.paper_variant_id,
-                            best.sx,
-                            best.sy,
-                            best.roi_profile_id,
-                            best.bbox.xmin,
-                            best.bbox.ymin,
-                            best.bbox.xmax,
-                            best.bbox.ymax,
-                        )
-
+        a4_candidates = [cand for cand in candidates if self._is_a4_candidate(cand)]
+        a4_cluster_map = self._cluster_lookup(self._build_a4_clusters(a4_candidates))
         for anchor_id in sorted(selected_by_anchor.keys()):
             selected = selected_by_anchor[anchor_id]
-            self._append_candidate_frame(selected, dxf_path, frames, used_candidates)
-            if self._is_a4_candidate(selected):
-                layer = selected.layer
-                if layer not in a4_cache:
-                    layer_polylines = poly_cache.get((layer, "LWPOLYLINE"), []) + poly_cache.get(
-                        (layer, "POLYLINE"), []
-                    )
-                    a4_candidates = self._build_a4_candidates(layer_polylines, layer)
-                    a4_cluster_map = self._cluster_lookup(self._build_a4_clusters(a4_candidates))
-                    a4_cache[layer] = (a4_candidates, a4_cluster_map)
-                cluster = a4_cache[layer][1].get(self._candidate_key(selected), [])
-                for cand in cluster:
-                    self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+            if not self._is_a4_candidate(selected):
+                continue
+            cluster = a4_cluster_map.get(self._candidate_key(selected), [])
+            for cand in cluster:
+                self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
 
+        self.last_detection_stats = {
+            "anchors_total": len(anchor_items),
+            "resolved_after_global_layers": resolved_after_global,
+            "unresolved_before_local_layers": len(unresolved_ids),
+            "local_windows_total": len(local_windows),
+            "local_window_hits_by_layer": local_window_hits_by_layer,
+            "used_local_only_layers": used_local_only_layers,
+        }
         if frames:
             return frames
-        if not found_geom:
-            raise DetectionError(
-                f"DETECT_FRAMES/GEOM_MATCH: RB附近无矩形/线段匹配 dxf={dxf_path.name}"
-            )
         raise DetectionError(f"DETECT_FRAMES/GEOM_MATCH: 未找到可用图框 dxf={dxf_path.name}")
 
     def _find_matching_candidates(
@@ -827,8 +753,29 @@ class AnchorCalibratedLocator:
         return None, None
 
     def _build_candidates(self, msp) -> list[CandidateFrame]:
+        return self._build_candidates_for_layers(
+            msp,
+            self.global_layers + self.local_only_layers or self.candidate_finder.layer_order,
+        )
+
+    def _build_candidates_for_layers(
+        self,
+        msp,
+        layers: list[str],
+        *,
+        window: BBox | None = None,
+        localize_line_rebuild: bool = False,
+    ) -> list[CandidateFrame]:
         candidates: list[CandidateFrame] = []
-        bboxes = self.candidate_finder.find_rectangles(msp)
+        if hasattr(self.candidate_finder, "find_rectangles_in_layers"):
+            bboxes = self.candidate_finder.find_rectangles_in_layers(
+                msp,
+                layers,
+                window=window,
+                localize_line_rebuild=localize_line_rebuild,
+            )
+        else:
+            bboxes = self.candidate_finder.find_rectangles(msp)
         for bbox in bboxes:
             for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
                 bbox, self.paper_variants
@@ -841,7 +788,7 @@ class AnchorCalibratedLocator:
                         sy=sy,
                         roi_profile_id=profile_id,
                         fit_error=error,
-                        layer="*",
+                        layer=layers[0] if len(layers) == 1 else "*",
                     )
                 )
 
@@ -855,6 +802,149 @@ class AnchorCalibratedLocator:
             }
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
         return candidates
+
+    def _locate_without_anchors(self, msp, dxf_path: Path) -> list[FrameMeta]:
+        candidate_layers = list(self.global_layers)
+        candidates = self._build_candidates_for_layers(msp, candidate_layers)
+        if not candidates and self.local_only_layers:
+            candidate_layers = list(self.local_only_layers)
+            candidates = self._build_candidates_for_layers(msp, candidate_layers)
+        frames: list[FrameMeta] = []
+        used_candidates: set[tuple[float, float, float, float]] = set()
+        best_by_bbox: dict[tuple[float, float, float, float], CandidateFrame] = {}
+        for cand in candidates:
+            key = self._candidate_key(cand)
+            best = best_by_bbox.get(key)
+            if best is None or (cand.fit_error, cand.area) < (best.fit_error, best.area):
+                best_by_bbox[key] = cand
+        for cand in best_by_bbox.values():
+            self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+        self.logger.info(
+            "几何fallback(RB)完成: dxf=%s frames=%d layers=%s",
+            dxf_path.name,
+            len(frames),
+            ",".join(candidate_layers),
+        )
+        return frames
+
+    def _candidate_signature(
+        self, cand: CandidateFrame
+    ) -> tuple[float, float, float, float, str, str, str]:
+        bbox_key = self._candidate_key(cand)
+        return (*bbox_key, cand.paper_variant_id, cand.roi_profile_id, cand.layer)
+
+    def _merge_candidates(
+        self,
+        target: list[CandidateFrame],
+        incoming: list[CandidateFrame],
+        seen: set[tuple[float, float, float, float, str, str, str]],
+    ) -> None:
+        for cand in incoming:
+            signature = self._candidate_signature(cand)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            target.append(cand)
+
+    def _resolve_anchor_matches(
+        self,
+        anchor_items: list[TextItem],
+        candidates: list[CandidateFrame],
+        selected_by_anchor: dict[int, CandidateFrame],
+        *,
+        anchor_ids: list[int] | None = None,
+    ) -> None:
+        for idx in anchor_ids or list(range(1, len(anchor_items) + 1)):
+            if idx in selected_by_anchor:
+                continue
+            anchor_item = anchor_items[idx - 1]
+            matches = self._find_matching_candidates(anchor_item, candidates)
+            self.logger.info(
+                "锚点直推匹配: index=%d x=%.3f y=%.3f matches=%d text=%s",
+                idx,
+                anchor_item.x,
+                anchor_item.y,
+                len(matches),
+                AnchorFirstLocator._short_text(anchor_item.text),
+            )
+            if not matches:
+                continue
+            selected, _score = min(matches, key=lambda item: (item[1], item[0].area))
+            selected_by_anchor[idx] = selected
+            self.logger.info(
+                "锚点直推->外框: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
+                idx,
+                selected.paper_variant_id,
+                selected.sx,
+                selected.sy,
+                selected.roi_profile_id,
+                selected.bbox.xmin,
+                selected.bbox.ymin,
+                selected.bbox.xmax,
+                selected.bbox.ymax,
+            )
+
+    def _build_local_windows(
+        self,
+        anchor_items: list[TextItem],
+        unresolved_ids: list[int],
+    ) -> list[dict[str, object]]:
+        windows: list[dict[str, object]] = []
+        for idx in unresolved_ids:
+            anchor_item = anchor_items[idx - 1]
+            for bbox in self._predict_outer_bboxes(anchor_item):
+                merged = False
+                for window_info in windows:
+                    if window_info["window"].intersects(bbox):
+                        window_info["window"] = self._union_bbox(window_info["window"], bbox)
+                        window_info["anchor_ids"].append(idx)
+                        merged = True
+                        break
+                if not merged:
+                    windows.append({"window": bbox, "anchor_ids": [idx]})
+        return windows
+
+    def _predict_outer_bboxes(self, item: TextItem) -> list[BBox]:
+        predicted: list[BBox] = []
+        for profile_id, calib in self._iter_calibrations():
+            for candidate in self._iter_scale_candidates(item, calib):
+                scale = candidate["scale"]
+                outer_xmax, outer_ymin = self._outer_rb_from_anchor(
+                    item,
+                    scale,
+                    calib,
+                    candidate["use_project_override"],
+                )
+                for paper_variant in self.paper_variants.values():
+                    if paper_variant.profile != profile_id:
+                        continue
+                    bbox = BBox(
+                        xmin=outer_xmax - paper_variant.W * scale,
+                        ymin=outer_ymin,
+                        xmax=outer_xmax,
+                        ymax=outer_ymin + paper_variant.H * scale,
+                    )
+                    predicted.append(self._expand_search_window(bbox))
+        return predicted
+
+    def _expand_search_window(self, bbox: BBox) -> BBox:
+        dx = max(bbox.width * self.spec.titleblock_extract.get("tolerances", {}).get("roi_margin_percent", 0.0), 2 * self.coord_tol)
+        dy = max(bbox.height * self.spec.titleblock_extract.get("tolerances", {}).get("roi_margin_percent", 0.0), 2 * self.coord_tol)
+        return BBox(
+            xmin=bbox.xmin - dx,
+            ymin=bbox.ymin - dy,
+            xmax=bbox.xmax + dx,
+            ymax=bbox.ymax + dy,
+        )
+
+    @staticmethod
+    def _union_bbox(left: BBox, right: BBox) -> BBox:
+        return BBox(
+            xmin=min(left.xmin, right.xmin),
+            ymin=min(left.ymin, right.ymin),
+            xmax=max(left.xmax, right.xmax),
+            ymax=max(left.ymax, right.ymax),
+        )
 
     def _append_candidate_frame(
         self,
