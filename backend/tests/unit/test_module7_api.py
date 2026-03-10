@@ -4,6 +4,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -92,6 +93,36 @@ def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> 
     assert payload["ready"] is True
     assert "storage_writable" in payload
     assert "worker_alive" in payload
+
+
+def test_health_reports_autocad_unready_when_runner_path_blank_and_autodetect_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE", "")
+    monkeypatch.setenv("FANBAN_AUTOCAD_INSTALL_DIR", "")
+    monkeypatch.setenv("FANBAN_AUTOCAD__CTB_PATH", "")
+    reload_config()
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app import runtime as runtime_module
+    from API.app.main import create_app
+
+    monkeypatch.setattr(
+        runtime_module,
+        "resolve_autocad_paths",
+        lambda configured_install_dir=None: SimpleNamespace(accoreconsole_exe=None),
+        raising=False,
+    )
+
+    with TestClient(create_app(job_processor=FakeJobProcessor())) as client:
+        response = client.get("/api/system/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["autocad_ready"] is False
 
 
 def test_form_schema_returns_deliverable_fields_and_options(

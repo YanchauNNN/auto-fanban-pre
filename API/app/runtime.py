@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 
 from .metadata import FormMetadataService
 
+from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import Job, JobStatus, JobType
@@ -69,7 +70,7 @@ class DeliverableApiRuntime:
     def health(self) -> dict[str, Any]:
         storage_writable = self._storage_writable()
         worker_alive = bool(self._worker_thread and self._worker_thread.is_alive())
-        autocad_ready = Path(self.config.module5_export.cad_runner.accoreconsole_exe).exists()
+        autocad_ready = self._autocad_ready()
         office_ready = importlib.util.find_spec("win32com.client") is not None
         return {
             "status": "ok",
@@ -81,6 +82,16 @@ class DeliverableApiRuntime:
             "autocad_ready": autocad_ready,
             "office_ready": office_ready,
         }
+
+    def _autocad_ready(self) -> bool:
+        configured_runner = str(self.config.module5_export.cad_runner.accoreconsole_exe or "").strip()
+        if configured_runner and Path(configured_runner).is_file():
+            return True
+
+        detected = resolve_autocad_paths(
+            configured_install_dir=self.config.autocad.install_dir,
+        ).accoreconsole_exe
+        return detected is not None and Path(detected).is_file()
 
     def form_schema(self) -> dict[str, Any]:
         return self.metadata.build_form_schema()
