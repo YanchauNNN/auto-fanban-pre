@@ -8,6 +8,65 @@ from src.cad.autocad_path_resolver import _default_install_candidates, resolve_a
 
 
 class TestAutoCADPathResolver:
+    def test_resolve_prefers_highest_supported_official_install_over_older_and_installer_media(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        older_dir = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2019"
+        older_dir.mkdir(parents=True)
+        (older_dir / "acad.exe").touch()
+        (older_dir / "accoreconsole.exe").touch()
+
+        installer_media = (
+            temp_dir
+            / "AutoCAD_2024_Simplified_Chinese_Win_64bit_dlm"
+            / "x64"
+            / "acad"
+            / "PF"
+            / "Root"
+        )
+        installer_media.mkdir(parents=True)
+        (installer_media / "acad.exe").touch()
+        (installer_media / "accoreconsole.exe").touch()
+
+        highest_supported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2022"
+        highest_supported.mkdir(parents=True)
+        (highest_supported / "acad.exe").touch()
+        (highest_supported / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[older_dir, installer_media, highest_supported],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir == highest_supported
+        assert info.accoreconsole_exe == highest_supported / "accoreconsole.exe"
+
+    def test_resolve_rejects_versions_below_2018(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        unsupported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2014"
+        unsupported.mkdir(parents=True)
+        (unsupported / "acad.exe").touch()
+        (unsupported / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[unsupported],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir is None
+        assert info.accoreconsole_exe is None
+
     def test_resolve_from_configured_install_dir(self, temp_dir: Path, monkeypatch):
         install_dir = temp_dir / "AutoCAD 2021"
         (install_dir / "Fonts").mkdir(parents=True)
