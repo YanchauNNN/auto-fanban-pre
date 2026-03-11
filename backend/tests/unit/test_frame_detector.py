@@ -66,3 +66,10 @@ def test_frame_detector_supports_tsz_plot_mark_aliases() -> None:
     assert "_TSZ_PLOT_MARK" in layers
     assert "_TSZ-PLOT_MARK" in layers
     assert layers.index("_TSZ_PLOT_MARK") < layers.index("_TSZ-PLOT_MARK")
+
+
+def test_frame_detector_uses_two_stage_layer_priority_groups() -> None:
+    detector = FrameDetector()
+
+    assert detector.anchor_locator.global_layers[:3] == ["_TSZ_PLOT_MARK", "_TSZ-PLOT_MARK", "TK"]
+    assert detector.anchor_locator.local_only_layers[:2] == ["图框", "ttkk"]

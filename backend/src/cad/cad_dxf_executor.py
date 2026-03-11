@@ -1382,9 +1382,13 @@ class CADDXFExecutor:
     @staticmethod
     def _name_for_frame(frame: FrameMeta) -> str:
         external = frame.titleblock.external_code
+        revision = frame.titleblock.revision
+        status = frame.titleblock.status
         internal = frame.titleblock.internal_code
         return CADDXFExecutor._make_output_name(
             external_code=external,
+            revision=revision,
+            status=status,
             internal_code=internal,
             fallback_id=frame.frame_id[:8],
         )
@@ -1395,6 +1399,8 @@ class CADDXFExecutor:
             tb = sheet_set.master_page.frame_meta.titleblock
             return CADDXFExecutor._make_output_name(
                 external_code=tb.external_code,
+                revision=tb.revision,
+                status=tb.status,
                 internal_code=tb.internal_code,
                 fallback_id=f"sheet_set_{sheet_set.cluster_id[:8]}",
             )
@@ -1404,15 +1410,23 @@ class CADDXFExecutor:
     def _make_output_name(
         *,
         external_code: str | None,
+        revision: str | None,
+        status: str | None,
         internal_code: str | None,
         fallback_id: str,
     ) -> str:
-        if external_code and internal_code:
-            return f"{external_code}({internal_code})"
-        if internal_code:
-            return internal_code
-        if external_code:
-            return external_code
+        external = (external_code or "").strip()
+        rev = (revision or "").strip()
+        doc_status = (status or "").strip()
+        internal = (internal_code or "").strip()
+
+        if external and internal:
+            prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
+            return f"{prefix} ({internal})"
+        if internal:
+            return internal
+        if external:
+            return external
         return fallback_id
 
     @staticmethod

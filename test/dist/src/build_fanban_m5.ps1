@@ -9,6 +9,8 @@ $venvPython = Join-Path $repoRoot "backend\.venv\Scripts\python.exe"
 $assetsRoot = Join-Path $distRoot "assets"
 $plottersRoot = Join-Path $assetsRoot "plotters"
 $plotStylesRoot = Join-Path $assetsRoot "plot_styles"
+$appDistRoot = Join-Path $distRoot "fanban_m5"
+$buildRoot = Join-Path $distRoot "build"
 $documentsRoot = Join-Path $repoRoot "documents"
 $pc3Source = Get-ChildItem -Path $documentsRoot -File -Filter *.pc3 | Where-Object { $_.Name -like "*PDF2*.pc3" } | Select-Object -First 1 -ExpandProperty FullName
 $pmpSource = Join-Path $documentsRoot "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
@@ -17,6 +19,10 @@ $ctbCandidates = @(
     (Join-Path $env:APPDATA "Autodesk\AutoCAD 2022\R24.1\enu\Plotters\Plot Styles\monochrome.ctb")
 )
 $ctbSource = $ctbCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (Test-Path $assetsRoot) { Remove-Item $assetsRoot -Recurse -Force }
+if (Test-Path $appDistRoot) { Remove-Item $appDistRoot -Recurse -Force }
+if (Test-Path $buildRoot) { Remove-Item $buildRoot -Recurse -Force }
 
 New-Item -ItemType Directory -Force -Path $plottersRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $plotStylesRoot | Out-Null
@@ -28,9 +34,15 @@ if (-not $ctbSource) { throw "Missing monochrome.ctb in the current AutoCAD user
 $pc3Name = Split-Path -Leaf $pc3Source
 $pmpName = Split-Path -Leaf $pmpSource
 
-Copy-Item $pc3Source (Join-Path $plottersRoot $pc3Name) -Force
-Copy-Item $pmpSource (Join-Path $plottersRoot $pmpName) -Force
-Copy-Item $ctbSource (Join-Path $plotStylesRoot "monochrome.ctb") -Force
+try {
+    Copy-Item $pc3Source (Join-Path $plottersRoot $pc3Name) -Force
+    Copy-Item $pmpSource (Join-Path $plottersRoot $pmpName) -Force
+    Copy-Item $ctbSource (Join-Path $plotStylesRoot "monochrome.ctb") -Force
 
-& $venvPython -m pip install pyinstaller
-& $venvPython -m PyInstaller (Join-Path $scriptDir "fanban_m5.spec") --noconfirm --clean --distpath $distRoot --workpath (Join-Path $distRoot "build")
+    & $venvPython -m pip install pyinstaller
+    & $venvPython -m PyInstaller (Join-Path $scriptDir "fanban_m5.spec") --noconfirm --clean --distpath $distRoot --workpath $buildRoot
+}
+finally {
+    if (Test-Path $assetsRoot) { Remove-Item $assetsRoot -Recurse -Force }
+    if (Test-Path $buildRoot) { Remove-Item $buildRoot -Recurse -Force }
+}

@@ -13,11 +13,13 @@ from fastapi import HTTPException, status
 
 from .metadata import FormMetadataService
 
+from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import Job, JobStatus, JobType
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.job_manager import JobManager
+from src.pipeline.project_no_inference import resolve_project_no
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,7 @@ class DeliverableApiRuntime:
     def health(self) -> dict[str, Any]:
         storage_writable = self._storage_writable()
         worker_alive = bool(self._worker_thread and self._worker_thread.is_alive())
-        autocad_ready = Path(self.config.module5_export.cad_runner.accoreconsole_exe).exists()
+        autocad_ready = self._autocad_ready()
         office_ready = importlib.util.find_spec("win32com.client") is not None
         return {
             "status": "ok",
@@ -82,12 +84,25 @@ class DeliverableApiRuntime:
             "office_ready": office_ready,
         }
 
+    def _autocad_ready(self) -> bool:
+        configured_runner = str(self.config.module5_export.cad_runner.accoreconsole_exe or "").strip()
+        if configured_runner and Path(configured_runner).is_file():
+            return True
+
+        detected = resolve_autocad_paths(
+            configured_install_dir=self.config.autocad.install_dir,
+        ).accoreconsole_exe
+        return detected is not None and Path(detected).is_file()
+
     def form_schema(self) -> dict[str, Any]:
         return self.metadata.build_form_schema()
 
     def create_batch(self, *, files: list[UploadedFilePayload], raw_params: dict[str, Any]) -> dict[str, Any]:
         upload_errors = self._validate_uploads(files)
-        param_errors = self.validator.validate_frontend_params(raw_params)
+        resolved_submissions = [
+            (upload, self._resolve_params_for_upload(raw_params, upload.filename)) for upload in files
+        ]
+        param_errors = self._collect_param_errors(resolved_submissions)
 
         if upload_errors or param_errors:
             raise HTTPException(
@@ -106,13 +121,13 @@ class DeliverableApiRuntime:
             "split_only": False,
         }
 
-        for upload in files:
+        for upload, resolved_params in resolved_submissions:
             source_filename = Path(upload.filename).name or "upload.dwg"
             job = self.job_manager.create_job(
                 job_type=JobType.DELIVERABLE.value,
-                project_no=str(raw_params["project_no"]),
+                project_no=str(resolved_params["project_no"]),
                 options=options,
-                params=dict(raw_params),
+                params=resolved_params,
                 batch_id=batch_id,
                 source_filename=source_filename,
             )
@@ -125,6 +140,25 @@ class DeliverableApiRuntime:
             "batch_id": batch_id,
             "jobs": jobs,
         }
+
+    @staticmethod
+    def _resolve_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
+        resolved = dict(raw_params)
+        resolved["project_no"] = resolve_project_no(raw_params.get("project_no"), filename)
+        return resolved
+
+    def _collect_param_errors(
+        self,
+        resolved_submissions: list[tuple[UploadedFilePayload, dict[str, Any]]],
+    ) -> dict[str, list[str]]:
+        merged: dict[str, list[str]] = {}
+        for _, params in resolved_submissions:
+            for field_name, field_errors in self.validator.validate_frontend_params(params).items():
+                bucket = merged.setdefault(field_name, [])
+                for error in field_errors:
+                    if error not in bucket:
+                        bucket.append(error)
+        return merged
 
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
         jobs = self.job_manager.load_all_jobs()

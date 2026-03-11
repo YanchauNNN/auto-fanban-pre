@@ -53,11 +53,17 @@ class FrameDetector(IFrameDetector):
         )
         outer_frame_cfg = self.spec.titleblock_extract.get("outer_frame", {})
         layer_priority = outer_frame_cfg.get("layer_priority", {})
-        layers = layer_priority.get("layers")
-        if not layers:
-            primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
-            secondary = layer_priority.get("secondary_layer", "0")
-            layers = [primary, secondary]
+        global_layers = layer_priority.get("global_layers")
+        local_only_layers = layer_priority.get("local_only_layers")
+        if not global_layers and not local_only_layers:
+            layers = layer_priority.get("layers")
+            if not layers:
+                primary = layer_priority.get("primary_layer", "_TSZ-PLOT_MARK")
+                secondary = layer_priority.get("secondary_layer", "0")
+                layers = [primary, secondary]
+            global_layers = list(layers)
+            local_only_layers = []
+        layers = [*(global_layers or []), *(local_only_layers or [])]
         entity_order = layer_priority.get("entity_order", ["LWPOLYLINE", "POLYLINE", "LINE"])
         line_rebuild_limits = outer_frame_cfg.get("line_rebuild_limits", {})
         acceptance_cfg = outer_frame_cfg.get("acceptance", {})
@@ -138,5 +144,14 @@ class FrameDetector(IFrameDetector):
         msp = doc.modelspace()
 
         if self.frame_detect_mode == "rb_anchor":
-            return self.anchor_calibrated_locator.locate_frames(msp, dxf_path)
-        return self.anchor_locator.locate_frames(msp, dxf_path)
+            frames = self.anchor_calibrated_locator.locate_frames(msp, dxf_path)
+            stats = getattr(self.anchor_calibrated_locator, "last_detection_stats", {})
+        else:
+            frames = self.anchor_locator.locate_frames(msp, dxf_path)
+            stats = getattr(self.anchor_locator, "last_detection_stats", {})
+
+        if stats:
+            import logging
+
+            logging.getLogger(__name__).info("DETECT_FRAMES diagnostics: %s", stats)
+        return frames

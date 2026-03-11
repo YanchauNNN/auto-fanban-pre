@@ -24,7 +24,7 @@ describe("normalizeFormSchema", () => {
                 key: "project_no",
                 label: "project_no",
                 type: "select",
-                required: true,
+                required: false,
                 required_when: null,
                 source: "frontend",
                 default: null,

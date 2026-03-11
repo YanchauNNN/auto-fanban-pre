@@ -1,17 +1,40 @@
 from __future__ import annotations
 
+import sys
 import threading
 import traceback
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
+
 from fanban_m5_launcher import (
     list_recent_jobs,
+    new_job_id,
+    read_job_live_snapshot,
     read_job_summary,
     read_job_trace_excerpt,
+    resolve_job_dir,
     run_split_only_job,
 )
+from src.pipeline.project_no_inference import infer_project_no_from_path
+
+
+def resolve_project_field_update(
+    *,
+    current_value: str,
+    auto_managed: bool,
+    dwg_path: str | Path,
+) -> tuple[str, bool]:
+    inferred = infer_project_no_from_path(dwg_path)
+    if not inferred:
+        return current_value, auto_managed
+    if auto_managed or not current_value.strip():
+        return inferred, True
+    return current_value, False
 
 
 class FanbanM5App(tk.Tk):
@@ -26,8 +49,14 @@ class FanbanM5App(tk.Tk):
         self.project_var = tk.StringVar(value="2016")
         self.status_var = tk.StringVar(value="就绪")
         self._jobs_index: dict[str, dict] = {}
+        self._active_job_id: str | None = None
+        self._poll_after_id: str | None = None
+        self._poll_interval_ms = 1000
+        self._project_auto_managed = True
+        self._project_trace_guard = False
 
         self._build_ui()
+        self.project_var.trace_add("write", self._on_project_var_changed)
         self.refresh_jobs()
 
     def _build_ui(self) -> None:
@@ -119,6 +148,7 @@ class FanbanM5App(tk.Tk):
         )
         if file_path:
             self.dwg_var.set(file_path)
+            self._auto_fill_project_no(file_path)
 
     def pick_output_dir(self) -> None:
         dir_path = filedialog.askdirectory(title="选择输出目录")
@@ -165,7 +195,7 @@ class FanbanM5App(tk.Tk):
     def run_job(self) -> None:
         dwg_path = self.dwg_var.get().strip()
         output_dir = self.output_var.get().strip()
-        project_no = self.project_var.get().strip() or "2016"
+        project_no = self.project_var.get().strip()
         if not dwg_path:
             messagebox.showerror("缺少输入", "请先选择DWG文件。")
             return
@@ -173,7 +203,11 @@ class FanbanM5App(tk.Tk):
             messagebox.showerror("缺少输出目录", "请先选择输出目录。")
             return
 
-        self.status_var.set("任务运行中...")
+        job_id = new_job_id()
+        self._active_job_id = job_id
+        self.status_var.set(f"任务运行中: {job_id}")
+        self._set_detail_text(f"job_id: {job_id}\nstatus: running\n")
+        self._start_live_poll()
 
         def _worker():
             try:
@@ -181,6 +215,7 @@ class FanbanM5App(tk.Tk):
                     dwg_path=Path(dwg_path),
                     selected_output_dir=Path(output_dir),
                     project_no=project_no,
+                    job_id=job_id,
                 )
             except Exception as exc:  # noqa: BLE001
                 detail = "".join(traceback.format_exception(exc))
@@ -191,24 +226,44 @@ class FanbanM5App(tk.Tk):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _on_project_var_changed(self, *_args) -> None:
+        if self._project_trace_guard:
+            return
+        self._project_auto_managed = False
+
+    def _set_project_var_auto(self, value: str) -> None:
+        self._project_trace_guard = True
+        try:
+            self.project_var.set(value)
+        finally:
+            self._project_trace_guard = False
+        self._project_auto_managed = True
+
+    def _auto_fill_project_no(self, dwg_path: str | Path) -> None:
+        value, auto_managed = resolve_project_field_update(
+            current_value=self.project_var.get(),
+            auto_managed=self._project_auto_managed,
+            dwg_path=dwg_path,
+        )
+        if auto_managed:
+            self._set_project_var_auto(value)
+        else:
+            self._project_auto_managed = False
+
     def _handle_run_success(self, result) -> None:
+        self._stop_live_poll()
+        snapshot = read_job_live_snapshot(job_dir=result.job_dir)
+        flags = snapshot["summary"].get("flags", []) if snapshot["summary"] else []
         self.status_var.set(
-            f"任务完成: {result.job.job_id} status={result.job.status.value} copied={result.copied_files}"
+            f"任务完成: {result.job.job_id} status={result.job.status.value} copied={result.copied_files} flags={len(flags)}"
         )
         self.refresh_jobs()
-        self._set_detail_text(
-            "\n".join(
-                [
-                    f"job_id: {result.job.job_id}",
-                    f"status: {result.job.status.value}",
-                    f"job_dir: {result.job_dir}",
-                    f"selected_output_dir: {result.selected_output_dir}",
-                    f"copied_files: {result.copied_files}",
-                ],
-            ),
-        )
+        self._set_detail_text(self._format_live_detail(snapshot))
+        self._active_job_id = None
 
     def _handle_run_error(self, detail: str) -> None:
+        self._stop_live_poll()
+        self._active_job_id = None
         self.status_var.set("任务失败")
         self._set_detail_text(detail)
         messagebox.showerror("任务失败", detail)
@@ -216,6 +271,41 @@ class FanbanM5App(tk.Tk):
     def _set_detail_text(self, text: str) -> None:
         self.detail_text.delete("1.0", "end")
         self.detail_text.insert("1.0", text)
+
+    def _start_live_poll(self) -> None:
+        self._stop_live_poll()
+        self._poll_live_job()
+
+    def _stop_live_poll(self) -> None:
+        if self._poll_after_id is not None:
+            self.after_cancel(self._poll_after_id)
+            self._poll_after_id = None
+
+    def _poll_live_job(self) -> None:
+        if not self._active_job_id:
+            return
+        job_dir = resolve_job_dir(self._active_job_id)
+        snapshot = read_job_live_snapshot(job_dir=job_dir)
+        if snapshot["summary"]:
+            self.refresh_jobs()
+            self._set_detail_text(self._format_live_detail(snapshot))
+            status = str(snapshot["summary"].get("status", "")).lower()
+            if status in {"succeeded", "failed", "cancelled"}:
+                self._poll_after_id = None
+                return
+        self._poll_after_id = self.after(self._poll_interval_ms, self._poll_live_job)
+
+    def _format_live_detail(self, snapshot: dict) -> str:
+        summary = snapshot.get("summary", {})
+        trace = snapshot.get("trace", "")
+        return "\n".join(
+            [
+                json_dump(summary) if summary else "(job.json not ready)",
+                "",
+                "----- module5_trace.log -----",
+                trace or "(empty)",
+            ],
+        )
 
 
 def json_dump(data: dict) -> str:

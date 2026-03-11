@@ -10,13 +10,24 @@ from pathlib import Path
 from uuid import uuid4
 
 
-SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+def _resolve_source_project_root() -> Path:
+    this_file = Path(__file__).resolve()
+    for parent in this_file.parents:
+        if (parent / "backend").exists():
+            return parent
+    return this_file.parent
+
+
+SOURCE_PROJECT_ROOT = _resolve_source_project_root()
 BACKEND_ROOT = SOURCE_PROJECT_ROOT / "backend"
 if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from src.cad.autocad_path_resolver import resolve_autocad_paths  # noqa: E402
+from src.config import reload_config  # noqa: E402
 from src.models import Job, JobType  # noqa: E402
 from src.pipeline.executor import PipelineExecutor  # noqa: E402
+from src.pipeline.project_no_inference import resolve_project_no  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -60,13 +71,23 @@ def configure_runtime_environment() -> Path:
         ),
     )
     os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(bundle_root / "assets"))
+    autodetected = resolve_autocad_paths()
+    if autodetected.install_dir is not None:
+        os.environ["FANBAN_AUTOCAD_INSTALL_DIR"] = str(autodetected.install_dir)
+    if autodetected.accoreconsole_exe is not None:
+        os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"] = str(
+            autodetected.accoreconsole_exe
+        )
+    if autodetected.monochrome_ctb_path is not None:
+        os.environ["FANBAN_AUTOCAD__CTB_PATH"] = str(autodetected.monochrome_ctb_path)
+    reload_config()
     return app_root
 
 
 def build_split_only_job(
     *,
     dwg_path: Path,
-    project_no: str = "2016",
+    project_no: str = "",
     job_id: str | None = None,
 ) -> Job:
     resolved_dwg = Path(dwg_path).resolve()
@@ -78,7 +99,7 @@ def build_split_only_job(
     return Job(
         job_id=job_id or _new_job_id(),
         job_type=JobType.DELIVERABLE,
-        project_no=str(project_no),
+        project_no=resolve_project_no(project_no, resolved_dwg),
         input_files=[resolved_dwg],
         options={
             "enabled": True,
@@ -93,7 +114,7 @@ def run_split_only_job(
     *,
     dwg_path: Path,
     selected_output_dir: Path | None = None,
-    project_no: str = "2016",
+    project_no: str = "",
     job_id: str | None = None,
 ) -> LauncherRunResult:
     configure_runtime_environment()
@@ -119,6 +140,10 @@ def run_split_only_job(
         copied_files=copied,
         selected_output_dir=target_dir,
     )
+
+
+def new_job_id() -> str:
+    return _new_job_id()
 
 
 def copy_job_outputs_to_selected_dir(*, job_dir: Path, selected_output_dir: Path) -> int:
@@ -169,6 +194,10 @@ def list_recent_jobs(*, storage_dir: Path | None = None, limit: int = 20) -> lis
     return jobs[:limit]
 
 
+def resolve_job_dir(job_id: str) -> Path:
+    return (resolve_runtime_root() / "storage" / "jobs" / job_id).resolve()
+
+
 def read_job_trace_excerpt(*, job_dir: Path, max_lines: int = 200) -> str:
     task_root = Path(job_dir) / "work" / "cad_tasks"
     if not task_root.exists():
@@ -188,6 +217,24 @@ def read_job_summary(*, job_dir: Path) -> dict:
     if not job_file.exists():
         return {}
     return json.loads(job_file.read_text(encoding="utf-8"))
+
+
+def read_job_live_snapshot(
+    *,
+    job_dir: Path | None = None,
+    job_id: str | None = None,
+    max_trace_lines: int = 200,
+) -> dict:
+    if job_dir is None:
+        if not job_id:
+            raise ValueError("job_dir or job_id is required")
+        job_dir = resolve_job_dir(job_id)
+    resolved_job_dir = Path(job_dir)
+    return {
+        "job_dir": str(resolved_job_dir),
+        "summary": read_job_summary(job_dir=resolved_job_dir),
+        "trace": read_job_trace_excerpt(job_dir=resolved_job_dir, max_lines=max_trace_lines),
+    }
 
 
 def _new_job_id() -> str:

@@ -156,6 +156,8 @@ def _make_frame(
     x=0.0, y=0.0, w=841.0, h=594.0,
     internal_code="1234567-JG001-001",
     external_code="JD1NHT11001B25C42SD",
+    revision="A",
+    status="CFC",
     frame_id=None,
     source_file=None,
 ) -> FrameMeta:
@@ -171,6 +173,8 @@ def _make_frame(
     tb = TitleblockFields(
         internal_code=internal_code,
         external_code=external_code,
+        revision=revision,
+        status=status,
         engineering_no="1234",
         title_cn="测试图纸",
         page_total=1, page_index=1,
@@ -243,29 +247,45 @@ def _create_test_dxf(path: Path, *, entities_bbox: tuple | None = None) -> Path:
 
 
 class TestOutputNaming:
-    """输出文件名 external_code(internal_code)"""
+    """输出文件名 external_code+revision+status (internal_code)"""
 
     def test_output_name_both_present(self):
         assert make_output_name(
             external_code="JD1NHT11001B25C42SD",
+            revision="A",
+            status="CFC",
             internal_code="1234567-JG001-001",
-        ) == "JD1NHT11001B25C42SD(1234567-JG001-001)"
+        ) == "JD1NHT11001B25C42SDACFC (1234567-JG001-001)"
+
+    def test_output_name_missing_revision_or_status_falls_back_to_external_internal(self):
+        assert make_output_name(
+            external_code="JD1NHT11001B25C42SD",
+            revision=None,
+            status="CFC",
+            internal_code="1234567-JG001-001",
+        ) == "JD1NHT11001B25C42SD (1234567-JG001-001)"
 
     def test_output_name_only_internal(self):
         assert make_output_name(
             external_code=None,
+            revision="A",
+            status="CFC",
             internal_code="1234567-JG001-001",
         ) == "1234567-JG001-001"
 
     def test_output_name_only_external(self):
         assert make_output_name(
             external_code="JD1NHT11001B25C42SD",
+            revision=None,
+            status=None,
             internal_code=None,
         ) == "JD1NHT11001B25C42SD"
 
     def test_output_name_fallback(self):
         assert make_output_name(
             external_code=None,
+            revision=None,
+            status=None,
             internal_code=None,
             fallback_id="abcd1234",
         ) == "abcd1234"
@@ -274,15 +294,17 @@ class TestOutputNaming:
         frame = _make_frame(
             internal_code="AAA-BBB-001",
             external_code="EXT19CHARS0000001XX",
+            revision="B",
+            status="CFC",
         )
-        assert output_name_for_frame(frame) == "EXT19CHARS0000001XX(AAA-BBB-001)"
+        assert output_name_for_frame(frame) == "EXT19CHARS0000001XXBCFC (AAA-BBB-001)"
 
     def test_output_name_for_sheet_set(self):
         ss = _make_sheet_set(
             master_internal="AAA-BBB-001",
             master_external="EXT19CHARS0000001XX",
         )
-        assert output_name_for_sheet_set(ss) == "EXT19CHARS0000001XX(AAA-BBB-001)"
+        assert output_name_for_sheet_set(ss) == "EXT19CHARS0000001XXACFC (AAA-BBB-001)"
 
 
 # ======================================================================
@@ -308,18 +330,20 @@ class TestSplitSingleFrame:
         assert frame.runtime.dwg_path == dwg
 
     def test_split_single_frame_naming(self, temp_dir):
-        """PDF/DWG 文件名 = external_code(internal_code)"""
+        """PDF/DWG 文件名 = external_code+revision+status (internal_code)"""
         splitter = _make_splitter(temp_dir)
         dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
         frame = _make_frame(
             internal_code="AAABBBB-CCCDD-001",
             external_code="EXT19CHARS0000001XX",
+            revision="B",
+            status="CFC",
             source_file=dxf,
         )
 
         pdf, dwg = splitter.split_frame(dxf, frame, temp_dir / "output")
 
-        expected_stem = "EXT19CHARS0000001XX(AAABBBB-CCCDD-001)"
+        expected_stem = "EXT19CHARS0000001XXBCFC (AAABBBB-CCCDD-001)"
         assert pdf.stem == expected_stem
         assert dwg.stem == expected_stem
 

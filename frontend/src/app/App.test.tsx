@@ -53,7 +53,7 @@ beforeEach(() => {
             key: "project_no",
             label: "项目号",
             type: "select",
-            required: true,
+            required: false,
             requiredWhen: null,
             defaultValue: "",
             description: "项目号",

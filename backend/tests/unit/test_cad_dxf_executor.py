@@ -606,12 +606,16 @@ def _make_frame(
     source_file: Path,
     internal_code: str,
     external_code: str,
+    revision: str = "A",
+    status: str = "CFC",
 ) -> FrameMeta:
     bbox = BBox(xmin=0, ymin=0, xmax=1000, ymax=600)
     runtime = _make_runtime(frame_id, source_file, bbox)
     tb = TitleblockFields(
         internal_code=internal_code,
         external_code=external_code,
+        revision=revision,
+        status=status,
         title_cn="测试图纸",
         page_total=1,
         page_index=1,
@@ -790,6 +794,43 @@ def test_group_by_source_dxf(tmp_path: Path):
     assert len(grouped[source_a.resolve()]["frames"]) == 1
     assert len(grouped[source_a.resolve()]["sheet_sets"]) == 1
     assert len(grouped[source_b.resolve()]["frames"]) == 1
+
+
+def test_make_output_name_includes_revision_and_status():
+    assert CADDXFExecutor._make_output_name(
+        external_code="E001",
+        revision="B",
+        status="CFC",
+        internal_code="I-001",
+        fallback_id="fallback",
+    ) == "E001BCFC (I-001)"
+
+
+def test_build_task_json_uses_revision_and_status_in_name(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+        revision="B",
+        status="CFC",
+    )
+
+    executor = _make_executor()
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=output_dir,
+    )
+
+    assert task["frames"][0]["name"] == "E001BCFC (I-001)"
 
 
 def test_result_json_backfill_paths(tmp_path: Path):

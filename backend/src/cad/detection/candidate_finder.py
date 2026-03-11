@@ -58,8 +58,23 @@ class CandidateFinder:
             候选矩形的BBox列表（按面积降序）
         """
         if self.layer_order:
-            return self._find_rectangles_by_layer(msp)
+            return self.find_rectangles_in_layers(msp, self.layer_order)
         return self._find_rectangles_global(msp)
+
+    def find_rectangles_in_layers(
+        self,
+        msp,
+        layers: Iterable[str],
+        *,
+        window: BBox | None = None,
+        localize_line_rebuild: bool = False,
+    ) -> list[BBox]:
+        return self._find_rectangles_by_layer(
+            msp,
+            list(layers),
+            window=window,
+            localize_line_rebuild=localize_line_rebuild,
+        )
 
     def _find_rectangles_global(self, msp) -> list[BBox]:
         poly_candidates: list[BBox] = []
@@ -92,12 +107,19 @@ class CandidateFinder:
 
         return candidates
 
-    def _find_rectangles_by_layer(self, msp) -> list[BBox]:
+    def _find_rectangles_by_layer(
+        self,
+        msp,
+        layers: list[str],
+        *,
+        window: BBox | None = None,
+        localize_line_rebuild: bool = False,
+    ) -> list[BBox]:
         poly_candidates: list[BBox] = []
         line_candidates: list[BBox] = []
         allow_line_rebuild = "LINE" in self.entity_order
 
-        for layer in self.layer_order:
+        for layer in layers:
             layer_poly_candidates: list[BBox] = []
             layer_poly_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
             layer_line_segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
@@ -116,63 +138,70 @@ class CandidateFinder:
                             if not self._is_axis_aligned(vertices):
                                 continue
                             bbox = self._bbox_from_vertices(vertices)
+                            if window and not bbox.intersects(window):
+                                continue
                             if self._is_valid_size(bbox):
                                 layer_poly_candidates.append(bbox)
                             continue
                         if allow_line_rebuild:
-                            layer_poly_segments.extend(self._polyline_segments(vertices))
+                            layer_poly_segments.extend(
+                                self._polyline_segments(vertices, window=window)
+                            )
                 elif entity_type == "LINE" and allow_line_rebuild:
-                    layer_line_segments.extend(self._line_segments(msp, layer))
+                    layer_line_segments.extend(self._line_segments(msp, layer, window=window))
 
             if layer_poly_candidates:
                 if self._bbox_scale_validator:
                     valid = [
                         bbox for bbox in layer_poly_candidates if self._bbox_scale_validator(bbox)
                     ]
-                    invalid_count = len(layer_poly_candidates) - len(valid)
                     poly_candidates.extend(valid)
-                    if invalid_count == 0:
-                        continue
                 else:
                     poly_candidates.extend(layer_poly_candidates)
-                    continue
             if allow_line_rebuild and (layer_poly_segments or layer_line_segments):
                 combined_segments = layer_poly_segments + layer_line_segments
-                if (
-                    self.line_rebuild_max_segments
-                    and len(combined_segments) > self.line_rebuild_max_segments
-                    and layer_poly_segments
-                ):
-                    poly_rects = self._rebuild_from_segments(
-                        layer_poly_segments, context=f"layer={layer}:poly_only"
-                    )
-                    valid_poly_rects = [
-                        bbox for bbox in poly_rects if self._is_valid_size(bbox)
+                if localize_line_rebuild and window is not None:
+                    valid_line_rects = [
+                        bbox
+                        for bbox in self._rebuild_from_segment_components(
+                            combined_segments,
+                            layer=layer,
+                        )
+                        if self._is_valid_size(bbox)
                     ]
-                    line_candidates.extend(valid_poly_rects)
-                    if valid_poly_rects:
-                        continue
-                    if layer_line_segments:
-                        line_rects = self._rebuild_from_segments(
-                            layer_line_segments, context=f"layer={layer}:line_only"
-                        )
-                        line_candidates.extend(
-                            [bbox for bbox in line_rects if self._is_valid_size(bbox)]
-                        )
+                    line_candidates.extend(valid_line_rects)
                 else:
-                    line_candidates.extend(
-                        [
+                    if (
+                        self.line_rebuild_max_segments
+                        and len(combined_segments) > self.line_rebuild_max_segments
+                        and layer_poly_segments
+                    ):
+                        poly_rects = self._rebuild_from_segments(
+                            layer_poly_segments, context=f"layer={layer}:poly_only"
+                        )
+                        valid_poly_rects = [
+                            bbox for bbox in poly_rects if self._is_valid_size(bbox)
+                        ]
+                        line_candidates.extend(valid_poly_rects)
+                        if layer_line_segments:
+                            line_rects = self._rebuild_from_segments(
+                                layer_line_segments, context=f"layer={layer}:line_only"
+                            )
+                            valid_line_rects = [
+                                bbox for bbox in line_rects if self._is_valid_size(bbox)
+                            ]
+                            line_candidates.extend(valid_line_rects)
+                    else:
+                        valid_line_rects = [
                             bbox
                             for bbox in self._rebuild_from_segments(
                                 combined_segments, context=f"layer={layer}"
                             )
                             if self._is_valid_size(bbox)
                         ]
-                    )
+                        line_candidates.extend(valid_line_rects)
 
-        candidates = self._dedupe_candidates(poly_candidates + line_candidates)
-        candidates.sort(key=lambda b: b.width * b.height, reverse=True)
-        return candidates
+        return self._finalize_candidates(poly_candidates + line_candidates)
 
     def _extract_bbox(self, entity) -> BBox | None:
         """从polyline提取外接矩形"""
@@ -233,6 +262,11 @@ class CandidateFinder:
             seen.add(key)
             unique.append(bbox)
         return unique
+
+    def _finalize_candidates(self, candidates: list[BBox]) -> list[BBox]:
+        finalized = self._dedupe_candidates(candidates)
+        finalized.sort(key=lambda b: b.width * b.height, reverse=True)
+        return finalized
 
     def _iter_layer_entities(self, msp, layer: str, entity_type: str):
         query = f'{entity_type}[layer=="{layer}"]'
@@ -333,9 +367,11 @@ class CandidateFinder:
         ys = [p[1] for p in vertices]
         return BBox(xmin=min(xs), ymin=min(ys), xmax=max(xs), ymax=max(ys))
 
-    @staticmethod
     def _polyline_segments(
+        self,
         vertices: list[tuple[float, float]],
+        *,
+        window: BBox | None = None,
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for idx in range(len(vertices) - 1):
@@ -343,20 +379,95 @@ class CandidateFinder:
             p2 = vertices[idx + 1]
             if p1 == p2:
                 continue
-            segments.append((p1, p2))
+            segment = (p1, p2)
+            if window and not self._segment_intersects_window(segment, window):
+                continue
+            segments.append(segment)
         return segments
 
     def _line_segments(
-        self, msp, layer: str
+        self, msp, layer: str, window: BBox | None = None
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
         for entity in self._iter_layer_entities(msp, layer, "LINE"):
             start = entity.dxf.start
             end = entity.dxf.end
-            segments.append(
-                ((float(start.x), float(start.y)), (float(end.x), float(end.y)))
-            )
+            segment = ((float(start.x), float(start.y)), (float(end.x), float(end.y)))
+            if window and not self._segment_intersects_window(segment, window):
+                continue
+            segments.append(segment)
         return segments
+
+    def _segment_intersects_window(
+        self,
+        segment: tuple[tuple[float, float], tuple[float, float]],
+        window: BBox,
+    ) -> bool:
+        (x1, y1), (x2, y2) = segment
+        return BBox(
+            xmin=min(x1, x2),
+            ymin=min(y1, y2),
+            xmax=max(x1, x2),
+            ymax=max(y1, y2),
+        ).intersects(window)
+
+    def _rebuild_from_segment_components(
+        self,
+        segments: list[tuple[tuple[float, float], tuple[float, float]]],
+        *,
+        layer: str,
+    ) -> list[BBox]:
+        rectangles: list[BBox] = []
+        for idx, component in enumerate(self._split_segments_into_components(segments), start=1):
+            if len(component) < 4:
+                continue
+            rectangles.extend(
+                self._rebuild_from_segments(
+                    component,
+                    context=f"layer={layer}:local_component={idx}",
+                )
+            )
+        return rectangles
+
+    def _split_segments_into_components(
+        self,
+        segments: list[tuple[tuple[float, float], tuple[float, float]]],
+    ) -> list[list[tuple[tuple[float, float], tuple[float, float]]]]:
+        if not segments:
+            return []
+
+        endpoint_index: dict[tuple[float, float], list[int]] = {}
+        for idx, segment in enumerate(segments):
+            for point in segment:
+                key = (
+                    round(point[0] / max(self.coord_tol, 1e-6)),
+                    round(point[1] / max(self.coord_tol, 1e-6)),
+                )
+                endpoint_index.setdefault(key, []).append(idx)
+
+        visited: set[int] = set()
+        components: list[list[tuple[tuple[float, float], tuple[float, float]]]] = []
+        for start_idx in range(len(segments)):
+            if start_idx in visited:
+                continue
+            stack = [start_idx]
+            comp_indices: list[int] = []
+            visited.add(start_idx)
+            while stack:
+                current = stack.pop()
+                comp_indices.append(current)
+                for point in segments[current]:
+                    key = (
+                        round(point[0] / max(self.coord_tol, 1e-6)),
+                        round(point[1] / max(self.coord_tol, 1e-6)),
+                    )
+                    for neighbor in endpoint_index.get(key, []):
+                        if neighbor in visited:
+                            continue
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+            components.append([segments[i] for i in comp_indices])
+        return components
 
     def _rebuild_from_lines(self, msp) -> list[BBox]:
         """从LINE实体重建矩形（兜底方案）"""

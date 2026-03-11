@@ -11,7 +11,7 @@
   3. 无法判定 → 保守保留（硬约束：图框范围内图素零误删）
 
 命名规则（强约束）:
-  输出 pdf/dwg 文件名 = external_code(internal_code)
+  输出 pdf/dwg 文件名 = external_code+revision+status (internal_code)
 """
 
 from __future__ import annotations
@@ -51,15 +51,23 @@ _ALWAYS_KEEP_TYPES = frozenset({
 def make_output_name(
     *,
     external_code: str | None = None,
+    revision: str | None = None,
+    status: str | None = None,
     internal_code: str | None = None,
     fallback_id: str = "unknown",
 ) -> str:
-    if external_code and internal_code:
-        return f"{external_code}({internal_code})"
-    if internal_code:
-        return internal_code
-    if external_code:
-        return external_code
+    external = (external_code or "").strip()
+    rev = (revision or "").strip()
+    doc_status = (status or "").strip()
+    internal = (internal_code or "").strip()
+
+    if external and internal:
+        prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
+        return f"{prefix} ({internal})"
+    if internal:
+        return internal
+    if external:
+        return external
     return fallback_id
 
 
@@ -67,6 +75,8 @@ def output_name_for_frame(frame: FrameMeta) -> str:
     tb = frame.titleblock
     return make_output_name(
         external_code=tb.external_code,
+        revision=tb.revision,
+        status=tb.status,
         internal_code=tb.internal_code,
         fallback_id=frame.frame_id[:8],
     )
@@ -77,6 +87,8 @@ def output_name_for_sheet_set(sheet_set: SheetSet) -> str:
         tb = sheet_set.master_page.frame_meta.titleblock
         return make_output_name(
             external_code=tb.external_code,
+            revision=tb.revision,
+            status=tb.status,
             internal_code=tb.internal_code,
             fallback_id=f"sheet_set_{sheet_set.cluster_id[:8]}",
         )

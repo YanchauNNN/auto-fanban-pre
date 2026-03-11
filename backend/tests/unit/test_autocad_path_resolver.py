@@ -2,10 +2,71 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.cad.autocad_path_resolver import resolve_autocad_paths
+import pytest
+
+from src.cad.autocad_path_resolver import _default_install_candidates, resolve_autocad_paths
 
 
 class TestAutoCADPathResolver:
+    def test_resolve_prefers_highest_supported_official_install_over_older_and_installer_media(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        older_dir = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2019"
+        older_dir.mkdir(parents=True)
+        (older_dir / "acad.exe").touch()
+        (older_dir / "accoreconsole.exe").touch()
+
+        installer_media = (
+            temp_dir
+            / "AutoCAD_2024_Simplified_Chinese_Win_64bit_dlm"
+            / "x64"
+            / "acad"
+            / "PF"
+            / "Root"
+        )
+        installer_media.mkdir(parents=True)
+        (installer_media / "acad.exe").touch()
+        (installer_media / "accoreconsole.exe").touch()
+
+        highest_supported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2022"
+        highest_supported.mkdir(parents=True)
+        (highest_supported / "acad.exe").touch()
+        (highest_supported / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[older_dir, installer_media, highest_supported],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir == highest_supported
+        assert info.accoreconsole_exe == highest_supported / "accoreconsole.exe"
+
+    def test_resolve_rejects_versions_below_2018(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        unsupported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2014"
+        unsupported.mkdir(parents=True)
+        (unsupported / "acad.exe").touch()
+        (unsupported / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[unsupported],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir is None
+        assert info.accoreconsole_exe is None
+
     def test_resolve_from_configured_install_dir(self, temp_dir: Path, monkeypatch):
         install_dir = temp_dir / "AutoCAD 2021"
         (install_dir / "Fonts").mkdir(parents=True)
@@ -58,20 +119,99 @@ class TestAutoCADPathResolver:
         assert info.pc3_path == user_plotters / "打印PDF2.pc3"
         assert info.monochrome_ctb_path == user_plot_styles / "monochrome.ctb"
 
-    def test_resolve_from_extra_candidates(self, temp_dir: Path):
+    def test_resolve_from_extra_candidates(self, temp_dir: Path, monkeypatch):
         install_dir = temp_dir / "AutoCAD 2022"
         (install_dir / "Fonts").mkdir(parents=True)
+        (install_dir / "acad.exe").touch()
+        (install_dir / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
 
         info = resolve_autocad_paths(
             configured_install_dir=None,
             extra_candidates=[install_dir],
             registry_candidates=[],
+            include_default_candidates=False,
         )
 
         assert info.install_dir == install_dir
         assert info.fonts_dir == install_dir / "Fonts"
+        assert info.accoreconsole_exe == install_dir / "accoreconsole.exe"
 
-    def test_resolve_no_match(self):
+    def test_resolve_prefers_first_usable_install_dir_over_earlier_existing_dir(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        bad_dir = temp_dir / "AutoCAD 2022"
+        bad_dir.mkdir(parents=True)
+
+        good_dir = temp_dir / "AutoCAD 2021"
+        (good_dir / "Fonts").mkdir(parents=True)
+        (good_dir / "acad.exe").touch()
+        (good_dir / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[bad_dir, good_dir],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir == good_dir
+        assert info.accoreconsole_exe == good_dir / "accoreconsole.exe"
+
+    @pytest.mark.parametrize("root_suffix", [Path("PF") / "Root", Path("Program Files") / "Root"])
+    def test_resolve_supports_installer_layout_root_subdirs(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+        root_suffix: Path,
+    ):
+        installer_root = temp_dir / "AutoCAD_2022_Simplified_Chinese_Win_64bit_dlm" / "x64" / "acad"
+        install_dir = installer_root / root_suffix
+        install_dir.mkdir(parents=True)
+        (install_dir / "acad.exe").touch()
+        (install_dir / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[installer_root],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir == install_dir
+        assert info.accoreconsole_exe == install_dir / "accoreconsole.exe"
+
+    def test_resolve_prefers_later_candidate_with_accoreconsole_over_earlier_acad_only(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        older_dir = temp_dir / "AutoCAD 2020"
+        older_dir.mkdir(parents=True)
+        (older_dir / "acad.exe").touch()
+
+        better_dir = temp_dir / "AutoCAD 2022"
+        better_dir.mkdir(parents=True)
+        (better_dir / "acad.exe").touch()
+        (better_dir / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        info = resolve_autocad_paths(
+            configured_install_dir=None,
+            extra_candidates=[older_dir, better_dir],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert info.install_dir == better_dir
+        assert info.accoreconsole_exe == better_dir / "accoreconsole.exe"
+
+    def test_resolve_no_match(self, monkeypatch):
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
         info = resolve_autocad_paths(
             configured_install_dir="Z:/not-exists/autocad",
             extra_candidates=[],
@@ -82,3 +222,8 @@ class TestAutoCADPathResolver:
         assert info.install_dir is None
         assert info.fonts_dir is None
         assert info.acad_exe is None
+
+    def test_default_candidates_include_plain_autocad_roots(self):
+        candidates = _default_install_candidates()
+
+        assert Path(r"D:\AUTOCAD\AutoCAD 2022") in candidates
