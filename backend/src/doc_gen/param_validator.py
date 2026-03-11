@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from ..config import load_spec
-from ..models import DocContext, GlobalDocParams
+from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
 
 _COND_RE = re.compile(
     r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*['"]([^'"]*)['"]\s*$""",
@@ -79,10 +79,12 @@ class DocParamValidator:
         if "project_no" not in raw_params or self._is_empty(raw_params.get("project_no")):
             return dict(raw_params)
 
+        normalized_params = normalize_global_doc_params(raw_params)
+
         try:
-            params = GlobalDocParams(**raw_params)
+            params = GlobalDocParams(**normalized_params)
         except Exception:
-            return dict(raw_params)
+            return dict(normalized_params)
 
         return params.model_dump()
 

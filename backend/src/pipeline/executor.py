@@ -42,7 +42,7 @@ from ..doc_gen import (
     IEDGenerator,
 )
 from ..doc_gen.param_validator import DocParamValidator
-from ..models import DocContext, GlobalDocParams
+from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
 from .packager import Packager
 from .stages import DELIVERABLE_STAGES, StageEnum
 
@@ -452,6 +452,8 @@ class PipelineExecutor:
 
     def _build_doc_context(self, job: Job, context: dict) -> DocContext:
         merged_params = dict(job.params)
+        merged_params.pop("project_no", None)
+        merged_params = normalize_global_doc_params(merged_params)
         frame_001 = self._find_frame_001(context.get("frames", []))
         if frame_001:
             tb = frame_001.titleblock
