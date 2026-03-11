@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,16 @@ LAUNCHER_PATH = PROJECT_ROOT / "test" / "dist" / "src" / "fanban_m5_launcher.py"
 
 def _load_launcher():
     spec = importlib.util.spec_from_file_location("fanban_m5_launcher", LAUNCHER_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_launcher_from_path(path: Path):
+    spec = importlib.util.spec_from_file_location(f"fanban_m5_launcher_{uuid.uuid4().hex}", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -41,6 +52,58 @@ def test_build_split_only_job_sets_expected_flags(tmp_path: Path):
     assert job.options["enabled"] is True
     assert job.options["export_pdf"] is True
     assert job.options["split_only"] is True
+
+
+def test_launcher_import_does_not_crash_when_file_path_is_shallow(tmp_path: Path) -> None:
+    shallow_dir = Path(tmp_path.anchor) / f"fanban-m5-shallow-{uuid.uuid4().hex[:8]}"
+    shallow_dir.mkdir(parents=True, exist_ok=True)
+    shallow_path = shallow_dir / "fanban_m5_launcher.py"
+    shallow_path.write_text(LAUNCHER_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+
+    backend_root = PROJECT_ROOT / "backend"
+    original_sys_path = list(sys.path)
+    try:
+        if str(backend_root) not in sys.path:
+            sys.path.insert(0, str(backend_root))
+        module = _load_launcher_from_path(shallow_path)
+        assert hasattr(module, "build_split_only_job")
+    finally:
+        sys.path[:] = original_sys_path
+        try:
+            shallow_path.unlink()
+            shallow_dir.rmdir()
+        except OSError:
+            pass
+
+
+def test_build_split_only_job_infers_project_no_when_blank(tmp_path: Path):
+    launcher = _load_launcher()
+    dwg = tmp_path / "20261RS-JGS65.dwg"
+    dwg.write_text("dwg", encoding="utf-8")
+
+    job = launcher.build_split_only_job(
+        dwg_path=dwg,
+        project_no="",
+        job_id="job-launcher-infer",
+    )
+
+    assert job.project_no == "2026"
+
+
+def test_build_split_only_job_falls_back_to_default_when_blank_and_not_inferable(
+    tmp_path: Path,
+):
+    launcher = _load_launcher()
+    dwg = tmp_path / "sample.dwg"
+    dwg.write_text("dwg", encoding="utf-8")
+
+    job = launcher.build_split_only_job(
+        dwg_path=dwg,
+        project_no="",
+        job_id="job-launcher-default",
+    )
+
+    assert job.project_no == "2016"
 
 
 def test_copy_job_outputs_to_selected_dir_copies_drawings(tmp_path: Path):

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
 import threading
 import traceback
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+
+CURRENT_DIR = Path(__file__).resolve().parent
+if str(CURRENT_DIR) not in sys.path:
+    sys.path.insert(0, str(CURRENT_DIR))
 
 from fanban_m5_launcher import (
     list_recent_jobs,
@@ -15,6 +20,21 @@ from fanban_m5_launcher import (
     resolve_job_dir,
     run_split_only_job,
 )
+from src.pipeline.project_no_inference import infer_project_no_from_path
+
+
+def resolve_project_field_update(
+    *,
+    current_value: str,
+    auto_managed: bool,
+    dwg_path: str | Path,
+) -> tuple[str, bool]:
+    inferred = infer_project_no_from_path(dwg_path)
+    if not inferred:
+        return current_value, auto_managed
+    if auto_managed or not current_value.strip():
+        return inferred, True
+    return current_value, False
 
 
 class FanbanM5App(tk.Tk):
@@ -32,8 +52,11 @@ class FanbanM5App(tk.Tk):
         self._active_job_id: str | None = None
         self._poll_after_id: str | None = None
         self._poll_interval_ms = 1000
+        self._project_auto_managed = True
+        self._project_trace_guard = False
 
         self._build_ui()
+        self.project_var.trace_add("write", self._on_project_var_changed)
         self.refresh_jobs()
 
     def _build_ui(self) -> None:
@@ -125,6 +148,7 @@ class FanbanM5App(tk.Tk):
         )
         if file_path:
             self.dwg_var.set(file_path)
+            self._auto_fill_project_no(file_path)
 
     def pick_output_dir(self) -> None:
         dir_path = filedialog.askdirectory(title="选择输出目录")
@@ -171,7 +195,7 @@ class FanbanM5App(tk.Tk):
     def run_job(self) -> None:
         dwg_path = self.dwg_var.get().strip()
         output_dir = self.output_var.get().strip()
-        project_no = self.project_var.get().strip() or "2016"
+        project_no = self.project_var.get().strip()
         if not dwg_path:
             messagebox.showerror("缺少输入", "请先选择DWG文件。")
             return
@@ -201,6 +225,30 @@ class FanbanM5App(tk.Tk):
             self.after(0, lambda: self._handle_run_success(result))
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_project_var_changed(self, *_args) -> None:
+        if self._project_trace_guard:
+            return
+        self._project_auto_managed = False
+
+    def _set_project_var_auto(self, value: str) -> None:
+        self._project_trace_guard = True
+        try:
+            self.project_var.set(value)
+        finally:
+            self._project_trace_guard = False
+        self._project_auto_managed = True
+
+    def _auto_fill_project_no(self, dwg_path: str | Path) -> None:
+        value, auto_managed = resolve_project_field_update(
+            current_value=self.project_var.get(),
+            auto_managed=self._project_auto_managed,
+            dwg_path=dwg_path,
+        )
+        if auto_managed:
+            self._set_project_var_auto(value)
+        else:
+            self._project_auto_managed = False
 
     def _handle_run_success(self, result) -> None:
         self._stop_live_poll()

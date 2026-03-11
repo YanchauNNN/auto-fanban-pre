@@ -10,7 +10,15 @@ from pathlib import Path
 from uuid import uuid4
 
 
-SOURCE_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+def _resolve_source_project_root() -> Path:
+    this_file = Path(__file__).resolve()
+    for parent in this_file.parents:
+        if (parent / "backend").exists():
+            return parent
+    return this_file.parent
+
+
+SOURCE_PROJECT_ROOT = _resolve_source_project_root()
 BACKEND_ROOT = SOURCE_PROJECT_ROOT / "backend"
 if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -19,6 +27,7 @@ from src.cad.autocad_path_resolver import resolve_autocad_paths  # noqa: E402
 from src.config import reload_config  # noqa: E402
 from src.models import Job, JobType  # noqa: E402
 from src.pipeline.executor import PipelineExecutor  # noqa: E402
+from src.pipeline.project_no_inference import resolve_project_no  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -78,7 +87,7 @@ def configure_runtime_environment() -> Path:
 def build_split_only_job(
     *,
     dwg_path: Path,
-    project_no: str = "2016",
+    project_no: str = "",
     job_id: str | None = None,
 ) -> Job:
     resolved_dwg = Path(dwg_path).resolve()
@@ -90,7 +99,7 @@ def build_split_only_job(
     return Job(
         job_id=job_id or _new_job_id(),
         job_type=JobType.DELIVERABLE,
-        project_no=str(project_no),
+        project_no=resolve_project_no(project_no, resolved_dwg),
         input_files=[resolved_dwg],
         options={
             "enabled": True,
@@ -105,7 +114,7 @@ def run_split_only_job(
     *,
     dwg_path: Path,
     selected_output_dir: Path | None = None,
-    project_no: str = "2016",
+    project_no: str = "",
     job_id: str | None = None,
 ) -> LauncherRunResult:
     configure_runtime_environment()
