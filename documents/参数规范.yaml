@@ -140,9 +140,9 @@ doc_generation:
     project:
       project_no:
         type: str
-        required: true
+        required: false
         source: frontend
-        desc: "项目号，用于模板切换和规则分支"
+        desc: "项目号；可留空，API/桌面端会优先从DWG文件名自动推断，推断失败时回退2016"
       
       cover_variant:
         type: enum[cover_variant]

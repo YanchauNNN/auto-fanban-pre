@@ -161,6 +161,9 @@ def test_form_schema_returns_deliverable_fields_and_options(
     )
 
     assert "2016" in project_no["options"]
+    assert project_no["required"] is False
+    assert "DWG" in project_no["desc"]
+    assert "2016" in project_no["desc"]
     assert "1 总体文件" in file_category["options"]
     assert ied_design_type["options"]
     assert ied_responsible_unit["options"] == [
@@ -197,6 +200,64 @@ def test_create_batch_rejects_missing_required_param(monkeypatch, tmp_path: Path
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"]["param_errors"]["album_title_cn"] == ["required"]
+
+
+def test_create_batch_infers_project_no_from_uploaded_filename_when_blank(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params["project_no"] = ""
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("2026-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["project_no"] == "2026"
+
+
+def test_create_batch_uses_inferred_project_no_for_required_when_validation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params["project_no"] = ""
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("1818-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["param_errors"]["subitem_name_en"] == ["required"]
+    assert payload["detail"]["param_errors"]["album_title_en"] == ["required"]
+
+
+def test_create_batch_falls_back_to_default_project_no_when_not_inferable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params.pop("project_no")
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("sample-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["project_no"] == "2016"
 
 
 def test_create_batch_processes_jobs_and_exposes_downloads(

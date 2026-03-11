@@ -19,6 +19,7 @@ from src.doc_gen.param_validator import DocParamValidator
 from src.models import Job, JobStatus, JobType
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.job_manager import JobManager
+from src.pipeline.project_no_inference import resolve_project_no
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,10 @@ class DeliverableApiRuntime:
 
     def create_batch(self, *, files: list[UploadedFilePayload], raw_params: dict[str, Any]) -> dict[str, Any]:
         upload_errors = self._validate_uploads(files)
-        param_errors = self.validator.validate_frontend_params(raw_params)
+        resolved_submissions = [
+            (upload, self._resolve_params_for_upload(raw_params, upload.filename)) for upload in files
+        ]
+        param_errors = self._collect_param_errors(resolved_submissions)
 
         if upload_errors or param_errors:
             raise HTTPException(
@@ -117,13 +121,13 @@ class DeliverableApiRuntime:
             "split_only": False,
         }
 
-        for upload in files:
+        for upload, resolved_params in resolved_submissions:
             source_filename = Path(upload.filename).name or "upload.dwg"
             job = self.job_manager.create_job(
                 job_type=JobType.DELIVERABLE.value,
-                project_no=str(raw_params["project_no"]),
+                project_no=str(resolved_params["project_no"]),
                 options=options,
-                params=dict(raw_params),
+                params=resolved_params,
                 batch_id=batch_id,
                 source_filename=source_filename,
             )
@@ -136,6 +140,25 @@ class DeliverableApiRuntime:
             "batch_id": batch_id,
             "jobs": jobs,
         }
+
+    @staticmethod
+    def _resolve_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
+        resolved = dict(raw_params)
+        resolved["project_no"] = resolve_project_no(raw_params.get("project_no"), filename)
+        return resolved
+
+    def _collect_param_errors(
+        self,
+        resolved_submissions: list[tuple[UploadedFilePayload, dict[str, Any]]],
+    ) -> dict[str, list[str]]:
+        merged: dict[str, list[str]] = {}
+        for _, params in resolved_submissions:
+            for field_name, field_errors in self.validator.validate_frontend_params(params).items():
+                bucket = merged.setdefault(field_name, [])
+                for error in field_errors:
+                    if error not in bucket:
+                        bucket.append(error)
+        return merged
 
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
         jobs = self.job_manager.load_all_jobs()
