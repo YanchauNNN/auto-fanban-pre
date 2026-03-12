@@ -26,11 +26,12 @@ class DummyFinder:
 
 
 class DummyFitter:
-    def __init__(self, paper_variant_id: str = "A1") -> None:
+    def __init__(self, paper_variant_id: str = "A1", profile_id: str = "BASE10") -> None:
         self.paper_variant_id = paper_variant_id
+        self.profile_id = profile_id
 
     def fit_all(self, _bbox, _variants):
-        return [(self.paper_variant_id, 1.0, 1.0, "BASE10", 0.0)]
+        return [(self.paper_variant_id, 1.0, 1.0, self.profile_id, 0.0)]
 
 
 class LayeredDummyFinder:
@@ -100,6 +101,55 @@ def _layered_anchor_spec() -> BusinessSpec:
             "tolerances": {"roi_margin_percent": 0.0},
         },
         a4_multipage={},
+        doc_generation={},
+        enums={},
+    )
+
+
+def _layered_a4_spec() -> BusinessSpec:
+    return BusinessSpec(
+        schema_version="2.0",
+        titleblock_extract={
+            "paper_variants": {
+                "CNPE_A4": {"W": 100.0, "H": 50.0, "profile": "SMALL5"}
+            },
+            "roi_profiles": {
+                "SMALL5": {
+                    "description": "test-a4",
+                    "tolerance": 0.5,
+                    "outer_frame": [0, 100, 0, 50],
+                    "fields": {"锚点": [0, 100, 0, 50]},
+                },
+            },
+            "outer_frame": {
+                "layer_priority": {
+                    "global_layers": ["HIGH"],
+                    "local_only_layers": ["LOW"],
+                    "entity_order": ["LWPOLYLINE", "POLYLINE", "LINE"],
+                }
+            },
+            "anchor": {
+                "search_text": ["ANCHOR"],
+                "roi_field_name": "锚点",
+                "match_policy": "single_hit_same_roi",
+                "scale_candidates": [1],
+                "scale_match_rel_tol": 0.1,
+                "calibration": {
+                    "reference_point": "text_bbox_right_bottom",
+                    "SMALL5": {
+                        "text_height_1to1_mm": 2.5,
+                        "anchor_roi_rb_offset_1to1": [0.0, 100.0, 0.0, 50.0],
+                        "text_ref_in_anchor_roi_1to1": {
+                            "dx_right": 0.0,
+                            "dy_bottom": 0.0,
+                        },
+                    }
+                },
+            },
+            "tolerances": {"roi_margin_percent": 0.0},
+            "scale_fit": {"uniform_scale_tol": 0.02, "scale_candidate_match_tol": 0.015},
+        },
+        a4_multipage={"cluster_building": {"gap_threshold_factor": 0.5}},
         doc_generation={},
         enums={},
     )
@@ -179,3 +229,30 @@ def test_locate_frames_without_anchor_falls_back_to_geometry_layers() -> None:
 
     assert len(frames) == 1
     assert finder.calls[0] == (("HIGH",), None)
+
+
+def test_locate_frames_expands_a4_neighbors_from_local_layers_without_extra_anchors() -> None:
+    spec = _layered_a4_spec()
+    finder = LayeredDummyFinder(
+        by_layer={
+            "HIGH": [
+                BBox(xmin=0, ymin=0, xmax=100, ymax=50),
+                BBox(xmin=110, ymin=0, xmax=210, ymax=50),
+            ],
+            "LOW": [
+                BBox(xmin=220, ymin=0, xmax=320, ymax=50),
+                BBox(xmin=330, ymin=0, xmax=430, ymax=50),
+            ],
+        }
+    )
+    locator = AnchorFirstLocator(spec, finder, DummyFitter("CNPE_A4", "SMALL5"))
+
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+    msp.add_text("ANCHOR", dxfattribs={"insert": (10, 10), "height": 2.5})
+    msp.add_text("ANCHOR", dxfattribs={"insert": (120, 10), "height": 2.5})
+
+    frames = locator.locate_frames(msp, Path("dummy.dxf"))
+
+    assert len(frames) == 4
+    assert any(call[0] == ("LOW",) and call[1] is not None for call in finder.calls)

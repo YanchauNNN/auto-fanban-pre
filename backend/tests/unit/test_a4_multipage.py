@@ -274,8 +274,8 @@ class TestPageTotalIsClusterSize:
         assert len(sheet_sets) == 1
         assert sheet_sets[0].page_total == 2  # 实际帧数
 
-    def test_1818_real_scenario(self):
-        """真实场景：1818仿真图.dxf — Master page_total=1, Slave=7, 实际=7"""
+    def test_master_page_total_mismatch_is_ignored_when_slaves_match_actual(self):
+        """Master 单点误读不应覆盖 Slave 一致结果"""
         grouper = _make_grouper()
         master = make_master_frame(x_offset=0, y_offset=0, page_total=1)
         slaves = [
@@ -291,8 +291,8 @@ class TestPageTotalIsClusterSize:
         ss = sheet_sets[0]
         assert ss.page_total == 7  # 7 帧
         assert len(ss.pages) == 7
-        # Master 声称 1 ≠ 实际 7 → 应有 flag
-        assert "A4张数有误，请检查" in ss.flags
+        # Slave 与实际页数一致，Master 的单点误读不再触发误报
+        assert "A4张数有误，请检查" not in ss.flags
 
 
 class TestAuxiliaryPageCountCheck:

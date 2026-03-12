@@ -200,6 +200,23 @@ class AnchorFirstLocator:
             self._append_candidate_frame(selected_by_anchor[idx], dxf_path, frames, used_candidates)
 
         small5_templates = self._collect_size_templates(frames, "SMALL5")
+        a4_local_windows_total = 0
+        if small5_templates and self.local_only_layers:
+            (
+                a4_local_windows_total,
+                a4_local_window_hits_by_layer,
+                a4_used_local_only_layers,
+            ) = self._expand_local_a4_neighbors(
+                msp,
+                candidates,
+                small5_templates,
+                seen_candidates,
+            )
+            for layer, hits in a4_local_window_hits_by_layer.items():
+                local_window_hits_by_layer[layer] = local_window_hits_by_layer.get(layer, 0) + hits
+            for layer in a4_used_local_only_layers:
+                if layer not in used_local_only_layers:
+                    used_local_only_layers.append(layer)
         a4_candidates = [
             c
             for c in candidates
@@ -233,7 +250,7 @@ class AnchorFirstLocator:
             "anchors_total": len(anchor_items),
             "resolved_after_global_layers": resolved_after_global,
             "unresolved_before_local_layers": len(unresolved_ids),
-            "local_windows_total": len(local_windows),
+            "local_windows_total": len(local_windows) + a4_local_windows_total,
             "local_window_hits_by_layer": local_window_hits_by_layer,
             "used_local_only_layers": used_local_only_layers,
         }
@@ -577,6 +594,73 @@ class AnchorFirstLocator:
                     windows.append({"window": bbox, "anchor_ids": [idx]})
         return windows
 
+    def _expand_local_a4_neighbors(
+        self,
+        msp,
+        candidates: list[CandidateFrame],
+        templates: list[tuple[float, float]],
+        seen_candidates: set[tuple[float, float, float, float, str, str]],
+    ) -> tuple[int, dict[str, int], list[str]]:
+        seeds = [
+            cand
+            for cand in candidates
+            if cand.roi_profile_id == "SMALL5"
+            and self._is_a4_candidate(cand)
+            and self._bbox_matches_templates(cand.bbox, templates)
+        ]
+        if not seeds:
+            return 0, {}, []
+
+        processed: set[tuple[float, float, float, float]] = set()
+        queued = {self._candidate_key(cand) for cand in seeds}
+        queue = list(seeds)
+        local_windows_total = 0
+        hits_by_layer: dict[str, int] = {}
+        used_layers: list[str] = []
+
+        while queue:
+            seed = queue.pop(0)
+            seed_key = self._candidate_key(seed)
+            if seed_key in processed:
+                continue
+            processed.add(seed_key)
+            search_window = self._build_a4_neighbor_window(seed.bbox)
+            local_windows_total += 1
+            for layer in self.local_only_layers:
+                layer_candidates = self._build_candidates_for_layers(
+                    msp,
+                    [layer],
+                    window=search_window,
+                    localize_line_rebuild=True,
+                )
+                filtered = [
+                    cand
+                    for cand in layer_candidates
+                    if cand.roi_profile_id == "SMALL5"
+                    and self._is_a4_candidate(cand)
+                    and self._bbox_matches_templates(cand.bbox, templates)
+                ]
+                if not filtered:
+                    continue
+                if layer not in used_layers:
+                    used_layers.append(layer)
+                new_hits = 0
+                for cand in filtered:
+                    signature = self._candidate_signature(cand)
+                    if signature in seen_candidates:
+                        continue
+                    seen_candidates.add(signature)
+                    candidates.append(cand)
+                    new_hits += 1
+                    cand_key = self._candidate_key(cand)
+                    if cand_key not in queued:
+                        queue.append(cand)
+                        queued.add(cand_key)
+                if new_hits:
+                    hits_by_layer[layer] = hits_by_layer.get(layer, 0) + new_hits
+
+        return local_windows_total, hits_by_layer, used_layers
+
     def _predict_outer_bboxes(self, item: TextItem) -> list[BBox]:
         predicted: list[BBox] = []
         ref_x, ref_y = self._anchor_ref_point(item)
@@ -663,6 +747,18 @@ class AnchorFirstLocator:
             ymin=bbox.ymin - dy,
             xmax=bbox.xmax + dx,
             ymax=bbox.ymax + dy,
+        )
+
+    def _build_a4_neighbor_window(self, bbox: BBox) -> BBox:
+        min_size = min(bbox.width, bbox.height)
+        gap = self.a4_gap_factor * min_size
+        expand_x = bbox.width + gap + 2 * self.coord_tol
+        expand_y = bbox.height + gap + 2 * self.coord_tol
+        return BBox(
+            xmin=bbox.xmin - expand_x,
+            ymin=bbox.ymin - expand_y,
+            xmax=bbox.xmax + expand_x,
+            ymax=bbox.ymax + expand_y,
         )
 
     @staticmethod

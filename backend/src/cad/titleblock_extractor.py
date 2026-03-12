@@ -441,8 +441,14 @@ class TitleblockExtractor(ITitleblockExtractor):
         re_mid_album = re.compile(mid_album_pat)
 
         candidates = self._candidate_strings(items)
+        ordered_items = sorted(items, key=lambda t: (-t.y, t.x))
+        joined_fragments = "".join(
+            self._strip_all_whitespace((item.text or "").upper()) for item in ordered_items
+        )
+        if joined_fragments:
+            candidates.append(joined_fragments)
         for cand in candidates:
-            text = cand.upper().replace(" ", "")
+            text = self._strip_all_whitespace(cand.upper())
             m = re_full.match(text)
             if not m:
                 m = re_short.match(text)
@@ -657,6 +663,10 @@ class TitleblockExtractor(ITitleblockExtractor):
     @staticmethod
     def _normalize_spaces(text: str) -> str:
         return re.sub(r"\s+", " ", (text or "").strip())
+
+    @staticmethod
+    def _strip_all_whitespace(text: str) -> str:
+        return re.sub(r"\s+", "", text or "")
 
     @staticmethod
     def _normalize_anchor(text: str) -> str:

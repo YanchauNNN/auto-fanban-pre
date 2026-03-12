@@ -44,6 +44,22 @@ def test_parse_internal_code_full_and_short() -> None:
     assert code == "ABC1234-ABCDE"
 
 
+def test_parse_internal_code_recombines_fragmented_lines() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["internal_code"].parse
+
+    code, album = extractor._parse_internal_code(
+        [
+            _item("20261NH-JGS51-", x=10.0, y=10.0),
+            _item("008", x=80.0, y=7.0),
+        ],
+        parse_cfg,
+    )
+
+    assert code == "20261NH-JGS51-008"
+    assert album == "51"
+
+
 def test_parse_external_code_fixed19() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse

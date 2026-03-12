@@ -237,25 +237,32 @@ class A4MultipageGrouper(IA4MultipageGrouper):
 
         真实多页张数 = ``len(cluster)``（实际检测到的 A4 图框数量）。
         Master 图签区 ``page_total`` 和 Slave 页码标记 ``page_total``
-        仅为辅助信息。若任一与实际张数不一致，追加 flag
-        ``A4张数有误，请检查``（仅追加一次，不中断，预留给前端展示）。
+        仅为辅助信息。优先信任 Slave 页码标记：
+        - 若存在任一 Slave page_total，则仅当 Slave 与实际张数不一致时报警
+        - 若所有 Slave 均缺失 page_total，再回退检查 Master
+
+        这样可以避免 Master 单点误读导致误报，同时保留真实异常。
         """
         actual = len(cluster)
 
-        # 检查 Master 的 page_total
-        master_pt = master.titleblock.page_total
-        if master_pt is not None and master_pt != actual:
-            flags.append("A4张数有误，请检查")
-            return  # 只追加一次
-
-        # 检查 Slave 的 page_total
+        slave_totals: list[int] = []
         for frame in cluster:
             if frame.frame_id == master.frame_id:
                 continue
             slave_pt = frame.titleblock.page_total
-            if slave_pt is not None and slave_pt != actual:
+            if slave_pt is None:
+                continue
+            slave_totals.append(slave_pt)
+            if slave_pt != actual:
                 flags.append("A4张数有误，请检查")
                 return  # 只追加一次
+
+        if slave_totals:
+            return
+
+        master_pt = master.titleblock.page_total
+        if master_pt is not None and master_pt != actual:
+            flags.append("A4张数有误，请检查")
 
     def _identify_master(self, cluster: list[FrameMeta]) -> FrameMeta | None:
         """识别Master页（字段命中最多，或page_index=1）"""
