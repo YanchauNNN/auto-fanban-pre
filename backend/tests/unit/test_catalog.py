@@ -13,6 +13,8 @@ from src.models import (
     FrameMeta,
     FrameRuntime,
     GlobalDocParams,
+    PageInfo,
+    SheetSet,
     TitleblockFields,
 )
 
@@ -58,6 +60,7 @@ def _build_context(project_no: str = "2016") -> DocContext:
         upgrade_note_text="升版",
     )
     derived = DerivedFields(
+        album_code="01",
         cover_internal_code="1234567-JG001-FM",
         catalog_internal_code="1234567-JG001-TM",
         cover_external_code="JD1NHT11F01B25C42SD",
@@ -70,6 +73,28 @@ def _build_context(project_no: str = "2016") -> DocContext:
     )
     frames = [_make_frame(3), _make_frame(1), _make_frame(2)]
     return DocContext(params=params, derived=derived, frames=frames)
+
+
+def _build_context_with_sheet_set_001() -> DocContext:
+    ctx = _build_context()
+    frame_001 = _make_frame(1)
+    frame_001.titleblock.paper_size_text = "A4"
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=frame_001.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=frame_001,
+    )
+    ctx.frames = [_make_frame(3), _make_frame(2)]
+    ctx.sheet_sets = [
+        SheetSet(
+            cluster_id="sheet-set-001",
+            page_total=1,
+            pages=[master_page],
+            master_page=master_page,
+        ),
+    ]
+    return ctx
 
 
 def test_catalog_row_order_and_upgrade_note() -> None:
@@ -127,4 +152,26 @@ def test_catalog_backfill_page_count(temp_dir: Path) -> None:
 
     ws = load_workbook(output_xlsx).active
     assert ws["H10"].value == 3
+
+
+def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set_001(
+    temp_dir: Path,
+) -> None:
+    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context_with_sheet_set_001()
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "目录.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/目录模板文件.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+
+    assert ws["D3"].value == "第01图册图纸(文件)目录"
+    assert ws["B11"].value == "1234567-JG001-001"
+    assert ws["D11"].value == "JD1NHT11001B25C42SD"
 

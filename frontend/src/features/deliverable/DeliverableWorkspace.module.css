@@ -1,0 +1,405 @@
+.modalLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 1.05rem 0.95rem;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #4f76a3;
+}
+
+.description {
+  margin: 0.3rem 0 0;
+  color: #496b92;
+  max-width: 52rem;
+  font-size: 0.92rem;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 0.9rem;
+}
+
+.sidebarPanel,
+.contentPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.summaryCard,
+.section {
+  border: 1px solid rgba(33, 74, 126, 0.12);
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 20px;
+  padding: 0.85rem 0.9rem;
+}
+
+.summaryHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.summaryHeaderRow h3,
+.sectionHeader h3,
+.advancedBlock h4 {
+  margin: 0;
+  color: #123e69;
+}
+
+.summaryHeaderRow span {
+  color: #56789f;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.summaryMeta,
+.helperText,
+.emptyState {
+  margin: 0.32rem 0 0;
+  color: #5a7899;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.fileList {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.45rem;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.fileList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: rgba(20, 73, 135, 0.05);
+  color: #14395e;
+  font-size: 0.88rem;
+}
+
+.summaryActions,
+.presetStack,
+.advancedStack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.presetButtonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.fileButton,
+.secondaryButton,
+.ghostButton,
+.primaryButton,
+.intentChip,
+.recommendationChip,
+.fieldAction,
+.comboToggle,
+.comboOption {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton {
+  padding: 0.78rem 1.15rem;
+  background: linear-gradient(135deg, #144987, #2467b1);
+  color: #f8fbff;
+}
+
+.secondaryButton {
+  padding: 0.72rem 0.95rem;
+  background: rgba(20, 73, 135, 0.08);
+  color: #174781;
+}
+
+.ghostButton,
+.fileButton,
+.fieldAction,
+.comboToggle,
+.comboOption {
+  border-color: rgba(20, 73, 135, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+  color: #174781;
+}
+
+.intentChip {
+  padding: 0.65rem 0.9rem;
+  border-color: rgba(20, 73, 135, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+  color: #174781;
+}
+
+.intentChipActive {
+  border-color: rgba(33, 96, 170, 0.28);
+  background: linear-gradient(135deg, #144987, #236bb9);
+  color: #f8fbff;
+}
+
+.recommendationChip {
+  padding: 0.42rem 0.7rem;
+  border-color: rgba(20, 73, 135, 0.16);
+  background: rgba(20, 73, 135, 0.05);
+  color: #174781;
+  font-size: 0.82rem;
+}
+
+.fieldAction,
+.comboToggle {
+  padding: 0.42rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.primaryButton:disabled {
+  border: 1px dashed rgba(20, 70, 128, 0.22);
+  background: rgba(20, 70, 128, 0.05);
+  color: #58789b;
+  cursor: not-allowed;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.formErrorPanel {
+  border-radius: 14px;
+  padding: 0.72rem 0.82rem;
+  background: rgba(167, 61, 39, 0.08);
+  color: #842f1f;
+}
+
+.formErrorPanel p {
+  margin: 0;
+}
+
+.formErrorPanel p + p {
+  margin-top: 0.35rem;
+}
+
+.sectionHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.72rem;
+}
+
+.sectionNote,
+.intentHelp,
+.replaceSummary {
+  padding: 0.68rem 0.78rem;
+  border-radius: 14px;
+  background: rgba(20, 73, 135, 0.05);
+  color: #345a84;
+}
+
+.sectionNote p,
+.intentHelp p,
+.replaceSummary p {
+  margin: 0;
+}
+
+.sectionNote p + p,
+.replaceSummary p + p {
+  margin-top: 0.35rem;
+}
+
+.sectionNoteWarning {
+  background: rgba(196, 106, 45, 0.08);
+  color: #905019;
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: 0.7rem 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+  min-width: 0;
+}
+
+.fieldHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.fieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-weight: 700;
+  color: #14395e;
+}
+
+.fieldLabel span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldLabel em {
+  flex: none;
+  font-style: normal;
+  font-size: 0.72rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(194, 107, 37, 0.14);
+  color: #8a4714;
+}
+
+.input,
+.select {
+  width: 100%;
+  border: 1px solid rgba(33, 74, 126, 0.16);
+  border-radius: 12px;
+  padding: 0.68rem 0.82rem;
+  background: rgba(251, 253, 255, 0.96);
+  color: #14395e;
+  min-height: 44px;
+}
+
+.combobox {
+  position: relative;
+}
+
+.comboboxRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+}
+
+.comboMenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 2;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.45rem;
+  border-radius: 14px;
+  border: 1px solid rgba(33, 74, 126, 0.14);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 40px rgba(10, 30, 57, 0.14);
+}
+
+.comboOption {
+  justify-content: flex-start;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+}
+
+.comboOption:hover,
+.comboToggle:hover,
+.secondaryButton:hover,
+.ghostButton:hover,
+.fileButton:hover,
+.recommendationChip:hover,
+.fieldAction:hover {
+  background: rgba(20, 73, 135, 0.1);
+}
+
+.errorText {
+  color: #982f1f;
+  font-size: 0.82rem;
+}
+
+.intentNotice,
+.recommendations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.advancedBlock h4 {
+  margin-bottom: 0.55rem;
+  font-size: 0.9rem;
+}
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  position: sticky;
+  bottom: 0;
+  margin-top: 0.05rem;
+  padding: 0.8rem 0 0.05rem;
+  border-top: 1px solid rgba(20, 73, 135, 0.08);
+  background: linear-gradient(180deg, rgba(247, 250, 254, 0), rgba(247, 250, 254, 0.98) 36%);
+}
+
+@media (max-width: 1180px) {
+  .form {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldGrid {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .modalHeader,
+  .actions,
+  .headerActions,
+  .presetButtonRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .comboboxRow {
+    grid-template-columns: 1fr;
+  }
+}

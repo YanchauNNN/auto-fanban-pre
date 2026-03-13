@@ -22,8 +22,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
+import time
 import zipfile
 from collections.abc import Callable
 from io import BytesIO
@@ -36,6 +38,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 from ..config import load_spec
 from ..config.spec_loader import CoverBinding
 from ..interfaces import GenerationError, ICoverGenerator
+from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
 
 if TYPE_CHECKING:
@@ -71,14 +74,24 @@ class CoverGenerator(ICoverGenerator):
         data = self._prepare_data(ctx)
 
         # 4. 写入Word文档
-        output_docx = output_dir / "封面.docx"
+        output_stem = self._build_output_stem(ctx)
+        output_docx = output_dir / f"{output_stem}.docx"
         self._write_cover(template_path, output_docx, bindings, data, ctx)
 
         # 5. 导出PDF
-        output_pdf = output_dir / "封面.pdf"
+        output_pdf = output_dir / f"{output_stem}.pdf"
         self.pdf_exporter.export_docx_to_pdf(output_docx, output_pdf)
 
         return output_docx, output_pdf
+
+    def _build_output_stem(self, ctx: DocContext) -> str:
+        return make_document_output_name(
+            external_code=ctx.derived.cover_external_code,
+            revision=ctx.params.cover_revision,
+            status=ctx.params.doc_status,
+            internal_code=ctx.derived.cover_internal_code,
+            fallback_name="封面",
+        )
 
     def _get_template_path(self, ctx: DocContext) -> str:
         """获取模板路径"""
@@ -127,9 +140,20 @@ class CoverGenerator(ICoverGenerator):
         """写入封面文档"""
         shutil.copy(template_path, output_path)
 
+        com_error: Exception | None = None
         try:
-            embedded_xlsx = self._find_embedded_xlsx(output_path)
-            if embedded_xlsx:
+            self._write_cover_via_com(
+                output_path=output_path,
+                bindings=bindings,
+                data=data,
+            )
+            return
+        except Exception as exc:
+            com_error = exc
+
+        embedded_xlsx = self._find_embedded_xlsx(output_path)
+        if embedded_xlsx:
+            try:
                 self._write_cover_via_embedded_xlsx(
                     output_path=output_path,
                     embedded_xlsx_path=embedded_xlsx,
@@ -137,11 +161,12 @@ class CoverGenerator(ICoverGenerator):
                     data=data,
                 )
                 return
+            except Exception as embedded_exc:
+                raise GenerationError(
+                    f"封面写入失败: COM={com_error}; embedded_xlsx={embedded_exc}"
+                ) from embedded_exc
 
-            # 1818 模板当前为 oleObject1.bin，走 COM 写入。
-            self._write_cover_via_com(output_path=output_path, bindings=bindings, data=data)
-        except Exception as exc:
-            raise GenerationError(f"封面写入失败: {exc}") from exc
+        raise GenerationError(f"封面写入失败: {com_error}") from com_error
 
     def _write_cover_via_embedded_xlsx(
         self,
@@ -184,7 +209,9 @@ class CoverGenerator(ICoverGenerator):
         bindings: dict[str, CoverBinding],
         data: dict[str, Any],
     ) -> None:
+        pythoncom = None
         try:
+            import pythoncom  # type: ignore[import]
             import win32com.client
         except ImportError as exc:
             raise GenerationError("缺少 pywin32，无法写入 OLE 封面模板") from exc
@@ -192,26 +219,38 @@ class CoverGenerator(ICoverGenerator):
         word = None
         doc = None
         try:
-            word = win32com.client.Dispatch("Word.Application")
+            pythoncom.CoInitialize()
+            word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
+            word.DisplayAlerts = 0
             doc = word.Documents.Open(str(output_path.absolute()))
+            time.sleep(1.0)
             ws = self._get_embedded_excel_sheet(doc)
             if ws is None:
                 raise GenerationError("未找到封面中的嵌入 Excel 对象")
 
             def read_cell(cell: str) -> Any:
-                return ws.Range(cell).Value
+                return self._com_call_with_retry(
+                    lambda: ws.Range(cell).Value,
+                    f"Range({cell}).Value",
+                )
 
             def write_cell(cell: str, value: Any) -> None:
-                ws.Range(cell).Value = value
+                self._com_call_with_retry(
+                    lambda: setattr(ws.Range(cell), "Value", value),
+                    f"Range({cell}).Value={value}",
+                )
 
             self._apply_bindings(bindings, data, read_cell, write_cell)
-            doc.Save()
+            self._com_call_with_retry(doc.Save, "Document.Save")
         finally:
             if doc is not None:
-                doc.Close(False)
+                self._close_com_object(lambda: doc.Close(False), "Document.Close")
             if word is not None:
-                word.Quit()
+                self._close_com_object(word.Quit, "Word.Quit")
+            if pythoncom is not None:
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
 
     def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
         for collection_name in ("InlineShapes", "Shapes"):
@@ -219,14 +258,34 @@ class CoverGenerator(ICoverGenerator):
             if collection is None:
                 continue
             try:
-                count = int(collection.Count)
+                count = int(
+                    self._com_call_with_retry(
+                        lambda: collection.Count,
+                        f"{collection_name}.Count",
+                    )
+                )
             except Exception:
                 continue
 
             for idx in range(1, count + 1):
                 try:
-                    shape = collection.Item(idx)
-                    ole_obj = shape.OLEFormat.Object
+                    shape = self._com_call_with_retry(
+                        lambda: collection.Item(idx),
+                        f"{collection_name}.Item({idx})",
+                    )
+                    ole_format = self._com_call_with_retry(
+                        lambda: shape.OLEFormat,
+                        f"{collection_name}.Item({idx}).OLEFormat",
+                    )
+                    self._com_call_with_retry(
+                        ole_format.Activate,
+                        f"{collection_name}.Item({idx}).OLEFormat.Activate",
+                    )
+                    time.sleep(0.8)
+                    ole_obj = self._com_call_with_retry(
+                        lambda: ole_format.Object,
+                        f"{collection_name}.Item({idx}).OLEFormat.Object",
+                    )
                 except Exception:
                     continue
 
@@ -240,15 +299,24 @@ class CoverGenerator(ICoverGenerator):
             return None
 
         try:
-            parent = getattr(ole_obj, "Parent", None)
+            parent = self._com_call_with_retry(
+                lambda: getattr(ole_obj, "Parent", None),
+                "OLEObject.Parent",
+            )
             if parent is not None and hasattr(parent, "Worksheets"):
-                return parent.Worksheets(1)
+                return self._com_call_with_retry(
+                    lambda: parent.Worksheets(1),
+                    "OLEObject.Parent.Worksheets(1)",
+                )
         except Exception:
             pass
 
         try:
             if hasattr(ole_obj, "Worksheets"):
-                return ole_obj.Worksheets(1)
+                return self._com_call_with_retry(
+                    lambda: ole_obj.Worksheets(1),
+                    "OLEObject.Worksheets(1)",
+                )
         except Exception:
             pass
 
@@ -413,3 +481,32 @@ class CoverGenerator(ICoverGenerator):
         if m is None:
             raise GenerationError(f"非法单元格引用: {ref}")
         return m.group(1).upper(), int(m.group(2))
+
+    def _com_call_with_retry(
+        self,
+        fn: Callable[[], Any],
+        desc: str,
+        *,
+        retries: int = 10,
+    ) -> Any:
+        last_exc: Exception | None = None
+        for _ in range(retries):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(0.8 if self._is_call_rejected(exc) else 0.3)
+        raise RuntimeError(f"COM 调用失败 {desc}: {last_exc}") from last_exc
+
+    def _close_com_object(self, fn: Callable[[], Any], desc: str) -> None:
+        try:
+            self._com_call_with_retry(fn, desc, retries=6)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _is_call_rejected(exc: Exception) -> bool:
+        if getattr(exc, "hresult", None) == -2147418111:
+            return True
+        msg = str(exc).lower()
+        return "call was rejected by callee" in msg or "拒绝接收呼叫" in msg

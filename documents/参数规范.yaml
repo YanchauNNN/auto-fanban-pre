@@ -173,12 +173,12 @@ doc_generation:
         type: str
         required: true
         source: frontend
-        desc: "子项名称（中文）（前端直接输入）"
+        desc: "子项名称（中文），例如：反应堆厂房"
       subitem_name_en:
         type: str
         required_when: "project_no == '1818'"
         source: frontend
-        desc: "子项名称（英文）（仅1818项目，前端直接输入）"
+        desc: "子项名称（英文），例如：Reactor Building"
       discipline:        { type: str, required: true, source: "dxf:frames[001].titleblock.discipline",     desc: "专业（取001图纸）" }
       revision:          { type: str, required: true, source: "dxf:frames[001].titleblock.revision",       desc: "版次" }
       doc_status:        { type: str, required: true, source: "dxf:frames[001].titleblock.status",         desc: "状态" }
@@ -189,13 +189,13 @@ doc_generation:
         type: str
         required: true
         source: frontend
-        desc: "图册名称(中文)，写入封面I21/I22"
+        desc: "图册名称(中文)，例如：XXX厂房XX标高模板图"
       
       album_title_en:
         type: str
         required_when: "project_no == '1818'"
         source: frontend
-        desc: "图册名称(英文)，仅1818需要，写入I23/I24"
+        desc: "图册名称(英文)，仅1818需要"
       
       cover_revision:
         type: str
@@ -224,11 +224,11 @@ doc_generation:
       design_status:     { type: str, required: false, source: frontend, default: "编制", desc: "设计文件状态(A列)" }
       internal_tag:      { type: str, required: false, source: frontend, default: "否",  desc: "内部标识(I列)" }
       discipline_office: { type: str, required: false, source: frontend, desc: "专业室(P列)" }
-      file_category:     { type: str, required: true,  source: frontend, desc: "文件类别(U列)，选项来自模板Sheet5" }
+      file_category:     { type: str, required: true,  source: frontend, desc: "文件类别(U列)" }
       attachment_name:   { type: str, required: false, source: frontend, desc: "附件名称(W列)" }
       qa_required:       { type: str, required: false, source: frontend, default: "否", desc: "是否质保核查(X列)" }
       qa_engineer:       { type: str, required: false, source: frontend, desc: "质保核查工程师(Y列)" }
-      work_hours:        { type: str, required_when: "ied_status == '发布'", source: frontend, default: "100", desc: "工时数，同时写入设计文件Z列和IED AT列" }
+      work_hours:        { type: str, required_when: "ied_status == '发布'", source: frontend, default: "100", desc: "工时数，同时写入设计文件和IED计划，默认100" }
 
     # ========== IED计划参数 ==========
     ied:
@@ -245,7 +245,7 @@ doc_generation:
         required_when: "ied_status == '发布'"
         source: frontend
         transform: "取最后一个'-'后的文本"
-        desc: "专业室(BJ列)，选项来自responsible_unit.json"
+        desc: "专业室(BJ列)"
       ied_chief_designer: { type: str, required: false, source: frontend, format: "姓名@ID", desc: "责任设总(W列)" }
       
       # --- 人员资格 ---
@@ -261,17 +261,17 @@ doc_generation:
       ied_internal_tag:  { type: str, required: false, source: frontend, default: "否", desc: "内部标识(U列)" }
       
       # --- 编审链（发布状态必填，格式: 姓名@ID / YYYY-MM-DD） ---
-      ied_prepared_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "编制者(AY列)" }
-      ied_prepared_by_2:         { type: str,  required: false,                       source: frontend, format: "姓名@ID",    desc: "第二编制者(AZ列)" }
-      ied_prepared_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "编制日期(BA列)" }
-      ied_checked_by:            { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "校核者(BB列)" }
-      ied_checked_date:          { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "校核日期(BC列)" }
-      ied_discipline_leader:     { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "工种负责人(BD列)" }
-      ied_discipline_leader_date: { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "工种负责人审核日期(BE列)" }
-      ied_reviewed_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "审核者(BF列)" }
-      ied_reviewed_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "审核日期(BG列)" }
-      ied_approved_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "审定者(BH列)" }
-      ied_approved_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "审定日期(BI列)" }
+      ied_prepared_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_prepared_by_2:         { type: str,  required: false,                       source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_prepared_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
+      ied_checked_by:            { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_checked_date:          { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
+      ied_discipline_leader:     { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_discipline_leader_date: { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
+      ied_reviewed_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_reviewed_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
+      ied_approved_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_approved_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
       
       # --- 计划日期（格式: YYYY-MM-DD，文本格式） ---
       ied_submitted_plan_date: { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "所提交计划(N列)" }
@@ -477,6 +477,7 @@ doc_generation:
     catalog_bindings:
       header:
         engineering_no:        { cell: "C1", label: "A1" }
+        album_code_title:      { cell: "D3:E3", template: "第{album_code}图册图纸(文件)目录" }
         catalog_internal_code: { cell: "H1", merge: "H1:I2(仅1818)" }
         catalog_external_code: { cell: "H3", merge: "H3:I4(仅1818)" }
         subitem_no:            { cell: "C5", merge: "C5:C6(仅1818)" }

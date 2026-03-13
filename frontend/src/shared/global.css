@@ -1,0 +1,38 @@
+:root {
+  color: #14395e;
+  background: #eff4fa;
+  font-family: "Noto Sans SC", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+h1,
+h2,
+h3,
+strong {
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+}
+
+code,
+.mono {
+  font-family: "JetBrains Mono", monospace;
+}

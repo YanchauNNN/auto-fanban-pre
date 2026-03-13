@@ -151,7 +151,7 @@ class IEDGenerator(IIEDGenerator):
         })
 
         # 图纸行
-        for frame in ctx.get_sorted_frames():
+        for frame in ctx.get_sorted_document_frames():
             tb = frame.titleblock
             rows.append({
                 "type": "drawing",
