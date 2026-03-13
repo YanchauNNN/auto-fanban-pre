@@ -287,7 +287,11 @@ class CADDXFExecutor:
         if self._plot_resource_context is not None:
             return self._plot_resource_context
         path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
-        self._plot_resource_context = ensure_plot_resources(path_info=path_info)
+        self._plot_resource_context = ensure_plot_resources(
+            path_info=path_info,
+            pc3_name=self.config.module5_export.plot.pc3_name,
+            ctb_name=self.config.module5_export.plot.ctb_name,
+        )
         return self._plot_resource_context
 
     def _build_output_entry(self) -> dict[str, str | bool | int]:

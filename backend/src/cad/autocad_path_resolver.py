@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-MIN_SUPPORTED_AUTOCAD_YEAR = 2018
+MIN_SUPPORTED_AUTOCAD_YEAR = 2010
 PDF2_PC3_NAME = "打印PDF2.pc3"
 
 
@@ -30,6 +30,16 @@ class AutoCADPathInfo:
     monochrome_ctb_path: Path | None
     pc3_path: Path | None
     fallback_pdf_pc3_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class AutoCADInstallation:
+    year: int | None
+    install_dir: Path
+    acad_exe: Path | None
+    accoreconsole_exe: Path | None
+    plotters_dir: Path | None
+    plot_styles_dir: Path | None
 
 
 def resolve_autocad_paths(
@@ -105,6 +115,42 @@ def resolve_autocad_paths(
     )
 
 
+def list_available_autocad_installations(
+    *,
+    configured_install_dir: str | Path | None = None,
+    extra_candidates: Iterable[str | Path] | None = None,
+    registry_candidates: Iterable[str | Path] | None = None,
+    include_default_candidates: bool = True,
+) -> list[AutoCADInstallation]:
+    resolved_dirs = _collect_resolved_install_dirs(
+        configured_install_dir=configured_install_dir,
+        extra_candidates=extra_candidates,
+        registry_candidates=registry_candidates,
+        include_default_candidates=include_default_candidates,
+    )
+    installations: list[AutoCADInstallation] = []
+    for install_dir in resolved_dirs:
+        info = resolve_autocad_paths(
+            configured_install_dir=install_dir,
+            extra_candidates=[],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+        if info.install_dir is None:
+            continue
+        installations.append(
+            AutoCADInstallation(
+                year=_extract_year_int(info.install_dir),
+                install_dir=info.install_dir,
+                acad_exe=info.acad_exe,
+                accoreconsole_exe=info.accoreconsole_exe,
+                plotters_dir=info.plotters_dir,
+                plot_styles_dir=info.plot_styles_dir,
+            )
+        )
+    return installations
+
+
 def _resolve_install_dir_by_priority(
     *,
     configured_install_dir: str | Path | None,
@@ -152,6 +198,59 @@ def _resolve_install_dir_by_priority(
         if install_dir is not None:
             return install_dir
     return None
+
+
+def _collect_resolved_install_dirs(
+    *,
+    configured_install_dir: str | Path | None,
+    extra_candidates: Iterable[str | Path] | None,
+    registry_candidates: Iterable[str | Path] | None,
+    include_default_candidates: bool,
+) -> list[Path]:
+    candidate_groups: list[list[Path]] = []
+
+    configured_group: list[Path] = []
+    _append_candidate(configured_group, configured_install_dir)
+    if configured_group:
+        candidate_groups.append(configured_group)
+
+    env_group: list[Path] = []
+    _append_candidate(env_group, os.getenv("FANBAN_AUTOCAD_INSTALL_DIR"))
+    if env_group:
+        candidate_groups.append(env_group)
+
+    extra_group: list[Path] = []
+    for candidate in extra_candidates or []:
+        _append_candidate(extra_group, candidate)
+    if extra_group:
+        candidate_groups.append(extra_group)
+
+    registry_group: list[Path] = []
+    if registry_candidates is None:
+        for candidate in _discover_registry_install_dirs():
+            _append_candidate(registry_group, candidate)
+    else:
+        for candidate in registry_candidates:
+            _append_candidate(registry_group, candidate)
+    if registry_group:
+        candidate_groups.append(registry_group)
+
+    default_group: list[Path] = []
+    if include_default_candidates:
+        for candidate in _default_install_candidates():
+            _append_candidate(default_group, candidate)
+    if default_group:
+        candidate_groups.append(default_group)
+
+    unique: dict[str, Path] = {}
+    for group in candidate_groups:
+        for raw in group:
+            resolved = _resolve_install_dir_candidate(raw)
+            if resolved is None:
+                continue
+            unique[str(resolved).lower()] = resolved
+
+    return sorted(unique.values(), key=_install_dir_rank, reverse=True)
 
 
 def _append_candidate(candidates: list[Path], raw: str | Path | None) -> None:
@@ -248,7 +347,7 @@ def _first_existing_file(paths: Iterable[Path]) -> Path | None:
 
 
 def _default_install_candidates() -> list[Path]:
-    versions = ("2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018")
+    versions = tuple(str(year) for year in range(2026, 2009, -1))
     roots = (
         Path(r"D:\AUTOCAD"),
         Path(r"C:\AUTOCAD"),
@@ -321,13 +420,18 @@ def _filter_plotters_by_year(paths: list[Path], year_hint: str | None) -> list[P
 
 
 def _discover_user_plotter_dirs() -> list[Path]:
-    appdata = os.getenv("APPDATA")
-    if not appdata:
-        return []
-    root = Path(appdata) / "Autodesk"
-    if not root.exists() or not root.is_dir():
-        return []
-    return [path for path in root.rglob("Plotters") if path.is_dir()]
+    results: list[Path] = []
+    for env_name in ("APPDATA", "LOCALAPPDATA"):
+        root_value = os.getenv(env_name)
+        if not root_value:
+            continue
+        root = Path(root_value) / "Autodesk"
+        if not root.exists() or not root.is_dir():
+            continue
+        for path in root.rglob("Plotters"):
+            if path.is_dir() and path not in results:
+                results.append(path)
+    return results
 
 
 def _iter_registry_subkeys(winreg, hive, root: str) -> list[str]:

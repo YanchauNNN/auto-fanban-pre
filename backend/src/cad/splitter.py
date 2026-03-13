@@ -1,4 +1,4 @@
-"""
+﻿"""
 图框拆分器 - 裁切/导出双阶段
 
 裁切策略（关键）：
@@ -169,7 +169,7 @@ class FrameSplitter(IFrameSplitter):
 
         # AutoCAD COM 导出器（仅在 pdf_engine=autocad_com/both 时使用）
         acad_cfg = getattr(self.config, "autocad", None)
-        ctb_name = Path(getattr(acad_cfg, "ctb_path", "monochrome.ctb")).name
+        ctb_name = Path(getattr(acad_cfg, "ctb_path", "fanban_monochrome.ctb")).name
         self.autocad_pdf_exporter: AutoCADPdfExporter = AutoCADPdfExporter(
             prog_id_candidates=getattr(acad_cfg, "prog_id_candidates", None),
             visible=getattr(acad_cfg, "visible", False),

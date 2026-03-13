@@ -1,4 +1,4 @@
-; ============================================================================
+﻿; ============================================================================
 ; Module5 CAD-DXF executor for AcCoreConsole
 ; ============================================================================
 ; Python builds runtime .scr and calls these functions in order:
@@ -17,7 +17,7 @@
 
 (setq *m5-output-dir* "")
 (setq *m5-pc3* "打印PDF2.pc3")
-(setq *m5-ctb* "monochrome.ctb")
+(setq *m5-ctb* "fanban_monochrome.ctb")
 (setq *m5-use-monochrome* T)
 (setq *m5-margin-top* 20.0)
 (setq *m5-margin-bottom* 10.0)

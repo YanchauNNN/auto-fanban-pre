@@ -87,7 +87,7 @@ class Module5PlotConfig(BaseModel):
     """模块5打印配置"""
 
     pc3_name: str = "打印PDF2.pc3"
-    ctb_name: str = "monochrome.ctb"
+    ctb_name: str = "fanban_monochrome.ctb"
     paper_from_frame: bool = True
     use_monochrome: bool = True
     center_plot: bool = False

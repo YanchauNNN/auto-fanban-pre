@@ -62,7 +62,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="fanban_m5",
+    name="拆图打印工具",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

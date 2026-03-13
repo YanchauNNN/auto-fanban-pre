@@ -23,7 +23,15 @@ BACKEND_ROOT = SOURCE_PROJECT_ROOT / "backend"
 if not getattr(sys, "frozen", False) and str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from src.cad.autocad_path_resolver import resolve_autocad_paths  # noqa: E402
+from src.cad.autocad_path_resolver import (  # noqa: E402
+    list_available_autocad_installations,
+    resolve_autocad_paths,
+)
+from src.cad.plot_resource_manager import (  # noqa: E402
+    MANAGED_CTB_NAME,
+    PDF2_PC3_NAME,
+    PDF2_PMP_NAME,
+)
 from src.config import reload_config  # noqa: E402
 from src.models import Job, JobType  # noqa: E402
 from src.pipeline.executor import PipelineExecutor  # noqa: E402
@@ -38,7 +46,113 @@ class LauncherRunResult:
     selected_output_dir: Path | None
 
 
-def configure_runtime_environment() -> Path:
+def launcher_settings_path(*, app_root: Path | None = None) -> Path:
+    return (app_root or resolve_runtime_root()) / "fanban_m5_settings.json"
+
+
+def load_launcher_settings(*, app_root: Path | None = None) -> dict:
+    path = launcher_settings_path(app_root=app_root)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def save_launcher_settings(settings: dict, *, app_root: Path | None = None) -> Path:
+    path = launcher_settings_path(app_root=app_root)
+    path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def validate_runtime_bundle(*, bundle_root: Path | None = None) -> list[str]:
+    root = (bundle_root or resolve_bundle_root()).resolve()
+    errors: list[str] = []
+    init_candidates = [root / "_tcl_data" / "init.tcl", root / "tcl_data" / "init.tcl"]
+    init_path = next((path for path in init_candidates if path.exists()), None)
+    if init_path is None:
+        errors.append("缺少 Tcl 运行时文件: _tcl_data/init.tcl")
+    else:
+        try:
+            init_text = init_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            errors.append(f"无法读取 Tcl 运行时文件: {init_path} ({exc})")
+        else:
+            if "# init.tcl" not in init_text:
+                errors.append(f"Tcl 运行时文件疑似损坏: {init_path}")
+
+    managed_ctb = root / "assets" / "plot_styles" / MANAGED_CTB_NAME
+    if not managed_ctb.exists():
+        errors.append(f"缺少受管 CTB 资源: {managed_ctb}")
+    else:
+        try:
+            data = managed_ctb.read_bytes()
+        except OSError as exc:
+            errors.append(f"无法读取受管 CTB: {managed_ctb} ({exc})")
+        else:
+            if len(data) < 512 or data == b"bundled-ctb":
+                errors.append(f"受管 CTB 资源损坏: {managed_ctb}")
+
+    for required in (
+        root / "assets" / "plotters" / PDF2_PC3_NAME,
+        root / "assets" / "plotters" / PDF2_PMP_NAME,
+        root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "Release"
+        / "net48"
+        / "Module5CadBridge.dll",
+    ):
+        if not required.exists():
+            errors.append(f"缺少关键运行资源: {required}")
+    return errors
+
+
+def _detected_cad_options() -> list[dict]:
+    options: list[dict] = []
+    for installation in list_available_autocad_installations():
+        label = f"AutoCAD {installation.year or 'Unknown'} | {installation.install_dir}"
+        options.append(
+            {
+                "label": label,
+                "year": installation.year,
+                "install_dir": str(installation.install_dir),
+                "accoreconsole_exe": str(installation.accoreconsole_exe) if installation.accoreconsole_exe else "",
+                "plotters_dir": str(installation.plotters_dir) if installation.plotters_dir else "",
+                "plot_styles_dir": str(installation.plot_styles_dir) if installation.plot_styles_dir else "",
+            }
+        )
+    return options
+
+
+def get_cad_settings_snapshot(*, app_root: Path | None = None) -> dict:
+    runtime_root = (app_root or resolve_runtime_root()).resolve()
+    settings = load_launcher_settings(app_root=runtime_root)
+    options = _detected_cad_options()
+    selected_install_dir = str(settings.get("selected_cad_install_dir", "")).strip()
+    selected = next((item for item in options if item["install_dir"] == selected_install_dir), None)
+    if selected is None and options:
+        selected = options[0]
+        selected_install_dir = selected["install_dir"]
+    bundle_root = resolve_bundle_root()
+    return {
+        "selected_install_dir": selected_install_dir,
+        "selected": selected,
+        "options": options,
+        "pc3_name": PDF2_PC3_NAME,
+        "ctb_name": MANAGED_CTB_NAME,
+        "pc3_asset_path": str(bundle_root / "assets" / "plotters" / PDF2_PC3_NAME),
+        "ctb_asset_path": str(bundle_root / "assets" / "plot_styles" / MANAGED_CTB_NAME),
+        "bundle_errors": validate_runtime_bundle(bundle_root=bundle_root),
+    }
+
+
+def configure_runtime_environment(*, selected_install_dir: str | Path | None = None) -> Path:
     app_root = resolve_runtime_root()
     bundle_root = resolve_bundle_root()
     os.chdir(app_root)
@@ -71,15 +185,21 @@ def configure_runtime_environment() -> Path:
         ),
     )
     os.environ.setdefault("FANBAN_PLOT_ASSET_ROOT", str(bundle_root / "assets"))
-    autodetected = resolve_autocad_paths()
+    os.environ["FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME"] = MANAGED_CTB_NAME
+    selected_candidate = str(selected_install_dir).strip() if selected_install_dir else ""
+    if not selected_candidate:
+        settings = load_launcher_settings(app_root=app_root)
+        selected_candidate = str(settings.get("selected_cad_install_dir", "")).strip()
+    autodetected = resolve_autocad_paths(configured_install_dir=selected_candidate or None)
+    if autodetected.install_dir is None:
+        autodetected = resolve_autocad_paths()
     if autodetected.install_dir is not None:
         os.environ["FANBAN_AUTOCAD_INSTALL_DIR"] = str(autodetected.install_dir)
     if autodetected.accoreconsole_exe is not None:
         os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"] = str(
             autodetected.accoreconsole_exe
         )
-    if autodetected.monochrome_ctb_path is not None:
-        os.environ["FANBAN_AUTOCAD__CTB_PATH"] = str(autodetected.monochrome_ctb_path)
+    os.environ["FANBAN_AUTOCAD__CTB_PATH"] = str(bundle_root / "assets" / "plot_styles" / MANAGED_CTB_NAME)
     reload_config()
     return app_root
 
@@ -116,8 +236,9 @@ def run_split_only_job(
     selected_output_dir: Path | None = None,
     project_no: str = "",
     job_id: str | None = None,
+    selected_install_dir: str | Path | None = None,
 ) -> LauncherRunResult:
-    configure_runtime_environment()
+    configure_runtime_environment(selected_install_dir=selected_install_dir)
     job = build_split_only_job(dwg_path=dwg_path, project_no=project_no, job_id=job_id)
     executor = PipelineExecutor()
     executor.config.multi_dwg_policy.code_conflict = "warn"

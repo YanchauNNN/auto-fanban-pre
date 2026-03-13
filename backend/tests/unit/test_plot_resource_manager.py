@@ -6,6 +6,7 @@ import pytest
 
 from src.cad.autocad_path_resolver import AutoCADPathInfo
 from src.cad.plot_resource_manager import (
+    MANAGED_CTB_NAME,
     MONOCHROME_CTB_NAME,
     PDF2_PC3_NAME,
     PDF2_PMP_NAME,
@@ -44,7 +45,7 @@ def test_ensure_plot_resources_deploys_pdf2_and_pmp_and_ctb(tmp_path: Path):
     )
     system_ctb = tmp_path / "system" / MONOCHROME_CTB_NAME
     system_ctb.parent.mkdir(parents=True)
-    system_ctb.write_text("ctb", encoding="utf-8")
+    system_ctb.write_text("system-ctb" * 128, encoding="utf-8")
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"
@@ -56,13 +57,14 @@ def test_ensure_plot_resources_deploys_pdf2_and_pmp_and_ctb(tmp_path: Path):
 
     assert result.pc3_path == target_plotters / PDF2_PC3_NAME
     assert result.pmp_path == target_plotters / "PMP Files" / PDF2_PMP_NAME
-    assert result.ctb_path == target_plot_styles / MONOCHROME_CTB_NAME
+    assert result.ctb_path == target_plot_styles / MANAGED_CTB_NAME
     assert result.pc3_path.read_text(encoding="utf-8") == "pc3"
     assert result.pmp_path.read_text(encoding="utf-8") == "pmp"
     assert (
         target_plotters / PDF2_PMP_NAME
     ).read_text(encoding="utf-8") == "pmp"
-    assert result.ctb_path.read_text(encoding="utf-8") == "ctb"
+    assert result.ctb_path.read_text(encoding="utf-8") == "system-ctb" * 128
+    assert not (target_plot_styles / MONOCHROME_CTB_NAME).exists()
 
 
 def test_ensure_plot_resources_overwrites_stale_pc3_with_bundled_asset(tmp_path: Path):
@@ -76,7 +78,7 @@ def test_ensure_plot_resources_overwrites_stale_pc3_with_bundled_asset(tmp_path:
         "bundled-pmp",
         encoding="utf-8",
     )
-    (plot_styles_asset / MONOCHROME_CTB_NAME).write_text("bundled-ctb", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("bundled-ctb" * 128, encoding="utf-8")
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"
@@ -99,7 +101,7 @@ def test_ensure_plot_resources_prefers_bundled_pc3_over_existing_system_pc3(tmp_
     plot_styles_asset.mkdir(parents=True)
     (plotters_asset / PDF2_PC3_NAME).write_text("bundled-pc3", encoding="utf-8")
     (plotters_asset / PDF2_PMP_NAME).write_text("bundled-pmp", encoding="utf-8")
-    (plot_styles_asset / MONOCHROME_CTB_NAME).write_text("bundled-ctb", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("bundled-ctb" * 128, encoding="utf-8")
 
     system_root = tmp_path / "system"
     system_plotters = system_root / "Plotters"
@@ -140,26 +142,53 @@ def test_ensure_plot_resources_deploys_to_discovered_user_plotters(tmp_path: Pat
         "pmp",
         encoding="utf-8",
     )
-    (plot_styles_asset / MONOCHROME_CTB_NAME).write_text("ctb", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("ctb" * 256, encoding="utf-8")
 
     install_plotters = tmp_path / "Program Files" / "Autodesk" / "AutoCAD 2022" / "Plotters"
     install_plot_styles = install_plotters / "Plot Styles"
     install_plot_styles.mkdir(parents=True)
 
     appdata = tmp_path / "AppData" / "Roaming"
+    local_appdata = tmp_path / "AppData" / "Local"
     old_user_plotters = appdata / "Autodesk" / "AutoCAD 2019" / "R23.0" / "chs" / "Plotters"
     old_user_plot_styles = old_user_plotters / "Plot Styles"
     old_user_plot_styles.mkdir(parents=True)
     monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("LOCALAPPDATA", str(local_appdata))
 
     ensure_plot_resources(
         path_info=_path_info(install_plotters, install_plot_styles),
         asset_roots=[asset_root],
     )
 
-    assert (old_user_plotters / PDF2_PC3_NAME).read_text(encoding="utf-8") == "pc3"
-    assert (old_user_plotters / "PMP Files" / PDF2_PMP_NAME).read_text(encoding="utf-8") == "pmp"
-    assert (old_user_plot_styles / MONOCHROME_CTB_NAME).read_text(encoding="utf-8") == "ctb"
+    assert not (old_user_plotters / PDF2_PC3_NAME).exists()
+    assert not (old_user_plot_styles / MANAGED_CTB_NAME).exists()
+
+
+def test_ensure_plot_resources_preserves_existing_system_monochrome_ctb(tmp_path: Path):
+    asset_root = tmp_path / "assets"
+    plotters_asset = asset_root / "plotters"
+    plot_styles_asset = asset_root / "plot_styles"
+    plotters_asset.mkdir(parents=True)
+    plot_styles_asset.mkdir(parents=True)
+    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("managed-ctb" * 128, encoding="utf-8")
+
+    target_plotters = tmp_path / "target" / "Plotters"
+    target_plot_styles = target_plotters / "Plot Styles"
+    target_plot_styles.mkdir(parents=True)
+    existing_monochrome = target_plot_styles / MONOCHROME_CTB_NAME
+    existing_monochrome.write_text("user-monochrome", encoding="utf-8")
+
+    result = ensure_plot_resources(
+        path_info=_path_info(target_plotters, target_plot_styles),
+        asset_roots=[asset_root],
+    )
+
+    assert existing_monochrome.read_text(encoding="utf-8") == "user-monochrome"
+    assert result.ctb_path == target_plot_styles / MANAGED_CTB_NAME
+    assert result.ctb_path.read_text(encoding="utf-8") == "managed-ctb" * 128
 
 
 def test_ensure_plot_resources_raises_when_pdf2_asset_missing(tmp_path: Path):

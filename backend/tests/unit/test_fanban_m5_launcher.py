@@ -233,10 +233,9 @@ def test_configure_runtime_environment_sets_detected_autocad_paths_when_frozen(
     exe_path.write_text("exe", encoding="utf-8")
     detected_install_dir = Path(r"D:\AUTOCAD\AutoCAD 2022")
     detected_accore = detected_install_dir / "accoreconsole.exe"
-    detected_ctb = (
-        Path(r"C:\Users\Test\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles")
-        / "monochrome.ctb"
-    )
+    managed_ctb = internal_dir / "assets" / "plot_styles" / "fanban_monochrome.ctb"
+    managed_ctb.parent.mkdir(parents=True)
+    managed_ctb.write_text("x" * 4096, encoding="utf-8")
 
     old_cwd = Path.cwd()
     try:
@@ -252,7 +251,7 @@ def test_configure_runtime_environment_sets_detected_autocad_paths_when_frozen(
             lambda configured_install_dir=None: SimpleNamespace(
                 install_dir=detected_install_dir,
                 accoreconsole_exe=detected_accore,
-                monochrome_ctb_path=detected_ctb,
+                monochrome_ctb_path=detected_install_dir / "Plotters" / "Plot Styles" / "monochrome.ctb",
             ),
         )
 
@@ -260,7 +259,7 @@ def test_configure_runtime_environment_sets_detected_autocad_paths_when_frozen(
 
         assert Path(os.environ["FANBAN_AUTOCAD_INSTALL_DIR"]) == detected_install_dir
         assert Path(os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"]) == detected_accore
-        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == detected_ctb
+        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == managed_ctb
     finally:
         os.chdir(old_cwd)
 
@@ -278,7 +277,9 @@ def test_configure_runtime_environment_overwrites_stale_autocad_defaults_when_de
     exe_path.write_text("exe", encoding="utf-8")
     detected_install_dir = Path(r"C:\Program Files\Autodesk\AutoCAD 2022")
     detected_accore = detected_install_dir / "accoreconsole.exe"
-    detected_ctb = Path(r"C:\Users\Test\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\Plotters\Plot Styles\monochrome.ctb")
+    managed_ctb = internal_dir / "assets" / "plot_styles" / "fanban_monochrome.ctb"
+    managed_ctb.parent.mkdir(parents=True)
+    managed_ctb.write_text("x" * 4096, encoding="utf-8")
 
     old_cwd = Path.cwd()
     try:
@@ -297,7 +298,7 @@ def test_configure_runtime_environment_overwrites_stale_autocad_defaults_when_de
             lambda configured_install_dir=None: SimpleNamespace(
                 install_dir=detected_install_dir,
                 accoreconsole_exe=detected_accore,
-                monochrome_ctb_path=detected_ctb,
+                monochrome_ctb_path=detected_install_dir / "Plotters" / "Plot Styles" / "monochrome.ctb",
             ),
         )
 
@@ -305,7 +306,7 @@ def test_configure_runtime_environment_overwrites_stale_autocad_defaults_when_de
 
         assert Path(os.environ["FANBAN_AUTOCAD_INSTALL_DIR"]) == detected_install_dir
         assert Path(os.environ["FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"]) == detected_accore
-        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == detected_ctb
+        assert Path(os.environ["FANBAN_AUTOCAD__CTB_PATH"]) == managed_ctb
     finally:
         os.chdir(old_cwd)
 
@@ -480,5 +481,102 @@ runtime_options:
         assert config.get_job_dir("job-1").resolve() == (
             exe_dir.resolve() / "storage" / "jobs" / "job-1"
         )
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_validate_runtime_bundle_reports_broken_ctb_and_missing_tcl(tmp_path: Path):
+    launcher = _load_launcher()
+    bundle_root = tmp_path / "_internal"
+    (bundle_root / "assets" / "plotters").mkdir(parents=True)
+    (bundle_root / "assets" / "plot_styles").mkdir(parents=True)
+    (bundle_root / "backend" / "src" / "cad" / "dotnet" / "Module5CadBridge" / "bin" / "Release" / "net48").mkdir(
+        parents=True
+    )
+    (bundle_root / "documents").mkdir(parents=True)
+    (bundle_root / "backend" / "src" / "cad" / "dotnet" / "Module5CadBridge" / "bin" / "Release" / "net48" / "Module5CadBridge.dll").write_text("dll", encoding="utf-8")
+    (bundle_root / "assets" / "plotters" / "打印PDF2.pc3").write_text("pc3", encoding="utf-8")
+    (bundle_root / "assets" / "plotters" / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp").write_text("pmp", encoding="utf-8")
+    (bundle_root / "assets" / "plot_styles" / "fanban_monochrome.ctb").write_text("bundled-ctb", encoding="utf-8")
+
+    errors = launcher.validate_runtime_bundle(bundle_root=bundle_root)
+
+    assert any("init.tcl" in error for error in errors)
+    assert any("fanban_monochrome.ctb" in error for error in errors)
+
+
+def test_validate_runtime_bundle_accepts_expected_tcl_and_managed_ctb(tmp_path: Path):
+    launcher = _load_launcher()
+    bundle_root = tmp_path / "_internal"
+    (bundle_root / "_tcl_data").mkdir(parents=True)
+    (bundle_root / "assets" / "plotters").mkdir(parents=True)
+    (bundle_root / "assets" / "plot_styles").mkdir(parents=True)
+    bridge_dir = bundle_root / "backend" / "src" / "cad" / "dotnet" / "Module5CadBridge" / "bin" / "Release" / "net48"
+    bridge_dir.mkdir(parents=True)
+    (bundle_root / "_tcl_data" / "init.tcl").write_text("# init.tcl --\npackage require Tcl 8.6\n", encoding="utf-8")
+    (bridge_dir / "Module5CadBridge.dll").write_text("dll", encoding="utf-8")
+    (bundle_root / "assets" / "plotters" / "打印PDF2.pc3").write_text("pc3", encoding="utf-8")
+    (bundle_root / "assets" / "plotters" / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp").write_text("pmp", encoding="utf-8")
+    (bundle_root / "assets" / "plot_styles" / "fanban_monochrome.ctb").write_text("x" * 4096, encoding="utf-8")
+
+    errors = launcher.validate_runtime_bundle(bundle_root=bundle_root)
+
+    assert errors == []
+
+
+def test_launcher_settings_persist_selected_cad_install_dir(tmp_path: Path):
+    launcher = _load_launcher()
+    app_root = tmp_path / "fanban_m5"
+    app_root.mkdir(parents=True)
+    selected = r"C:\Program Files\Autodesk\AutoCAD 2022"
+
+    launcher.save_launcher_settings(
+        {
+            "selected_cad_install_dir": selected,
+        },
+        app_root=app_root,
+    )
+
+    settings = launcher.load_launcher_settings(app_root=app_root)
+
+    assert settings["selected_cad_install_dir"] == selected
+
+
+def test_configure_runtime_environment_prefers_selected_cad_install_dir(tmp_path: Path, monkeypatch):
+    launcher = _load_launcher()
+    exe_dir = tmp_path / "fanban_m5"
+    internal_dir = exe_dir / "_internal"
+    exe_dir.mkdir(parents=True)
+    internal_dir.mkdir()
+    exe_path = exe_dir / "fanban_m5.exe"
+    exe_path.write_text("exe", encoding="utf-8")
+    selected_install_dir = Path(r"C:\Program Files\Autodesk\AutoCAD 2014")
+    detected_install_dir = Path(r"C:\Program Files\Autodesk\AutoCAD 2022")
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(internal_dir), raising=False)
+    monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
+    launcher.save_launcher_settings(
+        {"selected_cad_install_dir": str(selected_install_dir)},
+        app_root=exe_dir,
+    )
+
+    calls: list[Path | None] = []
+
+    def fake_resolve(configured_install_dir=None):
+        calls.append(Path(configured_install_dir) if configured_install_dir else None)
+        target = selected_install_dir if configured_install_dir else detected_install_dir
+        return SimpleNamespace(
+            install_dir=target,
+            accoreconsole_exe=target / "accoreconsole.exe",
+            monochrome_ctb_path=target / "Plotters" / "Plot Styles" / "monochrome.ctb",
+        )
+
+    monkeypatch.setattr(launcher, "resolve_autocad_paths", fake_resolve)
+
+    old_cwd = Path.cwd()
+    try:
+        launcher.configure_runtime_environment()
+        assert calls[0] == selected_install_dir
+        assert Path(os.environ["FANBAN_AUTOCAD_INSTALL_DIR"]) == selected_install_dir
     finally:
         os.chdir(old_cwd)

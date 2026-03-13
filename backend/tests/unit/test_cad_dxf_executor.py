@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from src.cad.cad_dxf_executor import CADDXFExecutor
+from src.cad.plot_resource_manager import MANAGED_CTB_NAME, PDF2_PC3_NAME, PDF2_PMP_NAME
 from src.config import RuntimeConfig
 from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
@@ -39,6 +40,19 @@ class _SpecStub:
 
     def get_paper_variants(self):
         return {"CNPE_A1": self._Variant(841.0, 594.0)}
+
+
+@pytest.fixture(autouse=True)
+def _managed_plot_assets(tmp_path: Path, monkeypatch):
+    asset_root = tmp_path / "assets"
+    plotters_asset = asset_root / "plotters"
+    plot_styles_asset = asset_root / "plot_styles"
+    plotters_asset.mkdir(parents=True, exist_ok=True)
+    plot_styles_asset.mkdir(parents=True, exist_ok=True)
+    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("managed-ctb" * 128, encoding="utf-8")
+    monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(asset_root))
 
 
 def _mm_to_pt(mm: float) -> float:

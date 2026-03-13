@@ -2,9 +2,8 @@
 Managed AutoCAD plot-resource deployment for Module5.
 
 The packaged app must carry its own PC3/PMP/CTB assets and deploy them onto
-AutoCAD-visible directories on the target machine. Deployment is intentionally
-overwrite-first for managed files so stale user copies do not keep breaking
-real-machine runs.
+AutoCAD-visible directories on the target machine. Managed resources should be
+self-contained and must not overwrite the user's generic system plot styles.
 """
 
 from __future__ import annotations
@@ -18,9 +17,11 @@ from typing import Iterable
 
 from .autocad_path_resolver import AutoCADPathInfo
 
-PDF2_PC3_NAME = "打印PDF2.pc3"
+PDF2_PC3_NAME = "\u6253\u5370PDF2.pc3"
 PDF2_PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 MONOCHROME_CTB_NAME = "monochrome.ctb"
+MANAGED_CTB_NAME = "fanban_monochrome.ctb"
+MIN_VALID_CTB_BYTES = 512
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ def ensure_plot_resources(
     asset_roots: Iterable[Path] | None = None,
     pc3_name: str = PDF2_PC3_NAME,
     pmp_name: str = PDF2_PMP_NAME,
-    ctb_name: str = MONOCHROME_CTB_NAME,
+    ctb_name: str = MANAGED_CTB_NAME,
 ) -> PlotResourceContext:
     roots = list(_normalize_asset_roots(asset_roots))
     pc3_source = _pick_pc3_source(path_info, roots, pc3_name)
@@ -49,29 +50,21 @@ def ensure_plot_resources(
             Path("plotters") / pmp_name,
             Path(pmp_name),
         ],
-        missing_message=f"缺少必需PMP资源: {pmp_name}",
+        missing_message=f"????PMP??: {pmp_name}",
     )
     ctb_source = _pick_ctb_source(path_info, roots, ctb_name)
 
     target_plotters_dirs = _resolve_target_plotters_dirs(path_info)
     if not target_plotters_dirs:
-        raise FileNotFoundError("未找到 AutoCAD Plotters 目录")
+        raise FileNotFoundError("??? AutoCAD Plotters ??")
 
     target_plot_styles_dirs = _resolve_target_plot_styles_dirs(path_info, target_plotters_dirs)
     deployed: list[Path] = []
 
     for plotters_dir in target_plotters_dirs:
         plotters_dir.mkdir(parents=True, exist_ok=True)
-        _copy_managed_file(
-            source=pc3_source,
-            target=plotters_dir / pc3_name,
-            deployed=deployed,
-        )
-        _copy_managed_file(
-            source=pmp_source,
-            target=plotters_dir / pmp_name,
-            deployed=deployed,
-        )
+        _copy_managed_file(source=pc3_source, target=plotters_dir / pc3_name, deployed=deployed)
+        _copy_managed_file(source=pmp_source, target=plotters_dir / pmp_name, deployed=deployed)
         _copy_managed_file(
             source=pmp_source,
             target=plotters_dir / "PMP Files" / pmp_name,
@@ -80,11 +73,7 @@ def ensure_plot_resources(
 
     for plot_styles_dir in target_plot_styles_dirs:
         plot_styles_dir.mkdir(parents=True, exist_ok=True)
-        _copy_managed_file(
-            source=ctb_source,
-            target=plot_styles_dir / ctb_name,
-            deployed=deployed,
-        )
+        _copy_managed_file(source=ctb_source, target=plot_styles_dir / ctb_name, deployed=deployed)
 
     primary_plotters = target_plotters_dirs[0]
     primary_plot_styles = target_plot_styles_dirs[0]
@@ -130,6 +119,7 @@ def _normalize_asset_roots(asset_roots: Iterable[Path] | None) -> list[Path]:
 
 def _resolve_target_plotters_dirs(path_info: AutoCADPathInfo) -> list[Path]:
     candidates: list[Path] = []
+    year_hint = _extract_year_hint(path_info)
 
     def add(path: Path | None) -> None:
         if path is None:
@@ -141,7 +131,7 @@ def _resolve_target_plotters_dirs(path_info: AutoCADPathInfo) -> list[Path]:
     add(path_info.plotters_dir)
     if path_info.install_dir is not None:
         add(Path(path_info.install_dir) / "Plotters")
-    for discovered in _discover_all_user_plotter_dirs():
+    for discovered in _discover_all_user_plotter_dirs(year_hint=year_hint):
         add(discovered)
     return candidates
 
@@ -165,14 +155,23 @@ def _resolve_target_plot_styles_dirs(
     return candidates
 
 
-def _discover_all_user_plotter_dirs() -> list[Path]:
-    appdata = os.getenv("APPDATA")
-    if not appdata:
-        return []
-    autodesk_root = Path(appdata) / "Autodesk"
-    if not autodesk_root.exists() or not autodesk_root.is_dir():
-        return []
-    return [path for path in autodesk_root.rglob("Plotters") if path.is_dir()]
+def _discover_all_user_plotter_dirs(*, year_hint: str | None) -> list[Path]:
+    discovered: list[Path] = []
+    for env_name in ("APPDATA", "LOCALAPPDATA"):
+        root_value = os.getenv(env_name)
+        if not root_value:
+            continue
+        autodesk_root = Path(root_value) / "Autodesk"
+        if not autodesk_root.exists() or not autodesk_root.is_dir():
+            continue
+        for path in autodesk_root.rglob("Plotters"):
+            if not path.is_dir():
+                continue
+            if year_hint and year_hint not in str(path):
+                continue
+            if path not in discovered:
+                discovered.append(path)
+    return discovered
 
 
 def _pick_pc3_source(
@@ -191,7 +190,7 @@ def _pick_pc3_source(
         return source
     if path_info.pc3_path is not None and Path(path_info.pc3_path).name == pc3_name:
         return Path(path_info.pc3_path)
-    raise FileNotFoundError(f"缺少必需PC3资源: {pc3_name}")
+    raise FileNotFoundError(f"????PC3??: {pc3_name}")
 
 
 def _pick_ctb_source(
@@ -206,11 +205,15 @@ def _pick_ctb_source(
             Path(ctb_name),
         ],
     )
-    if source is not None:
+    if source is not None and _is_valid_ctb_file(source):
         return source
-    if path_info.monochrome_ctb_path is not None and Path(path_info.monochrome_ctb_path).exists():
+    if (
+        path_info.monochrome_ctb_path is not None
+        and Path(path_info.monochrome_ctb_path).exists()
+        and _is_valid_ctb_file(Path(path_info.monochrome_ctb_path))
+    ):
         return Path(path_info.monochrome_ctb_path)
-    raise FileNotFoundError(f"缺少必需CTB资源: {ctb_name}")
+    raise FileNotFoundError(f"????CTB??: {ctb_name}")
 
 
 def _pick_required_asset_source(
@@ -246,3 +249,27 @@ def _copy_managed_file(*, source: Path, target: Path, deployed: list[Path]) -> P
         shutil.copy2(source, target)
         deployed.append(target)
     return target
+
+
+def _extract_year_hint(path_info: AutoCADPathInfo) -> str | None:
+    for candidate in (path_info.install_dir, path_info.plotters_dir, path_info.plot_styles_dir):
+        if candidate is None:
+            continue
+        normalized = str(candidate).replace("/", "\\")
+        for token in normalized.split("\\"):
+            if token.isdigit() and len(token) == 4:
+                return token
+        for token in str(candidate).split():
+            if token.isdigit() and len(token) == 4:
+                return token
+    return None
+
+
+def _is_valid_ctb_file(path: Path) -> bool:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    if len(data) < MIN_VALID_CTB_BYTES:
+        return False
+    return data != b"bundled-ctb"

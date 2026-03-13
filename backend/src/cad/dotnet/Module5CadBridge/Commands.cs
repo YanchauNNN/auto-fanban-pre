@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -319,7 +319,7 @@ internal sealed class BridgePlotConfig
     public string Pc3Name { get; private set; } = "打印PDF2.pc3";
     public string Pc3ResolvedPath { get; private set; } = string.Empty;
     public List<string> Pc3SearchDirs { get; private set; } = new();
-    public string CtbName { get; private set; } = "monochrome.ctb";
+    public string CtbName { get; private set; } = "fanban_monochrome.ctb";
     public bool CenterPlot { get; private set; } = false;
     public double PlotOffsetXmm { get; private set; } = 0.0;
     public double PlotOffsetYmm { get; private set; } = 0.0;
@@ -352,7 +352,7 @@ internal sealed class BridgePlotConfig
                 .Where(item => !string.IsNullOrWhiteSpace(item))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList(),
-            CtbName = BridgeValue.GetString(data, "ctb_name", "monochrome.ctb"),
+            CtbName = BridgeValue.GetString(data, "ctb_name", "fanban_monochrome.ctb"),
             CenterPlot = BridgeValue.GetBool(data, "center_plot", false),
             PlotOffsetXmm = BridgeValue.GetDouble(offsets, "x", 0.0),
             PlotOffsetYmm = BridgeValue.GetDouble(offsets, "y", 0.0),

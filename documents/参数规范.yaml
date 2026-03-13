@@ -87,7 +87,7 @@ doc_generation:
     autocad_prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     autocad_visible: { type: bool, default: false, desc: "AutoCAD COM 是否显示主窗口" }
     autocad_plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 绘图超时（秒）" }
-    autocad_ctb_path: { type: str, default: "", desc: "CTB 路径；留空时自动探测本机 Plot Styles 中的 monochrome.ctb" }
+    autocad_ctb_path: { type: str, default: "", desc: "CTB 路径；留空时自动探测本机 Plot Styles 中的 fanban_monochrome.ctb" }
     autocad_pc3_name: { type: str, default: "打印PDF2.pc3", desc: "PC3 配置名（与图幅纸张映射规则一致）" }
     autocad_retry: { type: int, default: 1, desc: "AutoCAD 绘图失败重试次数" }
 
@@ -1136,4 +1136,5 @@ a4_multipage:
         - { page_index: 1, outer_bbox: [], has_titleblock: true }
         - { page_index: 2, outer_bbox: [], has_titleblock: false }
       flags: ["比例不一致", "A4多页_页码不连续"]
+
 

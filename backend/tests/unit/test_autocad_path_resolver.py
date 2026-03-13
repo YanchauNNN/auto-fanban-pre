@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from src.cad.autocad_path_resolver import _default_install_candidates, resolve_autocad_paths
+from src.cad.autocad_path_resolver import (
+    _default_install_candidates,
+    list_available_autocad_installations,
+    resolve_autocad_paths,
+)
 
 
 class TestAutoCADPathResolver:
@@ -46,26 +50,26 @@ class TestAutoCADPathResolver:
         assert info.install_dir == highest_supported
         assert info.accoreconsole_exe == highest_supported / "accoreconsole.exe"
 
-    def test_resolve_rejects_versions_below_2018(
+    def test_resolve_accepts_versions_2010_and_above(
         self,
         temp_dir: Path,
         monkeypatch,
     ):
-        unsupported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2014"
-        unsupported.mkdir(parents=True)
-        (unsupported / "acad.exe").touch()
-        (unsupported / "accoreconsole.exe").touch()
+        supported = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2010"
+        supported.mkdir(parents=True)
+        (supported / "acad.exe").touch()
+        (supported / "accoreconsole.exe").touch()
         monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
 
         info = resolve_autocad_paths(
             configured_install_dir=None,
-            extra_candidates=[unsupported],
+            extra_candidates=[supported],
             registry_candidates=[],
             include_default_candidates=False,
         )
 
-        assert info.install_dir is None
-        assert info.accoreconsole_exe is None
+        assert info.install_dir == supported
+        assert info.accoreconsole_exe == supported / "accoreconsole.exe"
 
     def test_resolve_from_configured_install_dir(self, temp_dir: Path, monkeypatch):
         install_dir = temp_dir / "AutoCAD 2021"
@@ -227,3 +231,37 @@ class TestAutoCADPathResolver:
         candidates = _default_install_candidates()
 
         assert Path(r"D:\AUTOCAD\AutoCAD 2022") in candidates
+        assert Path(r"C:\Program Files\Autodesk\AutoCAD 2010") in candidates
+
+    def test_list_available_autocad_installations_returns_supported_versions_high_to_low(
+        self,
+        temp_dir: Path,
+        monkeypatch,
+    ):
+        cad_2010 = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2010"
+        cad_2022 = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2022"
+        installer_media = (
+            temp_dir
+            / "AutoCAD_2024_Simplified_Chinese_Win_64bit_dlm"
+            / "x64"
+            / "acad"
+            / "PF"
+            / "Root"
+        )
+        cad_2009 = temp_dir / "Program Files" / "Autodesk" / "AutoCAD 2009"
+        for install_dir in (cad_2010, cad_2022, installer_media, cad_2009):
+            install_dir.mkdir(parents=True, exist_ok=True)
+            (install_dir / "acad.exe").touch()
+            (install_dir / "accoreconsole.exe").touch()
+        monkeypatch.delenv("FANBAN_AUTOCAD_INSTALL_DIR", raising=False)
+
+        installations = list_available_autocad_installations(
+            extra_candidates=[cad_2010, cad_2022, installer_media, cad_2009],
+            registry_candidates=[],
+            include_default_candidates=False,
+        )
+
+        assert [item.year for item in installations] == [2022, 2010, 2024]
+        assert installations[0].install_dir == cad_2022
+        assert installations[1].install_dir == cad_2010
+        assert installations[2].install_dir == installer_media

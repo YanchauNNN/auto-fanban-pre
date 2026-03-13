@@ -1,9 +1,9 @@
-"""
+﻿"""
 AutoCAD COM PDF 导出器 — 原生打印链路
 
 策略：
 - 通过 AutoCAD ActiveX COM 接口打开裁切后的 DXF
-- 使用 打印PDF2.pc3 配合 monochrome.ctb 打印为 PDF
+- 使用 打印PDF2.pc3 配合 fanban_monochrome.ctb 打印为 PDF
 - 相比纯 Python 渲染（ezdxf+matplotlib），字体/线宽/图层与 CAD 原图一致
 - ProgID 按版本回退：24.1(2022) → 24.0(2021) → AutoCAD.Application(通用)
 - 超时保护：打印线程超时后强制 Quit AutoCAD
@@ -92,7 +92,7 @@ class AutoCADPdfExporter:
         prog_id_candidates: list[str] | None = None,
         visible: bool = False,
         plot_timeout_sec: int = 180,
-        ctb_name: str = "monochrome.ctb",
+        ctb_name: str = "fanban_monochrome.ctb",
         pc3_name: str = "打印PDF2.pc3",
         retry: int = 1,
         margins: dict[str, float] | None = None,
