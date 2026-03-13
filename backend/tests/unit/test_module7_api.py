@@ -15,6 +15,36 @@ from src.models import Job, JobStatus, JobType
 class FakeJobProcessor:
     def __call__(self, job: Job) -> None:
         job.work_dir = Path(job.work_dir or "")
+        if job.job_type == JobType.AUDIT_REPLACE:
+            job.mark_running(stage="AUDIT_CHECK")
+            job.progress.message = "auditing"
+            reports_dir = job.work_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            report_xlsx = reports_dir / "report.xlsx"
+            report_json = reports_dir / "report.json"
+            report_xlsx.write_bytes(b"PK\x03\x04report")
+            report_json.write_text(
+                json.dumps(
+                    {
+                        "findings_count": 2,
+                        "affected_drawings_count": 1,
+                        "top_wrong_texts": ["2016", "JD"],
+                        "top_internal_codes": ["1234567-JGS01-001"],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            job.artifacts.reports_dir = reports_dir
+            job.artifacts.report_xlsx = report_xlsx
+            job.artifacts.report_json = report_json
+            job.progress.details["findings_count"] = 2
+            job.progress.details["affected_drawings_count"] = 1
+            job.progress.details["top_wrong_texts"] = ["2016", "JD"]
+            job.progress.details["top_internal_codes"] = ["1234567-JGS01-001"]
+            job.mark_succeeded()
+            return
+
         job.mark_running(stage="GENERATE_DOCS")
         job.progress.message = "processing"
 
@@ -93,6 +123,43 @@ def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> 
     assert payload["ready"] is True
     assert "storage_writable" in payload
     assert "worker_alive" in payload
+
+
+def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
+    from API.app.runtime import PipelineJobProcessor
+
+    class DeliverableExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def execute(self, job: Job) -> None:
+            self.calls.append(job.job_id)
+
+    class AuditExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def execute(self, job: Job) -> None:
+            self.calls.append(job.job_id)
+
+    deliverable = DeliverableExecutor()
+    audit = AuditExecutor()
+    monkeypatch.setattr("API.app.runtime.PipelineExecutor", lambda: deliverable)
+    monkeypatch.setattr("API.app.runtime.AuditCheckExecutor", lambda: audit)
+
+    processor = PipelineJobProcessor()
+    processor(Job(job_id="job-deliverable", job_type=JobType.DELIVERABLE, project_no="2016"))
+    processor(
+        Job(
+            job_id="job-audit",
+            job_type=JobType.AUDIT_REPLACE,
+            project_no="2016",
+            options={"mode": "check"},
+        ),
+    )
+
+    assert deliverable.calls == ["job-deliverable"]
+    assert audit.calls == ["job-audit"]
 
 
 def test_health_endpoint_allows_local_frontend_origin(monkeypatch, tmp_path: Path) -> None:
@@ -269,6 +336,62 @@ def test_create_batch_falls_back_to_default_project_no_when_not_inferable(
     assert response.status_code == 201
     payload = response.json()
     assert payload["jobs"][0]["project_no"] == "2016"
+
+
+def test_create_audit_check_rejects_when_project_no_cannot_be_inferred(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = {"project_no": ""}
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps(params, ensure_ascii=False),
+            },
+            files=[("files[]", ("sample-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["param_errors"]["project_no"] == ["required_for_audit_check"]
+
+
+def test_create_audit_check_processes_job_and_exposes_report_download(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps({"project_no": "2016"}, ensure_ascii=False),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 1
+        assert payload["jobs"][0]["task_kind"] == "audit_check"
+        assert payload["jobs"][0]["job_mode"] == "check"
+
+        job_id = payload["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert detail["status"] == "succeeded"
+        assert detail["artifacts"]["report_available"] is True
+        assert detail["artifacts"]["package_available"] is False
+        assert detail["findings_count"] == 2
+        assert detail["affected_drawings_count"] == 1
+        assert detail["top_wrong_texts"] == ["2016", "JD"]
+        assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
+
+        report_download = client.get(f"/api/jobs/{job_id}/download/report")
+        assert report_download.status_code == 200
+        assert report_download.content.startswith(b"PK")
 
 
 def test_create_batch_processes_jobs_and_exposes_downloads(

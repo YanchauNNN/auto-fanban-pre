@@ -53,6 +53,9 @@ class FormMetadataService:
             "deliverable": {
                 "sections": sections,
             },
+            "audit_replace": {
+                "project_options": self._resolve_project_options(),
+            },
         }
 
     def _build_field_schema(self, field_key: str, rule: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +105,14 @@ class FormMetadataService:
             return []
 
         enum_values = self.spec.enums.get(enum_name, [])
+        if isinstance(enum_values, list):
+            if enum_values and isinstance(enum_values[0], dict):
+                return [str(item["id"]) for item in enum_values if "id" in item]
+            return [str(item) for item in enum_values]
+        return []
+
+    def _resolve_project_options(self) -> list[str]:
+        enum_values = self.spec.enums.get("project_no", [])
         if isinstance(enum_values, list):
             if enum_values and isinstance(enum_values[0], dict):
                 return [str(item["id"]) for item in enum_values if "id" in item]

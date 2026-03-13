@@ -13,13 +13,14 @@ from fastapi import HTTPException, status
 
 from .metadata import FormMetadataService
 
+from src.audit_check.executor import AuditCheckExecutor
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import Job, JobStatus, JobType
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.job_manager import JobManager
-from src.pipeline.project_no_inference import resolve_project_no
+from src.pipeline.project_no_inference import infer_project_no_from_path, resolve_project_no
 
 
 @dataclass(frozen=True)
@@ -31,10 +32,14 @@ class UploadedFilePayload:
 
 class PipelineJobProcessor:
     def __init__(self) -> None:
-        self.executor = PipelineExecutor()
+        self.deliverable_executor = PipelineExecutor()
+        self.audit_executor = AuditCheckExecutor()
 
     def __call__(self, job: Job) -> None:
-        self.executor.execute(job)
+        if job.job_type == JobType.AUDIT_REPLACE:
+            self.audit_executor.execute(job)
+            return
+        self.deliverable_executor.execute(job)
 
 
 class DeliverableApiRuntime:
@@ -141,10 +146,74 @@ class DeliverableApiRuntime:
             "jobs": jobs,
         }
 
+    def create_audit_batch(
+        self,
+        *,
+        mode: str,
+        files: list[UploadedFilePayload],
+        raw_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_mode = str(mode or "").strip().lower()
+        if normalized_mode != "check":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {"mode": ["unsupported_audit_mode"]},
+                },
+            )
+
+        upload_errors = self._validate_uploads(files)
+        resolved_submissions = [
+            (upload, self._resolve_audit_params_for_upload(raw_params, upload.filename)) for upload in files
+        ]
+        param_errors = self._collect_audit_param_errors(resolved_submissions)
+
+        if upload_errors or param_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": upload_errors,
+                    "param_errors": param_errors,
+                },
+            )
+
+        batch_id = self._new_batch_id()
+        jobs: list[dict[str, Any]] = []
+        options = {"mode": "check"}
+
+        for upload, resolved_params in resolved_submissions:
+            source_filename = Path(upload.filename).name or "upload.dwg"
+            job = self.job_manager.create_job(
+                job_type=JobType.AUDIT_REPLACE.value,
+                project_no=str(resolved_params["project_no"]),
+                options=options,
+                params=resolved_params,
+                batch_id=batch_id,
+                source_filename=source_filename,
+            )
+            self._store_upload(job, upload)
+            self.job_manager.update_job(job)
+            self._queue.put(job.job_id)
+            jobs.append(self._serialize_summary(job))
+
+        return {
+            "batch_id": batch_id,
+            "jobs": jobs,
+        }
+
     @staticmethod
     def _resolve_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
         resolved = dict(raw_params)
         resolved["project_no"] = resolve_project_no(raw_params.get("project_no"), filename)
+        return resolved
+
+    @staticmethod
+    def _resolve_audit_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
+        resolved = dict(raw_params)
+        explicit = str(raw_params.get("project_no") or "").strip()
+        inferred = infer_project_no_from_path(filename)
+        resolved["project_no"] = explicit or inferred or ""
         return resolved
 
     def _collect_param_errors(
@@ -158,6 +227,17 @@ class DeliverableApiRuntime:
                 for error in field_errors:
                     if error not in bucket:
                         bucket.append(error)
+        return merged
+
+    @staticmethod
+    def _collect_audit_param_errors(
+        resolved_submissions: list[tuple[UploadedFilePayload, dict[str, Any]]],
+    ) -> dict[str, list[str]]:
+        merged: dict[str, list[str]] = {}
+        for _, params in resolved_submissions:
+            project_no = str(params.get("project_no") or "").strip()
+            if not project_no:
+                merged.setdefault("project_no", []).append("required_for_audit_check")
         return merged
 
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
@@ -185,6 +265,7 @@ class DeliverableApiRuntime:
         path = {
             "package": job.artifacts.package_zip,
             "ied": job.artifacts.ied_xlsx,
+            "report": job.artifacts.report_xlsx,
         }.get(artifact)
 
         if path is None or not Path(path).exists():
@@ -279,12 +360,22 @@ class DeliverableApiRuntime:
         return f"batch-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
 
     def _serialize_summary(self, job: Job) -> dict[str, Any]:
+        task_kind = "deliverable"
+        job_mode = "deliverable"
+        if job.job_type == JobType.AUDIT_REPLACE:
+            mode = str(job.options.get("mode", "")).strip().lower()
+            if mode == "check":
+                task_kind = "audit_check"
+                job_mode = "check"
+            else:
+                task_kind = "audit_replace"
+                job_mode = mode or "replace"
         return {
             "job_id": job.job_id,
             "batch_id": job.batch_id,
             "source_filename": job.source_filename,
-            "task_kind": "deliverable",
-            "job_mode": "deliverable",
+            "task_kind": task_kind,
+            "job_mode": job_mode,
             "project_no": job.project_no,
             "status": job.status.value,
             "stage": job.progress.stage,
@@ -293,6 +384,8 @@ class DeliverableApiRuntime:
             "created_at": job.created_at.isoformat(),
             "finished_at": job.finished_at.isoformat() if job.finished_at else None,
             "artifacts": self._serialize_artifacts(job),
+            "findings_count": int(job.progress.details.get("findings_count", 0) or 0),
+            "affected_drawings_count": int(job.progress.details.get("affected_drawings_count", 0) or 0),
             "retry_available": False,
         }
 
@@ -304,6 +397,8 @@ class DeliverableApiRuntime:
                 "current_file": job.progress.current_file,
                 "flags": job.flags,
                 "errors": job.errors,
+                "top_wrong_texts": list(job.progress.details.get("top_wrong_texts", []) or []),
+                "top_internal_codes": list(job.progress.details.get("top_internal_codes", []) or []),
                 "artifacts": self._serialize_artifacts(job, include_urls=True, job_id=job.job_id),
             },
         )
@@ -318,18 +413,20 @@ class DeliverableApiRuntime:
     ) -> dict[str, Any]:
         package_available = bool(job.artifacts.package_zip and Path(job.artifacts.package_zip).exists())
         ied_available = bool(job.artifacts.ied_xlsx and Path(job.artifacts.ied_xlsx).exists())
+        report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
+        replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
         payload = {
             "package_available": package_available,
             "ied_available": ied_available,
-            "report_available": False,
-            "replaced_dwg_available": False,
+            "report_available": report_available,
+            "replaced_dwg_available": replaced_dwg_available,
         }
         if include_urls and job_id is not None:
             payload.update(
                 {
                     "package_download_url": f"/api/jobs/{job_id}/download/package" if package_available else None,
                     "ied_download_url": f"/api/jobs/{job_id}/download/ied" if ied_available else None,
-                    "report_download_url": None,
+                    "report_download_url": f"/api/jobs/{job_id}/download/report" if report_available else None,
                     "replaced_dwg_download_url": None,
                 },
             )

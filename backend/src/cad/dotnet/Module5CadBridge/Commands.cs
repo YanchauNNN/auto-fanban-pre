@@ -40,6 +40,11 @@ public class Commands
                 var selectionEngine = new SelectionEngine(task, trace);
                 selectionEngine.Execute(doc.Database, result);
             }
+            else if (task.WorkflowStage.Equals("audit_check_scan", StringComparison.OrdinalIgnoreCase))
+            {
+                var auditScanner = new AuditCheckScanner(task, trace);
+                auditScanner.Execute(result);
+            }
             else if (
                 task.WorkflowStage.Equals("plot_window_only", StringComparison.OrdinalIgnoreCase)
                 || task.WorkflowStage.Equals("plot_from_split_dwg", StringComparison.OrdinalIgnoreCase)
@@ -197,6 +202,7 @@ internal sealed class BridgeResultEnvelope
     public string SourceDxf { get; }
     public List<Dictionary<string, object>> Frames { get; } = new();
     public List<Dictionary<string, object>> SheetSets { get; } = new();
+    public List<Dictionary<string, object>> Texts { get; } = new();
     public List<string> Errors { get; } = new();
 
     public string ToJson()
@@ -208,6 +214,7 @@ internal sealed class BridgeResultEnvelope
             ["source_dxf"] = SourceDxf,
             ["frames"] = Frames,
             ["sheet_sets"] = SheetSets,
+            ["texts"] = Texts,
             ["errors"] = Errors,
         };
         var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };

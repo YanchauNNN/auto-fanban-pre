@@ -36,6 +36,9 @@ class JobArtifacts(BaseModel):
     drawings_dir: Path | None = None
     docs_dir: Path | None = None
     reports_dir: Path | None = None
+    report_xlsx: Path | None = None
+    report_json: Path | None = None
+    replaced_dwg: Path | None = None
 
 
 class JobProgress(BaseModel):
