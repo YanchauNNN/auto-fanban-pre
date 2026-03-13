@@ -70,6 +70,9 @@ type RawFormSchema = {
       }>;
     }>;
   };
+  audit_replace?: {
+    project_options?: string[];
+  };
 };
 
 export class HttpAdapter implements ApiAdapter {

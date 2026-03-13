@@ -41,27 +41,14 @@ class Packager(IPackager):
         output_dir = job.work_dir / "output"
         zip_path = job.work_dir / "package.zip"
 
+        packaged_names: set[str] = set()
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            # 打包drawings目录
-            drawings_dir = output_dir / "drawings"
-            if drawings_dir.exists():
-                for file in drawings_dir.rglob("*"):
-                    if file.is_file():
-                        arcname = f"drawings/{file.relative_to(drawings_dir)}"
-                        zf.write(file, arcname)
-
-            # 打包docs目录
-            docs_dir = output_dir / "docs"
-            if docs_dir.exists():
-                for file in docs_dir.rglob("*"):
-                    if file.is_file():
-                        arcname = f"docs/{file.relative_to(docs_dir)}"
-                        zf.write(file, arcname)
-
-            # 打包manifest
-            manifest_path = job.work_dir / "manifest.json"
-            if manifest_path.exists():
-                zf.write(manifest_path, "manifest.json")
+            for file in self._iter_packaged_files(output_dir):
+                arcname = file.name
+                if arcname in packaged_names:
+                    raise ValueError(f"Duplicate packaged filename: {arcname}")
+                zf.write(file, arcname)
+                packaged_names.add(arcname)
 
         return zip_path
 
@@ -170,3 +157,17 @@ class Packager(IPackager):
             )
 
         return entries
+
+    @staticmethod
+    def _iter_packaged_files(output_dir: Path) -> list[Path]:
+        packaged_files: list[Path] = []
+        for subdir_name in ("drawings", "docs"):
+            subdir = output_dir / subdir_name
+            if not subdir.exists():
+                continue
+            packaged_files.extend(
+                file
+                for file in sorted(subdir.rglob("*"))
+                if file.is_file()
+            )
+        return packaged_files

@@ -29,6 +29,77 @@
   gap: 1rem;
 }
 
+.controlPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 220px;
+  border-radius: 30px;
+  padding: 1.35rem;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  background:
+    linear-gradient(135deg, rgba(20, 70, 128, 0.08), rgba(255, 255, 255, 0.95)),
+    linear-gradient(90deg, rgba(37, 103, 177, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(37, 103, 177, 0.04) 1px, transparent 1px);
+  background-size: auto, 20px 20px, 20px 20px;
+  box-shadow: 0 22px 58px rgba(13, 44, 80, 0.08);
+}
+
+.uploadActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.primaryActionButton,
+.secondaryActionButton {
+  border-radius: 999px;
+  padding: 0.85rem 1.15rem;
+  font-weight: 700;
+}
+
+.primaryActionButton {
+  border: none;
+  background: linear-gradient(135deg, #144987, #236bb9);
+  color: white;
+}
+
+.primaryActionButton:disabled {
+  border: 1px dashed rgba(20, 70, 128, 0.22);
+  background: rgba(20, 70, 128, 0.05);
+  color: #58789b;
+  cursor: not-allowed;
+}
+
+.secondaryActionButton {
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  background: rgba(20, 70, 128, 0.05);
+  color: #174781;
+}
+
+.hiddenFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.entryHint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.entryHint span {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  color: #42688f;
+  font-size: 0.88rem;
+}
+
 .brandTop {
   margin: 0 0 0.3rem;
   font-family: "Rajdhani", sans-serif;

@@ -1,4 +1,5 @@
 export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
+export type TaskIntent = TaskKind;
 
 export type FormFieldType = "text" | "select" | "date" | "nameId";
 
@@ -29,6 +30,7 @@ export type FormSchema = {
   schemaVersion: string;
   uploadLimits: UploadLimits;
   sections: readonly FormSection[];
+  auditReplaceProjectOptions?: readonly string[];
 };
 
 export type HealthStatus = {
@@ -85,6 +87,36 @@ export type JobList = {
 export type CreateBatchPayload = {
   batchId: string;
   jobs: JobSummary[];
+};
+
+export type UploadProjectInference = {
+  inferredProjectNos: string[];
+  primaryProjectNo: string;
+  hasConflict: boolean;
+};
+
+export type ReplaceTaskConfig = {
+  sourceProjectNo: string;
+  targetProjectNo: string;
+};
+
+export type TaskConfigPreset = {
+  id: string;
+  name: string;
+  intent: TaskIntent;
+  values: Record<string, string>;
+  replaceConfig: ReplaceTaskConfig;
+  updatedAt: string;
+};
+
+export type TaskConfigDraft = {
+  intent: TaskIntent;
+  files: File[];
+  values: Record<string, string>;
+  fieldErrors: Record<string, string[]>;
+  formErrors: string[];
+  inference: UploadProjectInference;
+  replaceConfig: ReplaceTaskConfig;
 };
 
 export type ApiValidationError = {

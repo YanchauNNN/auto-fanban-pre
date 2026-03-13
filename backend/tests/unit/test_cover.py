@@ -65,6 +65,11 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     data = gen._prepare_data(ctx)
 
     output_docx = temp_dir / "封面.docx"
+    def force_embedded_fallback(*, output_path, bindings, data):  # noqa: ANN001
+        raise RuntimeError("force embedded fallback")
+
+    gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+
     gen._write_cover(
         template_path="documents_bin/封面模板文件.docx",
         output_path=output_docx,

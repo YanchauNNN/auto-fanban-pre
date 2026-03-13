@@ -19,8 +19,9 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openpyxl import load_workbook
 
@@ -71,6 +72,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         """写入设计文件Excel"""
         wb = load_workbook(template_path)
         ws = wb.active
+        template_lookups = self._load_template_lookups(wb)
 
         start_row = bindings.get("start_row", 2)
         columns = bindings.get("columns", {})
@@ -83,7 +85,14 @@ class DesignFileGenerator(IDesignFileGenerator):
 
         current_row = start_row
         for row_data in rows:
-            self._write_row(ws, current_row, row_data, global_data, columns, ctx)
+            self._write_row(
+                ws,
+                current_row,
+                row_data,
+                global_data,
+                columns,
+                template_lookups,
+            )
             current_row += 1
 
         wb.save(output_path)
@@ -157,7 +166,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         })
 
         # 图纸行
-        for frame in ctx.get_sorted_frames():
+        for frame in ctx.get_sorted_document_frames():
             tb = frame.titleblock
             rows.append({
                 "type": "drawing",
@@ -182,7 +191,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         row_data: dict,
         global_data: dict,
         columns: dict,
-        ctx: DocContext,
+        template_lookups: dict[str, list[str]],
     ) -> None:
         """写入单行"""
         # 遍历列配置写入
@@ -195,6 +204,7 @@ class DesignFileGenerator(IDesignFileGenerator):
                 is_global=is_global,
                 row_data=row_data,
                 global_data=global_data,
+                template_lookups=template_lookups,
             )
 
             # 写入
@@ -207,17 +217,87 @@ class DesignFileGenerator(IDesignFileGenerator):
         is_global: bool,
         row_data: dict,
         global_data: dict,
+        template_lookups: dict[str, list[str]],
     ) -> str:
         if source == "discipline_code_map[discipline]":
             return global_data.get("discipline_code", "") or ""
 
         if is_global:
-            return global_data.get(source, "") or ""
+            value = global_data.get(source, "") or ""
+        elif source in row_data:
+            value = row_data.get(source, "") or ""
+        elif source in global_data:
+            value = global_data.get(source, "") or ""
+        else:
+            value = ""
 
-        if source in row_data:
-            return row_data.get(source, "") or ""
+        if source == "paper_size_text":
+            return self._match_template_value(
+                value,
+                template_lookups.get("paper_sizes", []),
+                prefer_a4_drawing=True,
+            )
 
-        if source in global_data:
-            return global_data.get(source, "") or ""
+        if source == "discipline":
+            return self._match_template_value(
+                value,
+                template_lookups.get("disciplines", []),
+            )
 
-        return ""
+        return value
+
+    def _load_template_lookups(self, workbook) -> dict[str, list[str]]:
+        if len(workbook.worksheets) < 2:
+            return {"paper_sizes": [], "disciplines": []}
+
+        sheet = workbook.worksheets[1]
+        paper_sizes = self._read_lookup_column(sheet, "B", 53, 101)
+        disciplines = self._read_lookup_column(sheet, "E", 53, 101)
+        return {
+            "paper_sizes": paper_sizes,
+            "disciplines": disciplines,
+        }
+
+    def _read_lookup_column(
+        self,
+        sheet,
+        column: str,
+        start_row: int,
+        end_row: int,
+    ) -> list[str]:
+        values: list[str] = []
+        for row in range(start_row, end_row + 1):
+            value = sheet[f"{column}{row}"].value
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                values.append(text)
+        return values
+
+    def _match_template_value(
+        self,
+        raw_value: Any,
+        options: list[str],
+        *,
+        prefer_a4_drawing: bool = False,
+    ) -> str:
+        text = str(raw_value or "").strip()
+        if not text:
+            return ""
+
+        normalized = self._normalize_lookup_value(text)
+        if prefer_a4_drawing and normalized == "a4":
+            for option in options:
+                if self._normalize_lookup_value(option) == self._normalize_lookup_value("A4图纸"):
+                    return option
+
+        for option in options:
+            if self._normalize_lookup_value(option) == normalized:
+                return option
+
+        return text
+
+    def _normalize_lookup_value(self, value: str) -> str:
+        normalized = re.sub(r"\s+", "", str(value or "")).strip().lower()
+        return normalized

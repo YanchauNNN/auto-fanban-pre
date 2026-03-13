@@ -160,6 +160,17 @@ class DocContext(BaseModel):
         for frame in self.frames:
             if frame.titleblock.internal_code and frame.titleblock.internal_code.endswith("-001"):
                 return frame
+
+        for sheet_set in self.sheet_sets:
+            master_page = sheet_set.master_page
+            master_frame = master_page.frame_meta if master_page else None
+            if (
+                master_frame
+                and master_frame.titleblock.internal_code
+                and master_frame.titleblock.internal_code.endswith("-001")
+            ):
+                return master_frame
+
         return None
 
     def get_sorted_frames(self) -> list[FrameMeta]:
@@ -168,3 +179,28 @@ class DocContext(BaseModel):
             seq = f.titleblock.get_seq_no()
             return seq if seq is not None else 9999
         return sorted(self.frames, key=sort_key)
+
+    def get_sorted_document_frames(self) -> list[FrameMeta]:
+        """返回用于文档生成的图纸序列，包含普通图框与成组成图主页面。"""
+
+        def sort_key(frame: FrameMeta) -> tuple[int, str]:
+            seq = frame.titleblock.get_seq_no()
+            internal_code = frame.titleblock.internal_code or ""
+            return (seq if seq is not None else 9999, internal_code)
+
+        frames_by_code: dict[str, FrameMeta] = {}
+
+        for frame in self.frames:
+            internal_code = frame.titleblock.internal_code or frame.runtime.frame_id
+            frames_by_code[internal_code] = frame
+
+        for sheet_set in self.sheet_sets:
+            master_page = sheet_set.master_page
+            master_frame = master_page.frame_meta if master_page else None
+            if not master_frame:
+                continue
+
+            internal_code = master_frame.titleblock.internal_code or master_frame.runtime.frame_id
+            frames_by_code.setdefault(internal_code, master_frame)
+
+        return sorted(frames_by_code.values(), key=sort_key)

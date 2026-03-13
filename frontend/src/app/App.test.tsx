@@ -21,6 +21,8 @@ vi.mock("../platform/api/useApiAdapter", () => ({
 }));
 
 beforeEach(() => {
+  window.history.pushState({}, "", "/");
+
   mockGetHealth.mockReset();
   mockGetFormSchema.mockReset();
   mockCreateBatch.mockReset();
@@ -59,6 +61,16 @@ beforeEach(() => {
             description: "项目号",
             options: ["2016", "1818"],
           },
+          {
+            key: "album_title_cn",
+            label: "图册名称（中文）",
+            type: "text",
+            required: true,
+            requiredWhen: null,
+            defaultValue: "",
+            description: "图册名称",
+            options: [],
+          },
         ],
       },
     ],
@@ -70,22 +82,36 @@ beforeEach(() => {
 });
 
 describe("App", () => {
-  it("renders three task cards and marks unavailable tasks", async () => {
+  it("renders a compact upload entry instead of the three task cards", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "交付处理" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
-    expect(screen.getAllByText("接口未开放")).toHaveLength(2);
+    expect(await screen.findByRole("button", { name: "上传 DWG" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "交付处理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "纠错" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
   });
 
-  it("switches deliverable workspace panel into focus", async () => {
+  it("opens the task config modal after selecting files and reopens the preserved draft", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "交付处理" }));
+    await user.upload(
+      await screen.findByLabelText("选择 DWG 文件"),
+      new File(["dwg"], "A01.dwg", { type: "application/acad" }),
+    );
 
-    expect(screen.getByRole("heading", { name: "交付处理任务" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.click(screen.getByRole("button", { name: "关闭任务配置" }));
+
+    expect(screen.queryByRole("dialog", { name: "任务配置" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续草稿" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "继续草稿" }));
+
+    expect(await screen.findByDisplayValue("示例图册")).toBeInTheDocument();
+    expect(screen.getByText("A01.dwg")).toBeInTheDocument();
   });
 
   it("filters jobs by selected status", async () => {

@@ -1,0 +1,36 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(7, 21, 38, 0.38);
+  backdrop-filter: blur(12px);
+}
+
+.dialog {
+  width: min(1360px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border-radius: 26px;
+  border: 1px solid rgba(18, 64, 116, 0.22);
+  background:
+    linear-gradient(180deg, rgba(245, 249, 255, 0.98), rgba(251, 253, 255, 0.98)),
+    linear-gradient(90deg, rgba(30, 86, 153, 0.04) 1px, transparent 1px),
+    linear-gradient(rgba(30, 86, 153, 0.04) 1px, transparent 1px);
+  background-size: auto, 20px 20px, 20px 20px;
+  box-shadow: 0 24px 80px rgba(9, 28, 53, 0.28);
+}
+
+@media (max-width: 960px) {
+  .backdrop {
+    padding: 0.75rem;
+  }
+
+  .dialog {
+    max-height: calc(100vh - 1.5rem);
+    border-radius: 24px;
+  }
+}

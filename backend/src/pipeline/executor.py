@@ -411,7 +411,7 @@ class PipelineExecutor:
                 if err not in job.errors:
                     job.errors.append(err)
             job.add_flag("文档参数校验失败")
-            return
+            raise RuntimeError("文档参数校验失败")
 
         doc_ctx.derived = self.derivation.compute(doc_ctx)
 
@@ -454,7 +454,10 @@ class PipelineExecutor:
         merged_params = dict(job.params)
         merged_params.pop("project_no", None)
         merged_params = normalize_global_doc_params(merged_params)
-        frame_001 = self._find_frame_001(context.get("frames", []))
+        frame_001 = self._find_frame_001(
+            context.get("frames", []),
+            context.get("sheet_sets", []),
+        )
         if frame_001:
             tb = frame_001.titleblock
             self._fill_if_missing(merged_params, "engineering_no", tb.engineering_no)
@@ -474,11 +477,19 @@ class PipelineExecutor:
         )
 
     @staticmethod
-    def _find_frame_001(frames: list[Any]) -> Any | None:
+    def _find_frame_001(frames: list[Any], sheet_sets: list[Any]) -> Any | None:
         for frame in frames:
             internal_code = frame.titleblock.internal_code
             if internal_code and internal_code.endswith("-001"):
                 return frame
+
+        for sheet_set in sheet_sets:
+            master_page = getattr(sheet_set, "master_page", None)
+            master_frame = getattr(master_page, "frame_meta", None)
+            internal_code = getattr(getattr(master_frame, "titleblock", None), "internal_code", None)
+            if internal_code and internal_code.endswith("-001"):
+                return master_frame
+
         return None
 
     @staticmethod
@@ -491,11 +502,16 @@ class PipelineExecutor:
 
     def _stage_package(self, job: Job, context: dict) -> None:
         self._update_progress(job, message="打包中")
-        zip_path = self.packager.package(job)
-        self.packager.generate_manifest(job, context=context)
+        drawings_dir = job.work_dir / "output" / "drawings"
+        docs_dir = job.work_dir / "output" / "docs"
 
+        job.artifacts.drawings_dir = drawings_dir if drawings_dir.exists() else None
+        job.artifacts.docs_dir = docs_dir if docs_dir.exists() else None
+        job.artifacts.package_zip = job.work_dir / "package.zip"
+
+        self.packager.generate_manifest(job, context=context)
+        zip_path = self.packager.package(job)
         job.artifacts.package_zip = zip_path
-        job.artifacts.drawings_dir = job.work_dir / "output" / "drawings"
 
     # ==================================================================
     # Flags 聚合

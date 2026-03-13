@@ -29,6 +29,9 @@ type RawFormSchema = {
   deliverable: {
     sections: readonly RawSection[];
   };
+  audit_replace?: {
+    project_options?: readonly string[];
+  };
 };
 
 const SECTION_TITLES: Record<string, string> = {
@@ -69,7 +72,7 @@ const FIELD_LABELS: Record<string, string> = {
   ied_change_flag: "变更标记",
   ied_design_type: "设计类型",
   ied_responsible_unit: "责任单位",
-  ied_discipline_office: "IED 专业室",
+  ied_discipline_office: "专业室",
   ied_chief_designer: "责任设总",
   ied_person_qual_category: "人员资格类别",
   ied_fu_flag: "FU 标记",
@@ -146,6 +149,7 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
           .map((field) => normalizeField(field)),
       }))
       .filter((section) => section.fields.length > 0),
+    auditReplaceProjectOptions: payload.audit_replace?.project_options ?? [],
   };
 }
 
@@ -169,8 +173,32 @@ export function evaluateRequiredWhen(
   return operator === "==" ? actual === expected : actual !== expected;
 }
 
-export function isAdvancedField(field: FormField) {
-  return ADVANCED_FIELDS.has(field.key);
+export function isAdvancedField(
+  field: FormField,
+  values: Record<string, string> = {},
+) {
+  if (field.required || !ADVANCED_FIELDS.has(field.key)) {
+    return false;
+  }
+
+  return !evaluateRequiredWhen(field.requiredWhen, values);
+}
+
+export function buildRecommendedProjectNos(
+  inferredProjectNos: readonly string[],
+  schemaOptions: readonly string[],
+) {
+  const deduped = new Set<string>();
+
+  for (const projectNo of [...inferredProjectNos, ...schemaOptions]) {
+    const normalized = projectNo.trim();
+    if (!normalized) {
+      continue;
+    }
+    deduped.add(normalized);
+  }
+
+  return Array.from(deduped);
 }
 
 function normalizeField(field: RawField): FormField {

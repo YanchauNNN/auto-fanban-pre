@@ -12,8 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState } from "react";
-import { create } from "zustand";
+import { useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -24,24 +23,10 @@ import {
 } from "react-router-dom";
 
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
-import type { CreateBatchPayload, JobDetail, JobList, TaskKind } from "../platform/api/types";
+import type { CreateBatchPayload, JobDetail, JobList } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
 import styles from "./App.module.css";
-
-type UiStore = {
-  activeTaskKind: TaskKind;
-  highlightedBatchId: string | null;
-  setActiveTaskKind: (taskKind: TaskKind) => void;
-  setHighlightedBatchId: (batchId: string | null) => void;
-};
-
-const useUiStore = create<UiStore>((set) => ({
-  activeTaskKind: "deliverable",
-  highlightedBatchId: null,
-  setActiveTaskKind: (activeTaskKind) => set({ activeTaskKind }),
-  setHighlightedBatchId: (highlightedBatchId) => set({ highlightedBatchId }),
-}));
 
 const queryClient = new QueryClient();
 const JOB_STATUS_FILTERS: Array<{ label: string; value?: string }> = [
@@ -82,11 +67,13 @@ export function App() {
 function WorkspacePage() {
   const adapter = useApiAdapter();
   const queryClient = useQueryClient();
-  const activeTaskKind = useUiStore((state) => state.activeTaskKind);
-  const setActiveTaskKind = useUiStore((state) => state.setActiveTaskKind);
-  const highlightedBatchId = useUiStore((state) => state.highlightedBatchId);
-  const setHighlightedBatchId = useUiStore((state) => state.setHighlightedBatchId);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
+  const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
+  const [taskConfigOpen, setTaskConfigOpen] = useState(false);
+  const [hasDraft, setHasDraft] = useState(false);
+  const [incomingFiles, setIncomingFiles] = useState<File[]>([]);
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -114,7 +101,24 @@ function WorkspacePage() {
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
+    setTaskConfigOpen(false);
     queryClient.invalidateQueries({ queryKey: ["jobs"] });
+  }
+
+  function handleUploadClick() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0 || !schemaQuery.data) {
+      event.currentTarget.value = "";
+      return;
+    }
+
+    setIncomingFiles(files);
+    setTaskConfigOpen(true);
+    event.currentTarget.value = "";
   }
 
   return (
@@ -124,7 +128,7 @@ function WorkspacePage() {
           <p className={styles.brandTop}>CNPE Drawing Desk</p>
           <h1>图纸处理工作台</h1>
           <p className={styles.brandBody}>
-            面向内网工程人员的统一入口。当前首版只开放真实可用的交付处理链路。
+            面向内网工程人员的统一入口。录入动作全部收敛到任务配置弹窗，主页面只保留状态与任务视图。
           </p>
         </div>
 
@@ -148,53 +152,57 @@ function WorkspacePage() {
               />
             </dl>
           ) : (
-            <p className={styles.muted}>正在读取系统状态…</p>
+            <p className={styles.muted}>正在读取系统状态...</p>
           )}
         </section>
       </aside>
 
       <main className={styles.mainColumn}>
-        <section className={styles.entryRail}>
-          <TaskCard
-            actionLabel="交付处理"
-            description="真实接口已开放。上传多个 DWG 后，后端会拆成独立任务批量处理。"
-            disabled={false}
-            isActive={activeTaskKind === "deliverable"}
-            onClick={() => setActiveTaskKind("deliverable")}
-            title="交付处理"
+        <section className={styles.controlPanel}>
+          <div>
+            <p className={styles.brandTop}>Task Entry</p>
+            <h2>新建任务</h2>
+            <p className={styles.brandBody}>
+              点击上传后使用系统文件选择器选取 DWG。若已有未提交草稿，可直接恢复继续填写。
+            </p>
+          </div>
+
+          <div className={styles.uploadActions}>
+            <button
+              className={styles.primaryActionButton}
+              disabled={!schemaQuery.data}
+              type="button"
+              onClick={handleUploadClick}
+            >
+              上传 DWG
+            </button>
+            {hasDraft ? (
+              <button
+                className={styles.secondaryActionButton}
+                type="button"
+                onClick={() => setTaskConfigOpen(true)}
+              >
+                继续草稿
+              </button>
+            ) : null}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            accept=".dwg"
+            aria-label="选择 DWG 文件"
+            className={styles.hiddenFileInput}
+            multiple
+            type="file"
+            onChange={handleFileSelection}
           />
-          <TaskCard
-            actionLabel="纠错"
-            description="接口未开放"
-            disabled
-            isActive={false}
-            onClick={() => setActiveTaskKind("audit_check")}
-            title="纠错"
-          />
-          <TaskCard
-            actionLabel="翻版"
-            description="接口未开放"
-            disabled
-            isActive={false}
-            onClick={() => setActiveTaskKind("audit_replace")}
-            title="翻版"
-          />
+
+          <div className={styles.entryHint}>
+            <span>真实提交链路：交付处理</span>
+            <span>预留结构：纠错 / 翻版</span>
+            <span>草稿策略：关闭保留，提交成功或手动清空后重置</span>
+          </div>
         </section>
-
-        {activeTaskKind === "deliverable" && schemaQuery.data ? (
-          <DeliverableWorkspace
-            adapter={adapter}
-            onBatchCreated={handleBatchCreated}
-            schema={schemaQuery.data}
-          />
-        ) : null}
-
-        {activeTaskKind !== "deliverable" ? (
-          <section className={styles.placeholderPanel}>
-            <h2>接口未开放</h2>
-            <p>当前 API 只提供交付处理链路，纠错与翻版入口已保留，但暂不允许提交。</p>
-          </section>
-        ) : null}
       </main>
 
       <aside className={styles.jobsColumn}>
@@ -232,7 +240,11 @@ function WorkspacePage() {
           {jobsQuery.data?.items.length ? (
             jobsQuery.data.items.map((job) => (
               <Link
-                className={`${styles.jobCard} ${job.batchId && job.batchId === highlightedBatchId ? styles.jobCardHighlight : ""}`}
+                className={`${styles.jobCard} ${
+                  job.batchId && job.batchId === highlightedBatchId
+                    ? styles.jobCardHighlight
+                    : ""
+                }`}
                 key={job.jobId}
                 to={`/jobs/${job.jobId}`}
               >
@@ -254,6 +266,18 @@ function WorkspacePage() {
           )}
         </div>
       </aside>
+
+      {schemaQuery.data ? (
+        <DeliverableWorkspace
+          adapter={adapter}
+          incomingFiles={incomingFiles}
+          isOpen={taskConfigOpen}
+          onBatchCreated={handleBatchCreated}
+          onClose={() => setTaskConfigOpen(false)}
+          onDraftAvailabilityChange={setHasDraft}
+          schema={schemaQuery.data}
+        />
+      ) : null}
     </div>
   );
 }
@@ -291,7 +315,7 @@ function JobDetailPage() {
               <p className={styles.brandTop}>Job Detail</p>
               <h1>{detail.sourceFilename}</h1>
               <p className={styles.brandBody}>
-                {detail.jobId} · {detail.projectNo ?? "未标记项目"}
+                {detail.jobId} / {detail.projectNo ?? "未标记项目"}
               </p>
             </div>
             <StatusPill status={detail.status} />
@@ -305,7 +329,7 @@ function JobDetailPage() {
                   : "任务存在告警或错误，请先检查后再继续处理。"}
               </strong>
               <span>
-                flags {detail.flags.length} 项 · errors {detail.errors.length} 项
+                flags {detail.flags.length} 项 / errors {detail.errors.length} 项
               </span>
             </section>
           ) : null}
@@ -313,7 +337,7 @@ function JobDetailPage() {
           <div className={styles.detailGrid}>
             <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
             <InfoBlock label="进度" value={`${detail.percent}%`} />
-            <InfoBlock label="当前文件" value={detail.currentFile ?? "—"} />
+            <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
             <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
           </div>
 
@@ -354,14 +378,8 @@ function JobDetailPage() {
           <section className={styles.detailSection}>
             <h2>下载</h2>
             <div className={styles.downloadGrid}>
-              <ArtifactButton
-                href={detail.artifacts.packageDownloadUrl ?? undefined}
-                label="下载 package.zip"
-              />
-              <ArtifactButton
-                href={detail.artifacts.iedDownloadUrl ?? undefined}
-                label="下载 IED计划.xlsx"
-              />
+              <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载 package.zip" />
+              <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED计划.xlsx" />
             </div>
           </section>
 
@@ -379,7 +397,7 @@ function JobDetailPage() {
         </section>
       ) : (
         <section className={styles.detailPanel}>
-          <p className={styles.muted}>正在加载任务详情…</p>
+          <p className={styles.muted}>正在加载任务详情...</p>
         </section>
       )}
     </div>
@@ -392,35 +410,6 @@ function StatRow({ label, value }: { label: string; value: string }) {
       <dt>{label}</dt>
       <dd>{value}</dd>
     </>
-  );
-}
-
-function TaskCard({
-  title,
-  description,
-  actionLabel,
-  disabled,
-  isActive,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  actionLabel: string;
-  disabled: boolean;
-  isActive: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <article className={`${styles.taskCard} ${isActive ? styles.taskCardActive : ""}`}>
-      <header>
-        <p className={styles.brandTop}>Task Entry</p>
-        <h2>{title}</h2>
-      </header>
-      <p>{description}</p>
-      <button disabled={disabled} type="button" onClick={onClick}>
-        {actionLabel}
-      </button>
-    </article>
   );
 }
 
