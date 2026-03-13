@@ -477,6 +477,8 @@ doc_generation:
     catalog_bindings:
       header:
         engineering_no:        { cell: "C1", label: "A1" }
+        album_title_cn:        { cell: "D1:E1", desc: "目录主标题，写入图册名称（中文）" }
+        album_title_en:        { cell: "D2:E2", when: "project_no == '1818'", desc: "1818项目目录副标题，写入图册名称（英文）" }
         album_code_title:      { cell: "D3:E3", template: "第{album_code}图册图纸(文件)目录" }
         catalog_internal_code: { cell: "H1", merge: "H1:I2(仅1818)" }
         catalog_external_code: { cell: "H3", merge: "H3:I4(仅1818)" }

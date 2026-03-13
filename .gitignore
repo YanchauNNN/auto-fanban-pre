@@ -18,6 +18,7 @@ storage/
 tmp/
 /build/
 /dist/
+output/
 plot.log
 
 # Local dependency mirrors (do not commit)

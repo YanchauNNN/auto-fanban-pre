@@ -174,4 +174,25 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set
     assert ws["D3"].value == "第01图册图纸(文件)目录"
     assert ws["B11"].value == "1234567-JG001-001"
     assert ws["D11"].value == "JD1NHT11001B25C42SD"
+    assert ws["D1"].value == "测试图册"
+
+
+def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> None:
+    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context(project_no="1818")
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "目录-1818.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/1818图册目录模板.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+
+    assert ws["D1"].value == "测试图册"
+    assert ws["D2"].value == "Test Album"
+    assert ws["D3"].value == "第01图册图纸(文件)目录"
 

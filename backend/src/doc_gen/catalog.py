@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 
 from ..config import load_spec
 from ..interfaces import GenerationError, ICatalogGenerator
@@ -135,38 +136,90 @@ class CatalogGenerator(ICatalogGenerator):
         derived = ctx.derived
         params = ctx.params
 
+        if ctx.is_1818:
+            self._normalize_1818_title_merges(ws)
+
         # engineering_no → C1
         if "engineering_no" in header:
-            cell = header["engineering_no"].get("cell", "C1")
+            cell = self._resolve_writable_cell(ws, header["engineering_no"].get("cell", "C1"))
             ws[cell] = params.engineering_no
+
+        if "album_title_cn" in header and params.album_title_cn:
+            cell = self._resolve_writable_cell(ws, header["album_title_cn"].get("cell", "D1:E1"))
+            ws[cell] = params.album_title_cn
+
+        if (
+            ctx.is_1818
+            and "album_title_en" in header
+            and params.album_title_en
+        ):
+            cell = self._resolve_writable_cell(ws, header["album_title_en"].get("cell", "D2:E2"))
+            ws[cell] = params.album_title_en
 
         # catalog_internal_code → H1
         if "catalog_internal_code" in header:
-            cell = header["catalog_internal_code"].get("cell", "H1")
+            cell = self._resolve_writable_cell(ws, header["catalog_internal_code"].get("cell", "H1"))
             ws[cell] = derived.catalog_internal_code
 
         # catalog_external_code → H3
         if "catalog_external_code" in header:
-            cell = header["catalog_external_code"].get("cell", "H3")
+            cell = self._resolve_writable_cell(ws, header["catalog_external_code"].get("cell", "H3"))
             ws[cell] = derived.catalog_external_code
 
         # subitem_no → C5
         if "subitem_no" in header:
-            cell = header["subitem_no"].get("cell", "C5")
+            cell = self._resolve_writable_cell(ws, header["subitem_no"].get("cell", "C5"))
             ws[cell] = params.subitem_no
 
         # catalog_revision → H5
         if "catalog_revision" in header:
-            cell = header["catalog_revision"].get("cell", "H5")
+            cell = self._resolve_writable_cell(ws, header["catalog_revision"].get("cell", "H5"))
             ws[cell] = derived.catalog_revision
 
         if "album_code_title" in header and derived.album_code:
-            cell = header["album_code_title"].get("cell", "D3:E3").split(":")[0]
+            cell = self._resolve_writable_cell(ws, header["album_code_title"].get("cell", "D3:E3"))
             template = header["album_code_title"].get(
                 "template",
                 "第{album_code}图册图纸(文件)目录",
             )
             ws[cell] = template.format(album_code=derived.album_code)
+
+    def _resolve_writable_cell(self, ws, cell_ref: str) -> str:
+        anchor = cell_ref.split(":")[0]
+        if not isinstance(ws[anchor], MergedCell):
+            return anchor
+        for merged_range in ws.merged_cells.ranges:
+            if anchor in merged_range:
+                return merged_range.start_cell.coordinate
+        return anchor
+
+    def _normalize_1818_title_merges(self, ws) -> None:
+        merged_ranges = {str(rng) for rng in ws.merged_cells.ranges}
+        if "D2:E3" not in merged_ranges:
+            return
+
+        source = ws["D2"]
+        source_style = copy(source._style)
+        source_alignment = copy(source.alignment)
+        source_font = copy(source.font)
+        source_fill = copy(source.fill)
+        source_border = copy(source.border)
+        source_number_format = source.number_format
+        source_protection = copy(source.protection)
+
+        ws.unmerge_cells("D2:E3")
+        ws.merge_cells("D2:E2")
+        ws.merge_cells("D3:E3")
+
+        for cell_ref in ("D2", "E2", "D3", "E3"):
+            cell = ws[cell_ref]
+            cell._style = copy(source_style)
+            cell.alignment = copy(source_alignment)
+            cell.font = copy(source_font)
+            cell.fill = copy(source_fill)
+            cell.border = copy(source_border)
+            cell.number_format = source_number_format
+            cell.protection = copy(source_protection)
 
     def _build_detail_rows(self, ctx: DocContext) -> list[dict]:
         """构建明细行数据"""
