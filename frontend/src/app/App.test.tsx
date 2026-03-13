@@ -7,6 +7,7 @@ import { App } from "./App";
 const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
 const mockCreateBatch = vi.fn();
+const mockCreateAuditCheck = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobDetail = vi.fn();
 
@@ -15,6 +16,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
     createBatch: mockCreateBatch,
+    createAuditCheck: mockCreateAuditCheck,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
   }),
@@ -26,6 +28,7 @@ beforeEach(() => {
   mockGetHealth.mockReset();
   mockGetFormSchema.mockReset();
   mockCreateBatch.mockReset();
+  mockCreateAuditCheck.mockReset();
   mockListJobs.mockReset();
   mockGetJobDetail.mockReset();
 
@@ -74,6 +77,7 @@ beforeEach(() => {
         ],
       },
     ],
+    auditReplaceProjectOptions: ["2026", "1818"],
   });
   mockListJobs.mockResolvedValue({
     total: 0,
@@ -82,12 +86,12 @@ beforeEach(() => {
 });
 
 describe("App", () => {
-  it("renders a compact upload entry instead of the three task cards", async () => {
+  it("renders dual primary entry buttons for deliverable and audit check", async () => {
     render(<App />);
 
     expect(await screen.findByRole("button", { name: "上传 DWG" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "交付处理" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "纠错" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
   });
 
@@ -96,7 +100,7 @@ describe("App", () => {
     render(<App />);
 
     await user.upload(
-      await screen.findByLabelText("选择 DWG 文件"),
+      await screen.findByLabelText("选择交付 DWG 文件"),
       new File(["dwg"], "A01.dwg", { type: "application/acad" }),
     );
 
@@ -125,27 +129,29 @@ describe("App", () => {
     });
   });
 
-  it("renders localized job status labels in the recent jobs list", async () => {
+  it("renders audit check job cards with kind badge and summary metrics", async () => {
     mockListJobs.mockResolvedValue({
       total: 1,
       items: [
         {
           jobId: "job-1",
           batchId: "batch-1",
-          sourceFilename: "A01.dwg",
-          taskKind: "deliverable",
-          jobMode: "deliverable",
-          projectNo: "2016",
-          status: "failed",
-          stage: "GENERATE_DOCS",
-          percent: 70,
-          message: "任务失败",
+          sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          taskKind: "audit_check",
+          jobMode: "check",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "EXPORT_REPORT",
+          percent: 100,
+          message: "纠错完成",
           createdAt: "2026-03-08T10:20:30+08:00",
           finishedAt: null,
+          findingsCount: 12,
+          affectedDrawingsCount: 4,
           artifacts: {
             packageAvailable: false,
             iedAvailable: false,
-            reportAvailable: false,
+            reportAvailable: true,
             replacedDwgAvailable: false,
           },
           retryAvailable: false,
@@ -155,38 +161,133 @@ describe("App", () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getAllByText("失败")).toHaveLength(2);
-    });
+    expect(await screen.findByText("20261NH-JGS51-B合并版.dwg")).toBeInTheDocument();
+    expect(screen.getByText("错误数 12")).toBeInTheDocument();
+    expect(screen.getByText("受影响图纸 4")).toBeInTheDocument();
   });
 
-  it("shows a warning banner for succeeded jobs that still contain flags or errors", async () => {
+  it("shows an audit summary modal when an audit job completes with findings", async () => {
+    const user = userEvent.setup();
+    const detail = {
+      jobId: "job-1",
+      batchId: "batch-1",
+      sourceFilename: "20261NH-JGS51-B合并版.dwg",
+      taskKind: "audit_check" as const,
+      jobMode: "check",
+      projectNo: "2026",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "纠错完成",
+      createdAt: "2026-03-08T10:20:30+08:00",
+      finishedAt: "2026-03-08T10:25:30+08:00",
+      startedAt: "2026-03-08T10:21:30+08:00",
+      currentFile: "20261NH-JGS51-B合并版.dwg",
+      findingsCount: 6,
+      affectedDrawingsCount: 3,
+      topWrongTexts: ["错字A", "错字B"],
+      topInternalCodes: ["20261NH-JGS51-001"],
+      flags: [],
+      errors: [],
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: true,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: null,
+        iedDownloadUrl: null,
+        reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-1/download/report",
+        replacedDwgDownloadUrl: null,
+      },
+      retryAvailable: false,
+    };
+
+    mockListJobs
+      .mockResolvedValueOnce({
+        total: 1,
+        items: [
+          {
+            ...detail,
+            status: "running",
+            percent: 60,
+            findingsCount: 0,
+            affectedDrawingsCount: 0,
+            topWrongTexts: undefined,
+            topInternalCodes: undefined,
+            artifacts: {
+              packageAvailable: false,
+              iedAvailable: false,
+              reportAvailable: false,
+              replacedDwgAvailable: false,
+            },
+          },
+        ],
+      })
+      .mockResolvedValue({
+        total: 1,
+        items: [
+          {
+            ...detail,
+            artifacts: {
+              packageAvailable: false,
+              iedAvailable: false,
+              reportAvailable: true,
+              replacedDwgAvailable: false,
+            },
+          },
+        ],
+      });
+    mockGetJobDetail.mockResolvedValue(detail);
+
+    render(<App />);
+
+    expect(await screen.findByText("20261NH-JGS51-B合并版.dwg")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "刷新" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "纠错结果摘要" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("总错误数")).toBeInTheDocument();
+    expect(screen.getByText("6")).toBeInTheDocument();
+    expect(screen.getByText("错字A")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载完整报告" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8000/api/jobs/job-1/download/report",
+    );
+  });
+
+  it("renders audit check details with summary fields and report download only", async () => {
     window.history.pushState({}, "", "/jobs/job-1");
     mockGetJobDetail.mockResolvedValue({
       jobId: "job-1",
       batchId: "batch-1",
-      sourceFilename: "A01.dwg",
-      taskKind: "deliverable",
-      jobMode: "deliverable",
-      projectNo: "2016",
+      sourceFilename: "20261NH-JGS51-B合并版.dwg",
+      taskKind: "audit_check",
+      jobMode: "check",
+      projectNo: "2026",
       status: "succeeded",
-      stage: "PACKAGE_ZIP",
+      stage: "EXPORT_REPORT",
       percent: 100,
-      message: "任务完成",
+      message: "纠错完成",
       createdAt: "2026-03-08T10:20:30+08:00",
       finishedAt: "2026-03-08T10:25:30+08:00",
       startedAt: "2026-03-08T10:21:30+08:00",
-      currentFile: "A01.dwg",
-      flags: ["转换失败:A01.dwg"],
-      errors: ["文档参数缺失: engineering_no"],
+      currentFile: "20261NH-JGS51-B合并版.dwg",
+      findingsCount: 9,
+      affectedDrawingsCount: 5,
+      topWrongTexts: ["错字A", "错字B"],
+      topInternalCodes: ["20261NH-JGS51-001", "20261NH-JGS51-002"],
+      flags: [],
+      errors: [],
       artifacts: {
-        packageAvailable: true,
+        packageAvailable: false,
         iedAvailable: false,
-        reportAvailable: false,
+        reportAvailable: true,
         replacedDwgAvailable: false,
-        packageDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-1/download/package",
+        packageDownloadUrl: null,
         iedDownloadUrl: null,
-        reportDownloadUrl: null,
+        reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-1/download/report",
         replacedDwgDownloadUrl: null,
       },
       retryAvailable: false,
@@ -194,8 +295,11 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByText("任务已完成，但仍有告警或缺失项需要处理。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("总错误数")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载 package.zip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.getByText("错字A")).toBeInTheDocument();
+    expect(screen.getByText("20261NH-JGS51-001")).toBeInTheDocument();
   });
 });

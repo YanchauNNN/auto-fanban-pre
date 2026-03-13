@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.audit_check.executor import AuditCheckExecutor
+from src.audit_check.roi_mapper import AuditFieldContextMapper
 from src.audit_check.models import AuditLexicon, ScanTextItem
 from src.config import SpecLoader, reload_config
-from src.models import Job, JobStatus, JobType
+from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, TitleblockFields
 
 
 def _configure_env(monkeypatch, tmp_path: Path) -> None:
@@ -75,3 +76,26 @@ def test_audit_check_executor_writes_reports_and_summary(monkeypatch, tmp_path: 
     assert job.progress.details["findings_count"] == 2
     assert job.progress.details["affected_drawings_count"] == 1
     assert job.progress.details["top_wrong_texts"] == ["1418", "JD"]
+
+
+def test_audit_field_context_mapper_initializes_roi_margin_before_building_regions(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-audit-1",
+            source_file=tmp_path / "demo.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=200, ymax=100),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(internal_code="1234567-JGS01-001"),
+    )
+
+    mapper = AuditFieldContextMapper([frame], [])
+
+    assert mapper is not None

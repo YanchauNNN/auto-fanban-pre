@@ -25,7 +25,7 @@ type RawJobSummary = {
   job_id: string;
   batch_id: string | null;
   source_filename: string;
-  task_kind: "deliverable";
+  task_kind: "deliverable" | "audit_check" | "audit_replace";
   job_mode: string | null;
   project_no: string | null;
   status: string;
@@ -34,6 +34,8 @@ type RawJobSummary = {
   message: string | null;
   created_at: string;
   finished_at: string | null;
+  findings_count?: number | null;
+  affected_drawings_count?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
 };
@@ -43,6 +45,8 @@ type RawJobDetail = RawJobSummary & {
   current_file: string | null;
   flags: string[];
   errors: string[];
+  top_wrong_texts?: string[] | null;
+  top_internal_codes?: string[] | null;
 };
 
 type RawFormSchema = {
@@ -135,6 +139,31 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createAuditCheck(
+    projectNo: string,
+    files: File[],
+  ): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("mode", "check");
+    formData.append("params_json", JSON.stringify({ project_no: projectNo }));
+    for (const file of files) {
+      formData.append("files[]", file);
+    }
+
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/audit-replace", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
   async listJobs(status?: string): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
@@ -161,6 +190,8 @@ export class HttpAdapter implements ApiAdapter {
       currentFile: payload.current_file,
       flags: payload.flags,
       errors: payload.errors,
+      topWrongTexts: payload.top_wrong_texts ?? [],
+      topInternalCodes: payload.top_internal_codes ?? [],
     };
   }
 
@@ -178,6 +209,8 @@ export class HttpAdapter implements ApiAdapter {
       message: payload.message ?? "",
       createdAt: payload.created_at,
       finishedAt: payload.finished_at,
+      findingsCount: payload.findings_count ?? 0,
+      affectedDrawingsCount: payload.affected_drawings_count ?? 0,
       artifacts: {
         packageAvailable: payload.artifacts.package_available,
         iedAvailable: payload.artifacts.ied_available,

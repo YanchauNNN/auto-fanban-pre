@@ -481,19 +481,9 @@ export function DeliverableWorkspace({
               <div className={styles.summaryCard}>
                 <div className={styles.summaryHeaderRow}>
                   <h3>次级任务开关</h3>
-                  <span>{draft.intent === "deliverable" ? "交付" : draft.intent === "audit_check" ? "纠错" : "翻版"}</span>
+                  <span>{draft.intent === "deliverable" ? "交付" : "翻版"}</span>
                 </div>
                 <div className={styles.intentNotice}>
-                  <button
-                    aria-pressed={draft.intent === "audit_check"}
-                    className={`${styles.intentChip} ${
-                      draft.intent === "audit_check" ? styles.intentChipActive : ""
-                    }`}
-                    type="button"
-                    onClick={() => handleIntentChange("audit_check")}
-                  >
-                    纠错
-                  </button>
                   <button
                     aria-pressed={draft.intent === "audit_replace"}
                     className={`${styles.intentChip} ${
@@ -507,9 +497,7 @@ export function DeliverableWorkspace({
                 </div>
                 <div className={styles.intentHelp}>
                   {draft.intent === "deliverable" ? (
-                    <p>当前按交付处理链路提交，纠错与翻版已预留前端结构，待接口开放后接入。</p>
-                  ) : draft.intent === "audit_check" ? (
-                    <p>纠错接口尚未开放，当前只保留任务开关与后续接线位。</p>
+                    <p>当前按交付处理链路提交；纠错已经独立到首页主入口，这里只保留翻版结构。</p>
                   ) : (
                     <div className={styles.replaceSummary}>
                       <p>
@@ -879,10 +867,6 @@ function applyFilesToDraft(draft: TaskConfigDraft, files: File[]) {
 }
 
 function getIntentUnavailableMessage(intent: TaskIntent) {
-  if (intent === "audit_check") {
-    return "纠错接口未开放，当前无法提交。";
-  }
-
   if (intent === "audit_replace") {
     return "翻版接口未开放，当前无法提交。";
   }

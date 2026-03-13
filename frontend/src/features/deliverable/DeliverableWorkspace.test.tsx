@@ -98,6 +98,7 @@ function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
+    createAuditCheck: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
@@ -351,8 +352,7 @@ describe("DeliverableWorkspace", () => {
     expect(screen.getByRole("button", { name: "创建交付任务" })).toBeInTheDocument();
   });
 
-  it("blocks submit for unavailable secondary task intents", async () => {
-    const user = userEvent.setup();
+  it("keeps the deliverable modal focused on delivery and replace only", async () => {
     const adapter = createAdapter();
 
     render(
@@ -367,13 +367,7 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("图册名称（中文）"), "草稿图册");
-    await user.click(screen.getByRole("button", { name: "纠错" }));
-    await user.click(screen.getByRole("button", { name: "创建任务" }));
-
-    expect(
-      await screen.findByText("纠错接口未开放，当前无法提交。"),
-    ).toBeInTheDocument();
-    expect(adapter.createBatch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "纠错" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
   });
 });

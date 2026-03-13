@@ -24,10 +24,10 @@ class _FrameRegion:
 class AuditFieldContextMapper:
     def __init__(self, frames: list[FrameMeta], sheet_sets: list[SheetSet]) -> None:
         self.spec = load_spec()
-        self._frame_regions = self._build_frame_regions(frames, sheet_sets)
-        self._field_regions = self._build_field_regions(frames)
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         self._roi_margin_percent = float(tolerances.get("roi_margin_percent", 0.0))
+        self._frame_regions = self._build_frame_regions(frames, sheet_sets)
+        self._field_regions = self._build_field_regions(frames)
 
     def annotate(self, item: ScanTextItem) -> ScanTextItem:
         x = item.position_x

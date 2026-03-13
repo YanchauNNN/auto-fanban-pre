@@ -43,7 +43,7 @@ class AuditDotNetScanner:
             result_json=result_json,
             workspace_dir=task_dir,
         )
-        payload = json.loads(result_json.read_text(encoding="utf-8"))
+        payload = json.loads(result_json.read_text(encoding="utf-8-sig"))
         items: list[ScanTextItem] = []
         for row in payload.get("texts", []):
             if not isinstance(row, dict):

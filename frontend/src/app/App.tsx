@@ -12,7 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -22,13 +22,16 @@ import {
   useParams,
 } from "react-router-dom";
 
+import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
+import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
-import type { CreateBatchPayload, JobDetail, JobList } from "../platform/api/types";
+import type { CreateBatchPayload, JobDetail, JobList, JobSummary, TaskKind } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
 import styles from "./App.module.css";
 
-const queryClient = new QueryClient();
+const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
+
 const JOB_STATUS_FILTERS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
   { label: "排队中", value: "queued" },
@@ -47,6 +50,8 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
 };
 
 export function App() {
+  const [queryClient] = useState(() => new QueryClient());
+
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter
@@ -66,14 +71,22 @@ export function App() {
 
 function WorkspacePage() {
   const adapter = useApiAdapter();
-  const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const reactQueryClient = useQueryClient();
+  const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
+  const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
+  const notifiedAuditJobIdsRef = useRef<Set<string>>(new Set());
 
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
-  const [taskConfigOpen, setTaskConfigOpen] = useState(false);
-  const [hasDraft, setHasDraft] = useState(false);
+
+  const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
+  const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
   const [incomingFiles, setIncomingFiles] = useState<File[]>([]);
+
+  const [auditConfigOpen, setAuditConfigOpen] = useState(false);
+  const [auditDraftAvailable, setAuditDraftAvailable] = useState(false);
+  const [auditSummaryQueue, setAuditSummaryQueue] = useState<JobDetail[]>([]);
+  const [auditNotice, setAuditNotice] = useState<string | null>(null);
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -92,24 +105,96 @@ function WorkspacePage() {
     queryFn: () => adapter.listJobs(jobsStatusFilter),
     refetchInterval: (query) => {
       const items = ((query.state.data as JobList | undefined)?.items ?? []);
-      const hasActive = items.some((item) =>
-        ["queued", "running", "cancel_requested"].includes(item.status),
-      );
+      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
       return hasActive ? 3000 : 12000;
     },
   });
 
+  useEffect(() => {
+    const items = jobsQuery.data?.items;
+    if (!items) {
+      return;
+    }
+
+    const currentStatuses = new Map(items.map((job) => [job.jobId, job.status]));
+    const previousStatuses = knownJobStatusesRef.current;
+    knownJobStatusesRef.current = currentStatuses;
+
+    if (!previousStatuses) {
+      return;
+    }
+
+    const completedAuditJobs = items.filter((job) => {
+      const previousStatus = previousStatuses.get(job.jobId);
+      return (
+        job.taskKind === "audit_check" &&
+        previousStatus !== undefined &&
+        ACTIVE_JOB_STATUSES.includes(previousStatus as never) &&
+        job.status === "succeeded" &&
+        !notifiedAuditJobIdsRef.current.has(job.jobId)
+      );
+    });
+
+    if (completedAuditJobs.length === 0) {
+      return;
+    }
+
+    completedAuditJobs.forEach((job) => {
+      notifiedAuditJobIdsRef.current.add(job.jobId);
+    });
+
+    let active = true;
+
+    void (async () => {
+      const summaries: JobDetail[] = [];
+      const passedWithoutFindings: string[] = [];
+
+      for (const job of completedAuditJobs) {
+        if (job.findingsCount > 0) {
+          try {
+            const detail = await adapter.getJobDetail(job.jobId);
+            if (detail.taskKind === "audit_check") {
+              summaries.push(detail);
+            }
+          } catch {
+            // keep the session moving; list polling will continue and the user can open detail manually
+          }
+          continue;
+        }
+
+        passedWithoutFindings.push(job.sourceFilename);
+      }
+
+      if (!active) {
+        return;
+      }
+
+      if (summaries.length > 0) {
+        setAuditSummaryQueue((current) => [...current, ...summaries]);
+      }
+
+      if (passedWithoutFindings.length > 0) {
+        setAuditNotice(`纠错任务已完成，未发现问题：${passedWithoutFindings.join("、")}`);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [adapter, jobsQuery.data]);
+
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
-    setTaskConfigOpen(false);
-    queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    setDeliverableConfigOpen(false);
+    setAuditConfigOpen(false);
+    void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
   }
 
-  function handleUploadClick() {
-    fileInputRef.current?.click();
+  function handleDeliverableUploadClick() {
+    deliverableFileInputRef.current?.click();
   }
 
-  function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleDeliverableFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0 || !schemaQuery.data) {
       event.currentTarget.value = "";
@@ -117,9 +202,11 @@ function WorkspacePage() {
     }
 
     setIncomingFiles(files);
-    setTaskConfigOpen(true);
+    setDeliverableConfigOpen(true);
     event.currentTarget.value = "";
   }
+
+  const activeAuditSummary = auditSummaryQueue[0] ?? null;
 
   return (
     <div className={styles.shell}>
@@ -128,7 +215,7 @@ function WorkspacePage() {
           <p className={styles.brandTop}>CNPE Drawing Desk</p>
           <h1>图纸处理工作台</h1>
           <p className={styles.brandBody}>
-            面向内网工程人员的统一入口。录入动作全部收敛到任务配置弹窗，主页面只保留状态与任务视图。
+            当前主线已经把交付处理和纠错接到同一个工作台里。交付继续走任务配置弹窗，纠错使用独立配置弹窗。
           </p>
         </div>
 
@@ -137,22 +224,13 @@ function WorkspacePage() {
           {healthQuery.data ? (
             <dl className={styles.healthGrid}>
               <StatRow label="服务" value={healthQuery.data.ready ? "可用" : "异常"} />
-              <StatRow
-                label="存储"
-                value={healthQuery.data.storageWritable ? "可写" : "不可写"}
-              />
+              <StatRow label="存储" value={healthQuery.data.storageWritable ? "可写" : "不可写"} />
               <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
-              <StatRow
-                label="AutoCAD"
-                value={healthQuery.data.autocadReady ? "就绪" : "缺失"}
-              />
-              <StatRow
-                label="Office"
-                value={healthQuery.data.officeReady ? "就绪" : "缺失"}
-              />
+              <StatRow label="AutoCAD" value={healthQuery.data.autocadReady ? "就绪" : "缺失"} />
+              <StatRow label="Office" value={healthQuery.data.officeReady ? "就绪" : "缺失"} />
             </dl>
           ) : (
-            <p className={styles.muted}>正在读取系统状态...</p>
+            <p className={styles.muted}>正在读取系统状态…</p>
           )}
         </section>
       </aside>
@@ -163,7 +241,7 @@ function WorkspacePage() {
             <p className={styles.brandTop}>Task Entry</p>
             <h2>新建任务</h2>
             <p className={styles.brandBody}>
-              点击上传后使用系统文件选择器选取 DWG。若已有未提交草稿，可直接恢复继续填写。
+              交付处理继续从系统文件选择器进入；纠错从独立弹窗进入，表单只保留项目号和 DWG 上传。
             </p>
           </div>
 
@@ -172,15 +250,23 @@ function WorkspacePage() {
               className={styles.primaryActionButton}
               disabled={!schemaQuery.data}
               type="button"
-              onClick={handleUploadClick}
+              onClick={handleDeliverableUploadClick}
             >
               上传 DWG
             </button>
-            {hasDraft ? (
+            <button
+              className={styles.primaryActionButton}
+              disabled={!schemaQuery.data}
+              type="button"
+              onClick={() => setAuditConfigOpen(true)}
+            >
+              {auditDraftAvailable ? "继续纠错" : "纠错"}
+            </button>
+            {deliverableDraftAvailable ? (
               <button
                 className={styles.secondaryActionButton}
                 type="button"
-                onClick={() => setTaskConfigOpen(true)}
+                onClick={() => setDeliverableConfigOpen(true)}
               >
                 继续草稿
               </button>
@@ -188,20 +274,29 @@ function WorkspacePage() {
           </div>
 
           <input
-            ref={fileInputRef}
+            ref={deliverableFileInputRef}
             accept=".dwg"
-            aria-label="选择 DWG 文件"
+            aria-label="选择交付 DWG 文件"
             className={styles.hiddenFileInput}
             multiple
             type="file"
-            onChange={handleFileSelection}
+            onChange={handleDeliverableFileSelection}
           />
 
           <div className={styles.entryHint}>
-            <span>真实提交链路：交付处理</span>
-            <span>预留结构：纠错 / 翻版</span>
-            <span>草稿策略：关闭保留，提交成功或手动清空后重置</span>
+            <span>真实可提交：交付处理、纠错</span>
+            <span>仍未开放：翻版真实提交</span>
+            <span>草稿策略：关闭保留，提交成功或清空后重置</span>
           </div>
+
+          {auditNotice ? (
+            <div className={styles.noticeBanner}>
+              <span>{auditNotice}</span>
+              <button className={styles.noticeClose} type="button" onClick={() => setAuditNotice(null)}>
+                关闭
+              </button>
+            </div>
+          ) : null}
         </section>
       </main>
 
@@ -211,11 +306,7 @@ function WorkspacePage() {
             <p className={styles.brandTop}>Recent Jobs</p>
             <h2>最近任务</h2>
           </div>
-          <button
-            className={styles.subtleButton}
-            type="button"
-            onClick={() => jobsQuery.refetch()}
-          >
+          <button className={styles.subtleButton} type="button" onClick={() => jobsQuery.refetch()}>
             刷新
           </button>
         </header>
@@ -241,9 +332,7 @@ function WorkspacePage() {
             jobsQuery.data.items.map((job) => (
               <Link
                 className={`${styles.jobCard} ${
-                  job.batchId && job.batchId === highlightedBatchId
-                    ? styles.jobCardHighlight
-                    : ""
+                  job.batchId && job.batchId === highlightedBatchId ? styles.jobCardHighlight : ""
                 }`}
                 key={job.jobId}
                 to={`/jobs/${job.jobId}`}
@@ -251,6 +340,19 @@ function WorkspacePage() {
                 <div className={styles.jobCardHeader}>
                   <strong>{job.sourceFilename}</strong>
                   <StatusPill status={job.status} />
+                </div>
+                <div className={styles.jobMetaRow}>
+                  <TaskKindBadge kind={job.taskKind} />
+                  {job.taskKind === "audit_check" ? (
+                    <span className={styles.jobMetric}>
+                      错误数 {job.findingsCount}
+                    </span>
+                  ) : null}
+                  {job.taskKind === "audit_check" ? (
+                    <span className={styles.jobMetric}>
+                      受影响图纸 {job.affectedDrawingsCount}
+                    </span>
+                  ) : null}
                 </div>
                 <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
                 <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
@@ -268,14 +370,33 @@ function WorkspacePage() {
       </aside>
 
       {schemaQuery.data ? (
-        <DeliverableWorkspace
-          adapter={adapter}
-          incomingFiles={incomingFiles}
-          isOpen={taskConfigOpen}
-          onBatchCreated={handleBatchCreated}
-          onClose={() => setTaskConfigOpen(false)}
-          onDraftAvailabilityChange={setHasDraft}
-          schema={schemaQuery.data}
+        <>
+          <DeliverableWorkspace
+            adapter={adapter}
+            incomingFiles={incomingFiles}
+            isOpen={deliverableConfigOpen}
+            onBatchCreated={handleBatchCreated}
+            onClose={() => setDeliverableConfigOpen(false)}
+            onDraftAvailabilityChange={setDeliverableDraftAvailable}
+            schema={schemaQuery.data}
+          />
+          <AuditCheckWorkspace
+            adapter={adapter}
+            isOpen={auditConfigOpen}
+            onBatchCreated={handleBatchCreated}
+            onClose={() => setAuditConfigOpen(false)}
+            onDraftAvailabilityChange={setAuditDraftAvailable}
+            schema={schemaQuery.data}
+          />
+        </>
+      ) : null}
+
+      {activeAuditSummary ? (
+        <AuditCheckSummaryModal
+          job={activeAuditSummary}
+          onClose={() =>
+            setAuditSummaryQueue((current) => current.slice(1))
+          }
         />
       ) : null}
     </div>
@@ -293,9 +414,7 @@ function JobDetailPage() {
     enabled: Boolean(params.jobId),
     refetchInterval: (query) => {
       const data = query.state.data as JobDetail | undefined;
-      return data && ["queued", "running", "cancel_requested"].includes(data.status)
-        ? 3000
-        : 12000;
+      return data && ACTIVE_JOB_STATUSES.includes(data.status as never) ? 3000 : 12000;
     },
   });
 
@@ -315,7 +434,7 @@ function JobDetailPage() {
               <p className={styles.brandTop}>Job Detail</p>
               <h1>{detail.sourceFilename}</h1>
               <p className={styles.brandBody}>
-                {detail.jobId} / {detail.projectNo ?? "未标记项目"}
+                {detail.jobId} / {detail.projectNo ?? "未标记项目"} / {taskKindLabel(detail.taskKind)}
               </p>
             </div>
             <StatusPill status={detail.status} />
@@ -335,51 +454,65 @@ function JobDetailPage() {
           ) : null}
 
           <div className={styles.detailGrid}>
+            <InfoBlock label="任务类型" value={taskKindLabel(detail.taskKind)} />
             <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
             <InfoBlock label="进度" value={`${detail.percent}%`} />
             <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
             <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
+            <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
           </div>
 
           <div className={styles.progressBarLarge}>
             <div style={{ width: `${detail.percent}%` }} />
           </div>
 
+          {detail.taskKind === "audit_check" ? (
+            <section className={styles.detailSection}>
+              <h2>纠错摘要</h2>
+              <div className={styles.detailGrid}>
+                <InfoBlock label="总错误数" value={String(detail.findingsCount)} />
+                <InfoBlock label="受影响图纸数" value={String(detail.affectedDrawingsCount)} />
+              </div>
+              <div className={styles.columns}>
+                <ListBlock title="前 10 个错误文本" items={detail.topWrongTexts} emptyText="暂无错误文本摘要" />
+                <ListBlock title="前 10 个受影响内部编码" items={detail.topInternalCodes} emptyText="暂无内部编码摘要" />
+              </div>
+            </section>
+          ) : null}
+
           <section className={styles.detailSection}>
             <h2>告警与错误</h2>
             <div className={styles.columns}>
-              <div>
-                <h3>Flags</h3>
-                {detail.flags.length ? (
-                  <ul>
-                    {detail.flags.map((flag) => (
-                      <li key={flag}>{flag}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className={styles.muted}>暂无 flags</p>
-                )}
-              </div>
-              <div>
-                <h3>Errors</h3>
-                {detail.errors.length ? (
-                  <ul>
-                    {detail.errors.map((error) => (
-                      <li key={error}>{error}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className={styles.muted}>暂无 errors</p>
-                )}
-              </div>
+              <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+              <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
             </div>
           </section>
 
           <section className={styles.detailSection}>
             <h2>下载</h2>
             <div className={styles.downloadGrid}>
-              <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载 package.zip" />
-              <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED计划.xlsx" />
+              {detail.taskKind === "deliverable" ? (
+                <>
+                  <ArtifactButton
+                    href={detail.artifacts.packageDownloadUrl ?? undefined}
+                    label="下载 package.zip"
+                  />
+                  <ArtifactButton
+                    href={detail.artifacts.iedDownloadUrl ?? undefined}
+                    label="下载 IED计划.xlsx"
+                  />
+                </>
+              ) : detail.taskKind === "audit_check" ? (
+                <ArtifactButton
+                  href={detail.artifacts.reportDownloadUrl ?? undefined}
+                  label="下载 report.xlsx"
+                />
+              ) : (
+                <ArtifactButton
+                  href={detail.artifacts.replacedDwgDownloadUrl ?? undefined}
+                  label="下载替换后 DWG"
+                />
+              )}
             </div>
           </section>
 
@@ -438,6 +571,35 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ListBlock({
+  title,
+  items,
+  emptyText,
+}: {
+  title: string;
+  items: readonly string[];
+  emptyText: string;
+}) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      {items.length > 0 ? (
+        <ul>
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className={styles.muted}>{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function TaskKindBadge({ kind }: { kind: TaskKind }) {
+  return <span className={`${styles.kindBadge} ${kindToneClass(kind)}`}>{taskKindLabel(kind)}</span>;
+}
+
 function StatusPill({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, tone: "default" };
 
@@ -462,6 +624,26 @@ function statusToneClass(tone: string) {
     return styles.statusFailed;
   }
   return styles.statusDefault;
+}
+
+function kindToneClass(kind: TaskKind) {
+  if (kind === "audit_check") {
+    return styles.kindAudit;
+  }
+  if (kind === "audit_replace") {
+    return styles.kindReplace;
+  }
+  return styles.kindDeliverable;
+}
+
+function taskKindLabel(kind: TaskKind) {
+  if (kind === "audit_check") {
+    return "纠错";
+  }
+  if (kind === "audit_replace") {
+    return "翻版";
+  }
+  return "交付";
 }
 
 function formatTimestamp(value: string) {

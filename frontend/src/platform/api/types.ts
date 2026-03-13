@@ -68,6 +68,8 @@ export type JobSummary = {
   message: string;
   createdAt: string;
   finishedAt: string | null;
+  findingsCount: number;
+  affectedDrawingsCount: number;
   artifacts: JobArtifacts;
   retryAvailable: boolean;
 };
@@ -77,6 +79,8 @@ export type JobDetail = JobSummary & {
   currentFile: string | null;
   flags: string[];
   errors: string[];
+  topWrongTexts: string[];
+  topInternalCodes: string[];
 };
 
 export type JobList = {
@@ -133,6 +137,7 @@ export type ApiAdapter = {
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
   createBatch: (params: Record<string, string>, files: File[]) => Promise<CreateBatchPayload>;
+  createAuditCheck: (projectNo: string, files: File[]) => Promise<CreateBatchPayload>;
   listJobs: (status?: string) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

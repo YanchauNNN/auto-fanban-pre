@@ -1,0 +1,102 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.kicker {
+  margin: 0 0 0.25rem;
+  font-family: "Rajdhani", sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #5d84b3;
+}
+
+.description {
+  margin: 0;
+  color: #5a7798;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.summaryCard {
+  border-radius: 22px;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(244, 248, 253, 0.92);
+  padding: 1rem;
+}
+
+.summaryCard span {
+  display: block;
+  color: #6481a0;
+  margin-bottom: 0.35rem;
+}
+
+.summaryCard strong {
+  color: #133f6c;
+  font-size: 1.4rem;
+}
+
+.listSection {
+  border-radius: 22px;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(244, 248, 253, 0.92);
+  padding: 1rem;
+}
+
+.listSection h3 {
+  margin-top: 0;
+  color: #163f6d;
+}
+
+.listSection ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #355b82;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.ghostButton,
+.downloadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.78rem 1.05rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ghostButton {
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  background: rgba(20, 70, 128, 0.05);
+  color: #174781;
+}
+
+.downloadButton {
+  border: none;
+  background: linear-gradient(135deg, #144987, #236bb9);
+  color: #fff;
+}
+
+@media (max-width: 800px) {
+  .summaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
