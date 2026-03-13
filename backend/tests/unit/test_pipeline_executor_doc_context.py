@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
+import zipfile
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
-from src.models import Job, JobType
+import pytest
+
+from src.models import DocContext, FrameMeta, GlobalDocParams, Job, JobType, PageInfo, SheetSet
 from src.pipeline.executor import PipelineExecutor
+from src.pipeline.packager import Packager
 
 
 def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> None:
@@ -36,3 +44,160 @@ def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> 
     assert doc_ctx.params.cover_variant == "通用"
     assert doc_ctx.params.upgrade_start_seq is None
     assert doc_ctx.params.upgrade_end_seq is None
+
+
+def test_build_doc_context_inherits_required_titleblock_fields_from_sheet_set_master(
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.spec = SimpleNamespace(
+        doc_generation={"rules": {}},
+        get_mappings=lambda: {},
+    )
+
+    master_frame = deepcopy(sample_frame)
+    master_frame.titleblock.internal_code = "20261RS-JGS65-001"
+    master_frame.titleblock.engineering_no = "2026"
+    master_frame.titleblock.subitem_no = "JGS65"
+    master_frame.titleblock.discipline = "结构"
+    master_frame.titleblock.revision = "A"
+    master_frame.titleblock.status = "CFC"
+
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master_frame.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master_frame,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-001",
+        page_total=1,
+        pages=[master_page],
+        master_page=master_page,
+    )
+
+    job = Job(
+        job_id="job-doc-context-sheet-set",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        params={
+            "project_no": "2026",
+            "cover_variant": "通用",
+            "classification": "非密",
+            "subitem_name": "反应堆厂房",
+            "album_title_cn": "测试图册",
+            "wbs_code": "WBS-001",
+            "file_category": "图纸",
+            "ied_status": "发布",
+            "ied_doc_type": "图册",
+        },
+    )
+
+    doc_ctx = PipelineExecutor._build_doc_context(
+        executor,
+        job,
+        {"frames": [], "sheet_sets": [sheet_set]},
+    )
+
+    assert doc_ctx.params.engineering_no == "2026"
+    assert doc_ctx.params.subitem_no == "JGS65"
+    assert doc_ctx.params.discipline == "结构"
+    assert doc_ctx.params.revision == "A"
+    assert doc_ctx.params.doc_status == "CFC"
+
+
+def test_doc_context_get_frame_001_falls_back_to_sheet_set_master(sample_frame: FrameMeta) -> None:
+    master_frame = deepcopy(sample_frame)
+    master_frame.titleblock.internal_code = "20261RS-JGS65-001"
+
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master_frame.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master_frame,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-001",
+        page_total=1,
+        pages=[master_page],
+        master_page=master_page,
+    )
+
+    ctx = DocContext(
+        params=GlobalDocParams(project_no="2026"),
+        frames=[],
+        sheet_sets=[sheet_set],
+    )
+
+    frame_001 = ctx.get_frame_001()
+
+    assert frame_001 is not None
+    assert frame_001.titleblock.internal_code == "20261RS-JGS65-001"
+
+
+def test_stage_generate_docs_raises_on_doc_param_validation_errors(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.doc_param_validator = SimpleNamespace(
+        validate=lambda ctx: ["文档参数缺失: engineering_no", "文档参数缺失: revision"],
+    )
+    executor._build_doc_context = MagicMock(return_value=SimpleNamespace())
+
+    job = Job(
+        job_id="job-doc-validation-fail",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+    )
+
+    with pytest.raises(RuntimeError, match="文档参数校验失败"):
+        PipelineExecutor._stage_generate_docs(executor, job, {"frames": [], "sheet_sets": []})
+
+    assert "文档参数缺失: engineering_no" in job.errors
+    assert "文档参数缺失: revision" in job.errors
+    assert "文档参数校验失败" in job.flags
+    assert job.artifacts.docs_dir is None
+    assert job.artifacts.ied_xlsx is None
+
+
+def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.packager = Packager()
+
+    job = Job(
+        job_id="job-package-stage",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+        input_files=[tmp_path / "demo.dwg"],
+        params={"project_no": "2026"},
+    )
+    job.input_files[0].write_text("demo", encoding="utf-8")
+
+    drawings_dir = tmp_path / "output" / "drawings"
+    drawings_dir.mkdir(parents=True)
+    (drawings_dir / "demo.pdf").write_text("pdf", encoding="utf-8")
+
+    docs_dir = tmp_path / "output" / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "cover.docx").write_text("doc", encoding="utf-8")
+
+    PipelineExecutor._stage_package(executor, job, {"frames": [], "sheet_sets": []})
+
+    assert job.artifacts.package_zip == tmp_path / "package.zip"
+    assert job.artifacts.drawings_dir == drawings_dir
+    assert job.artifacts.docs_dir == docs_dir
+    assert job.artifacts.package_zip.exists()
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["artifacts"]["package_zip"] == str(tmp_path / "package.zip")
+    assert manifest["artifacts"]["drawings_dir"] == str(drawings_dir)
+    assert manifest["artifacts"]["docs_dir"] == str(docs_dir)
+
+    with zipfile.ZipFile(job.artifacts.package_zip) as zf:
+        names = set(zf.namelist())
+
+    assert "manifest.json" not in names
+    assert "demo.pdf" in names
+    assert "cover.docx" in names

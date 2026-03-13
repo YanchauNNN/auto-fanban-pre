@@ -160,8 +160,6 @@ def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
 
     assert deliverable.calls == ["job-deliverable"]
     assert audit.calls == ["job-audit"]
-
-
 def test_health_endpoint_allows_local_frontend_origin(monkeypatch, tmp_path: Path) -> None:
     with _create_client(monkeypatch, tmp_path) as client:
         response = client.get(
@@ -214,6 +212,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
     payload = response.json()
     assert payload["upload_limits"]["max_files"] == 3
     assert payload["deliverable"]["sections"]
+    assert "2016" in payload["audit_replace"]["project_options"]
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"
@@ -237,6 +236,12 @@ def test_form_schema_returns_deliverable_fields_and_options(
         for field in section["fields"]
         if field["key"] == "ied_responsible_unit"
     )
+    ied_person_qual_category = next(
+        field
+        for section in payload["deliverable"]["sections"]
+        for field in section["fields"]
+        if field["key"] == "ied_person_qual_category"
+    )
 
     assert "2016" in project_no["options"]
     assert project_no["required"] is False
@@ -248,6 +253,17 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "河北分公司-建筑结构所-结构一室",
         "河北分公司-建筑结构所-结构二室",
         "河北分公司-建筑结构所-建筑总图室",
+    ]
+    assert ied_person_qual_category["options"] == [
+        "非核安全物项",
+        "非核压力容器",
+        "非核压力管道",
+        "一般核安全物项-军工",
+        "一般核安全物项-民用",
+        "核安全承压机械设备-军工-甲级",
+        "核安全承压机械设备-军工-乙级",
+        "核安全承压机械设备-民用-甲级",
+        "核安全承压机械设备-民用-乙级",
     ]
 
 

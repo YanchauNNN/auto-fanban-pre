@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,8 @@ from src.models import (
     FrameMeta,
     FrameRuntime,
     GlobalDocParams,
+    PageInfo,
+    SheetSet,
     TitleblockFields,
 )
 
@@ -70,6 +73,33 @@ def _build_context() -> DocContext:
         design_phase="施工图设计",
     )
     return DocContext(params=params, derived=derived, frames=[_make_frame(1)])
+
+
+def _build_context_with_sheet_set_001() -> DocContext:
+    ctx = _build_context()
+    frame_001 = deepcopy(_make_frame(1, discipline="结 构"))
+    frame_001.titleblock.paper_size_text = "A4"
+
+    frame_002 = deepcopy(_make_frame(2, discipline="结 构"))
+    frame_002.titleblock.paper_size_text = "A 0"
+
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=frame_001.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=frame_001,
+    )
+
+    ctx.frames = [frame_002]
+    ctx.sheet_sets = [
+        SheetSet(
+            cluster_id="sheet-set-001",
+            page_total=1,
+            pages=[master_page],
+            master_page=master_page,
+        ),
+    ]
+    return ctx
 
 
 def test_design_write_rows_with_bindings(temp_dir: Path) -> None:

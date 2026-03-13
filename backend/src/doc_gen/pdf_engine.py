@@ -117,7 +117,9 @@ class PDFExporter(IPDFExporter):
 
     def _export_docx_via_com(self, docx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Word到PDF"""
+        pythoncom = None
         try:
+            import pythoncom  # type: ignore[import]
             import win32com.client
         except ImportError:
             raise ExportError("pywin32未安装，无法使用Office COM")
@@ -125,20 +127,26 @@ class PDFExporter(IPDFExporter):
         word = None
         doc = None
         try:
-            word = win32com.client.Dispatch("Word.Application")
+            pythoncom.CoInitialize()
+            word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
+            word.DisplayAlerts = 0
 
             doc = word.Documents.Open(str(docx_path.absolute()))
-            doc.SaveAs(str(pdf_path.absolute()), FileFormat=17)  # 17 = PDF
+            doc.ExportAsFixedFormat(str(pdf_path.absolute()), 17)  # 17 = PDF
         finally:
             if doc:
                 doc.Close(False)
             if word:
                 word.Quit()
+            if pythoncom is not None:
+                pythoncom.CoUninitialize()
 
     def _export_xlsx_via_com(self, xlsx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Excel到PDF"""
+        pythoncom = None
         try:
+            import pythoncom  # type: ignore[import]
             import win32com.client
         except ImportError:
             raise ExportError("pywin32未安装，无法使用Office COM")
@@ -146,8 +154,10 @@ class PDFExporter(IPDFExporter):
         excel = None
         wb = None
         try:
-            excel = win32com.client.Dispatch("Excel.Application")
+            pythoncom.CoInitialize()
+            excel = win32com.client.DispatchEx("Excel.Application")
             excel.Visible = False
+            excel.DisplayAlerts = False
 
             wb = excel.Workbooks.Open(str(xlsx_path.absolute()))
             wb.ExportAsFixedFormat(0, str(pdf_path.absolute()))  # 0 = PDF
@@ -156,6 +166,8 @@ class PDFExporter(IPDFExporter):
                 wb.Close(False)
             if excel:
                 excel.Quit()
+            if pythoncom is not None:
+                pythoncom.CoUninitialize()
 
     def _export_via_libreoffice(self, input_path: Path, pdf_path: Path) -> None:
         """通过LibreOffice导出PDF"""
@@ -174,6 +186,8 @@ class PDFExporter(IPDFExporter):
                 timeout=self.timeout,
                 check=True,
             )
+        except FileNotFoundError as e:
+            raise ExportError("LibreOffice 未安装或 soffice 不在 PATH 中") from e
         except subprocess.TimeoutExpired as e:
             raise ExportError(f"LibreOffice导出超时: {input_path}") from e
         except subprocess.CalledProcessError as e:

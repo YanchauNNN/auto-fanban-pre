@@ -96,6 +96,12 @@ class FormMetadataService:
                 resolve_repo_path(self.spec.get_template_path("ied", "2016")),
                 sheet_index=3,
             )
+        if field_key == "ied_person_qual_category":
+            return self._load_data_validation_list_options(
+                resolve_repo_path(self.spec.get_template_path("ied", "2016")),
+                sheet_index=0,
+                column_letter="M",
+            )
         if field_key in {"ied_responsible_unit", "ied_discipline_office"}:
             path = resolve_repo_path("documents_bin/responsible_unit.json")
             return list(json.loads(path.read_text(encoding="utf-8-sig")))
@@ -143,3 +149,43 @@ class FormMetadataService:
             if text and text not in values:
                 values.append(text)
         return values
+
+    @staticmethod
+    def _load_data_validation_list_options(
+        workbook_path: Path,
+        *,
+        sheet_index: int,
+        column_letter: str,
+    ) -> list[str]:
+        wb = load_workbook(workbook_path, read_only=False, data_only=False)
+        ws = wb[wb.sheetnames[sheet_index]]
+        matches: list[str] = []
+
+        for validation in ws.data_validations.dataValidation:
+            formula = str(validation.formula1 or "").strip()
+            if validation.type != "list" or not formula:
+                continue
+
+            refs = str(validation.sqref).split()
+            if not any(
+                ref.startswith(column_letter)
+                or f":{column_letter}" in ref
+                or f"{column_letter}:" in ref
+                for ref in refs
+            ):
+                continue
+
+            matches.extend(FormMetadataService._parse_list_formula(formula))
+
+        deduped: list[str] = []
+        for value in matches:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
+
+    @staticmethod
+    def _parse_list_formula(formula: str) -> list[str]:
+        if formula.startswith('"') and formula.endswith('"'):
+            return [item.strip() for item in formula[1:-1].split(",") if item.strip()]
+
+        return []
