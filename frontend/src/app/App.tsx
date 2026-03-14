@@ -215,7 +215,7 @@ function WorkspacePage() {
           <p className={styles.brandTop}>CNPE Drawing Desk</p>
           <h1>图纸处理工作台</h1>
           <p className={styles.brandBody}>
-            当前主线已经把交付处理和纠错接到同一个工作台里。交付继续走任务配置弹窗，纠错使用独立配置弹窗。
+            当前主线已经把出图和纠错接到同一个工作台里。出图继续走任务配置弹窗，纠错使用独立配置弹窗。
           </p>
         </div>
 
@@ -241,7 +241,7 @@ function WorkspacePage() {
             <p className={styles.brandTop}>Task Entry</p>
             <h2>新建任务</h2>
             <p className={styles.brandBody}>
-              交付处理继续从系统文件选择器进入；纠错从独立弹窗进入，表单只保留项目号和 DWG 上传。
+              出图继续从系统文件选择器进入；纠错从独立弹窗进入，表单只保留项目号和 DWG 上传。
             </p>
           </div>
 
@@ -252,7 +252,7 @@ function WorkspacePage() {
               type="button"
               onClick={handleDeliverableUploadClick}
             >
-              上传 DWG
+              出图
             </button>
             <button
               className={styles.primaryActionButton}
@@ -276,7 +276,7 @@ function WorkspacePage() {
           <input
             ref={deliverableFileInputRef}
             accept=".dwg"
-            aria-label="选择交付 DWG 文件"
+            aria-label="选择出图 DWG 文件"
             className={styles.hiddenFileInput}
             multiple
             type="file"

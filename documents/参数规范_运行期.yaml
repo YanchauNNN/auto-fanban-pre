@@ -7,7 +7,7 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2026-03-03"
+last_updated: "2026-03-13"
 
 runtime_options:
   # --------------------------------------------------------------------------
@@ -105,7 +105,55 @@ runtime_options:
     fallback:  { type: enum, default: "libreoffice", desc: "PDF 引擎兜底" }
 
   # --------------------------------------------------------------------------
-  # 4) 上传限制与资源保护
+  # 4) 纠错运行规则
+  # --------------------------------------------------------------------------
+  audit_check:
+    enabled: { type: bool, default: true, desc: "是否启用纠错任务" }
+    lexicon_path: { type: str, default: "documents_bin\\词库收集.xlsx", desc: "纠错词库路径（相对运行期配置目录）" }
+    project_column_header_pattern: { type: str, default: "^\\d{4}$", desc: "词库项目列头匹配规则" }
+    include_rows:
+      type: "list[str|int]"
+      default: [1, 2, "3+"]
+      desc: "参与词库匹配的数据行：第1行项目号、第2行项目名称/别名、第3行起词条"
+    generic_identifier_like:
+      regex:
+        type: str
+        default: "^[A-Z0-9-]{6,}$"
+        desc: "generic_identifier_like 的文本分类规则"
+      exempt_embed_patterns:
+        type: "list[str]"
+        default: ["^[A-Z]{3}\\d{4}[A-Z]$"]
+        desc: "嵌入项目号时允许豁免的严格格式；默认仅豁免 3位大写字母+4位数字+1位大写字母"
+    context_rules:
+      date_like:
+        type: "list[str]"
+        default:
+          - "^\\d{4}[-/.]\\d{1,2}([-/.:]\\d{1,2})+$"
+          - "^\\d{4}年\\d{1,2}月(\\d{1,2}日?)?$"
+        desc: "日期/时间上下文正则"
+      dimension_like:
+        type: "list[str]"
+        default:
+          - "^\\d+(?:\\s*[X×*]\\s*\\d+)+$"
+        desc: "尺寸上下文正则"
+      code_like_internal:
+        type: "list[str]"
+        default:
+          - "^\\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2}$"
+        desc: "内部编码/工程编码语义正则"
+      code_like_external:
+        type: "list[str]"
+        default:
+          - "^[A-Z0-9]{19}$"
+        desc: "外部编码语义正则"
+    matching_policy:
+      roi_context_priority: { type: bool, default: true, desc: "ROI 语义优先于纯文本形状判断" }
+      allow_embedded_match_in_titleblock: { type: bool, default: true, desc: "titleblock_* 语义中允许嵌入命中" }
+      suppress_project_no_in_date_like: { type: bool, default: true, desc: "日期语义中抑制项目号命中" }
+      suppress_project_no_in_dimension_like: { type: bool, default: true, desc: "尺寸语义中抑制项目号命中" }
+
+  # --------------------------------------------------------------------------
+  # 5) 上传限制与资源保护
   # --------------------------------------------------------------------------
   upload_limits:
     max_files:        { type: int, default: 50, desc: "单次上传最大文件数" }
@@ -114,7 +162,7 @@ runtime_options:
     min_free_disk_mb: { type: int, default: 10240, desc: "磁盘最小可用空间阈值（MB）" }
 
   # --------------------------------------------------------------------------
-  # 5) 任务生命周期与清理
+  # 6) 任务生命周期与清理
   # --------------------------------------------------------------------------
   lifecycle:
     retention_hours:   { type: int, default: 168, desc: "任务产物保留时长（小时）" }
@@ -122,14 +170,14 @@ runtime_options:
     cleanup_cron:      { type: str, default: "0 3 * * *", desc: "定时清理任务（cron）" }
 
   # --------------------------------------------------------------------------
-  # 6) 日志与可观测性
+  # 7) 日志与可观测性
   # --------------------------------------------------------------------------
   logging:
     log_level:   { type: str, default: "INFO", desc: "日志级别" }
     log_to_file: { type: bool, default: true, desc: "是否输出到文件" }
 
   # --------------------------------------------------------------------------
-  # 7) 运行期业务覆盖（锚点校准相关）
+  # 8) 运行期业务覆盖（锚点校准相关）
   # --------------------------------------------------------------------------
   titleblock_overrides:
     frame_detect_mode:
@@ -168,7 +216,7 @@ runtime_options:
       desc: "LINE重建矩形的上限（geometry_first 模式生效）"
 
   # --------------------------------------------------------------------------
-  # 8) 多DWG处理与冲突策略
+  # 9) 多DWG处理与冲突策略
   # --------------------------------------------------------------------------
   multi_dwg_policy:
     per_dwg_isolation:
@@ -193,7 +241,7 @@ runtime_options:
       desc: "manifest.inputs.dwg_files[] 与 manifest.artifacts 按DWG分组"
 
   # --------------------------------------------------------------------------
-  # 9) DXF→PDF 渲染覆盖（ezdxf + matplotlib）
+  # 10) DXF→PDF 渲染覆盖（ezdxf + matplotlib）
   # --------------------------------------------------------------------------
   dxf_pdf_export:
     aci1_linewidth_mm:         { type: float, default: 0.4,  desc: "ACI颜色1线宽(mm)" }

@@ -8,7 +8,7 @@
 # ============================================================================
 
 schema_version: "2.0"
-last_updated: "2026-03-03"
+last_updated: "2026-03-13"
 
 # ============================================================================
 # 一、通用枚举定义
@@ -238,15 +238,46 @@ doc_generation:
       ied_change_flag:   { type: str, required: false, source: frontend, desc: "变更标记(B列)" }
       
       # --- 设计类型与责任 ---
-      ied_design_type:      { type: str, required: false, source: frontend, desc: "设计类型(V列)，选项来自模板Sheet4" }
-      ied_responsible_unit: { type: str, required: false, source: frontend, desc: "责任单位(X列)，选项来自responsible_unit.json" }
+      ied_design_type:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        desc: "设计类型(V列)，候选来自IED模板Sheet4的G1:G19，支持自由输入和输入筛选下拉"
+        option_source:
+          type: workbook_range
+          workbook: "documents_bin/IED计划模板文件.xlsx"
+          sheet_index: 4
+          range: "G1:G19"
+        ui:
+          widget: combobox
+          allow_custom_input: true
+          filterable: true
+      ied_responsible_unit:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        desc: "责任单位(X列)，候选来自IED模板Sheet3的B1:B314，支持自由输入和输入筛选下拉"
+        option_source:
+          type: workbook_range
+          workbook: "documents_bin/IED计划模板文件.xlsx"
+          sheet_index: 3
+          range: "B1:B314"
+        ui:
+          widget: combobox
+          allow_custom_input: true
+          filterable: true
       ied_discipline_office:
         type: str
         required_when: "ied_status == '发布'"
         source: frontend
         transform: "取最后一个'-'后的文本"
         desc: "专业室(BJ列)"
-      ied_chief_designer: { type: str, required: false, source: frontend, format: "姓名@ID", desc: "责任设总(W列)" }
+      ied_chief_designer:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        format: "姓名@ID"
+        desc: "责任设总(W列)，填写规则同编制人/校核人等人员字段"
       
       # --- 人员资格 ---
       ied_person_qual_category:
@@ -274,9 +305,24 @@ doc_generation:
       ied_approved_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
       
       # --- 计划日期（格式: YYYY-MM-DD，文本格式） ---
-      ied_submitted_plan_date: { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "所提交计划(N列)" }
-      ied_publish_plan_date:   { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "出版计划(P列)" }
-      ied_external_plan_date:  { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "外部计划(Q列)" }
+      ied_submitted_plan_date:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        format: "YYYY-MM-DD"
+        desc: "所提交计划(N列)，填写规则同其他日期列"
+      ied_publish_plan_date:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        format: "YYYY-MM-DD"
+        desc: "出版计划(P列)，填写规则同其他日期列"
+      ied_external_plan_date:
+        type: str
+        required_when: "ied_status == '发布'"
+        source: frontend
+        format: "YYYY-MM-DD"
+        desc: "外部计划(Q列)，填写规则同其他日期列"
       ied_fu_plan_date:        { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "FU计划(S列)" }
 
   # --------------------------------------------------------------------------

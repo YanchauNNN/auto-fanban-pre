@@ -245,8 +245,11 @@ class CoverGenerator(ICoverGenerator):
             self._com_call_with_retry(doc.Save, "Document.Save")
         finally:
             if doc is not None:
+                self._mark_document_saved(doc)
                 self._close_com_object(lambda: doc.Close(False), "Document.Close")
             if word is not None:
+                self._close_all_word_documents(word, keep=doc)
+                self._mark_normal_template_saved(word)
                 self._close_com_object(word.Quit, "Word.Quit")
             if pythoncom is not None:
                 with contextlib.suppress(Exception):
@@ -503,6 +506,67 @@ class CoverGenerator(ICoverGenerator):
             self._com_call_with_retry(fn, desc, retries=6)
         except Exception:
             pass
+
+    def _mark_document_saved(self, doc: Any) -> None:
+        with contextlib.suppress(Exception):
+            self._com_call_with_retry(
+                lambda: setattr(doc, "Saved", True),
+                "Document.Saved=True",
+                retries=3,
+            )
+
+    def _mark_normal_template_saved(self, word: Any) -> None:
+        with contextlib.suppress(Exception):
+            template = self._com_call_with_retry(
+                lambda: getattr(word, "NormalTemplate", None),
+                "Word.NormalTemplate",
+                retries=3,
+            )
+            if template is not None:
+                self._com_call_with_retry(
+                    lambda: setattr(template, "Saved", True),
+                    "Word.NormalTemplate.Saved=True",
+                    retries=3,
+                )
+
+    def _close_all_word_documents(self, word: Any, *, keep: Any | None = None) -> None:
+        try:
+            documents = self._com_call_with_retry(
+                lambda: getattr(word, "Documents", None),
+                "Word.Documents",
+                retries=3,
+            )
+            if documents is None:
+                return
+
+            count = int(
+                self._com_call_with_retry(
+                    lambda: documents.Count,
+                    "Word.Documents.Count",
+                    retries=3,
+                )
+            )
+        except Exception:
+            return
+
+        for index in range(count, 0, -1):
+            try:
+                current = self._com_call_with_retry(
+                    lambda index=index: documents.Item(index),
+                    f"Word.Documents.Item({index})",
+                    retries=3,
+                )
+            except Exception:
+                continue
+
+            if keep is not None and current is keep:
+                continue
+
+            self._mark_document_saved(current)
+            self._close_com_object(
+                lambda current=current: current.Close(False),
+                f"Word.Documents.Item({index}).Close",
+            )
 
     @staticmethod
     def _is_call_rejected(exc: Exception) -> bool:

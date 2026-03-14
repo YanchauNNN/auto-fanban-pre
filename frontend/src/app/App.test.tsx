@@ -89,7 +89,7 @@ describe("App", () => {
   it("renders dual primary entry buttons for deliverable and audit check", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "上传 DWG" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "交付处理" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
@@ -100,7 +100,7 @@ describe("App", () => {
     render(<App />);
 
     await user.upload(
-      await screen.findByLabelText("选择交付 DWG 文件"),
+      await screen.findByLabelText("选择出图 DWG 文件"),
       new File(["dwg"], "A01.dwg", { type: "application/acad" }),
     );
 

@@ -61,12 +61,15 @@ class FormMetadataService:
     def _build_field_schema(self, field_key: str, rule: dict[str, Any]) -> dict[str, Any]:
         options = self._resolve_options(field_key, rule)
         field_type = "text"
-        if options:
+        ui = rule.get("ui") if isinstance(rule.get("ui"), dict) else {}
+        if ui.get("widget") == "combobox":
+            field_type = "combobox"
+        elif options:
             field_type = "select"
         elif rule.get("format") == "YYYY-MM-DD":
             field_type = "date"
 
-        return {
+        payload = {
             "key": field_key,
             "label": field_key,
             "type": field_type,
@@ -78,8 +81,29 @@ class FormMetadataService:
             "desc": rule.get("desc"),
             "options": options,
         }
+        if ui:
+            payload["ui"] = ui
+            payload["allow_custom_input"] = bool(ui.get("allow_custom_input", False))
+            payload["filterable"] = bool(ui.get("filterable", False))
+        if isinstance(rule.get("option_source"), dict):
+            payload["option_source"] = rule["option_source"]
+        return payload
 
     def _resolve_options(self, field_key: str, rule: dict[str, Any]) -> list[str]:
+        option_source = rule.get("option_source")
+        if isinstance(option_source, dict):
+            source_type = str(option_source.get("type") or "").strip().lower()
+            if source_type == "workbook_range":
+                workbook = option_source.get("workbook")
+                sheet_index = option_source.get("sheet_index")
+                cell_range = option_source.get("range")
+                if workbook and sheet_index and cell_range:
+                    return self._load_range_options(
+                        resolve_repo_path(str(workbook)),
+                        sheet_index=int(sheet_index) - 1,
+                        cell_range=str(cell_range),
+                    )
+
         if field_key in self.spec.enums:
             enum_values = self.spec.enums.get(field_key, [])
             if isinstance(enum_values, list):
@@ -91,18 +115,13 @@ class FormMetadataService:
                 resolve_repo_path(self.spec.get_template_path("design", "2016")),
                 sheet_index=4,
             )
-        if field_key == "ied_design_type":
-            return self._load_first_column_options(
-                resolve_repo_path(self.spec.get_template_path("ied", "2016")),
-                sheet_index=3,
-            )
         if field_key == "ied_person_qual_category":
             return self._load_data_validation_list_options(
                 resolve_repo_path(self.spec.get_template_path("ied", "2016")),
                 sheet_index=0,
                 column_letter="M",
             )
-        if field_key in {"ied_responsible_unit", "ied_discipline_office"}:
+        if field_key == "ied_discipline_office":
             path = resolve_repo_path("documents_bin/responsible_unit.json")
             return list(json.loads(path.read_text(encoding="utf-8-sig")))
 
@@ -148,6 +167,22 @@ class FormMetadataService:
             text = str(value).strip()
             if text and text not in values:
                 values.append(text)
+        return values
+
+    @staticmethod
+    def _load_range_options(workbook_path: Path, *, sheet_index: int, cell_range: str) -> list[str]:
+        wb = load_workbook(workbook_path, read_only=True, data_only=True)
+        ws = wb[wb.sheetnames[sheet_index]]
+        values: list[str] = []
+        for row in ws[cell_range]:
+            cells = row if isinstance(row, tuple) else (row,)
+            for cell in cells:
+                value = cell.value
+                if value is None:
+                    continue
+                text = str(value).strip()
+                if text and text not in values:
+                    values.append(text)
         return values
 
     @staticmethod

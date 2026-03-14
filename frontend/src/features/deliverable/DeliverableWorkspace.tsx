@@ -663,7 +663,7 @@ function FieldControl({
           {required ? <em>必填</em> : null}
         </label>
       </div>
-      {field.type === "select" ? (
+      {field.type === "select" || field.type === "combobox" ? (
         <ComboboxField
           field={field}
           id={inputId}

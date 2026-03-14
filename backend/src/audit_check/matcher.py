@@ -2,22 +2,31 @@ from __future__ import annotations
 
 import re
 
+from ..config import get_config
 from .lexicon import normalize_text
 from .models import AuditFinding, AuditLexicon, ScanTextItem
-
-_DATE_PATTERNS = (
-    re.compile(r"^\d{4}[-/.]\d{1,2}([-/.:]\d{1,2})+$"),
-    re.compile(r"^\d{4}年\d{1,2}月(\d{1,2}日?)?$"),
-)
-_DIMENSION_RE = re.compile(r"^\d+(?:\s*[X×*]\s*\d+)+$")
-_INTERNAL_CODE_RE = re.compile(r"^\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2}$")
-_EXTERNAL_CODE_RE = re.compile(r"^[A-Z0-9]{19}$")
-_GENERIC_IDENTIFIER_RE = re.compile(r"^[A-Z0-9-]{6,}$")
 
 
 class AuditMatchEngine:
     def __init__(self, lexicon: AuditLexicon) -> None:
         self.lexicon = lexicon
+        audit_cfg = get_config().audit_check
+        self.matching_policy = audit_cfg.matching_policy
+        self._date_patterns = [re.compile(pattern) for pattern in audit_cfg.context_rules.date_like]
+        self._dimension_patterns = [
+            re.compile(pattern) for pattern in audit_cfg.context_rules.dimension_like
+        ]
+        self._internal_code_patterns = [
+            re.compile(pattern) for pattern in audit_cfg.context_rules.code_like_internal
+        ]
+        self._external_code_patterns = [
+            re.compile(pattern) for pattern in audit_cfg.context_rules.code_like_external
+        ]
+        self._generic_identifier_re = re.compile(audit_cfg.generic_identifier_like.regex)
+        self._generic_identifier_exempt_patterns = [
+            re.compile(pattern)
+            for pattern in audit_cfg.generic_identifier_like.exempt_embed_patterns
+        ]
 
     def evaluate(self, *, project_no: str, items: list[ScanTextItem]) -> list[AuditFinding]:
         foreign_tokens = sorted(self.lexicon.foreign_texts.get(project_no, set()), key=len, reverse=True)
@@ -29,7 +38,13 @@ class AuditMatchEngine:
                 continue
 
             context_kind = self._classify_context(item.field_context, normalized_text)
-            if context_kind in {"date_like", "dimension_like"}:
+            if (
+                context_kind == "date_like"
+                and self.matching_policy.suppress_project_no_in_date_like
+            ) or (
+                context_kind == "dimension_like"
+                and self.matching_policy.suppress_project_no_in_dimension_like
+            ):
                 continue
 
             matched_tokens: set[str] = set()
@@ -58,31 +73,44 @@ class AuditMatchEngine:
 
         return findings
 
-    @staticmethod
-    def _classify_context(field_context: str | None, normalized_text: str) -> str:
+    def _classify_context(self, field_context: str | None, normalized_text: str) -> str:
         if field_context:
             return field_context
-        if any(pattern.fullmatch(normalized_text) for pattern in _DATE_PATTERNS):
+        if any(pattern.fullmatch(normalized_text) for pattern in self._date_patterns):
             return "date_like"
-        if _DIMENSION_RE.fullmatch(normalized_text):
+        if any(pattern.fullmatch(normalized_text) for pattern in self._dimension_patterns):
             return "dimension_like"
-        if _INTERNAL_CODE_RE.fullmatch(normalized_text) or _EXTERNAL_CODE_RE.fullmatch(normalized_text):
+        if any(pattern.fullmatch(normalized_text) for pattern in self._internal_code_patterns) or any(
+            pattern.fullmatch(normalized_text) for pattern in self._external_code_patterns
+        ):
             return "code_like"
-        if _GENERIC_IDENTIFIER_RE.fullmatch(normalized_text):
+        if self._generic_identifier_re.fullmatch(normalized_text):
             return "generic_identifier_like"
         return "plain_text"
 
     def _matches_token(self, *, token: str, text: str, context_kind: str) -> bool:
-        if context_kind.startswith("titleblock_") or context_kind == "code_like":
+        if context_kind.startswith("titleblock_"):
+            if self.matching_policy.allow_embedded_match_in_titleblock:
+                return token in text
+            return self._is_strong_boundary_match(token, text)
+
+        if context_kind == "code_like":
             return token in text
 
         if context_kind == "generic_identifier_like":
-            return len(token) > 4 and token in text and not token.isdigit()
+            if self._is_exempt_generic_identifier(text, token):
+                return False
+            return token in text
 
         if self._is_strong_boundary_match(token, text):
             return True
 
         return len(token) > 4 and token in text and ("-" in token or any(ord(ch) > 127 for ch in token))
+
+    def _is_exempt_generic_identifier(self, text: str, token: str) -> bool:
+        if not token.isdigit():
+            return False
+        return any(pattern.fullmatch(text) for pattern in self._generic_identifier_exempt_patterns)
 
     @staticmethod
     def _is_strong_boundary_match(token: str, text: str) -> bool:

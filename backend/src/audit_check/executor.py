@@ -36,7 +36,7 @@ class AuditCheckExecutor:
         job.work_dir = self.config.get_job_dir(job.job_id)
         job.work_dir.mkdir(parents=True, exist_ok=True)
 
-        lexicon = self.lexicon_loader.load(_default_lexicon_path())
+        lexicon = self.lexicon_loader.load(self.config.audit_check.lexicon_path)
         dxf_dir = job.work_dir / "work" / "audit_dxf"
         dxf_dir.mkdir(parents=True, exist_ok=True)
         dxf_path = self.oda.dwg_to_dxf(source_dwg, dxf_dir)
@@ -87,7 +87,3 @@ class AuditCheckExecutor:
         job.progress.details["top_wrong_texts"] = list(summary["top_wrong_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
         job.mark_succeeded()
-
-
-def _default_lexicon_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "documents_bin" / "词库收集.xlsx"

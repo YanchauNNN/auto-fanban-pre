@@ -81,6 +81,45 @@ describe("normalizeFormSchema", () => {
     expect(normalized.sections[1].fields[0].type).toBe("nameId");
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);
   });
+
+  it("preserves combobox fields from form-schema instead of downgrading them to plain select metadata", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [
+          {
+            id: "ied",
+            title: "ied",
+            fields: [
+              {
+                key: "ied_design_type",
+                label: "ied_design_type",
+                type: "combobox",
+                required: false,
+                required_when: "ied_status == '发布'",
+                source: "frontend",
+                default: null,
+                format: null,
+                desc: "设计类型(V列)",
+                options: ["安装技术要求", "初步设计"],
+              },
+            ],
+          },
+        ],
+      },
+      audit_replace: {
+        project_options: ["2016", "1818"],
+      },
+    });
+
+    expect(normalized.sections[0].fields[0].type).toBe("combobox");
+    expect(normalized.sections[0].fields[0].options).toEqual(["安装技术要求", "初步设计"]);
+  });
 });
 
 describe("evaluateRequiredWhen", () => {

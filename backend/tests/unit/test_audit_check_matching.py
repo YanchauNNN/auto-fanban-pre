@@ -49,7 +49,8 @@ def test_match_engine_reports_code_like_project_no_and_short_code_but_suppresses
             ScanTextItem(raw_text="JD1NHT11001B25C42SD", entity_type="TEXT"),
             ScanTextItem(raw_text="2026年4月8日", entity_type="TEXT"),
             ScanTextItem(raw_text="645X600X2016", entity_type="TEXT"),
-            ScanTextItem(raw_text="6TT2016GX", entity_type="TEXT"),
+            ScanTextItem(raw_text="RVV2016P", entity_type="TEXT"),
+            ScanTextItem(raw_text="ABCD2016X", entity_type="TEXT"),
         ],
     )
 
@@ -58,7 +59,8 @@ def test_match_engine_reports_code_like_project_no_and_short_code_but_suppresses
     assert ("JD", "code_like", "high") in matched
     assert all(item.raw_text != "2026年4月8日" for item in findings)
     assert all(item.raw_text != "645X600X2016" for item in findings)
-    assert all(item.raw_text != "6TT2016GX" for item in findings)
+    assert all(item.raw_text != "RVV2016P" for item in findings)
+    assert any(item.raw_text == "ABCD2016X" and item.matched_text == "2016" for item in findings)
 
 
 def test_match_engine_uses_field_context_to_promote_project_sensitive_hits(tmp_path: Path) -> None:

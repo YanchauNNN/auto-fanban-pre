@@ -248,11 +248,19 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert "DWG" in project_no["desc"]
     assert "2016" in project_no["desc"]
     assert "1 总体文件" in file_category["options"]
-    assert ied_design_type["options"]
-    assert ied_responsible_unit["options"] == [
-        "河北分公司-建筑结构所-结构一室",
-        "河北分公司-建筑结构所-结构二室",
-        "河北分公司-建筑结构所-建筑总图室",
+    assert ied_design_type["required_when"] == "ied_status == '发布'"
+    assert ied_design_type["type"] == "combobox"
+    assert ied_design_type["allow_custom_input"] is True
+    assert ied_design_type["filterable"] is True
+    assert ied_design_type["options"][:3] == ["安装技术要求", "常规岛厂房设计", "初步设计"]
+    assert ied_responsible_unit["required_when"] == "ied_status == '发布'"
+    assert ied_responsible_unit["type"] == "combobox"
+    assert ied_responsible_unit["allow_custom_input"] is True
+    assert ied_responsible_unit["filterable"] is True
+    assert ied_responsible_unit["options"][:3] == [
+        "河北分公司-核工程研究设计所-电仪室",
+        "公用系统所-水工工艺二室",
+        "河北分公司-电气自动化所-仪控一室",
     ]
     assert ied_person_qual_category["options"] == [
         "非核安全物项",
@@ -265,6 +273,30 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "核安全承压机械设备-民用-甲级",
         "核安全承压机械设备-民用-乙级",
     ]
+
+
+def test_create_batch_requires_ied_publish_fields_when_status_is_publish(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params["ied_status"] = "发布"
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["param_errors"]["ied_submitted_plan_date"] == ["required"]
+    assert payload["detail"]["param_errors"]["ied_publish_plan_date"] == ["required"]
+    assert payload["detail"]["param_errors"]["ied_external_plan_date"] == ["required"]
+    assert payload["detail"]["param_errors"]["ied_design_type"] == ["required"]
+    assert payload["detail"]["param_errors"]["ied_chief_designer"] == ["required"]
+    assert payload["detail"]["param_errors"]["ied_responsible_unit"] == ["required"]
 
 
 def test_create_batch_rejects_non_dwg_upload(monkeypatch, tmp_path: Path) -> None:

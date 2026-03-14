@@ -115,3 +115,49 @@ def test_get_embedded_excel_sheet_activates_ole_before_reading_object() -> None:
     sheet = gen._get_embedded_excel_sheet(FakeDoc())
 
     assert sheet is not None
+
+
+def test_close_all_word_documents_marks_temp_docs_saved_before_quit() -> None:
+    gen = CoverGenerator()
+
+    class FakeDoc:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.saved = False
+            self.closed = False
+
+        @property
+        def Saved(self) -> bool:
+            return self.saved
+
+        @Saved.setter
+        def Saved(self, value: bool) -> None:
+            self.saved = value
+
+        def Close(self, save_changes: bool) -> None:  # noqa: FBT001
+            assert save_changes is False
+            self.closed = True
+
+    class FakeDocuments:
+        def __init__(self, docs: list[FakeDoc]) -> None:
+            self._docs = docs
+
+        @property
+        def Count(self) -> int:
+            return len(self._docs)
+
+        def Item(self, index: int) -> FakeDoc:
+            return self._docs[index - 1]
+
+    keep = FakeDoc("main")
+    temp = FakeDoc("temp")
+
+    class FakeWord:
+        def __init__(self) -> None:
+            self.Documents = FakeDocuments([keep, temp])
+
+    gen._close_all_word_documents(FakeWord(), keep=keep)
+
+    assert keep.closed is False
+    assert temp.saved is True
+    assert temp.closed is True

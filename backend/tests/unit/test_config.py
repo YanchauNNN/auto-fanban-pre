@@ -140,6 +140,14 @@ class TestRuntimeConfig:
             "AutoCAD.Application",
         ]
         assert runtime_config.autocad.pc3_name == "打印PDF2.pc3"
+        assert runtime_config.audit_check.enabled is True
+        assert runtime_config.audit_check.lexicon_path.endswith("documents_bin\\词库收集.xlsx")
+        assert runtime_config.audit_check.project_column_header_pattern == r"^\d{4}$"
+        assert runtime_config.audit_check.include_rows == [1, 2, "3+"]
+        assert runtime_config.audit_check.generic_identifier_like.regex == r"^[A-Z0-9-]{6,}$"
+        assert runtime_config.audit_check.generic_identifier_like.exempt_embed_patterns == [
+            r"^[A-Z]{3}\d{4}[A-Z]$",
+        ]
 
     def test_reload_config_uses_env_override_when_default_runtime_spec_missing(
         self,
@@ -198,4 +206,28 @@ runtime_options:
         restored = get_config()
 
         assert restored.concurrency.max_workers == 2
+
+    def test_runtime_config_resolves_audit_lexicon_path_from_repo_root_sibling(
+        self,
+        tmp_path: Path,
+    ):
+        """运行期规范位于 documents/ 下时，documents_bin 资源应解析到仓库根目录同级。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  audit_check:
+    lexicon_path:
+      type: str
+      default: "documents_bin\\\\词库收集.xlsx"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert Path(config.audit_check.lexicon_path) == (
+            tmp_path / "documents_bin" / "词库收集.xlsx"
+        ).resolve()
 

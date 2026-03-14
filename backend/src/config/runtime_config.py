@@ -163,6 +163,56 @@ class PDFEngineConfig(BaseModel):
     fallback: str = "libreoffice"
 
 
+class AuditCheckGenericIdentifierConfig(BaseModel):
+    """纠错 generic_identifier_like 配置"""
+
+    regex: str = r"^[A-Z0-9-]{6,}$"
+    exempt_embed_patterns: list[str] = Field(
+        default_factory=lambda: [r"^[A-Z]{3}\d{4}[A-Z]$"],
+    )
+
+
+class AuditCheckContextRulesConfig(BaseModel):
+    """纠错上下文分类规则"""
+
+    date_like: list[str] = Field(
+        default_factory=lambda: [
+            r"^\d{4}[-/.]\d{1,2}([-/.:]\d{1,2})+$",
+            r"^\d{4}年\d{1,2}月(\d{1,2}日?)?$",
+        ],
+    )
+    dimension_like: list[str] = Field(default_factory=lambda: [r"^\d+(?:\s*[X×*]\s*\d+)+$"])
+    code_like_internal: list[str] = Field(
+        default_factory=lambda: [r"^\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2}$"],
+    )
+    code_like_external: list[str] = Field(default_factory=lambda: [r"^[A-Z0-9]{19}$"])
+
+
+class AuditCheckMatchingPolicyConfig(BaseModel):
+    """纠错匹配策略配置"""
+
+    roi_context_priority: bool = True
+    allow_embedded_match_in_titleblock: bool = True
+    suppress_project_no_in_date_like: bool = True
+    suppress_project_no_in_dimension_like: bool = True
+
+
+class AuditCheckConfig(BaseModel):
+    """纠错运行配置"""
+
+    enabled: bool = True
+    lexicon_path: str = r"documents_bin\词库收集.xlsx"
+    project_column_header_pattern: str = r"^\d{4}$"
+    include_rows: list[int | str] = Field(default_factory=lambda: [1, 2, "3+"])
+    generic_identifier_like: AuditCheckGenericIdentifierConfig = Field(
+        default_factory=AuditCheckGenericIdentifierConfig,
+    )
+    context_rules: AuditCheckContextRulesConfig = Field(default_factory=AuditCheckContextRulesConfig)
+    matching_policy: AuditCheckMatchingPolicyConfig = Field(
+        default_factory=AuditCheckMatchingPolicyConfig,
+    )
+
+
 class UploadLimitsConfig(BaseModel):
     """上传限制"""
 
@@ -227,6 +277,7 @@ class RuntimeConfig(BaseSettings):
     module5_export: Module5ExportConfig = Field(default_factory=Module5ExportConfig)
     autocad: AutoCADConfig = Field(default_factory=AutoCADConfig)
     pdf_engine: PDFEngineConfig = Field(default_factory=PDFEngineConfig)
+    audit_check: AuditCheckConfig = Field(default_factory=AuditCheckConfig)
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -261,6 +312,7 @@ class RuntimeConfig(BaseSettings):
             ),
             "autocad": AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
             "pdf_engine": PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
+            "audit_check": AuditCheckConfig(**cls._extract(runtime_opts, "audit_check")),
             "upload_limits": UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
             "lifecycle": LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
             "logging": LoggingConfig(**cls._extract(runtime_opts, "logging")),
@@ -386,10 +438,15 @@ class RuntimeConfig(BaseSettings):
                 self.module5_export.dotnet_bridge.dll_path = str(
                     (base_dir / dll_path).resolve(),
                 )
+        if self.audit_check.lexicon_path:
+            lexicon_path = Path(self.audit_check.lexicon_path)
+            if not lexicon_path.is_absolute():
+                self.audit_check.lexicon_path = str((self.base_dir / lexicon_path).resolve())
 
     def _normalize_root_paths(self, base_dir: Path) -> None:
         """???????????????????? Path???????????"""
-        self.base_dir = self._coerce_path(self.base_dir)
+        project_root = self._resolve_project_root(base_dir)
+        self.base_dir = self._resolve_root_path(self.base_dir, project_root)
         self.storage_dir = self._coerce_path(self.storage_dir)
         self.spec_path = self._coerce_path(self.spec_path)
         self.runtime_spec_path = self._coerce_path(self.runtime_spec_path)
@@ -397,6 +454,20 @@ class RuntimeConfig(BaseSettings):
     @staticmethod
     def _coerce_path(value: str | Path) -> Path:
         return value if isinstance(value, Path) else Path(value)
+
+    @classmethod
+    def _resolve_root_path(cls, value: str | Path, project_root: Path) -> Path:
+        path = cls._coerce_path(value)
+        if path.is_absolute():
+            return path
+        return (project_root / path).resolve()
+
+    @staticmethod
+    def _resolve_project_root(config_dir: Path) -> Path:
+        normalized = config_dir.resolve()
+        if normalized.name.lower() in {"documents", "config"}:
+            return normalized.parent
+        return normalized
 
     def get_job_dir(self, job_id: str) -> Path:
         """获取任务工作目录"""

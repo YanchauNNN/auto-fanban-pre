@@ -215,6 +215,9 @@ function normalizeField(field: RawField): FormField {
 }
 
 function resolveFieldType(field: RawField): FormFieldType {
+  if (field.type === "combobox") {
+    return "combobox";
+  }
   if (field.type === "select" || field.options.length > 0) {
     return "select";
   }

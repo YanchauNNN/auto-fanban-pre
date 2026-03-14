@@ -1,7 +1,7 @@
 export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
 export type TaskIntent = TaskKind;
 
-export type FormFieldType = "text" | "select" | "date" | "nameId";
+export type FormFieldType = "text" | "select" | "combobox" | "date" | "nameId";
 
 export type UploadLimits = {
   maxFiles: number;
