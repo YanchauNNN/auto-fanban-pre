@@ -371,14 +371,15 @@ function WorkspacePage() {
 
       {schemaQuery.data ? (
         <>
-          <DeliverableWorkspace
-            adapter={adapter}
-            incomingFiles={incomingFiles}
-            isOpen={deliverableConfigOpen}
-            onBatchCreated={handleBatchCreated}
-            onClose={() => setDeliverableConfigOpen(false)}
-            onDraftAvailabilityChange={setDeliverableDraftAvailable}
-            schema={schemaQuery.data}
+        <DeliverableWorkspace
+          adapter={adapter}
+          incomingFiles={incomingFiles}
+          isOpen={deliverableConfigOpen}
+          onBatchCreated={handleBatchCreated}
+          onNotice={setAuditNotice}
+          onClose={() => setDeliverableConfigOpen(false)}
+          onDraftAvailabilityChange={setDeliverableDraftAvailable}
+          schema={schemaQuery.data}
           />
           <AuditCheckWorkspace
             adapter={adapter}

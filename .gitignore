@@ -29,3 +29,4 @@ backend/src/cad/dotnet/Module5CadBridge/obj/
 
 # Local git worktrees (do not commit)
 .worktrees/
+docs/

@@ -83,3 +83,31 @@ def test_match_engine_uses_field_context_to_promote_project_sensitive_hits(tmp_p
     assert findings[0].matched_text == "2016"
     assert findings[0].context_kind == "titleblock_internal_code"
     assert findings[0].confidence == "high"
+
+
+def test_match_engine_reports_project_no_inside_digit_prefix_when_suffix_turns_non_ascii(
+    tmp_path: Path,
+) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["项目号", "1907", "2016", "说明"])
+    ws.append(["关键词库", "三门", "金七门", "填写说明"])
+    ws.append([None, "1907", "2016", None])
+    workbook = tmp_path / "lexicon-1907.xlsx"
+    wb.save(workbook)
+
+    lexicon = AuditLexiconLoader().load(workbook)
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="2016",
+        items=[
+            ScanTextItem(
+                raw_text="7788991907一一二二",
+                entity_type="TEXT",
+            ),
+        ],
+    )
+
+    assert any(item.matched_text == "1907" for item in findings)

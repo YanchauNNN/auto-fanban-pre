@@ -21,7 +21,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import gc
 import math
+import os
 from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -177,7 +180,13 @@ class CatalogGenerator(ICatalogGenerator):
             ws[cell] = derived.catalog_revision
 
         if "album_code_title" in header and derived.album_code:
-            cell = self._resolve_writable_cell(ws, header["album_code_title"].get("cell", "D3:E3"))
+            title_binding = header["album_code_title"]
+            cell_ref = (
+                title_binding.get("cell_1818")
+                if ctx.is_1818 and title_binding.get("cell_1818")
+                else title_binding.get("cell", "D3:E3")
+            )
+            cell = self._resolve_writable_cell(ws, cell_ref)
             template = header["album_code_title"].get(
                 "template",
                 "第{album_code}图册图纸(文件)目录",
@@ -346,6 +355,9 @@ class CatalogGenerator(ICatalogGenerator):
         start_row: int,
         last_row: int,
     ) -> None:
+        if not self._should_use_excel_com():
+            return
+
         pythoncom = None
         try:
             import pythoncom  # type: ignore[import]
@@ -355,6 +367,8 @@ class CatalogGenerator(ICatalogGenerator):
 
         excel = None
         workbook = None
+        worksheet = None
+        row_range = None
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
@@ -362,7 +376,9 @@ class CatalogGenerator(ICatalogGenerator):
             excel.DisplayAlerts = False
             workbook = excel.Workbooks.Open(str(xlsx_path.absolute()))
             worksheet = workbook.Worksheets(1)
-            worksheet.Rows(f"{start_row}:{last_row}").AutoFit()
+            row_range = worksheet.Rows(f"{start_row}:{last_row}")
+            row_range.AutoFit()
+            row_range = None
 
             for row in range(start_row, last_row + 1):
                 auto_height = float(worksheet.Rows(row).RowHeight or 0)
@@ -374,12 +390,20 @@ class CatalogGenerator(ICatalogGenerator):
         except Exception:
             return
         finally:
+            worksheet = None
+            row_range = None
             if workbook:
-                workbook.Close(False)
+                with contextlib.suppress(Exception):
+                    workbook.Close(False)
+            workbook = None
             if excel:
-                excel.Quit()
+                with contextlib.suppress(Exception):
+                    excel.Quit()
+            excel = None
+            gc.collect()
             if pythoncom is not None:
-                pythoncom.CoUninitialize()
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
 
     def _estimate_wrapped_line_count(self, text: str, column_width: float) -> int:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
@@ -429,10 +453,11 @@ class CatalogGenerator(ICatalogGenerator):
     def _count_pages(self, xlsx_path: Path) -> int:
         """计算目录页数"""
         # 优先尝试 Excel COM 的分页信息
-        try:
-            return self._count_pages_via_com(xlsx_path)
-        except Exception:
-            pass
+        if self._should_use_excel_com():
+            try:
+                return self._count_pages_via_com(xlsx_path)
+            except Exception:
+                pass
 
         # 优先尝试Excel分页信息
         try:
@@ -466,6 +491,7 @@ class CatalogGenerator(ICatalogGenerator):
 
         excel = None
         wb = None
+        ws = None
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
@@ -476,12 +502,23 @@ class CatalogGenerator(ICatalogGenerator):
             page_count = int(ws.HPageBreaks.Count) + 1
             return max(1, page_count)
         finally:
+            ws = None
             if wb:
-                wb.Close(False)
+                with contextlib.suppress(Exception):
+                    wb.Close(False)
+            wb = None
             if excel:
-                excel.Quit()
+                with contextlib.suppress(Exception):
+                    excel.Quit()
+            excel = None
+            gc.collect()
             if pythoncom is not None:
-                pythoncom.CoUninitialize()
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
+
+    @staticmethod
+    def _should_use_excel_com() -> bool:
+        return "PYTEST_CURRENT_TEST" not in os.environ
 
     def _backfill_page_count(
         self,

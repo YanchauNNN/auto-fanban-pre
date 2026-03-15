@@ -19,6 +19,8 @@ PDF导出引擎 - Word/Excel导出PDF
 
 from __future__ import annotations
 
+import contextlib
+import gc
 import subprocess
 from pathlib import Path
 
@@ -136,11 +138,17 @@ class PDFExporter(IPDFExporter):
             doc.ExportAsFixedFormat(str(pdf_path.absolute()), 17)  # 17 = PDF
         finally:
             if doc:
-                doc.Close(False)
+                with contextlib.suppress(Exception):
+                    doc.Close(False)
+            doc = None
             if word:
-                word.Quit()
+                with contextlib.suppress(Exception):
+                    word.Quit()
+            word = None
+            gc.collect()
             if pythoncom is not None:
-                pythoncom.CoUninitialize()
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
 
     def _export_xlsx_via_com(self, xlsx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Excel到PDF"""
@@ -163,11 +171,17 @@ class PDFExporter(IPDFExporter):
             wb.ExportAsFixedFormat(0, str(pdf_path.absolute()))  # 0 = PDF
         finally:
             if wb:
-                wb.Close(False)
+                with contextlib.suppress(Exception):
+                    wb.Close(False)
+            wb = None
             if excel:
-                excel.Quit()
+                with contextlib.suppress(Exception):
+                    excel.Quit()
+            excel = None
+            gc.collect()
             if pythoncom is not None:
-                pythoncom.CoUninitialize()
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
 
     def _export_via_libreoffice(self, input_path: Path, pdf_path: Path) -> None:
         """通过LibreOffice导出PDF"""

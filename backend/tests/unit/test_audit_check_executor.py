@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_check.roi_mapper import AuditFieldContextMapper
 from src.audit_check.models import AuditLexicon, ScanTextItem
@@ -73,6 +75,7 @@ def test_audit_check_executor_writes_reports_and_summary(monkeypatch, tmp_path: 
     assert job.status == JobStatus.SUCCEEDED
     assert job.artifacts.report_json and job.artifacts.report_json.exists()
     assert job.artifacts.report_xlsx and job.artifacts.report_xlsx.exists()
+    load_workbook(job.artifacts.report_xlsx)
     assert job.progress.details["findings_count"] == 2
     assert job.progress.details["affected_drawings_count"] == 1
     assert job.progress.details["top_wrong_texts"] == ["1418", "JD"]

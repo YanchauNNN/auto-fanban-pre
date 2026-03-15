@@ -146,10 +146,10 @@ doc_generation:
       
       cover_variant:
         type: enum[cover_variant]
-        required_when: "project_no != '1818'"
+        required: true
         source: frontend
         default: "通用"
-        desc: "非1818封面模板选择"
+        desc: "封面模板选择；1818 与非1818均使用通用/压力容器/核安全设备三选一，1818会切到对应专用模板"
       
       classification:
         type: str
@@ -306,23 +306,23 @@ doc_generation:
       
       # --- 计划日期（格式: YYYY-MM-DD，文本格式） ---
       ied_submitted_plan_date:
-        type: str
-        required_when: "ied_status == '发布'"
-        source: frontend
-        format: "YYYY-MM-DD"
-        desc: "所提交计划(N列)，填写规则同其他日期列"
+          type: str
+          required_when: "ied_status == '发布'"
+          source: frontend
+          format: "YYYY-MM-DD"
+          desc: "点击选择日期"
       ied_publish_plan_date:
-        type: str
-        required_when: "ied_status == '发布'"
-        source: frontend
-        format: "YYYY-MM-DD"
-        desc: "出版计划(P列)，填写规则同其他日期列"
+          type: str
+          required_when: "ied_status == '发布'"
+          source: frontend
+          format: "YYYY-MM-DD"
+          desc: "点击选择日期"
       ied_external_plan_date:
-        type: str
-        required_when: "ied_status == '发布'"
-        source: frontend
-        format: "YYYY-MM-DD"
-        desc: "外部计划(Q列)，填写规则同其他日期列"
+          type: str
+          required_when: "ied_status == '发布'"
+          source: frontend
+          format: "YYYY-MM-DD"
+          desc: "点击选择日期"
       ied_fu_plan_date:        { type: str, required: false, source: frontend, format: "YYYY-MM-DD", desc: "FU计划(S列)" }
 
   # --------------------------------------------------------------------------
@@ -457,7 +457,10 @@ doc_generation:
     # 模板选择规则
     selection:
       cover:
-        "1818": "documents_bin/1818图册封面模板.docx"
+        "1818":
+          default: "documents_bin/1818图册封面模板.docx"
+          压力容器: "documents_bin/1818图册压力容器封面模板.docx"
+          核安全设备: "documents_bin/1818图册核安全设备封面模板.docx"
         default: "documents_bin/封面模板文件{variant}.docx"  # variant: 空/压力容器版/核安全设备版
       catalog:
         "1818": "documents_bin/1818图册目录模板.xlsx"
@@ -500,6 +503,7 @@ doc_generation:
         album_internal_code: { cell: "M3:S3", merge: true, label: "M2" }
         cover_revision:      { cell: "M5", write_mode: "append_after_label", label: "Rev.:" }
         doc_status:          { cell: "P5", write_mode: "append_after_label", label: "Status:", source: "doc_status", note: "来源为001图纸的status值" }
+        cover_external_code: { cell: "B30:T30", note: "19位逐格写入（1818专用模板第30行）" }
         册次:                { cell: "M4", fixed: true, note: "Vol. x of y，模板固定值" }
         # 注：密级(classification)无需程序写入封面
       
@@ -525,7 +529,7 @@ doc_generation:
         engineering_no:        { cell: "C1", label: "A1" }
         album_title_cn:        { cell: "D1:E1", desc: "目录主标题，写入图册名称（中文）" }
         album_title_en:        { cell: "D2:E2", when: "project_no == '1818'", desc: "1818项目目录副标题，写入图册名称（英文）" }
-        album_code_title:      { cell: "D3:E3", template: "第{album_code}图册图纸(文件)目录" }
+        album_code_title:      { cell: "D3:E3", cell_1818: "D4:E4", template: "第{album_code}图册图纸(文件)目录" }
         catalog_internal_code: { cell: "H1", merge: "H1:I2(仅1818)" }
         catalog_external_code: { cell: "H3", merge: "H3:I4(仅1818)" }
         subitem_no:            { cell: "C5", merge: "C5:C6(仅1818)" }

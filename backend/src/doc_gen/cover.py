@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import contextlib
+import gc
 import re
 import shutil
 import time
@@ -97,9 +98,9 @@ class CoverGenerator(ICoverGenerator):
         """获取模板路径"""
         variant = ""
         if ctx.params.cover_variant == "压力容器":
-            variant = "压力容器版"
+            variant = "压力容器" if ctx.is_1818 else "压力容器版"
         elif ctx.params.cover_variant == "核安全设备":
-            variant = "核安全设备版"
+            variant = "核安全设备" if ctx.is_1818 else "核安全设备版"
         return self.spec.get_template_path(
             "cover",
             ctx.params.project_no,
@@ -218,6 +219,7 @@ class CoverGenerator(ICoverGenerator):
 
         word = None
         doc = None
+        ws = None
         try:
             pythoncom.CoInitialize()
             word = win32com.client.DispatchEx("Word.Application")
@@ -244,13 +246,17 @@ class CoverGenerator(ICoverGenerator):
             self._apply_bindings(bindings, data, read_cell, write_cell)
             self._com_call_with_retry(doc.Save, "Document.Save")
         finally:
+            ws = None
             if doc is not None:
                 self._mark_document_saved(doc)
                 self._close_com_object(lambda: doc.Close(False), "Document.Close")
+            doc = None
             if word is not None:
                 self._close_all_word_documents(word, keep=doc)
                 self._mark_normal_template_saved(word)
                 self._close_com_object(word.Quit, "Word.Quit")
+            word = None
+            gc.collect()
             if pythoncom is not None:
                 with contextlib.suppress(Exception):
                     pythoncom.CoUninitialize()

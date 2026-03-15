@@ -108,6 +108,7 @@ export type TaskConfigPreset = {
   id: string;
   name: string;
   intent: TaskIntent;
+  runAuditCheck: boolean;
   values: Record<string, string>;
   replaceConfig: ReplaceTaskConfig;
   updatedAt: string;
@@ -115,6 +116,7 @@ export type TaskConfigPreset = {
 
 export type TaskConfigDraft = {
   intent: TaskIntent;
+  runAuditCheck: boolean;
   files: File[];
   values: Record<string, string>;
   fieldErrors: Record<string, string[]>;

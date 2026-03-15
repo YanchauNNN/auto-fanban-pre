@@ -21,6 +21,7 @@ export function loadTaskPresets(): TaskConfigPreset[] {
 
     return parsed
       .filter(isTaskPreset)
+      .map(normalizeStoredPreset)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   } catch {
     return [];
@@ -29,15 +30,33 @@ export function loadTaskPresets(): TaskConfigPreset[] {
 
 export function createTaskPreset(
   name: string,
-  draft: Pick<TaskConfigDraft, "intent" | "values" | "replaceConfig">,
-  existingId?: string,
+  draft: Pick<TaskConfigDraft, "intent" | "runAuditCheck" | "values" | "replaceConfig">,
 ): TaskConfigPreset {
   const now = new Date().toISOString();
 
   return {
-    id: existingId ?? `preset-${now}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `preset-${now}-${Math.random().toString(36).slice(2, 8)}`,
     name: name.trim(),
     intent: draft.intent,
+    runAuditCheck: draft.runAuditCheck,
+    values: omitPresetManagedValues(draft.values),
+    replaceConfig: { ...draft.replaceConfig },
+    updatedAt: now,
+  };
+}
+
+export function updateTaskPreset(
+  id: string,
+  name: string,
+  draft: Pick<TaskConfigDraft, "intent" | "runAuditCheck" | "values" | "replaceConfig">,
+): TaskConfigPreset {
+  const now = new Date().toISOString();
+
+  return {
+    id,
+    name: name.trim(),
+    intent: draft.intent,
+    runAuditCheck: draft.runAuditCheck,
     values: omitPresetManagedValues(draft.values),
     replaceConfig: { ...draft.replaceConfig },
     updatedAt: now,
@@ -79,6 +98,7 @@ export function applyTaskPreset(
   return syncTaskConfigDraft(schema, {
     ...currentDraft,
     intent: preset.intent,
+    runAuditCheck: preset.runAuditCheck ?? false,
     values: {
       ...currentDraft.values,
       ...preset.values,
@@ -119,4 +139,11 @@ function isTaskPreset(value: unknown): value is TaskConfigPreset {
     Boolean(candidate.values && typeof candidate.values === "object") &&
     Boolean(candidate.replaceConfig && typeof candidate.replaceConfig === "object")
   );
+}
+
+function normalizeStoredPreset(preset: TaskConfigPreset): TaskConfigPreset {
+  return {
+    ...preset,
+    runAuditCheck: preset.runAuditCheck ?? false,
+  };
 }

@@ -102,6 +102,9 @@ class AuditMatchEngine:
                 return False
             return token in text
 
+        if context_kind == "plain_text" and self._is_non_ascii_suffix_match(token, text):
+            return True
+
         if self._is_strong_boundary_match(token, text):
             return True
 
@@ -115,6 +118,15 @@ class AuditMatchEngine:
     @staticmethod
     def _is_strong_boundary_match(token: str, text: str) -> bool:
         pattern = re.compile(rf"(?<![A-Z0-9]){re.escape(token)}(?![A-Z0-9])")
+        return bool(pattern.search(text))
+
+    @staticmethod
+    def _is_non_ascii_suffix_match(token: str, text: str) -> bool:
+        if not (token.isdigit() and len(token) == 4):
+            return False
+        if not any(ord(ch) > 127 for ch in text):
+            return False
+        pattern = re.compile(rf"{re.escape(token)}(?=[^A-Z0-9])")
         return bool(pattern.search(text))
 
     @staticmethod

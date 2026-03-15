@@ -3,9 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { DeliverableWorkspace } from "./DeliverableWorkspace";
-import type { ApiAdapter } from "../../platform/api/types";
+import type { ApiAdapter, FormSchema } from "../../platform/api/types";
 
-const schema = {
+const schema: FormSchema = {
   schemaVersion: "frontend-form@1",
   uploadLimits: {
     maxFiles: 50,
@@ -34,7 +34,7 @@ const schema = {
           required: true,
           requiredWhen: null,
           defaultValue: "通用",
-          description: "非1818封面模板选择",
+          description: "封面模板选择",
           options: ["通用", "压力容器", "核安全设备"],
         },
       ],
@@ -50,7 +50,7 @@ const schema = {
           required: true,
           requiredWhen: null,
           defaultValue: "",
-          description: "图册名称",
+          description: "图册名称（中文），例如：XXX厂房XX标高模板图",
           options: [],
         },
         {
@@ -92,7 +92,7 @@ const schema = {
       ],
     },
   ],
-} as const;
+};
 
 function createAdapter(): ApiAdapter {
   return {
@@ -313,7 +313,7 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getAllByRole("button").find((button) => button.textContent?.includes("翻版"))!);
+    await user.click(screen.getByRole("button", { name: "翻版" }));
 
     await waitFor(() => {
       expect(screen.getAllByRole("dialog")).toHaveLength(2);
@@ -325,8 +325,7 @@ describe("DeliverableWorkspace", () => {
     ).toBe(true);
   });
 
-  it("closes replace mode cleanly when the flip button is clicked again", async () => {
-    const user = userEvent.setup();
+  it("keeps the deliverable modal focused on delivery, audit and replace controls", () => {
     const adapter = createAdapter();
 
     render(
@@ -341,19 +340,21 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "翻版" }));
-    expect(await screen.findByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "翻版" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "翻版配置" })).not.toBeInTheDocument();
-    });
-    expect(screen.getByRole("button", { name: "创建交付任务" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
   });
 
-  it("keeps the deliverable modal focused on delivery and replace only", async () => {
+  it("can queue an additional audit check job from the deliverable modal", async () => {
+    const user = userEvent.setup();
     const adapter = createAdapter();
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-1",
+      jobs: [],
+    });
+    adapter.createAuditCheck = vi.fn().mockResolvedValue({
+      batchId: "batch-audit-1",
+      jobs: [],
+    });
 
     render(
       <DeliverableWorkspace
@@ -367,7 +368,21 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "纠错" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    const auditButton = screen.getByRole("button", { name: "纠错" });
+    await user.click(auditButton);
+
+    expect(auditButton).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledTimes(1);
+      expect(adapter.createAuditCheck).toHaveBeenCalledWith(
+        "2016",
+        expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
+      );
+    });
   });
 });

@@ -29,6 +29,7 @@ import {
   loadTaskPresets,
   renameTaskPreset,
   saveTaskPreset,
+  updateTaskPreset,
 } from "./taskPresets";
 import { createTaskConfigDraft, getDefaultTaskValues, syncTaskConfigDraft } from "./taskDraft";
 import { inferProjectNumbers } from "./uploadInference";
@@ -42,6 +43,7 @@ type DeliverableWorkspaceProps = {
   isOpen: boolean;
   incomingFiles: File[];
   onBatchCreated: (payload: CreateBatchPayload) => void;
+  onNotice?: (message: string) => void;
   onClose: () => void;
   onDraftAvailabilityChange: (available: boolean) => void;
 };
@@ -56,6 +58,7 @@ export function DeliverableWorkspace({
   isOpen,
   incomingFiles,
   onBatchCreated,
+  onNotice,
   onClose,
   onDraftAvailabilityChange,
 }: DeliverableWorkspaceProps) {
@@ -176,11 +179,29 @@ export function DeliverableWorkspace({
 
     try {
       const payload = await adapter.createBatch(draft.values, draft.files);
+      let combinedPayload = payload;
+
+      if (draft.runAuditCheck) {
+        try {
+          const auditPayload = await adapter.createAuditCheck(
+            (draft.values.project_no ?? "").trim(),
+            draft.files,
+          );
+          combinedPayload = {
+            batchId: payload.batchId,
+            jobs: [...payload.jobs, ...auditPayload.jobs],
+          };
+          onNotice?.("出图任务已创建，并已自动追加纠错任务。");
+        } catch {
+          onNotice?.("出图任务已创建，但同时执行的纠错任务创建失败，请从首页单独重试。");
+        }
+      }
+
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
       setReplaceModalOpen(false);
       setReplaceConfigError(null);
-      startTransition(() => onBatchCreated(payload));
+      startTransition(() => onBatchCreated(combinedPayload));
       onClose();
     } catch (error) {
       const detail =
@@ -268,6 +289,13 @@ export function DeliverableWorkspace({
     setReplaceModalOpen(nextIntent === "audit_replace");
   }
 
+  function handleAuditToggle() {
+    setDraft((current) => ({
+      ...current,
+      runAuditCheck: !current.runAuditCheck,
+    }));
+  }
+
   function handleReplaceConfigChange(
     field: "sourceProjectNo" | "targetProjectNo",
     value: string,
@@ -309,7 +337,7 @@ export function DeliverableWorkspace({
       return;
     }
 
-    const nextPreset = createTaskPreset(trimmedName, draft, selectedPreset?.id);
+    const nextPreset = createTaskPreset(trimmedName, draft);
     const nextPresets = saveTaskPreset(nextPreset);
     setSavedPresets(nextPresets);
     setSelectedPresetId(nextPreset.id);
@@ -340,6 +368,24 @@ export function DeliverableWorkspace({
     }
 
     const nextPresets = renameTaskPreset(selectedPresetId, trimmedName);
+    setSavedPresets(nextPresets);
+    setPresetName(trimmedName);
+    setPresetError(null);
+  }
+
+  function handleUpdatePreset() {
+    const trimmedName = presetName.trim();
+    if (!selectedPresetId) {
+      setPresetError("璇峰厛閫夋嫨涓€涓凡淇濆瓨鏂规銆?");
+      return;
+    }
+    if (!trimmedName) {
+      setPresetError("璇峰厛濉啓鏂规鍚嶇О銆?");
+      return;
+    }
+
+    const nextPreset = updateTaskPreset(selectedPresetId, trimmedName, draft);
+    const nextPresets = saveTaskPreset(nextPreset);
     setSavedPresets(nextPresets);
     setPresetName(trimmedName);
     setPresetError(null);
@@ -447,10 +493,18 @@ export function DeliverableWorkspace({
                   />
                   <div className={styles.presetButtonRow}>
                     <button className={styles.secondaryButton} type="button" onClick={handleSavePreset}>
-                      保存方案
+                      保存为新方案
                     </button>
                     <button className={styles.secondaryButton} type="button" onClick={handleApplyPreset}>
                       应用方案
+                    </button>
+                    <button
+                      className={styles.secondaryButton}
+                      disabled={!selectedPresetId}
+                      type="button"
+                      onClick={handleUpdatePreset}
+                    >
+                      更新当前方案
                     </button>
                   </div>
                   <select
@@ -481,9 +535,25 @@ export function DeliverableWorkspace({
               <div className={styles.summaryCard}>
                 <div className={styles.summaryHeaderRow}>
                   <h3>次级任务开关</h3>
-                  <span>{draft.intent === "deliverable" ? "交付" : "翻版"}</span>
+                  <span>
+                    {draft.intent === "audit_replace"
+                      ? "翻版"
+                      : draft.runAuditCheck
+                        ? "交付+纠错"
+                        : "交付"}
+                  </span>
                 </div>
                 <div className={styles.intentNotice}>
+                  <button
+                    aria-pressed={draft.runAuditCheck}
+                    className={`${styles.intentChip} ${
+                      draft.runAuditCheck ? styles.intentChipActive : ""
+                    }`}
+                    type="button"
+                    onClick={handleAuditToggle}
+                  >
+                    纠错
+                  </button>
                   <button
                     aria-pressed={draft.intent === "audit_replace"}
                     className={`${styles.intentChip} ${
@@ -497,7 +567,12 @@ export function DeliverableWorkspace({
                 </div>
                 <div className={styles.intentHelp}>
                   {draft.intent === "deliverable" ? (
-                    <p>当前按交付处理链路提交；纠错已经独立到首页主入口，这里只保留翻版结构。</p>
+                    <p>
+                      当前按交付处理链路提交。
+                      {draft.runAuditCheck
+                        ? "已选中同时执行纠错，提交后会自动追加一个独立纠错任务。"
+                        : "未选中纠错时，只会创建出图任务。"}
+                    </p>
                   ) : (
                     <div className={styles.replaceSummary}>
                       <p>
@@ -794,6 +869,10 @@ function filterSections(
 
 function hasTaskConfigDraft(schema: FormSchema, draft: TaskConfigDraft) {
   if (draft.files.length > 0) {
+    return true;
+  }
+
+  if (draft.runAuditCheck) {
     return true;
   }
 

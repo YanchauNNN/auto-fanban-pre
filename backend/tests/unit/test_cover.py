@@ -57,6 +57,16 @@ def test_cover_variant_template_mapping() -> None:
     ctx.params.cover_variant = "核安全设备"
     assert gen._get_template_path(ctx).endswith("封面模板文件核安全设备版.docx")
 
+    ctx.params.project_no = "1818"
+    ctx.params.cover_variant = "通用"
+    assert gen._get_template_path(ctx).endswith("1818图册封面模板.docx")
+
+    ctx.params.cover_variant = "压力容器"
+    assert gen._get_template_path(ctx).endswith("1818图册压力容器封面模板.docx")
+
+    ctx.params.cover_variant = "核安全设备"
+    assert gen._get_template_path(ctx).endswith("1818图册核安全设备封面模板.docx")
+
 
 def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
@@ -115,3 +125,11 @@ def test_write_cover_1818_uses_com_when_no_embedded_xlsx(
     )
 
     assert called["hit"] is True
+
+
+def test_1818_cover_binding_writes_external_code_on_row_30() -> None:
+    gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
+    bindings = gen.spec.get_cover_bindings("1818")
+
+    assert "cover_external_code" in bindings
+    assert bindings["cover_external_code"].cell == "B30:T30"

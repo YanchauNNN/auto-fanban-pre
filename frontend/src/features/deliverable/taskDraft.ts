@@ -11,6 +11,7 @@ const AUTO_TODAY_FIELD_KEYS = new Set([
 export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
   return {
     intent: "deliverable",
+    runAuditCheck: false,
     files: [],
     values: getDefaultTaskValues(schema),
     fieldErrors: {},
@@ -39,6 +40,7 @@ export function syncTaskConfigDraft(
 
   return {
     ...currentDraft,
+    runAuditCheck: currentDraft.runAuditCheck ?? false,
     values: {
       ...defaultValues,
       ...currentDraft.values,

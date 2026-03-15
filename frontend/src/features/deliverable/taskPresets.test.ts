@@ -7,6 +7,7 @@ import {
   loadTaskPresets,
   renameTaskPreset,
   saveTaskPreset,
+  updateTaskPreset,
 } from "./taskPresets";
 import { createTaskConfigDraft } from "./taskDraft";
 import type { FormSchema } from "../../platform/api/types";
@@ -95,6 +96,42 @@ describe("taskPresets", () => {
     expect(loadTaskPresets()).toEqual([]);
   });
 
+  it("creates a new preset instead of overwriting the selected one when saving a different name", () => {
+    const draft = createTaskConfigDraft(schema);
+    draft.values.project_no = "2016";
+
+    const firstPreset = createTaskPreset("方案一", draft);
+    saveTaskPreset(firstPreset);
+
+    draft.values.project_no = "1818";
+    const secondPreset = createTaskPreset("方案二", draft);
+    saveTaskPreset(secondPreset);
+
+    const presets = loadTaskPresets();
+    expect(presets).toHaveLength(2);
+    expect(presets.map((preset) => preset.name)).toEqual(["方案二", "方案一"]);
+    expect(presets.map((preset) => preset.id)).toContain(firstPreset.id);
+    expect(presets.map((preset) => preset.id)).toContain(secondPreset.id);
+  });
+
+  it("updates the selected preset in place only when explicitly requested", () => {
+    const draft = createTaskConfigDraft(schema);
+    draft.values.project_no = "2016";
+
+    const preset = createTaskPreset("方案一", draft);
+    saveTaskPreset(preset);
+
+    draft.values.project_no = "1818";
+    const updatedPreset = updateTaskPreset(preset.id, "方案一-更新", draft);
+    saveTaskPreset(updatedPreset);
+
+    const presets = loadTaskPresets();
+    expect(presets).toHaveLength(1);
+    expect(presets[0]?.id).toBe(preset.id);
+    expect(presets[0]?.name).toBe("方案一-更新");
+    expect(presets[0]?.values.project_no).toBe("1818");
+  });
+
   it("applies a preset onto the current draft without touching files or inference", () => {
     const draft = createTaskConfigDraft(schema);
     draft.files = [new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })];
@@ -106,6 +143,7 @@ describe("taskPresets", () => {
 
     const preset = createTaskPreset("翻版方案", {
       intent: "audit_replace",
+      runAuditCheck: true,
       values: {
         ...draft.values,
         project_no: "2020",
@@ -127,6 +165,7 @@ describe("taskPresets", () => {
       new Date().toISOString().slice(0, 10),
     );
     expect(nextDraft.intent).toBe("audit_replace");
+    expect(nextDraft.runAuditCheck).toBe(true);
     expect(nextDraft.replaceConfig.targetProjectNo).toBe("1818");
   });
 });

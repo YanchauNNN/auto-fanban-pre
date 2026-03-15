@@ -55,6 +55,7 @@ describe("createTaskConfigDraft", () => {
     const draft = createTaskConfigDraft(schema);
 
     expect(draft.intent).toBe("deliverable");
+    expect(draft.runAuditCheck).toBe(false);
     expect(draft.files).toEqual([]);
     expect(draft.values).toEqual({
       project_no: "",
@@ -72,6 +73,7 @@ describe("syncTaskConfigDraft", () => {
   it("preserves user input while backfilling new schema fields", () => {
     const currentDraft: TaskConfigDraft = {
       intent: "audit_replace",
+      runAuditCheck: true,
       files: [new File(["dwg"], "1818-A01.dwg", { type: "application/acad" })],
       values: {
         project_no: "1818",
@@ -118,6 +120,7 @@ describe("syncTaskConfigDraft", () => {
     const draft = syncTaskConfigDraft(nextSchema, currentDraft);
 
     expect(draft.intent).toBe("audit_replace");
+    expect(draft.runAuditCheck).toBe(true);
     expect(draft.values).toEqual({
       project_no: "1818",
       album_title_cn: "已修改图册",

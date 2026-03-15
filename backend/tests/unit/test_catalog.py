@@ -194,5 +194,5 @@ def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> N
 
     assert ws["D1"].value == "测试图册"
     assert ws["D2"].value == "Test Album"
-    assert ws["D3"].value == "第01图册图纸(文件)目录"
+    assert ws["D4"].value == "第01图册图纸(文件)目录"
 

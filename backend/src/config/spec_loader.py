@@ -132,7 +132,15 @@ class BusinessSpec(BaseModel):
 
         if doc_type == "cover":
             if project_no == "1818":
-                return selection.get("cover", {}).get("1818", "")
+                cover_1818 = selection.get("cover", {}).get("1818", "")
+                if isinstance(cover_1818, dict):
+                    normalized_variant = str(variant or "").strip()
+                    return str(
+                        cover_1818.get(normalized_variant)
+                        or cover_1818.get("default")
+                        or ""
+                    )
+                return str(cover_1818)
             template = selection.get("cover", {}).get("default", "")
             return template.replace("{variant}", variant)
 
