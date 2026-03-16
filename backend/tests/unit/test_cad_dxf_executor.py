@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -77,6 +78,56 @@ def _write_dummy_pdf(
         page[NameObject("/Contents")] = writer._add_object(stream)
     with open(path, "wb") as f:
         writer.write(f)
+
+
+def test_plot_resources_deploy_into_slot_local_dirs_when_runtime_context_present(
+    tmp_path: Path,
+    monkeypatch,
+):
+    cfg = RuntimeConfig()
+    cfg.autocad.install_dir = ""
+    plotters_dir = tmp_path / "slot" / "support" / "Plotters"
+    plot_styles_dir = plotters_dir / "Plot Styles"
+    pmp_dir = plotters_dir / "PMP Files"
+    slot_runtime = {
+        "plotters_dir": str(plotters_dir),
+        "plot_styles_dir": str(plot_styles_dir),
+        "pmp_dir": str(pmp_dir),
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "src.cad.cad_dxf_executor.resolve_autocad_paths",
+        lambda configured_install_dir=None: cast(Any, SimpleNamespace(
+            install_dir=None,
+            plotters_dir=None,
+            plot_styles_dir=None,
+            monochrome_ctb_path=None,
+            pc3_path=None,
+        )),
+    )
+
+    def _fake_ensure_plot_resources(**kwargs):
+        captured.update(kwargs)
+        return cast(
+            Any,
+            SimpleNamespace(
+                plotters_dir=plotters_dir,
+                plot_styles_dir=plot_styles_dir,
+                pc3_path=plotters_dir / PDF2_PC3_NAME,
+                pmp_path=pmp_dir / PDF2_PMP_NAME,
+                ctb_path=plot_styles_dir / MANAGED_CTB_NAME,
+            ),
+        )
+
+    monkeypatch.setattr("src.cad.cad_dxf_executor.ensure_plot_resources", _fake_ensure_plot_resources)
+    executor = CADDXFExecutor(config=cfg, runner=_RunnerSuccessStub(), spec=_SpecStub())
+
+    context = executor._ensure_plot_resources_ready(slot_runtime=slot_runtime)
+
+    assert context.plotters_dir == plotters_dir
+    assert plotters_dir in captured["target_plotters_dirs"]
+    assert plot_styles_dir in captured["target_plot_styles_dirs"]
 
 
 class _RunnerSuccessStub:
@@ -1094,8 +1145,18 @@ def test_execute_source_dxf_ensures_plot_resources_before_building_task(
     order: list[str] = []
     original_build = CADDXFExecutor.build_task_json
 
-    def _ensure(self):
+    def _ensure(self, *, slot_runtime=None):
         order.append("ensure")
+        return cast(
+            Any,
+            SimpleNamespace(
+                plotters_dir=tmp_path / "plotters",
+                plot_styles_dir=tmp_path / "plot_styles",
+                pc3_path=tmp_path / "plotters" / PDF2_PC3_NAME,
+                pmp_path=tmp_path / "plotters" / "PMP Files" / PDF2_PMP_NAME,
+                ctb_path=tmp_path / "plot_styles" / MANAGED_CTB_NAME,
+            ),
+        )
 
     def _build(self, *args, **kwargs):
         order.append("build")

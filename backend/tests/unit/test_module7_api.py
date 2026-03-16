@@ -12,6 +12,7 @@ from openpyxl import Workbook, load_workbook
 
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
+from src.pipeline.shared_prep import SharedPrepArtifacts
 
 
 class FakeJobProcessor:
@@ -447,6 +448,8 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["affected_drawings_count"] == 1
         assert detail["top_wrong_texts"] == ["2016", "JD"]
         assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
+        assert detail["slot_id"] is not None
+        assert detail["profile_arg"] is not None
 
         report_download = client.get(f"/api/jobs/{job_id}/download/report")
         assert report_download.status_code == 200
@@ -502,6 +505,8 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert final_detail["status"] == "succeeded"
         assert final_detail["artifacts"]["package_available"] is True
         assert final_detail["artifacts"]["ied_available"] is True
+        assert final_detail["slot_id"] is not None
+        assert final_detail["profile_arg"] is not None
 
         listing = client.get("/api/jobs")
         assert listing.status_code == 200
@@ -516,6 +521,150 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         ied_download = client.get(f"/api/jobs/{job_id}/download/ied")
         assert ied_download.status_code == 200
         assert ied_download.content == b"ied"
+
+
+class FakeSharedPrepService:
+    def prepare(self, *, group_id: str, source_dwg: Path, shared_dir: Path) -> SharedPrepArtifacts:
+        shared_dir.mkdir(parents=True, exist_ok=True)
+        staged_source = shared_dir / source_dwg.name
+        staged_source.write_bytes(source_dwg.read_bytes())
+        converted_dxf = shared_dir / "source_converted.dxf"
+        (shared_dir / "prep_summary.json").write_text(
+            json.dumps(
+                {
+                    "group_id": group_id,
+                    "source_input_dwg": str(staged_source),
+                    "source_converted_dxf": str(converted_dxf),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (shared_dir / "frames.json").write_text("[]", encoding="utf-8")
+        (shared_dir / "sheet_sets.json").write_text("[]", encoding="utf-8")
+        (shared_dir / "titleblock_extracts.json").write_text("[]", encoding="utf-8")
+        (shared_dir / "audit_roi_context.json").write_text("{}", encoding="utf-8")
+        converted_dxf.write_text("0\nEOF\n", encoding="utf-8")
+        return SharedPrepArtifacts(
+            shared_dir=shared_dir,
+            source_input_dwg=staged_source,
+            source_converted_dxf=converted_dxf,
+            frames=[],
+            sheet_sets=[],
+        )
+
+
+def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    with TestClient(
+        create_app(
+            job_processor=FakeJobProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+        ),
+    ) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(_deliverable_params(), ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[("files[]", ("20261RS-JGS65.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 1
+        group_summary = payload["jobs"][0]
+        assert group_summary["is_group"] is True
+        assert group_summary["run_audit_check"] is True
+        assert len(group_summary["child_job_ids"]) == 2
+
+        detail = _poll_job(client, group_summary["job_id"], timeout_sec=5.0)
+        assert detail["is_group"] is True
+        assert detail["run_audit_check"] is True
+        assert len(detail["children"]) == 2
+        assert {child["task_role"] for child in detail["children"]} == {
+            "deliverable_main",
+            "audit_check",
+        }
+
+        listing = client.get("/api/jobs")
+        assert listing.status_code == 200
+        items = listing.json()["items"]
+        assert len(items) == 1
+        assert items[0]["job_id"] == group_summary["job_id"]
+
+
+def test_grouped_batches_can_run_children_concurrently(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    class ConcurrentTrackingProcessor:
+        def __init__(self) -> None:
+            self.inner = FakeJobProcessor()
+            self.current = 0
+            self.max_seen = 0
+            self.lock = threading.Lock()
+
+        def __call__(self, job: Job) -> None:
+            with self.lock:
+                self.current += 1
+                self.max_seen = max(self.max_seen, self.current)
+            try:
+                time.sleep(0.15)
+                self.inner(job)
+            finally:
+                with self.lock:
+                    self.current -= 1
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    processor = ConcurrentTrackingProcessor()
+    params = _deliverable_params()
+    params["subitem_name_en"] = "Example Subitem"
+    params["album_title_en"] = "Example Album"
+
+    with TestClient(
+        create_app(
+            job_processor=processor,
+            shared_prep_service=FakeSharedPrepService(),
+        ),
+    ) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[
+                ("files[]", ("18185NE-JGS11.dwg", b"dwg-a", "application/acad")),
+                ("files[]", ("20261RS-JGS65.dwg", b"dwg-b", "application/acad")),
+            ],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 2
+        for item in payload["jobs"]:
+            detail = _poll_job(client, item["job_id"], timeout_sec=8.0)
+            assert detail["status"] == "succeeded"
+
+    assert processor.max_seen >= 2
 
 
 def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -> None:

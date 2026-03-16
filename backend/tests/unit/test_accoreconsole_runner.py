@@ -312,6 +312,125 @@ def test_runner_uses_detected_accoreconsole_when_config_path_blank(tmp_path: Pat
     assert runner.accoreconsole_exe == detected_exe.resolve()
 
 
+def test_write_runtime_script_sets_slot_local_printer_paths(tmp_path: Path):
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    runtime_scr = tmp_path / "runtime.scr"
+    lsp_path = tmp_path / "module5_cad_executor.lsp"
+    lsp_path.write_text("(princ)\n", encoding="utf-8")
+    task_json = tmp_path / "task.json"
+    result_json = tmp_path / "result.json"
+    trace_log = tmp_path / "module5_trace.log"
+    task_data = {
+        "workflow_stage": "plot_from_split_dwg",
+        "runtime": {
+            "plotters_dir": str(tmp_path / "slot" / "support" / "Plotters"),
+            "pmp_dir": str(tmp_path / "slot" / "support" / "Plotters" / "PMP Files"),
+            "plot_styles_dir": str(tmp_path / "slot" / "support" / "Plotters" / "Plot Styles"),
+            "spool_dir": str(tmp_path / "slot" / "spool"),
+        },
+        "engines": {
+            "selection_engine": "dotnet",
+            "plot_engine": "dotnet",
+            "dotnet_bridge": {
+                "enabled": True,
+                "dll_path": str(tmp_path / "Module5CadBridge.dll"),
+                "command_name": "M5BRIDGE_RUN",
+                "netload_each_run": True,
+            },
+        },
+    }
+
+    runner._write_runtime_script(
+        runtime_scr=runtime_scr,
+        task_json=task_json,
+        lsp_path=lsp_path,
+        task_data=task_data,
+        result_json=result_json,
+        module5_trace_log=trace_log,
+    )
+
+    content = runtime_scr.read_text(encoding="utf-8")
+    assert "PrinterConfigPath" in content
+    assert "PrinterDescPath" in content
+    assert "PrinterStyleSheetPath" in content
+    assert "PrintSpoolerPath" in content
+
+
+def test_run_uses_slot_local_temp_env(tmp_path: Path, monkeypatch):
+    cfg = RuntimeConfig()
+    fake_exe = tmp_path / "accoreconsole.exe"
+    fake_exe.write_text("", encoding="utf-8")
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    (script_dir / "module5_cad_executor.lsp").write_text("(princ)\n", encoding="utf-8")
+    cfg.module5_export.cad_runner.accoreconsole_exe = str(fake_exe)
+    cfg.module5_export.cad_runner.script_dir = str(script_dir)
+    cfg.module5_export.cad_runner.retry = 0
+
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    workspace = tmp_path / "work"
+    workspace.mkdir(parents=True, exist_ok=True)
+    task_json = workspace / "task.json"
+    result_json = workspace / "result.json"
+    slot_temp = tmp_path / "slot" / "temp"
+    slot_spool = tmp_path / "slot" / "spool"
+    slot_temp.mkdir(parents=True, exist_ok=True)
+    slot_spool.mkdir(parents=True, exist_ok=True)
+    task_json.write_text(
+        json.dumps(
+            {
+                "job_id": "job-slot-env",
+                "source_dxf": str(source),
+                "output_dir": str(workspace / "out"),
+                "runtime": {
+                    "temp_dir": str(slot_temp),
+                    "spool_dir": str(slot_spool),
+                },
+                "plot": {
+                    "pc3_name": "打印PDF2.pc3",
+                    "ctb_name": "fanban_monochrome.ctb",
+                    "use_monochrome": True,
+                    "margins_mm": {"top": 0, "bottom": 0, "left": 0, "right": 0},
+                },
+                "selection": {
+                    "bbox_margin_percent": 0.015,
+                    "empty_selection_retry_margin_percent": 0.03,
+                },
+                "frames": [],
+                "sheet_sets": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_json.write_text("{}", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _capture_run(*args, **kwargs):
+        captured["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(
+            args=kwargs.get("args", []),
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _capture_run)
+    runner = AcCoreConsoleRunner(config=cfg)
+    runner.run(
+        source_dxf=source,
+        task_json=task_json,
+        result_json=result_json,
+        workspace_dir=workspace,
+    )
+
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["TEMP"] == str(slot_temp)
+    assert env["TMP"] == str(slot_temp)
+
+
 def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):
     cfg = RuntimeConfig()
     fake_exe = tmp_path / "accoreconsole.exe"

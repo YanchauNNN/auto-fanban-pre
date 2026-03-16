@@ -10,13 +10,16 @@
 
 from .doc_context import DerivedFields, DocContext, GlobalDocParams, normalize_global_doc_params
 from .frame import BBox, FrameMeta, FrameRuntime, TitleblockFields
-from .job import Job, JobStatus, JobType
+from .job import Job, JobArtifacts, JobStatus, JobType
 from .sheet_set import PageInfo, SheetSet
+from .task_group import TaskGroup
 
 __all__ = [
     "Job",
+    "JobArtifacts",
     "JobStatus",
     "JobType",
+    "TaskGroup",
     "FrameMeta",
     "FrameRuntime",
     "TitleblockFields",

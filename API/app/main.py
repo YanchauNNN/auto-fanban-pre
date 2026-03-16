@@ -13,10 +13,17 @@ from .routers.system import router as system_router
 from .runtime import DeliverableApiRuntime
 
 from src.models import Job
+from src.pipeline.shared_prep import SharedPrepService
 
 
-def create_app(job_processor: Callable[[Job], None] | None = None) -> FastAPI:
-    runtime = DeliverableApiRuntime(job_processor=job_processor)
+def create_app(
+    job_processor: Callable[[Job], None] | None = None,
+    shared_prep_service: SharedPrepService | None = None,
+) -> FastAPI:
+    runtime = DeliverableApiRuntime(
+        job_processor=job_processor,
+        shared_prep_service=shared_prep_service,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

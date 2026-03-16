@@ -19,6 +19,7 @@ from .dxf_pdf_exporter import DxfPdfExporter
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
+from .slot_pool import CADSlot, CADSlotPool
 from .splitter import FrameSplitter
 from .titleblock_extractor import TitleblockExtractor
 from .titleblock_consistency import TitleblockConsistencyService
@@ -37,6 +38,8 @@ __all__ = [
     "resolve_autocad_paths",
     "PlotResourceContext",
     "ensure_plot_resources",
+    "CADSlot",
+    "CADSlotPool",
     "TitleblockConsistencyService",
     "TitleblockConsistencyBridge",
 ]

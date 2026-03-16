@@ -41,6 +41,8 @@ def ensure_plot_resources(
     pc3_name: str = PDF2_PC3_NAME,
     pmp_name: str = PDF2_PMP_NAME,
     ctb_name: str = MANAGED_CTB_NAME,
+    target_plotters_dirs: Iterable[Path] | None = None,
+    target_plot_styles_dirs: Iterable[Path] | None = None,
 ) -> PlotResourceContext:
     roots = list(_normalize_asset_roots(asset_roots))
     pc3_source = _pick_pc3_source(path_info, roots, pc3_name)
@@ -54,14 +56,22 @@ def ensure_plot_resources(
     )
     ctb_source = _pick_ctb_source(path_info, roots, ctb_name)
 
-    target_plotters_dirs = _resolve_target_plotters_dirs(path_info)
-    if not target_plotters_dirs:
+    resolved_plotters_dirs = (
+        [Path(path) for path in target_plotters_dirs]
+        if target_plotters_dirs is not None
+        else _resolve_target_plotters_dirs(path_info)
+    )
+    if not resolved_plotters_dirs:
         raise FileNotFoundError("??? AutoCAD Plotters ??")
 
-    target_plot_styles_dirs = _resolve_target_plot_styles_dirs(path_info, target_plotters_dirs)
+    resolved_plot_styles_dirs = (
+        [Path(path) for path in target_plot_styles_dirs]
+        if target_plot_styles_dirs is not None
+        else _resolve_target_plot_styles_dirs(path_info, resolved_plotters_dirs)
+    )
     deployed: list[Path] = []
 
-    for plotters_dir in target_plotters_dirs:
+    for plotters_dir in resolved_plotters_dirs:
         plotters_dir.mkdir(parents=True, exist_ok=True)
         _copy_managed_file(source=pc3_source, target=plotters_dir / pc3_name, deployed=deployed)
         _copy_managed_file(source=pmp_source, target=plotters_dir / pmp_name, deployed=deployed)
@@ -71,12 +81,12 @@ def ensure_plot_resources(
             deployed=deployed,
         )
 
-    for plot_styles_dir in target_plot_styles_dirs:
+    for plot_styles_dir in resolved_plot_styles_dirs:
         plot_styles_dir.mkdir(parents=True, exist_ok=True)
         _copy_managed_file(source=ctb_source, target=plot_styles_dir / ctb_name, deployed=deployed)
 
-    primary_plotters = target_plotters_dirs[0]
-    primary_plot_styles = target_plot_styles_dirs[0]
+    primary_plotters = resolved_plotters_dirs[0]
+    primary_plot_styles = resolved_plot_styles_dirs[0]
     return PlotResourceContext(
         plotters_dir=primary_plotters.resolve(),
         plot_styles_dir=primary_plot_styles.resolve(),

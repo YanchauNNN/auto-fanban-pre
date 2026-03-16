@@ -102,3 +102,79 @@ def test_audit_field_context_mapper_initializes_roi_margin_before_building_regio
     mapper = AuditFieldContextMapper([frame], [])
 
     assert mapper is not None
+
+
+def test_audit_check_executor_reuses_shared_prep_without_rerunning_oda_or_detection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    source_dwg = tmp_path / "20261RS-JGS65.dwg"
+    source_dwg.write_bytes(b"dwg")
+    shared_dir = tmp_path / "shared"
+    shared_dir.mkdir(parents=True, exist_ok=True)
+    (shared_dir / "source_converted.dxf").write_text("0\nEOF\n", encoding="utf-8")
+    (shared_dir / "frames.json").write_text("[]", encoding="utf-8")
+    (shared_dir / "sheet_sets.json").write_text("[]", encoding="utf-8")
+    (shared_dir / "titleblock_extracts.json").write_text("[]", encoding="utf-8")
+    (shared_dir / "audit_roi_context.json").write_text("{}", encoding="utf-8")
+
+    lexicon = AuditLexicon(
+        project_options=["2026"],
+        allowed_texts={"2026": {"2026"}},
+        foreign_texts={"2026": {"JD"}},
+        token_projects={"2026": {"2026"}, "JD": {"1418"}},
+    )
+
+    executor = AuditCheckExecutor()
+    monkeypatch.setattr(
+        executor.oda,
+        "dwg_to_dxf",
+        lambda src, out_dir: (_ for _ in ()).throw(AssertionError("should not convert dwg")),
+    )
+    monkeypatch.setattr(
+        executor.frame_detector,
+        "detect_frames",
+        lambda path: (_ for _ in ()).throw(AssertionError("should not detect frames")),
+    )
+    monkeypatch.setattr(
+        executor.titleblock_extractor,
+        "extract_fields",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not extract titleblock fields")
+        ),
+    )
+    monkeypatch.setattr(
+        executor.a4_grouper,
+        "group_a4_pages",
+        lambda frames: (_ for _ in ()).throw(AssertionError("should not regroup a4 pages")),
+    )
+    monkeypatch.setattr(executor.lexicon_loader, "load", lambda path: lexicon)
+    monkeypatch.setattr(
+        executor.dotnet_scanner,
+        "scan",
+        lambda **kwargs: [
+            ScanTextItem(
+                raw_text="JD1RSL32001B25C42SD",
+                entity_type="DBText",
+                field_context="titleblock_external_code",
+                position_x=10.0,
+                position_y=10.0,
+            ),
+        ],
+    )
+
+    job = Job(
+        job_id="job-audit-shared-prep",
+        job_type=JobType.AUDIT_REPLACE,
+        project_no="2026",
+        input_files=[source_dwg],
+        options={"mode": "check"},
+        params={"shared_prep_dir": str(shared_dir)},
+    )
+
+    executor.execute(job)
+
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.artifacts.report_json and job.artifacts.report_json.exists()

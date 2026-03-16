@@ -42,6 +42,9 @@ class JobManager(IJobManager):
         params: dict[str, Any] | None = None,
         batch_id: str | None = None,
         source_filename: str | None = None,
+        group_id: str | None = None,
+        task_role: str | None = None,
+        shared_run_id: str | None = None,
         **kwargs: Any,
     ) -> Job:
         """创建任务"""
@@ -50,6 +53,9 @@ class JobManager(IJobManager):
         params = kwargs.get("params", params)
         batch_id = kwargs.get("batch_id", batch_id)
         source_filename = kwargs.get("source_filename", source_filename)
+        group_id = kwargs.get("group_id", group_id)
+        task_role = kwargs.get("task_role", task_role)
+        shared_run_id = kwargs.get("shared_run_id", shared_run_id)
 
         job_id = str(uuid.uuid4())
 
@@ -59,6 +65,9 @@ class JobManager(IJobManager):
             project_no=project_no,
             batch_id=batch_id,
             source_filename=source_filename,
+            group_id=group_id,
+            task_role=task_role,
+            shared_run_id=shared_run_id,
             input_files=input_files or [],
             options=options or {},
             params=params or {},

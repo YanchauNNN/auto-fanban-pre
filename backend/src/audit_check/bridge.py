@@ -13,7 +13,14 @@ class AuditDotNetScanner:
         self.config = get_config()
         self.runner = AcCoreConsoleRunner(config=self.config)
 
-    def scan(self, *, job_id: str, source_dwg: Path, workspace_dir: Path) -> list[ScanTextItem]:
+    def scan(
+        self,
+        *,
+        job_id: str,
+        source_dwg: Path,
+        workspace_dir: Path,
+        slot_runtime: dict[str, str] | None = None,
+    ) -> list[ScanTextItem]:
         task_dir = workspace_dir / "audit_scan"
         task_dir.mkdir(parents=True, exist_ok=True)
         task_json = task_dir / "task.json"
@@ -36,6 +43,8 @@ class AuditDotNetScanner:
                 },
             },
         }
+        if slot_runtime:
+            task_payload["runtime"] = dict(slot_runtime)
         task_json.write_text(json.dumps(task_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self.runner.run(
             source_dxf=source_dwg,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import time
 from dataclasses import dataclass
@@ -101,6 +102,7 @@ class AcCoreConsoleRunner:
             result_json=result_json,
             module5_trace_log=module5_trace_log,
         )
+        runtime_env = self._build_runtime_env(task_data)
 
         cmd = [
             str(self.accoreconsole_exe),
@@ -123,6 +125,7 @@ class AcCoreConsoleRunner:
                     encoding="utf-8",
                     errors="ignore",
                     timeout=self.task_timeout_sec,
+                    env=runtime_env,
                 )
                 elapsed = time.monotonic() - t0
                 result = AcCoreConsoleRunResult(
@@ -261,6 +264,7 @@ class AcCoreConsoleRunner:
                 result_json=result_json,
                 module5_trace_log=module5_trace_log,
                 dotnet_bridge=dotnet_bridge,
+                runtime=task_data.get("runtime", {}),
             )
         else:
             content = self._build_lisp_runtime_content(
@@ -268,6 +272,7 @@ class AcCoreConsoleRunner:
                 task_data=task_data,
                 result_json=result_json,
                 module5_trace_log=module5_trace_log,
+                runtime=task_data.get("runtime", {}),
             )
         content.extend(["_.QUIT", "_N"])
         runtime_scr.write_text("\n".join(content) + "\n", encoding="utf-8")
@@ -279,6 +284,7 @@ class AcCoreConsoleRunner:
         result_json: Path,
         module5_trace_log: Path,
         dotnet_bridge: dict[str, Any],
+        runtime: Any,
     ) -> list[str]:
         dll_file = Path(str(dotnet_bridge.get("dll_path", "")))
         dll_path = self._quote_lisp_path(dll_file)
@@ -294,6 +300,8 @@ class AcCoreConsoleRunner:
             '(setvar "CMDDIA" 0)',
             '(setvar "SECURELOAD" 0)',
         ]
+        if isinstance(runtime, dict):
+            content.extend(self._build_runtime_preferences_content(runtime))
         if netload_each_run:
             content.append(f'(command "_.NETLOAD" "{dll_path}")')
         content.append(
@@ -308,6 +316,7 @@ class AcCoreConsoleRunner:
         task_data: dict[str, Any],
         result_json: Path,
         module5_trace_log: Path,
+        runtime: Any,
     ) -> list[str]:
         lsp_escaped = self._quote_lisp_path(lsp_path)
         lsp_dir_escaped = self._quote_lisp_path(lsp_path.parent)
@@ -374,6 +383,8 @@ class AcCoreConsoleRunner:
                 f'"{plot_preferred_area}" "{plot_fallback_area}" {split_stage_plot_enabled})'
             ),
         ]
+        if isinstance(runtime, dict):
+            content[3:3] = self._build_runtime_preferences_content(runtime)
 
         for frame in task_data.get("frames", []):
             frame_id = self._escape_lisp_string(str(frame.get("frame_id", "")))
@@ -437,6 +448,40 @@ class AcCoreConsoleRunner:
             )
 
         content.append("(module5-finalize)")
+        return content
+
+    def _build_runtime_env(self, task_data: dict[str, Any]) -> dict[str, str]:
+        env = dict(os.environ)
+        runtime = task_data.get("runtime", {})
+        if not isinstance(runtime, dict):
+            return env
+
+        temp_dir = str(runtime.get("temp_dir", "")).strip()
+        if temp_dir:
+            env["TEMP"] = temp_dir
+            env["TMP"] = temp_dir
+        return env
+
+    def _build_runtime_preferences_content(self, runtime: dict[str, Any]) -> list[str]:
+        plotters_dir = self._escape_lisp_string(str(runtime.get("plotters_dir", "")))
+        pmp_dir = self._escape_lisp_string(str(runtime.get("pmp_dir", "")))
+        plot_styles_dir = self._escape_lisp_string(str(runtime.get("plot_styles_dir", "")))
+        spool_dir = self._escape_lisp_string(str(runtime.get("spool_dir", "")))
+        if not any((plotters_dir, pmp_dir, plot_styles_dir, spool_dir)):
+            return []
+
+        content = [
+            "(vl-load-com)",
+            '(setq _m5prefs (vla-get-Files (vla-get-Preferences (vlax-get-acad-object))))',
+        ]
+        if plotters_dir:
+            content.append(f'(vla-put-PrinterConfigPath _m5prefs "{plotters_dir}")')
+        if pmp_dir:
+            content.append(f'(vla-put-PrinterDescPath _m5prefs "{pmp_dir}")')
+        if plot_styles_dir:
+            content.append(f'(vla-put-PrinterStyleSheetPath _m5prefs "{plot_styles_dir}")')
+        if spool_dir:
+            content.append(f'(vla-put-PrintSpoolerPath _m5prefs "{spool_dir}")')
         return content
 
     @staticmethod

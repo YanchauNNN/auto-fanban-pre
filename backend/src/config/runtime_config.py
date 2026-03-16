@@ -498,10 +498,16 @@ class RuntimeConfig(BaseSettings):
         """获取任务工作目录"""
         return self.storage_dir / "jobs" / job_id
 
+    def get_group_dir(self, group_id: str) -> Path:
+        """获取任务组工作目录"""
+        return self.storage_dir / "groups" / group_id
+
     def ensure_dirs(self) -> None:
         """确保必要目录存在"""
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         (self.storage_dir / "jobs").mkdir(exist_ok=True)
+        (self.storage_dir / "groups").mkdir(exist_ok=True)
+        (self.storage_dir / "runtime").mkdir(exist_ok=True)
 
 
 # 全局配置实例

@@ -46,6 +46,7 @@ from ..doc_gen import (
 from ..doc_gen.param_validator import DocParamValidator
 from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
 from .packager import Packager
+from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
 
 if TYPE_CHECKING:
@@ -80,60 +81,86 @@ class PipelineExecutor:
         self.packager = Packager()
 
     def execute(self, job: Job) -> None:
-        """执行流水线"""
+        """?????"""
         job.mark_running()
-        self._update_progress(job, message="任务开始", force=True)
+        self._update_progress(job, message="????", force=True)
 
         try:
             work_dir = self.config.get_job_dir(job.job_id)
             job.work_dir = work_dir
             work_dir.mkdir(parents=True, exist_ok=True)
 
-            context: dict = {
-                "dxf_files": [],
-                "dxf_to_dwg": {},
-                "frames": [],
-                "sheet_sets": [],
-                # Stage 7 (cad_dxf) 产物: {source_dxf: result_json_dict}
-                "cad_dxf_results": {},
-            }
-
             split_only = bool(job.options.get("split_only", False))
-            stages = (
-                [
-                    stage
-                    for stage in DELIVERABLE_STAGES
-                    if stage.name
-                    in {
-                        StageEnum.INGEST.value,
-                        StageEnum.CONVERT_DWG_TO_DXF.value,
-                        StageEnum.DETECT_FRAMES.value,
-                        StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
-                        StageEnum.SCALE_FIT_AND_CHECK.value,
-                        StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
-                        StageEnum.A4_MULTIPAGE_GROUPING.value,
-                        StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
-                        StageEnum.SPLIT_AND_RENAME.value,
-                        StageEnum.EXPORT_PDF_AND_DWG.value,
-                    }
-                ]
-                if split_only
-                else DELIVERABLE_STAGES
-            )
+            shared_prep_dir = str(job.params.get("shared_prep_dir") or "").strip()
+            if shared_prep_dir:
+                prep = SharedPrepService.load(Path(shared_prep_dir))
+                context: dict = {
+                    "dxf_files": [prep.source_converted_dxf],
+                    "dxf_to_dwg": {
+                        str(prep.source_converted_dxf.resolve()): prep.source_input_dwg.resolve(),
+                    },
+                    "frames": prep.frames,
+                    "sheet_sets": prep.sheet_sets,
+                    "cad_dxf_results": {},
+                    "shared_prep_dir": str(prep.shared_dir),
+                }
+                allowed = {
+                    StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
+                    StageEnum.SPLIT_AND_RENAME.value,
+                    StageEnum.EXPORT_PDF_AND_DWG.value,
+                }
+                if not split_only:
+                    allowed.update(
+                        {
+                            StageEnum.GENERATE_DOCS.value,
+                            StageEnum.PACKAGE_ZIP.value,
+                        }
+                    )
+                stages = [stage for stage in DELIVERABLE_STAGES if stage.name in allowed]
+            else:
+                context = {
+                    "dxf_files": [],
+                    "dxf_to_dwg": {},
+                    "frames": [],
+                    "sheet_sets": [],
+                    # Stage 7 (cad_dxf) ??: {source_dxf: result_json_dict}
+                    "cad_dxf_results": {},
+                }
+                stages = (
+                    [
+                        stage
+                        for stage in DELIVERABLE_STAGES
+                        if stage.name
+                        in {
+                            StageEnum.INGEST.value,
+                            StageEnum.CONVERT_DWG_TO_DXF.value,
+                            StageEnum.DETECT_FRAMES.value,
+                            StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
+                            StageEnum.SCALE_FIT_AND_CHECK.value,
+                            StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
+                            StageEnum.A4_MULTIPAGE_GROUPING.value,
+                            StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
+                            StageEnum.SPLIT_AND_RENAME.value,
+                            StageEnum.EXPORT_PDF_AND_DWG.value,
+                        }
+                    ]
+                    if split_only
+                    else DELIVERABLE_STAGES
+                )
             for stage in stages:
                 self._execute_stage(job, stage, context)
 
-            # 聚合 frame/sheet_set flags 到 job
+            # ?? frame/sheet_set flags ? job
             self._aggregate_flags(job, context)
             self._raise_if_fatal_export_errors(job)
 
             job.mark_succeeded()
-            self._update_progress(job, message="任务完成", force=True)
+            self._update_progress(job, message="????", force=True)
 
         except Exception as e:
-            logger.exception(f"流水线执行失败: {job.job_id}")
+            logger.exception(f"???????: {job.job_id}")
             job.mark_failed(str(e))
-            self._update_progress(job, message=f"任务失败: {e}", force=True)
+            self._update_progress(job, message=f"????: {e}", force=True)
             raise
 
     # ==================================================================
@@ -313,6 +340,7 @@ class PipelineExecutor:
         consistency_dir = work_dir / "work" / "titleblock_consistency"
         consistency_dir.mkdir(parents=True, exist_ok=True)
         report_path = consistency_dir / "consistency_report.json"
+        slot_runtime = job.params.get("cad_slot_runtime")
 
         for source_path, plans in source_to_plans.items():
             safe_plans = [plan for plan in plans if plan.replacements]
@@ -355,6 +383,7 @@ class PipelineExecutor:
                     output_dwg=output_dwg,
                     plans=safe_plans,
                     workspace_dir=consistency_dir / source_path.stem,
+                    slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
                 )
                 errors = [
                     str(error)
@@ -437,6 +466,7 @@ class PipelineExecutor:
                 details={"split_done": done},
             )
             try:
+                slot_runtime = job.params.get("cad_slot_runtime")
                 result = self.cad_dxf_executor.execute_source_dxf(
                     job_id=job.job_id,
                     source_dxf=source_dxf,
@@ -444,6 +474,7 @@ class PipelineExecutor:
                     sheet_sets=group["sheet_sets"],
                     output_dir=drawings_dir,
                     task_root=task_root,
+                    slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
                 )
                 context["cad_dxf_results"][str(source_dxf)] = result
             except Exception as e:  # noqa: BLE001

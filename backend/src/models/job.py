@@ -57,6 +57,18 @@ class Job(BaseModel):
     project_no: str
     batch_id: str | None = None
     source_filename: str | None = None
+    group_id: str | None = None
+    task_role: str | None = None
+    shared_run_id: str | None = None
+
+    # ????
+    slot_id: str | None = None
+    cad_version: str | None = None
+    accoreconsole_exe: str | None = None
+    profile_arg: str | None = None
+    pc3_path: str | None = None
+    pmp_path: str | None = None
+    ctb_path: str | None = None
 
     # 输入
     input_files: list[Path] = Field(default_factory=list)

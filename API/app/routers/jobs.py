@@ -15,6 +15,7 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 async def create_batch(
     request: Request,
     params_json: str = Form(...),
+    run_audit_check: bool = Form(False),
     files: list[UploadFile] = File(..., alias="files[]"),
 ) -> JSONResponse:
     try:
@@ -40,7 +41,11 @@ async def create_batch(
         )
         for upload in files
     ]
-    payload = request.app.state.runtime.create_batch(files=uploads, raw_params=params)
+    payload = request.app.state.runtime.create_batch(
+        files=uploads,
+        raw_params=params,
+        run_audit_check=run_audit_check,
+    )
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
 
 

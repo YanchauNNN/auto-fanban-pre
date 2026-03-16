@@ -42,7 +42,6 @@ class CADDXFExecutor:
         self.spec: BusinessSpec = spec or load_spec()
         self.runner = runner or AcCoreConsoleRunner(config=self.config)
         self._paper_variant_cache: list[tuple[str, float, float]] | None = None
-        self._plot_resource_context: PlotResourceContext | None = None
 
     def group_by_source_dxf(
         self,
@@ -79,6 +78,7 @@ class CADDXFExecutor:
         sheet_sets: list[SheetSet],
         output_dir: Path,
         task_root: Path,
+        slot_runtime: dict[str, str] | None = None,
     ) -> dict:
         """执行单个 CAD 源文件分组任务（固定两阶段：先切图，再从切图DWG打印）。"""
         source_dxf = source_dxf.resolve()
@@ -90,7 +90,11 @@ class CADDXFExecutor:
         requested_task_dir = task_root / self._safe_task_dir_name(source_dxf)
         requested_task_dir.mkdir(parents=True, exist_ok=True)
 
-        self._ensure_plot_resources_ready()
+        plot_resource_context = self._ensure_plot_resources_ready(slot_runtime=slot_runtime)
+        runtime_context = self._build_runtime_context(
+            slot_runtime=slot_runtime,
+            plot_resource_context=plot_resource_context,
+        )
 
         runtime_task_dir = self._make_runtime_task_dir(source_dxf)
         runtime_task_dir.mkdir(parents=True, exist_ok=True)
@@ -109,6 +113,8 @@ class CADDXFExecutor:
             sheet_sets=sheet_sets,
             output_dir=staged_output_dir,
             workflow_stage="split_only",
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
         split_run_meta = self._run_runner_with_engine_fallback(
             source_dxf=staged_source_dxf,
@@ -132,6 +138,8 @@ class CADDXFExecutor:
             split_result=split_result,
             frames=frames,
             sheet_sets=sheet_sets,
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
         self._write_task_json(result_json, final_result)
 
@@ -155,6 +163,8 @@ class CADDXFExecutor:
         sheet_sets: list[SheetSet],
         output_dir: Path,
         workflow_stage: str = "split_only",
+        plot_resource_context: PlotResourceContext | None = None,
+        runtime_context: dict[str, str] | None = None,
     ) -> dict:
         """构建 task.json（Python -> CAD）。"""
         self._validate_duplicate_codes(frames)
@@ -165,6 +175,8 @@ class CADDXFExecutor:
             workflow_stage=workflow_stage,
             frame_entries=[self._build_frame_entry(frame) for frame in frames],
             sheet_set_entries=[self._build_sheet_set_entry(sheet_set) for sheet_set in sheet_sets],
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
 
     def _build_task_json_from_entries(
@@ -177,15 +189,20 @@ class CADDXFExecutor:
         frame_entries: list[dict],
         sheet_set_entries: list[dict],
         output_override: dict[str, str | bool] | None = None,
+        plot_resource_context: PlotResourceContext | None = None,
+        runtime_context: dict[str, str] | None = None,
     ) -> dict:
         plot_cfg = self.config.module5_export.plot
         selection_cfg = self.config.module5_export.selection
         margins_mm = self._resolve_plot_margins_mm()
-        pc3_resolved_path, pc3_search_dirs = self._resolve_pc3_runtime_context(plot_cfg.pc3_name)
+        pc3_resolved_path, pc3_search_dirs = self._resolve_pc3_runtime_context(
+            plot_cfg.pc3_name,
+            plot_resource_context=plot_resource_context,
+        )
         output_entry = self._build_output_entry()
         if output_override:
             output_entry.update(output_override)
-        return {
+        payload = {
             "schema_version": "cad-dxf-task@1.0",
             "workflow_stage": workflow_stage,
             "job_id": job_id,
@@ -225,8 +242,16 @@ class CADDXFExecutor:
             "frames": frame_entries,
             "sheet_sets": sheet_set_entries,
         }
+        if runtime_context:
+            payload["runtime"] = runtime_context
+        return payload
 
-    def _resolve_pc3_runtime_context(self, pc3_name: str) -> tuple[str | None, list[str]]:
+    def _resolve_pc3_runtime_context(
+        self,
+        pc3_name: str,
+        *,
+        plot_resource_context: PlotResourceContext | None = None,
+    ) -> tuple[str | None, list[str]]:
         pc3_token = str(pc3_name or "").strip()
         if not pc3_token:
             return None, []
@@ -246,8 +271,8 @@ class CADDXFExecutor:
             if resolved not in search_dirs:
                 search_dirs.append(resolved)
 
-        if self._plot_resource_context is not None:
-            add_dir(self._plot_resource_context.plotters_dir)
+        if plot_resource_context is not None:
+            add_dir(plot_resource_context.plotters_dir)
         add_dir(path_info.plotters_dir)
         if path_info.install_dir is not None:
             add_dir(path_info.install_dir / "Plotters")
@@ -268,11 +293,8 @@ class CADDXFExecutor:
             except Exception:  # noqa: BLE001
                 resolved_path = str(candidate)
         else:
-            if (
-                self._plot_resource_context is not None
-                and self._plot_resource_context.pc3_path.name == pc3_token
-            ):
-                resolved_path = str(self._plot_resource_context.pc3_path.resolve())
+            if plot_resource_context is not None and plot_resource_context.pc3_path.name == pc3_token:
+                resolved_path = str(plot_resource_context.pc3_path.resolve())
             for base_dir in search_dirs:
                 if resolved_path is not None:
                     break
@@ -283,16 +305,70 @@ class CADDXFExecutor:
 
         return resolved_path, [str(path) for path in search_dirs]
 
-    def _ensure_plot_resources_ready(self) -> PlotResourceContext:
-        if self._plot_resource_context is not None:
-            return self._plot_resource_context
+    def _ensure_plot_resources_ready(
+        self,
+        *,
+        slot_runtime: dict[str, str] | None = None,
+    ) -> PlotResourceContext:
         path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
-        self._plot_resource_context = ensure_plot_resources(
+        target_plotters_dirs = self._slot_target_dirs(slot_runtime, "plotters_dir")
+        target_plot_styles_dirs = self._slot_target_dirs(slot_runtime, "plot_styles_dir")
+        return ensure_plot_resources(
             path_info=path_info,
             pc3_name=self.config.module5_export.plot.pc3_name,
             ctb_name=self.config.module5_export.plot.ctb_name,
+            target_plotters_dirs=target_plotters_dirs,
+            target_plot_styles_dirs=target_plot_styles_dirs,
         )
-        return self._plot_resource_context
+
+    def _slot_target_dirs(
+        self,
+        slot_runtime: dict[str, str] | None,
+        key: str,
+    ) -> list[Path] | None:
+        targets: list[Path] = []
+
+        def add_target(raw_value: str | None) -> None:
+            value = str(raw_value or "").strip()
+            if not value:
+                return
+            path = Path(value)
+            if path not in targets:
+                targets.append(path)
+
+        add_target(str((slot_runtime or {}).get(key, "")))
+
+        # Core Console 在部分环境下拿不到 ActiveX PreferencesFiles，
+        # 槽位私有 Plotters/Plot Styles 即便写入 task/runtime 也不一定被会话采纳。
+        # 为保证真实执行链不退化，这里保留一份受管资源镜像到 AutoCAD 默认可见目录。
+        path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
+        if key == "plotters_dir":
+            add_target(str(path_info.plotters_dir) if path_info.plotters_dir else None)
+        elif key == "plot_styles_dir":
+            add_target(str(path_info.plot_styles_dir) if path_info.plot_styles_dir else None)
+
+        return targets or None
+
+    def _build_runtime_context(
+        self,
+        *,
+        slot_runtime: dict[str, str] | None,
+        plot_resource_context: PlotResourceContext,
+    ) -> dict[str, str]:
+        runtime = {
+            "plotters_dir": str(plot_resource_context.plotters_dir),
+            "pmp_dir": str(plot_resource_context.pmp_path.parent),
+            "plot_styles_dir": str(plot_resource_context.plot_styles_dir),
+            "pc3_path": str(plot_resource_context.pc3_path),
+            "pmp_path": str(plot_resource_context.pmp_path),
+            "ctb_path": str(plot_resource_context.ctb_path),
+        }
+        if slot_runtime:
+            for key in ("slot_id", "slot_root", "profile_arg", "spool_dir", "temp_dir"):
+                value = str(slot_runtime.get(key, "")).strip()
+                if value:
+                    runtime[key] = value
+        return runtime
 
     def _build_output_entry(self) -> dict[str, str | bool | int]:
         output_cfg = self.config.module5_export.output
@@ -343,6 +419,8 @@ class CADDXFExecutor:
         split_result: dict,
         frames: list[FrameMeta],
         sheet_sets: list[SheetSet],
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         frames_by_id = {frame.frame_id: frame for frame in frames}
         sheet_sets_by_id = {sheet_set.cluster_id: sheet_set for sheet_set in sheet_sets}
@@ -364,6 +442,8 @@ class CADDXFExecutor:
                     staged_output_dir=staged_output_dir,
                     frames=frames,
                     sheet_sets=sheet_sets,
+                    plot_resource_context=plot_resource_context,
+                    runtime_context=runtime_context,
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"WINDOW_BATCH_FAILED:{exc}")
@@ -404,6 +484,8 @@ class CADDXFExecutor:
                         frame=frame,
                         window_plot_item=window_frame_items_by_id.get(frame_id),
                         use_split_fallback=use_split_fallback,
+                        plot_resource_context=plot_resource_context,
+                        runtime_context=runtime_context,
                     ),
                 )
             else:
@@ -414,6 +496,8 @@ class CADDXFExecutor:
                         staged_output_dir=staged_output_dir,
                         split_item=item,
                         frame=frame,
+                        plot_resource_context=plot_resource_context,
+                        runtime_context=runtime_context,
                     ),
                 )
 
@@ -433,6 +517,8 @@ class CADDXFExecutor:
                         sheet_set=sheet_set,
                         window_plot_item=window_sheet_items_by_id.get(cluster_id),
                         use_split_fallback=use_split_fallback,
+                        plot_resource_context=plot_resource_context,
+                        runtime_context=runtime_context,
                     ),
                 )
             else:
@@ -443,6 +529,8 @@ class CADDXFExecutor:
                         staged_output_dir=staged_output_dir,
                         split_item=item,
                         sheet_set=sheet_set,
+                        plot_resource_context=plot_resource_context,
+                        runtime_context=runtime_context,
                     ),
                 )
 
@@ -468,6 +556,8 @@ class CADDXFExecutor:
         staged_output_dir: Path,
         frames: list[FrameMeta],
         sheet_sets: list[SheetSet],
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         frame_entries: list[dict] = [self._build_frame_entry(frame) for frame in frames]
         sheet_set_entries: list[dict] = [
@@ -491,6 +581,8 @@ class CADDXFExecutor:
             frame_entries=frame_entries,
             sheet_set_entries=sheet_set_entries,
             output_override={"plot_preferred_area": "window", "plot_fallback_area": "none"},
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
         return self._run_plot_task_from_dwg(
             source_dwg=source_dxf,
@@ -508,6 +600,8 @@ class CADDXFExecutor:
         frame: FrameMeta | None,
         window_plot_item: dict | None,
         use_split_fallback: bool,
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         frame_id = str(split_item.get("frame_id", ""))
         flags = self._normalize_flag_list(split_item.get("flags"))
@@ -568,6 +662,8 @@ class CADDXFExecutor:
                 staged_output_dir=staged_output_dir,
                 split_item=split_item,
                 frame=frame,
+                plot_resource_context=plot_resource_context,
+                runtime_context=runtime_context,
             )
             for flag in self._normalize_flag_list(fallback_result.get("flags")):
                 self._append_flag(flags, flag)
@@ -592,6 +688,8 @@ class CADDXFExecutor:
         sheet_set: SheetSet | None,
         window_plot_item: dict | None,
         use_split_fallback: bool,
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         cluster_id = str(split_item.get("cluster_id", ""))
         flags = self._normalize_flag_list(split_item.get("flags"))
@@ -658,6 +756,8 @@ class CADDXFExecutor:
                 staged_output_dir=staged_output_dir,
                 split_item=split_item,
                 sheet_set=sheet_set,
+                plot_resource_context=plot_resource_context,
+                runtime_context=runtime_context,
             )
             for flag in self._normalize_flag_list(fallback_result.get("flags")):
                 self._append_flag(flags, flag)
@@ -680,6 +780,8 @@ class CADDXFExecutor:
         staged_output_dir: Path,
         split_item: dict,
         frame: FrameMeta | None,
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         frame_id = str(split_item.get("frame_id", ""))
         flags = self._normalize_flag_list(split_item.get("flags"))
@@ -712,6 +814,8 @@ class CADDXFExecutor:
             workflow_stage="plot_from_split_dwg",
             frame_entries=[frame_entry],
             sheet_set_entries=[],
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
 
         try:
@@ -771,6 +875,8 @@ class CADDXFExecutor:
         staged_output_dir: Path,
         split_item: dict,
         sheet_set: SheetSet | None,
+        plot_resource_context: PlotResourceContext,
+        runtime_context: dict[str, str],
     ) -> dict:
         cluster_id = str(split_item.get("cluster_id", ""))
         flags = self._normalize_flag_list(split_item.get("flags"))
@@ -808,6 +914,8 @@ class CADDXFExecutor:
             frame_entries=[],
             sheet_set_entries=[self._build_sheet_set_entry(sheet_set)],
             output_override={"plot_preferred_area": "window", "plot_fallback_area": "none"},
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
         )
         try:
             plot_result = self._run_plot_task_from_dwg(

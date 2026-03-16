@@ -22,6 +22,7 @@ class TitleblockConsistencyBridge:
         output_dwg: Path,
         plans: list[FieldConsistencyPlan],
         workspace_dir: Path,
+        slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         task_json = workspace_dir / "consistency_fix_task.json"
@@ -47,6 +48,8 @@ class TitleblockConsistencyBridge:
             },
             "consistency_actions": [self._serialize_plan(plan) for plan in plans],
         }
+        if slot_runtime:
+            payload["runtime"] = dict(slot_runtime)
         task_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         self.runner.run(
             source_dxf=source_dwg,

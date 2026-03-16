@@ -5,6 +5,7 @@ from pathlib import Path
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
 from ..config import get_config
 from ..models import Job
+from ..pipeline.shared_prep import SharedPrepService
 from .bridge import AuditDotNetScanner
 from .lexicon import AuditLexiconLoader
 from .matcher import AuditMatchEngine
@@ -36,22 +37,30 @@ class AuditCheckExecutor:
         job.work_dir = self.config.get_job_dir(job.job_id)
         job.work_dir.mkdir(parents=True, exist_ok=True)
 
+        shared_prep_dir = str(job.params.get("shared_prep_dir") or "").strip()
+        if shared_prep_dir:
+            prep = SharedPrepService.load(Path(shared_prep_dir))
+            remaining_frames = prep.frames
+            sheet_sets = prep.sheet_sets
+        else:
+            dxf_dir = job.work_dir / "work" / "audit_dxf"
+            dxf_dir.mkdir(parents=True, exist_ok=True)
+            dxf_path = self.oda.dwg_to_dxf(source_dwg, dxf_dir)
+
+            frames = self.frame_detector.detect_frames(dxf_path)
+            for frame in frames:
+                frame.runtime.cad_source_file = source_dwg
+                self.titleblock_extractor.extract_fields(dxf_path, frame)
+            remaining_frames, sheet_sets = self.a4_grouper.group_a4_pages(frames)
+
         lexicon = self.lexicon_loader.load(self.config.audit_check.lexicon_path)
-        dxf_dir = job.work_dir / "work" / "audit_dxf"
-        dxf_dir.mkdir(parents=True, exist_ok=True)
-        dxf_path = self.oda.dwg_to_dxf(source_dwg, dxf_dir)
-
-        frames = self.frame_detector.detect_frames(dxf_path)
-        for frame in frames:
-            frame.runtime.cad_source_file = source_dwg
-            self.titleblock_extractor.extract_fields(dxf_path, frame)
-        remaining_frames, sheet_sets = self.a4_grouper.group_a4_pages(frames)
-
         mapper = AuditFieldContextMapper(remaining_frames, sheet_sets)
+        slot_runtime = job.params.get("cad_slot_runtime")
         scan_items = self.dotnet_scanner.scan(
             job_id=job.job_id,
             source_dwg=source_dwg,
             workspace_dir=job.work_dir / "work",
+            slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
         )
         annotated_items = [mapper.annotate(item) for item in scan_items]
 
