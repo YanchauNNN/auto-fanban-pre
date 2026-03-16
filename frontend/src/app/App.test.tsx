@@ -166,15 +166,81 @@ describe("App", () => {
     expect(screen.getByText("受影响图纸 4")).toBeInTheDocument();
   });
 
-  it("groups jobs from the same batch into one package card", async () => {
+  it("renders a backend group row as one top-level package card with child task chips", async () => {
     mockListJobs.mockResolvedValue({
-      total: 2,
+      total: 1,
       items: [
+        {
+          jobId: "group-1",
+          groupId: "group-1",
+          batchId: "batch-shared-1",
+          isGroup: true,
+          sourceFilename: "18185NE-JGS11.dwg",
+          sourceFilenames: ["18185NE-JGS11.dwg"],
+          taskKind: null,
+          jobMode: null,
+          projectNo: "1818",
+          status: "running",
+          stage: "DELIVERABLE_BRANCH",
+          percent: 45,
+          message: "generating",
+          createdAt: "2026-03-16T10:20:30+08:00",
+          finishedAt: null,
+          runAuditCheck: true,
+          childJobIds: ["job-deliverable-1", "job-audit-1"],
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+        },
+      ],
+    });
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "group-1",
+      groupId: "group-1",
+      batchId: "batch-shared-1",
+      isGroup: true,
+      sourceFilename: "18185NE-JGS11.dwg",
+      sourceFilenames: ["18185NE-JGS11.dwg"],
+      taskKind: null,
+      jobMode: null,
+      projectNo: "1818",
+      status: "running",
+      stage: "DELIVERABLE_BRANCH",
+      percent: 45,
+      message: "generating",
+      createdAt: "2026-03-16T10:20:30+08:00",
+      finishedAt: null,
+      startedAt: "2026-03-16T10:20:32+08:00",
+      currentFile: null,
+      runAuditCheck: true,
+      childJobIds: ["job-deliverable-1", "job-audit-1"],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      topWrongTexts: [],
+      topInternalCodes: [],
+      flags: [],
+      errors: [],
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      children: [
         {
           jobId: "job-deliverable-1",
           batchId: "batch-shared-1",
+          groupId: "group-1",
           sourceFilename: "18185NE-JGS11.dwg",
           taskKind: "deliverable",
+          taskRole: "deliverable_main",
           jobMode: "deliverable",
           projectNo: "1818",
           status: "running",
@@ -196,8 +262,10 @@ describe("App", () => {
         {
           jobId: "job-audit-1",
           batchId: "batch-shared-1",
+          groupId: "group-1",
           sourceFilename: "18185NE-JGS11.dwg",
           taskKind: "audit_check",
+          taskRole: "audit_check",
           jobMode: "check",
           projectNo: "1818",
           status: "queued",
@@ -224,6 +292,19 @@ describe("App", () => {
     expect(await screen.findByText("18185NE-JGS11.dwg")).toBeInTheDocument();
     expect(screen.getAllByText("18185NE-JGS11.dwg")).toHaveLength(1);
     expect(screen.getByText("包含 2 个子任务")).toBeInTheDocument();
+    await waitFor(() => {
+      const deliverableLink = screen
+        .getAllByRole("link")
+        .find((link) => link.getAttribute("href") === "/jobs/job-deliverable-1");
+      const auditLink = screen
+        .getAllByRole("link")
+        .find((link) => link.getAttribute("href") === "/jobs/job-audit-1");
+
+      expect(deliverableLink).toBeDefined();
+      expect(auditLink).toBeDefined();
+      expect(deliverableLink?.textContent).toContain("交付");
+      expect(auditLink?.textContent).toContain("纠错");
+    });
   });
 
   it("shows an audit summary modal when an audit job completes with findings", async () => {
@@ -317,49 +398,126 @@ describe("App", () => {
     );
   });
 
-  it("renders audit check details with summary fields and report download only", async () => {
-    window.history.pushState({}, "", "/jobs/job-1");
+  it("renders group details with top-level downloads and child task details", async () => {
+    window.history.pushState({}, "", "/jobs/group-1");
     mockGetJobDetail.mockResolvedValue({
-      jobId: "job-1",
+      jobId: "group-1",
+      groupId: "group-1",
       batchId: "batch-1",
+      isGroup: true,
       sourceFilename: "20261NH-JGS51-B合并版.dwg",
-      taskKind: "audit_check",
-      jobMode: "check",
+      sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+      taskKind: null,
+      jobMode: null,
       projectNo: "2026",
       status: "succeeded",
-      stage: "EXPORT_REPORT",
+      stage: "GROUP_COMPLETE",
       percent: 100,
-      message: "纠错完成",
+      message: "group done",
       createdAt: "2026-03-08T10:20:30+08:00",
       finishedAt: "2026-03-08T10:25:30+08:00",
       startedAt: "2026-03-08T10:21:30+08:00",
-      currentFile: "20261NH-JGS51-B合并版.dwg",
+      currentFile: null,
+      runAuditCheck: true,
+      childJobIds: ["job-deliverable-1", "job-audit-1"],
       findingsCount: 9,
       affectedDrawingsCount: 5,
-      topWrongTexts: ["错字A", "错字B"],
-      topInternalCodes: ["20261NH-JGS51-001", "20261NH-JGS51-002"],
+      topWrongTexts: [],
+      topInternalCodes: [],
       flags: [],
       errors: [],
       artifacts: {
-        packageAvailable: false,
-        iedAvailable: false,
+        packageAvailable: true,
+        iedAvailable: true,
         reportAvailable: true,
         replacedDwgAvailable: false,
-        packageDownloadUrl: null,
-        iedDownloadUrl: null,
-        reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-1/download/report",
+        packageDownloadUrl: "http://127.0.0.1:8000/api/jobs/group-1/download/package",
+        iedDownloadUrl: "http://127.0.0.1:8000/api/jobs/group-1/download/ied",
+        reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/group-1/download/report",
         replacedDwgDownloadUrl: null,
       },
       retryAvailable: false,
+      children: [
+        {
+          jobId: "job-deliverable-1",
+          batchId: "batch-1",
+          groupId: "group-1",
+          sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          taskKind: "deliverable",
+          taskRole: "deliverable_main",
+          jobMode: "deliverable",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "PACKAGE_ZIP",
+          percent: 100,
+          message: "deliverable done",
+          createdAt: "2026-03-08T10:20:30+08:00",
+          finishedAt: "2026-03-08T10:25:00+08:00",
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: true,
+            iedAvailable: true,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+            packageDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-deliverable-1/download/package",
+            iedDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-deliverable-1/download/ied",
+          },
+          retryAvailable: false,
+        },
+        {
+          jobId: "job-audit-1",
+          batchId: "batch-1",
+          groupId: "group-1",
+          sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          taskKind: "audit_check",
+          taskRole: "audit_check",
+          jobMode: "check",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "EXPORT_REPORT",
+          percent: 100,
+          message: "audit done",
+          createdAt: "2026-03-08T10:20:40+08:00",
+          finishedAt: "2026-03-08T10:25:30+08:00",
+          findingsCount: 9,
+          affectedDrawingsCount: 5,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: true,
+            replacedDwgAvailable: false,
+            reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-audit-1/download/report",
+          },
+          retryAvailable: false,
+        },
+      ],
     });
 
     render(<App />);
 
-    expect(await screen.findByText("总错误数")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载 package.zip" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
-    expect(screen.getByText("错字A")).toBeInTheDocument();
-    expect(screen.getByText("20261NH-JGS51-001")).toBeInTheDocument();
+    expect(await screen.findByText("任务包概览")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载交付包" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8000/api/jobs/group-1/download/package",
+    );
+    expect(screen.getByRole("link", { name: "下载IED" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8000/api/jobs/group-1/download/ied",
+    );
+    expect(screen.getByRole("link", { name: "下载纠错报告" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8000/api/jobs/group-1/download/report",
+    );
+    expect(screen.getByText("deliverable_main")).toBeInTheDocument();
+    expect(screen.getByText("audit_check")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看子任务 deliverable_main" })).toHaveAttribute(
+      "href",
+      "/jobs/job-deliverable-1",
+    );
+    expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toHaveAttribute(
+      "href",
+      "/jobs/job-audit-1",
+    );
   });
 });

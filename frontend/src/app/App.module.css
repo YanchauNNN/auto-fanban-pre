@@ -272,6 +272,11 @@
   color: #8f5a12;
 }
 
+.kindGroup {
+  background: rgba(52, 94, 148, 0.12);
+  color: #1b4b87;
+}
+
 .jobMetric,
 .statusDefault {
   background: rgba(20, 70, 128, 0.08);
@@ -406,6 +411,40 @@
 
 .detailSection {
   margin-top: 1.4rem;
+}
+
+.childTaskList {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.childTaskCard {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(20, 70, 128, 0.08);
+  background: rgba(241, 246, 252, 0.7);
+}
+
+.childTaskTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.childTaskActions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.8rem;
+}
+
+.childTaskDownloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
 }
 
 .warningBanner {

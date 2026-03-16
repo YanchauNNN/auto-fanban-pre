@@ -179,31 +179,16 @@ export function DeliverableWorkspace({
     setIsSubmitting(true);
 
     try {
-      const payload = await adapter.createBatch(draft.values, draft.files);
-      let combinedPayload = payload;
-
-      if (draft.runAuditCheck) {
-        try {
-          const auditPayload = await adapter.createAuditCheck(
-            (draft.values.project_no ?? "").trim(),
-            draft.files,
-            payload.batchId,
-          );
-          combinedPayload = {
-            batchId: payload.batchId,
-            jobs: [...payload.jobs, ...auditPayload.jobs],
-          };
-          onNotice?.("出图任务已创建，并已自动追加纠错任务。");
-        } catch {
-          onNotice?.("出图任务已创建，但同时执行的纠错任务创建失败，请从首页单独重试。");
-        }
-      }
+      const payload = await adapter.createBatch(draft.values, draft.files, draft.runAuditCheck);
+      onNotice?.(
+        draft.runAuditCheck ? "出图与纠错任务包已创建。" : "出图任务已创建。",
+      );
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
       setReplaceModalOpen(false);
       setReplaceConfigError(null);
-      startTransition(() => onBatchCreated(combinedPayload));
+      startTransition(() => onBatchCreated(payload));
       onClose();
     } catch (error) {
       const detail =
@@ -572,7 +557,7 @@ export function DeliverableWorkspace({
                     <p>
                       当前按交付处理链路提交。
                       {draft.runAuditCheck
-                        ? "已选中同时执行纠错，提交后会自动追加一个独立纠错任务。"
+                        ? "已选中同时执行纠错，提交后会直接创建一个包含交付和纠错子任务的任务包。"
                         : "未选中纠错时，只会创建出图任务。"}
                     </p>
                   ) : (

@@ -12,7 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -25,7 +25,7 @@ import {
 import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
 import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
-import type { CreateBatchPayload, JobDetail, JobList, JobSummary, TaskKind } from "../platform/api/types";
+import type { ApiAdapter, CreateBatchPayload, JobDetail, JobList, JobSummary, TaskKind } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
 import styles from "./App.module.css";
@@ -110,11 +110,6 @@ function WorkspacePage() {
     },
   });
 
-  const jobPackages = useMemo(
-    () => buildJobPackages(jobsQuery.data?.items ?? []),
-    [jobsQuery.data?.items],
-  );
-
   useEffect(() => {
     const items = jobsQuery.data?.items;
     if (!items) {
@@ -132,6 +127,7 @@ function WorkspacePage() {
     const completedAuditJobs = items.filter((job) => {
       const previousStatus = previousStatuses.get(job.jobId);
       return (
+        !job.isGroup &&
         job.taskKind === "audit_check" &&
         previousStatus !== undefined &&
         ACTIVE_JOB_STATUSES.includes(previousStatus as never) &&
@@ -140,11 +136,23 @@ function WorkspacePage() {
       );
     });
 
-    if (completedAuditJobs.length === 0) {
+    const completedAuditGroups = items.filter((job) => {
+      const previousStatus = previousStatuses.get(job.jobId);
+      return (
+        job.isGroup &&
+        job.runAuditCheck &&
+        previousStatus !== undefined &&
+        ACTIVE_JOB_STATUSES.includes(previousStatus as never) &&
+        job.status === "succeeded" &&
+        !notifiedAuditJobIdsRef.current.has(job.jobId)
+      );
+    });
+
+    if (completedAuditJobs.length === 0 && completedAuditGroups.length === 0) {
       return;
     }
 
-    completedAuditJobs.forEach((job) => {
+    [...completedAuditJobs, ...completedAuditGroups].forEach((job) => {
       notifiedAuditJobIdsRef.current.add(job.jobId);
     });
 
@@ -168,6 +176,26 @@ function WorkspacePage() {
         }
 
         passedWithoutFindings.push(job.sourceFilename);
+      }
+
+      for (const group of completedAuditGroups) {
+        if (group.findingsCount > 0) {
+          try {
+            const groupDetail = await adapter.getJobDetail(group.jobId);
+            const auditChild = groupDetail.children?.find((child) => child.taskKind === "audit_check");
+            if (auditChild) {
+              const auditDetail = await adapter.getJobDetail(auditChild.jobId);
+              if (auditDetail.taskKind === "audit_check") {
+                summaries.push(auditDetail);
+              }
+            }
+          } catch {
+            // keep the session moving; list polling will continue and the user can open detail manually
+          }
+          continue;
+        }
+
+        passedWithoutFindings.push(group.sourceFilename);
       }
 
       if (!active) {
@@ -333,52 +361,15 @@ function WorkspacePage() {
         </div>
 
         <div className={styles.jobsPanel}>
-          {jobPackages.length ? (
-            jobPackages.map((jobPackage) => {
-              const job = jobPackage.jobs[0]!;
-              return (
-                <div
-                className={`${styles.jobCard} ${
-                  jobPackage.batchId && jobPackage.batchId === highlightedBatchId
-                    ? styles.jobCardHighlight
-                    : ""
-                }`}
-                key={jobPackage.packageKey}
-              >
-                <div className={styles.jobCardHeader}>
-                  <strong>{jobPackage.sourceFilename}</strong>
-                  <StatusPill status={jobPackage.status} />
-                </div>
-                <p className={styles.packageMeta}>包含 {jobPackage.jobs.length} 个子任务</p>
-                <div className={styles.jobMetaRow}>
-                  <TaskKindBadge kind={job.taskKind} />
-                  {job.taskKind === "audit_check" ? (
-                    <span className={styles.jobMetric}>
-                      错误数 {job.findingsCount}
-                    </span>
-                  ) : null}
-                  {job.taskKind === "audit_check" ? (
-                    <span className={styles.jobMetric}>
-                      受影响图纸 {job.affectedDrawingsCount}
-                    </span>
-                  ) : null}
-                </div>
-                <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
-                <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
-                <div className={styles.packageTaskList}>
-                  {jobPackage.jobs.map((subtask) => (
-                    <Link className={styles.subtaskLink} key={subtask.jobId} to={`/jobs/${subtask.jobId}`}>
-                      <TaskKindBadge kind={subtask.taskKind} />
-                      <span className={styles.subtaskStatus}>{statusLabel(subtask.status)}</span>
-                    </Link>
-                  ))}
-                </div>
-                <div className={styles.progressBar}>
-                  <div style={{ width: `${job.percent}%` }} />
-                </div>
-                </div>
-              );
-            })
+          {(jobsQuery.data?.items ?? []).length ? (
+            (jobsQuery.data?.items ?? []).map((job) => (
+              <JobCard
+                adapter={adapter}
+                highlighted={Boolean(job.batchId && job.batchId === highlightedBatchId)}
+                job={job}
+                key={job.jobId}
+              />
+            ))
           ) : (
             <div className={styles.emptyPanel}>
               <p>当前没有任务记录。</p>
@@ -422,6 +413,73 @@ function WorkspacePage() {
   );
 }
 
+function JobCard({
+  adapter,
+  job,
+  highlighted,
+}: {
+  adapter: ApiAdapter;
+  job: JobSummary;
+  highlighted: boolean;
+}) {
+  const groupDetailQuery = useQuery({
+    queryKey: ["job-card-group-detail", job.jobId],
+    queryFn: () => adapter.getJobDetail(job.jobId),
+    enabled: Boolean(job.isGroup),
+    refetchInterval:
+      job.isGroup && ACTIVE_JOB_STATUSES.includes(job.status as never) ? 3000 : false,
+  });
+
+  const childJobs = job.isGroup
+    ? (groupDetailQuery.data?.children ?? job.children ?? buildGroupChildPlaceholders(job))
+    : [];
+  const childCount = job.isGroup
+    ? Math.max(childJobs.length, job.childJobIds.length)
+    : 1;
+
+  return (
+    <div
+      className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}
+    >
+      <div className={styles.jobCardHeader}>
+        <strong>{job.sourceFilename}</strong>
+        <StatusPill status={job.status} />
+      </div>
+      {job.isGroup ? (
+        <p className={styles.packageMeta}>包含 {childCount} 个子任务</p>
+      ) : null}
+      <div className={styles.jobMetaRow}>
+        {job.isGroup ? (
+          <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
+        ) : job.taskKind ? (
+          <TaskKindBadge kind={job.taskKind} />
+        ) : null}
+        {(job.isGroup || job.taskKind === "audit_check") && job.findingsCount > 0 ? (
+          <span className={styles.jobMetric}>错误数 {job.findingsCount}</span>
+        ) : null}
+        {(job.isGroup || job.taskKind === "audit_check") && job.affectedDrawingsCount > 0 ? (
+          <span className={styles.jobMetric}>受影响图纸 {job.affectedDrawingsCount}</span>
+        ) : null}
+      </div>
+      <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
+      <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
+      {job.isGroup ? (
+        <div className={styles.packageTaskList}>
+          {childJobs.map((child) => (
+            <Link className={styles.subtaskLink} key={child.jobId} to={`/jobs/${child.jobId}`}>
+              {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+              <span className={styles.subtaskStatus}>{statusLabel(child.status)}</span>
+            </Link>
+          ))}
+        </div>
+      ) : null}
+      <div className={styles.progressBar}>
+        <div style={{ width: `${job.percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function JobDetailPage() {
   const adapter = useApiAdapter();
   const navigate = useNavigate();
@@ -447,112 +505,182 @@ function JobDetailPage() {
       </button>
 
       {detail ? (
-        <section className={styles.detailPanel}>
-          <header className={styles.detailHeader}>
-            <div>
-              <p className={styles.brandTop}>Job Detail</p>
-              <h1>{detail.sourceFilename}</h1>
-              <p className={styles.brandBody}>
-                {detail.jobId} / {detail.projectNo ?? "未标记项目"} / {taskKindLabel(detail.taskKind)}
-              </p>
-            </div>
-            <StatusPill status={detail.status} />
-          </header>
-
-          {hasWarnings ? (
-            <section className={styles.warningBanner}>
-              <strong>
-                {detail.status === "succeeded"
-                  ? "任务已完成，但仍有告警或缺失项需要处理。"
-                  : "任务存在告警或错误，请先检查后再继续处理。"}
-              </strong>
-              <span>
-                flags {detail.flags.length} 项 / errors {detail.errors.length} 项
-              </span>
-            </section>
-          ) : null}
-
-          <div className={styles.detailGrid}>
-            <InfoBlock label="任务类型" value={taskKindLabel(detail.taskKind)} />
-            <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
-            <InfoBlock label="进度" value={`${detail.percent}%`} />
-            <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
-            <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
-            <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
-          </div>
-
-          <div className={styles.progressBarLarge}>
-            <div style={{ width: `${detail.percent}%` }} />
-          </div>
-
-          {detail.taskKind === "audit_check" ? (
-            <section className={styles.detailSection}>
-              <h2>纠错摘要</h2>
-              <div className={styles.detailGrid}>
-                <InfoBlock label="总错误数" value={String(detail.findingsCount)} />
-                <InfoBlock label="受影响图纸数" value={String(detail.affectedDrawingsCount)} />
-              </div>
-              <div className={styles.columns}>
-                <ListBlock title="前 10 个错误文本" items={detail.topWrongTexts} emptyText="暂无错误文本摘要" />
-                <ListBlock title="前 10 个受影响内部编码" items={detail.topInternalCodes} emptyText="暂无内部编码摘要" />
-              </div>
-            </section>
-          ) : null}
-
-          <section className={styles.detailSection}>
-            <h2>告警与错误</h2>
-            <div className={styles.columns}>
-              <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-              <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-            </div>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h2>下载</h2>
-            <div className={styles.downloadGrid}>
-              {detail.taskKind === "deliverable" ? (
-                <>
-                  <ArtifactButton
-                    href={detail.artifacts.packageDownloadUrl ?? undefined}
-                    label="下载 package.zip"
-                  />
-                  <ArtifactButton
-                    href={detail.artifacts.iedDownloadUrl ?? undefined}
-                    label="下载 IED计划.xlsx"
-                  />
-                </>
-              ) : detail.taskKind === "audit_check" ? (
-                <ArtifactButton
-                  href={detail.artifacts.reportDownloadUrl ?? undefined}
-                  label="下载 report.xlsx"
-                />
-              ) : (
-                <ArtifactButton
-                  href={detail.artifacts.replacedDwgDownloadUrl ?? undefined}
-                  label="下载替换后 DWG"
-                />
-              )}
-            </div>
-          </section>
-
-          <section className={styles.detailSection}>
-            <h2>后续动作</h2>
-            <div className={styles.downloadGrid}>
-              <button className={styles.disabledAction} disabled type="button">
-                取消任务（接口未开放）
-              </button>
-              <button className={styles.disabledAction} disabled type="button">
-                重试任务（接口未开放）
-              </button>
-            </div>
-          </section>
-        </section>
+        detail.isGroup ? (
+          <GroupDetailPanel detail={detail} />
+        ) : (
+          <SingleJobDetailPanel detail={detail} hasWarnings={hasWarnings} />
+        )
       ) : (
         <section className={styles.detailPanel}>
           <p className={styles.muted}>正在加载任务详情...</p>
         </section>
       )}
     </div>
+  );
+}
+
+function SingleJobDetailPanel({
+  detail,
+  hasWarnings,
+}: {
+  detail: JobDetail;
+  hasWarnings: boolean;
+}) {
+  return (
+    <section className={styles.detailPanel}>
+      <header className={styles.detailHeader}>
+        <div>
+          <p className={styles.brandTop}>Job Detail</p>
+          <h1>{detail.sourceFilename}</h1>
+          <p className={styles.brandBody}>
+            {detail.jobId} / {detail.projectNo ?? "未标记项目"} /{" "}
+            {taskKindLabel(detail.taskKind ?? "deliverable")}
+          </p>
+        </div>
+        <StatusPill status={detail.status} />
+      </header>
+
+      {hasWarnings ? (
+        <section className={styles.warningBanner}>
+          <strong>
+            {detail.status === "succeeded"
+              ? "任务已完成，但仍有告警或缺失项需要处理。"
+              : "任务存在告警或错误，请先检查后再继续处理。"}
+          </strong>
+          <span>
+            flags {detail.flags.length} 项 / errors {detail.errors.length} 项
+          </span>
+        </section>
+      ) : null}
+
+      <div className={styles.detailGrid}>
+        <InfoBlock label="任务类型" value={taskKindLabel(detail.taskKind ?? "deliverable")} />
+        <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
+        <InfoBlock label="进度" value={`${detail.percent}%`} />
+        <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
+        <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
+        <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
+      </div>
+
+      <div className={styles.progressBarLarge}>
+        <div style={{ width: `${detail.percent}%` }} />
+      </div>
+
+      {detail.taskKind === "audit_check" ? (
+        <section className={styles.detailSection}>
+          <h2>纠错摘要</h2>
+          <div className={styles.detailGrid}>
+            <InfoBlock label="总错误数" value={String(detail.findingsCount)} />
+            <InfoBlock label="受影响图纸数" value={String(detail.affectedDrawingsCount)} />
+          </div>
+          <div className={styles.columns}>
+            <ListBlock title="前 10 个错误文本" items={detail.topWrongTexts} emptyText="暂无错误文本摘要" />
+            <ListBlock title="前 10 个受影响内部编码" items={detail.topInternalCodes} emptyText="暂无内部编码摘要" />
+          </div>
+        </section>
+      ) : null}
+
+      <section className={styles.detailSection}>
+        <h2>告警与错误</h2>
+        <div className={styles.columns}>
+          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>下载</h2>
+        <div className={styles.downloadGrid}>{renderArtifactButtons(detail)}</div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>后续动作</h2>
+        <div className={styles.downloadGrid}>
+          <button className={styles.disabledAction} disabled type="button">
+            取消任务（接口未开放）
+          </button>
+          <button className={styles.disabledAction} disabled type="button">
+            重试任务（接口未开放）
+          </button>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function GroupDetailPanel({ detail }: { detail: JobDetail }) {
+  const childJobs = detail.children ?? [];
+
+  return (
+    <section className={styles.detailPanel}>
+      <header className={styles.detailHeader}>
+        <div>
+          <p className={styles.brandTop}>Group Detail</p>
+          <h1>{detail.sourceFilename}</h1>
+          <p className={styles.brandBody}>
+            {detail.jobId} / {detail.projectNo ?? "未标记项目"} / 任务包
+          </p>
+        </div>
+        <StatusPill status={detail.status} />
+      </header>
+
+      <section className={styles.detailSection}>
+        <h2>任务包概览</h2>
+        <div className={styles.detailGrid}>
+          <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
+          <InfoBlock label="进度" value={`${detail.percent}%`} />
+          <InfoBlock label="子任务数" value={String(Math.max(childJobs.length, detail.childJobIds.length))} />
+          <InfoBlock label="纠错已开启" value={detail.runAuditCheck ? "是" : "否"} />
+          <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
+          <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
+        </div>
+        <div className={styles.progressBarLarge}>
+          <div style={{ width: `${detail.percent}%` }} />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>聚合下载</h2>
+        <div className={styles.downloadGrid}>
+          <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载交付包" />
+          <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载IED" />
+          <ArtifactButton href={detail.artifacts.reportDownloadUrl ?? undefined} label="下载纠错报告" />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>子任务</h2>
+        <div className={styles.childTaskList}>
+          {childJobs.map((child) => (
+            <div className={styles.childTaskCard} key={child.jobId}>
+              <div className={styles.jobCardHeader}>
+                <div className={styles.childTaskTitle}>
+                  <strong>{child.taskRole ?? child.jobId}</strong>
+                  {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+                </div>
+                <StatusPill status={child.status} />
+              </div>
+              <p className={styles.jobStage}>{child.stage ?? "queued"}</p>
+              <p className={styles.jobMessage}>{child.message || "等待处理中"}</p>
+              <div className={styles.childTaskActions}>
+                <Link className={styles.subtaskLink} to={`/jobs/${child.jobId}`}>
+                  查看子任务 {child.taskRole ?? child.jobId}
+                </Link>
+                <div className={styles.childTaskDownloads}>{renderArtifactButtons(child)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>告警与错误</h2>
+        <div className={styles.columns}>
+          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -665,72 +793,76 @@ function taskKindLabel(kind: TaskKind) {
   return "交付";
 }
 
-type JobPackage = {
-  packageKey: string;
-  batchId: string | null;
-  sourceFilename: string;
-  status: string;
-  jobs: JobSummary[];
-};
-
-function buildJobPackages(items: readonly JobSummary[]): JobPackage[] {
-  const grouped = new Map<string, JobSummary[]>();
-
-  for (const job of items) {
-    const packageKey = job.batchId ?? `job:${job.jobId}`;
-    const bucket = grouped.get(packageKey);
-    if (bucket) {
-      bucket.push(job);
-    } else {
-      grouped.set(packageKey, [job]);
-    }
-  }
-
-  return Array.from(grouped.entries()).map(([packageKey, jobs]) => {
-    const orderedJobs = [...jobs].sort((left, right) => jobSortRank(left) - jobSortRank(right));
-    const leadJob = orderedJobs.find((job) => job.taskKind === "deliverable") ?? orderedJobs[0]!;
-
-    return {
-      packageKey,
-      batchId: leadJob.batchId,
-      sourceFilename: leadJob.sourceFilename,
-      status: derivePackageStatus(orderedJobs),
-      jobs: orderedJobs,
-    };
-  });
-}
-
-function jobSortRank(job: JobSummary) {
-  if (job.taskKind === "deliverable") {
-    return 0;
-  }
-  if (job.taskKind === "audit_check") {
-    return 1;
-  }
-  return 2;
-}
-
-function derivePackageStatus(jobs: readonly JobSummary[]) {
-  if (jobs.some((job) => job.status === "failed")) {
-    return "failed";
-  }
-  if (jobs.some((job) => job.status === "running")) {
-    return "running";
-  }
-  if (jobs.some((job) => job.status === "cancel_requested")) {
-    return "cancel_requested";
-  }
-  if (jobs.some((job) => job.status === "queued")) {
-    return "queued";
-  }
-  if (jobs.every((job) => job.status === "succeeded")) {
-    return "succeeded";
-  }
-  return jobs[0]?.status ?? "queued";
-}
-
 function statusLabel(status: string) {
   return STATUS_META[status]?.label ?? status;
+}
+
+function buildGroupChildPlaceholders(job: JobSummary): JobSummary[] {
+  return job.childJobIds.map((childJobId, index) => ({
+    jobId: childJobId,
+    batchId: job.batchId,
+    isGroup: false,
+    groupId: job.groupId ?? job.jobId,
+    sourceFilename: job.sourceFilename,
+    sourceFilenames: job.sourceFilenames,
+    taskKind: index === 0 ? "deliverable" : "audit_check",
+    jobMode: index === 0 ? "deliverable" : "check",
+    projectNo: job.projectNo,
+    status: job.status,
+    stage: job.stage,
+    percent: job.percent,
+    message: job.message,
+    createdAt: job.createdAt,
+    finishedAt: job.finishedAt,
+    runAuditCheck: false,
+    childJobIds: [],
+    findingsCount: 0,
+    affectedDrawingsCount: 0,
+    artifacts: {
+      packageAvailable: false,
+      iedAvailable: false,
+      reportAvailable: false,
+      replacedDwgAvailable: false,
+    },
+    retryAvailable: false,
+    taskRole: index === 0 ? "deliverable_main" : "audit_check",
+    sharedRunId: job.sharedRunId,
+  }));
+}
+
+function renderArtifactButtons(job: JobSummary) {
+  if (job.taskKind === "deliverable") {
+    return [
+      <ArtifactButton
+        href={job.artifacts.packageDownloadUrl ?? undefined}
+        key="package"
+        label="下载 package.zip"
+      />,
+      <ArtifactButton
+        href={job.artifacts.iedDownloadUrl ?? undefined}
+        key="ied"
+        label="下载 IED计划.xlsx"
+      />,
+    ];
+  }
+
+  if (job.taskKind === "audit_check") {
+    return [
+      <ArtifactButton
+        href={job.artifacts.reportDownloadUrl ?? undefined}
+        key="report"
+        label="下载 report.xlsx"
+      />,
+    ];
+  }
+
+  return [
+    <ArtifactButton
+      href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
+      key="replaced-dwg"
+      label="下载替换后 DWG"
+    />,
+  ];
 }
 
 function formatTimestamp(value: string) {

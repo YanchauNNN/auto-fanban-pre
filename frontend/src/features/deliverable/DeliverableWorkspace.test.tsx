@@ -379,11 +379,12 @@ describe("DeliverableWorkspace", () => {
 
     await waitFor(() => {
       expect(adapter.createBatch).toHaveBeenCalledTimes(1);
-      expect(adapter.createAuditCheck).toHaveBeenCalledWith(
-        "2016",
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ project_no: "2016" }),
         expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
-        "batch-deliverable-1",
+        true,
       );
+      expect(adapter.createAuditCheck).not.toHaveBeenCalled();
     });
   });
 

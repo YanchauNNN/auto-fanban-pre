@@ -58,8 +58,11 @@ export type JobArtifacts = {
 export type JobSummary = {
   jobId: string;
   batchId: string | null;
+  isGroup: boolean;
+  groupId: string | null;
   sourceFilename: string;
-  taskKind: TaskKind;
+  sourceFilenames: string[];
+  taskKind: TaskKind | null;
   jobMode: string | null;
   projectNo: string | null;
   status: string;
@@ -68,10 +71,15 @@ export type JobSummary = {
   message: string;
   createdAt: string;
   finishedAt: string | null;
+  runAuditCheck: boolean;
+  childJobIds: string[];
   findingsCount: number;
   affectedDrawingsCount: number;
   artifacts: JobArtifacts;
   retryAvailable: boolean;
+  taskRole: string | null;
+  sharedRunId: string | null;
+  children?: JobSummary[];
 };
 
 export type JobDetail = JobSummary & {
@@ -81,6 +89,7 @@ export type JobDetail = JobSummary & {
   errors: string[];
   topWrongTexts: string[];
   topInternalCodes: string[];
+  sharedDir?: string | null;
 };
 
 export type JobList = {
@@ -138,7 +147,11 @@ export type ApiError = {
 export type ApiAdapter = {
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
-  createBatch: (params: Record<string, string>, files: File[]) => Promise<CreateBatchPayload>;
+  createBatch: (
+    params: Record<string, string>,
+    files: File[],
+    runAuditCheck?: boolean,
+  ) => Promise<CreateBatchPayload>;
   createAuditCheck: (
     projectNo: string,
     files: File[],

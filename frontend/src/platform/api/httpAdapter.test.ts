@@ -160,4 +160,62 @@ describe("HttpAdapter", () => {
     expect(jobs.items[0]?.findingsCount).toBe(12);
     expect(jobs.items[0]?.affectedDrawingsCount).toBe(4);
   });
+
+  it("creates grouped deliverable batches with run_audit_check=true when requested", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-group-1",
+          jobs: [
+            {
+              job_id: "group-1",
+              group_id: "group-1",
+              batch_id: "batch-group-1",
+              is_group: true,
+              source_filename: "18185NE-JGS11.dwg",
+              source_filenames: ["18185NE-JGS11.dwg"],
+              project_no: "1818",
+              status: "queued",
+              stage: "PREP_SOURCE",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-16T11:00:00+08:00",
+              finished_at: null,
+              run_audit_check: true,
+              child_job_ids: ["job-deliverable-1", "job-audit-1"],
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "18185NE-JGS11.dwg", {
+      type: "application/acad",
+    });
+
+    const created = await adapter.createBatch({ project_no: "1818" }, [file], true);
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("params_json")).toBe(JSON.stringify({ project_no: "1818" }));
+    expect(formData.get("run_audit_check")).toBe("true");
+    expect(created.jobs[0]).toMatchObject({
+      jobId: "group-1",
+      isGroup: true,
+      groupId: "group-1",
+      runAuditCheck: true,
+      childJobIds: ["job-deliverable-1", "job-audit-1"],
+      sourceFilenames: ["18185NE-JGS11.dwg"],
+    });
+  });
 });

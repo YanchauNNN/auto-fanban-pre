@@ -24,9 +24,14 @@ type RawArtifacts = {
 type RawJobSummary = {
   job_id: string;
   batch_id: string | null;
-  source_filename: string;
-  task_kind: "deliverable" | "audit_check" | "audit_replace";
-  job_mode: string | null;
+  group_id?: string | null;
+  shared_run_id?: string | null;
+  task_role?: string | null;
+  is_group?: boolean;
+  source_filename?: string | null;
+  source_filenames?: string[] | null;
+  task_kind?: "deliverable" | "audit_check" | "audit_replace" | null;
+  job_mode?: string | null;
   project_no: string | null;
   status: string;
   stage: string | null;
@@ -34,19 +39,23 @@ type RawJobSummary = {
   message: string | null;
   created_at: string;
   finished_at: string | null;
+  run_audit_check?: boolean | null;
+  child_job_ids?: string[] | null;
   findings_count?: number | null;
   affected_drawings_count?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
+  children?: RawJobSummary[] | null;
 };
 
 type RawJobDetail = RawJobSummary & {
-  started_at: string | null;
-  current_file: string | null;
-  flags: string[];
-  errors: string[];
+  started_at?: string | null;
+  current_file?: string | null;
+  flags?: string[];
+  errors?: string[];
   top_wrong_texts?: string[] | null;
   top_internal_codes?: string[] | null;
+  shared_dir?: string | null;
 };
 
 type RawFormSchema = {
@@ -118,9 +127,13 @@ export class HttpAdapter implements ApiAdapter {
   async createBatch(
     params: Record<string, string>,
     files: File[],
+    runAuditCheck = false,
   ): Promise<CreateBatchPayload> {
     const formData = new FormData();
     formData.append("params_json", JSON.stringify(params));
+    if (runAuditCheck) {
+      formData.append("run_audit_check", "true");
+    }
     for (const file of files) {
       formData.append("files[]", file);
     }
@@ -191,22 +204,27 @@ export class HttpAdapter implements ApiAdapter {
     const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`);
     return {
       ...this.normalizeSummary(payload),
-      startedAt: payload.started_at,
-      currentFile: payload.current_file,
-      flags: payload.flags,
-      errors: payload.errors,
+      startedAt: payload.started_at ?? null,
+      currentFile: payload.current_file ?? null,
+      flags: payload.flags ?? [],
+      errors: payload.errors ?? [],
       topWrongTexts: payload.top_wrong_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
+      sharedDir: payload.shared_dir ?? null,
     };
   }
 
   private normalizeSummary(payload: RawJobSummary): JobSummary {
+    const sourceFilename = payload.source_filename ?? payload.source_filenames?.[0] ?? payload.job_id;
     return {
       jobId: payload.job_id,
       batchId: payload.batch_id,
-      sourceFilename: payload.source_filename,
-      taskKind: payload.task_kind,
-      jobMode: payload.job_mode,
+      isGroup: payload.is_group ?? false,
+      groupId: payload.group_id ?? null,
+      sourceFilename,
+      sourceFilenames: payload.source_filenames ?? [sourceFilename],
+      taskKind: payload.task_kind ?? null,
+      jobMode: payload.job_mode ?? null,
       projectNo: payload.project_no,
       status: payload.status,
       stage: payload.stage,
@@ -214,6 +232,8 @@ export class HttpAdapter implements ApiAdapter {
       message: payload.message ?? "",
       createdAt: payload.created_at,
       finishedAt: payload.finished_at,
+      runAuditCheck: payload.run_audit_check ?? false,
+      childJobIds: payload.child_job_ids ?? [],
       findingsCount: payload.findings_count ?? 0,
       affectedDrawingsCount: payload.affected_drawings_count ?? 0,
       artifacts: {
@@ -227,6 +247,9 @@ export class HttpAdapter implements ApiAdapter {
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
       },
       retryAvailable: payload.retry_available,
+      taskRole: payload.task_role ?? null,
+      sharedRunId: payload.shared_run_id ?? null,
+      children: payload.children?.map((child) => this.normalizeSummary(child)),
     };
   }
 
