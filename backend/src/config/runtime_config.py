@@ -166,7 +166,7 @@ class PDFEngineConfig(BaseModel):
 class AuditCheckGenericIdentifierConfig(BaseModel):
     """纠错 generic_identifier_like 配置"""
 
-    regex: str = r"^[A-Z0-9-]{6,}$"
+    regex: str = r"^[A-Z]{3}\d{4}[A-Z]$"
     exempt_embed_patterns: list[str] = Field(
         default_factory=lambda: [r"^[A-Z]{3}\d{4}[A-Z]$"],
     )
@@ -212,6 +212,24 @@ class AuditCheckConfig(BaseModel):
     matching_policy: AuditCheckMatchingPolicyConfig = Field(
         default_factory=AuditCheckMatchingPolicyConfig,
     )
+
+
+class DeliverableConsistencyPaperSizeConfig(BaseModel):
+    """交付图签一致性修正 - 图幅配置"""
+
+    template_range: str = "B53:B79"
+
+
+class DeliverableConsistencyFixConfig(BaseModel):
+    """交付图签一致性修正配置"""
+
+    enabled: bool = True
+    failure_policy: str = "flag_and_continue"
+    source_scope: str = "staged_source_before_split"
+    paper_size: DeliverableConsistencyPaperSizeConfig = Field(
+        default_factory=DeliverableConsistencyPaperSizeConfig,
+    )
+    fields: list[str] = Field(default_factory=lambda: ["paper_size_text", "scale_text"])
 
 
 class UploadLimitsConfig(BaseModel):
@@ -279,6 +297,9 @@ class RuntimeConfig(BaseSettings):
     autocad: AutoCADConfig = Field(default_factory=AutoCADConfig)
     pdf_engine: PDFEngineConfig = Field(default_factory=PDFEngineConfig)
     audit_check: AuditCheckConfig = Field(default_factory=AuditCheckConfig)
+    deliverable_consistency_fix: DeliverableConsistencyFixConfig = Field(
+        default_factory=DeliverableConsistencyFixConfig,
+    )
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
@@ -314,6 +335,9 @@ class RuntimeConfig(BaseSettings):
             "autocad": AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
             "pdf_engine": PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
             "audit_check": AuditCheckConfig(**cls._extract(runtime_opts, "audit_check")),
+            "deliverable_consistency_fix": DeliverableConsistencyFixConfig(
+                **cls._extract(runtime_opts, "deliverable_consistency_fix"),
+            ),
             "upload_limits": UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
             "lifecycle": LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
             "logging": LoggingConfig(**cls._extract(runtime_opts, "logging")),

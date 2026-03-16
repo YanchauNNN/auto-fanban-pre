@@ -45,6 +45,11 @@ public class Commands
                 var auditScanner = new AuditCheckScanner(task, trace);
                 auditScanner.Execute(result);
             }
+            else if (task.WorkflowStage.Equals("titleblock_consistency_fix", StringComparison.OrdinalIgnoreCase))
+            {
+                var fixer = new TitleblockConsistencyFixer(task, trace);
+                fixer.Execute(result);
+            }
             else if (
                 task.WorkflowStage.Equals("plot_window_only", StringComparison.OrdinalIgnoreCase)
                 || task.WorkflowStage.Equals("plot_from_split_dwg", StringComparison.OrdinalIgnoreCase)
@@ -140,12 +145,14 @@ internal sealed class BridgeTask
     public string JobId { get; private set; } = "unknown";
     public string SourceDxf { get; private set; } = string.Empty;
     public string OutputDir { get; private set; } = string.Empty;
+    public string OutputDwg { get; private set; } = string.Empty;
 
     public BridgePlotConfig Plot { get; private set; } = new();
     public BridgeSelectionConfig Selection { get; private set; } = new();
     public BridgeOutputConfig Output { get; private set; } = new();
     public List<BridgeFrameTask> Frames { get; private set; } = new();
     public List<BridgeSheetSetTask> SheetSets { get; private set; } = new();
+    public List<BridgeConsistencyAction> ConsistencyActions { get; private set; } = new();
 
     public static BridgeTask Load(string taskPath)
     {
@@ -163,6 +170,7 @@ internal sealed class BridgeTask
             JobId = BridgeValue.GetString(root, "job_id", "unknown"),
             SourceDxf = BridgeValue.GetString(root, "source_dxf", string.Empty),
             OutputDir = BridgeValue.GetString(root, "output_dir", string.Empty),
+            OutputDwg = BridgeValue.GetString(root, "output_dwg", string.Empty),
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),
             Output = BridgeOutputConfig.FromObject(root.TryGetValue("output", out var outputObj) ? outputObj : null),
@@ -183,6 +191,15 @@ internal sealed class BridgeTask
             if (sheetDict != null)
             {
                 task.SheetSets.Add(BridgeSheetSetTask.FromDictionary(sheetDict));
+            }
+        }
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(root.TryGetValue("consistency_actions", out var actionsObj) ? actionsObj : null))
+        {
+            var actionDict = BridgeValue.AsDictionary(item);
+            if (actionDict != null)
+            {
+                task.ConsistencyActions.Add(BridgeConsistencyAction.FromDictionary(actionDict));
             }
         }
 
@@ -280,6 +297,58 @@ internal sealed class BridgeSheetSetTask
         }
 
         return task;
+    }
+}
+
+internal sealed class BridgeConsistencyAction
+{
+    public string FrameId { get; private set; } = string.Empty;
+    public string FieldName { get; private set; } = string.Empty;
+    public string ExpectedText { get; private set; } = string.Empty;
+    public string CurrentText { get; private set; } = string.Empty;
+    public BridgeBBox RoiBBox { get; private set; } = BridgeBBox.Empty;
+    public List<BridgeConsistencyTarget> Targets { get; private set; } = new();
+
+    public static BridgeConsistencyAction FromDictionary(Dictionary<string, object> data)
+    {
+        var action = new BridgeConsistencyAction
+        {
+            FrameId = BridgeValue.GetString(data, "frame_id", string.Empty),
+            FieldName = BridgeValue.GetString(data, "field_name", string.Empty),
+            ExpectedText = BridgeValue.GetString(data, "expected_text", string.Empty),
+            CurrentText = BridgeValue.GetString(data, "current_text", string.Empty),
+            RoiBBox = BridgeBBox.FromObject(data.TryGetValue("roi_bbox", out var roiObj) ? roiObj : null),
+        };
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(data.TryGetValue("targets", out var targetsObj) ? targetsObj : null))
+        {
+            var targetDict = BridgeValue.AsDictionary(item);
+            if (targetDict != null)
+            {
+                action.Targets.Add(BridgeConsistencyTarget.FromDictionary(targetDict));
+            }
+        }
+
+        return action;
+    }
+}
+
+internal sealed class BridgeConsistencyTarget
+{
+    public string OldText { get; private set; } = string.Empty;
+    public string NewText { get; private set; } = string.Empty;
+    public double X { get; private set; }
+    public double Y { get; private set; }
+
+    public static BridgeConsistencyTarget FromDictionary(Dictionary<string, object> data)
+    {
+        return new BridgeConsistencyTarget
+        {
+            OldText = BridgeValue.GetString(data, "old_text", string.Empty),
+            NewText = BridgeValue.GetString(data, "new_text", string.Empty),
+            X = BridgeValue.GetDouble(data, "x", 0.0),
+            Y = BridgeValue.GetDouble(data, "y", 0.0),
+        };
     }
 }
 

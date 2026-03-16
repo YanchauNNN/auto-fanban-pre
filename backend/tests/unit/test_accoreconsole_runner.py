@@ -195,6 +195,43 @@ def test_write_runtime_script_uses_dotnet_bridge_for_audit_check_scan(tmp_path: 
     assert "(module5-finalize)" not in content
 
 
+def test_write_runtime_script_uses_dotnet_bridge_for_titleblock_consistency_fix(tmp_path: Path):
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    runtime_scr = tmp_path / "runtime.scr"
+    lsp_path = tmp_path / "module5_cad_executor.lsp"
+    lsp_path.write_text("(princ)\n", encoding="utf-8")
+    task_json = tmp_path / "task.json"
+    result_json = tmp_path / "result.json"
+    trace_log = tmp_path / "module5_trace.log"
+    task_data = {
+        "workflow_stage": "titleblock_consistency_fix",
+        "engines": {
+            "selection_engine": "dotnet",
+            "plot_engine": "dotnet",
+            "dotnet_bridge": {
+                "enabled": True,
+                "dll_path": str(tmp_path / "Module5CadBridge.dll"),
+                "command_name": "M5BRIDGE_RUN",
+                "netload_each_run": True,
+            },
+        },
+    }
+
+    runner._write_runtime_script(
+        runtime_scr=runtime_scr,
+        task_json=task_json,
+        lsp_path=lsp_path,
+        task_data=task_data,
+        result_json=result_json,
+        module5_trace_log=trace_log,
+    )
+    content = runtime_scr.read_text(encoding="utf-8")
+    assert 'command "_.NETLOAD"' in content
+    assert 'command "M5BRIDGE_RUN"' in content
+    assert "TRUSTEDPATHS" not in content
+    assert "(module5-finalize)" not in content
+
+
 def test_run_accepts_timeout_when_result_exists(tmp_path: Path, monkeypatch):
     cfg = RuntimeConfig()
     fake_exe = tmp_path / "accoreconsole.exe"

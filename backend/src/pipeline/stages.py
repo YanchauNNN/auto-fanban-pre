@@ -16,14 +16,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..models import Job
 
 
-class StageEnum(str, Enum):
+class StageEnum(StrEnum):
     """流水线阶段枚举"""
     INGEST = "INGEST"
     CONVERT_DWG_TO_DXF = "CONVERT_DWG_TO_DXF"
@@ -32,6 +32,7 @@ class StageEnum(str, Enum):
     SCALE_FIT_AND_CHECK = "SCALE_FIT_AND_CHECK"
     EXTRACT_TITLEBLOCK_FIELDS = "EXTRACT_TITLEBLOCK_FIELDS"
     A4_MULTIPAGE_GROUPING = "A4_MULTIPAGE_GROUPING"
+    FIX_TITLEBLOCK_CONSISTENCY = "FIX_TITLEBLOCK_CONSISTENCY"
     SPLIT_AND_RENAME = "SPLIT_AND_RENAME"
     EXPORT_PDF_AND_DWG = "EXPORT_PDF_AND_DWG"
     GENERATE_DOCS = "GENERATE_DOCS"
@@ -61,8 +62,9 @@ DELIVERABLE_STAGES: list[PipelineStage] = [
     PipelineStage(StageEnum.SCALE_FIT_AND_CHECK.value, 30, 35),
     PipelineStage(StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value, 35, 50),
     PipelineStage(StageEnum.A4_MULTIPAGE_GROUPING.value, 50, 55),
-    PipelineStage(StageEnum.SPLIT_AND_RENAME.value, 55, 70),
-    PipelineStage(StageEnum.EXPORT_PDF_AND_DWG.value, 70, 80),
-    PipelineStage(StageEnum.GENERATE_DOCS.value, 80, 95),
+    PipelineStage(StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value, 55, 60),
+    PipelineStage(StageEnum.SPLIT_AND_RENAME.value, 60, 72),
+    PipelineStage(StageEnum.EXPORT_PDF_AND_DWG.value, 72, 82),
+    PipelineStage(StageEnum.GENERATE_DOCS.value, 82, 95),
     PipelineStage(StageEnum.PACKAGE_ZIP.value, 95, 100),
 ]

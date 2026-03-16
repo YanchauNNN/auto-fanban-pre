@@ -193,6 +193,13 @@ class CoverGenerator(ICoverGenerator):
             return ws[cell].value
 
         def write_cell(cell: str, value: Any) -> None:
+            if ":" in cell:
+                start_cell, end_cell = self._split_range_ref(cell)
+                # Embedded workbook fallback only needs the anchor cell for merged
+                # or visually spanning title cells. Writing every cell breaks merged
+                # ranges in openpyxl.
+                ws[start_cell] = value
+                return
             ws[cell] = value
 
         self._apply_bindings(bindings, data, read_cell, write_cell)
@@ -274,7 +281,7 @@ class CoverGenerator(ICoverGenerator):
             try:
                 count = int(
                     self._com_call_with_retry(
-                        lambda: collection_obj.Count,
+                        lambda collection_obj=collection_obj: collection_obj.Count,
                         f"{collection_name}.Count",
                     )
                 )
@@ -284,11 +291,11 @@ class CoverGenerator(ICoverGenerator):
             for idx in range(1, count + 1):
                 try:
                     shape = self._com_call_with_retry(
-                        lambda: collection_obj.Item(idx),
+                        lambda collection_obj=collection_obj, idx=idx: collection_obj.Item(idx),
                         f"{collection_name}.Item({idx})",
                     )
                     ole_format = self._com_call_with_retry(
-                        lambda: shape.OLEFormat,
+                        lambda shape=shape: shape.OLEFormat,
                         f"{collection_name}.Item({idx}).OLEFormat",
                     )
                     self._com_call_with_retry(
@@ -297,7 +304,7 @@ class CoverGenerator(ICoverGenerator):
                     )
                     time.sleep(0.8)
                     ole_obj = self._com_call_with_retry(
-                        lambda: ole_format.Object,
+                        lambda ole_format=ole_format: ole_format.Object,
                         f"{collection_name}.Item({idx}).OLEFormat.Object",
                     )
                 except Exception:
@@ -375,11 +382,11 @@ class CoverGenerator(ICoverGenerator):
                 write_cell(right_cell, right)
                 continue
 
-            target_cell = self._first_cell(cell_ref)
+            target_cell = cell_ref.strip() if ":" in cell_ref else self._first_cell(cell_ref)
             if binding.write_mode == "append_after_label":
                 if self._is_empty(value):
                     continue
-                current = read_cell(target_cell)
+                current = read_cell(self._first_cell(cell_ref))
                 merged = self._append_after_label(
                     current=str(current or ""),
                     label=binding.label or "",
@@ -513,10 +520,8 @@ class CoverGenerator(ICoverGenerator):
         raise RuntimeError(f"COM 调用失败 {desc}: {last_exc}") from last_exc
 
     def _close_com_object(self, fn: Callable[[], Any], desc: str) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._com_call_with_retry(fn, desc, retries=6)
-        except Exception:
-            pass
 
     def _mark_document_saved(self, doc: Any) -> None:
         with contextlib.suppress(Exception):

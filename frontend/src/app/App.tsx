@@ -349,7 +349,7 @@ function WorkspacePage() {
                   <strong>{jobPackage.sourceFilename}</strong>
                   <StatusPill status={jobPackage.status} />
                 </div>
-                <p className={styles.packageMeta}>鍖呭惈 {jobPackage.jobs.length} 涓瓙浠诲姟</p>
+                <p className={styles.packageMeta}>包含 {jobPackage.jobs.length} 个子任务</p>
                 <div className={styles.jobMetaRow}>
                   <TaskKindBadge kind={job.taskKind} />
                   {job.taskKind === "audit_check" ? (

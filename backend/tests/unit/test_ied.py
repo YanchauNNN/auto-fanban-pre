@@ -106,11 +106,10 @@ def test_ied_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["AT2"].value == "66"
     assert ws["AY2"].value == "李四@A002"
     assert ws["BA2"].value == "2026-03-01"
-    assert ws["BJ2"].value == "结构一室"
+    assert ws["BJ2"].value in ("", None)
     assert ws["BK2"].value == "非密"
 
     # 第4行：图纸行
     assert ws["G4"].value == "JD1NHT11001B25C42SD"
     assert ws["I4"].value == "1234567-JG001-001"
     assert ws["K4"].value == "图纸1"
-

@@ -4,12 +4,13 @@ import json
 import zipfile
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, cast
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 
+from src.cad.titleblock_consistency import TitleblockConsistencyService
 from src.models import DocContext, FrameMeta, GlobalDocParams, Job, JobType, PageInfo, SheetSet
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.packager import Packager
@@ -204,3 +205,66 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     assert "manifest.json" not in names
     assert "demo.pdf" in names
     assert "cover.docx" in names
+
+
+def test_stage_fix_titleblock_consistency_updates_working_source_and_flags(
+    tmp_path: Path,
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(
+            deliverable_consistency_fix=SimpleNamespace(enabled=True),
+        ),
+    )
+    executor._update_progress = MagicMock()
+
+    frame = FrameMeta.model_validate_json(sample_frame.model_dump_json())
+    frame.runtime.source_file = tmp_path / "source.dwg"
+    frame.runtime.source_file.write_text("dwg", encoding="utf-8")
+    frame.runtime.cad_source_file = frame.runtime.source_file
+    frame.runtime.paper_variant_id = "CNPE_A1"
+    frame.runtime.geom_scale_factor = 50
+    frame.titleblock.paper_size_text = "A0"
+    frame.titleblock.scale_text = "1:100"
+    frame.raw_extracts = {
+        "图幅": [
+            {"text": "A", "x": 10.0, "y": 0.0},
+            {"text": "0", "x": 20.0, "y": 0.0},
+        ],
+        "比例": [
+            {"text": "1", "x": 10.0, "y": 0.0},
+            {"text": ":", "x": 15.0, "y": 0.0},
+            {"text": "100", "x": 20.0, "y": 0.0},
+        ],
+    }
+
+    corrected = tmp_path / "work" / "titleblock_consistency" / "source.consistency.dwg"
+
+    executor.titleblock_consistency = TitleblockConsistencyService()
+    executor.titleblock_consistency_bridge = cast(
+        Any,
+        SimpleNamespace(
+            apply=lambda **kwargs: (corrected.parent.mkdir(parents=True, exist_ok=True), corrected.write_text("fixed", encoding="utf-8"), {"errors": []})[2],
+        ),
+    )
+
+    job = Job(
+        job_id="job-consistency-fix",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+    )
+
+    PipelineExecutor._stage_fix_titleblock_consistency(executor, job, {"frames": [frame], "sheet_sets": []})
+
+    assert frame.runtime.cad_source_file == corrected
+    assert frame.titleblock.paper_size_text == "A1"
+    assert frame.titleblock.scale_text == "1:50"
+    assert "PAPER_SIZE_MISMATCH" in frame.runtime.flags
+    assert "PAPER_SIZE_AUTO_FIXED" in frame.runtime.flags
+    assert "SCALE_MISMATCH" in frame.runtime.flags
+    assert "SCALE_AUTO_FIXED" in frame.runtime.flags
+    report_path = tmp_path / "work" / "titleblock_consistency" / "consistency_report.json"
+    assert report_path.exists()

@@ -98,7 +98,7 @@ class DerivationEngine:
         )
 
         # === 固定值 ===
-        derived.cover_paper_size_text = "A4文件"
+        derived.cover_paper_size_text = "A4图纸"
         derived.cover_page_total = 1
         derived.catalog_paper_size_text = "A4文件"
         # catalog_page_total 需要PDF计页后回填

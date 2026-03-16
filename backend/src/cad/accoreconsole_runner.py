@@ -248,6 +248,7 @@ class AcCoreConsoleRunner:
         use_dotnet = bool(dotnet_bridge.get("enabled", False)) and (
             (workflow_stage == "split_only" and selection_engine == "dotnet")
             or workflow_stage == "audit_check_scan"
+            or workflow_stage == "titleblock_consistency_fix"
             or (
                 workflow_stage in {"plot_window_only", "plot_from_split_dwg"}
                 and plot_engine == "dotnet"

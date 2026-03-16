@@ -74,7 +74,7 @@ def _create_mock_spec() -> BusinessSpec:
         schema_version="2.0",
         enums={
             "project_no": [{"id": "1818"}, {"id": "2016"}],
-            "discipline_en_map": {"结构": "Structural"},
+            "discipline_en_map": {"结构": "Structural Engineering"},
         },
         doc_generation={
             "options": {"enabled": True, "export_pdf": True},

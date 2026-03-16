@@ -123,7 +123,7 @@ class DerivedFields(BaseModel):
     catalog_revision: str | None = None
 
     # 固定值
-    cover_paper_size_text: str = "A4文件"
+    cover_paper_size_text: str = "A4图纸"
     cover_page_total: int = 1
     catalog_paper_size_text: str = "A4文件"
     catalog_page_total: int | None = None  # PDF计页后回填

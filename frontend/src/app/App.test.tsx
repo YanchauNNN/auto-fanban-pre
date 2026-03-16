@@ -223,7 +223,7 @@ describe("App", () => {
 
     expect(await screen.findByText("18185NE-JGS11.dwg")).toBeInTheDocument();
     expect(screen.getAllByText("18185NE-JGS11.dwg")).toHaveLength(1);
-    expect(screen.getByText("鍖呭惈 2 涓瓙浠诲姟")).toBeInTheDocument();
+    expect(screen.getByText("包含 2 个子任务")).toBeInTheDocument();
   });
 
   it("shows an audit summary modal when an audit job completes with findings", async () => {

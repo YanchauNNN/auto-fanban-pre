@@ -144,12 +144,17 @@ class TestRuntimeConfig:
         assert runtime_config.audit_check.lexicon_path.endswith("documents_bin\\词库收集.xlsx")
         assert runtime_config.audit_check.project_column_header_pattern == r"^\d{4}$"
         assert runtime_config.audit_check.include_rows == [1, 2, "3+"]
-        assert runtime_config.audit_check.generic_identifier_like.regex == r"^[A-Z0-9-]{6,}$"
+        assert runtime_config.audit_check.generic_identifier_like.regex == r"^[A-Z]{3}\d{4}[A-Z]$"
         assert runtime_config.audit_check.generic_identifier_like.exempt_embed_patterns == [
             r"^[A-Z]{3}\d{4}[A-Z]$",
         ]
         assert runtime_config.audit_check.context_rules.date_like[0] == r"^\d{4}[-/.]\d{1,2}$"
         assert runtime_config.audit_check.matching_policy.suppress_project_no_in_dimension_like is True
+        assert runtime_config.deliverable_consistency_fix.enabled is True
+        assert runtime_config.deliverable_consistency_fix.failure_policy == "flag_and_continue"
+        assert runtime_config.deliverable_consistency_fix.source_scope == "staged_source_before_split"
+        assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
+        assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
 
     def test_reload_config_uses_env_override_when_default_runtime_spec_missing(
         self,

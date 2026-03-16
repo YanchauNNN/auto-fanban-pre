@@ -46,7 +46,7 @@ enums:
   
   # 专业中英文映射（用于1818封面）
   discipline_en_map:
-    结构: "Structural"
+    结构: "Structural Engineering"
     建筑: "Architectural"
     总图运输: "Site & Transportation"
     # 其他专业待补充
@@ -268,10 +268,10 @@ doc_generation:
           filterable: true
       ied_discipline_office:
         type: str
-        required_when: "ied_status == '发布'"
+        required: false
         source: frontend
         transform: "取最后一个'-'后的文本"
-        desc: "专业室(BJ列)"
+        desc: "专业室(BJ列，当前版本不写入IED，仅保留兼容字段)"
       ied_chief_designer:
         type: str
         required_when: "ied_status == '发布'"
@@ -389,7 +389,7 @@ doc_generation:
       desc: "目录版次，优先取升版版本"
     
     # === 固定值 ===
-    cover_paper_size_text:   { value: "A4文件" }
+    cover_paper_size_text:   { value: "A4图纸" }
     cover_page_total:        { value: 1 }
     catalog_paper_size_text: { value: "A4文件" }
     catalog_page_total:      { from: "catalog_pdf", transform: "count_pdf_pages", note: "优先使用Excel分页信息计页；不稳定时回退为导出PDF计页" }
@@ -427,7 +427,7 @@ doc_generation:
         建筑: "JZ"
         总图运输: "ZY"
       discipline_to_en:
-        结构: "Structural"
+        结构: "Structural Engineering"
         建筑: "Architectural"
         总图运输: "Site & Transportation"
       status_to_design_phase:
@@ -496,7 +496,7 @@ doc_generation:
         design_phase:        { cell: "I16", label: "D16", desc: "设计阶段（中文）" }
         design_phase_en:     { cell: "I17", label: "D17", desc: "设计阶段（英文），由映射表生成" }
         discipline:          { cell: "I18", label: "D18", desc: "专业（中文）" }
-        discipline_en:       { cell: "I19", label: "D19", desc: "专业（英文），由映射表生成" }
+        discipline_en:       { cell: "I19:S19", label: "D19", desc: "专业（英文），由映射表生成" }
         album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half" }
         album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half" }
         album_code:          { cell: "I25", label: "D25/D26" }
@@ -612,7 +612,7 @@ doc_generation:
         P:  { name: "专业室",       source: "discipline_office",   global: true }
         Q:  { name: "设计阶段",     source: "design_phase" }
         R:  { name: "密级",         source: "classification",      global: true }
-        S:  { name: "图幅",         source: "paper_size_text",     cover_catalog: "A4文件" }
+        S:  { name: "图幅",         source: "paper_size_text",     cover_catalog: "A4图纸/A4文件（封面=A4图纸，目录=A4文件，图纸按标准识别图幅映射）" }
         T:  { name: "总页数",       source: "page_total",          cover: 1, catalog: "catalog_page_total" }
         U:  { name: "文件类别",     source: "file_category",       global: true }
         V:  { name: "图纸文件状态", source: "status",              cover_catalog: "取001图纸status" }
@@ -698,7 +698,7 @@ doc_generation:
         BG: { name: "审核日期",     source: "ied_reviewed_date",       global: true }
         BH: { name: "审定者",       source: "ied_approved_by",         global: true }
         BI: { name: "审定日期",     source: "ied_approved_date",       global: true }
-        BJ: { name: "专业室",       source: "ied_discipline_office",   global: true }
+        BJ: { name: "专业室",       value: "" }
         BK: { name: "密级",         source: "classification",          global: true }
         
         # === BL~BW: 固定留空（完整列表） ===

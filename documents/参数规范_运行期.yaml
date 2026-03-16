@@ -118,8 +118,8 @@ runtime_options:
     generic_identifier_like:
       regex:
         type: str
-        default: "^[A-Z0-9-]{6,}$"
-        desc: "generic_identifier_like 的文本分类规则"
+        default: "^[A-Z]{3}\\d{4}[A-Z]$"
+        desc: "generic_identifier_like 的文本分类规则（收紧为 3位大写字母+4位数字+1位大写字母）"
       exempt_embed_patterns:
         type: "list[str]"
         default: ["^[A-Z]{3}\\d{4}[A-Z]$"]
@@ -154,7 +154,21 @@ runtime_options:
       suppress_project_no_in_dimension_like: { type: bool, default: true, desc: "尺寸语义中抑制项目号命中" }
 
   # --------------------------------------------------------------------------
-  # 5) 上传限制与资源保护
+  # 5) 交付图签一致性修正
+  # --------------------------------------------------------------------------
+  deliverable_consistency_fix:
+    enabled: { type: bool, default: true, desc: "是否启用图签图幅/比例一致性修正" }
+    failure_policy: { type: str, default: "flag_and_continue", desc: "修正失败策略：标红并继续" }
+    source_scope: { type: str, default: "staged_source_before_split", desc: "修正作用域：切图前的工作副本源DWG" }
+    paper_size:
+      template_range: { type: str, default: "B53:B79", desc: "设计文件模板图幅标准值范围" }
+    fields:
+      type: "list[str]"
+      default: ["paper_size_text", "scale_text"]
+      desc: "参与一致性检查与自动修正的图签字段"
+
+  # --------------------------------------------------------------------------
+  # 6) 上传限制与资源保护
   # --------------------------------------------------------------------------
   upload_limits:
     max_files:        { type: int, default: 50, desc: "单次上传最大文件数" }
@@ -163,7 +177,7 @@ runtime_options:
     min_free_disk_mb: { type: int, default: 10240, desc: "磁盘最小可用空间阈值（MB）" }
 
   # --------------------------------------------------------------------------
-  # 6) 任务生命周期与清理
+  # 7) 任务生命周期与清理
   # --------------------------------------------------------------------------
   lifecycle:
     retention_hours:   { type: int, default: 168, desc: "任务产物保留时长（小时）" }
@@ -171,14 +185,14 @@ runtime_options:
     cleanup_cron:      { type: str, default: "0 3 * * *", desc: "定时清理任务（cron）" }
 
   # --------------------------------------------------------------------------
-  # 7) 日志与可观测性
+  # 8) 日志与可观测性
   # --------------------------------------------------------------------------
   logging:
     log_level:   { type: str, default: "INFO", desc: "日志级别" }
     log_to_file: { type: bool, default: true, desc: "是否输出到文件" }
 
   # --------------------------------------------------------------------------
-  # 8) 运行期业务覆盖（锚点校准相关）
+  # 9) 运行期业务覆盖（锚点校准相关）
   # --------------------------------------------------------------------------
   titleblock_overrides:
     frame_detect_mode:
@@ -217,7 +231,7 @@ runtime_options:
       desc: "LINE重建矩形的上限（geometry_first 模式生效）"
 
   # --------------------------------------------------------------------------
-  # 9) 多DWG处理与冲突策略
+  # 10) 多DWG处理与冲突策略
   # --------------------------------------------------------------------------
   multi_dwg_policy:
     per_dwg_isolation:
@@ -242,7 +256,7 @@ runtime_options:
       desc: "manifest.inputs.dwg_files[] 与 manifest.artifacts 按DWG分组"
 
   # --------------------------------------------------------------------------
-  # 10) DXF→PDF 渲染覆盖（ezdxf + matplotlib）
+  # 11) DXF→PDF 渲染覆盖（ezdxf + matplotlib）
   # --------------------------------------------------------------------------
   dxf_pdf_export:
     aci1_linewidth_mm:         { type: float, default: 0.4,  desc: "ACI颜色1线宽(mm)" }

@@ -74,7 +74,7 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
 
-        assert derived.discipline_en == "Structural"
+        assert derived.discipline_en == "Structural Engineering"
         assert derived.design_phase_en == "Constructing Design"
         assert derived.cover_title_en == "Test Album Cover"
         assert derived.catalog_title_en == "Test Album Contents"
@@ -99,3 +99,13 @@ class TestDerivationEngine:
         ctx2 = DocContext(params=params2, frames=[])
         derived2 = engine.compute(ctx2)
         assert derived2.catalog_revision == "A"
+
+    def test_derive_fixed_cover_and_catalog_paper_labels(self, engine: DerivationEngine):
+        """封面与目录固定图幅值应符合设计文件业务口径"""
+        params = GlobalDocParams(project_no="2016")
+        ctx = DocContext(params=params, frames=[])
+
+        derived = engine.compute(ctx)
+
+        assert derived.cover_paper_size_text == "A4图纸"
+        assert derived.catalog_paper_size_text == "A4文件"

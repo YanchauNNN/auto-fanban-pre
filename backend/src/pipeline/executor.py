@@ -30,6 +30,8 @@ from ..cad import (
     CADDXFExecutor,
     FrameDetector,
     ODAConverter,
+    TitleblockConsistencyBridge,
+    TitleblockConsistencyService,
     TitleblockExtractor,
 )
 from ..cad.splitter import output_name_for_frame, output_name_for_sheet_set
@@ -66,6 +68,8 @@ class PipelineExecutor:
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
+        self.titleblock_consistency = TitleblockConsistencyService()
+        self.titleblock_consistency_bridge = TitleblockConsistencyBridge()
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.derivation = DerivationEngine()
         self.doc_param_validator = DocParamValidator()
@@ -108,6 +112,7 @@ class PipelineExecutor:
                         StageEnum.SCALE_FIT_AND_CHECK.value,
                         StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
                         StageEnum.A4_MULTIPAGE_GROUPING.value,
+                        StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
                         StageEnum.SPLIT_AND_RENAME.value,
                         StageEnum.EXPORT_PDF_AND_DWG.value,
                     }
@@ -150,6 +155,7 @@ class PipelineExecutor:
                 StageEnum.SCALE_FIT_AND_CHECK.value: self._stage_scale_fit,
                 StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value: self._stage_extract_fields,
                 StageEnum.A4_MULTIPAGE_GROUPING.value: self._stage_a4_grouping,
+                StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value: self._stage_fix_titleblock_consistency,
                 StageEnum.SPLIT_AND_RENAME.value: self._stage_split,
                 StageEnum.EXPORT_PDF_AND_DWG.value: self._stage_export,
                 StageEnum.GENERATE_DOCS.value: self._stage_generate_docs,
@@ -276,6 +282,123 @@ class PipelineExecutor:
         remaining, sheet_sets = self.a4_grouper.group_a4_pages(context["frames"])
         context["frames"] = remaining
         context["sheet_sets"] = sheet_sets
+
+    def _stage_fix_titleblock_consistency(self, job: Job, context: dict) -> None:
+        cfg = self.config.deliverable_consistency_fix
+        if not cfg.enabled:
+            self._update_progress(job, message="图签一致性修正已关闭", force=True)
+            return
+
+        all_frames = self.titleblock_consistency.collect_document_frames(
+            context["frames"],
+            context["sheet_sets"],
+        )
+        frame_by_id = {frame.frame_id: frame for frame in all_frames}
+        source_to_all_frames: dict[Path, list[Any]] = {}
+        source_to_plans: dict[Path, list[Any]] = {}
+        report: dict[str, Any] = {"sources": []}
+
+        for frame in all_frames:
+            source_path = Path(frame.runtime.cad_source_file or frame.runtime.source_file)
+            source_to_all_frames.setdefault(source_path, []).append(frame)
+            plans = self.titleblock_consistency.build_frame_plans(frame)
+            if plans:
+                source_to_plans.setdefault(source_path, []).extend(plans)
+
+        if not source_to_plans:
+            self._update_progress(job, message="图签图幅/比例一致性已通过", force=True)
+            return
+
+        work_dir = self._require_work_dir(job)
+        consistency_dir = work_dir / "work" / "titleblock_consistency"
+        consistency_dir.mkdir(parents=True, exist_ok=True)
+        report_path = consistency_dir / "consistency_report.json"
+
+        for source_path, plans in source_to_plans.items():
+            safe_plans = [plan for plan in plans if plan.replacements]
+            skipped_plans = [plan for plan in plans if not plan.replacements]
+            source_report = {
+                "source_dwg": str(source_path),
+                "safe_plan_count": len(safe_plans),
+                "skipped_plan_count": len(skipped_plans),
+                "output_dwg": None,
+                "errors": [],
+                "plans": [
+                    {
+                        "frame_id": plan.frame_id,
+                        "field_name": plan.field_name,
+                        "expected_text": plan.expected_text,
+                        "current_text": plan.current_text,
+                        "replacement_count": len(plan.replacements),
+                    }
+                    for plan in plans
+                ],
+            }
+            report["sources"].append(source_report)
+
+            for plan in skipped_plans:
+                frame = frame_by_id.get(plan.frame_id)
+                if frame is None:
+                    continue
+                self._mark_consistency_flag(frame, plan.field_name, "MISMATCH")
+                self._mark_consistency_flag(frame, plan.field_name, "FIX_SKIPPED")
+
+            if not safe_plans:
+                continue
+
+            output_dwg = consistency_dir / f"{source_path.stem}.consistency{source_path.suffix}"
+            source_report["output_dwg"] = str(output_dwg)
+            try:
+                result = self.titleblock_consistency_bridge.apply(
+                    job_id=job.job_id,
+                    source_dwg=source_path,
+                    output_dwg=output_dwg,
+                    plans=safe_plans,
+                    workspace_dir=consistency_dir / source_path.stem,
+                )
+                errors = [
+                    str(error)
+                    for error in result.get("errors", [])
+                    if isinstance(error, str) and error
+                ]
+                source_report["errors"] = errors
+                if errors or not output_dwg.exists():
+                    raise RuntimeError("; ".join(errors) if errors else "corrected dwg missing")
+
+                for frame in source_to_all_frames.get(source_path, []):
+                    frame.runtime.cad_source_file = output_dwg
+
+                for plan in safe_plans:
+                    frame = frame_by_id.get(plan.frame_id)
+                    if frame is None:
+                        continue
+                    self._mark_consistency_flag(frame, plan.field_name, "MISMATCH")
+                    self._mark_consistency_flag(frame, plan.field_name, "AUTO_FIXED")
+                    self.titleblock_consistency.apply_expected_texts(frame)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("图签一致性修正失败: %s: %s", source_path, exc)
+                source_report["errors"].append(str(exc))
+                for plan in safe_plans:
+                    frame = frame_by_id.get(plan.frame_id)
+                    if frame is None:
+                        continue
+                    self._mark_consistency_flag(frame, plan.field_name, "MISMATCH")
+                    self._mark_consistency_flag(frame, plan.field_name, "FIX_SKIPPED")
+
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _mark_consistency_flag(frame: Any, field_name: str, suffix: str) -> None:
+        mapping = {
+            "paper_size_text": "PAPER_SIZE",
+            "scale_text": "SCALE",
+        }
+        prefix = mapping.get(field_name)
+        if prefix:
+            frame.add_flag(f"{prefix}_{suffix}")
 
     def _module5_engine(self) -> str:
         """模块5主执行引擎（固定为 cad_dxf）。"""

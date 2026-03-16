@@ -37,7 +37,7 @@ def _build_context(project_no: str = "2016") -> DocContext:
         cover_external_code="JD1NHT11F01B25C42SD",
         design_phase="施工图设计",
         design_phase_en="Constructing Design",
-        discipline_en="Structural",
+        discipline_en="Structural Engineering",
     )
     return DocContext(params=params, derived=derived, frames=[])
 
@@ -70,6 +70,29 @@ def test_cover_variant_template_mapping() -> None:
 
     ctx.params.cover_variant = "核安全设备"
     assert gen._get_template_path(ctx).endswith("1818图册核安全设备封面模板.docx")
+
+
+def test_1818_cover_binding_expands_discipline_en_range() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+
+    bindings = gen.spec.get_cover_bindings("1818")
+
+    assert bindings["discipline_en"].cell == "I19:S19"
+
+
+def test_1818_cover_apply_bindings_writes_discipline_en_range() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    bindings = gen.spec.get_cover_bindings("1818")
+    writes: list[tuple[str, object]] = []
+
+    gen._apply_bindings(
+        bindings,
+        {"discipline_en": "Structural Engineering"},
+        read_cell=lambda cell: "",
+        write_cell=lambda cell, value: writes.append((cell, value)),
+    )
+
+    assert ("I19:S19", "Structural Engineering") in writes
 
 
 def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:

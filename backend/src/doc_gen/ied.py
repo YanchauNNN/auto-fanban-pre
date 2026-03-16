@@ -90,8 +90,6 @@ class IEDGenerator(IIEDGenerator):
         """准备全局数据"""
         params = ctx.params
         derived = ctx.derived
-        discipline_office = self._normalize_discipline_office(params.ied_discipline_office)
-
         return {
             "ied_change_flag": params.ied_change_flag,
             "ied_doc_type": params.ied_doc_type,
@@ -100,7 +98,6 @@ class IEDGenerator(IIEDGenerator):
             "album_internal_code": derived.album_internal_code,
             "ied_design_type": params.ied_design_type,
             "ied_responsible_unit": params.ied_responsible_unit,
-            "ied_discipline_office": discipline_office,
             "ied_chief_designer": params.ied_chief_designer,
             "ied_person_qual_category": params.ied_person_qual_category,
             "ied_fu_flag": params.ied_fu_flag,
@@ -216,12 +213,3 @@ class IEDGenerator(IIEDGenerator):
 
         return ""
 
-    def _normalize_discipline_office(self, office: str | None) -> str:
-        if office is None:
-            return ""
-        text = office.strip()
-        if text == "":
-            return ""
-        if "-" in text:
-            return text.rsplit("-", 1)[-1].strip()
-        return text

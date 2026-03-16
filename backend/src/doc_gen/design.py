@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from openpyxl import load_workbook
 
+from ..cad.titleblock_consistency import TitleblockConsistencyService
 from ..config import load_spec
 from ..interfaces import GenerationError, IDesignFileGenerator
 
@@ -41,6 +42,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         pdf_exporter=None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
+        self.consistency = TitleblockConsistencyService()
         # 保留参数以兼容历史构造调用；设计文件已不再导出PDF。
         self.pdf_exporter = pdf_exporter
 
@@ -143,7 +145,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             "revision": params.cover_revision,
             "title_cn": derived.cover_title_cn,
             "title_en": derived.cover_title_en,
-            "paper_size_text": "A4文件",
+            "paper_size_text": self.consistency.cover_paper_text(),
             "page_total": 1,
             "status": params.doc_status,
             "discipline": params.discipline,
@@ -158,7 +160,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             "revision": derived.catalog_revision,
             "title_cn": derived.catalog_title_cn,
             "title_en": derived.catalog_title_en,
-            "paper_size_text": "A4文件",
+            "paper_size_text": self.consistency.catalog_paper_text(),
             "page_total": derived.catalog_page_total or 1,
             "status": params.doc_status,
             "discipline": params.discipline,
@@ -175,7 +177,7 @@ class DesignFileGenerator(IDesignFileGenerator):
                 "revision": tb.revision,
                 "title_cn": tb.title_cn,
                 "title_en": tb.title_en,
-                "paper_size_text": tb.paper_size_text,
+                "paper_size_text": self.consistency.drawing_paper_text(frame),
                 "page_total": tb.page_total or 1,
                 "status": tb.status,
                 "discipline": tb.discipline or params.discipline,
@@ -235,7 +237,6 @@ class DesignFileGenerator(IDesignFileGenerator):
             return self._match_template_value(
                 value,
                 template_lookups.get("paper_sizes", []),
-                prefer_a4_drawing=True,
             )
 
         if source == "discipline":
@@ -251,7 +252,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             return {"paper_sizes": [], "disciplines": []}
 
         sheet = workbook.worksheets[1]
-        paper_sizes = self._read_lookup_column(sheet, "B", 53, 101)
+        paper_sizes = self._read_lookup_column(sheet, "B", 53, 79)
         disciplines = self._read_lookup_column(sheet, "E", 53, 101)
         return {
             "paper_sizes": paper_sizes,
@@ -279,18 +280,12 @@ class DesignFileGenerator(IDesignFileGenerator):
         self,
         raw_value: Any,
         options: list[str],
-        *,
-        prefer_a4_drawing: bool = False,
     ) -> str:
         text = str(raw_value or "").strip()
         if not text:
             return ""
 
         normalized = self._normalize_lookup_value(text)
-        if prefer_a4_drawing and normalized == "a4":
-            for option in options:
-                if self._normalize_lookup_value(option) == self._normalize_lookup_value("A4图纸"):
-                    return option
 
         for option in options:
             if self._normalize_lookup_value(option) == normalized:

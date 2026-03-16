@@ -21,6 +21,8 @@ from .oda_converter import ODAConverter
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 from .splitter import FrameSplitter
 from .titleblock_extractor import TitleblockExtractor
+from .titleblock_consistency import TitleblockConsistencyService
+from .titleblock_consistency_bridge import TitleblockConsistencyBridge
 
 __all__ = [
     "ODAConverter",
@@ -35,4 +37,6 @@ __all__ = [
     "resolve_autocad_paths",
     "PlotResourceContext",
     "ensure_plot_resources",
+    "TitleblockConsistencyService",
+    "TitleblockConsistencyBridge",
 ]
