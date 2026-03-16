@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import RuntimeConfig, get_config
-from .autocad_path_resolver import AutoCADInstallation, list_available_autocad_installations
+from .autocad_path_resolver import (
+    AutoCADInstallation,
+    AutoCADPathInfo,
+    list_available_autocad_installations,
+)
+from .plot_resource_manager import ensure_plot_resources
 
 
 @dataclass(slots=True)
@@ -130,6 +135,21 @@ class CADSlotPool:
                 spool_dir=spool_dir,
                 temp_dir=temp_dir,
                 logs_dir=logs_dir,
+            )
+            ensure_plot_resources(
+                path_info=AutoCADPathInfo(
+                    install_dir=installation.install_dir if installation else slot_root,
+                    acad_exe=installation.acad_exe if installation else None,
+                    accoreconsole_exe=installation.accoreconsole_exe if installation else None,
+                    fonts_dir=getattr(installation, "fonts_dir", None) if installation else None,
+                    plotters_dir=plotters_dir,
+                    plot_styles_dir=plot_styles_dir,
+                    monochrome_ctb_path=None,
+                    pc3_path=None,
+                    fallback_pdf_pc3_path=None,
+                ),
+                target_plotters_dirs=[plotters_dir],
+                target_plot_styles_dirs=[plot_styles_dir],
             )
             self._slots[slot_id] = slot
             self._queue.put(slot_id)

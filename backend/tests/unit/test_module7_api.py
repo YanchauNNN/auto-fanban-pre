@@ -450,6 +450,8 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
         assert detail["slot_id"] is not None
         assert detail["profile_arg"] is not None
+        assert detail["plot_style_key"] == "red_wider"
+        assert detail["plot_resource_mode"] == "slot_private_with_shared_mirror"
 
         report_download = client.get(f"/api/jobs/{job_id}/download/report")
         assert report_download.status_code == 200
@@ -507,6 +509,8 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert final_detail["artifacts"]["ied_available"] is True
         assert final_detail["slot_id"] is not None
         assert final_detail["profile_arg"] is not None
+        assert final_detail["plot_style_key"] == "red_wider"
+        assert final_detail["plot_resource_mode"] == "slot_private_with_shared_mirror"
 
         listing = client.get("/api/jobs")
         assert listing.status_code == 200
@@ -596,6 +600,12 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
             "deliverable_main",
             "audit_check",
         }
+        assert {child["plot_style_key"] for child in detail["children"]} == {"red_wider"}
+        assert {child["plot_resource_mode"] for child in detail["children"]} == {
+            "slot_private_with_shared_mirror",
+        }
+        assert all(child["slot_id"] is not None for child in detail["children"])
+        assert all(child["ctb_path"] for child in detail["children"])
 
         listing = client.get("/api/jobs")
         assert listing.status_code == 200

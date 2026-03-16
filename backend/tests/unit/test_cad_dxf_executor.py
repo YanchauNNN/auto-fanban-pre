@@ -12,7 +12,12 @@ from typing import Any, cast
 import pytest
 
 from src.cad.cad_dxf_executor import CADDXFExecutor
-from src.cad.plot_resource_manager import MANAGED_CTB_NAME, PDF2_PC3_NAME, PDF2_PMP_NAME
+from src.cad.plot_resource_manager import (
+    ALL_MANAGED_CTB_NAMES,
+    MANAGED_CTB_NAME,
+    PDF2_PC3_NAME,
+    PDF2_PMP_NAME,
+)
 from src.config import RuntimeConfig
 from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
@@ -53,7 +58,8 @@ def _managed_plot_assets(tmp_path: Path, monkeypatch):
     plot_styles_asset.mkdir(parents=True, exist_ok=True)
     (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
     (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
-    (plot_styles_asset / MANAGED_CTB_NAME).write_text("managed-ctb" * 128, encoding="utf-8")
+    for name in ALL_MANAGED_CTB_NAMES:
+        (plot_styles_asset / name).write_text("managed-ctb" * 128, encoding="utf-8")
     monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(asset_root))
 
 
@@ -899,6 +905,61 @@ def test_build_task_json_uses_revision_and_status_in_name(tmp_path: Path):
     assert task["frames"][0]["name"] == "E001BCFC (I-001)"
 
 
+def test_build_task_json_uses_default_plot_style_key_mapping(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+
+    cfg = RuntimeConfig()
+    cfg.module5_export.plot.default_plot_style_key = "same_width"
+    executor = _make_executor(config=cfg)
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=output_dir,
+    )
+
+    assert task["plot"]["plot_style_key"] == "same_width"
+    assert task["plot"]["ctb_name"] == "fanban_monochrome-same width.ctb"
+
+
+def test_build_task_json_allows_explicit_plot_style_override(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+
+    executor = _make_executor()
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=output_dir,
+        plot_style_key="review_white",
+    )
+
+    assert task["plot"]["plot_style_key"] == "review_white"
+    assert task["plot"]["ctb_name"] == "打白图.ctb"
+
+
 def test_result_json_backfill_paths(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
@@ -1145,7 +1206,7 @@ def test_execute_source_dxf_ensures_plot_resources_before_building_task(
     order: list[str] = []
     original_build = CADDXFExecutor.build_task_json
 
-    def _ensure(self, *, slot_runtime=None):
+    def _ensure(self, *, slot_runtime=None, ctb_name=None):
         order.append("ensure")
         return cast(
             Any,

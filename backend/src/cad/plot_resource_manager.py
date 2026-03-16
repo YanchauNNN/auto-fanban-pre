@@ -21,6 +21,13 @@ PDF2_PC3_NAME = "\u6253\u5370PDF2.pc3"
 PDF2_PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 MONOCHROME_CTB_NAME = "monochrome.ctb"
 MANAGED_CTB_NAME = "fanban_monochrome.ctb"
+MANAGED_SAME_WIDTH_CTB_NAME = "fanban_monochrome-same width.ctb"
+MANAGED_REVIEW_WHITE_CTB_NAME = "\u6253\u767d\u56fe.ctb"
+ALL_MANAGED_CTB_NAMES = (
+    MANAGED_CTB_NAME,
+    MANAGED_SAME_WIDTH_CTB_NAME,
+    MANAGED_REVIEW_WHITE_CTB_NAME,
+)
 MIN_VALID_CTB_BYTES = 512
 
 
@@ -41,6 +48,7 @@ def ensure_plot_resources(
     pc3_name: str = PDF2_PC3_NAME,
     pmp_name: str = PDF2_PMP_NAME,
     ctb_name: str = MANAGED_CTB_NAME,
+    managed_ctb_names: Iterable[str] | None = None,
     target_plotters_dirs: Iterable[Path] | None = None,
     target_plot_styles_dirs: Iterable[Path] | None = None,
 ) -> PlotResourceContext:
@@ -54,7 +62,14 @@ def ensure_plot_resources(
         ],
         missing_message=f"????PMP??: {pmp_name}",
     )
-    ctb_source = _pick_ctb_source(path_info, roots, ctb_name)
+    ctb_names_to_deploy = _resolve_managed_ctb_names(
+        ctb_name=ctb_name,
+        managed_ctb_names=managed_ctb_names,
+    )
+    ctb_sources = {
+        name: _pick_ctb_source(path_info, roots, name)
+        for name in ctb_names_to_deploy
+    }
 
     resolved_plotters_dirs = (
         [Path(path) for path in target_plotters_dirs]
@@ -83,7 +98,12 @@ def ensure_plot_resources(
 
     for plot_styles_dir in resolved_plot_styles_dirs:
         plot_styles_dir.mkdir(parents=True, exist_ok=True)
-        _copy_managed_file(source=ctb_source, target=plot_styles_dir / ctb_name, deployed=deployed)
+        for managed_name, managed_source in ctb_sources.items():
+            _copy_managed_file(
+                source=managed_source,
+                target=plot_styles_dir / managed_name,
+                deployed=deployed,
+            )
 
     primary_plotters = resolved_plotters_dirs[0]
     primary_plot_styles = resolved_plot_styles_dirs[0]
@@ -106,7 +126,12 @@ def default_asset_roots() -> list[Path]:
         exe_root = Path(sys.executable).resolve().parent
         roots.extend([exe_root / "assets", exe_root / "_internal" / "assets"])
     repo_root = Path(__file__).resolve().parents[3]
-    roots.extend([repo_root / "test" / "dist" / "assets", repo_root / "documents"])
+    roots.extend(
+        [
+            repo_root / "test" / "dist" / "assets",
+            repo_root / "documents" / "Resources",
+        ]
+    )
     unique: list[Path] = []
     seen: set[str] = set()
     for root in roots:
@@ -125,6 +150,24 @@ def _normalize_asset_roots(asset_roots: Iterable[Path] | None) -> list[Path]:
     if asset_roots is None:
         return [root for root in default_asset_roots() if root.exists()]
     return [Path(root) for root in asset_roots if Path(root).exists()]
+
+
+def _resolve_managed_ctb_names(
+    *,
+    ctb_name: str,
+    managed_ctb_names: Iterable[str] | None,
+) -> tuple[str, ...]:
+    names: list[str] = []
+    for name in managed_ctb_names or ALL_MANAGED_CTB_NAMES:
+        normalized = str(name or "").strip()
+        if normalized and normalized not in names:
+            names.append(normalized)
+    requested = str(ctb_name or "").strip()
+    if requested and requested not in names:
+        names.append(requested)
+    if not names:
+        names.append(MANAGED_CTB_NAME)
+    return tuple(names)
 
 
 def _resolve_target_plotters_dirs(path_info: AutoCADPathInfo) -> list[Path]:

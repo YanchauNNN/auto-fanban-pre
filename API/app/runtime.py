@@ -447,19 +447,24 @@ class DeliverableApiRuntime:
         slot = None
         try:
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
+            resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
             job.slot_id = slot.slot_id
             job.cad_version = str(slot.cad_version) if slot.cad_version is not None else None
             job.accoreconsole_exe = str(slot.accoreconsole_exe) if slot.accoreconsole_exe else None
             job.profile_arg = str(slot.profile_arg_path)
+            job.plot_style_key = resolved_plot_style_key
+            job.plot_resource_mode = "slot_private_with_shared_mirror"
             job.pc3_path = str(slot.plotters_dir / self.config.module5_export.plot.pc3_name)
             job.pmp_path = str(slot.pmp_dir / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp")
-            job.ctb_path = str(slot.plot_styles_dir / self.config.module5_export.plot.ctb_name)
+            job.ctb_path = str(slot.plot_styles_dir / resolved_ctb_name)
             job.params["cad_slot_id"] = slot.slot_id
             job.params["cad_slot_root"] = str(slot.slot_root)
             job.params["cad_slot_profile_arg"] = str(slot.profile_arg_path)
             job.params["cad_slot_plotters_dir"] = str(slot.plotters_dir)
             job.params["cad_slot_pmp_dir"] = str(slot.pmp_dir)
             job.params["cad_slot_plot_styles_dir"] = str(slot.plot_styles_dir)
+            job.params["plot_style_key"] = resolved_plot_style_key
+            job.params["plot_resource_mode"] = job.plot_resource_mode
             job.params["cad_slot_runtime"] = {
                 "slot_id": slot.slot_id,
                 "slot_root": str(slot.slot_root),
@@ -480,6 +485,20 @@ class DeliverableApiRuntime:
             self.job_manager.update_job(job)
             if slot is not None:
                 self.cad_slot_pool.release(slot.slot_id)
+
+    def _resolve_job_plot_style(self, job: Job) -> tuple[str, str]:
+        plot_cfg = self.config.module5_export.plot
+        profiles = dict(getattr(plot_cfg, "plot_style_profiles", {}) or {})
+        default_key = str(getattr(plot_cfg, "default_plot_style_key", "") or "").strip() or "red_wider"
+        requested_key = str(job.params.get("plot_style_key", "") or "").strip()
+        resolved_key = requested_key or default_key
+        ctb_name = str(profiles.get(resolved_key, "") or "").strip()
+        if not ctb_name:
+            resolved_key = default_key
+            ctb_name = str(profiles.get(resolved_key, "") or "").strip()
+        if not ctb_name:
+            ctb_name = str(plot_cfg.ctb_name)
+        return resolved_key, ctb_name
     def _resolve_group_source_input(self, group: TaskGroup) -> Path:
         raw = str(group.metadata.get('source_input_path') or '').strip()
         if raw:
@@ -568,6 +587,15 @@ class DeliverableApiRuntime:
             'group_id': job.group_id,
             'shared_run_id': job.shared_run_id,
             'task_role': job.task_role,
+            'plot_style_key': job.plot_style_key,
+            'plot_resource_mode': job.plot_resource_mode,
+            'slot_id': job.slot_id,
+            'cad_version': job.cad_version,
+            'accoreconsole_exe': job.accoreconsole_exe,
+            'profile_arg': job.profile_arg,
+            'pc3_path': job.pc3_path,
+            'pmp_path': job.pmp_path,
+            'ctb_path': job.ctb_path,
             'is_group': False,
             'source_filename': job.source_filename,
             'task_kind': task_kind,
@@ -595,13 +623,8 @@ class DeliverableApiRuntime:
             'top_wrong_texts': list(job.progress.details.get('top_wrong_texts', []) or []),
             'top_internal_codes': list(job.progress.details.get('top_internal_codes', []) or []),
             'artifacts': self._serialize_job_artifacts(job, include_urls=True, job_id=job.job_id),
-            'slot_id': job.slot_id,
-            'cad_version': job.cad_version,
-            'accoreconsole_exe': job.accoreconsole_exe,
-            'profile_arg': job.profile_arg,
-            'pc3_path': job.pc3_path,
-            'pmp_path': job.pmp_path,
-            'ctb_path': job.ctb_path,
+            'plot_style_key': job.plot_style_key,
+            'plot_resource_mode': job.plot_resource_mode,
         })
         return payload
 

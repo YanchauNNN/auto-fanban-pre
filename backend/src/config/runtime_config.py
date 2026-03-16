@@ -88,6 +88,14 @@ class Module5PlotConfig(BaseModel):
 
     pc3_name: str = "打印PDF2.pc3"
     ctb_name: str = "fanban_monochrome.ctb"
+    default_plot_style_key: str = "red_wider"
+    plot_style_profiles: dict[str, str] = Field(
+        default_factory=lambda: {
+            "red_wider": "fanban_monochrome.ctb",
+            "same_width": "fanban_monochrome-same width.ctb",
+            "review_white": "打白图.ctb",
+        }
+    )
     paper_from_frame: bool = True
     use_monochrome: bool = True
     center_plot: bool = False

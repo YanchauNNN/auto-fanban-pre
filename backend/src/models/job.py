@@ -66,6 +66,8 @@ class Job(BaseModel):
     cad_version: str | None = None
     accoreconsole_exe: str | None = None
     profile_arg: str | None = None
+    plot_style_key: str | None = None
+    plot_resource_mode: str | None = None
     pc3_path: str | None = None
     pmp_path: str | None = None
     ctb_path: str | None = None
