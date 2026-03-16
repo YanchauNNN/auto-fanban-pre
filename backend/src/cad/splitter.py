@@ -43,6 +43,15 @@ _ALWAYS_KEEP_TYPES = frozenset({
 })
 
 
+def _float_option(value: object, default: float) -> float:
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 # ======================================================================
 # 命名辅助
 # ======================================================================
@@ -161,8 +170,8 @@ class FrameSplitter(IFrameSplitter):
         # 纯 Python 导出器（baseline / 兜底）
         self.pdf_exporter: DxfPdfExporter = pdf_exporter or DxfPdfExporter(
             margins=self.margins,
-            aci1_linewidth=float(aci1_lw),
-            aci_default_linewidth=float(aci_default_lw),
+            aci1_linewidth=_float_option(aci1_lw, 0.4),
+            aci_default_linewidth=_float_option(aci_default_lw, 0.18),
             font_dirs=font_dirs,
             fallback_font_family=fallback_fonts,
         )

@@ -382,7 +382,42 @@ describe("DeliverableWorkspace", () => {
       expect(adapter.createAuditCheck).toHaveBeenCalledWith(
         "2016",
         expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
+        "batch-deliverable-1",
       );
     });
+  });
+
+  it("keeps project number and cover template menus fully visible while typing", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    const projectNo = await screen.findByRole("combobox", { name: "项目号" });
+    await user.clear(projectNo);
+    await user.type(projectNo, "zzz");
+
+    expect(await screen.findByRole("option", { name: "2016" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1818" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "2020" })).toBeInTheDocument();
+
+    const coverVariant = screen.getByRole("combobox", { name: "封面模板" });
+    await user.clear(coverVariant);
+    await user.type(coverVariant, "zzz");
+    await user.click(coverVariant);
+
+    expect(await screen.findByRole("option", { name: "通用" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "压力容器" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "核安全设备" })).toBeInTheDocument();
   });
 });

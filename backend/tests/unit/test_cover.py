@@ -3,10 +3,12 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from typing import Any, cast
 
 from openpyxl import load_workbook
 
 from src.doc_gen.cover import CoverGenerator
+from src.interfaces import IPDFExporter
 from src.models import DerivedFields, DocContext, GlobalDocParams
 
 
@@ -40,15 +42,17 @@ def _build_context(project_no: str = "2016") -> DocContext:
     return DocContext(params=params, derived=derived, frames=[])
 
 
-def _read_cover_embedded_wb(docx_path: Path):
+def _read_cover_embedded_wb(docx_path: Path) -> Any:
     with zipfile.ZipFile(docx_path, "r") as zf:
         payload = zf.read("word/embeddings/Microsoft_Excel_Worksheet.xlsx")
     wb = load_workbook(BytesIO(payload))
-    return wb["封面"] if "封面" in wb.sheetnames else wb.active
+    ws = wb.active
+    assert ws is not None
+    return ws
 
 
 def test_cover_variant_template_mapping() -> None:
-    gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
 
     ctx.params.cover_variant = "压力容器"
@@ -69,7 +73,7 @@ def test_cover_variant_template_mapping() -> None:
 
 
 def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
-    gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="2016")
     bindings = gen.spec.get_cover_bindings(ctx.params.project_no)
     data = gen._prepare_data(ctx)
@@ -103,7 +107,7 @@ def test_write_cover_1818_uses_com_when_no_embedded_xlsx(
     temp_dir: Path,
     monkeypatch,
 ) -> None:
-    gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="1818")
     bindings = gen.spec.get_cover_bindings("1818")
     data = gen._prepare_data(ctx)
@@ -128,7 +132,7 @@ def test_write_cover_1818_uses_com_when_no_embedded_xlsx(
 
 
 def test_1818_cover_binding_writes_external_code_on_row_30() -> None:
-    gen = CoverGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     bindings = gen.spec.get_cover_bindings("1818")
 
     assert "cover_external_code" in bindings

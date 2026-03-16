@@ -81,8 +81,9 @@ class PipelineExecutor:
         self._update_progress(job, message="任务开始", force=True)
 
         try:
-            job.work_dir = self.config.get_job_dir(job.job_id)
-            job.work_dir.mkdir(parents=True, exist_ok=True)
+            work_dir = self.config.get_job_dir(job.job_id)
+            job.work_dir = work_dir
+            work_dir.mkdir(parents=True, exist_ok=True)
 
             context: dict = {
                 "dxf_files": [],
@@ -170,8 +171,15 @@ class PipelineExecutor:
     # 阶段 1-6: 不变（ingest / convert / detect / verify / scale / extract / a4）
     # ==================================================================
 
+    @staticmethod
+    def _require_work_dir(job: Job) -> Path:
+        work_dir = job.work_dir
+        if work_dir is None:
+            raise RuntimeError(f"job.work_dir not initialized: {job.job_id}")
+        return work_dir
+
     def _stage_ingest(self, job: Job, context: dict) -> None:
-        input_dir = job.work_dir / "input"
+        input_dir = self._require_work_dir(job) / "input"
         input_dir.mkdir(exist_ok=True)
         for f in job.input_files:
             if f.exists():
@@ -180,8 +188,9 @@ class PipelineExecutor:
                 shutil.copy(f, input_dir / f.name)
 
     def _stage_convert(self, job: Job, context: dict) -> None:
-        input_dir = job.work_dir / "input"
-        dxf_dir = job.work_dir / "work" / "dxf"
+        work_dir = self._require_work_dir(job)
+        input_dir = work_dir / "input"
+        dxf_dir = work_dir / "work" / "dxf"
         dxf_dir.mkdir(parents=True, exist_ok=True)
         dwg_files = list(input_dir.glob("*.dwg"))
         job.progress.details.update({"dwg_total": len(dwg_files), "dwg_converted": 0})
@@ -282,8 +291,9 @@ class PipelineExecutor:
 
     def _stage_split_cad_dxf(self, job: Job, context: dict) -> None:
         """cad_dxf 主路径：按 source_dxf 分组，执行 CAD 内核导出。"""
-        drawings_dir = job.work_dir / "output" / "drawings"
-        task_root = job.work_dir / "work" / "cad_tasks"
+        work_dir = self._require_work_dir(job)
+        drawings_dir = work_dir / "output" / "drawings"
+        task_root = work_dir / "work" / "cad_tasks"
         drawings_dir.mkdir(parents=True, exist_ok=True)
         task_root.mkdir(parents=True, exist_ok=True)
 
@@ -339,7 +349,7 @@ class PipelineExecutor:
 
     def _stage_export_cad_dxf(self, job: Job, context: dict) -> None:
         """cad_dxf 主路径的导出校验与结果回填。"""
-        drawings_dir = job.work_dir / "output" / "drawings"
+        drawings_dir = self._require_work_dir(job) / "output" / "drawings"
         drawings_dir.mkdir(parents=True, exist_ok=True)
 
         frames_by_id = {frame.frame_id: frame for frame in context["frames"]}
@@ -398,9 +408,10 @@ class PipelineExecutor:
     # ==================================================================
 
     def _stage_generate_docs(self, job: Job, context: dict) -> None:
-        docs_dir = job.work_dir / "output" / "docs"
+        work_dir = self._require_work_dir(job)
+        docs_dir = work_dir / "output" / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
-        ied_dir = job.work_dir / "ied"
+        ied_dir = work_dir / "ied"
         ied_dir.mkdir(parents=True, exist_ok=True)
 
         doc_ctx = self._build_doc_context(job, context)
@@ -502,12 +513,13 @@ class PipelineExecutor:
 
     def _stage_package(self, job: Job, context: dict) -> None:
         self._update_progress(job, message="打包中")
-        drawings_dir = job.work_dir / "output" / "drawings"
-        docs_dir = job.work_dir / "output" / "docs"
+        work_dir = self._require_work_dir(job)
+        drawings_dir = work_dir / "output" / "drawings"
+        docs_dir = work_dir / "output" / "docs"
 
         job.artifacts.drawings_dir = drawings_dir if drawings_dir.exists() else None
         job.artifacts.docs_dir = docs_dir if docs_dir.exists() else None
-        job.artifacts.package_zip = job.work_dir / "package.zip"
+        job.artifacts.package_zip = work_dir / "package.zip"
 
         self.packager.generate_manifest(job, context=context)
         zip_path = self.packager.package(job)

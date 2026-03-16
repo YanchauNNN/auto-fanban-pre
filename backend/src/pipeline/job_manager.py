@@ -42,8 +42,15 @@ class JobManager(IJobManager):
         params: dict[str, Any] | None = None,
         batch_id: str | None = None,
         source_filename: str | None = None,
+        **kwargs: Any,
     ) -> Job:
         """创建任务"""
+        input_files = kwargs.get("input_files", input_files)
+        options = kwargs.get("options", options)
+        params = kwargs.get("params", params)
+        batch_id = kwargs.get("batch_id", batch_id)
+        source_filename = kwargs.get("source_filename", source_filename)
+
         job_id = str(uuid.uuid4())
 
         job = Job(

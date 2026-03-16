@@ -166,6 +166,66 @@ describe("App", () => {
     expect(screen.getByText("受影响图纸 4")).toBeInTheDocument();
   });
 
+  it("groups jobs from the same batch into one package card", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 2,
+      items: [
+        {
+          jobId: "job-deliverable-1",
+          batchId: "batch-shared-1",
+          sourceFilename: "18185NE-JGS11.dwg",
+          taskKind: "deliverable",
+          jobMode: "deliverable",
+          projectNo: "1818",
+          status: "running",
+          stage: "GENERATE_DOCS",
+          percent: 45,
+          message: "generating",
+          createdAt: "2026-03-16T10:20:30+08:00",
+          finishedAt: null,
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+        },
+        {
+          jobId: "job-audit-1",
+          batchId: "batch-shared-1",
+          sourceFilename: "18185NE-JGS11.dwg",
+          taskKind: "audit_check",
+          jobMode: "check",
+          projectNo: "1818",
+          status: "queued",
+          stage: "INIT",
+          percent: 0,
+          message: "queued",
+          createdAt: "2026-03-16T10:20:31+08:00",
+          finishedAt: null,
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.getAllByText("18185NE-JGS11.dwg")).toHaveLength(1);
+    expect(screen.getByText("鍖呭惈 2 涓瓙浠诲姟")).toBeInTheDocument();
+  });
+
   it("shows an audit summary modal when an audit job completes with findings", async () => {
     const user = userEvent.setup();
     const detail = {

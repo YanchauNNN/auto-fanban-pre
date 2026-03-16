@@ -34,7 +34,7 @@ class _TestableGrouper:
 
         # 避免调用 __init__（会触发 load_spec），手动构造
         obj = object.__new__(A4MultipageGrouper)
-        obj.spec = None  # 不需要完整 spec
+        obj.spec = None  # type: ignore[assignment]  # 不需要完整 spec
         obj.a4_config = a4_config or {
             "cluster_building": {"gap_threshold_factor": 1.0},
         }

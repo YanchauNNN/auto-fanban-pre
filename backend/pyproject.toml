@@ -39,6 +39,7 @@ dev = [
     "httpx>=0.28.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
+    "pyright>=1.1.403",
 ]
 
 [build-system]
@@ -72,3 +73,10 @@ ignore = ["E501"]
 python_version = "3.13"
 strict = true
 ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+extraPaths = ["src", ".."]
+reportPrivateImportUsage = false

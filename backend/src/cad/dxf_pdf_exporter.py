@@ -351,7 +351,7 @@ class DxfPdfExporter:
         fig = plt.figure(figsize=(pw_inch, ph_inch))
 
         # axes 占据内容区域（严格按边距比例）
-        ax = fig.add_axes([ml / pw_mm, mb / ph_mm, cw_mm / pw_mm, ch_mm / ph_mm])
+        ax = fig.add_axes((ml / pw_mm, mb / ph_mm, cw_mm / pw_mm, ch_mm / ph_mm))
         ax.set_axis_off()
 
         backend = MatplotlibBackend(ax, adjust_figure=False)
@@ -462,7 +462,7 @@ class DxfPdfExporter:
             ph_inch *= ratio
 
         fig = plt.figure(figsize=(pw_inch, ph_inch))
-        ax = fig.add_axes([ml / pw_mm, mb / ph_mm, cw_mm / pw_mm, ch_mm / ph_mm])
+        ax = fig.add_axes((ml / pw_mm, mb / ph_mm, cw_mm / pw_mm, ch_mm / ph_mm))
         ax.set_axis_off()
 
         backend = MatplotlibBackend(ax, adjust_figure=False)

@@ -73,7 +73,7 @@ const FIELD_LABELS: Record<string, string> = {
   ied_design_type: "设计类型",
   ied_responsible_unit: "责任单位",
   ied_discipline_office: "专业室",
-  ied_chief_designer: "责任设总",
+  ied_chief_designer: "责任设计",
   ied_person_qual_category: "人员资格类别",
   ied_fu_flag: "FU 标记",
   ied_internal_tag: "IED 内部标识",
@@ -92,6 +92,12 @@ const FIELD_LABELS: Record<string, string> = {
   ied_publish_plan_date: "出版计划",
   ied_external_plan_date: "外部计划",
   ied_fu_plan_date: "FU 计划",
+};
+
+const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  project_no: "可留空，会优先从DWG文件名自动推断",
+  cover_variant: "封面模板选择",
+  classification: "写入设计文件/IED",
 };
 
 const NAME_ID_FIELDS = new Set([
@@ -161,9 +167,7 @@ export function evaluateRequiredWhen(
     return false;
   }
 
-  const match = expression.match(
-    /^([a-zA-Z0-9_]+)\s*(==|!=)\s*'([^']*)'$/,
-  );
+  const match = expression.match(/^([a-zA-Z0-9_]+)\s*(==|!=)\s*'([^']*)'$/);
   if (!match) {
     return false;
   }
@@ -209,7 +213,7 @@ function normalizeField(field: RawField): FormField {
     required: field.required,
     requiredWhen: field.required_when,
     defaultValue: field.default ?? "",
-    description: field.desc,
+    description: FIELD_DESCRIPTION_OVERRIDES[field.key] ?? field.desc,
     options: field.options,
   };
 }
@@ -235,9 +239,7 @@ function humanizeKey(value: string) {
     .split("_")
     .filter(Boolean)
     .map((segment, index) =>
-      index === 0
-        ? segment.charAt(0).toUpperCase() + segment.slice(1)
-        : segment,
+      index === 0 ? segment.charAt(0).toUpperCase() + segment.slice(1) : segment,
     )
     .join(" ");
 }

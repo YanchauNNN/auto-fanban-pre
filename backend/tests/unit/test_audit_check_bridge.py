@@ -45,3 +45,37 @@ def test_audit_dotnet_scanner_reads_utf8_bom_result_json(monkeypatch, tmp_path: 
     assert len(items) == 1
     assert items[0].raw_text == "示例文本"
     assert items[0].position_x == 12.5
+
+
+def test_audit_dotnet_scanner_preserves_block_path_from_nested_blocks(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    scanner = AuditDotNetScanner()
+    source_dwg = tmp_path / "2026-A01.dwg"
+    source_dwg.write_bytes(b"dwg")
+    workspace_dir = tmp_path / "work"
+
+    def fake_run(*, result_json: Path, **_: object) -> None:
+        payload = {
+            "texts": [
+                {
+                    "raw_text": "7788991907一一二二",
+                    "entity_type": "DBText",
+                    "layout_name": "Model",
+                    "block_path": "OUTER > INNER",
+                    "position_x": 12.5,
+                    "position_y": 35.0,
+                }
+            ]
+        }
+        result_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8-sig")
+
+    monkeypatch.setattr(scanner.runner, "run", fake_run)
+
+    items = scanner.scan(job_id="job-audit-nested", source_dwg=source_dwg, workspace_dir=workspace_dir)
+
+    assert len(items) == 1
+    assert items[0].block_path == "OUTER > INNER"

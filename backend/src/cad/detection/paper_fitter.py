@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from ...models import BBox
 
 
@@ -31,7 +34,7 @@ class PaperFitter:
     def fit(
         self,
         bbox: BBox,
-        paper_variants: dict[str, object],
+        paper_variants: Mapping[str, object],
     ) -> tuple[str, float, float, str] | None:
         """
         拟合标准纸张尺寸
@@ -56,7 +59,7 @@ class PaperFitter:
     def fit_all(
         self,
         bbox: BBox,
-        paper_variants: dict[str, object],
+        paper_variants: Mapping[str, object],
     ) -> list[tuple[str, float, float, str, float]]:
         """返回所有满足拟合条件的候选"""
         W_obs = bbox.width
@@ -70,11 +73,17 @@ class PaperFitter:
                 H_std = variant.H  # type: ignore[union-attr]
                 profile = variant.profile  # type: ignore[union-attr]
             except AttributeError:
-                W_std = variant.get("W")  # type: ignore[union-attr]
-                H_std = variant.get("H")  # type: ignore[union-attr]
-                profile = variant.get("profile")  # type: ignore[union-attr]
+                mapping_variant = variant if isinstance(variant, Mapping) else {}
+                W_std = mapping_variant.get("W")
+                H_std = mapping_variant.get("H")
+                profile = mapping_variant.get("profile")
 
             if not W_std or not H_std or not profile:
+                continue
+
+            if not isinstance(W_std, (int, float)) or not isinstance(H_std, (int, float)):
+                continue
+            if not isinstance(profile, str):
                 continue
 
             candidate = self._evaluate_variant(W_obs, H_obs, W_std, H_std)

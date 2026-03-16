@@ -23,7 +23,7 @@ class AuditMatchEngine:
             re.compile(pattern) for pattern in audit_cfg.context_rules.code_like_external
         ]
         self._generic_identifier_re = re.compile(audit_cfg.generic_identifier_like.regex)
-        self._generic_identifier_exempt_patterns = [
+        self._project_identifier_whitelist_patterns = [
             re.compile(pattern)
             for pattern in audit_cfg.generic_identifier_like.exempt_embed_patterns
         ]
@@ -89,31 +89,20 @@ class AuditMatchEngine:
         return "plain_text"
 
     def _matches_token(self, *, token: str, text: str, context_kind: str) -> bool:
+        if self._is_whitelisted_project_identifier(text, token):
+            return False
+
         if context_kind.startswith("titleblock_"):
             if self.matching_policy.allow_embedded_match_in_titleblock:
-                return token in text
+                return self._contains_token(token, text)
             return self._is_strong_boundary_match(token, text)
 
-        if context_kind == "code_like":
-            return token in text
+        return self._contains_token(token, text)
 
-        if context_kind == "generic_identifier_like":
-            if self._is_exempt_generic_identifier(text, token):
-                return False
-            return token in text
-
-        if context_kind == "plain_text" and self._is_non_ascii_suffix_match(token, text):
-            return True
-
-        if self._is_strong_boundary_match(token, text):
-            return True
-
-        return len(token) > 4 and token in text and ("-" in token or any(ord(ch) > 127 for ch in token))
-
-    def _is_exempt_generic_identifier(self, text: str, token: str) -> bool:
+    def _is_whitelisted_project_identifier(self, text: str, token: str) -> bool:
         if not token.isdigit():
             return False
-        return any(pattern.fullmatch(text) for pattern in self._generic_identifier_exempt_patterns)
+        return any(pattern.fullmatch(text) for pattern in self._project_identifier_whitelist_patterns)
 
     @staticmethod
     def _is_strong_boundary_match(token: str, text: str) -> bool:
@@ -121,13 +110,26 @@ class AuditMatchEngine:
         return bool(pattern.search(text))
 
     @staticmethod
-    def _is_non_ascii_suffix_match(token: str, text: str) -> bool:
-        if not (token.isdigit() and len(token) == 4):
+    def _contains_token(token: str, text: str) -> bool:
+        if token not in text:
             return False
-        if not any(ord(ch) > 127 for ch in text):
-            return False
-        pattern = re.compile(rf"{re.escape(token)}(?=[^A-Z0-9])")
-        return bool(pattern.search(text))
+        if not token.isalpha():
+            return True
+
+        start = 0
+        token_length = len(token)
+        while True:
+            index = text.find(token, start)
+            if index < 0:
+                return False
+
+            left_char = text[index - 1] if index > 0 else ""
+            right_index = index + token_length
+            right_char = text[right_index] if right_index < len(text) else ""
+            if not (left_char.isalpha() or right_char.isalpha()):
+                return True
+
+            start = index + 1
 
     @staticmethod
     def _confidence_for(context_kind: str, text: str, token: str) -> str:

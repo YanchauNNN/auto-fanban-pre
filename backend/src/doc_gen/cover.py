@@ -38,7 +38,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 
 from ..config import load_spec
 from ..config.spec_loader import CoverBinding
-from ..interfaces import GenerationError, ICoverGenerator
+from ..interfaces import GenerationError, ICoverGenerator, IPDFExporter
 from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
 
@@ -54,7 +54,7 @@ class CoverGenerator(ICoverGenerator):
     def __init__(
         self,
         spec_path: str | None = None,
-        pdf_exporter: PDFExporter | None = None,
+        pdf_exporter: IPDFExporter | None = None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
         self.pdf_exporter = pdf_exporter or PDFExporter()
@@ -186,6 +186,8 @@ class CoverGenerator(ICoverGenerator):
 
         wb = load_workbook(BytesIO(workbook_bytes))
         ws = wb["封面"] if "封面" in wb.sheetnames else wb.active
+        if ws is None:
+            raise GenerationError("封面模板缺少活动工作表")
 
         def read_cell(cell: str) -> Any:
             return ws[cell].value
@@ -230,16 +232,17 @@ class CoverGenerator(ICoverGenerator):
             ws = self._get_embedded_excel_sheet(doc)
             if ws is None:
                 raise GenerationError("未找到封面中的嵌入 Excel 对象")
+            worksheet = ws
 
             def read_cell(cell: str) -> Any:
                 return self._com_call_with_retry(
-                    lambda: ws.Range(cell).Value,
+                    lambda: worksheet.Range(cell).Value,
                     f"Range({cell}).Value",
                 )
 
             def write_cell(cell: str, value: Any) -> None:
                 self._com_call_with_retry(
-                    lambda: setattr(ws.Range(cell), "Value", value),
+                    lambda: setattr(worksheet.Range(cell), "Value", value),
                     f"Range({cell}).Value={value}",
                 )
 
@@ -248,8 +251,9 @@ class CoverGenerator(ICoverGenerator):
         finally:
             ws = None
             if doc is not None:
+                doc_obj = doc
                 self._mark_document_saved(doc)
-                self._close_com_object(lambda: doc.Close(False), "Document.Close")
+                self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
             doc = None
             if word is not None:
                 self._close_all_word_documents(word, keep=doc)
@@ -266,10 +270,11 @@ class CoverGenerator(ICoverGenerator):
             collection = getattr(doc, collection_name, None)
             if collection is None:
                 continue
+            collection_obj = collection
             try:
                 count = int(
                     self._com_call_with_retry(
-                        lambda: collection.Count,
+                        lambda: collection_obj.Count,
                         f"{collection_name}.Count",
                     )
                 )
@@ -279,7 +284,7 @@ class CoverGenerator(ICoverGenerator):
             for idx in range(1, count + 1):
                 try:
                     shape = self._com_call_with_retry(
-                        lambda: collection.Item(idx),
+                        lambda: collection_obj.Item(idx),
                         f"{collection_name}.Item({idx})",
                     )
                     ole_format = self._com_call_with_retry(

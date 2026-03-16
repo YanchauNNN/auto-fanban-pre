@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import ezdxf
@@ -139,13 +140,13 @@ def _make_splitter(
         },
     }
     obj.config = MagicMock()
-    obj.oda = oda or MockODAConverter()
+    obj.oda = cast(Any, oda or MockODAConverter())
     obj.margins = {"top": 20, "bottom": 10, "left": 20, "right": 10}
-    obj.pdf_exporter = pdf_exporter or MockPdfExporter()
-    obj.autocad_pdf_exporter = autocad_pdf_exporter or MockPdfExporter()
+    obj.pdf_exporter = cast(Any, pdf_exporter or MockPdfExporter())
+    obj.autocad_pdf_exporter = cast(Any, autocad_pdf_exporter or MockPdfExporter())
     obj._pdf_engine = pdf_engine
     obj._module5_engine = "python_fallback"
-    obj.cad_dxf_executor = MagicMock()
+    obj.cad_dxf_executor = cast(Any, MagicMock())
     obj._margin_percent = 0.015
     obj._unknown_bbox_policy = "keep_if_uncertain"
     return obj
@@ -154,8 +155,8 @@ def _make_splitter(
 def _make_frame(
     *,
     x=0.0, y=0.0, w=841.0, h=594.0,
-    internal_code="1234567-JG001-001",
-    external_code="JD1NHT11001B25C42SD",
+    internal_code: str | None = "1234567-JG001-001",
+    external_code: str | None = "JD1NHT11001B25C42SD",
     revision="A",
     status="CFC",
     frame_id=None,
@@ -378,8 +379,9 @@ class TestKeepCoordinates:
             except Exception:
                 pass
             try:
-                if hasattr(e, "get_points"):
-                    pts = list(e.get_points())
+                get_points = getattr(cast(Any, e), "get_points", None)
+                if callable(get_points):
+                    pts = list(cast(Any, get_points)())
                     for p in pts:
                         if p[0] >= 1000:
                             found_original = True
@@ -935,14 +937,15 @@ class TestCadDxfEngineRouting:
             frame.runtime.dwg_path = Path(result["frames"][0]["dwg_path"])
             return (1, 0)
 
-        splitter.cad_dxf_executor.execute_source_dxf.return_value = fake_result
-        splitter.cad_dxf_executor.apply_result.side_effect = _apply_result
+        cad_executor = cast(Any, splitter.cad_dxf_executor)
+        cad_executor.execute_source_dxf.return_value = fake_result
+        cad_executor.apply_result.side_effect = _apply_result
 
         pdf, dwg = splitter.split_frame(dxf, frame, temp_dir / "out")
 
         assert pdf == expected_pdf
         assert dwg == expected_dwg
-        splitter.cad_dxf_executor.execute_source_dxf.assert_called_once()
+        cad_executor.execute_source_dxf.assert_called_once()
 
     def test_split_sheet_set_routes_to_cad_executor(self, temp_dir: Path):
         dxf = _create_test_dxf(temp_dir / "src" / "test.dxf")
@@ -962,15 +965,16 @@ class TestCadDxfEngineRouting:
         expected_pdf.touch()
         expected_dwg.touch()
 
-        splitter.cad_dxf_executor.execute_source_dxf.return_value = {
+        cad_executor = cast(Any, splitter.cad_dxf_executor)
+        cad_executor.execute_source_dxf.return_value = {
             "frames": [],
             "sheet_sets": [{"cluster_id": ss.cluster_id, "status": "ok", "flags": []}],
             "errors": [],
         }
-        splitter.cad_dxf_executor.apply_result.return_value = (0, 1)
+        cad_executor.apply_result.return_value = (0, 1)
 
         pdf, dwg = splitter.split_sheet_set(dxf, ss, out_dir)
 
         assert pdf == expected_pdf
         assert dwg == expected_dwg
-        splitter.cad_dxf_executor.execute_source_dxf.assert_called_once()
+        cad_executor.execute_source_dxf.assert_called_once()

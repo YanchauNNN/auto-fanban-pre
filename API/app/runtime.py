@@ -178,7 +178,8 @@ class DeliverableApiRuntime:
                 },
             )
 
-        batch_id = self._new_batch_id()
+        explicit_batch_id = str(raw_params.get("batch_id") or "").strip()
+        batch_id = explicit_batch_id or self._new_batch_id()
         jobs: list[dict[str, Any]] = []
         options = {"mode": "check"}
 
@@ -188,7 +189,7 @@ class DeliverableApiRuntime:
                 job_type=JobType.AUDIT_REPLACE.value,
                 project_no=str(resolved_params["project_no"]),
                 options=options,
-                params=resolved_params,
+                params={key: value for key, value in resolved_params.items() if key != "batch_id"},
                 batch_id=batch_id,
                 source_filename=source_filename,
             )

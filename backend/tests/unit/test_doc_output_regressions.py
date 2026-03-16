@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from openpyxl import load_workbook
 
 from src.doc_gen.catalog import CatalogGenerator
 from src.doc_gen.cover import CoverGenerator
+from src.interfaces import IPDFExporter
 from src.models import (
     BBox,
     DerivedFields,
@@ -115,7 +117,7 @@ def _build_cover_context() -> DocContext:
 def test_catalog_detail_rows_center_title_and_use_uniform_body_height(
     temp_dir: Path,
 ) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyCatalogPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyCatalogPDFExporter()))
     ctx = _build_catalog_context()
     output_xlsx = temp_dir / "目录.xlsx"
 
@@ -127,6 +129,7 @@ def test_catalog_detail_rows_center_title_and_use_uniform_body_height(
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws["E9"].alignment.horizontal == "center"
     assert ws["E9"].alignment.vertical == "center"
@@ -141,9 +144,13 @@ def test_catalog_detail_rows_center_title_and_use_uniform_body_height(
 def test_catalog_detail_rows_raise_height_for_three_and_four_line_titles(
     temp_dir: Path,
 ) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyCatalogPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyCatalogPDFExporter()))
     ctx = _build_catalog_context()
-    ctx.sheet_sets[0].master_page.frame_meta.titleblock.title_cn = "第一行\n第二行\n第三行"
+    master_page = ctx.sheet_sets[0].master_page
+    assert master_page is not None
+    frame_meta = master_page.frame_meta
+    assert frame_meta is not None
+    frame_meta.titleblock.title_cn = "\u7b2c\u4e00\u884c\n\u7b2c\u4e8c\u884c\n\u7b2c\u4e09\u884c"
     ctx.frames[0].titleblock.title_cn = "甲\n乙\n丙\n丁"
     output_xlsx = temp_dir / "目录.xlsx"
 
@@ -155,6 +162,7 @@ def test_catalog_detail_rows_raise_height_for_three_and_four_line_titles(
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws.row_dimensions[11].height == pytest.approx(50, abs=0.2)
     assert ws.row_dimensions[12].height == pytest.approx(60, abs=0.2)
@@ -164,7 +172,7 @@ def test_generate_catalog_uses_external_code_revision_status_filename(
     temp_dir: Path,
     monkeypatch,
 ) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyCatalogPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyCatalogPDFExporter()))
     ctx = _build_catalog_context()
     recorded: dict[str, Path] = {}
 
@@ -188,7 +196,7 @@ def test_generate_catalog_uses_external_code_revision_status_filename(
         def count_pdf_pages(self, pdf_path: Path) -> int:  # noqa: ARG002
             return 2
 
-    gen.pdf_exporter = FakePDFExporter()
+    gen.pdf_exporter = cast(IPDFExporter, FakePDFExporter())
 
     output_xlsx, output_pdf, page_count = gen.generate(ctx, temp_dir)
 
@@ -219,7 +227,7 @@ def test_generate_cover_uses_external_code_revision_status_filename(
             pdf_path.write_bytes(b"pdf")
             recorded["pdf"] = pdf_path
 
-    gen.pdf_exporter = FakePDFExporter()
+    gen.pdf_exporter = cast(IPDFExporter, FakePDFExporter())
 
     output_docx, output_pdf = gen.generate(ctx, temp_dir)
 

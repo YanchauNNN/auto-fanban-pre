@@ -136,6 +136,7 @@ class TestDocContext:
 
         frame_001 = ctx.get_frame_001()
         assert frame_001 is not None
+        assert frame_001.titleblock.internal_code is not None
         assert frame_001.titleblock.internal_code.endswith("-001")
 
     def test_get_sorted_frames(self, sample_frame: FrameMeta):

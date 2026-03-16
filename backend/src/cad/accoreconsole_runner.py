@@ -507,8 +507,10 @@ class AcCoreConsoleRunner:
                     xmin,
                     ymax,
                 )
-            sx = float(page.get("sx")) if page.get("sx") is not None else 0.0
-            sy = float(page.get("sy")) if page.get("sy") is not None else 0.0
+            sx_value = page.get("sx")
+            sy_value = page.get("sy")
+            sx = float(sx_value) if isinstance(sx_value, (int, float, str)) else 0.0
+            sy = float(sy_value) if isinstance(sy_value, (int, float, str)) else 0.0
             literals.append(
                 "(list "
                 f"{page_index:d} "

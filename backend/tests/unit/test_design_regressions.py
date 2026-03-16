@@ -101,6 +101,7 @@ def test_design_includes_001_and_maps_paper_size_and_discipline(temp_dir: Path) 
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws["E4"].value == "1234567-JG001-001"
     assert ws["S4"].value == "A4图纸"

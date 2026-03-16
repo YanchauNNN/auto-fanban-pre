@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -13,7 +14,7 @@ from src.pipeline.stages import StageEnum
 
 def _make_executor_with_engine(engine: str) -> PipelineExecutor:
     executor = object.__new__(PipelineExecutor)
-    executor.config = SimpleNamespace(module5_export=SimpleNamespace(engine=engine))
+    executor.config = cast(Any, SimpleNamespace(module5_export=SimpleNamespace(engine=engine)))
     return executor
 
 
@@ -37,7 +38,7 @@ def test_stage_export_routes_to_cad_dxf():
 
 def test_execute_marks_job_failed_when_cad_export_reports_fatal_errors(tmp_path: Path):
     executor = object.__new__(PipelineExecutor)
-    executor.config = SimpleNamespace(get_job_dir=lambda job_id: tmp_path / "storage" / "jobs" / job_id)
+    executor.config = cast(Any, SimpleNamespace(get_job_dir=lambda job_id: tmp_path / "storage" / "jobs" / job_id))
     executor._last_progress_write = 0.0
     executor._progress_interval_sec = 0.0
     executor._update_progress = MagicMock()

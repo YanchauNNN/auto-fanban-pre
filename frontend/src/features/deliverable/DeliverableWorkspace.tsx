@@ -51,6 +51,7 @@ type DeliverableWorkspaceProps = {
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
+const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
 
 export function DeliverableWorkspace({
   adapter,
@@ -186,6 +187,7 @@ export function DeliverableWorkspace({
           const auditPayload = await adapter.createAuditCheck(
             (draft.values.project_no ?? "").trim(),
             draft.files,
+            payload.batchId,
           );
           combinedPayload = {
             batchId: payload.batchId,
@@ -781,11 +783,13 @@ function ComboboxField({
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
   const deferredValue = useDeferredValue(value);
-  const filteredOptions = field.options
-    .filter((option) =>
-      option.toLowerCase().includes(deferredValue.trim().toLowerCase()),
-    )
-    .slice(0, MAX_COMBO_OPTIONS);
+  const filteredOptions = (
+    FULL_MENU_COMBOBOX_FIELDS.has(field.key)
+      ? field.options
+      : field.options.filter((option) =>
+          option.toLowerCase().includes(deferredValue.trim().toLowerCase()),
+        )
+  ).slice(0, MAX_COMBO_OPTIONS);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

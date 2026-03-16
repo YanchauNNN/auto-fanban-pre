@@ -139,7 +139,11 @@ export type ApiAdapter = {
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
   createBatch: (params: Record<string, string>, files: File[]) => Promise<CreateBatchPayload>;
-  createAuditCheck: (projectNo: string, files: File[]) => Promise<CreateBatchPayload>;
+  createAuditCheck: (
+    projectNo: string,
+    files: File[],
+    batchId?: string,
+  ) => Promise<CreateBatchPayload>;
   listJobs: (status?: string) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

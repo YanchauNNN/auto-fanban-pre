@@ -4,6 +4,7 @@ import json
 import zipfile
 from copy import deepcopy
 from pathlib import Path
+from typing import Any, cast
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -16,10 +17,10 @@ from src.pipeline.packager import Packager
 
 def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> None:
     executor = object.__new__(PipelineExecutor)
-    executor.spec = SimpleNamespace(
+    executor.spec = cast(Any, SimpleNamespace(
         doc_generation={"rules": {}},
         get_mappings=lambda: {},
-    )
+    ))
 
     job = Job(
         job_id="job-doc-context-1",
@@ -50,10 +51,10 @@ def test_build_doc_context_inherits_required_titleblock_fields_from_sheet_set_ma
     sample_frame: FrameMeta,
 ) -> None:
     executor = object.__new__(PipelineExecutor)
-    executor.spec = SimpleNamespace(
+    executor.spec = cast(Any, SimpleNamespace(
         doc_generation={"rules": {}},
         get_mappings=lambda: {},
-    )
+    ))
 
     master_frame = deepcopy(sample_frame)
     master_frame.titleblock.internal_code = "20261RS-JGS65-001"
@@ -138,9 +139,9 @@ def test_doc_context_get_frame_001_falls_back_to_sheet_set_master(sample_frame: 
 def test_stage_generate_docs_raises_on_doc_param_validation_errors(tmp_path: Path) -> None:
     executor = object.__new__(PipelineExecutor)
     executor._update_progress = MagicMock()
-    executor.doc_param_validator = SimpleNamespace(
+    executor.doc_param_validator = cast(Any, SimpleNamespace(
         validate=lambda ctx: ["文档参数缺失: engineering_no", "文档参数缺失: revision"],
-    )
+    ))
     executor._build_doc_context = MagicMock(return_value=SimpleNamespace())
 
     job = Job(
@@ -188,6 +189,7 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     assert job.artifacts.package_zip == tmp_path / "package.zip"
     assert job.artifacts.drawings_dir == drawings_dir
     assert job.artifacts.docs_dir == docs_dir
+    assert job.artifacts.package_zip is not None
     assert job.artifacts.package_zip.exists()
 
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
@@ -195,6 +197,7 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     assert manifest["artifacts"]["drawings_dir"] == str(drawings_dir)
     assert manifest["artifacts"]["docs_dir"] == str(docs_dir)
 
+    assert job.artifacts.package_zip is not None
     with zipfile.ZipFile(job.artifacts.package_zip) as zf:
         names = set(zf.namelist())
 

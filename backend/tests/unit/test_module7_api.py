@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import sys
 import time
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from openpyxl import Workbook, load_workbook
 
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
@@ -22,7 +24,16 @@ class FakeJobProcessor:
             reports_dir.mkdir(parents=True, exist_ok=True)
             report_xlsx = reports_dir / "report.xlsx"
             report_json = reports_dir / "report.json"
-            report_xlsx.write_bytes(b"PK\x03\x04report")
+            workbook = Workbook()
+            summary_sheet = workbook.active
+            assert summary_sheet is not None
+            summary_sheet.title = "Summary"
+            summary_sheet.append(["source_filename", job.source_filename or "upload.dwg"])
+            summary_sheet.append(["project_no", job.project_no])
+            summary_sheet.append(["findings_count", 2])
+            summary_sheet.append(["affected_drawings_count", 1])
+            workbook.save(report_xlsx)
+            workbook.close()
             report_json.write_text(
                 json.dumps(
                     {
@@ -439,7 +450,31 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
 
         report_download = client.get(f"/api/jobs/{job_id}/download/report")
         assert report_download.status_code == 200
-        assert report_download.content.startswith(b"PK")
+        workbook = load_workbook(filename=BytesIO(report_download.content))
+        assert workbook.sheetnames[0] == "Summary"
+
+
+def test_create_audit_check_reuses_explicit_batch_id_when_provided(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps(
+                    {"project_no": "2016", "batch_id": "batch-shared-1"},
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["batch_id"] == "batch-shared-1"
+    assert payload["jobs"][0]["batch_id"] == "batch-shared-1"
 
 
 def test_create_batch_processes_jobs_and_exposes_downloads(

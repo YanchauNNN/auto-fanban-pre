@@ -304,6 +304,37 @@
   color: #4f7399;
 }
 
+.packageMeta {
+  margin: 0;
+  color: #557696;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.packageTaskList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.subtaskLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.45rem;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(242, 247, 253, 0.9);
+  color: inherit;
+  text-decoration: none;
+}
+
+.subtaskStatus {
+  color: #5c7b99;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .progressBar,
 .progressBarLarge {
   overflow: hidden;

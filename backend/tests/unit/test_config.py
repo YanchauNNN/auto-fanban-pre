@@ -148,6 +148,8 @@ class TestRuntimeConfig:
         assert runtime_config.audit_check.generic_identifier_like.exempt_embed_patterns == [
             r"^[A-Z]{3}\d{4}[A-Z]$",
         ]
+        assert runtime_config.audit_check.context_rules.date_like[0] == r"^\d{4}[-/.]\d{1,2}$"
+        assert runtime_config.audit_check.matching_policy.suppress_project_no_in_dimension_like is True
 
     def test_reload_config_uses_env_override_when_default_runtime_spec_missing(
         self,

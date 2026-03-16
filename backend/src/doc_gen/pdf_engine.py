@@ -92,17 +92,9 @@ class PDFExporter(IPDFExporter):
 
         # 尝试使用PyPDF2
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
             reader = PdfReader(str(pdf_path))
             return len(reader.pages)
-        except ImportError:
-            pass
-
-        # 尝试使用pdfplumber
-        try:
-            import pdfplumber
-            with pdfplumber.open(str(pdf_path)) as pdf:
-                return len(pdf.pages)
         except ImportError:
             pass
 

@@ -116,6 +116,7 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     # 第2行：封面
     assert ws["D2"].value == "JD1NHT11F01B25C42SD"

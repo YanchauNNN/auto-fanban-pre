@@ -11,8 +11,15 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Iterable
+from typing import TypedDict
 
 from ...models import BBox
+
+
+class _SegmentCluster(TypedDict):
+    coord: float
+    count: int
+    segments: list[tuple[float, float]]
 
 
 class CandidateFinder:
@@ -581,7 +588,7 @@ class CandidateFinder:
         if not segments:
             return {}
         segments.sort(key=lambda s: s[0])
-        clusters: list[dict[str, object]] = []
+        clusters: list[_SegmentCluster] = []
         for coord, start, end in segments:
             if not clusters or abs(coord - clusters[-1]["coord"]) > self.coord_tol:
                 clusters.append({"coord": coord, "count": 1, "segments": [(start, end)]})

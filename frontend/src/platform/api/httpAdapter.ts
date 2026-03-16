@@ -142,10 +142,15 @@ export class HttpAdapter implements ApiAdapter {
   async createAuditCheck(
     projectNo: string,
     files: File[],
+    batchId?: string,
   ): Promise<CreateBatchPayload> {
     const formData = new FormData();
     formData.append("mode", "check");
-    formData.append("params_json", JSON.stringify({ project_no: projectNo }));
+    const params: Record<string, string> = { project_no: projectNo };
+    if (batchId) {
+      params.batch_id = batchId;
+    }
+    formData.append("params_json", JSON.stringify(params));
     for (const file of files) {
       formData.append("files[]", file);
     }

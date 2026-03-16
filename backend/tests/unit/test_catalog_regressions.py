@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from openpyxl import load_workbook
 
 from src.doc_gen.catalog import CatalogGenerator
+from src.interfaces import IPDFExporter
 from src.models import (
     BBox,
     DerivedFields,
@@ -91,7 +93,7 @@ def _build_context() -> DocContext:
 def test_catalog_writes_album_code_into_merged_title_cell_and_includes_001(
     temp_dir: Path,
 ) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
     output_xlsx = temp_dir / "目录.xlsx"
 
@@ -103,6 +105,7 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_001(
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws["D3"].value == "第01图册图纸(文件)目录"
     assert ws["B11"].value == "1234567-JG001-001"

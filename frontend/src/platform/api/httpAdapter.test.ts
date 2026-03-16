@@ -63,7 +63,7 @@ describe("HttpAdapter", () => {
     );
   });
 
-  it("creates audit check jobs with mode=check and normalizes audit summary fields", async () => {
+  it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({
@@ -137,7 +137,7 @@ describe("HttpAdapter", () => {
       type: "application/acad",
     });
 
-    const created = await adapter.createAuditCheck("2026", [file]);
+    const created = await adapter.createAuditCheck("2026", [file], "batch-shared-1");
     const jobs = await adapter.listJobs();
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -151,7 +151,9 @@ describe("HttpAdapter", () => {
 
     const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(formData.get("mode")).toBe("check");
-    expect(formData.get("params_json")).toBe(JSON.stringify({ project_no: "2026" }));
+    expect(formData.get("params_json")).toBe(
+      JSON.stringify({ project_no: "2026", batch_id: "batch-shared-1" }),
+    );
     expect(formData.getAll("files[]")).toHaveLength(1);
 
     expect(created.jobs[0]?.taskKind).toBe("audit_check");

@@ -12,7 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -109,6 +109,11 @@ function WorkspacePage() {
       return hasActive ? 3000 : 12000;
     },
   });
+
+  const jobPackages = useMemo(
+    () => buildJobPackages(jobsQuery.data?.items ?? []),
+    [jobsQuery.data?.items],
+  );
 
   useEffect(() => {
     const items = jobsQuery.data?.items;
@@ -328,19 +333,23 @@ function WorkspacePage() {
         </div>
 
         <div className={styles.jobsPanel}>
-          {jobsQuery.data?.items.length ? (
-            jobsQuery.data.items.map((job) => (
-              <Link
+          {jobPackages.length ? (
+            jobPackages.map((jobPackage) => {
+              const job = jobPackage.jobs[0]!;
+              return (
+                <div
                 className={`${styles.jobCard} ${
-                  job.batchId && job.batchId === highlightedBatchId ? styles.jobCardHighlight : ""
+                  jobPackage.batchId && jobPackage.batchId === highlightedBatchId
+                    ? styles.jobCardHighlight
+                    : ""
                 }`}
-                key={job.jobId}
-                to={`/jobs/${job.jobId}`}
+                key={jobPackage.packageKey}
               >
                 <div className={styles.jobCardHeader}>
-                  <strong>{job.sourceFilename}</strong>
-                  <StatusPill status={job.status} />
+                  <strong>{jobPackage.sourceFilename}</strong>
+                  <StatusPill status={jobPackage.status} />
                 </div>
+                <p className={styles.packageMeta}>鍖呭惈 {jobPackage.jobs.length} 涓瓙浠诲姟</p>
                 <div className={styles.jobMetaRow}>
                   <TaskKindBadge kind={job.taskKind} />
                   {job.taskKind === "audit_check" ? (
@@ -356,11 +365,20 @@ function WorkspacePage() {
                 </div>
                 <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
                 <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
+                <div className={styles.packageTaskList}>
+                  {jobPackage.jobs.map((subtask) => (
+                    <Link className={styles.subtaskLink} key={subtask.jobId} to={`/jobs/${subtask.jobId}`}>
+                      <TaskKindBadge kind={subtask.taskKind} />
+                      <span className={styles.subtaskStatus}>{statusLabel(subtask.status)}</span>
+                    </Link>
+                  ))}
+                </div>
                 <div className={styles.progressBar}>
                   <div style={{ width: `${job.percent}%` }} />
                 </div>
-              </Link>
-            ))
+                </div>
+              );
+            })
           ) : (
             <div className={styles.emptyPanel}>
               <p>当前没有任务记录。</p>
@@ -645,6 +663,74 @@ function taskKindLabel(kind: TaskKind) {
     return "翻版";
   }
   return "交付";
+}
+
+type JobPackage = {
+  packageKey: string;
+  batchId: string | null;
+  sourceFilename: string;
+  status: string;
+  jobs: JobSummary[];
+};
+
+function buildJobPackages(items: readonly JobSummary[]): JobPackage[] {
+  const grouped = new Map<string, JobSummary[]>();
+
+  for (const job of items) {
+    const packageKey = job.batchId ?? `job:${job.jobId}`;
+    const bucket = grouped.get(packageKey);
+    if (bucket) {
+      bucket.push(job);
+    } else {
+      grouped.set(packageKey, [job]);
+    }
+  }
+
+  return Array.from(grouped.entries()).map(([packageKey, jobs]) => {
+    const orderedJobs = [...jobs].sort((left, right) => jobSortRank(left) - jobSortRank(right));
+    const leadJob = orderedJobs.find((job) => job.taskKind === "deliverable") ?? orderedJobs[0]!;
+
+    return {
+      packageKey,
+      batchId: leadJob.batchId,
+      sourceFilename: leadJob.sourceFilename,
+      status: derivePackageStatus(orderedJobs),
+      jobs: orderedJobs,
+    };
+  });
+}
+
+function jobSortRank(job: JobSummary) {
+  if (job.taskKind === "deliverable") {
+    return 0;
+  }
+  if (job.taskKind === "audit_check") {
+    return 1;
+  }
+  return 2;
+}
+
+function derivePackageStatus(jobs: readonly JobSummary[]) {
+  if (jobs.some((job) => job.status === "failed")) {
+    return "failed";
+  }
+  if (jobs.some((job) => job.status === "running")) {
+    return "running";
+  }
+  if (jobs.some((job) => job.status === "cancel_requested")) {
+    return "cancel_requested";
+  }
+  if (jobs.some((job) => job.status === "queued")) {
+    return "queued";
+  }
+  if (jobs.every((job) => job.status === "succeeded")) {
+    return "succeeded";
+  }
+  return jobs[0]?.status ?? "queued";
+}
+
+function statusLabel(status: string) {
+  return STATUS_META[status]?.label ?? status;
 }
 
 function formatTimestamp(value: string) {

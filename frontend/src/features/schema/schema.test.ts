@@ -8,7 +8,7 @@ import {
 } from "./schema";
 
 describe("normalizeFormSchema", () => {
-  it("maps section titles, field labels, and hides deprecated approved_by", () => {
+  it("maps section titles, field labels, helper copy, and hides deprecated approved_by", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",
       upload_limits: {
@@ -31,8 +31,32 @@ describe("normalizeFormSchema", () => {
                 source: "frontend",
                 default: null,
                 format: null,
-                desc: "项目号",
+                desc: "项目号；可留空，API/桌面端会优先从DWG文件名自动推断，推断失败时回退2016",
                 options: ["2016", "1818"],
+              },
+              {
+                key: "cover_variant",
+                label: "cover_variant",
+                type: "select",
+                required: true,
+                required_when: null,
+                source: "frontend",
+                default: "通用",
+                format: null,
+                desc: "封面模板选择；1818 与非1818均使用通用/压力容器/核安全设备三选一，1818会切到对应专用模板",
+                options: ["通用", "压力容器", "核安全设备"],
+              },
+              {
+                key: "classification",
+                label: "classification",
+                type: "select",
+                required: true,
+                required_when: null,
+                source: "frontend",
+                default: "非密",
+                format: null,
+                desc: "密级，写入封面/设计文件/IED",
+                options: ["非密", "秘密"],
               },
               {
                 key: "approved_by",
@@ -75,8 +99,13 @@ describe("normalizeFormSchema", () => {
 
     expect(normalized.sections).toHaveLength(2);
     expect(normalized.sections[0].title).toBe("任务与项目");
-    expect(normalized.sections[0].fields).toHaveLength(1);
+    expect(normalized.sections[0].fields).toHaveLength(3);
     expect(normalized.sections[0].fields[0].label).toBe("项目号");
+    expect(normalized.sections[0].fields[0].description).toBe(
+      "可留空，会优先从DWG文件名自动推断",
+    );
+    expect(normalized.sections[0].fields[1].description).toBe("封面模板选择");
+    expect(normalized.sections[0].fields[2].description).toBe("写入设计文件/IED");
     expect(normalized.sections[1].title).toBe("IED 基础信息");
     expect(normalized.sections[1].fields[0].type).toBe("nameId");
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);

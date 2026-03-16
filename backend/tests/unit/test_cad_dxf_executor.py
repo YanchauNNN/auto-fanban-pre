@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -680,7 +681,7 @@ def _make_executor(
 ) -> CADDXFExecutor:
     return CADDXFExecutor(
         config=config or RuntimeConfig(),
-        runner=runner or _RunnerSuccessStub(),
+        runner=cast(Any, runner or _RunnerSuccessStub()),
         spec=spec or _SpecStub(),
     )
 

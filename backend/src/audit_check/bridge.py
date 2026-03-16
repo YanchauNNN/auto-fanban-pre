@@ -65,6 +65,8 @@ class AuditDotNetScanner:
 def _to_float(value: object) -> float | None:
     if value is None:
         return None
+    if not isinstance(value, (int, float, str)):
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):

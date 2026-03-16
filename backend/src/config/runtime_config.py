@@ -177,6 +177,7 @@ class AuditCheckContextRulesConfig(BaseModel):
 
     date_like: list[str] = Field(
         default_factory=lambda: [
+            r"^\d{4}[-/.]\d{1,2}$",
             r"^\d{4}[-/.]\d{1,2}([-/.:]\d{1,2})+$",
             r"^\d{4}年\d{1,2}月(\d{1,2}日?)?$",
         ],

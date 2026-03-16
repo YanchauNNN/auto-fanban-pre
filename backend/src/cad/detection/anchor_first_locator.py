@@ -14,6 +14,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from ...models import BBox, FrameMeta, FrameRuntime
 
@@ -41,6 +42,11 @@ class CandidateFrame:
     @property
     def area(self) -> float:
         return self.bbox.width * self.bbox.height
+
+
+class LocalWindowInfo(TypedDict):
+    window: BBox
+    anchor_ids: list[int]
 
 
 class AnchorFirstLocator:
@@ -578,8 +584,8 @@ class AnchorFirstLocator:
         self,
         anchor_items: list[TextItem],
         unresolved_ids: list[int],
-    ) -> list[dict[str, object]]:
-        windows: list[dict[str, object]] = []
+    ) -> list[LocalWindowInfo]:
+        windows: list[LocalWindowInfo] = []
         for idx in unresolved_ids:
             anchor_item = anchor_items[idx - 1]
             for bbox in self._predict_outer_bboxes(anchor_item):

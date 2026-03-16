@@ -33,7 +33,7 @@ from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 
 from ..config import load_spec
-from ..interfaces import GenerationError, ICatalogGenerator
+from ..interfaces import GenerationError, ICatalogGenerator, IPDFExporter
 from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
 
@@ -52,7 +52,7 @@ class CatalogGenerator(ICatalogGenerator):
     def __init__(
         self,
         spec_path: str | None = None,
-        pdf_exporter: PDFExporter | None = None,
+        pdf_exporter: IPDFExporter | None = None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
         self.pdf_exporter = pdf_exporter or PDFExporter()
@@ -109,6 +109,8 @@ class CatalogGenerator(ICatalogGenerator):
         """写入目录Excel"""
         wb = load_workbook(template_path)
         ws = wb.active
+        if ws is None:
+            raise GenerationError("目录模板缺少活动工作表")
 
         # 写入表头
         self._write_header(ws, bindings, ctx)
@@ -463,9 +465,12 @@ class CatalogGenerator(ICatalogGenerator):
         try:
             wb = load_workbook(xlsx_path)
             ws = wb.active
-
+            if ws is None:
+                return 1
             # 尝试通过分页符计算
-            h_breaks = len(ws.page_breaks.horizontalBreaks) if hasattr(ws, 'page_breaks') else 0
+            page_breaks = getattr(ws, "page_breaks", None)
+            horizontal_breaks = getattr(page_breaks, "horizontalBreaks", None)
+            h_breaks = len(horizontal_breaks) if horizontal_breaks is not None else 0
             if h_breaks > 0:
                 return h_breaks + 1
         except Exception:
@@ -529,6 +534,8 @@ class CatalogGenerator(ICatalogGenerator):
         """回填目录行页数"""
         wb = load_workbook(xlsx_path)
         ws = wb.active
+        if ws is None:
+            raise GenerationError("目录文件缺少活动工作表")
 
         # 目录行是第2行明细（封面后）
         start_row = bindings.get("detail", {}).get("start_row", 9)

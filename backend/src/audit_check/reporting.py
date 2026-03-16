@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from openpyxl import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from .models import AuditFinding
 
@@ -69,7 +70,7 @@ def write_report_xlsx(
     summary: dict[str, Any],
 ) -> None:
     workbook = Workbook()
-    summary_sheet = workbook.active
+    summary_sheet = cast(Worksheet, workbook.active)
     summary_sheet.title = "Summary"
     summary_sheet.append(["source_filename", source_filename])
     summary_sheet.append(["project_no", project_no])
@@ -123,3 +124,4 @@ def write_report_xlsx(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(path)
+    workbook.close()

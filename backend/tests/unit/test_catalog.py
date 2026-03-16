@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
 
 from src.doc_gen.catalog import CatalogGenerator
+from src.interfaces import IPDFExporter
 from src.models import (
     BBox,
     DerivedFields,
@@ -98,7 +100,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
 
 
 def test_catalog_row_order_and_upgrade_note() -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
     rows = gen._build_detail_rows(ctx)
 
@@ -115,10 +117,11 @@ def test_catalog_row_order_and_upgrade_note() -> None:
 
 
 def test_catalog_1818_title_in_same_cell_with_newline() -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="1818")
     wb = Workbook()
     ws = wb.active
+    assert ws is not None
     bindings = gen.spec.get_catalog_bindings()
 
     row_data = {
@@ -137,7 +140,7 @@ def test_catalog_1818_title_in_same_cell_with_newline() -> None:
 
 
 def test_catalog_backfill_page_count(temp_dir: Path) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
     bindings = gen.spec.get_catalog_bindings()
     output_xlsx = temp_dir / "目录.xlsx"
@@ -151,13 +154,14 @@ def test_catalog_backfill_page_count(temp_dir: Path) -> None:
     gen._backfill_page_count(output_xlsx, 3, bindings)
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
     assert ws["H10"].value == 3
 
 
 def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set_001(
     temp_dir: Path,
 ) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context_with_sheet_set_001()
     bindings = gen.spec.get_catalog_bindings()
     output_xlsx = temp_dir / "目录.xlsx"
@@ -170,6 +174,7 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws["D3"].value == "第01图册图纸(文件)目录"
     assert ws["B11"].value == "1234567-JG001-001"
@@ -178,7 +183,7 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set
 
 
 def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> None:
-    gen = CatalogGenerator(pdf_exporter=DummyPDFExporter())
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="1818")
     bindings = gen.spec.get_catalog_bindings()
     output_xlsx = temp_dir / "目录-1818.xlsx"
@@ -191,6 +196,7 @@ def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> N
     )
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
 
     assert ws["D1"].value == "测试图册"
     assert ws["D2"].value == "Test Album"
