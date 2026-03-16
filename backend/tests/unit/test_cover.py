@@ -95,6 +95,15 @@ def test_1818_cover_apply_bindings_writes_discipline_en_range() -> None:
     assert ("I19:S19", "Structural Engineering") in writes
 
 
+def test_prepare_data_1818_includes_discipline_en() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+
+    data = gen._prepare_data(ctx)
+
+    assert data["discipline_en"] == "Structural Engineering"
+
+
 def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="2016")

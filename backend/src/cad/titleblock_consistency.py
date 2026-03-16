@@ -57,6 +57,8 @@ class FieldConsistencyPlan:
 
 
 class TitleblockConsistencyService:
+    _SCALE_RE = re.compile(r"1\s*:\s*\d+(?:\.\d+)?", re.IGNORECASE)
+
     def __init__(self) -> None:
         self.spec = load_spec()
         self.config = get_config()
@@ -126,7 +128,7 @@ class TitleblockConsistencyService:
         expected_text: str,
         field_name: str | None = None,
     ) -> list[TextReplacement]:
-        ordered = self._sort_fragments(fragments)
+        ordered = self._select_relevant_fragments(field_name, self._sort_fragments(fragments))
         current_parts = [self._compact_text(fragment.get("text")) for fragment in ordered]
         expected_parts = self._tokenize_expected_text(expected_text)
 
@@ -142,6 +144,14 @@ class TitleblockConsistencyService:
         current_text = self._current_field_text(field_name, ordered)
         if self._compact_text(current_text) == self._compact_text(expected_text):
             return []
+
+        field_specific = self._plan_field_specific_replacements(
+            ordered,
+            expected_text=expected_text,
+            field_name=field_name,
+        )
+        if field_specific is not None:
+            return field_specific
 
         if len(current_parts) != len(expected_parts):
             return []
@@ -180,11 +190,14 @@ class TitleblockConsistencyService:
             return None
 
         roi_name = self._field_roi_name(field_name)
-        fragments = self._sort_fragments(list(frame.raw_extracts.get(roi_name, [])))
+        fragments = self._select_relevant_fragments(
+            field_name,
+            self._sort_fragments(list(frame.raw_extracts.get(roi_name, []))),
+        )
         if not fragments:
             return None
 
-        current_text = self._current_field_text(field_name, fragments)
+        current_text = self._current_field_text_from_frame(frame, field_name, fragments)
         if self._compact_text(current_text) == self._compact_text(expected_text):
             return None
 
@@ -257,11 +270,27 @@ class TitleblockConsistencyService:
             normalized = self._compose_overlay_paper_text(ordered)
             if normalized is not None:
                 return normalized
+        if field_name == "scale_text":
+            scale_text = self._extract_scale_text_from_fragments(ordered)
+            if scale_text:
+                return scale_text
         return self._join_fragments(ordered)
 
     @staticmethod
     def _compact_text(value: Any) -> str:
         return "".join(str(value or "").split()).upper()
+
+    def _current_field_text_from_frame(
+        self,
+        frame: FrameMeta,
+        field_name: str,
+        fragments: list[dict[str, Any]],
+    ) -> str:
+        if field_name == "paper_size_text":
+            return frame.titleblock.paper_size_text or self._current_field_text(field_name, fragments)
+        if field_name == "scale_text":
+            return frame.titleblock.scale_text or self._current_field_text(field_name, fragments)
+        return self._current_field_text(field_name, fragments)
 
     @staticmethod
     def _tokenize_expected_text(value: str) -> list[str]:
@@ -314,3 +343,120 @@ class TitleblockConsistencyService:
             return f"{first_text[0]}{second_text}{first_text[1:]}"
 
         return None
+
+    def _select_relevant_fragments(
+        self,
+        field_name: str | None,
+        fragments: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if field_name != "scale_text":
+            return fragments
+
+        scale_fragments = [
+            fragment
+            for fragment in fragments
+            if self._extract_scale_text(str(fragment.get("text") or ""))
+        ]
+        return scale_fragments or fragments
+
+    def _plan_field_specific_replacements(
+        self,
+        fragments: list[dict[str, Any]],
+        *,
+        expected_text: str,
+        field_name: str | None,
+    ) -> list[TextReplacement] | None:
+        if field_name == "paper_size_text":
+            return self._plan_prefix_preserving_replacements(fragments, expected_text)
+        if field_name == "scale_text":
+            return self._plan_scale_replacements(fragments, expected_text)
+        return None
+
+    def _plan_prefix_preserving_replacements(
+        self,
+        fragments: list[dict[str, Any]],
+        expected_text: str,
+    ) -> list[TextReplacement]:
+        if len(fragments) < 2:
+            return []
+
+        expected_compact = self._compact_text(expected_text)
+        remaining = expected_compact
+        replacements: list[TextReplacement] = []
+
+        for idx, fragment in enumerate(fragments):
+            current_compact = self._compact_text(fragment.get("text"))
+            if idx < len(fragments) - 1:
+                if not remaining.startswith(current_compact):
+                    return []
+                expected_fragment_compact = current_compact
+                remaining = remaining[len(current_compact) :]
+            else:
+                expected_fragment_compact = remaining
+
+            if current_compact == expected_fragment_compact:
+                continue
+
+            replacements.append(
+                TextReplacement(
+                    index=idx,
+                    old_text=str(fragment.get("text") or ""),
+                    new_text=self._apply_compact_rewrite(str(fragment.get("text") or ""), expected_fragment_compact),
+                )
+            )
+
+        return replacements
+
+    def _plan_scale_replacements(
+        self,
+        fragments: list[dict[str, Any]],
+        expected_text: str,
+    ) -> list[TextReplacement]:
+        replacements: list[TextReplacement] = []
+        expected_compact = self._compact_text(expected_text)
+        for idx, fragment in enumerate(fragments):
+            original = str(fragment.get("text") or "")
+            current_scale = self._extract_scale_text(original)
+            if not current_scale or self._compact_text(current_scale) == expected_compact:
+                continue
+
+            rewritten = self._replace_scale_text(original, expected_text)
+            replacements.append(
+                TextReplacement(
+                    index=idx,
+                    old_text=original,
+                    new_text=rewritten,
+                )
+            )
+        return replacements
+
+    @classmethod
+    def _extract_scale_text(cls, text: str) -> str | None:
+        match = cls._SCALE_RE.search(text or "")
+        if match is None:
+            return None
+        return re.sub(r"\s+", "", match.group(0))
+
+    @classmethod
+    def _extract_scale_text_from_fragments(cls, fragments: list[dict[str, Any]]) -> str:
+        for fragment in fragments:
+            text = cls._extract_scale_text(str(fragment.get("text") or ""))
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def _replace_scale_text(cls, original: str, expected_text: str) -> str:
+        match = cls._SCALE_RE.search(original or "")
+        if match is None:
+            return expected_text
+        return f"{original[:match.start()]}{expected_text}{original[match.end():]}"
+
+    @staticmethod
+    def _apply_compact_rewrite(original: str, expected_compact: str) -> str:
+        original_text = str(original or "")
+        if not original_text:
+            return expected_compact
+        leading_ws = original_text[: len(original_text) - len(original_text.lstrip())]
+        trailing_ws = original_text[len(original_text.rstrip()) :]
+        return f"{leading_ws}{expected_compact}{trailing_ws}"

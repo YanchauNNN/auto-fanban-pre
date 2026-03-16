@@ -607,7 +607,7 @@ doc_generation:
         K:  { name: "子项号",       source: "subitem_no",          global: true }
         L:  { name: "系统代码",     source: "system_code",         global: true }
         M:  { name: "系统名称",     source: "system_name",         global: true }
-        N:  { name: "专业(工种)",   source: "discipline",          cover_catalog: "取001图纸专业" }
+        N:  { name: "专业(工种)",   source: "discipline",          cover_catalog: "取001图纸专业", normalize: "cjk_only" }
         O:  { name: "专业代码",     source: "discipline_code_map[discipline]" }
         P:  { name: "专业室",       source: "discipline_office",   global: true }
         Q:  { name: "设计阶段",     source: "design_phase" }

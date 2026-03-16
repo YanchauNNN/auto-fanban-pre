@@ -200,6 +200,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         for col_letter, col_config in columns.items():
             source = col_config.get("source", "")
             is_global = col_config.get("global", False)
+            normalize = str(col_config.get("normalize", "") or "").strip()
 
             value = self._resolve_value(
                 source=source,
@@ -208,6 +209,9 @@ class DesignFileGenerator(IDesignFileGenerator):
                 global_data=global_data,
                 template_lookups=template_lookups,
             )
+
+            if normalize == "cjk_only":
+                value = self._keep_cjk_text(value)
 
             # 写入
             ws[f"{col_letter}{row}"] = value
@@ -296,3 +300,15 @@ class DesignFileGenerator(IDesignFileGenerator):
     def _normalize_lookup_value(self, value: str) -> str:
         normalized = re.sub(r"\s+", "", str(value or "")).strip().lower()
         return normalized
+
+    def _keep_cjk_text(self, value: Any) -> str:
+        text = str(value or "")
+        if not text:
+            return ""
+        text = re.sub(
+            r"[^\u3400-\u4dbf\u4e00-\u9fff\s]+",
+            "",
+            text,
+        )
+        text = re.sub(r"\s+", " ", text).strip()
+        return text

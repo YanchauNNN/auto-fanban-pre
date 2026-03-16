@@ -151,3 +151,22 @@ def test_design_generate_xlsx_only_without_pdf(temp_dir: Path) -> None:
     assert output_xlsx == temp_dir / "设计文件.xlsx"
     assert output_xlsx.exists()
     assert not (temp_dir / "设计文件.pdf").exists()
+
+def test_design_column_n_keeps_only_chinese(temp_dir: Path) -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    ctx.params.discipline = "结构 Structural Engineering"
+    ctx.frames = []
+
+    output_xlsx = temp_dir / "设计文件.xlsx"
+    gen._write_design(
+        template_path="documents_bin/设计文件模板.xlsx",
+        output_path=output_xlsx,
+        bindings=gen.spec.get_design_bindings(),
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["N2"].value == "结构"
+    assert ws["N3"].value == "结构"
