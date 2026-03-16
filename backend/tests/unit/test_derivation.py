@@ -79,6 +79,20 @@ class TestDerivationEngine:
         assert derived.cover_title_en == "Test Album Cover"
         assert derived.catalog_title_en == "Test Album Contents"
 
+    def test_derive_1818_english_from_structure_hint(self, engine: DerivationEngine):
+        """1818 专业值即使带损坏文本/英文提示，也应派生成标准英文专业名。"""
+        params = GlobalDocParams(
+            project_no="1818",
+            discipline="\uc368\ubbd0\nStructure",
+            doc_status="CFC",
+            album_title_cn="娴嬭瘯鍥惧唽",
+            album_title_en="Test Album",
+        )
+        ctx = DocContext(params=params, frames=[])
+        derived = engine.compute(ctx)
+
+        assert derived.discipline_en == "Structural Engineering"
+
     def test_derive_catalog_revision(self, engine: DerivationEngine):
         """测试目录版次派生"""
         # 有升版版本时优先

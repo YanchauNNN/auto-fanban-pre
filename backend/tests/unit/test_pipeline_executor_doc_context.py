@@ -108,6 +108,62 @@ def test_build_doc_context_inherits_required_titleblock_fields_from_sheet_set_ma
     assert doc_ctx.params.doc_status == "CFC"
 
 
+def test_build_doc_context_normalizes_discipline_from_1818_titleblock_hint(
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.spec = cast(Any, SimpleNamespace(
+        doc_generation={"rules": {}},
+        get_mappings=lambda: {
+            "discipline_to_code": {"结构": "JG"},
+            "discipline_to_en": {"结构": "Structural Engineering"},
+        },
+    ))
+
+    master_frame = deepcopy(sample_frame)
+    master_frame.titleblock.internal_code = "18185NE-JGS11-001"
+    master_frame.titleblock.discipline = "\uc368\ubbd0\nStructure"
+
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master_frame.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master_frame,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-1818",
+        page_total=1,
+        pages=[master_page],
+        master_page=master_page,
+    )
+
+    job = Job(
+        job_id="job-doc-context-1818-discipline",
+        job_type=JobType.DELIVERABLE,
+        project_no="1818",
+        params={
+            "project_no": "1818",
+            "cover_variant": "\u901a\u7528",
+            "classification": "\u975e\u5bc6",
+            "subitem_name": "\u53cd\u5e94\u5806\u5382\u623f",
+            "album_title_cn": "\u6d4b\u8bd5\u56fe\u518c",
+            "album_title_en": "Test Album",
+            "wbs_code": "WBS-001",
+            "file_category": "\u56fe\u7eb8",
+            "ied_status": "\u53d1\u5e03",
+            "ied_doc_type": "\u56fe\u518c",
+        },
+    )
+
+    doc_ctx = PipelineExecutor._build_doc_context(
+        executor,
+        job,
+        {"frames": [], "sheet_sets": [sheet_set]},
+    )
+
+    assert doc_ctx.params.discipline == "\u7ed3\u6784"
+
+
 def test_doc_context_get_frame_001_falls_back_to_sheet_set_master(sample_frame: FrameMeta) -> None:
     master_frame = deepcopy(sample_frame)
     master_frame.titleblock.internal_code = "20261RS-JGS65-001"
@@ -265,6 +321,6 @@ def test_stage_fix_titleblock_consistency_updates_working_source_and_flags(
     assert "PAPER_SIZE_MISMATCH" in frame.runtime.flags
     assert "PAPER_SIZE_AUTO_FIXED" in frame.runtime.flags
     assert "SCALE_MISMATCH" in frame.runtime.flags
-    assert "SCALE_AUTO_FIXED" in frame.runtime.flags
+    assert "SCALE_FIX_SKIPPED" in frame.runtime.flags
     report_path = tmp_path / "work" / "titleblock_consistency" / "consistency_report.json"
     assert report_path.exists()

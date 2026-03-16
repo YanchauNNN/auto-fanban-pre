@@ -1,4 +1,4 @@
-"""
+﻿"""
 设计文件生成器 - Excel文档生成
 
 职责：
@@ -28,6 +28,7 @@ from openpyxl import load_workbook
 from ..cad.titleblock_consistency import TitleblockConsistencyService
 from ..config import load_spec
 from ..interfaces import GenerationError, IDesignFileGenerator
+from ..models import normalize_discipline_label
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -104,10 +105,11 @@ class DesignFileGenerator(IDesignFileGenerator):
         params = ctx.params
         derived = ctx.derived
         mappings = self.spec.get_mappings()
+        discipline = normalize_discipline_label(params.discipline, mappings) or ""
 
         # 专业代码映射
         discipline_code = mappings.get("discipline_to_code", {}).get(
-            params.discipline or "", ""
+            discipline, ""
         )
 
         return {
@@ -119,7 +121,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             "subitem_no": params.subitem_no,
             "system_code": params.system_code,
             "system_name": params.system_name,
-            "discipline": params.discipline,
+            "discipline": discipline,
             "discipline_code": discipline_code,
             "discipline_office": params.discipline_office,
             "design_phase": derived.design_phase,
@@ -136,6 +138,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         rows = []
         derived = ctx.derived
         params = ctx.params
+        discipline = normalize_discipline_label(params.discipline, self.spec.get_mappings()) or ""
 
         # 封面行
         rows.append({
@@ -148,7 +151,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             "paper_size_text": self.consistency.cover_paper_text(),
             "page_total": 1,
             "status": params.doc_status,
-            "discipline": params.discipline,
+            "discipline": discipline,
             "design_phase": derived.design_phase,
         })
 
@@ -163,7 +166,7 @@ class DesignFileGenerator(IDesignFileGenerator):
             "paper_size_text": self.consistency.catalog_paper_text(),
             "page_total": derived.catalog_page_total or 1,
             "status": params.doc_status,
-            "discipline": params.discipline,
+            "discipline": discipline,
             "design_phase": derived.design_phase,
         })
 
@@ -180,7 +183,10 @@ class DesignFileGenerator(IDesignFileGenerator):
                 "paper_size_text": self.consistency.drawing_paper_text(frame),
                 "page_total": tb.page_total or 1,
                 "status": tb.status,
-                "discipline": tb.discipline or params.discipline,
+                "discipline": normalize_discipline_label(
+                    tb.discipline or params.discipline,
+                    self.spec.get_mappings(),
+                ) or "",
                 "design_phase": derived.design_phase,
             })
 

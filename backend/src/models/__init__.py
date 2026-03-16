@@ -8,7 +8,13 @@
 - DocContext: 文档生成上下文
 """
 
-from .doc_context import DerivedFields, DocContext, GlobalDocParams, normalize_global_doc_params
+from .doc_context import (
+    DerivedFields,
+    DocContext,
+    GlobalDocParams,
+    normalize_discipline_label,
+    normalize_global_doc_params,
+)
 from .frame import BBox, FrameMeta, FrameRuntime, TitleblockFields
 from .job import Job, JobArtifacts, JobStatus, JobType
 from .sheet_set import PageInfo, SheetSet
@@ -29,5 +35,6 @@ __all__ = [
     "DocContext",
     "GlobalDocParams",
     "DerivedFields",
+    "normalize_discipline_label",
     "normalize_global_doc_params",
 ]

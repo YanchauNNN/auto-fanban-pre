@@ -1,4 +1,4 @@
-"""
+﻿"""
 派生字段引擎 - 计算派生字段
 
 职责：
@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from ..config import load_spec
-from ..models import DerivedFields, DocContext
+from ..models import DerivedFields, DocContext, normalize_discipline_label
 
 
 class DerivationEngine:
@@ -87,7 +87,7 @@ class DerivationEngine:
                     derived.design_phase
                 )
 
-            discipline = ctx.params.discipline
+            discipline = normalize_discipline_label(ctx.params.discipline, self.mappings)
             if discipline:
                 derived.discipline_en = self.mappings.get("discipline_to_en", {}).get(discipline)
 

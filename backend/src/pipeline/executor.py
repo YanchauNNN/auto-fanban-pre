@@ -44,7 +44,12 @@ from ..doc_gen import (
     IEDGenerator,
 )
 from ..doc_gen.param_validator import DocParamValidator
-from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
+from ..models import (
+    DocContext,
+    GlobalDocParams,
+    normalize_discipline_label,
+    normalize_global_doc_params,
+)
 from .packager import Packager
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
@@ -630,6 +635,13 @@ class PipelineExecutor:
             self._fill_if_missing(merged_params, "discipline", tb.discipline)
             self._fill_if_missing(merged_params, "revision", tb.revision)
             self._fill_if_missing(merged_params, "doc_status", tb.status)
+
+        normalized_discipline = normalize_discipline_label(
+            merged_params.get("discipline"),
+            self.spec.get_mappings(),
+        )
+        if normalized_discipline:
+            merged_params["discipline"] = normalized_discipline
 
         params = GlobalDocParams(project_no=job.project_no, **merged_params)
         return DocContext(

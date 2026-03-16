@@ -1,4 +1,4 @@
-"""
+﻿"""
 封面生成器 - Word文档生成
 
 职责：
@@ -39,6 +39,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 from ..config import load_spec
 from ..config.spec_loader import CoverBinding
 from ..interfaces import GenerationError, ICoverGenerator, IPDFExporter
+from ..models import normalize_discipline_label
 from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
 
@@ -111,6 +112,9 @@ class CoverGenerator(ICoverGenerator):
         """准备写入数据"""
         params = ctx.params
         derived = ctx.derived
+        discipline = normalize_discipline_label(params.discipline, self.spec.get_mappings()) or (
+            params.discipline or ""
+        )
 
         return {
             "engineering_no": params.engineering_no,
@@ -119,7 +123,7 @@ class CoverGenerator(ICoverGenerator):
             "subitem_name_en": params.subitem_name_en,  # 仅1818
             "design_phase": derived.design_phase,
             "design_phase_en": derived.design_phase_en,  # 仅1818
-            "discipline": params.discipline,
+            "discipline": discipline,
             "discipline_en": derived.discipline_en,  # 仅1818
             "album_title_cn": params.album_title_cn,
             "album_title_en": params.album_title_en,  # 仅1818

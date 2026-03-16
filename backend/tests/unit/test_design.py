@@ -170,3 +170,22 @@ def test_design_column_n_keeps_only_chinese(temp_dir: Path) -> None:
     assert ws is not None
     assert ws["N2"].value == "结构"
     assert ws["N3"].value == "结构"
+
+def test_design_column_o_maps_discipline_code_from_1818_structure_hint(temp_dir: Path) -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    ctx.params.discipline = "\uc368\ubbd0\nStructure"
+    ctx.frames = []
+
+    output_xlsx = temp_dir / "设计文件.xlsx"
+    gen._write_design(
+        template_path="documents_bin/设计文件模板.xlsx",
+        output_path=output_xlsx,
+        bindings=gen.spec.get_design_bindings(),
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["N2"].value == "结构"
+    assert ws["O2"].value == "JG"

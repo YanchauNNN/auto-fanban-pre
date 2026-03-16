@@ -6,12 +6,72 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .frame import FrameMeta
 from .sheet_set import SheetSet
+
+
+_DISCIPLINE_EN_HINTS: dict[str, tuple[str, ...]] = {
+    "结构": ("structure", "structural"),
+    "建筑": ("architecture", "architectural", "building"),
+    "总图运输": ("site transportation", "site transport", "transportation"),
+}
+
+
+def _compact_cjk_text(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"[^\u3400-\u4dbf\u4e00-\u9fff\s]+", "", text)
+    text = re.sub(r"\s+", "", text).strip()
+    return text
+
+
+def _compact_ascii_text(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"[^a-z]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def normalize_discipline_label(
+    raw_value: Any,
+    mappings: dict[str, dict[str, str]] | None = None,
+) -> str | None:
+    """Normalize mixed/garbled discipline labels into canonical Chinese labels."""
+
+    text = str(raw_value or "").strip()
+    if not text:
+        return None
+
+    mappings = mappings or {}
+    discipline_to_code = mappings.get("discipline_to_code", {})
+    discipline_to_en = mappings.get("discipline_to_en", {})
+    known_labels = tuple(discipline_to_code.keys() or discipline_to_en.keys())
+
+    cjk_text = _compact_cjk_text(text)
+    if cjk_text in known_labels:
+        return cjk_text
+
+    ascii_text = _compact_ascii_text(text)
+    if ascii_text:
+        reverse_exact = {
+            _compact_ascii_text(english): chinese
+            for chinese, english in discipline_to_en.items()
+            if english
+        }
+        if ascii_text in reverse_exact:
+            return reverse_exact[ascii_text]
+
+        for chinese, hints in _DISCIPLINE_EN_HINTS.items():
+            if chinese not in known_labels:
+                continue
+            if any(hint in ascii_text for hint in hints):
+                return chinese
+
+    return cjk_text or text
 
 
 class GlobalDocParams(BaseModel):
