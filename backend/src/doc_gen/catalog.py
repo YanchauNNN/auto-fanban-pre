@@ -287,7 +287,7 @@ class CatalogGenerator(ICatalogGenerator):
                 "title_en": tb.title_en,
                 "revision": tb.revision,
                 "status": tb.status,
-                "page_total": tb.page_total or 1,
+                "page_total": ctx.get_page_total_for_frame(frame),
                 "upgrade_note": upgrade_note,
             })
 

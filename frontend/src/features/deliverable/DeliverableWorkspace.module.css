@@ -119,6 +119,18 @@
   gap: 0.55rem;
 }
 
+.presetUpdateRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.presetUpdatedNotice {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #2b6f44;
+}
+
 .fileButton,
 .secondaryButton,
 .ghostButton,

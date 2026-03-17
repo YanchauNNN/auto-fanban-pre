@@ -43,6 +43,15 @@ type RawJobSummary = {
   child_job_ids?: string[] | null;
   findings_count?: number | null;
   affected_drawings_count?: number | null;
+  plot_style_key?: string | null;
+  plot_resource_mode?: string | null;
+  slot_id?: string | null;
+  cad_version?: string | null;
+  accoreconsole_exe?: string | null;
+  profile_arg?: string | null;
+  pc3_path?: string | null;
+  pmp_path?: string | null;
+  ctb_path?: string | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
   children?: RawJobSummary[] | null;
@@ -249,6 +258,15 @@ export class HttpAdapter implements ApiAdapter {
       retryAvailable: payload.retry_available,
       taskRole: payload.task_role ?? null,
       sharedRunId: payload.shared_run_id ?? null,
+      plotStyleKey: payload.plot_style_key ?? null,
+      plotResourceMode: payload.plot_resource_mode ?? null,
+      slotId: payload.slot_id ?? null,
+      cadVersion: payload.cad_version ?? null,
+      accoreconsoleExe: payload.accoreconsole_exe ?? null,
+      profileArg: payload.profile_arg ?? null,
+      pc3Path: payload.pc3_path ?? null,
+      pmpPath: payload.pmp_path ?? null,
+      ctbPath: payload.ctb_path ?? null,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
     };
   }

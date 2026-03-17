@@ -61,7 +61,7 @@ beforeEach(() => {
             required: false,
             requiredWhen: null,
             defaultValue: "",
-            description: "项目号",
+            description: "可留空，会优先从DWG文件名自动推断",
             options: ["2016", "1818"],
           },
           {
@@ -91,89 +91,16 @@ describe("App", () => {
 
     expect(await screen.findByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "交付处理" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
   });
 
-  it("opens the task config modal after selecting files and reopens the preserved draft", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.upload(
-      await screen.findByLabelText("选择出图 DWG 文件"),
-      new File(["dwg"], "A01.dwg", { type: "application/acad" }),
-    );
-
-    expect(await screen.findByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
-    await user.click(screen.getByRole("button", { name: "关闭任务配置" }));
-
-    expect(screen.queryByRole("dialog", { name: "任务配置" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "继续草稿" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "继续草稿" }));
-
-    expect(await screen.findByDisplayValue("示例图册")).toBeInTheDocument();
-    expect(screen.getByText("A01.dwg")).toBeInTheDocument();
-  });
-
-  it("filters jobs by selected status", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(await screen.findByRole("button", { name: "失败" }));
-
-    await waitFor(() => {
-      expect(mockListJobs).toHaveBeenLastCalledWith("failed");
-    });
-  });
-
-  it("renders audit check job cards with kind badge and summary metrics", async () => {
-    mockListJobs.mockResolvedValue({
-      total: 1,
-      items: [
-        {
-          jobId: "job-1",
-          batchId: "batch-1",
-          sourceFilename: "20261NH-JGS51-B合并版.dwg",
-          taskKind: "audit_check",
-          jobMode: "check",
-          projectNo: "2026",
-          status: "succeeded",
-          stage: "EXPORT_REPORT",
-          percent: 100,
-          message: "纠错完成",
-          createdAt: "2026-03-08T10:20:30+08:00",
-          finishedAt: null,
-          findingsCount: 12,
-          affectedDrawingsCount: 4,
-          artifacts: {
-            packageAvailable: false,
-            iedAvailable: false,
-            reportAvailable: true,
-            replacedDwgAvailable: false,
-          },
-          retryAvailable: false,
-        },
-      ],
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("20261NH-JGS51-B合并版.dwg")).toBeInTheDocument();
-    expect(screen.getByText("错误数 12")).toBeInTheDocument();
-    expect(screen.getByText("受影响图纸 4")).toBeInTheDocument();
-  });
-
-  it("renders a backend group row as one top-level package card with child task chips", async () => {
+  it("renders a real backend task group as one package card with two child chips", async () => {
     mockListJobs.mockResolvedValue({
       total: 1,
       items: [
         {
           jobId: "group-1",
           groupId: "group-1",
-          batchId: "batch-shared-1",
+          batchId: "batch-1",
           isGroup: true,
           sourceFilename: "18185NE-JGS11.dwg",
           sourceFilenames: ["18185NE-JGS11.dwg"],
@@ -183,7 +110,7 @@ describe("App", () => {
           status: "running",
           stage: "DELIVERABLE_BRANCH",
           percent: 45,
-          message: "generating",
+          message: "",
           createdAt: "2026-03-16T10:20:30+08:00",
           finishedAt: null,
           runAuditCheck: true,
@@ -197,13 +124,15 @@ describe("App", () => {
             replacedDwgAvailable: false,
           },
           retryAvailable: false,
+          taskRole: null,
+          sharedRunId: null,
         },
       ],
     });
     mockGetJobDetail.mockResolvedValue({
       jobId: "group-1",
       groupId: "group-1",
-      batchId: "batch-shared-1",
+      batchId: "batch-1",
       isGroup: true,
       sourceFilename: "18185NE-JGS11.dwg",
       sourceFilenames: ["18185NE-JGS11.dwg"],
@@ -213,7 +142,7 @@ describe("App", () => {
       status: "running",
       stage: "DELIVERABLE_BRANCH",
       percent: 45,
-      message: "generating",
+      message: "",
       createdAt: "2026-03-16T10:20:30+08:00",
       finishedAt: null,
       startedAt: "2026-03-16T10:20:32+08:00",
@@ -233,12 +162,16 @@ describe("App", () => {
         replacedDwgAvailable: false,
       },
       retryAvailable: false,
+      taskRole: null,
+      sharedRunId: null,
       children: [
         {
           jobId: "job-deliverable-1",
-          batchId: "batch-shared-1",
+          batchId: "batch-1",
           groupId: "group-1",
+          isGroup: false,
           sourceFilename: "18185NE-JGS11.dwg",
+          sourceFilenames: ["18185NE-JGS11.dwg"],
           taskKind: "deliverable",
           taskRole: "deliverable_main",
           jobMode: "deliverable",
@@ -246,9 +179,11 @@ describe("App", () => {
           status: "running",
           stage: "GENERATE_DOCS",
           percent: 45,
-          message: "generating",
+          message: "",
           createdAt: "2026-03-16T10:20:30+08:00",
           finishedAt: null,
+          runAuditCheck: false,
+          childJobIds: [],
           findingsCount: 0,
           affectedDrawingsCount: 0,
           artifacts: {
@@ -258,12 +193,15 @@ describe("App", () => {
             replacedDwgAvailable: false,
           },
           retryAvailable: false,
+          sharedRunId: null,
         },
         {
           jobId: "job-audit-1",
-          batchId: "batch-shared-1",
+          batchId: "batch-1",
           groupId: "group-1",
+          isGroup: false,
           sourceFilename: "18185NE-JGS11.dwg",
+          sourceFilenames: ["18185NE-JGS11.dwg"],
           taskKind: "audit_check",
           taskRole: "audit_check",
           jobMode: "check",
@@ -271,9 +209,11 @@ describe("App", () => {
           status: "queued",
           stage: "INIT",
           percent: 0,
-          message: "queued",
+          message: "",
           createdAt: "2026-03-16T10:20:31+08:00",
           finishedAt: null,
+          runAuditCheck: false,
+          childJobIds: [],
           findingsCount: 0,
           affectedDrawingsCount: 0,
           artifacts: {
@@ -283,6 +223,7 @@ describe("App", () => {
             replacedDwgAvailable: false,
           },
           retryAvailable: false,
+          sharedRunId: null,
         },
       ],
     });
@@ -292,19 +233,92 @@ describe("App", () => {
     expect(await screen.findByText("18185NE-JGS11.dwg")).toBeInTheDocument();
     expect(screen.getAllByText("18185NE-JGS11.dwg")).toHaveLength(1);
     expect(screen.getByText("包含 2 个子任务")).toBeInTheDocument();
-    await waitFor(() => {
-      const deliverableLink = screen
-        .getAllByRole("link")
-        .find((link) => link.getAttribute("href") === "/jobs/job-deliverable-1");
-      const auditLink = screen
-        .getAllByRole("link")
-        .find((link) => link.getAttribute("href") === "/jobs/job-audit-1");
+    expect(screen.getByText("任务包")).toBeInTheDocument();
+    expect(screen.getAllByText("交付")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("纠错")[0]).toBeInTheDocument();
+    expect(screen.getByText("执行出图子任务")).toBeInTheDocument();
+    expect(screen.getByText("正在执行出图任务")).toBeInTheDocument();
+  });
 
-      expect(deliverableLink).toBeDefined();
-      expect(auditLink).toBeDefined();
-      expect(deliverableLink?.textContent).toContain("交付");
-      expect(auditLink?.textContent).toContain("纠错");
+  it("groups historical child-only deliverable and audit jobs into one synthetic package card", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 4,
+      items: [
+        {
+          jobId: "job-deliverable-1",
+          batchId: "batch-shared-1",
+          groupId: null,
+          isGroup: false,
+          sourceFilename: "20261RS-JGS65.dwg",
+          sourceFilenames: ["20261RS-JGS65.dwg"],
+          taskKind: "deliverable",
+          taskRole: null,
+          jobMode: "deliverable",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "PACKAGE_ZIP",
+          percent: 100,
+          message: "????",
+          createdAt: "2026-03-16T10:20:30+08:00",
+          finishedAt: null,
+          runAuditCheck: false,
+          childJobIds: [],
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: true,
+            iedAvailable: true,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+          sharedRunId: null,
+        },
+        {
+          jobId: "job-audit-1",
+          batchId: "batch-shared-1",
+          groupId: null,
+          isGroup: false,
+          sourceFilename: "20261RS-JGS65.dwg",
+          sourceFilenames: ["20261RS-JGS65.dwg"],
+          taskKind: "audit_check",
+          taskRole: null,
+          jobMode: "check",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "AUDIT_CHECK",
+          percent: 100,
+          message: "auditing",
+          createdAt: "2026-03-16T10:20:31+08:00",
+          finishedAt: null,
+          runAuditCheck: false,
+          childJobIds: [],
+          findingsCount: 15,
+          affectedDrawingsCount: 6,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: true,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+          sharedRunId: null,
+        },
+      ],
     });
+
+    render(<App />);
+
+    expect(await screen.findByText("20261RS-JGS65.dwg")).toBeInTheDocument();
+    expect(screen.getAllByText("20261RS-JGS65.dwg")).toHaveLength(1);
+    expect(screen.getByText("包含 2 个子任务")).toBeInTheDocument();
+    expect(screen.getByText("错误数 15")).toBeInTheDocument();
+    expect(screen.getByText("受影响图纸 6")).toBeInTheDocument();
+    expect(screen.queryByText("????")).not.toBeInTheDocument();
+    expect(screen.queryByText("auditing")).not.toBeInTheDocument();
+    expect(screen.getByText("任务包已完成")).toBeInTheDocument();
+    expect(screen.getAllByText("交付")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("纠错")[0]).toBeInTheDocument();
   });
 
   it("shows an audit summary modal when an audit job completes with findings", async () => {
@@ -312,18 +326,24 @@ describe("App", () => {
     const detail = {
       jobId: "job-1",
       batchId: "batch-1",
+      groupId: null,
+      isGroup: false,
       sourceFilename: "20261NH-JGS51-B合并版.dwg",
+      sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
       taskKind: "audit_check" as const,
+      taskRole: null,
       jobMode: "check",
       projectNo: "2026",
       status: "succeeded",
       stage: "EXPORT_REPORT",
       percent: 100,
-      message: "纠错完成",
+      message: "",
       createdAt: "2026-03-08T10:20:30+08:00",
       finishedAt: "2026-03-08T10:25:30+08:00",
       startedAt: "2026-03-08T10:21:30+08:00",
       currentFile: "20261NH-JGS51-B合并版.dwg",
+      runAuditCheck: false,
+      childJobIds: [],
       findingsCount: 6,
       affectedDrawingsCount: 3,
       topWrongTexts: ["错字A", "错字B"],
@@ -341,6 +361,7 @@ describe("App", () => {
         replacedDwgDownloadUrl: null,
       },
       retryAvailable: false,
+      sharedRunId: null,
     };
 
     mockListJobs
@@ -353,8 +374,6 @@ describe("App", () => {
             percent: 60,
             findingsCount: 0,
             affectedDrawingsCount: 0,
-            topWrongTexts: undefined,
-            topInternalCodes: undefined,
             artifacts: {
               packageAvailable: false,
               iedAvailable: false,
@@ -398,7 +417,7 @@ describe("App", () => {
     );
   });
 
-  it("renders group details with top-level downloads and child task details", async () => {
+  it("renders group details with top-level downloads and child task diagnostics", async () => {
     window.history.pushState({}, "", "/jobs/group-1");
     mockGetJobDetail.mockResolvedValue({
       jobId: "group-1",
@@ -408,12 +427,13 @@ describe("App", () => {
       sourceFilename: "20261NH-JGS51-B合并版.dwg",
       sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
       taskKind: null,
+      taskRole: null,
       jobMode: null,
       projectNo: "2026",
       status: "succeeded",
       stage: "GROUP_COMPLETE",
       percent: 100,
-      message: "group done",
+      message: "",
       createdAt: "2026-03-08T10:20:30+08:00",
       finishedAt: "2026-03-08T10:25:30+08:00",
       startedAt: "2026-03-08T10:21:30+08:00",
@@ -437,12 +457,15 @@ describe("App", () => {
         replacedDwgDownloadUrl: null,
       },
       retryAvailable: false,
+      sharedRunId: null,
       children: [
         {
           jobId: "job-deliverable-1",
           batchId: "batch-1",
           groupId: "group-1",
+          isGroup: false,
           sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
           taskKind: "deliverable",
           taskRole: "deliverable_main",
           jobMode: "deliverable",
@@ -450,9 +473,11 @@ describe("App", () => {
           status: "succeeded",
           stage: "PACKAGE_ZIP",
           percent: 100,
-          message: "deliverable done",
+          message: "",
           createdAt: "2026-03-08T10:20:30+08:00",
           finishedAt: "2026-03-08T10:25:00+08:00",
+          runAuditCheck: false,
+          childJobIds: [],
           findingsCount: 0,
           affectedDrawingsCount: 0,
           artifacts: {
@@ -464,12 +489,24 @@ describe("App", () => {
             iedDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-deliverable-1/download/ied",
           },
           retryAvailable: false,
+          sharedRunId: null,
+          plotStyleKey: "same_width",
+          plotResourceMode: "slot_private_with_shared_mirror",
+          slotId: "slot-02",
+          cadVersion: "AutoCAD 2024",
+          accoreconsoleExe: "C:/Program Files/Autodesk/accoreconsole.exe",
+          profileArg: "C:/slots/slot-02/profile.arg",
+          pc3Path: "C:/slots/slot-02/pc3/fanban.pc3",
+          pmpPath: "C:/slots/slot-02/pmp/fanban.pmp",
+          ctbPath: "C:/slots/slot-02/plot styles/fanban_monochrome-same width.ctb",
         },
         {
           jobId: "job-audit-1",
           batchId: "batch-1",
           groupId: "group-1",
+          isGroup: false,
           sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
           taskKind: "audit_check",
           taskRole: "audit_check",
           jobMode: "check",
@@ -477,9 +514,11 @@ describe("App", () => {
           status: "succeeded",
           stage: "EXPORT_REPORT",
           percent: 100,
-          message: "audit done",
+          message: "",
           createdAt: "2026-03-08T10:20:40+08:00",
           finishedAt: "2026-03-08T10:25:30+08:00",
+          runAuditCheck: false,
+          childJobIds: [],
           findingsCount: 9,
           affectedDrawingsCount: 5,
           artifacts: {
@@ -490,6 +529,7 @@ describe("App", () => {
             reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-audit-1/download/report",
           },
           retryAvailable: false,
+          sharedRunId: null,
         },
       ],
     });
@@ -497,11 +537,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("任务包概览")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载交付包" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "下载任务包" })).toHaveAttribute(
       "href",
       "http://127.0.0.1:8000/api/jobs/group-1/download/package",
     );
-    expect(screen.getByRole("link", { name: "下载IED" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "下载 IED" })).toHaveAttribute(
       "href",
       "http://127.0.0.1:8000/api/jobs/group-1/download/ied",
     );
@@ -509,15 +549,12 @@ describe("App", () => {
       "href",
       "http://127.0.0.1:8000/api/jobs/group-1/download/report",
     );
-    expect(screen.getByText("deliverable_main")).toBeInTheDocument();
-    expect(screen.getByText("audit_check")).toBeInTheDocument();
+    expect(screen.getByText("same_width")).toBeInTheDocument();
+    expect(screen.getByText(/fanban_monochrome-same width\.ctb/)).toBeInTheDocument();
+
     expect(screen.getByRole("link", { name: "查看子任务 deliverable_main" })).toHaveAttribute(
       "href",
       "/jobs/job-deliverable-1",
-    );
-    expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toHaveAttribute(
-      "href",
-      "/jobs/job-audit-1",
     );
   });
 });

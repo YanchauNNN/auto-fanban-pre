@@ -265,3 +265,26 @@ class DocContext(BaseModel):
 
         return sorted(frames_by_code.values(), key=sort_key)
 
+    def get_page_total_for_frame(self, frame: FrameMeta) -> int:
+        """返回文档阶段应使用的总页数，优先采用A4成组导出的真实页数。"""
+
+        frame_id = frame.runtime.frame_id
+        internal_code = frame.titleblock.internal_code
+
+        for sheet_set in self.sheet_sets:
+            master_page = sheet_set.master_page
+            master_frame = master_page.frame_meta if master_page else None
+            if not master_frame:
+                continue
+
+            master_internal_code = master_frame.titleblock.internal_code
+            if master_frame.runtime.frame_id == frame_id or (
+                internal_code and master_internal_code == internal_code
+            ):
+                if sheet_set.generated_page_count and sheet_set.generated_page_count > 0:
+                    return sheet_set.generated_page_count
+                if sheet_set.page_total > 0:
+                    return sheet_set.page_total
+
+        return frame.titleblock.page_total or 1
+

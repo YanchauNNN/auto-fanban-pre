@@ -79,6 +79,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
     ctx = _build_context()
     frame_001 = deepcopy(_make_frame(1, discipline="结 构"))
     frame_001.titleblock.paper_size_text = "A4"
+    frame_001.titleblock.page_total = 1
 
     frame_002 = deepcopy(_make_frame(2, discipline="结 构"))
     frame_002.titleblock.paper_size_text = "A 0"
@@ -94,7 +95,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
     ctx.sheet_sets = [
         SheetSet(
             cluster_id="sheet-set-001",
-            page_total=1,
+            page_total=7,
             pages=[master_page],
             master_page=master_page,
         ),
@@ -151,6 +152,24 @@ def test_design_generate_xlsx_only_without_pdf(temp_dir: Path) -> None:
     assert output_xlsx == temp_dir / "设计文件.xlsx"
     assert output_xlsx.exists()
     assert not (temp_dir / "设计文件.pdf").exists()
+
+def test_design_uses_sheet_set_page_total_for_001(temp_dir: Path) -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context_with_sheet_set_001()
+
+    output_xlsx = temp_dir / "design-sheetset-001.xlsx"
+    gen._write_design(
+        template_path=gen.spec.get_template_path("design", ctx.params.project_no),
+        output_path=output_xlsx,
+        bindings=gen.spec.get_design_bindings(),
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["E4"].value == "1234567-JG001-001"
+    assert ws["T4"].value == 7
+
 
 def test_design_column_n_keeps_only_chinese(temp_dir: Path) -> None:
     gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())

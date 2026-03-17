@@ -81,6 +81,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
     ctx = _build_context()
     frame_001 = _make_frame(1)
     frame_001.titleblock.paper_size_text = "A4"
+    frame_001.titleblock.page_total = 1
     master_page = PageInfo(
         page_index=1,
         outer_bbox=frame_001.runtime.outer_bbox,
@@ -91,7 +92,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
     ctx.sheet_sets = [
         SheetSet(
             cluster_id="sheet-set-001",
-            page_total=1,
+            page_total=7,
             pages=[master_page],
             master_page=master_page,
         ),
@@ -180,6 +181,7 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set
     assert ws["B11"].value == "1234567-JG001-001"
     assert ws["D11"].value == "JD1NHT11001B25C42SD"
     assert ws["D1"].value == "测试图册"
+    assert ws["H11"].value == 7
 
 
 def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> None:

@@ -79,6 +79,15 @@ export type JobSummary = {
   retryAvailable: boolean;
   taskRole: string | null;
   sharedRunId: string | null;
+  plotStyleKey?: string | null;
+  plotResourceMode?: string | null;
+  slotId?: string | null;
+  cadVersion?: string | null;
+  accoreconsoleExe?: string | null;
+  profileArg?: string | null;
+  pc3Path?: string | null;
+  pmpPath?: string | null;
+  ctbPath?: string | null;
   children?: JobSummary[];
 };
 

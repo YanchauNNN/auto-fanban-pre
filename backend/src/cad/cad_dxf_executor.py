@@ -1276,6 +1276,15 @@ class CADDXFExecutor:
 
         if status != "ok" and "导出失败" not in sheet_set.flags:
             sheet_set.flags.append("导出失败")
+            return
+
+        pdf_path_raw = item.get("pdf_path")
+        if isinstance(pdf_path_raw, str) and pdf_path_raw:
+            sheet_set.pdf_path = Path(pdf_path_raw)
+
+        page_count = int(item.get("page_count", 0) or 0)
+        if page_count > 0:
+            sheet_set.generated_page_count = page_count
 
     def _build_frame_entry(self, frame: FrameMeta) -> dict:
         return {

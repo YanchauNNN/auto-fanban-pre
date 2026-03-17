@@ -58,6 +58,7 @@ describe("createTaskConfigDraft", () => {
     expect(draft.runAuditCheck).toBe(false);
     expect(draft.files).toEqual([]);
     expect(draft.values).toEqual({
+      plot_style_key: "red_wider",
       project_no: "",
       album_title_cn: "默认图册",
       ied_prepared_date: new Date().toISOString().slice(0, 10),
@@ -122,6 +123,7 @@ describe("syncTaskConfigDraft", () => {
     expect(draft.intent).toBe("audit_replace");
     expect(draft.runAuditCheck).toBe(true);
     expect(draft.values).toEqual({
+      plot_style_key: "red_wider",
       project_no: "1818",
       album_title_cn: "已修改图册",
       ied_prepared_date: "2026-03-12",

@@ -1,8 +1,8 @@
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/noto-sans-sc/400.css";
 import "@fontsource/noto-sans-sc/500.css";
 import "@fontsource/noto-sans-sc/700.css";
-import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/rajdhani/500.css";
 import "@fontsource/rajdhani/700.css";
 
@@ -12,7 +12,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -25,10 +25,25 @@ import {
 import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
 import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
-import type { ApiAdapter, CreateBatchPayload, JobDetail, JobList, JobSummary, TaskKind } from "../platform/api/types";
+import type {
+  ApiAdapter,
+  CreateBatchPayload,
+  JobDetail,
+  JobList,
+  JobSummary,
+  TaskKind,
+} from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
 import styles from "./App.module.css";
+import {
+  buildJobCardModels,
+  getMessageLabel,
+  getStageLabel,
+  getStatusLabel,
+  getTaskKindLabel,
+  type JobCardModel,
+} from "./jobPresentation";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 
@@ -110,6 +125,11 @@ function WorkspacePage() {
     },
   });
 
+  const jobCards = useMemo(
+    () => buildJobCardModels(jobsQuery.data?.items ?? []),
+    [jobsQuery.data?.items],
+  );
+
   useEffect(() => {
     const items = jobsQuery.data?.items;
     if (!items) {
@@ -170,7 +190,7 @@ function WorkspacePage() {
               summaries.push(detail);
             }
           } catch {
-            // keep the session moving; list polling will continue and the user can open detail manually
+            // list polling will continue; the user can still open the detail page manually
           }
           continue;
         }
@@ -190,7 +210,7 @@ function WorkspacePage() {
               }
             }
           } catch {
-            // keep the session moving; list polling will continue and the user can open detail manually
+            // list polling will continue; the user can still open the detail page manually
           }
           continue;
         }
@@ -248,7 +268,7 @@ function WorkspacePage() {
           <p className={styles.brandTop}>CNPE Drawing Desk</p>
           <h1>图纸处理工作台</h1>
           <p className={styles.brandBody}>
-            当前主线已经把出图和纠错接到同一个工作台里。出图继续走任务配置弹窗，纠错使用独立配置弹窗。
+            当前主线已经把出图和纠错接到同一个工作台里。出图走任务配置弹窗，纯纠错走独立弹窗。
           </p>
         </div>
 
@@ -274,7 +294,7 @@ function WorkspacePage() {
             <p className={styles.brandTop}>Task Entry</p>
             <h2>新建任务</h2>
             <p className={styles.brandBody}>
-              出图继续从系统文件选择器进入；纠错从独立弹窗进入，表单只保留项目号和 DWG 上传。
+              出图继续从系统文件选择器进入；纠错从独立弹窗进入。出图时如果勾选纠错，会按任务包一起创建。
             </p>
           </div>
 
@@ -317,7 +337,7 @@ function WorkspacePage() {
           />
 
           <div className={styles.entryHint}>
-            <span>真实可提交：交付处理、纠错</span>
+            <span>真实可提交：出图、纠错</span>
             <span>仍未开放：翻版真实提交</span>
             <span>草稿策略：关闭保留，提交成功或清空后重置</span>
           </div>
@@ -361,13 +381,13 @@ function WorkspacePage() {
         </div>
 
         <div className={styles.jobsPanel}>
-          {(jobsQuery.data?.items ?? []).length ? (
-            (jobsQuery.data?.items ?? []).map((job) => (
+          {jobCards.length > 0 ? (
+            jobCards.map((card) => (
               <JobCard
                 adapter={adapter}
-                highlighted={Boolean(job.batchId && job.batchId === highlightedBatchId)}
-                job={job}
-                key={job.jobId}
+                card={card}
+                highlighted={Boolean(card.summary.batchId && card.summary.batchId === highlightedBatchId)}
+                key={card.key}
               />
             ))
           ) : (
@@ -380,15 +400,15 @@ function WorkspacePage() {
 
       {schemaQuery.data ? (
         <>
-        <DeliverableWorkspace
-          adapter={adapter}
-          incomingFiles={incomingFiles}
-          isOpen={deliverableConfigOpen}
-          onBatchCreated={handleBatchCreated}
-          onNotice={setAuditNotice}
-          onClose={() => setDeliverableConfigOpen(false)}
-          onDraftAvailabilityChange={setDeliverableDraftAvailable}
-          schema={schemaQuery.data}
+          <DeliverableWorkspace
+            adapter={adapter}
+            incomingFiles={incomingFiles}
+            isOpen={deliverableConfigOpen}
+            onBatchCreated={handleBatchCreated}
+            onNotice={setAuditNotice}
+            onClose={() => setDeliverableConfigOpen(false)}
+            onDraftAvailabilityChange={setDeliverableDraftAvailable}
+            schema={schemaQuery.data}
           />
           <AuditCheckWorkspace
             adapter={adapter}
@@ -404,9 +424,7 @@ function WorkspacePage() {
       {activeAuditSummary ? (
         <AuditCheckSummaryModal
           job={activeAuditSummary}
-          onClose={() =>
-            setAuditSummaryQueue((current) => current.slice(1))
-          }
+          onClose={() => setAuditSummaryQueue((current) => current.slice(1))}
         />
       ) : null}
     </div>
@@ -415,66 +433,70 @@ function WorkspacePage() {
 
 function JobCard({
   adapter,
-  job,
+  card,
   highlighted,
 }: {
   adapter: ApiAdapter;
-  job: JobSummary;
+  card: JobCardModel;
   highlighted: boolean;
 }) {
   const groupDetailQuery = useQuery({
-    queryKey: ["job-card-group-detail", job.jobId],
-    queryFn: () => adapter.getJobDetail(job.jobId),
-    enabled: Boolean(job.isGroup),
+    queryKey: ["job-card-group-detail", card.jobId],
+    queryFn: () => adapter.getJobDetail(card.jobId),
+    enabled: card.kind === "real_group",
     refetchInterval:
-      job.isGroup && ACTIVE_JOB_STATUSES.includes(job.status as never) ? 3000 : false,
+      card.kind === "real_group" && ACTIVE_JOB_STATUSES.includes(card.status as never) ? 3000 : false,
   });
 
-  const childJobs = job.isGroup
-    ? (groupDetailQuery.data?.children ?? job.children ?? buildGroupChildPlaceholders(job))
-    : [];
-  const childCount = job.isGroup
-    ? Math.max(childJobs.length, job.childJobIds.length)
-    : 1;
+  const childJobs = card.kind === "real_group"
+    ? (groupDetailQuery.data?.children ?? card.childJobs)
+    : card.childJobs;
 
   return (
-    <div
-      className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}
-    >
+    <div className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}>
       <div className={styles.jobCardHeader}>
-        <strong>{job.sourceFilename}</strong>
-        <StatusPill status={job.status} />
+        <strong>{card.title}</strong>
+        <StatusPill status={card.status} />
       </div>
-      {job.isGroup ? (
-        <p className={styles.packageMeta}>包含 {childCount} 个子任务</p>
+
+      {card.kind !== "single_job" ? (
+        <p className={styles.packageMeta}>包含 {Math.max(childJobs.length, card.childCount)} 个子任务</p>
       ) : null}
+
       <div className={styles.jobMetaRow}>
-        {job.isGroup ? (
-          <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
-        ) : job.taskKind ? (
-          <TaskKindBadge kind={job.taskKind} />
+        {card.kind === "single_job" ? (
+          card.summary.taskKind ? <TaskKindBadge kind={card.summary.taskKind} /> : null
+        ) : (
+          <>
+            <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
+            {childJobs.map((child) => (
+              <Link className={styles.subtaskLink} key={child.jobId} to={`/jobs/${child.jobId}`}>
+                {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+                <span className={styles.subtaskStatus}>{getStatusLabel(child.status)}</span>
+              </Link>
+            ))}
+            {card.kind === "real_group" ? (
+              <Link className={styles.subtaskLink} to={`/jobs/${card.jobId}`}>
+                查看任务包
+              </Link>
+            ) : null}
+          </>
+        )}
+
+        {(card.kind !== "single_job" || card.summary.taskKind === "audit_check") && card.findingsCount > 0 ? (
+          <span className={styles.jobMetric}>错误数 {card.findingsCount}</span>
         ) : null}
-        {(job.isGroup || job.taskKind === "audit_check") && job.findingsCount > 0 ? (
-          <span className={styles.jobMetric}>错误数 {job.findingsCount}</span>
-        ) : null}
-        {(job.isGroup || job.taskKind === "audit_check") && job.affectedDrawingsCount > 0 ? (
-          <span className={styles.jobMetric}>受影响图纸 {job.affectedDrawingsCount}</span>
+        {(card.kind !== "single_job" || card.summary.taskKind === "audit_check") &&
+        card.affectedDrawingsCount > 0 ? (
+          <span className={styles.jobMetric}>受影响图纸 {card.affectedDrawingsCount}</span>
         ) : null}
       </div>
-      <p className={styles.jobStage}>{job.stage ?? "queued"}</p>
-      <p className={styles.jobMessage}>{job.message || "等待处理中"}</p>
-      {job.isGroup ? (
-        <div className={styles.packageTaskList}>
-          {childJobs.map((child) => (
-            <Link className={styles.subtaskLink} key={child.jobId} to={`/jobs/${child.jobId}`}>
-              {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
-              <span className={styles.subtaskStatus}>{statusLabel(child.status)}</span>
-            </Link>
-          ))}
-        </div>
-      ) : null}
+
+      <p className={styles.jobStage}>{card.stageLabel}</p>
+      <p className={styles.jobMessage}>{card.messageLabel}</p>
+
       <div className={styles.progressBar}>
-        <div style={{ width: `${job.percent}%` }} />
+        <div style={{ width: `${card.percent}%` }} />
       </div>
     </div>
   );
@@ -512,7 +534,7 @@ function JobDetailPage() {
         )
       ) : (
         <section className={styles.detailPanel}>
-          <p className={styles.muted}>正在加载任务详情...</p>
+          <p className={styles.muted}>正在加载任务详情…</p>
         </section>
       )}
     </div>
@@ -526,6 +548,9 @@ function SingleJobDetailPanel({
   detail: JobDetail;
   hasWarnings: boolean;
 }) {
+  const stageLabel = getStageLabel(detail.stage, detail);
+  const messageLabel = getMessageLabel(detail);
+
   return (
     <section className={styles.detailPanel}>
       <header className={styles.detailHeader}>
@@ -534,7 +559,7 @@ function SingleJobDetailPanel({
           <h1>{detail.sourceFilename}</h1>
           <p className={styles.brandBody}>
             {detail.jobId} / {detail.projectNo ?? "未标记项目"} /{" "}
-            {taskKindLabel(detail.taskKind ?? "deliverable")}
+            {getTaskKindLabel(detail.taskKind ?? "deliverable")}
           </p>
         </div>
         <StatusPill status={detail.status} />
@@ -554,11 +579,11 @@ function SingleJobDetailPanel({
       ) : null}
 
       <div className={styles.detailGrid}>
-        <InfoBlock label="任务类型" value={taskKindLabel(detail.taskKind ?? "deliverable")} />
-        <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
+        <InfoBlock label="任务类型" value={getTaskKindLabel(detail.taskKind ?? "deliverable")} />
+        <InfoBlock label="当前阶段" value={stageLabel} />
         <InfoBlock label="进度" value={`${detail.percent}%`} />
         <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
-        <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
+        <InfoBlock label="状态说明" value={messageLabel} />
         <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
       </div>
 
@@ -577,6 +602,13 @@ function SingleJobDetailPanel({
             <ListBlock title="前 10 个错误文本" items={detail.topWrongTexts} emptyText="暂无错误文本摘要" />
             <ListBlock title="前 10 个受影响内部编码" items={detail.topInternalCodes} emptyText="暂无内部编码摘要" />
           </div>
+        </section>
+      ) : null}
+
+      {hasExecutionDiagnostics(detail) ? (
+        <section className={styles.detailSection}>
+          <h2>执行诊断</h2>
+          <ExecutionDiagnostics diagnostics={detail} />
         </section>
       ) : null}
 
@@ -610,6 +642,8 @@ function SingleJobDetailPanel({
 
 function GroupDetailPanel({ detail }: { detail: JobDetail }) {
   const childJobs = detail.children ?? [];
+  const stageLabel = getStageLabel(detail.stage, detail);
+  const messageLabel = getMessageLabel(detail);
 
   return (
     <section className={styles.detailPanel}>
@@ -627,11 +661,11 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
       <section className={styles.detailSection}>
         <h2>任务包概览</h2>
         <div className={styles.detailGrid}>
-          <InfoBlock label="当前阶段" value={detail.stage ?? "queued"} />
+          <InfoBlock label="当前阶段" value={stageLabel} />
           <InfoBlock label="进度" value={`${detail.percent}%`} />
+          <InfoBlock label="状态说明" value={messageLabel} />
           <InfoBlock label="子任务数" value={String(Math.max(childJobs.length, detail.childJobIds.length))} />
-          <InfoBlock label="纠错已开启" value={detail.runAuditCheck ? "是" : "否"} />
-          <InfoBlock label="创建时间" value={formatTimestamp(detail.createdAt)} />
+          <InfoBlock label="已启用纠错" value={detail.runAuditCheck ? "是" : "否"} />
           <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
         </div>
         <div className={styles.progressBarLarge}>
@@ -642,8 +676,8 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
       <section className={styles.detailSection}>
         <h2>聚合下载</h2>
         <div className={styles.downloadGrid}>
-          <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载交付包" />
-          <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载IED" />
+          <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
+          <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
           <ArtifactButton href={detail.artifacts.reportDownloadUrl ?? undefined} label="下载纠错报告" />
         </div>
       </section>
@@ -660,8 +694,15 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
                 </div>
                 <StatusPill status={child.status} />
               </div>
-              <p className={styles.jobStage}>{child.stage ?? "queued"}</p>
-              <p className={styles.jobMessage}>{child.message || "等待处理中"}</p>
+              <p className={styles.jobStage}>{getStageLabel(child.stage, child)}</p>
+              <p className={styles.jobMessage}>{getMessageLabel(child)}</p>
+
+              {hasExecutionDiagnostics(child) ? (
+                <div className={styles.detailSection}>
+                  <ExecutionDiagnostics diagnostics={child} />
+                </div>
+              ) : null}
+
               <div className={styles.childTaskActions}>
                 <Link className={styles.subtaskLink} to={`/jobs/${child.jobId}`}>
                   查看子任务 {child.taskRole ?? child.jobId}
@@ -681,6 +722,37 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
         </div>
       </section>
     </section>
+  );
+}
+
+function ExecutionDiagnostics({
+  diagnostics,
+}: {
+  diagnostics: Pick<
+    JobSummary,
+    | "plotStyleKey"
+    | "plotResourceMode"
+    | "slotId"
+    | "cadVersion"
+    | "accoreconsoleExe"
+    | "profileArg"
+    | "pc3Path"
+    | "pmpPath"
+    | "ctbPath"
+  >;
+}) {
+  return (
+    <div className={styles.detailGrid}>
+      <InfoBlock label="打印样式" value={diagnostics.plotStyleKey ?? "-"} />
+      <InfoBlock label="资源模式" value={diagnostics.plotResourceMode ?? "-"} />
+      <InfoBlock label="Slot" value={diagnostics.slotId ?? "-"} />
+      <InfoBlock label="CAD 版本" value={diagnostics.cadVersion ?? "-"} />
+      <InfoBlock label="AcCoreConsole" value={diagnostics.accoreconsoleExe ?? "-"} />
+      <InfoBlock label="Profile ARG" value={diagnostics.profileArg ?? "-"} />
+      <InfoBlock label="PC3 路径" value={diagnostics.pc3Path ?? "-"} />
+      <InfoBlock label="PMP 路径" value={diagnostics.pmpPath ?? "-"} />
+      <InfoBlock label="CTB 路径" value={diagnostics.ctbPath ?? "-"} />
+    </div>
   );
 }
 
@@ -744,17 +816,13 @@ function ListBlock({
 }
 
 function TaskKindBadge({ kind }: { kind: TaskKind }) {
-  return <span className={`${styles.kindBadge} ${kindToneClass(kind)}`}>{taskKindLabel(kind)}</span>;
+  return <span className={`${styles.kindBadge} ${kindToneClass(kind)}`}>{getTaskKindLabel(kind)}</span>;
 }
 
 function StatusPill({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, tone: "default" };
 
-  return (
-    <span className={`${styles.statusPill} ${statusToneClass(meta.tone)}`}>
-      {meta.label}
-    </span>
-  );
+  return <span className={`${styles.statusPill} ${statusToneClass(meta.tone)}`}>{meta.label}</span>;
 }
 
 function statusToneClass(tone: string) {
@@ -781,53 +849,6 @@ function kindToneClass(kind: TaskKind) {
     return styles.kindReplace;
   }
   return styles.kindDeliverable;
-}
-
-function taskKindLabel(kind: TaskKind) {
-  if (kind === "audit_check") {
-    return "纠错";
-  }
-  if (kind === "audit_replace") {
-    return "翻版";
-  }
-  return "交付";
-}
-
-function statusLabel(status: string) {
-  return STATUS_META[status]?.label ?? status;
-}
-
-function buildGroupChildPlaceholders(job: JobSummary): JobSummary[] {
-  return job.childJobIds.map((childJobId, index) => ({
-    jobId: childJobId,
-    batchId: job.batchId,
-    isGroup: false,
-    groupId: job.groupId ?? job.jobId,
-    sourceFilename: job.sourceFilename,
-    sourceFilenames: job.sourceFilenames,
-    taskKind: index === 0 ? "deliverable" : "audit_check",
-    jobMode: index === 0 ? "deliverable" : "check",
-    projectNo: job.projectNo,
-    status: job.status,
-    stage: job.stage,
-    percent: job.percent,
-    message: job.message,
-    createdAt: job.createdAt,
-    finishedAt: job.finishedAt,
-    runAuditCheck: false,
-    childJobIds: [],
-    findingsCount: 0,
-    affectedDrawingsCount: 0,
-    artifacts: {
-      packageAvailable: false,
-      iedAvailable: false,
-      reportAvailable: false,
-      replacedDwgAvailable: false,
-    },
-    retryAvailable: false,
-    taskRole: index === 0 ? "deliverable_main" : "audit_check",
-    sharedRunId: job.sharedRunId,
-  }));
 }
 
 function renderArtifactButtons(job: JobSummary) {
@@ -863,6 +884,33 @@ function renderArtifactButtons(job: JobSummary) {
       label="下载替换后 DWG"
     />,
   ];
+}
+
+function hasExecutionDiagnostics(
+  job: Pick<
+    JobSummary,
+    | "plotStyleKey"
+    | "plotResourceMode"
+    | "slotId"
+    | "cadVersion"
+    | "accoreconsoleExe"
+    | "profileArg"
+    | "pc3Path"
+    | "pmpPath"
+    | "ctbPath"
+  >,
+) {
+  return Boolean(
+    job.plotStyleKey ||
+      job.plotResourceMode ||
+      job.slotId ||
+      job.cadVersion ||
+      job.accoreconsoleExe ||
+      job.profileArg ||
+      job.pc3Path ||
+      job.pmpPath ||
+      job.ctbPath,
+  );
 }
 
 function formatTimestamp(value: string) {

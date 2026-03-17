@@ -8,6 +8,10 @@ const AUTO_TODAY_FIELD_KEYS = new Set([
   "ied_approved_date",
 ]);
 
+const LOCAL_DEFAULT_VALUES = {
+  plot_style_key: "red_wider",
+} as const;
+
 export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
   return {
     intent: "deliverable",
@@ -49,16 +53,19 @@ export function syncTaskConfigDraft(
 }
 
 export function getDefaultTaskValues(schema: FormSchema) {
-  return Object.fromEntries(
-    schema.sections.flatMap((section) =>
-      section.fields.map((field) => [
-        field.key,
-        isAutoTodayField(field.key) && field.type === "date"
-          ? getTodayValue()
-          : field.defaultValue,
-      ]),
+  return {
+    ...LOCAL_DEFAULT_VALUES,
+    ...Object.fromEntries(
+      schema.sections.flatMap((section) =>
+        section.fields.map((field) => [
+          field.key,
+          isAutoTodayField(field.key) && field.type === "date"
+            ? getTodayValue()
+            : field.defaultValue,
+        ]),
+      ),
     ),
-  );
+  };
 }
 
 export function isAutoTodayField(fieldKey: string) {

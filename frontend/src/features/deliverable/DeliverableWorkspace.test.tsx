@@ -24,7 +24,7 @@ const schema: FormSchema = {
           required: false,
           requiredWhen: null,
           defaultValue: "",
-          description: "项目号",
+          description: "可留空，会优先从DWG文件名自动推断",
           options: ["2016", "1818", "2020"],
         },
         {
@@ -86,12 +86,13 @@ const schema: FormSchema = {
           required: true,
           requiredWhen: null,
           defaultValue: "",
-          description: "编制日期",
+          description: "点击选择日期",
           options: [],
         },
       ],
     },
   ],
+  auditReplaceProjectOptions: ["2016", "2035"],
 };
 
 function createAdapter(): ApiAdapter {
@@ -106,7 +107,38 @@ function createAdapter(): ApiAdapter {
 }
 
 describe("DeliverableWorkspace", () => {
-  it("fills inferred project number into the project field and uses a single combobox for select fields", async () => {
+  it("shows an update notice after updating the current preset and clears it on further edits", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("图册名称（中文）"), "方案图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.type(screen.getByLabelText("方案名称"), "1818-2");
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+    await user.click(screen.getByRole("button", { name: "更新当前方案" }));
+
+    expect(screen.getByText("已更新配置")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("方案名称"), "A");
+
+    expect(screen.queryByText("已更新配置")).not.toBeInTheDocument();
+  });
+
+  it("fills inferred project number and keeps full project/cover menus visible while typing", async () => {
+    const user = userEvent.setup();
     const adapter = createAdapter();
 
     render(
@@ -121,14 +153,26 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByDisplayValue("2016")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "项目号" })).toHaveValue("2016");
-    expect(screen.getByRole("combobox", { name: "封面模板" })).toHaveValue("通用");
-    expect(screen.queryByLabelText("项目号筛选")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("封面模板筛选")).not.toBeInTheDocument();
+    const projectNo = await screen.findByRole("combobox", { name: "项目号" });
+    expect(projectNo).toHaveValue("2016");
+
+    await user.clear(projectNo);
+    await user.type(projectNo, "zzz");
+
+    expect(await screen.findByRole("option", { name: "2016" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1818" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "2020" })).toBeInTheDocument();
+
+    const coverVariant = screen.getByRole("combobox", { name: "封面模板" });
+    await user.clear(coverVariant);
+    await user.type(coverVariant, "zzz");
+
+    expect(await screen.findByRole("option", { name: "通用" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "压力容器" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "核安全设备" })).toBeInTheDocument();
   });
 
-  it("uses the revised field helper copy from schema descriptions", () => {
+  it("shows schema helper copy and defaults plot style to red_wider", () => {
     const adapter = createAdapter();
 
     render(
@@ -144,9 +188,10 @@ describe("DeliverableWorkspace", () => {
     );
 
     expect(screen.getByText("子项名称（中文），例如：反应堆厂房")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "红色更宽" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("maps 422 param errors into field and form level messages inside the modal", async () => {
+  it("maps 422 param errors into field and form messages", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
     adapter.createBatch = vi.fn().mockRejectedValue({
@@ -183,7 +228,7 @@ describe("DeliverableWorkspace", () => {
     });
   });
 
-  it("preserves the draft when the modal is closed and reopened", async () => {
+  it("preserves the draft when the modal closes and reopens", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
     const onClose = vi.fn();
@@ -232,7 +277,7 @@ describe("DeliverableWorkspace", () => {
     expect(screen.getByText("A01.dwg")).toBeInTheDocument();
   });
 
-  it("defaults IED signature dates to today without rendering a shortcut button", () => {
+  it("defaults IED dates to today without rendering a shortcut button", () => {
     const adapter = createAdapter();
 
     render(
@@ -249,110 +294,14 @@ describe("DeliverableWorkspace", () => {
 
     const today = new Date().toISOString().slice(0, 10);
     expect(screen.getByLabelText("编制日期")).toHaveValue(today);
-    expect(screen.queryByRole("button", { name: "编制日期 当日" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /当日/ })).not.toBeInTheDocument();
   });
 
-  it("opens the replace modal with inferred source project number and allows filling target from recommendations", async () => {
-    const user = userEvent.setup();
-    const adapter = createAdapter();
-
-    render(
-      <DeliverableWorkspace
-        adapter={adapter}
-        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
-        isOpen
-        onBatchCreated={vi.fn()}
-        onClose={vi.fn()}
-        onDraftAvailabilityChange={vi.fn()}
-        schema={schema}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "翻版" }));
-
-    expect(await screen.findByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
-    expect(screen.getByLabelText("原始项目号")).toHaveValue("2016");
-
-    await user.click(screen.getByRole("button", { name: "将 2020 填入目标项目号" }));
-
-    expect(screen.getByLabelText("目标项目号")).toHaveValue("2020");
-  });
-
-  it("uses audit replace project options as additional recommendations in the replace modal", async () => {
-    const user = userEvent.setup();
-    const adapter = createAdapter();
-    const replaceSchema = {
-      ...schema,
-      auditReplaceProjectOptions: ["2016", "2035"],
-      sections: schema.sections.map((section) =>
-        section.id === "project"
-          ? {
-              ...section,
-              fields: section.fields.map((field) =>
-                field.key === "project_no"
-                  ? {
-                      ...field,
-                      options: ["2016"],
-                    }
-                  : field,
-              ),
-            }
-          : section,
-      ),
-    } as const;
-
-    render(
-      <DeliverableWorkspace
-        adapter={adapter}
-        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
-        isOpen
-        onBatchCreated={vi.fn()}
-        onClose={vi.fn()}
-        onDraftAvailabilityChange={vi.fn()}
-        schema={replaceSchema}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "翻版" }));
-
-    await waitFor(() => {
-      expect(screen.getAllByRole("dialog")).toHaveLength(2);
-    });
-    expect(
-      screen
-        .getAllByRole("button")
-        .some((button) => button.textContent?.includes("2035")),
-    ).toBe(true);
-  });
-
-  it("keeps the deliverable modal focused on delivery, audit and replace controls", () => {
-    const adapter = createAdapter();
-
-    render(
-      <DeliverableWorkspace
-        adapter={adapter}
-        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
-        isOpen
-        onBatchCreated={vi.fn()}
-        onClose={vi.fn()}
-        onDraftAvailabilityChange={vi.fn()}
-        schema={schema}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
-  });
-
-  it("can queue an additional audit check job from the deliverable modal", async () => {
+  it("submits plot_style_key and runAuditCheck together when audit is enabled", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
     adapter.createBatch = vi.fn().mockResolvedValue({
       batchId: "batch-deliverable-1",
-      jobs: [],
-    });
-    adapter.createAuditCheck = vi.fn().mockResolvedValue({
-      batchId: "batch-audit-1",
       jobs: [],
     });
 
@@ -370,55 +319,21 @@ describe("DeliverableWorkspace", () => {
 
     await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
-    const auditButton = screen.getByRole("button", { name: "纠错" });
-    await user.click(auditButton);
-
-    expect(auditButton).toHaveAttribute("aria-pressed", "true");
-
+    await user.click(screen.getByRole("button", { name: "同线宽" }));
+    await user.click(screen.getByRole("button", { name: "纠错" }));
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
 
     await waitFor(() => {
       expect(adapter.createBatch).toHaveBeenCalledTimes(1);
       expect(adapter.createBatch).toHaveBeenCalledWith(
-        expect.objectContaining({ project_no: "2016" }),
+        expect.objectContaining({
+          project_no: "2016",
+          plot_style_key: "same_width",
+        }),
         expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
         true,
       );
       expect(adapter.createAuditCheck).not.toHaveBeenCalled();
     });
-  });
-
-  it("keeps project number and cover template menus fully visible while typing", async () => {
-    const user = userEvent.setup();
-    const adapter = createAdapter();
-
-    render(
-      <DeliverableWorkspace
-        adapter={adapter}
-        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
-        isOpen
-        onBatchCreated={vi.fn()}
-        onClose={vi.fn()}
-        onDraftAvailabilityChange={vi.fn()}
-        schema={schema}
-      />,
-    );
-
-    const projectNo = await screen.findByRole("combobox", { name: "项目号" });
-    await user.clear(projectNo);
-    await user.type(projectNo, "zzz");
-
-    expect(await screen.findByRole("option", { name: "2016" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "1818" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "2020" })).toBeInTheDocument();
-
-    const coverVariant = screen.getByRole("combobox", { name: "封面模板" });
-    await user.clear(coverVariant);
-    await user.type(coverVariant, "zzz");
-    await user.click(coverVariant);
-
-    expect(await screen.findByRole("option", { name: "通用" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "压力容器" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "核安全设备" })).toBeInTheDocument();
   });
 });

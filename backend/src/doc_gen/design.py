@@ -181,7 +181,7 @@ class DesignFileGenerator(IDesignFileGenerator):
                 "title_cn": tb.title_cn,
                 "title_en": tb.title_en,
                 "paper_size_text": self.consistency.drawing_paper_text(frame),
-                "page_total": tb.page_total or 1,
+                "page_total": ctx.get_page_total_for_frame(frame),
                 "status": tb.status,
                 "discipline": normalize_discipline_label(
                     tb.discipline or params.discipline,

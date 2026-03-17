@@ -52,6 +52,11 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
 const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
+const PLOT_STYLE_OPTIONS = [
+  { key: "red_wider", label: "红色更宽" },
+  { key: "same_width", label: "同线宽" },
+  { key: "review_white", label: "交审图" },
+] as const;
 
 export function DeliverableWorkspace({
   adapter,
@@ -72,6 +77,7 @@ export function DeliverableWorkspace({
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
   const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetUpdatedNotice, setPresetUpdatedNotice] = useState(false);
 
   useEffect(() => {
     setDraft((current) => syncTaskConfigDraft(schema, current));
@@ -212,6 +218,7 @@ export function DeliverableWorkspace({
   }
 
   function handleFieldChange(key: string, value: string) {
+    setPresetUpdatedNotice(false);
     setDraft((current) => ({
       ...current,
       values: {
@@ -230,12 +237,14 @@ export function DeliverableWorkspace({
       return;
     }
 
+    setPresetUpdatedNotice(false);
     setDraft((current) => applyFilesToDraft(syncTaskConfigDraft(schema, current), files));
     setReplaceModalOpen(false);
     setReplaceConfigError(null);
   }
 
   function handleClearDraft() {
+    setPresetUpdatedNotice(false);
     setDraft(createTaskConfigDraft(schema));
     setShowAdvanced(false);
     setReplaceModalOpen(false);
@@ -252,6 +261,7 @@ export function DeliverableWorkspace({
   }
 
   function handleIntentChange(intent: TaskIntent) {
+    setPresetUpdatedNotice(false);
     const nextIntent = draft.intent === intent ? "deliverable" : intent;
 
     setDraft((current) => ({
@@ -277,6 +287,7 @@ export function DeliverableWorkspace({
   }
 
   function handleAuditToggle() {
+    setPresetUpdatedNotice(false);
     setDraft((current) => ({
       ...current,
       runAuditCheck: !current.runAuditCheck,
@@ -287,6 +298,7 @@ export function DeliverableWorkspace({
     field: "sourceProjectNo" | "targetProjectNo",
     value: string,
   ) {
+    setPresetUpdatedNotice(false);
     setDraft((current) => ({
       ...current,
       replaceConfig: {
@@ -312,6 +324,7 @@ export function DeliverableWorkspace({
   }
 
   function handlePresetSelectionChange(nextId: string) {
+    setPresetUpdatedNotice(false);
     setSelectedPresetId(nextId);
     setPresetName(savedPresets.find((preset) => preset.id === nextId)?.name ?? "");
     setPresetError(null);
@@ -330,6 +343,7 @@ export function DeliverableWorkspace({
     setSelectedPresetId(nextPreset.id);
     setPresetName(trimmedName);
     setPresetError(null);
+    setPresetUpdatedNotice(false);
   }
 
   function handleApplyPreset() {
@@ -341,6 +355,7 @@ export function DeliverableWorkspace({
     setDraft((current) => applyTaskPreset(schema, current, selectedPreset));
     setShowAdvanced(false);
     setPresetError(null);
+    setPresetUpdatedNotice(false);
   }
 
   function handleRenamePreset() {
@@ -358,16 +373,17 @@ export function DeliverableWorkspace({
     setSavedPresets(nextPresets);
     setPresetName(trimmedName);
     setPresetError(null);
+    setPresetUpdatedNotice(false);
   }
 
   function handleUpdatePreset() {
     const trimmedName = presetName.trim();
     if (!selectedPresetId) {
-      setPresetError("璇峰厛閫夋嫨涓€涓凡淇濆瓨鏂规銆?");
+      setPresetError("请先选择一个已保存方案。");
       return;
     }
     if (!trimmedName) {
-      setPresetError("璇峰厛濉啓鏂规鍚嶇О銆?");
+      setPresetError("请先填写方案名称。");
       return;
     }
 
@@ -376,6 +392,7 @@ export function DeliverableWorkspace({
     setSavedPresets(nextPresets);
     setPresetName(trimmedName);
     setPresetError(null);
+    setPresetUpdatedNotice(true);
   }
 
   function handleDeletePreset() {
@@ -389,6 +406,7 @@ export function DeliverableWorkspace({
     setSelectedPresetId("");
     setPresetName("");
     setPresetError(null);
+    setPresetUpdatedNotice(false);
   }
 
   const submitLabel = draft.intent === "deliverable" ? "创建交付任务" : "创建任务";
@@ -476,7 +494,10 @@ export function DeliverableWorkspace({
                     placeholder="输入方案名称"
                     type="text"
                     value={presetName}
-                    onChange={(event) => setPresetName(event.target.value)}
+                    onChange={(event) => {
+                      setPresetName(event.target.value);
+                      setPresetUpdatedNotice(false);
+                    }}
                   />
                   <div className={styles.presetButtonRow}>
                     <button className={styles.secondaryButton} type="button" onClick={handleSavePreset}>
@@ -485,14 +506,19 @@ export function DeliverableWorkspace({
                     <button className={styles.secondaryButton} type="button" onClick={handleApplyPreset}>
                       应用方案
                     </button>
-                    <button
-                      className={styles.secondaryButton}
-                      disabled={!selectedPresetId}
-                      type="button"
-                      onClick={handleUpdatePreset}
-                    >
-                      更新当前方案
-                    </button>
+                    <div className={styles.presetUpdateRow}>
+                      <button
+                        className={styles.secondaryButton}
+                        disabled={!selectedPresetId}
+                        type="button"
+                        onClick={handleUpdatePreset}
+                      >
+                        更新当前方案
+                      </button>
+                      {presetUpdatedNotice ? (
+                        <span className={styles.presetUpdatedNotice}>已更新配置</span>
+                      ) : null}
+                    </div>
                   </div>
                   <select
                     aria-label="已保存方案"
@@ -643,6 +669,32 @@ export function DeliverableWorkspace({
                   </div>
                 </section>
               ))}
+
+              <section className={styles.section}>
+                <header className={styles.sectionHeader}>
+                  <h3>打印设置</h3>
+                </header>
+                <div className={styles.intentNotice}>
+                  {PLOT_STYLE_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      aria-pressed={draft.values.plot_style_key === option.key}
+                      className={`${styles.intentChip} ${
+                        draft.values.plot_style_key === option.key ? styles.intentChipActive : ""
+                      }`}
+                      type="button"
+                      onClick={() => handleFieldChange("plot_style_key", option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <span className={styles.helperText}>
+                  这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的
+                  {" "}
+                  <code>plot_style_key</code>。
+                </span>
+              </section>
 
               {showAdvanced && advancedSections.length > 0 ? (
                 <section className={styles.section}>
