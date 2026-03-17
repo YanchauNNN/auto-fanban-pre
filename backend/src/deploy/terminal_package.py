@@ -4,7 +4,6 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
@@ -82,7 +81,8 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
 
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
+    encoding = "utf-8-sig" if path.suffix.lower() == ".ps1" else "utf-8"
+    path.write_text(content, encoding=encoding, newline="\n")
 
 
 def _write_support_files(
@@ -90,6 +90,8 @@ def _write_support_files(
     *,
     dotnet_installer: Path | None,
     vc_redist_installer: Path | None,
+    url_rewrite_installer: Path | None,
+    arr_installer: Path | None,
 ) -> None:
     storage_root = output_root / "storage"
     for rel in [Path("jobs"), Path("groups"), Path("runtime")]:
@@ -146,7 +148,9 @@ Write-Host "storage 初始化完成"
 
     prepare_terminal = r'''param(
     [string]$StorageRoot = "",
-    [int]$Port = 8000
+    [int]$Port = 8000,
+    [ValidateSet("quick", "deep")]
+    [string]$OfficeProbeMode = "quick"
 )
 
 $ErrorActionPreference = "Stop"
@@ -156,15 +160,29 @@ $runtimeEnv = Join-Path $PSScriptRoot "runtime.env.ps1"
 
 New-Item -ItemType Directory -Path (Join-Path $root "logs") -Force | Out-Null
 
+Write-Host "[1/4] 检查并安装运行时依赖..."
 & (Join-Path $root "install\install_runtime_prereqs.ps1")
-& (Join-Path $PSScriptRoot "init_storage.ps1")
-& (Join-Path $PSScriptRoot "probe_target_env.ps1") -OutJson $probeJson -RepoRoot $root -Port $Port -StorageRoot $StorageRoot
 
-$probe = Get-Content -LiteralPath $probeJson -Raw | ConvertFrom-Json -Depth 20
+Write-Host "[2/4] 初始化 storage 目录..."
+& (Join-Path $PSScriptRoot "init_storage.ps1")
+
+Write-Host ("[3/4] 执行环境探针（Office 模式: " + $OfficeProbeMode + "）...")
+& (Join-Path $PSScriptRoot "probe_target_env.ps1") -OutJson $probeJson -RepoRoot $root -Port $Port -StorageRoot $StorageRoot -OfficeProbeMode $OfficeProbeMode
+
+$probe = Get-Content -LiteralPath $probeJson -Raw | ConvertFrom-Json
 if ($probe.blocking_issues.Count -gt 0) {
+    Write-Host "Blocking issues detail:"
+    foreach ($issue in $probe.blocking_issues) {
+        $section = if ($null -ne $issue.section) { [string]$issue.section } else { "unknown" }
+        $code = if ($null -ne $issue.code) { [string]$issue.code } else { "-" }
+        $message = if ($null -ne $issue.message) { [string]$issue.message } else { "" }
+        Write-Host ("- [{0}/{1}] {2}" -f $section, $code, $message)
+    }
+    Write-Host ("探针结果文件: " + $probeJson)
     throw ("环境探测未通过，blocking issues = " + $probe.blocking_issues.Count)
 }
 
+Write-Host "[4/4] 生成运行环境文件..."
 $envMap = $probe.recommended_runtime.recommended_env
 $lines = @(
     '$ErrorActionPreference = "Stop"',
@@ -176,13 +194,28 @@ foreach ($prop in $envMap.PSObject.Properties) {
     if ([string]::IsNullOrWhiteSpace($value)) {
         continue
     }
-    $escaped = $value.Replace("`", "``").Replace('"', '`"')
-    $lines += ('$env:{0} = "{1}"' -f $name, $escaped)
+    $escaped = $value.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:{0}' -Value '{1}'" -f $name, $escaped)
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
 '''
     _write_text(output_root / "scripts" / "prepare_terminal.ps1", prepare_terminal)
+
+    deep_check_terminal = r'''param(
+    [string]$StorageRoot = "",
+    [int]$Port = 8000
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$probeJson = Join-Path $root "logs\probe_target_env.deep.json"
+
+Write-Host "开始执行深度环境检查..."
+& (Join-Path $PSScriptRoot "probe_target_env.ps1") -OutJson $probeJson -RepoRoot $root -Port $Port -StorageRoot $StorageRoot -OfficeProbeMode deep
+Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
+'''
+    _write_text(output_root / "scripts" / "deep_check_terminal.ps1", deep_check_terminal)
 
     check_health = r'''param(
     [string]$Url = "http://127.0.0.1:8000/api/system/health"
@@ -195,7 +228,7 @@ $probeScript = Join-Path $PSScriptRoot "probe_target_env.ps1"
 $iisProxyScript = Join-Path $root "install\check_iis_proxy_prereqs.ps1"
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
-    & $probeScript -OutJson $probeJson -RepoRoot $root
+    & $probeScript -OutJson $probeJson -RepoRoot $root -OfficeProbeMode quick
     Write-Host "==== Local Probe ===="
     Get-Content -LiteralPath $probeJson
 }
@@ -216,26 +249,133 @@ try {
     _write_text(output_root / "scripts" / "check_health.ps1", check_health)
 
     install_runtime = r'''$ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$root = $PSScriptRoot
+
+function Get-DotNetRelease {
+    $keys = @(
+        "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\NET Framework Setup\NDP\v4\Full"
+    )
+    foreach ($key in $keys) {
+        try {
+            $item = Get-ItemProperty -Path $key -ErrorAction Stop
+            if ($null -ne $item.Release) {
+                return [int]$item.Release
+            }
+        } catch {
+        }
+    }
+    return 0
+}
+
+function Test-DotNet48OrAboveInstalled {
+    return ((Get-DotNetRelease) -ge 528040)
+}
+
+function Get-VcRuntimeInfo {
+    $keys = @(
+        "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    )
+    foreach ($key in $keys) {
+        try {
+            $item = Get-ItemProperty -Path $key -ErrorAction Stop
+            if ([int]$item.Installed -eq 1) {
+                return [ordered]@{
+                    installed = $true
+                    version = [string]$item.Version
+                }
+            }
+        } catch {
+        }
+    }
+    return [ordered]@{
+        installed = $false
+        version = ""
+    }
+}
 
 $dotnet = Get-ChildItem -Path (Join-Path $root "dotnet") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
 $vc = Get-ChildItem -Path (Join-Path $root "vc_redist") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
 
-if ($dotnet) {
+if (Test-DotNet48OrAboveInstalled) {
+    Write-Host ".NET Framework 4.8 或更高版本已安装，跳过。"
+} elseif ($dotnet) {
     Write-Host "安装 .NET Framework 4.8: $($dotnet.FullName)"
     & $dotnet.FullName /q /norestart
 } else {
-    Write-Warning ".NET Framework 4.8 离线安装器不存在，请手工补充。"
+    Write-Warning ".NET Framework 4.8 未安装，且离线安装器不存在，请手工补充。"
 }
 
-if ($vc) {
+$vcInfo = Get-VcRuntimeInfo
+if ($vcInfo.installed) {
+    $versionText = if ([string]::IsNullOrWhiteSpace($vcInfo.version)) { "未知版本" } else { $vcInfo.version }
+    Write-Host ("VC++ 2015-2022 x64 运行时已安装，版本: " + $versionText + "，跳过。")
+} elseif ($vc) {
     Write-Host "安装 VC++ 运行时: $($vc.FullName)"
     & $vc.FullName /install /quiet /norestart
 } else {
-    Write-Warning "VC++ 离线安装器不存在，请手工补充。"
+    Write-Warning "VC++ 2015-2022 x64 运行时未安装，且离线安装器不存在，请手工补充。"
 }
 '''
     _write_text(output_root / "install" / "install_runtime_prereqs.ps1", install_runtime)
+
+    install_iis_proxy = r'''$ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
+
+function Test-IisInstalled {
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-UrlRewriteInstalled {
+    if (-not (Test-IisInstalled)) {
+        return $false
+    }
+    $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
+    return ($null -ne $rewriteModule)
+}
+
+function Test-ArrInstalled {
+    if (-not (Test-IisInstalled)) {
+        return $false
+    }
+    $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
+    if ($null -ne $proxySection) {
+        return $true
+    }
+    $arrModule = Get-WebGlobalModule | Where-Object {
+        $_.Name -like "*ARR*" -or $_.Image -like "*requestRouter*"
+    }
+    return ($null -ne $arrModule)
+}
+
+$rewrite = Get-ChildItem -Path (Join-Path $root "iis\url_rewrite") -Filter *.msi -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$arr = Get-ChildItem -Path (Join-Path $root "iis\arr") -Filter *.msi -File -ErrorAction SilentlyContinue | Select-Object -First 1
+
+if (Test-UrlRewriteInstalled) {
+    Write-Host "URL Rewrite 已安装，跳过。"
+} elseif ($rewrite) {
+    Write-Host "安装 URL Rewrite: $($rewrite.FullName)"
+    Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", $rewrite.FullName, "/qn", "/norestart") -Wait
+} else {
+    Write-Warning "URL Rewrite 未安装，且离线安装器不存在，请手工补充。"
+}
+
+if (Test-ArrInstalled) {
+    Write-Host "ARR 已安装，跳过。"
+} elseif ($arr) {
+    Write-Host "安装 ARR: $($arr.FullName)"
+    Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", $arr.FullName, "/qn", "/norestart") -Wait
+} else {
+    Write-Warning "ARR 未安装，且离线安装器不存在，请手工补充。"
+}
+'''
+    _write_text(output_root / "install" / "install_iis_proxy_prereqs.ps1", install_iis_proxy)
 
     check_iis_proxy = r'''$ErrorActionPreference = "Stop"
 
@@ -348,8 +488,17 @@ $webConfig = Join-Path $PhysicalPath "web.config"
 $proxyWarning = $null
 if ($EnableReverseProxy) {
     $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
-    if ($null -eq $rewriteModule) {
-        $proxyWarning = "未检测到 URL Rewrite 模块，已仅写入 SPA 静态站点配置。若需要同源 /api 反代，请离线安装 URL Rewrite + ARR。"
+    $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
+    $arrInstalled = $null -ne $proxySection
+    if ($null -eq $rewriteModule -or -not $arrInstalled) {
+        $missingParts = @()
+        if ($null -eq $rewriteModule) {
+            $missingParts += "URL Rewrite"
+        }
+        if (-not $arrInstalled) {
+            $missingParts += "ARR"
+        }
+        $proxyWarning = "未检测到 " + ($missingParts -join " + ") + "，已仅写入 SPA 静态站点配置。若需要同源 /api 反代，请离线安装缺失组件。"
         $webConfigContent = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -550,6 +699,10 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
         missing_lines.append("- 未找到 `.NET Framework 4.8` 离线安装器，请手工放入 `install/dotnet/`。")
     if vc_redist_installer is None:
         missing_lines.append("- 未找到 `VC++ 2015-2022 x64` 离线安装器，请手工放入 `install/vc_redist/`。")
+    if url_rewrite_installer is None:
+        missing_lines.append("- 未找到 `URL Rewrite` 离线安装器，请手工放入 `install/iis/url_rewrite/`。")
+    if arr_installer is None:
+        missing_lines.append("- 未找到 `ARR` 离线安装器，请手工放入 `install/iis/arr/`。")
     if len(missing_lines) == 2:
         missing_lines.append("- 当前离线安装器已齐备。")
     _write_text(output_root / "install" / MISSING_INSTALLER_README, "\n".join(missing_lines) + "\n")
@@ -568,6 +721,20 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
     else:
         (output_root / "install" / "vc_redist").mkdir(parents=True, exist_ok=True)
 
+    if url_rewrite_installer is not None:
+        target = output_root / "install" / "iis" / "url_rewrite" / url_rewrite_installer.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(url_rewrite_installer, target)
+    else:
+        (output_root / "install" / "iis" / "url_rewrite").mkdir(parents=True, exist_ok=True)
+
+    if arr_installer is not None:
+        target = output_root / "install" / "iis" / "arr" / arr_installer.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(arr_installer, target)
+    else:
+        (output_root / "install" / "iis" / "arr").mkdir(parents=True, exist_ok=True)
+
 
 def build_terminal_deploy_package(
     *,
@@ -575,6 +742,8 @@ def build_terminal_deploy_package(
     output_root: Path,
     dotnet_installer: Path | None = None,
     vc_redist_installer: Path | None = None,
+    url_rewrite_installer: Path | None = None,
+    arr_installer: Path | None = None,
 ) -> Path:
     copy_plan = gather_copy_plan(repo_root)
     _ensure_exists(copy_plan)
@@ -590,6 +759,8 @@ def build_terminal_deploy_package(
         output_root,
         dotnet_installer=dotnet_installer,
         vc_redist_installer=vc_redist_installer,
+        url_rewrite_installer=url_rewrite_installer,
+        arr_installer=arr_installer,
     )
 
     return output_root

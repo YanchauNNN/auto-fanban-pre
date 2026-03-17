@@ -127,13 +127,13 @@ def test_plot_resources_deploy_into_slot_local_dirs_when_runtime_context_present
         )
 
     monkeypatch.setattr("src.cad.cad_dxf_executor.ensure_plot_resources", _fake_ensure_plot_resources)
-    executor = CADDXFExecutor(config=cfg, runner=_RunnerSuccessStub(), spec=_SpecStub())
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, _RunnerSuccessStub()), spec=_SpecStub())
 
     context = executor._ensure_plot_resources_ready(slot_runtime=slot_runtime)
 
     assert context.plotters_dir == plotters_dir
-    assert plotters_dir in captured["target_plotters_dirs"]
-    assert plot_styles_dir in captured["target_plot_styles_dirs"]
+    assert plotters_dir in cast(list[Path], captured["target_plotters_dirs"])
+    assert plot_styles_dir in cast(list[Path], captured["target_plot_styles_dirs"])
 
 
 class _RunnerSuccessStub:

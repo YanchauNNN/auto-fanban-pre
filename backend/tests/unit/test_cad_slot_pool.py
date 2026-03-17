@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 from src.cad.slot_pool import CADSlotPool
 
@@ -10,7 +11,7 @@ def test_cad_slot_pool_initializes_four_slots(tmp_path: Path) -> None:
     config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
     config.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    pool = CADSlotPool(config=config, slot_count=4)
+    pool = CADSlotPool(config=cast(Any, config), slot_count=4)
 
     slots = pool.list_slots()
     assert [slot.slot_id for slot in slots] == ["slot-01", "slot-02", "slot-03", "slot-04"]
@@ -27,7 +28,7 @@ def test_cad_slot_pool_initializes_four_slots(tmp_path: Path) -> None:
 def test_cad_slot_pool_acquire_and_release_updates_status(tmp_path: Path) -> None:
     config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
     config.storage_dir.mkdir(parents=True, exist_ok=True)
-    pool = CADSlotPool(config=config, slot_count=1)
+    pool = CADSlotPool(config=cast(Any, config), slot_count=1)
 
     slot = pool.acquire("job-1", timeout=1)
     assert slot.status == "busy"
@@ -62,7 +63,7 @@ def test_cad_slot_pool_preloads_all_managed_plot_styles(tmp_path: Path, monkeypa
     config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
     config.storage_dir.mkdir(parents=True, exist_ok=True)
 
-    pool = CADSlotPool(config=config, slot_count=1)
+    pool = CADSlotPool(config=cast(Any, config), slot_count=1)
 
     slot = pool.list_slots()[0]
     assert (slot.plotters_dir / "打印PDF2.pc3").exists()

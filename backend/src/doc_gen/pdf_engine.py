@@ -23,6 +23,7 @@ import contextlib
 import gc
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 from ..config import get_config
 from ..interfaces import ExportError, IPDFExporter
@@ -109,31 +110,58 @@ class PDFExporter(IPDFExporter):
         except Exception:
             return 1
 
+    @staticmethod
+    def _prepare_word_for_headless_run(word: object) -> None:
+        word_app = cast(Any, word)
+        word_app.Visible = False
+        word_app.DisplayAlerts = 0
+        with contextlib.suppress(Exception):
+            options = getattr(word_app, "Options", None)
+            if options is not None:
+                cast(Any, options).SaveNormalPrompt = False
+
+    @staticmethod
+    def _mark_word_document_saved(doc: object | None) -> None:
+        if doc is None:
+            return
+        with contextlib.suppress(Exception):
+            cast(Any, doc).Saved = True
+
+    @staticmethod
+    def _mark_word_normal_template_saved(word: object | None) -> None:
+        if word is None:
+            return
+        with contextlib.suppress(Exception):
+            template = getattr(cast(Any, word), "NormalTemplate", None)
+            if template is not None:
+                cast(Any, template).Saved = True
+
     def _export_docx_via_com(self, docx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Word到PDF"""
         pythoncom = None
         try:
             import pythoncom  # type: ignore[import]
             import win32com.client
-        except ImportError:
-            raise ExportError("pywin32未安装，无法使用Office COM")
+        except ImportError as err:
+            raise ExportError("pywin32未安装，无法使用Office COM") from err
 
         word = None
         doc = None
         try:
             pythoncom.CoInitialize()
             word = win32com.client.DispatchEx("Word.Application")
-            word.Visible = False
-            word.DisplayAlerts = 0
+            self._prepare_word_for_headless_run(word)
 
             doc = word.Documents.Open(str(docx_path.absolute()))
             doc.ExportAsFixedFormat(str(pdf_path.absolute()), 17)  # 17 = PDF
         finally:
             if doc:
+                self._mark_word_document_saved(doc)
                 with contextlib.suppress(Exception):
                     doc.Close(False)
             doc = None
             if word:
+                self._mark_word_normal_template_saved(word)
                 with contextlib.suppress(Exception):
                     word.Quit()
             word = None
@@ -148,8 +176,8 @@ class PDFExporter(IPDFExporter):
         try:
             import pythoncom  # type: ignore[import]
             import win32com.client
-        except ImportError:
-            raise ExportError("pywin32未安装，无法使用Office COM")
+        except ImportError as err:
+            raise ExportError("pywin32未安装，无法使用Office COM") from err
 
         excel = None
         wb = None

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from src.models import BBox, FrameMeta, FrameRuntime, TitleblockFields
+from pathlib import Path
+
 from src.cad.titleblock_consistency import (
     TextReplacement,
     TitleblockConsistencyService,
 )
+from src.models import BBox, FrameMeta, FrameRuntime, TitleblockFields
 
 
 def test_paper_text_from_variant_normalizes_special_cases() -> None:
@@ -106,7 +108,7 @@ def test_build_frame_plans_uses_parsed_scale_text_not_raw_roi_noise() -> None:
     frame = FrameMeta(
         runtime=FrameRuntime(
             frame_id="frame-1",
-            source_file=__file__,
+            source_file=Path(__file__),
             outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
             paper_variant_id="CNPE_A1+1/2",
             geom_scale_factor=50.0,

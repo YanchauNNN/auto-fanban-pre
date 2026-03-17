@@ -12,7 +12,7 @@ from openpyxl import Workbook, load_workbook
 
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
-from src.pipeline.shared_prep import SharedPrepArtifacts
+from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
 
 
 class FakeJobProcessor:
@@ -654,7 +654,7 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert ied_download.content == b"ied"
 
 
-class FakeSharedPrepService:
+class FakeSharedPrepService(SharedPrepService):
     def prepare(self, *, group_id: str, source_dwg: Path, shared_dir: Path) -> SharedPrepArtifacts:
         shared_dir.mkdir(parents=True, exist_ok=True)
         staged_source = shared_dir / source_dwg.name

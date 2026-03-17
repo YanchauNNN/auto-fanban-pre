@@ -2,15 +2,33 @@
     [string]$OutJson = "",
     [string]$RepoRoot = "",
     [int]$Port = 8000,
-    [string]$StorageRoot = ""
+    [string]$StorageRoot = "",
+    [ValidateSet("quick", "deep")]
+    [string]$OfficeProbeMode = "quick",
+    [ValidateSet("", "word_export", "excel_export", "word_template", "excel_template")]
+    [string]$OfficeWorkerTask = "",
+    [string]$OfficeWorkerTemplatePath = "",
+    [string]$OfficeWorkerTemplateLabel = "",
+    [string]$OfficeWorkerOutJson = "",
+    [int]$OfficeWorkerTimeoutSec = 90
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:ProbeScriptPath = $PSCommandPath
+$script:ProbeVersion = "fanban-env-probe@2.1-deploy-20260317"
 
 function Get-Timestamp {
     return (Get-Date).ToString("yyyyMMdd-HHmmss")
+}
+
+function Write-ProbeStage {
+    param(
+        [string]$Stage,
+        [string]$Message
+    )
+
+    Write-Host ("[{0}] {1}" -f $Stage, $Message)
 }
 
 function Resolve-FullPathOrRaw {
@@ -29,6 +47,35 @@ function Resolve-FullPathOrRaw {
             return $PathText
         }
     }
+}
+
+function Resolve-PreferredPath {
+    param(
+        [string[]]$Candidates,
+        [switch]$Container
+    )
+
+    foreach ($candidate in $Candidates) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) {
+            continue
+        }
+        $resolved = Resolve-FullPathOrRaw $candidate
+        if ($Container) {
+            if (Test-Path -LiteralPath $resolved -PathType Container) {
+                return $resolved
+            }
+        } else {
+            if (Test-Path -LiteralPath $resolved -PathType Leaf) {
+                return $resolved
+            }
+        }
+    }
+
+    if ($Candidates.Count -gt 0) {
+        return Resolve-FullPathOrRaw $Candidates[0]
+    }
+
+    return ""
 }
 
 function New-CheckResult {
@@ -488,8 +535,14 @@ function Get-RepoFacts {
         repo_root = (Resolve-FullPathOrRaw $ActualRepoRoot)
         runtime_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范_运行期.yaml"))
         business_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范.yaml"))
-        cad_scripts_dir = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "backend\src\cad\scripts"))
-        dotnet_bridge_dll = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"))
+        cad_scripts_dir = (Resolve-PreferredPath -Candidates @(
+            (Join-Path $ActualRepoRoot "backend\src\cad\scripts"),
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts")
+        ) -Container)
+        dotnet_bridge_dll = (Resolve-PreferredPath -Candidates @(
+            (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"),
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll")
+        ))
         oda_exe = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "bin\ODAFileConverter 25.12.0\ODAFileConverter.exe"))
         common_cover_template = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents_bin\封面模板文件.docx"))
         cover_1818_template = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents_bin\1818图册封面模板.docx"))
@@ -615,19 +668,61 @@ function Test-PythonImport {
         return New-CheckResult -Status "skip" -Error "python executable is unavailable"
     }
 
-    $code = "import importlib, sys; importlib.import_module(sys.argv[1]); print('ok')"
-    $invoke = Invoke-ExternalCommand -FilePath $PythonExe -Arguments @("-c", $code, $ModuleName)
-    if ($invoke.success) {
-        return New-CheckResult -Status "pass"
-    }
+    $tempDir = New-TempDirectory -Prefix "fanban_import_probe"
+    $scriptPath = Join-Path $tempDir "import_probe.py"
+    $code = @'
+import importlib
+import sys
+import traceback
 
-    return New-CheckResult -Status "fail" -Error $(if ($invoke.Contains("error")) { [string]$invoke.error } else { [string]$invoke.stdout })
+module_name = sys.argv[1]
+try:
+    importlib.import_module(module_name)
+except Exception:
+    traceback.print_exc()
+    raise
+else:
+    print("ok")
+'@
+    try {
+        $code | Out-File -LiteralPath $scriptPath -Encoding utf8
+        $invoke = Invoke-ExternalCommand -FilePath $PythonExe -Arguments @("-X", "utf8", $scriptPath, $ModuleName)
+        if ($invoke.success) {
+            return New-CheckResult -Status "pass" -Details ([ordered]@{
+                module = $ModuleName
+                python_exe = $PythonExe
+                exit_code = $invoke.exit_code
+                output = [string]$invoke.stdout
+                script_path = $scriptPath
+            })
+        }
+
+        $failureText = if ($invoke.Contains("error") -and -not [string]::IsNullOrWhiteSpace([string]$invoke.error)) {
+            [string]$invoke.error
+        } else {
+            [string]$invoke.stdout
+        }
+
+        return New-CheckResult -Status "fail" -Details ([ordered]@{
+            module = $ModuleName
+            python_exe = $PythonExe
+            exit_code = $invoke.exit_code
+            output = [string]$invoke.stdout
+            launcher_error = if ($invoke.Contains("error")) { [string]$invoke.error } else { "" }
+            script_path = $scriptPath
+        }) -Error $failureText
+    } finally {
+        Remove-ProbePath -PathText $tempDir
+    }
 }
 
 function Get-PythonFacts {
     param([string]$ActualRepoRoot)
 
-    $venvPython = Join-Path $ActualRepoRoot "backend\.venv\Scripts\python.exe"
+    $venvPython = Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "backend\.venv\Scripts\python.exe"),
+        (Join-Path $ActualRepoRoot "backend-runtime\backend\.venv\Scripts\python.exe")
+    )
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 
@@ -801,6 +896,140 @@ function Remove-ComObjectReference {
     }
 }
 
+function Get-ProcessIdSnapshot {
+    param([string[]]$Names)
+
+    $ids = New-Object System.Collections.Generic.List[int]
+    foreach ($name in $Names) {
+        foreach ($proc in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            if (-not $ids.Contains([int]$proc.Id)) {
+                $ids.Add([int]$proc.Id)
+            }
+        }
+    }
+    return $ids.ToArray()
+}
+
+function Stop-NewOfficeProcesses {
+    param(
+        [int[]]$BaselineWordIds,
+        [int[]]$BaselineExcelIds
+    )
+
+    $baselineWordSet = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($id in @($BaselineWordIds)) {
+        [void]$baselineWordSet.Add([int]$id)
+    }
+    $baselineExcelSet = New-Object System.Collections.Generic.HashSet[int]
+    foreach ($id in @($BaselineExcelIds)) {
+        [void]$baselineExcelSet.Add([int]$id)
+    }
+
+    foreach ($proc in @(Get-Process -Name WINWORD -ErrorAction SilentlyContinue)) {
+        if (-not $baselineWordSet.Contains([int]$proc.Id)) {
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch {}
+        }
+    }
+    foreach ($proc in @(Get-Process -Name EXCEL -ErrorAction SilentlyContinue)) {
+        if (-not $baselineExcelSet.Contains([int]$proc.Id)) {
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch {}
+        }
+    }
+}
+
+function Write-OfficeWorkerResultAndExit {
+    param([hashtable]$Result)
+
+    if ([string]::IsNullOrWhiteSpace($OfficeWorkerOutJson)) {
+        throw "Office worker result path is empty"
+    }
+
+    $target = Resolve-FullPathOrRaw $OfficeWorkerOutJson
+    $parent = Split-Path -Parent $target
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $Result | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $target -Encoding utf8
+    exit 0
+}
+
+function Invoke-OfficeWorkerWithTimeout {
+    param(
+        [ValidateSet("word_export", "excel_export", "word_template", "excel_template")]
+        [string]$TaskName,
+        [string]$TemplatePath,
+        [string]$TemplateLabel,
+        [int]$TimeoutSec = 90
+    )
+
+    $resultJson = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban_office_worker_" + [guid]::NewGuid().ToString("N") + ".json")
+    $baselineWordIds = Get-ProcessIdSnapshot -Names @("WINWORD")
+    $baselineExcelIds = Get-ProcessIdSnapshot -Names @("EXCEL")
+    $process = $null
+
+    try {
+        $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            $script:ProbeScriptPath,
+            "-RepoRoot",
+            $RepoRoot,
+            "-OfficeWorkerTask",
+            $TaskName,
+            "-OfficeWorkerTemplatePath",
+            $TemplatePath,
+            "-OfficeWorkerTemplateLabel",
+            $TemplateLabel,
+            "-OfficeWorkerOutJson",
+            $resultJson
+        ) -PassThru -WindowStyle Hidden
+
+        $finished = $process.WaitForExit($TimeoutSec * 1000)
+        if (-not $finished) {
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+            Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+            return New-CheckResult -Status "fail" -Details ([ordered]@{
+                task = $TaskName
+                template = $TemplateLabel
+                template_path = (Resolve-FullPathOrRaw $TemplatePath)
+                timeout_sec = $TimeoutSec
+            }) -Error ("office worker timed out after " + $TimeoutSec + "s")
+        }
+
+        if (-not (Test-Path -LiteralPath $resultJson -PathType Leaf)) {
+            return New-CheckResult -Status "fail" -Details ([ordered]@{
+                task = $TaskName
+                template = $TemplateLabel
+                template_path = (Resolve-FullPathOrRaw $TemplatePath)
+                timeout_sec = $TimeoutSec
+            }) -Error "office worker did not produce result json"
+        }
+
+        $result = Get-Content -LiteralPath $resultJson -Raw | ConvertFrom-Json
+        return [ordered]@{
+            status = [string]$result.status
+            ok = [bool]$result.ok
+            error = [string]$result.error
+            details = $result.details
+        }
+    } catch {
+        Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+        return New-CheckResult -Status "fail" -Details ([ordered]@{
+            task = $TaskName
+            template = $TemplateLabel
+            template_path = (Resolve-FullPathOrRaw $TemplatePath)
+            timeout_sec = $TimeoutSec
+        }) -Error $_.Exception.Message
+    } finally {
+        if ($process -and -not $process.HasExited) {
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+        }
+        Remove-ProbePath -PathText $resultJson
+    }
+}
+
 function Get-AutoCADFacts {
     $installDirs = Find-AutoCADInstallDirs
     $installFacts = @()
@@ -886,8 +1115,7 @@ function Test-WordCom {
     $app = $null
     try {
         $app = New-Object -ComObject Word.Application
-        $app.Visible = $false
-        $app.DisplayAlerts = 0
+        Set-WordHeadlessState -WordApp $app
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             prog_id = "Word.Application"
             version = [string]$app.Version
@@ -898,6 +1126,7 @@ function Test-WordCom {
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $app) {
+            Mark-WordNormalTemplateSaved -WordApp $app
             try { $app.Quit() } catch {}
             Remove-ComObjectReference -ComObject $app
             [GC]::Collect()
@@ -930,90 +1159,190 @@ function Test-ExcelCom {
     }
 }
 
-function Test-WordExportSmoke {
-    $tempDir = New-TempDirectory -Prefix "fanban_word_export"
+function Set-WordHeadlessState {
+    param($WordApp)
+
+    if ($null -eq $WordApp) {
+        return
+    }
+
+    try { $WordApp.Visible = $false } catch {}
+    try { $WordApp.DisplayAlerts = 0 } catch {}
+    try { $WordApp.Options.SaveNormalPrompt = $false } catch {}
+}
+
+function Mark-WordDocumentSaved {
+    param($Document)
+
+    if ($null -eq $Document) {
+        return
+    }
+
+    try { $Document.Saved = $true } catch {}
+}
+
+function Mark-WordNormalTemplateSaved {
+    param($WordApp)
+
+    if ($null -eq $WordApp) {
+        return
+    }
+
+    try { $WordApp.Options.SaveNormalPrompt = $false } catch {}
+    try {
+        $template = $WordApp.NormalTemplate
+        if ($null -ne $template) {
+            $template.Saved = $true
+        }
+    } catch {}
+}
+
+function Resolve-BackendRootForOfficeProbe {
+    param([string]$ActualRepoRoot)
+
+    return Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "backend-runtime\backend"),
+        (Join-Path $ActualRepoRoot "backend")
+    ) -Container
+}
+
+function Resolve-BackendPythonForOfficeProbe {
+    param([string]$ActualRepoRoot)
+
+    return Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "backend-runtime\backend\.venv\Scripts\python.exe"),
+        (Join-Path $ActualRepoRoot "backend\.venv\Scripts\python.exe")
+    )
+}
+
+function Invoke-BackendPdfExportCore {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath) -or -not (Test-Path -LiteralPath $TemplatePath -PathType Leaf)) {
+        return New-CheckResult -Status "fail" -Details ([ordered]@{
+            template = $TemplateLabel
+            template_path = (Resolve-FullPathOrRaw $TemplatePath)
+        }) -Error "template file is missing"
+    }
+
+    $actualRepoRoot = Resolve-RepoRoot -RepoRootArg $RepoRoot
+    $backendRoot = Resolve-BackendRootForOfficeProbe -ActualRepoRoot $actualRepoRoot
+    $pythonExe = Resolve-BackendPythonForOfficeProbe -ActualRepoRoot $actualRepoRoot
+    if ([string]::IsNullOrWhiteSpace($backendRoot) -or -not (Test-Path -LiteralPath $backendRoot -PathType Container)) {
+        return New-CheckResult -Status "fail" -Details ([ordered]@{
+            template = $TemplateLabel
+            template_path = (Resolve-FullPathOrRaw $TemplatePath)
+            backend_root = $backendRoot
+        }) -Error "backend root is unavailable"
+    }
+    if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        return New-CheckResult -Status "fail" -Details ([ordered]@{
+            template = $TemplateLabel
+            template_path = (Resolve-FullPathOrRaw $TemplatePath)
+            python_exe = $pythonExe
+        }) -Error "backend python executable is unavailable"
+    }
+
+    $tempDir = New-TempDirectory -Prefix "fanban_backend_pdf_export"
+    $helperPath = Join-Path $tempDir "backend_pdf_export_probe.py"
     $pdfPath = Join-Path $tempDir "probe.pdf"
-    $app = $null
-    $doc = $null
+    $helperCode = @'
+from pathlib import Path
+import sys
+
+backend_root = Path(sys.argv[1])
+input_path = Path(sys.argv[2])
+output_path = Path(sys.argv[3])
+
+if str(backend_root) not in sys.path:
+    sys.path.insert(0, str(backend_root))
+
+from src.doc_gen.pdf_engine import PDFExporter
+
+exporter = PDFExporter(preferred_engine="office_com")
+if input_path.suffix.lower() == ".docx":
+    exporter.export_docx_to_pdf(input_path, output_path)
+elif input_path.suffix.lower() == ".xlsx":
+    exporter.export_xlsx_to_pdf(input_path, output_path)
+else:
+    raise RuntimeError(f"unsupported input suffix: {input_path.suffix}")
+
+print("ok")
+'@
 
     try {
-        $app = New-Object -ComObject Word.Application
-        $app.Visible = $false
-        $app.DisplayAlerts = 0
-        $doc = $app.Documents.Add()
-        $doc.Content.Text = "fanban office probe"
-        $doc.ExportAsFixedFormat($pdfPath, 17)
+        $helperCode | Out-File -LiteralPath $helperPath -Encoding utf8
+        $invoke = Invoke-ExternalCommand -FilePath $pythonExe -Arguments @(
+            "-X",
+            "utf8",
+            $helperPath,
+            $backendRoot,
+            $TemplatePath,
+            $pdfPath
+        )
 
         $pdfExists = Test-Path -LiteralPath $pdfPath -PathType Leaf
-        return New-CheckResult -Status $(if ($pdfExists) { "pass" } else { "fail" }) -Details ([ordered]@{
+        $details = [ordered]@{
+            template = $TemplateLabel
+            template_path = (Resolve-FullPathOrRaw $TemplatePath)
+            backend_root = $backendRoot
+            python_exe = $pythonExe
+            helper_script = $helperPath
             pdf_path = $pdfPath
             pdf_exists = $pdfExists
-        }) -Error $(if ($pdfExists) { "" } else { "word export did not produce a pdf" })
-    } catch {
-        return New-CheckResult -Status "fail" -Details ([ordered]@{
-            pdf_path = $pdfPath
-            pdf_exists = (Test-Path -LiteralPath $pdfPath -PathType Leaf)
-        }) -Error $_.Exception.Message
+            exit_code = $invoke.exit_code
+            output = [string]$invoke.stdout
+        }
+        if (-not $invoke.success) {
+            $details.launcher_error = if ($invoke.Contains("error")) { [string]$invoke.error } else { "" }
+            return New-CheckResult -Status "fail" -Details $details -Error $(if ($invoke.Contains("error") -and -not [string]::IsNullOrWhiteSpace([string]$invoke.error)) { [string]$invoke.error } else { [string]$invoke.stdout })
+        }
+        return New-CheckResult -Status $(if ($pdfExists) { "pass" } else { "fail" }) -Details $details -Error $(if ($pdfExists) { "" } else { "backend pdf export did not produce a pdf" })
     } finally {
-        if ($null -ne $doc) {
-            try { $doc.Close($false) } catch {}
-            Remove-ComObjectReference -ComObject $doc
-        }
-        if ($null -ne $app) {
-            try { $app.Quit() } catch {}
-            Remove-ComObjectReference -ComObject $app
-        }
-        [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
         Remove-ProbePath -PathText $tempDir
     }
+}
+
+function Invoke-WordExportSmokeCore {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    return Invoke-BackendPdfExportCore -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel
+}
+
+function Test-WordExportSmoke {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    return Invoke-OfficeWorkerWithTimeout -TaskName "word_export" -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel -TimeoutSec $OfficeWorkerTimeoutSec
+}
+
+function Invoke-ExcelExportSmokeCore {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    return Invoke-BackendPdfExportCore -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel
 }
 
 function Test-ExcelExportSmoke {
-    $tempDir = New-TempDirectory -Prefix "fanban_excel_export"
-    $pdfPath = Join-Path $tempDir "probe.pdf"
-    $app = $null
-    $workbook = $null
-    $worksheet = $null
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
 
-    try {
-        $app = New-Object -ComObject Excel.Application
-        $app.Visible = $false
-        $app.DisplayAlerts = $false
-        $workbook = $app.Workbooks.Add()
-        $worksheet = $workbook.Worksheets.Item(1)
-        $worksheet.Cells.Item(1, 1).Value2 = "fanban office probe"
-        $workbook.ExportAsFixedFormat(0, $pdfPath)
-
-        $pdfExists = Test-Path -LiteralPath $pdfPath -PathType Leaf
-        return New-CheckResult -Status $(if ($pdfExists) { "pass" } else { "fail" }) -Details ([ordered]@{
-            pdf_path = $pdfPath
-            pdf_exists = $pdfExists
-        }) -Error $(if ($pdfExists) { "" } else { "excel export did not produce a pdf" })
-    } catch {
-        return New-CheckResult -Status "fail" -Details ([ordered]@{
-            pdf_path = $pdfPath
-            pdf_exists = (Test-Path -LiteralPath $pdfPath -PathType Leaf)
-        }) -Error $_.Exception.Message
-    } finally {
-        if ($null -ne $worksheet) {
-            Remove-ComObjectReference -ComObject $worksheet
-        }
-        if ($null -ne $workbook) {
-            try { $workbook.Close($false) } catch {}
-            Remove-ComObjectReference -ComObject $workbook
-        }
-        if ($null -ne $app) {
-            try { $app.Quit() } catch {}
-            Remove-ComObjectReference -ComObject $app
-        }
-        [GC]::Collect()
-        [GC]::WaitForPendingFinalizers()
-        Remove-ProbePath -PathText $tempDir
-    }
+    return Invoke-OfficeWorkerWithTimeout -TaskName "excel_export" -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel -TimeoutSec $OfficeWorkerTimeoutSec
 }
 
-function Test-WordTemplateCopy {
+function Invoke-WordTemplateOpenCore {
     param(
         [string]$TemplatePath,
         [string]$TemplateLabel
@@ -1028,42 +1357,34 @@ function Test-WordTemplateCopy {
 
     $tempDir = New-TempDirectory -Prefix "fanban_word_template"
     $workingCopy = Join-Path $tempDir ([System.IO.Path]::GetFileName($TemplatePath))
-    $savedCopy = Join-Path $tempDir ("saved_" + [System.IO.Path]::GetFileName($TemplatePath))
     $app = $null
     $doc = $null
 
     try {
         Copy-Item -LiteralPath $TemplatePath -Destination $workingCopy -Force
         $app = New-Object -ComObject Word.Application
-        $app.Visible = $false
-        $app.DisplayAlerts = 0
-        $doc = $app.Documents.Open($workingCopy, $false, $false)
-        try {
-            $doc.SaveAs2($savedCopy)
-        } catch {
-            $doc.SaveAs([ref]$savedCopy)
-        }
+        Set-WordHeadlessState -WordApp $app
+        $doc = $app.Documents.Open($workingCopy, $false, $true)
 
-        $saved = Test-Path -LiteralPath $savedCopy -PathType Leaf
-        return New-CheckResult -Status $(if ($saved) { "pass" } else { "fail" }) -Details ([ordered]@{
+        return New-CheckResult -Status "pass" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
-            saved_copy = $savedCopy
-            saved = $saved
-        }) -Error $(if ($saved) { "" } else { "word template could not be saved" })
+            opened_copy = $workingCopy
+        })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
-            saved_copy = $savedCopy
-            saved = (Test-Path -LiteralPath $savedCopy -PathType Leaf)
+            opened_copy = $workingCopy
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $doc) {
+            Mark-WordDocumentSaved -Document $doc
             try { $doc.Close($false) } catch {}
             Remove-ComObjectReference -ComObject $doc
         }
         if ($null -ne $app) {
+            Mark-WordNormalTemplateSaved -WordApp $app
             try { $app.Quit() } catch {}
             Remove-ComObjectReference -ComObject $app
         }
@@ -1073,7 +1394,16 @@ function Test-WordTemplateCopy {
     }
 }
 
-function Test-ExcelTemplateCopy {
+function Test-WordTemplateOpen {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    return Invoke-OfficeWorkerWithTimeout -TaskName "word_template" -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel -TimeoutSec $OfficeWorkerTimeoutSec
+}
+
+function Invoke-ExcelTemplateOpenCore {
     param(
         [string]$TemplatePath,
         [string]$TemplateLabel
@@ -1088,7 +1418,6 @@ function Test-ExcelTemplateCopy {
 
     $tempDir = New-TempDirectory -Prefix "fanban_excel_template"
     $workingCopy = Join-Path $tempDir ([System.IO.Path]::GetFileName($TemplatePath))
-    $savedCopy = Join-Path $tempDir ("saved_" + [System.IO.Path]::GetFileName($TemplatePath))
     $app = $null
     $workbook = $null
 
@@ -1097,22 +1426,18 @@ function Test-ExcelTemplateCopy {
         $app = New-Object -ComObject Excel.Application
         $app.Visible = $false
         $app.DisplayAlerts = $false
-        $workbook = $app.Workbooks.Open($workingCopy)
-        $workbook.SaveCopyAs($savedCopy)
+        $workbook = $app.Workbooks.Open($workingCopy, 0, $true)
 
-        $saved = Test-Path -LiteralPath $savedCopy -PathType Leaf
-        return New-CheckResult -Status $(if ($saved) { "pass" } else { "fail" }) -Details ([ordered]@{
+        return New-CheckResult -Status "pass" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
-            saved_copy = $savedCopy
-            saved = $saved
-        }) -Error $(if ($saved) { "" } else { "excel template could not be saved" })
+            opened_copy = $workingCopy
+        })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
-            saved_copy = $savedCopy
-            saved = (Test-Path -LiteralPath $savedCopy -PathType Leaf)
+            opened_copy = $workingCopy
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $workbook) {
@@ -1129,61 +1454,101 @@ function Test-ExcelTemplateCopy {
     }
 }
 
+function Test-ExcelTemplateOpen {
+    param(
+        [string]$TemplatePath,
+        [string]$TemplateLabel
+    )
+
+    return Invoke-OfficeWorkerWithTimeout -TaskName "excel_template" -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel -TimeoutSec $OfficeWorkerTimeoutSec
+}
+
 function Get-OfficeFacts {
-    param([hashtable]$RepoFacts)
+    param(
+        [hashtable]$RepoFacts,
+        [ValidateSet("quick", "deep")]
+        [string]$ProbeMode = "quick"
+    )
 
+    Write-ProbeStage -Stage "office 1/4" -Message ("Word COM 快速检查（模式: " + $ProbeMode + "）")
     $wordCom = Test-WordCom
+
+    Write-ProbeStage -Stage "office 2/4" -Message ("Excel COM 快速检查（模式: " + $ProbeMode + "）")
     $excelCom = Test-ExcelCom
-    $wordExport = if ($wordCom.status -eq "pass") {
-        Test-WordExportSmoke
-    } else {
-        New-CheckResult -Status "skip" -Error "word com is unavailable"
-    }
-    $excelExport = if ($excelCom.status -eq "pass") {
-        Test-ExcelExportSmoke
-    } else {
-        New-CheckResult -Status "skip" -Error "excel com is unavailable"
+
+    $wordExport = New-CheckResult -Status "skip" -Error "quick mode skipped"
+    $excelExport = New-CheckResult -Status "skip" -Error "quick mode skipped"
+    $templateChecks = [ordered]@{
+        common_cover = New-CheckResult -Status "skip" -Error "quick mode skipped"
+        cover_1818 = New-CheckResult -Status "skip" -Error "quick mode skipped"
+        common_catalog = New-CheckResult -Status "skip" -Error "quick mode skipped"
+        catalog_1818 = New-CheckResult -Status "skip" -Error "quick mode skipped"
     }
 
-    $templateChecks = [ordered]@{
-        common_cover = if ($wordCom.status -eq "pass") {
-            Test-WordTemplateCopy -TemplatePath ([string]$RepoFacts.paths.common_cover_template) -TemplateLabel "common_cover"
+    if ($ProbeMode -eq "deep") {
+        Write-ProbeStage -Stage "office 3/4" -Message "Office PDF 导出深度检查"
+        $wordExport = if ($wordCom.status -eq "pass") {
+            Test-WordExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_cover_template) -TemplateLabel "common_cover"
         } else {
             New-CheckResult -Status "skip" -Error "word com is unavailable"
         }
-        cover_1818 = if ($wordCom.status -eq "pass") {
-            Test-WordTemplateCopy -TemplatePath ([string]$RepoFacts.paths.cover_1818_template) -TemplateLabel "cover_1818"
-        } else {
-            New-CheckResult -Status "skip" -Error "word com is unavailable"
-        }
-        common_catalog = if ($excelCom.status -eq "pass") {
-            Test-ExcelTemplateCopy -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
+        $excelExport = if ($excelCom.status -eq "pass") {
+            Test-ExcelExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
         } else {
             New-CheckResult -Status "skip" -Error "excel com is unavailable"
         }
-        catalog_1818 = if ($excelCom.status -eq "pass") {
-            Test-ExcelTemplateCopy -TemplatePath ([string]$RepoFacts.paths.catalog_1818_template) -TemplateLabel "catalog_1818"
-        } else {
-            New-CheckResult -Status "skip" -Error "excel com is unavailable"
+
+        Write-ProbeStage -Stage "office 4/4" -Message "Office 模板复制深度检查"
+        $templateChecks = [ordered]@{
+            common_cover = if ($wordCom.status -eq "pass") {
+                Test-WordTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_cover_template) -TemplateLabel "common_cover"
+            } else {
+                New-CheckResult -Status "skip" -Error "word com is unavailable"
+            }
+            cover_1818 = if ($wordCom.status -eq "pass") {
+                Test-WordTemplateOpen -TemplatePath ([string]$RepoFacts.paths.cover_1818_template) -TemplateLabel "cover_1818"
+            } else {
+                New-CheckResult -Status "skip" -Error "word com is unavailable"
+            }
+            common_catalog = if ($excelCom.status -eq "pass") {
+                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
+            } else {
+                New-CheckResult -Status "skip" -Error "excel com is unavailable"
+            }
+            catalog_1818 = if ($excelCom.status -eq "pass") {
+                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.catalog_1818_template) -TemplateLabel "catalog_1818"
+            } else {
+                New-CheckResult -Status "skip" -Error "excel com is unavailable"
+            }
         }
+    } else {
+        Write-ProbeStage -Stage "office 3/4" -Message "快速模式：跳过 Office PDF 导出深度检查"
+        Write-ProbeStage -Stage "office 4/4" -Message "快速模式：跳过 Office 模板复制深度检查"
     }
 
     $templatesPass = $true
     foreach ($check in $templateChecks.Values) {
-        if ($check.status -ne "pass") {
+        if ($check.status -eq "fail") {
             $templatesPass = $false
             break
         }
     }
 
-    return [ordered]@{
-        status = if (
+    $status = if ($ProbeMode -eq "quick") {
+        if ($wordCom.status -eq "pass" -and $excelCom.status -eq "pass") { "pass" } else { "fail" }
+    } else {
+        if (
             $wordCom.status -eq "pass" -and
             $excelCom.status -eq "pass" -and
             $wordExport.status -eq "pass" -and
             $excelExport.status -eq "pass" -and
             $templatesPass
         ) { "pass" } else { "fail" }
+    }
+
+    return [ordered]@{
+        status = $status
+        probe_mode = $ProbeMode
         word_com = $wordCom
         excel_com = $excelCom
         word_export_smoke = $wordExport
@@ -1260,6 +1625,35 @@ function Get-ServiceHostingFacts {
     }
 }
 
+function Invoke-OfficeWorkerTask {
+    switch ($OfficeWorkerTask) {
+        "word_export" {
+            return Invoke-WordExportSmokeCore -TemplatePath $OfficeWorkerTemplatePath -TemplateLabel $OfficeWorkerTemplateLabel
+        }
+        "excel_export" {
+            return Invoke-ExcelExportSmokeCore -TemplatePath $OfficeWorkerTemplatePath -TemplateLabel $OfficeWorkerTemplateLabel
+        }
+        "word_template" {
+            return Invoke-WordTemplateOpenCore -TemplatePath $OfficeWorkerTemplatePath -TemplateLabel $OfficeWorkerTemplateLabel
+        }
+        "excel_template" {
+            return Invoke-ExcelTemplateOpenCore -TemplatePath $OfficeWorkerTemplatePath -TemplateLabel $OfficeWorkerTemplateLabel
+        }
+        default {
+            return New-CheckResult -Status "fail" -Details ([ordered]@{
+                task = $OfficeWorkerTask
+                template = $OfficeWorkerTemplateLabel
+                template_path = (Resolve-FullPathOrRaw $OfficeWorkerTemplatePath)
+            }) -Error "unsupported office worker task"
+        }
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($OfficeWorkerTask)) {
+    $workerResult = Invoke-OfficeWorkerTask
+    Write-OfficeWorkerResultAndExit -Result $workerResult
+}
+
 $actualRepoRoot = Resolve-RepoRoot -RepoRootArg $RepoRoot
 if ([string]::IsNullOrWhiteSpace($StorageRoot)) {
     $StorageRoot = Join-Path $actualRepoRoot "storage"
@@ -1278,14 +1672,30 @@ if ([string]::IsNullOrWhiteSpace($actualOutJson)) {
     $actualOutJson = $OutJson
 }
 
+Write-ProbeStage -Stage "1/8" -Message "收集主机基础信息"
 $hostFacts = Get-HostFacts
+
+Write-ProbeStage -Stage "2/8" -Message "检查仓库和模板资源"
 $repoFacts = Get-RepoFacts -ActualRepoRoot $actualRepoRoot
+
+Write-ProbeStage -Stage "3/8" -Message "检查 Python 运行环境"
 $pythonFacts = Get-PythonFacts -ActualRepoRoot $actualRepoRoot
+
+Write-ProbeStage -Stage "4/8" -Message "执行 SQLite 读写探针"
 $sqliteFacts = Test-SqliteProbe -PythonExe ([string]$pythonFacts.selected.executable)
+
+Write-ProbeStage -Stage "5/8" -Message "检查 storage 目录和磁盘空间"
 $storageFacts = Get-StorageFacts -ActualStorageRoot $actualStorageRoot
+
+Write-ProbeStage -Stage "6/8" -Message "检查网络端口和防火墙状态"
 $networkFacts = Get-NetworkFacts -TargetPort $Port
+
+Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
 $autocadFacts = Get-AutoCADFacts
-$officeFacts = Get-OfficeFacts -RepoFacts $repoFacts
+
+Write-ProbeStage -Stage "8/8" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
+$officeFacts = Get-OfficeFacts -RepoFacts $repoFacts -ProbeMode $OfficeProbeMode
+
 $serviceHostingFacts = Get-ServiceHostingFacts
 
 $blockingIssues = @()
@@ -1413,7 +1823,7 @@ if (-not [bool]$autocadFacts.best_guess.has_fonts_dir) {
     }
 }
 
-foreach ($officeKey in @("word_com", "excel_com", "word_export_smoke", "excel_export_smoke")) {
+foreach ($officeKey in @("word_com", "excel_com")) {
     $check = $officeFacts[$officeKey]
     if ($check.status -ne "pass") {
         $blockingIssues += [ordered]@{
@@ -1423,12 +1833,26 @@ foreach ($officeKey in @("word_com", "excel_com", "word_export_smoke", "excel_ex
         }
     }
 }
-foreach ($templateEntry in $officeFacts.template_checks.GetEnumerator()) {
-    if ($templateEntry.Value.status -ne "pass") {
-        $blockingIssues += [ordered]@{
-            section = "office"
-            code = [string]$templateEntry.Key
-            message = if ([string]::IsNullOrWhiteSpace($templateEntry.Value.error)) { "office template probe failed" } else { [string]$templateEntry.Value.error }
+
+if ($officeFacts.probe_mode -eq "deep") {
+    foreach ($officeKey in @("word_export_smoke", "excel_export_smoke")) {
+        $check = $officeFacts[$officeKey]
+        if ($check.status -ne "pass") {
+            $blockingIssues += [ordered]@{
+                section = "office"
+                code = $officeKey
+                message = if ([string]::IsNullOrWhiteSpace($check.error)) { "$officeKey failed" } else { [string]$check.error }
+            }
+        }
+    }
+
+    foreach ($templateEntry in $officeFacts.template_checks.GetEnumerator()) {
+        if ($templateEntry.Value.status -ne "pass") {
+            $blockingIssues += [ordered]@{
+                section = "office"
+                code = [string]$templateEntry.Key
+                message = if ([string]::IsNullOrWhiteSpace($templateEntry.Value.error)) { "office template probe failed" } else { [string]$templateEntry.Value.error }
+            }
         }
     }
 }
@@ -1525,11 +1949,13 @@ $result = [ordered]@{
         script = (Resolve-FullPathOrRaw $script:ProbeScriptPath)
         output_json = $actualOutJson
         schema_version = "fanban-env-probe@2"
+        script_version = $script:ProbeVersion
         input = [ordered]@{
             repo_root = $actualRepoRoot
             storage_root = $actualStorageRoot
             out_json = $actualOutJson
             port = $Port
+            office_probe_mode = $OfficeProbeMode
         }
     }
     host = $hostFacts
@@ -1559,13 +1985,15 @@ if (-not [string]::IsNullOrWhiteSpace($outDir) -and -not (Test-Path -LiteralPath
 $result | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $actualOutJson -Encoding utf8
 
 Write-Host "==== Fanban Environment Probe V2 ===="
+Write-Host ("Script version: " + $script:ProbeVersion)
 Write-Host ("Output JSON: " + $actualOutJson)
 Write-Host ("Repo status: " + $repoFacts.status)
 Write-Host ("Python status: " + $pythonFacts.status)
 Write-Host ("AutoCAD status: " + $autocadFacts.status)
-Write-Host ("Office status: " + $officeFacts.status)
+Write-Host ("Office status: " + $officeFacts.status + " (mode: " + $officeFacts.probe_mode + ")")
 Write-Host ("Ready for web service: " + $readyForWebService)
 Write-Host ("Blocking issues: " + $blockingIssues.Count)
 Write-Host ("Warnings: " + $warnings.Count)
 Write-Host "====================================="
+
 
