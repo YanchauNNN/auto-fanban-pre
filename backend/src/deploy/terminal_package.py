@@ -192,11 +192,17 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $probeJson = Join-Path $root "logs\probe_target_env.json"
 $probeScript = Join-Path $PSScriptRoot "probe_target_env.ps1"
+$iisProxyScript = Join-Path $root "install\check_iis_proxy_prereqs.ps1"
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
     & $probeScript -OutJson $probeJson -RepoRoot $root
     Write-Host "==== Local Probe ===="
     Get-Content -LiteralPath $probeJson
+}
+
+if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
+    Write-Host "==== IIS Proxy Prereqs ===="
+    & $iisProxyScript
 }
 
 try {
@@ -231,6 +237,282 @@ if ($vc) {
 '''
     _write_text(output_root / "install" / "install_runtime_prereqs.ps1", install_runtime)
 
+    check_iis_proxy = r'''$ErrorActionPreference = "Stop"
+
+$iisInstalled = $false
+try {
+    Import-Module WebAdministration -ErrorAction Stop
+    $iisInstalled = $true
+} catch {
+    $iisInstalled = $false
+}
+
+$rewriteInstalled = $false
+$arrInstalled = $false
+
+if ($iisInstalled) {
+    $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
+    if ($null -ne $rewriteModule) {
+        $rewriteInstalled = $true
+    }
+
+    $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
+    if ($null -ne $proxySection) {
+        $arrInstalled = $true
+    }
+
+    if (-not $arrInstalled) {
+        $arrModule = Get-WebGlobalModule | Where-Object {
+            $_.Name -like "*ARR*" -or $_.Image -like "*requestRouter*"
+        }
+        if ($null -ne $arrModule) {
+            $arrInstalled = $true
+        }
+    }
+}
+
+$result = [ordered]@{
+    iis = [ordered]@{
+        installed = $iisInstalled
+        status = if ($iisInstalled) { "pass" } else { "missing" }
+    }
+    url_rewrite = [ordered]@{
+        installed = $rewriteInstalled
+        status = if ($rewriteInstalled) { "pass" } else { "missing" }
+        module_name = "RewriteModule"
+    }
+    arr = [ordered]@{
+        installed = $arrInstalled
+        status = if ($arrInstalled) { "pass" } else { "missing" }
+        product_name = "Application Request Routing"
+    }
+}
+
+$result | ConvertTo-Json -Depth 6
+
+if (-not $iisInstalled) {
+    Write-Warning "未检测到 IIS。"
+}
+if (-not $rewriteInstalled) {
+    Write-Warning "未检测到 URL Rewrite 模块。"
+}
+if (-not $arrInstalled) {
+    Write-Warning "未检测到 ARR（Application Request Routing）。"
+}
+'''
+    _write_text(output_root / "install" / "check_iis_proxy_prereqs.ps1", check_iis_proxy)
+
+    configure_iis_site = r'''param(
+    [string]$SiteName = "FanBanTerminal",
+    [string]$AppPoolName = "FanBanTerminalAppPool",
+    [int]$Port = 80,
+    [string]$HostName = "",
+    [string]$BindAddress = "*",
+    [int]$ApiPort = 8000,
+    [switch]$EnableReverseProxy = $true,
+    [string]$PhysicalPath = ""
+)
+
+$ErrorActionPreference = "Stop"
+Import-Module WebAdministration
+
+$root = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($PhysicalPath)) {
+    $PhysicalPath = Join-Path $root "frontend-dist"
+}
+
+if (-not (Test-Path -LiteralPath $PhysicalPath -PathType Container)) {
+    throw "前端静态目录不存在: $PhysicalPath"
+}
+
+if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
+    New-WebAppPool -Name $AppPoolName | Out-Null
+}
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value ""
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"
+
+$bindingInformation = "{0}:{1}:{2}" -f $BindAddress, $Port, $HostName
+
+if (-not (Test-Path "IIS:\Sites\$SiteName")) {
+    New-Website -Name $SiteName -PhysicalPath $PhysicalPath -Port $Port -IPAddress $BindAddress -HostHeader $HostName | Out-Null
+} else {
+    Stop-Website -Name $SiteName -ErrorAction SilentlyContinue | Out-Null
+    Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath -Value $PhysicalPath
+    Get-WebBinding -Name $SiteName -ErrorAction SilentlyContinue | Remove-WebBinding -ErrorAction SilentlyContinue
+    New-WebBinding -Name $SiteName -Protocol http -IPAddress $BindAddress -Port $Port -HostHeader $HostName | Out-Null
+}
+
+Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $AppPoolName
+
+$webConfig = Join-Path $PhysicalPath "web.config"
+$proxyWarning = $null
+if ($EnableReverseProxy) {
+    $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
+    if ($null -eq $rewriteModule) {
+        $proxyWarning = "未检测到 URL Rewrite 模块，已仅写入 SPA 静态站点配置。若需要同源 /api 反代，请离线安装 URL Rewrite + ARR。"
+        $webConfigContent = @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="SPA Fallback" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAll">
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
+"@
+    } else {
+        $appcmd = Join-Path $env:WinDir "System32\inetsrv\appcmd.exe"
+        if (Test-Path -LiteralPath $appcmd -PathType Leaf) {
+            & $appcmd set config -section:system.webServer/proxy /enabled:"True" /commit:apphost | Out-Null
+        }
+        $webConfigContent = @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="API Proxy" stopProcessing="true">
+          <match url="^api/(.*)" />
+          <action type="Rewrite" url="http://127.0.0.1:$ApiPort/api/{R:1}" />
+        </rule>
+        <rule name="SPA Fallback" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAll">
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+            <add input="{REQUEST_URI}" pattern="^/api/" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
+"@
+    }
+} else {
+    $webConfigContent = @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="SPA Fallback" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAll">
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
+"@
+}
+
+$webConfigContent | Out-File -LiteralPath $webConfig -Encoding utf8
+Start-Website -Name $SiteName | Out-Null
+
+$displayHost = if ([string]::IsNullOrWhiteSpace($HostName)) { "<部署机IP或主机名>" } else { $HostName }
+$displayPort = if ($Port -eq 80) { "" } else { ":" + $Port }
+Write-Host ("IIS 站点已配置完成。前端访问地址: http://{0}{1}/" -f $displayHost, $displayPort)
+if ($proxyWarning) {
+    Write-Warning $proxyWarning
+}
+'''
+    _write_text(output_root / "install" / "configure_iis_site.ps1", configure_iis_site)
+
+    register_backend_service = r'''param(
+    [string]$ServiceName = "FanBanBackend",
+    [string]$DisplayName = "FanBan Backend",
+    [ValidateSet("auto", "nssm", "scheduled-task")]
+    [string]$Mode = "auto"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$startScript = Join-Path $root "scripts\start_backend.ps1"
+if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
+    throw "启动脚本不存在: $startScript"
+}
+
+function Get-NssmPath {
+    $candidate = Join-Path $PSScriptRoot "nssm\nssm.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return $candidate
+    }
+    $cmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
+    if ($null -eq $cmd) {
+        $cmd = Get-Command nssm -ErrorAction SilentlyContinue
+    }
+    return if ($null -ne $cmd) { [string]$cmd.Source } else { "" }
+}
+
+function Register-WithNssm([string]$nssmPath) {
+    & $nssmPath remove $ServiceName confirm 2>$null | Out-Null
+    & $nssmPath install $ServiceName "powershell.exe" "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+    & $nssmPath set $ServiceName AppDirectory $root
+    & $nssmPath set $ServiceName DisplayName $DisplayName
+    & $nssmPath set $ServiceName Start SERVICE_AUTO_START
+    Write-Host ("已使用 NSSM 注册 Windows 服务: " + $ServiceName)
+}
+
+function Register-WithScheduledTask {
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable
+    Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Warning ("未检测到 NSSM，已回退为开机自启动计划任务: " + $ServiceName)
+}
+
+$nssmPath = Get-NssmPath
+if ($Mode -eq "nssm" -and [string]::IsNullOrWhiteSpace($nssmPath)) {
+    throw "指定使用 NSSM，但未找到 nssm.exe"
+}
+
+if ($Mode -eq "nssm" -or ($Mode -eq "auto" -and -not [string]::IsNullOrWhiteSpace($nssmPath))) {
+    Register-WithNssm -nssmPath $nssmPath
+} else {
+    Register-WithScheduledTask
+}
+'''
+    _write_text(output_root / "install" / "register_backend_service.ps1", register_backend_service)
+
+    unregister_backend_service = r'''param(
+    [string]$ServiceName = "FanBanBackend"
+)
+
+$ErrorActionPreference = "Stop"
+
+$nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
+if ($null -eq $nssmCommand) {
+    $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+}
+
+if ($null -ne $nssmCommand) {
+    & $nssmCommand.Source remove $ServiceName confirm 2>$null | Out-Null
+}
+
+if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
+}
+
+Write-Host ("已移除服务/计划任务: " + $ServiceName)
+'''
+    _write_text(output_root / "install" / "unregister_backend_service.ps1", unregister_backend_service)
+
     readme = r'''# 部署说明
 
 ## 目录用途
@@ -246,9 +528,20 @@ if ($vc) {
 
 1. 先执行 `install\install_runtime_prereqs.ps1`
 2. 再执行 `scripts\prepare_terminal.ps1`
-3. 确认 AutoCAD 与 Office 探测通过
-4. 执行 `scripts\start_backend.ps1`
-5. 执行 `scripts\check_health.ps1`
+3. 配置 IIS：`install\configure_iis_site.ps1`
+4. 注册后端常驻：`install\register_backend_service.ps1`
+5. 确认 AutoCAD 与 Office 探测通过
+6. 手工启动时执行 `scripts\start_backend.ps1`
+7. 执行 `scripts\check_health.ps1`
+
+## 前端地址怎么定
+
+- 推荐使用 IIS 同源模式，前端访问地址就是 IIS 站点绑定的地址。
+- 你可以自己设置：
+  - `http://部署机IP/`
+  - `http://部署机IP:8080/`
+  - `http://自定义主机名/`
+- `configure_iis_site.ps1` 里通过 `HostName` 和 `Port` 控制最终地址，不固定写死 IP。
 '''
     _write_text(output_root / DEPLOY_README, readme)
 

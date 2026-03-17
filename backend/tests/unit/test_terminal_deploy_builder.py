@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from src.deploy.prereq_installers import ensure_prereq_installers
 from src.deploy.terminal_package import build_terminal_deploy_package, gather_copy_plan
 
-SPEC_NAME = "参数规范.yaml"
-RUNTIME_SPEC_NAME = "参数规范_运行期.yaml"
-PC3_NAME = "打印PDF2.pc3"
-DEPLOY_README = "README_部署说明.md"
-MISSING_INSTALLER_README = "README_缺失离线安装器.md"
+SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
+RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
+PC3_NAME = "\u6253\u5370PDF2.pc3"
+DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
+MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 
 
 def _write_file(path: Path, content: str = "x") -> None:
@@ -114,21 +115,33 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
 
     assert (output_root / "install" / "dotnet" / dotnet.name).exists()
     assert (output_root / "install" / "vc_redist" / vc.name).exists()
+    assert (output_root / "install" / "configure_iis_site.ps1").exists()
+    assert (output_root / "install" / "check_iis_proxy_prereqs.ps1").exists()
+    assert (output_root / "install" / "register_backend_service.ps1").exists()
+    assert (output_root / "install" / "unregister_backend_service.ps1").exists()
 
     start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
     prepare_terminal = (output_root / "scripts" / "prepare_terminal.ps1").read_text(encoding="utf-8")
     check_health = (output_root / "scripts" / "check_health.ps1").read_text(encoding="utf-8")
+    configure_iis = (output_root / "install" / "configure_iis_site.ps1").read_text(encoding="utf-8")
+    check_iis_proxy = (output_root / "install" / "check_iis_proxy_prereqs.ps1").read_text(encoding="utf-8")
+    register_service = (output_root / "install" / "register_backend_service.ps1").read_text(encoding="utf-8")
 
     assert "runtime.env.ps1" in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Invoke-RestMethod" in check_health
+    assert "check_iis_proxy_prereqs.ps1" in check_health
     assert "probe_target_env.ps1" in check_health
+    assert "New-Website" in configure_iis or "Set-ItemProperty" in configure_iis
+    assert "HostName" in configure_iis
+    assert "RewriteModule" in check_iis_proxy
+    assert "Application Request Routing" in check_iis_proxy
+    assert "nssm" in register_service
+    assert "Register-ScheduledTask" in register_service
 
 
 def test_ensure_prereq_installers_downloads_missing_files(tmp_path: Path) -> None:
-    from src.deploy.prereq_installers import ensure_prereq_installers
-
     downloads: list[tuple[str, Path]] = []
 
     def fake_downloader(url: str, destination: Path) -> Path:
