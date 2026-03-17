@@ -85,6 +85,118 @@ beforeEach(() => {
   });
 });
 
+describe("recent jobs sidebar", () => {
+  it("shows only the latest four recent jobs by default and can expand the rest", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 6,
+      items: Array.from({ length: 6 }, (_, index) => ({
+        jobId: `job-${index + 1}`,
+        batchId: `batch-${index + 1}`,
+        groupId: null,
+        isGroup: false,
+        sourceFilename: `sample-${index + 1}.dwg`,
+        sourceFilenames: [`sample-${index + 1}.dwg`],
+        taskKind: "deliverable",
+        taskRole: null,
+        jobMode: "deliverable",
+        projectNo: "2026",
+        status: "succeeded",
+        stage: "PACKAGE_ZIP",
+        percent: 100,
+        message: "",
+        createdAt: `2026-03-16T10:2${index}:30+08:00`,
+        finishedAt: null,
+        runAuditCheck: false,
+        childJobIds: [],
+        findingsCount: 0,
+        affectedDrawingsCount: 0,
+        artifacts: {
+          packageAvailable: true,
+          iedAvailable: true,
+          reportAvailable: false,
+          replacedDwgAvailable: false,
+        },
+        retryAvailable: false,
+        sharedRunId: null,
+      })),
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("sample-6.dwg")).toBeInTheDocument();
+    expect(screen.getByText("sample-3.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("sample-2.dwg")).not.toBeInTheDocument();
+    expect(screen.getByText(/展开其余/)).toBeInTheDocument();
+
+    await user.click(screen.getByText(/展开其余/));
+
+    expect(screen.getByText("sample-2.dwg")).toBeInTheDocument();
+    expect(screen.getByText("sample-1.dwg")).toBeInTheDocument();
+    expect(screen.getByText("收起")).toBeInTheDocument();
+
+    await user.click(screen.getByText("收起"));
+
+    expect(screen.queryByText("sample-2.dwg")).not.toBeInTheDocument();
+  });
+
+  it("shows all matching jobs while searching and bypasses the collapsed recent jobs limit", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 6,
+      items: [
+        "sample-1.dwg",
+        "20261RS-JGS65.dwg",
+        "sample-3.dwg",
+        "18185NE-JGS11.dwg",
+        "sample-5.dwg",
+        "20261RS-JGS66.dwg",
+      ].map((name, index) => ({
+        jobId: `job-${index + 1}`,
+        batchId: `batch-${index + 1}`,
+        groupId: null,
+        isGroup: false,
+        sourceFilename: name,
+        sourceFilenames: [name],
+        taskKind: "deliverable",
+        taskRole: null,
+        jobMode: "deliverable",
+        projectNo: "2026",
+        status: "succeeded",
+        stage: "PACKAGE_ZIP",
+        percent: 100,
+        message: "",
+        createdAt: `2026-03-16T11:1${index}:30+08:00`,
+        finishedAt: null,
+        runAuditCheck: false,
+        childJobIds: [],
+        findingsCount: 0,
+        affectedDrawingsCount: 0,
+        artifacts: {
+          packageAvailable: true,
+          iedAvailable: true,
+          reportAvailable: false,
+          replacedDwgAvailable: false,
+        },
+        retryAvailable: false,
+        sharedRunId: null,
+      })),
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("20261RS-JGS66.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("sample-1.dwg")).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox"), "20261RS");
+
+    expect(screen.getByText("20261RS-JGS65.dwg")).toBeInTheDocument();
+    expect(screen.getByText("20261RS-JGS66.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("sample-1.dwg")).not.toBeInTheDocument();
+    expect(screen.queryByText(/展开其余/)).not.toBeInTheDocument();
+  });
+});
+
 describe("App", () => {
   it("renders dual primary entry buttons for deliverable and audit check", async () => {
     render(<App />);
@@ -417,9 +529,122 @@ describe("App", () => {
     );
   });
 
-  it("renders group details with top-level downloads and child task diagnostics", async () => {
+  it("renders group details with result-focused child cards", async () => {
     window.history.pushState({}, "", "/jobs/group-1");
-    mockGetJobDetail.mockResolvedValue({
+    mockGetJobDetail.mockImplementation(async (jobId: string) => {
+      if (jobId === "job-deliverable-1") {
+        return {
+          jobId: "job-deliverable-1",
+          batchId: "batch-1",
+          groupId: "group-1",
+          isGroup: false,
+          sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+          taskKind: "deliverable",
+          taskRole: "deliverable_main",
+          jobMode: "deliverable",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "PACKAGE_ZIP",
+          percent: 100,
+          message: "",
+          createdAt: "2026-03-08T10:20:30+08:00",
+          finishedAt: "2026-03-08T10:25:00+08:00",
+          startedAt: "2026-03-08T10:20:32+08:00",
+          currentFile: null,
+          runAuditCheck: false,
+          childJobIds: [],
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          topWrongTexts: [],
+          topInternalCodes: [],
+          flags: [],
+          errors: [],
+          deliverableOutputs: {
+            dwgCount: 2,
+            pdfCount: 2,
+            drawings: [
+              {
+                name: "A01",
+                internalCode: "20261NH-JGS51-001",
+                dwgName: "A01.dwg",
+                pdfName: "A01.pdf",
+                pageTotal: 1,
+              },
+              {
+                name: "A02",
+                internalCode: "20261NH-JGS51-002",
+                dwgName: "A02.dwg",
+                pdfName: "A02.pdf",
+                pageTotal: 2,
+              },
+            ],
+            documents: [
+              { name: "封面.docx", kind: "docx" },
+              { name: "目录.xlsx", kind: "xlsx" },
+            ],
+          },
+          artifacts: {
+            packageAvailable: true,
+            iedAvailable: true,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+            packageDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-deliverable-1/download/package",
+            iedDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-deliverable-1/download/ied",
+          },
+          retryAvailable: false,
+          sharedRunId: null,
+        };
+      }
+
+      if (jobId === "job-audit-1") {
+        return {
+          jobId: "job-audit-1",
+          batchId: "batch-1",
+          groupId: "group-1",
+          isGroup: false,
+          sourceFilename: "20261NH-JGS51-B合并版.dwg",
+          sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+          taskKind: "audit_check",
+          taskRole: "audit_check",
+          jobMode: "check",
+          projectNo: "2026",
+          status: "succeeded",
+          stage: "EXPORT_REPORT",
+          percent: 100,
+          message: "",
+          createdAt: "2026-03-08T10:20:40+08:00",
+          finishedAt: "2026-03-08T10:25:30+08:00",
+          startedAt: "2026-03-08T10:20:45+08:00",
+          currentFile: null,
+          runAuditCheck: false,
+          childJobIds: [],
+          findingsCount: 9,
+          affectedDrawingsCount: 5,
+          topWrongTexts: ["2016"],
+          topInternalCodes: ["20261NH-JGS51-001"],
+          findingGroups: [
+            {
+              matchedText: "2016",
+              count: 3,
+              internalCodes: ["20261NH-JGS51-001", "20261NH-JGS51-003"],
+            },
+          ],
+          flags: [],
+          errors: [],
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            reportAvailable: true,
+            replacedDwgAvailable: false,
+            reportDownloadUrl: "http://127.0.0.1:8000/api/jobs/job-audit-1/download/report",
+          },
+          retryAvailable: false,
+          sharedRunId: null,
+        };
+      }
+
+      return {
       jobId: "group-1",
       groupId: "group-1",
       batchId: "batch-1",
@@ -532,6 +757,7 @@ describe("App", () => {
           sharedRunId: null,
         },
       ],
+    };
     });
 
     render(<App />);
@@ -549,9 +775,16 @@ describe("App", () => {
       "href",
       "http://127.0.0.1:8000/api/jobs/group-1/download/report",
     );
-    expect(screen.getByText("same_width")).toBeInTheDocument();
-    expect(screen.getByText(/fanban_monochrome-same width\.ctb/)).toBeInTheDocument();
-
+    expect(await screen.findByText("拆图结果")).toBeInTheDocument();
+    expect(await screen.findByText(/A01\.dwg/)).toBeInTheDocument();
+    expect(await screen.findByText(/A02\.pdf/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 页/)).toBeInTheDocument();
+    expect(await screen.findByText("封面.docx")).toBeInTheDocument();
+    expect(await screen.findByText("错误与图纸编号")).toBeInTheDocument();
+    expect(await screen.findByText("2016")).toBeInTheDocument();
+    expect(await screen.findByText("20261NH-JGS51-003")).toBeInTheDocument();
+    expect(screen.queryByText("same_width")).not.toBeInTheDocument();
+    expect(screen.queryByText(/fanban_monochrome-same width\.ctb/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看子任务 deliverable_main" })).toHaveAttribute(
       "href",
       "/jobs/job-deliverable-1",

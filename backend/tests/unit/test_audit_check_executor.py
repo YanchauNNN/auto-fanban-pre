@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from openpyxl import load_workbook
 
 from src.audit_check.executor import AuditCheckExecutor
-from src.audit_check.roi_mapper import AuditFieldContextMapper
 from src.audit_check.models import AuditLexicon, ScanTextItem
+from src.audit_check.roi_mapper import AuditFieldContextMapper
 from src.config import SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, TitleblockFields
 
@@ -76,6 +77,19 @@ def test_audit_check_executor_writes_reports_and_summary(monkeypatch, tmp_path: 
     assert job.artifacts.report_json and job.artifacts.report_json.exists()
     assert job.artifacts.report_xlsx and job.artifacts.report_xlsx.exists()
     load_workbook(job.artifacts.report_xlsx)
+    report_payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+    assert report_payload["finding_groups"] == [
+        {
+            "matched_text": "1418",
+            "count": 1,
+            "internal_codes": ["未归属"],
+        },
+        {
+            "matched_text": "JD",
+            "count": 1,
+            "internal_codes": ["未归属"],
+        },
+    ]
     assert job.progress.details["findings_count"] == 2
     assert job.progress.details["affected_drawings_count"] == 1
     assert job.progress.details["top_wrong_texts"] == ["1418", "JD"]

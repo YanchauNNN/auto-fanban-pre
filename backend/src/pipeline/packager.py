@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from ..cad.splitter import output_name_for_frame, output_name_for_sheet_set
 from ..config import load_spec
 from ..interfaces import IPackager
+from ..result_views import build_deliverable_outputs, normalize_user_flags
 
 if TYPE_CHECKING:
     from ..models import Job
@@ -92,7 +93,7 @@ class Packager(IPackager):
                     str(job.artifacts.docs_dir) if job.artifacts.docs_dir else None
                 ),
             },
-            "flags": job.flags,
+            "flags": normalize_user_flags(job.flags),
             "errors": job.errors,
             "timestamps": {
                 "created_at": (
@@ -110,6 +111,11 @@ class Packager(IPackager):
         # Drawing级追溯条目
         if context:
             manifest["drawings"] = self._build_drawing_entries(context)
+            docs_dir = job.artifacts.docs_dir or (job.work_dir / "output" / "docs")
+            manifest["deliverable_outputs"] = build_deliverable_outputs(
+                context=context,
+                docs_dir=Path(docs_dir) if docs_dir else None,
+            )
 
         manifest_path = job.work_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -137,7 +143,7 @@ class Packager(IPackager):
                     "external_code": frame.titleblock.external_code,
                     "pdf_path": str(frame.runtime.pdf_path) if frame.runtime.pdf_path else None,
                     "dwg_path": str(frame.runtime.dwg_path) if frame.runtime.dwg_path else None,
-                    "flags": list(frame.runtime.flags),
+                    "flags": normalize_user_flags(frame.runtime.flags),
                 }
             )
 
@@ -149,10 +155,10 @@ class Packager(IPackager):
                     "name": name,
                     "type": "a4_sheet_set",
                     "cluster_id": ss.cluster_id,
-                    "page_total": ss.page_total,
+                    "page_total": ss.generated_page_count or ss.page_total,
                     "internal_code": master_tb.get("internal_code"),
                     "external_code": master_tb.get("external_code"),
-                    "flags": list(ss.flags),
+                    "flags": normalize_user_flags(ss.flags),
                 }
             )
 

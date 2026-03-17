@@ -3,6 +3,8 @@ import type {
   ApiAdapter,
   ApiError,
   CreateBatchPayload,
+  DeliverableOutputs,
+  FindingGroup,
   FormSchema,
   HealthStatus,
   JobDetail,
@@ -65,6 +67,26 @@ type RawJobDetail = RawJobSummary & {
   top_wrong_texts?: string[] | null;
   top_internal_codes?: string[] | null;
   shared_dir?: string | null;
+  deliverable_outputs?: {
+    dwg_count?: number | null;
+    pdf_count?: number | null;
+    documents?: Array<{
+      name?: string | null;
+      kind?: string | null;
+    }> | null;
+    drawings?: Array<{
+      name?: string | null;
+      internal_code?: string | null;
+      dwg_name?: string | null;
+      pdf_name?: string | null;
+      page_total?: number | null;
+    }> | null;
+  } | null;
+  finding_groups?: Array<{
+    matched_text?: string | null;
+    count?: number | null;
+    internal_codes?: string[] | null;
+  }> | null;
 };
 
 type RawFormSchema = {
@@ -220,6 +242,8 @@ export class HttpAdapter implements ApiAdapter {
       topWrongTexts: payload.top_wrong_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
       sharedDir: payload.shared_dir ?? null,
+      deliverableOutputs: this.normalizeDeliverableOutputs(payload.deliverable_outputs),
+      findingGroups: this.normalizeFindingGroups(payload.finding_groups),
     };
   }
 
@@ -302,5 +326,41 @@ export class HttpAdapter implements ApiAdapter {
       return path;
     }
     return this.buildUrl(path);
+  }
+
+  private normalizeDeliverableOutputs(
+    payload: RawJobDetail["deliverable_outputs"],
+  ): DeliverableOutputs | undefined {
+    if (!payload) {
+      return undefined;
+    }
+
+    return {
+      dwgCount: payload.dwg_count ?? 0,
+      pdfCount: payload.pdf_count ?? 0,
+      documents: (payload.documents ?? []).map((document) => ({
+        name: document.name ?? "",
+        kind: document.kind ?? "",
+      })),
+      drawings: (payload.drawings ?? []).map((drawing) => ({
+        name: drawing.name ?? "",
+        internalCode: drawing.internal_code ?? null,
+        dwgName: drawing.dwg_name ?? null,
+        pdfName: drawing.pdf_name ?? null,
+        pageTotal: drawing.page_total ?? 0,
+      })),
+    };
+  }
+
+  private normalizeFindingGroups(payload: RawJobDetail["finding_groups"]): FindingGroup[] | undefined {
+    if (!payload) {
+      return undefined;
+    }
+
+    return payload.map((group) => ({
+      matchedText: group.matched_text ?? "",
+      count: group.count ?? 0,
+      internalCodes: group.internal_codes ?? [],
+    }));
   }
 }

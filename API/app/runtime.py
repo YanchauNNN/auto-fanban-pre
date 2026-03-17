@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import importlib.util
+import json
 import queue
 import threading
 import uuid
@@ -25,6 +26,7 @@ from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
 from src.pipeline.project_no_inference import infer_project_no_from_path, resolve_project_no
 from src.pipeline.shared_prep import SharedPrepService
+from src.result_views import normalize_user_flags
 
 
 @dataclass(frozen=True)
@@ -615,10 +617,12 @@ class DeliverableApiRuntime:
 
     def _serialize_job_detail(self, job: Job) -> dict[str, Any]:
         payload = self._serialize_job_summary(job)
+        manifest_payload = self._load_json_artifact(job.work_dir / 'manifest.json' if job.work_dir else None)
+        report_payload = self._load_json_artifact(job.artifacts.report_json)
         payload.update({
             'started_at': job.started_at.isoformat() if job.started_at else None,
             'current_file': job.progress.current_file,
-            'flags': job.flags,
+            'flags': normalize_user_flags(job.flags),
             'errors': job.errors,
             'top_wrong_texts': list(job.progress.details.get('top_wrong_texts', []) or []),
             'top_internal_codes': list(job.progress.details.get('top_internal_codes', []) or []),
@@ -626,6 +630,10 @@ class DeliverableApiRuntime:
             'plot_style_key': job.plot_style_key,
             'plot_resource_mode': job.plot_resource_mode,
         })
+        if job.job_type == JobType.DELIVERABLE:
+            payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
+        elif job.job_type == JobType.AUDIT_REPLACE:
+            payload['finding_groups'] = report_payload.get('finding_groups', [])
         return payload
 
     def _serialize_job_artifacts(self, job: Job, *, include_urls: bool = False, job_id: str | None = None) -> dict[str, Any]:
@@ -683,7 +691,7 @@ class DeliverableApiRuntime:
         payload = self._serialize_group_summary(group)
         payload.update({
             'started_at': group.started_at.isoformat() if group.started_at else None,
-            'flags': list(group.flags),
+            'flags': normalize_user_flags(group.flags),
             'errors': list(group.errors),
             'shared_run_id': group.shared_run_id,
             'shared_dir': str(group.shared_dir) if group.shared_dir else None,
@@ -746,6 +754,15 @@ class DeliverableApiRuntime:
             if merged.replaced_dwg is None and child.artifacts.replaced_dwg:
                 merged.replaced_dwg = child.artifacts.replaced_dwg
         return merged
+
+    @staticmethod
+    def _load_json_artifact(path: Path | None) -> dict[str, Any]:
+        if path is None or not Path(path).exists():
+            return {}
+        try:
+            return json.loads(Path(path).read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError):
+            return {}
 
     def _iter_group_children(self, group: TaskGroup) -> list[Job]:
         children: list[Job] = []

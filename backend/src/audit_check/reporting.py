@@ -8,6 +8,7 @@ from typing import Any, cast
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from ..result_views import build_finding_groups
 from .models import AuditFinding
 
 
@@ -37,6 +38,15 @@ def write_report_json(
         "source_filename": source_filename,
         "project_no": project_no,
         **summary,
+        "finding_groups": build_finding_groups(
+            [
+                {
+                    "matched_text": finding.matched_text,
+                    "internal_code": finding.internal_code,
+                }
+                for finding in findings
+            ]
+        ),
         "findings": [
             {
                 "raw_text": finding.raw_text,

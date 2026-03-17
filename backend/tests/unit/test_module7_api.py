@@ -42,6 +42,18 @@ class FakeJobProcessor:
                         "affected_drawings_count": 1,
                         "top_wrong_texts": ["2016", "JD"],
                         "top_internal_codes": ["1234567-JGS01-001"],
+                        "finding_groups": [
+                            {
+                                "matched_text": "2016",
+                                "count": 1,
+                                "internal_codes": ["1234567-JGS01-001"],
+                            },
+                            {
+                                "matched_text": "JD",
+                                "count": 1,
+                                "internal_codes": ["1234567-JGS01-001"],
+                            },
+                        ],
                     },
                     ensure_ascii=False,
                 ),
@@ -62,14 +74,89 @@ class FakeJobProcessor:
 
         package_zip = job.work_dir / "package.zip"
         ied_xlsx = job.work_dir / "ied" / "IED计划.xlsx"
+        drawings_dir = job.work_dir / "output" / "drawings"
+        docs_dir = job.work_dir / "output" / "docs"
         ied_xlsx.parent.mkdir(parents=True, exist_ok=True)
+        drawings_dir.mkdir(parents=True, exist_ok=True)
+        docs_dir.mkdir(parents=True, exist_ok=True)
         package_zip.write_bytes(b"PK\x03\x04test")
         ied_xlsx.write_bytes(b"ied")
+        (drawings_dir / "drawing-001.dwg").write_bytes(b"dwg")
+        (drawings_dir / "drawing-001.pdf").write_bytes(b"pdf")
+        (drawings_dir / "drawing-002.pdf").write_bytes(b"pdf")
+        (docs_dir / "cover.docx").write_text("cover", encoding="utf-8")
+        (docs_dir / "cover.pdf").write_text("cover-pdf", encoding="utf-8")
+        (docs_dir / "design.xlsx").write_text("design", encoding="utf-8")
+        (job.work_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "drawings": [
+                        {
+                            "name": "DRAW001 (20261RS-JGS65-001)",
+                            "type": "single_frame",
+                            "internal_code": "20261RS-JGS65-001",
+                            "pdf_path": str(drawings_dir / "drawing-001.pdf"),
+                            "dwg_path": str(drawings_dir / "drawing-001.dwg"),
+                            "page_total": 1,
+                            "flags": [
+                                "PLOT_WINDOW_USED",
+                                "PLOT_FROM_SOURCE_WINDOW",
+                                "PAPER_SIZE_MISMATCH",
+                                "PAPER_SIZE_AUTO_FIXED",
+                            ],
+                        },
+                        {
+                            "name": "DRAW002 (20261RS-JGS65-002)",
+                            "type": "a4_sheet_set",
+                            "internal_code": "20261RS-JGS65-002",
+                            "pdf_path": str(drawings_dir / "drawing-002.pdf"),
+                            "dwg_path": None,
+                            "page_total": 4,
+                            "flags": ["PLOT_WINDOW_USED"],
+                        },
+                    ],
+                    "deliverable_outputs": {
+                        "dwg_count": 1,
+                        "pdf_count": 2,
+                        "documents": [
+                            {"name": "cover.docx", "kind": "docx"},
+                            {"name": "cover.pdf", "kind": "pdf"},
+                            {"name": "design.xlsx", "kind": "xlsx"},
+                        ],
+                        "drawings": [
+                            {
+                                "name": "DRAW001 (20261RS-JGS65-001)",
+                                "internal_code": "20261RS-JGS65-001",
+                                "dwg_name": "drawing-001.dwg",
+                                "pdf_name": "drawing-001.pdf",
+                                "page_total": 1,
+                            },
+                            {
+                                "name": "DRAW002 (20261RS-JGS65-002)",
+                                "internal_code": "20261RS-JGS65-002",
+                                "dwg_name": None,
+                                "pdf_name": "drawing-002.pdf",
+                                "page_total": 4,
+                            },
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
         job.artifacts.package_zip = package_zip
         job.artifacts.ied_xlsx = ied_xlsx
-        job.artifacts.drawings_dir = job.work_dir / "output" / "drawings"
-        job.artifacts.docs_dir = job.work_dir / "output" / "docs"
+        job.artifacts.drawings_dir = drawings_dir
+        job.artifacts.docs_dir = docs_dir
+        job.flags = [
+            "[DRAW001 (20261RS-JGS65-001)] PLOT_WINDOW_USED",
+            "[DRAW001 (20261RS-JGS65-001)] PLOT_FROM_SOURCE_WINDOW",
+            "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_MISMATCH",
+            "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED",
+        ]
         job.mark_succeeded()
 
 
@@ -448,6 +535,18 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["affected_drawings_count"] == 1
         assert detail["top_wrong_texts"] == ["2016", "JD"]
         assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
+        assert detail["finding_groups"] == [
+            {
+                "matched_text": "2016",
+                "count": 1,
+                "internal_codes": ["1234567-JGS01-001"],
+            },
+            {
+                "matched_text": "JD",
+                "count": 1,
+                "internal_codes": ["1234567-JGS01-001"],
+            },
+        ]
         assert detail["slot_id"] is not None
         assert detail["profile_arg"] is not None
         assert detail["plot_style_key"] == "red_wider"
@@ -507,6 +606,34 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert final_detail["status"] == "succeeded"
         assert final_detail["artifacts"]["package_available"] is True
         assert final_detail["artifacts"]["ied_available"] is True
+        assert final_detail["deliverable_outputs"] == {
+            "dwg_count": 1,
+            "pdf_count": 2,
+            "documents": [
+                {"name": "cover.docx", "kind": "docx"},
+                {"name": "cover.pdf", "kind": "pdf"},
+                {"name": "design.xlsx", "kind": "xlsx"},
+            ],
+            "drawings": [
+                {
+                    "name": "DRAW001 (20261RS-JGS65-001)",
+                    "internal_code": "20261RS-JGS65-001",
+                    "dwg_name": "drawing-001.dwg",
+                    "pdf_name": "drawing-001.pdf",
+                    "page_total": 1,
+                },
+                {
+                    "name": "DRAW002 (20261RS-JGS65-002)",
+                    "internal_code": "20261RS-JGS65-002",
+                    "dwg_name": None,
+                    "pdf_name": "drawing-002.pdf",
+                    "page_total": 4,
+                },
+            ],
+        }
+        assert final_detail["flags"] == [
+            "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED",
+        ]
         assert final_detail["slot_id"] is not None
         assert final_detail["profile_arg"] is not None
         assert final_detail["plot_style_key"] == "red_wider"
@@ -595,6 +722,7 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         detail = _poll_job(client, group_summary["job_id"], timeout_sec=5.0)
         assert detail["is_group"] is True
         assert detail["run_audit_check"] is True
+        assert detail["flags"] == ["[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED"]
         assert len(detail["children"]) == 2
         assert {child["task_role"] for child in detail["children"]} == {
             "deliverable_main",

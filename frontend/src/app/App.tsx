@@ -10,6 +10,7 @@ import {
   QueryClient,
   QueryClientProvider,
   useQuery,
+  useQueries,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -28,6 +29,8 @@ import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspa
 import type {
   ApiAdapter,
   CreateBatchPayload,
+  DeliverableOutputs,
+  FindingGroup,
   JobDetail,
   JobList,
   JobSummary,
@@ -93,6 +96,8 @@ function WorkspacePage() {
 
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
+  const [recentJobsSearch, setRecentJobsSearch] = useState("");
+  const [recentJobsExpanded, setRecentJobsExpanded] = useState(false);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
   const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
@@ -129,6 +134,22 @@ function WorkspacePage() {
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
     [jobsQuery.data?.items],
   );
+  const normalizedRecentJobsSearch = recentJobsSearch.trim().toLowerCase();
+  const filteredJobCards = useMemo(() => {
+    if (!normalizedRecentJobsSearch) {
+      return jobCards;
+    }
+
+    return jobCards.filter((card) => card.title.toLowerCase().includes(normalizedRecentJobsSearch));
+  }, [jobCards, normalizedRecentJobsSearch]);
+  const shouldCollapseRecentJobs = !normalizedRecentJobsSearch && filteredJobCards.length > 4;
+  const visibleJobCards =
+    shouldCollapseRecentJobs && !recentJobsExpanded ? filteredJobCards.slice(0, 4) : filteredJobCards;
+  const hiddenJobCardCount = shouldCollapseRecentJobs ? filteredJobCards.length - 4 : 0;
+
+  useEffect(() => {
+    setRecentJobsExpanded(false);
+  }, [jobsStatusFilter, normalizedRecentJobsSearch]);
 
   useEffect(() => {
     const items = jobsQuery.data?.items;
@@ -380,9 +401,29 @@ function WorkspacePage() {
           })}
         </div>
 
+        <div className={styles.searchRow}>
+          <input
+            aria-label="搜索任务名称"
+            className={styles.searchInput}
+            placeholder="搜索任务名称"
+            type="search"
+            value={recentJobsSearch}
+            onChange={(event) => setRecentJobsSearch(event.target.value)}
+          />
+          {shouldCollapseRecentJobs ? (
+            <button
+              className={styles.collapseToggle}
+              type="button"
+              onClick={() => setRecentJobsExpanded((current) => !current)}
+            >
+              {recentJobsExpanded ? "收起" : `展开其余 ${hiddenJobCardCount} 个`}
+            </button>
+          ) : null}
+        </div>
+
         <div className={styles.jobsPanel}>
-          {jobCards.length > 0 ? (
-            jobCards.map((card) => (
+          {visibleJobCards.length > 0 ? (
+            visibleJobCards.map((card) => (
               <JobCard
                 adapter={adapter}
                 card={card}
@@ -392,7 +433,7 @@ function WorkspacePage() {
             ))
           ) : (
             <div className={styles.emptyPanel}>
-              <p>当前没有任务记录。</p>
+              <p>{normalizedRecentJobsSearch ? "没有匹配的任务。" : "当前没有任务记录。"}</p>
             </div>
           )}
         </div>
@@ -528,7 +569,7 @@ function JobDetailPage() {
 
       {detail ? (
         detail.isGroup ? (
-          <GroupDetailPanel detail={detail} />
+          <GroupDetailPanel adapter={adapter} detail={detail} />
         ) : (
           <SingleJobDetailPanel detail={detail} hasWarnings={hasWarnings} />
         )
@@ -598,17 +639,21 @@ function SingleJobDetailPanel({
             <InfoBlock label="总错误数" value={String(detail.findingsCount)} />
             <InfoBlock label="受影响图纸数" value={String(detail.affectedDrawingsCount)} />
           </div>
-          <div className={styles.columns}>
-            <ListBlock title="前 10 个错误文本" items={detail.topWrongTexts} emptyText="暂无错误文本摘要" />
-            <ListBlock title="前 10 个受影响内部编码" items={detail.topInternalCodes} emptyText="暂无内部编码摘要" />
-          </div>
+          <AuditResultCard
+            affectedDrawingsCount={detail.affectedDrawingsCount}
+            findingGroups={detail.findingGroups}
+            findingsCount={detail.findingsCount}
+          />
         </section>
       ) : null}
 
-      {hasExecutionDiagnostics(detail) ? (
+      {detail.taskKind === "deliverable" ? (
         <section className={styles.detailSection}>
-          <h2>执行诊断</h2>
-          <ExecutionDiagnostics diagnostics={detail} />
+          <h2>出图结果</h2>
+          <DeliverableResultCard
+            outputs={detail.deliverableOutputs}
+            sourceFilename={detail.sourceFilename}
+          />
         </section>
       ) : null}
 
@@ -640,10 +685,24 @@ function SingleJobDetailPanel({
   );
 }
 
-function GroupDetailPanel({ detail }: { detail: JobDetail }) {
+function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: JobDetail }) {
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
+  const childDetailQueries = useQueries({
+    queries: childJobs.map((child) => ({
+      queryKey: ["group-child-detail", child.jobId],
+      queryFn: () => adapter.getJobDetail(child.jobId),
+      refetchInterval: ACTIVE_JOB_STATUSES.includes(child.status as never) ? 3000 : false,
+    })),
+  });
+  const childDetailsById = useMemo(
+    () =>
+      new Map(
+        childJobs.map((child, index) => [child.jobId, childDetailQueries[index]?.data] as const),
+      ),
+    [childDetailQueries, childJobs],
+  );
 
   return (
     <section className={styles.detailPanel}>
@@ -694,14 +753,23 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
                 </div>
                 <StatusPill status={child.status} />
               </div>
-              <p className={styles.jobStage}>{getStageLabel(child.stage, child)}</p>
-              <p className={styles.jobMessage}>{getMessageLabel(child)}</p>
 
-              {hasExecutionDiagnostics(child) ? (
-                <div className={styles.detailSection}>
-                  <ExecutionDiagnostics diagnostics={child} />
-                </div>
-              ) : null}
+              {child.taskKind === "deliverable" ? (
+                <DeliverableResultCard
+                  outputs={childDetailsById.get(child.jobId)?.deliverableOutputs}
+                  sourceFilename={child.sourceFilename}
+                />
+              ) : child.taskKind === "audit_check" ? (
+                <AuditResultCard
+                  affectedDrawingsCount={
+                    childDetailsById.get(child.jobId)?.affectedDrawingsCount ?? child.affectedDrawingsCount
+                  }
+                  findingGroups={childDetailsById.get(child.jobId)?.findingGroups}
+                  findingsCount={childDetailsById.get(child.jobId)?.findingsCount ?? child.findingsCount}
+                />
+              ) : (
+                <p className={styles.muted}>暂无可展示的子任务结果。</p>
+              )}
 
               <div className={styles.childTaskActions}>
                 <Link className={styles.subtaskLink} to={`/jobs/${child.jobId}`}>
@@ -725,33 +793,109 @@ function GroupDetailPanel({ detail }: { detail: JobDetail }) {
   );
 }
 
-function ExecutionDiagnostics({
-  diagnostics,
+function DeliverableResultCard({
+  outputs,
+  sourceFilename,
 }: {
-  diagnostics: Pick<
-    JobSummary,
-    | "plotStyleKey"
-    | "plotResourceMode"
-    | "slotId"
-    | "cadVersion"
-    | "accoreconsoleExe"
-    | "profileArg"
-    | "pc3Path"
-    | "pmpPath"
-    | "ctbPath"
-  >;
+  outputs: DeliverableOutputs | undefined;
+  sourceFilename: string;
 }) {
+  if (!outputs) {
+    return <p className={styles.muted}>正在整理出图结果。</p>;
+  }
+
   return (
-    <div className={styles.detailGrid}>
-      <InfoBlock label="打印样式" value={diagnostics.plotStyleKey ?? "-"} />
-      <InfoBlock label="资源模式" value={diagnostics.plotResourceMode ?? "-"} />
-      <InfoBlock label="Slot" value={diagnostics.slotId ?? "-"} />
-      <InfoBlock label="CAD 版本" value={diagnostics.cadVersion ?? "-"} />
-      <InfoBlock label="AcCoreConsole" value={diagnostics.accoreconsoleExe ?? "-"} />
-      <InfoBlock label="Profile ARG" value={diagnostics.profileArg ?? "-"} />
-      <InfoBlock label="PC3 路径" value={diagnostics.pc3Path ?? "-"} />
-      <InfoBlock label="PMP 路径" value={diagnostics.pmpPath ?? "-"} />
-      <InfoBlock label="CTB 路径" value={diagnostics.ctbPath ?? "-"} />
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="DWG 数量" value={String(outputs.dwgCount)} />
+        <InfoBlock label="PDF 数量" value={String(outputs.pdfCount)} />
+        <InfoBlock label="文档数量" value={String(outputs.documents.length)} />
+      </div>
+
+      <div className={styles.resultSectionBlock}>
+        <h3>拆图结果</h3>
+        {outputs.drawings.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {outputs.drawings.map((drawing) => (
+              <div className={styles.outputCard} key={drawing.name || drawing.internalCode || sourceFilename}>
+                <strong>{drawing.internalCode ?? drawing.name ?? sourceFilename}</strong>
+                <span>{drawing.name || sourceFilename}</span>
+                <ul className={styles.outputMetaList}>
+                  <li>DWG：{drawing.dwgName ?? "-"}</li>
+                  <li>PDF：{drawing.pdfName ?? "-"}</li>
+                  <li>页数：{formatPageTotal(drawing.pageTotal)}</li>
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>当前没有拆图结果。</p>
+        )}
+      </div>
+
+      <div className={styles.resultSectionBlock}>
+        <h3>文档结果</h3>
+        {outputs.documents.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {outputs.documents.map((document) => (
+              <div className={styles.documentCard} key={document.name}>
+                <strong>{document.name}</strong>
+                <span>{document.kind.toUpperCase() || "文档"}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>当前没有文档产物。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AuditResultCard({
+  findingsCount,
+  affectedDrawingsCount,
+  findingGroups,
+}: {
+  findingsCount: number;
+  affectedDrawingsCount: number;
+  findingGroups: FindingGroup[] | undefined;
+}) {
+  const groups = findingGroups ?? [];
+
+  return (
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="总错误数" value={String(findingsCount)} />
+        <InfoBlock label="受影响图纸数" value={String(affectedDrawingsCount)} />
+      </div>
+
+      <div className={styles.resultSectionBlock}>
+        <h3>错误与图纸编号</h3>
+        {groups.length > 0 ? (
+          <div className={styles.findingGroupList}>
+            {groups.map((group) => (
+              <div className={styles.findingGroupCard} key={group.matchedText}>
+                <div className={styles.findingGroupHeader}>
+                  <strong>{group.matchedText}</strong>
+                  <span className={styles.jobMetric}>命中 {group.count}</span>
+                </div>
+                <div className={styles.findingCodeList}>
+                  {group.internalCodes.map((internalCode) => (
+                    <span className={styles.findingCodePill} key={`${group.matchedText}-${internalCode}`}>
+                      {internalCode}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : findingsCount > 0 ? (
+          <p className={styles.muted}>正在整理纠错结果。</p>
+        ) : (
+          <p className={styles.muted}>未发现错误。</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -886,33 +1030,6 @@ function renderArtifactButtons(job: JobSummary) {
   ];
 }
 
-function hasExecutionDiagnostics(
-  job: Pick<
-    JobSummary,
-    | "plotStyleKey"
-    | "plotResourceMode"
-    | "slotId"
-    | "cadVersion"
-    | "accoreconsoleExe"
-    | "profileArg"
-    | "pc3Path"
-    | "pmpPath"
-    | "ctbPath"
-  >,
-) {
-  return Boolean(
-    job.plotStyleKey ||
-      job.plotResourceMode ||
-      job.slotId ||
-      job.cadVersion ||
-      job.accoreconsoleExe ||
-      job.profileArg ||
-      job.pc3Path ||
-      job.pmpPath ||
-      job.ctbPath,
-  );
-}
-
 function formatTimestamp(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -928,4 +1045,11 @@ function formatTimestamp(value: string) {
     second: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatPageTotal(pageTotal: number) {
+  if (!pageTotal || pageTotal < 1) {
+    return "-";
+  }
+  return `${pageTotal} 页`;
 }

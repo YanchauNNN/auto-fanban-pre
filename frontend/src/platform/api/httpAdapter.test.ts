@@ -33,6 +33,20 @@ describe("HttpAdapter", () => {
           affected_drawings_count: 0,
           top_wrong_texts: [],
           top_internal_codes: [],
+          deliverable_outputs: {
+            dwg_count: 1,
+            pdf_count: 1,
+            documents: [{ name: "目录.xlsx", kind: "xlsx" }],
+            drawings: [
+              {
+                name: "A01",
+                internal_code: "20261RS-JGS65-001",
+                dwg_name: "A01.dwg",
+                pdf_name: "A01.pdf",
+                page_total: 2,
+              },
+            ],
+          },
           retry_available: false,
           artifacts: {
             package_available: true,
@@ -61,6 +75,11 @@ describe("HttpAdapter", () => {
     expect(detail.artifacts.iedDownloadUrl).toBe(
       "http://127.0.0.1:8000/api/jobs/job-1/download/ied",
     );
+    expect(detail.deliverableOutputs?.drawings[0]).toMatchObject({
+      internalCode: "20261RS-JGS65-001",
+      dwgName: "A01.dwg",
+      pageTotal: 2,
+    });
   });
 
   it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {

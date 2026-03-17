@@ -55,6 +55,32 @@ export type JobArtifacts = {
   replacedDwgDownloadUrl?: string | null;
 };
 
+export type DeliverableDrawingOutput = {
+  name: string;
+  internalCode: string | null;
+  dwgName: string | null;
+  pdfName: string | null;
+  pageTotal: number;
+};
+
+export type DeliverableDocumentOutput = {
+  name: string;
+  kind: string;
+};
+
+export type DeliverableOutputs = {
+  dwgCount: number;
+  pdfCount: number;
+  documents: DeliverableDocumentOutput[];
+  drawings: DeliverableDrawingOutput[];
+};
+
+export type FindingGroup = {
+  matchedText: string;
+  count: number;
+  internalCodes: string[];
+};
+
 export type JobSummary = {
   jobId: string;
   batchId: string | null;
@@ -99,6 +125,8 @@ export type JobDetail = JobSummary & {
   topWrongTexts: string[];
   topInternalCodes: string[];
   sharedDir?: string | null;
+  deliverableOutputs?: DeliverableOutputs;
+  findingGroups?: FindingGroup[];
 };
 
 export type JobList = {
