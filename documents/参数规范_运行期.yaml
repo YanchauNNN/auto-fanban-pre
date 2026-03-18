@@ -110,7 +110,7 @@ runtime_options:
 
   pdf_engine:
     preferred: { type: enum, default: "office_com", desc: "PDF 引擎优先级：office_com/libreoffice" }
-    fallback:  { type: enum, default: "libreoffice", desc: "PDF 引擎兜底" }
+    fallback:  { type: enum, default: "disabled", desc: "PDF 引擎兜底；当前部署默认禁用 LibreOffice 回退" }
 
   # --------------------------------------------------------------------------
   # 4) 纠错运行规则

@@ -1282,6 +1282,10 @@ class CADDXFExecutor:
         if isinstance(pdf_path_raw, str) and pdf_path_raw:
             sheet_set.pdf_path = Path(pdf_path_raw)
 
+        dwg_path_raw = item.get("dwg_path")
+        if isinstance(dwg_path_raw, str) and dwg_path_raw:
+            sheet_set.dwg_path = Path(dwg_path_raw)
+
         page_count = int(item.get("page_count", 0) or 0)
         if page_count > 0:
             sheet_set.generated_page_count = page_count

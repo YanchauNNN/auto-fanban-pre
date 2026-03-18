@@ -31,7 +31,7 @@ def main() -> int:
     if str(BACKEND_ROOT) not in sys.path:
         sys.path.insert(0, str(BACKEND_ROOT))
 
-    from src.deploy import build_terminal_deploy_package, ensure_prereq_installers
+    from src.deploy import ensure_prereq_installers, publish_terminal_deploy_artifacts
 
     parser = argparse.ArgumentParser(description="?????????")
     parser.add_argument(
@@ -55,6 +55,16 @@ def main() -> int:
         help="???VC++ 2015-2022 x64 ???????",
     )
     parser.add_argument(
+        "--python-installer",
+        default=os.environ.get("FANBAN_PYTHON_INSTALLER", ""),
+        help="???Python 3.13 x64 ???????",
+    )
+    parser.add_argument(
+        "--nssm-archive",
+        default=os.environ.get("FANBAN_NSSM_ARCHIVE", ""),
+        help="???NSSM ???????ZIP?",
+    )
+    parser.add_argument(
         "--url-rewrite-installer",
         default=os.environ.get("FANBAN_URL_REWRITE_INSTALLER", ""),
         help="???IIS URL Rewrite ???????",
@@ -75,14 +85,18 @@ def main() -> int:
         download_root=installers_root,
         dotnet_installer=_resolve_optional_path(args.dotnet_installer),
         vc_redist_installer=_resolve_optional_path(args.vc_redist_installer),
+        python_installer=_resolve_optional_path(args.python_installer),
+        nssm_archive=_resolve_optional_path(args.nssm_archive),
         url_rewrite_installer=_resolve_optional_path(args.url_rewrite_installer),
         arr_installer=_resolve_optional_path(args.arr_installer),
     )
-    build_terminal_deploy_package(
+    publish_terminal_deploy_artifacts(
         repo_root=REPO_ROOT,
         output_root=output_root,
         dotnet_installer=installers.dotnet,
         vc_redist_installer=installers.vc_redist,
+        python_installer=installers.python,
+        nssm_archive=installers.nssm,
         url_rewrite_installer=installers.url_rewrite,
         arr_installer=installers.arr,
     )

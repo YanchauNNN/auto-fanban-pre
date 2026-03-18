@@ -96,6 +96,8 @@ class TestRuntimeConfig:
         """测试默认配置"""
         assert runtime_config.concurrency.max_workers == 2
         assert runtime_config.timeouts.oda_convert_sec == 600
+        assert runtime_config.pdf_engine.preferred == "office_com"
+        assert runtime_config.pdf_engine.fallback == "disabled"
 
     def test_get_job_dir(self, runtime_config: RuntimeConfig):
         """测试获取任务目录"""

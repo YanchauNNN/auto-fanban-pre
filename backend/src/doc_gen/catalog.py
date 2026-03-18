@@ -374,8 +374,8 @@ class CatalogGenerator(ICatalogGenerator):
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
-            excel.Visible = False
-            excel.DisplayAlerts = False
+            PDFExporter._prepare_excel_for_headless_run(excel)
+            PDFExporter._clear_windows_zone_identifier(xlsx_path)
             workbook = excel.Workbooks.Open(str(xlsx_path.absolute()))
             worksheet = workbook.Worksheets(1)
             row_range = worksheet.Rows(f"{start_row}:{last_row}")
@@ -500,8 +500,8 @@ class CatalogGenerator(ICatalogGenerator):
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
-            excel.Visible = False
-            excel.DisplayAlerts = False
+            PDFExporter._prepare_excel_for_headless_run(excel)
+            PDFExporter._clear_windows_zone_identifier(xlsx_path)
             wb = excel.Workbooks.Open(str(xlsx_path.absolute()))
             ws = wb.Worksheets(1)
             page_count = int(ws.HPageBreaks.Count) + 1

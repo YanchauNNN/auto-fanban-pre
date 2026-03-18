@@ -110,13 +110,13 @@ class FakeJobProcessor:
                             "type": "a4_sheet_set",
                             "internal_code": "20261RS-JGS65-002",
                             "pdf_path": str(drawings_dir / "drawing-002.pdf"),
-                            "dwg_path": None,
+                            "dwg_path": str(drawings_dir / "drawing-002.dwg"),
                             "page_total": 4,
                             "flags": ["PLOT_WINDOW_USED"],
                         },
                     ],
                     "deliverable_outputs": {
-                        "dwg_count": 1,
+                        "dwg_count": 2,
                         "pdf_count": 2,
                         "documents": [
                             {"name": "cover.docx", "kind": "docx"},
@@ -134,7 +134,7 @@ class FakeJobProcessor:
                             {
                                 "name": "DRAW002 (20261RS-JGS65-002)",
                                 "internal_code": "20261RS-JGS65-002",
-                                "dwg_name": None,
+                                "dwg_name": "drawing-002.dwg",
                                 "pdf_name": "drawing-002.pdf",
                                 "page_total": 4,
                             },
@@ -607,7 +607,7 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert final_detail["artifacts"]["package_available"] is True
         assert final_detail["artifacts"]["ied_available"] is True
         assert final_detail["deliverable_outputs"] == {
-            "dwg_count": 1,
+            "dwg_count": 2,
             "pdf_count": 2,
             "documents": [
                 {"name": "cover.docx", "kind": "docx"},
@@ -625,7 +625,7 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
                 {
                     "name": "DRAW002 (20261RS-JGS65-002)",
                     "internal_code": "20261RS-JGS65-002",
-                    "dwg_name": None,
+                    "dwg_name": "drawing-002.dwg",
                     "pdf_name": "drawing-002.pdf",
                     "page_total": 4,
                 },

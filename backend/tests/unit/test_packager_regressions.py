@@ -140,6 +140,7 @@ def test_generate_manifest_includes_deliverable_outputs_and_filtered_flags(tmp_p
         pages=[master_page],
         master_page=master_page,
         flags=["PLOT_WINDOW_USED"],
+        dwg_path=tmp_path / "output" / "drawings" / "drawing-002.dwg",
         pdf_path=tmp_path / "output" / "drawings" / "drawing-002.pdf",
     )
 
@@ -157,8 +158,9 @@ def test_generate_manifest_includes_deliverable_outputs_and_filtered_flags(tmp_p
     assert manifest["flags"] == ["[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED"]
     assert manifest["drawings"][0]["flags"] == ["PAPER_SIZE_AUTO_FIXED"]
     assert manifest["drawings"][1]["flags"] == []
+    assert manifest["drawings"][1]["dwg_path"] == str(tmp_path / "output" / "drawings" / "drawing-002.dwg")
     assert manifest["deliverable_outputs"] == {
-        "dwg_count": 1,
+        "dwg_count": 2,
         "pdf_count": 2,
         "documents": [
             {"name": "cover.docx", "kind": "docx"},
@@ -175,7 +177,7 @@ def test_generate_manifest_includes_deliverable_outputs_and_filtered_flags(tmp_p
             {
                 "name": "DRAW002ACFC (20261RS-JGS65-002)",
                 "internal_code": "20261RS-JGS65-002",
-                "dwg_name": None,
+                "dwg_name": "drawing-002.dwg",
                 "pdf_name": "drawing-002.pdf",
                 "page_total": 4,
             },

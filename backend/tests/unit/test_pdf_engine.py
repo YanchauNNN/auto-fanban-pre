@@ -62,6 +62,59 @@ def test_export_docx_missing_file_raises(temp_dir: Path) -> None:
         exporter.export_docx_to_pdf(temp_dir / "missing.docx", temp_dir / "x.pdf")
 
 
+def test_export_xlsx_does_not_fallback_when_disabled(monkeypatch, temp_dir: Path) -> None:
+    input_xlsx = temp_dir / "input.xlsx"
+    input_xlsx.write_bytes(b"dummy")
+    output_pdf = temp_dir / "output.pdf"
+    exporter = PDFExporter(preferred_engine="office_com")
+    exporter.fallback = "disabled"
+
+    called = {"fallback": False}
+
+    def fake_com(xlsx_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+        raise RuntimeError("excel com boom")
+
+    def fake_libreoffice(input_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+        called["fallback"] = True
+        raise ExportError("should not be called")
+
+    monkeypatch.setattr(exporter, "_export_xlsx_via_com", fake_com)
+    monkeypatch.setattr(exporter, "_export_via_libreoffice", fake_libreoffice)
+
+    with pytest.raises(ExportError) as exc_info:
+        exporter.export_xlsx_to_pdf(input_xlsx, output_pdf)
+
+    assert "excel com boom" in str(exc_info.value)
+    assert called["fallback"] is False
+
+
+def test_export_xlsx_reports_original_com_error_when_fallback_also_fails(
+    monkeypatch,
+    temp_dir: Path,
+) -> None:
+    input_xlsx = temp_dir / "input.xlsx"
+    input_xlsx.write_bytes(b"dummy")
+    output_pdf = temp_dir / "output.pdf"
+    exporter = PDFExporter(preferred_engine="office_com")
+    exporter.fallback = "libreoffice"
+
+    def fake_com(xlsx_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+        raise RuntimeError("excel com boom")
+
+    def fake_libreoffice(input_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+        raise ExportError("libreoffice missing")
+
+    monkeypatch.setattr(exporter, "_export_xlsx_via_com", fake_com)
+    monkeypatch.setattr(exporter, "_export_via_libreoffice", fake_libreoffice)
+
+    with pytest.raises(ExportError) as exc_info:
+        exporter.export_xlsx_to_pdf(input_xlsx, output_pdf)
+
+    message = str(exc_info.value)
+    assert "excel com boom" in message
+    assert "libreoffice missing" in message
+
+
 class _FakeWordOptions:
     def __init__(self) -> None:
         self.SaveNormalPrompt = True
@@ -83,6 +136,19 @@ class _FakeWordApp:
 class _FakeWordDoc:
     def __init__(self) -> None:
         self.Saved = False
+
+
+class _FakeExcelApp:
+    def __init__(self) -> None:
+        self.Visible = True
+        self.DisplayAlerts = True
+        self.AskToUpdateLinks = True
+        self.EnableEvents = True
+        self.ScreenUpdating = True
+        self.DisplayStatusBar = True
+        self.UserControl = True
+        self.Interactive = True
+        self.AutomationSecurity = 1
 
 
 def test_prepare_word_for_headless_run_suppresses_normal_prompt() -> None:
@@ -112,3 +178,35 @@ def test_mark_word_document_saved() -> None:
     exporter._mark_word_document_saved(doc)
 
     assert doc.Saved is True
+
+
+def test_prepare_excel_for_headless_run_disables_interactive_features() -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    excel = _FakeExcelApp()
+
+    exporter._prepare_excel_for_headless_run(excel)
+
+    assert excel.Visible is False
+    assert excel.DisplayAlerts is False
+    assert excel.AskToUpdateLinks is False
+    assert excel.EnableEvents is False
+    assert excel.ScreenUpdating is False
+    assert excel.DisplayStatusBar is False
+    assert excel.UserControl is False
+    assert excel.Interactive is False
+    assert excel.AutomationSecurity == 3
+
+
+def test_prepare_excel_path_for_com_creates_ascii_temp_copy(temp_dir: Path) -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    source = temp_dir / "目录模板文件.xlsx"
+    source.write_bytes(b"excel-bytes")
+
+    working_copy, cleanup_dir = exporter._prepare_excel_path_for_com(
+        source,
+        label="common_catalog",
+    )
+
+    assert working_copy.name == "common_catalog.xlsx"
+    assert working_copy.read_bytes() == b"excel-bytes"
+    assert cleanup_dir.exists()

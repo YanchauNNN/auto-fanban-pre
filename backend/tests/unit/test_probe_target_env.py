@@ -69,3 +69,52 @@ def test_probe_target_env_deep_pdf_export_uses_backend_pdf_exporter() -> None:
 
     assert "from src.doc_gen.pdf_engine import PDFExporter" in script_text
     assert "backend-runtime" in script_text
+    assert "python_traceback.txt" in script_text
+    assert "preserved_temp_dir" in script_text
+
+
+def test_probe_target_env_prefers_package_python_runtime() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "python-runtime\\python.exe" in script_text
+    assert 'Label "package_runtime"' in script_text
+
+
+def test_probe_target_env_keeps_excel_failure_evidence_and_checks_bundled_nssm() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "excel_probe_failure.txt" in script_text
+    assert "exception_hresult" in script_text
+    assert "diagnostics_path" in script_text
+    assert "install\\nssm\\nssm.exe" in script_text
+    assert "deploy_bundle" in script_text
+
+
+def test_probe_target_env_can_reuse_quick_probe_baseline_for_deep_checks() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert '[string]$ReuseQuickProbeJson = ""' in script_text
+    assert "Import-ProbeBaseline" in script_text
+    assert "reused_quick_probe_json" in script_text
+    assert "复用 quick 探针结果" in script_text
+
+
+def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'fanban_excel_' in script_text
+    assert "Unblock-File -LiteralPath $workingCopy" in script_text
+    assert '$app.AskToUpdateLinks = $false' in script_text
+    assert '$app.EnableEvents = $false' in script_text

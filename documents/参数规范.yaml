@@ -28,7 +28,7 @@ enums:
   cover_variant: ["通用", "压力容器", "核安全设备"]
 
   # PDF 引擎
-  pdf_engine: ["office_com", "libreoffice"]
+  pdf_engine: ["office_com", "libreoffice", "disabled"]
   module5_pdf_engine: ["python", "autocad_com", "both"]
 
   # IED 变更标记

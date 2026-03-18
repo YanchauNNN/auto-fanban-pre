@@ -158,6 +158,8 @@ class Packager(IPackager):
                     "page_total": ss.generated_page_count or ss.page_total,
                     "internal_code": master_tb.get("internal_code"),
                     "external_code": master_tb.get("external_code"),
+                    "pdf_path": str(ss.pdf_path) if ss.pdf_path else None,
+                    "dwg_path": str(ss.dwg_path) if ss.dwg_path else None,
                     "flags": normalize_user_flags(ss.flags),
                 }
             )

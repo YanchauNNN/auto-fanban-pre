@@ -1,19 +1,36 @@
 ﻿from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
+PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
+STALE_RUNTIME_PTH_FILES = ("_auto_fanban.pth", "a1_coverage.pth")
+PACKAGE_MANIFEST = "package-manifest.json"
+DELTA_DIR_NAME = "_delta"
+DELTA_MANIFEST = "delta-manifest.json"
+DELTA_OVERWRITE_LIST = "覆盖清单.txt"
+DELTA_DELETE_LIST = "删除清单.txt"
+DELTA_USAGE = "使用说明.txt"
 
 
 @dataclass(frozen=True)
 class CopyPlanEntry:
     source: Path
     destination: Path
+
+
+@dataclass(frozen=True)
+class DeployArtifacts:
+    full_root: Path
+    delta_root: Path
 
 
 def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
@@ -26,8 +43,8 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             Path("backend-runtime") / "backend" / "pyproject.toml",
         ),
         CopyPlanEntry(
-            repo_root / "backend" / ".venv",
-            Path("backend-runtime") / "backend" / ".venv",
+            repo_root / "backend" / ".venv" / "Lib" / "site-packages",
+            PYTHON_PACKAGES_DEST,
         ),
         CopyPlanEntry(
             repo_root
@@ -73,7 +90,14 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
     if entry.source.is_dir():
         if target.exists():
             shutil.rmtree(target)
-        shutil.copytree(entry.source, target)
+        ignore = None
+        if entry.destination != PYTHON_PACKAGES_DEST:
+            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+        shutil.copytree(
+            entry.source,
+            target,
+            ignore=ignore,
+        )
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(entry.source, target)
@@ -85,11 +109,196 @@ def _write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding=encoding, newline="\n")
 
 
+def _sanitize_python_packages(output_root: Path) -> None:
+    site_packages_root = output_root / PYTHON_PACKAGES_DEST
+    if not site_packages_root.exists():
+        return
+    for filename in STALE_RUNTIME_PTH_FILES:
+        target = site_packages_root / filename
+        if target.exists():
+            target.unlink()
+
+
+def _timestamp_utc() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _iter_package_files(package_root: Path) -> list[Path]:
+    if not package_root.exists():
+        return []
+    return sorted(path for path in package_root.rglob("*") if path.is_file())
+
+
+def _collect_package_files(package_root: Path | None) -> dict[str, dict[str, object]]:
+    if package_root is None or not package_root.exists():
+        return {}
+
+    files: dict[str, dict[str, object]] = {}
+    for path in _iter_package_files(package_root):
+        rel_path = path.relative_to(package_root).as_posix()
+        files[rel_path] = {
+            "path": rel_path,
+            "size": path.stat().st_size,
+            "sha256": _hash_file(path),
+        }
+    return files
+
+
+def _write_json(path: Path, payload: object) -> None:
+    _write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def write_package_manifest(package_root: Path, *, package_kind: str) -> dict[str, object]:
+    file_map = _collect_package_files(package_root)
+    file_map.pop(PACKAGE_MANIFEST, None)
+    manifest = {
+        "generated_at_utc": _timestamp_utc(),
+        "package_kind": package_kind,
+        "file_count": len(file_map),
+        "files": [file_map[key] for key in sorted(file_map)],
+    }
+    _write_json(package_root / PACKAGE_MANIFEST, manifest)
+    return manifest
+
+
+def _copy_relative_file(source_root: Path, destination_root: Path, rel_path: str) -> None:
+    source = source_root / Path(rel_path)
+    target = destination_root / Path(rel_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def _write_delta_text_list(path: Path, header: str, items: list[str], empty_message: str) -> None:
+    lines = [header, ""]
+    if items:
+        lines.extend(items)
+    else:
+        lines.append(empty_message)
+    _write_text(path, "\n".join(lines) + "\n")
+
+
+def _is_delta_relevant_path(rel_path: str) -> bool:
+    path = Path(rel_path)
+    if "__pycache__" in path.parts:
+        return False
+    if path.suffix.lower() in {".pyc", ".pyo"}:
+        return False
+    return True
+
+
+def build_terminal_deploy_delta_package(
+    *,
+    baseline_root: Path | None,
+    target_root: Path,
+    delta_root: Path,
+    baseline_label: str,
+    target_label: str,
+) -> Path:
+    baseline_exists = baseline_root is not None and baseline_root.exists()
+    baseline_files = _collect_package_files(baseline_root) if baseline_exists else {}
+    target_files = _collect_package_files(target_root)
+
+    baseline_files.pop(PACKAGE_MANIFEST, None)
+    target_files.pop(PACKAGE_MANIFEST, None)
+    baseline_files = {path: meta for path, meta in baseline_files.items() if _is_delta_relevant_path(path)}
+    target_files = {path: meta for path, meta in target_files.items() if _is_delta_relevant_path(path)}
+
+    if delta_root.exists():
+        shutil.rmtree(delta_root)
+    delta_root.mkdir(parents=True, exist_ok=True)
+
+    added_files: list[str] = []
+    modified_files: list[str] = []
+    deleted_files: list[str] = []
+
+    if baseline_exists:
+        added_files = sorted(path for path in target_files if path not in baseline_files)
+        modified_files = sorted(
+            path
+            for path in target_files
+            if path in baseline_files and target_files[path]["sha256"] != baseline_files[path]["sha256"]
+        )
+        deleted_files = sorted(path for path in baseline_files if path not in target_files)
+        for rel_path in added_files + modified_files:
+            _copy_relative_file(target_root, delta_root, rel_path)
+
+    unchanged_files = 0
+    if baseline_exists:
+        unchanged_files = sum(
+            1
+            for path in target_files
+            if path in baseline_files and target_files[path]["sha256"] == baseline_files[path]["sha256"]
+        )
+
+    delta_meta_dir = delta_root / DELTA_DIR_NAME
+    delta_meta_dir.mkdir(parents=True, exist_ok=True)
+
+    delta_manifest = {
+        "generated_at_utc": _timestamp_utc(),
+        "baseline_exists": baseline_exists,
+        "baseline_package_root": baseline_label,
+        "target_package_root": target_label,
+        "added_files": added_files,
+        "modified_files": modified_files,
+        "deleted_files": deleted_files,
+        "copied_file_count": len(added_files) + len(modified_files),
+        "unchanged_file_count": unchanged_files,
+        "message": (
+            "未检测到上一版 full 包基线；首次部署或基线不确定时请使用 full 包。"
+            if not baseline_exists
+            else "delta 包只适用于当前离线机已匹配上一版 full 包基线的场景。"
+        ),
+    }
+    _write_json(delta_meta_dir / DELTA_MANIFEST, delta_manifest)
+
+    _write_delta_text_list(
+        delta_meta_dir / DELTA_OVERWRITE_LIST,
+        "# 覆盖清单",
+        added_files + modified_files,
+        "无需要覆盖的文件。",
+    )
+    _write_delta_text_list(
+        delta_meta_dir / DELTA_DELETE_LIST,
+        "# 删除清单",
+        deleted_files,
+        "无需要删除的文件。",
+    )
+
+    usage_lines = [
+        "# 使用说明",
+        "",
+        "1. 当前 full 包输出目录为: " + target_label,
+        "2. 当前 delta 包只包含需要覆盖到离线部署机的新增/修改文件。",
+        "3. 覆盖完成后，再按 `_delta/删除清单.txt` 删除旧文件。",
+        "4. 只有当离线机当前内容匹配上一版 full 包基线时，才可直接使用 delta 包。",
+    ]
+    if not baseline_exists:
+        usage_lines.extend(
+            [
+                "5. 当前未检测到上一版 full 包基线。",
+                "6. 本次请优先使用 full 包，不要只拷 delta 包。",
+            ]
+        )
+    _write_text(delta_meta_dir / DELTA_USAGE, "\n".join(usage_lines) + "\n")
+    write_package_manifest(delta_root, package_kind="delta")
+    return delta_root
+
+
 def _write_support_files(
     output_root: Path,
     *,
     dotnet_installer: Path | None,
     vc_redist_installer: Path | None,
+    python_installer: Path | None,
+    nssm_archive: Path | None,
     url_rewrite_installer: Path | None,
     arr_installer: Path | None,
 ) -> None:
@@ -104,7 +313,7 @@ def _write_support_files(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $root "backend-runtime\backend\.venv\Scripts\python.exe"
+$python = Join-Path $root "python-runtime\python.exe"
 $runtimeEnv = Join-Path $PSScriptRoot "runtime.env.ps1"
 
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
@@ -115,9 +324,9 @@ if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
     . $runtimeEnv
 }
 
-Push-Location $root
+Push-Location (Join-Path $root "backend-runtime")
 try {
-    & $python -m uvicorn API.app.main:create_app --factory --host $Host --port $Port
+    & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $Host --port $Port
 } finally {
     Pop-Location
 }
@@ -160,7 +369,7 @@ $runtimeEnv = Join-Path $PSScriptRoot "runtime.env.ps1"
 
 New-Item -ItemType Directory -Path (Join-Path $root "logs") -Force | Out-Null
 
-Write-Host "[1/4] 检查并安装运行时依赖..."
+Write-Host "[1/4] 校验并补齐运行时依赖..."
 & (Join-Path $root "install\install_runtime_prereqs.ps1")
 
 Write-Host "[2/4] 初始化 storage 目录..."
@@ -204,15 +413,32 @@ Write-Host ("已生成运行环境文件: " + $runtimeEnv)
 
     deep_check_terminal = r'''param(
     [string]$StorageRoot = "",
-    [int]$Port = 8000
+    [int]$Port = 8000,
+    [switch]$ForceFullProbe
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $probeJson = Join-Path $root "logs\probe_target_env.deep.json"
+$quickProbeJson = Join-Path $root "logs\probe_target_env.json"
+$probeArgs = @{
+    OutJson = $probeJson
+    RepoRoot = $root
+    Port = $Port
+    StorageRoot = $StorageRoot
+    OfficeProbeMode = "deep"
+}
 
-Write-Host "开始执行深度环境检查..."
-& (Join-Path $PSScriptRoot "probe_target_env.ps1") -OutJson $probeJson -RepoRoot $root -Port $Port -StorageRoot $StorageRoot -OfficeProbeMode deep
+if ($ForceFullProbe) {
+    Write-Host "开始执行深度环境检查（完整重跑模式）..."
+} elseif (Test-Path -LiteralPath $quickProbeJson -PathType Leaf) {
+    Write-Host ("开始执行深度环境检查（复用 quick 探针结果）: " + $quickProbeJson)
+    $probeArgs.ReuseQuickProbeJson = $quickProbeJson
+} else {
+    Write-Host "未找到 quick 探针结果，将执行完整 deep 探针..."
+}
+
+& (Join-Path $PSScriptRoot "probe_target_env.ps1") @probeArgs
 Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 '''
     _write_text(output_root / "scripts" / "deep_check_terminal.ps1", deep_check_terminal)
@@ -250,6 +476,12 @@ try {
 
     install_runtime = r'''$ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+$packageRoot = Split-Path -Parent $PSScriptRoot
+$pythonRuntimeDir = Join-Path $packageRoot "python-runtime"
+$pythonExe = Join-Path $pythonRuntimeDir "python.exe"
+$pythonPackagesSeed = Join-Path $packageRoot "python-packages\Lib\site-packages"
+$nssmInstallDir = Join-Path $root "nssm"
+$nssmExe = Join-Path $nssmInstallDir "nssm.exe"
 
 function Get-DotNetRelease {
     $keys = @(
@@ -295,8 +527,143 @@ function Get-VcRuntimeInfo {
     }
 }
 
+function Test-PackagePythonInstalled {
+    param([string]$PythonPath)
+
+    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        return $false
+    }
+    try {
+        & $PythonPath --version | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Test-NssmReady {
+    param([string]$NssmPath)
+
+    return (Test-Path -LiteralPath $NssmPath -PathType Leaf)
+}
+
+function Expand-PackagePythonRuntime {
+    param(
+        [string]$ArchivePath,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
+        Write-Warning "Python 3.13 离线运行时包不存在，请手工补充。"
+        return
+    }
+
+    if (Test-Path -LiteralPath $TargetDir -PathType Container) {
+        Remove-Item -LiteralPath $TargetDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+    Write-Host ("解压离线 Python 运行时: " + $ArchivePath)
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $TargetDir -Force
+}
+
+function Install-BundledNssm {
+    param(
+        [string]$ArchivePath,
+        [string]$TargetDir
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ArchivePath) -or -not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
+        throw "部署包缺少 NSSM 离线压缩包，请检查 install\\nssm。"
+    }
+
+    $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban_nssm_" + [guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
+
+        Write-Host ("解压 NSSM 离线包: " + $ArchivePath)
+        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $extractRoot -Force
+
+        $sourceExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter "nssm.exe" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "[\\/](win64|amd64)[\\/]" } |
+            Select-Object -First 1
+        if ($null -eq $sourceExe) {
+            $sourceExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter "nssm.exe" -File -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+        }
+        if ($null -eq $sourceExe) {
+            throw "NSSM 压缩包中未找到 nssm.exe。"
+        }
+
+        Copy-Item -LiteralPath $sourceExe.FullName -Destination (Join-Path $TargetDir "nssm.exe") -Force
+    } finally {
+        if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Enable-EmbeddedPythonSitePackages {
+    param([string]$PythonRuntimeRoot)
+
+    $pthFile = Get-ChildItem -LiteralPath $PythonRuntimeRoot -Filter "python*._pth" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $pthFile) {
+        throw "未找到嵌入式 Python 的 ._pth 文件。"
+    }
+
+    $existing = @()
+    if (Test-Path -LiteralPath $pthFile.FullName -PathType Leaf) {
+        $existing = @(Get-Content -LiteralPath $pthFile.FullName -ErrorAction SilentlyContinue)
+    }
+
+    $filtered = @()
+    foreach ($line in $existing) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed)) {
+            continue
+        }
+        if ($trimmed -eq "#import site" -or $trimmed -eq "import site") {
+            continue
+        }
+        if ($trimmed -eq "Lib" -or $trimmed -eq "Lib\\site-packages") {
+            continue
+        }
+        $filtered += $line
+    }
+
+    $updated = @($filtered + "Lib" + "Lib\\site-packages" + "import site")
+    Set-Content -LiteralPath $pthFile.FullName -Value $updated -Encoding ascii
+}
+
+function Sync-PythonSitePackages {
+    param(
+        [string]$SeedRoot,
+        [string]$PythonRuntimeRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $SeedRoot -PathType Container)) {
+        throw "部署包缺少 python-packages 目录: $SeedRoot"
+    }
+
+    $targetRoot = Join-Path $PythonRuntimeRoot "Lib\site-packages"
+    New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+
+    foreach ($item in Get-ChildItem -LiteralPath $SeedRoot -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $targetRoot -Recurse -Force
+    }
+
+    foreach ($stalePth in @("_auto_fanban.pth", "a1_coverage.pth")) {
+        Remove-Item -LiteralPath (Join-Path $targetRoot $stalePth) -Force -ErrorAction SilentlyContinue
+    }
+
+    $backendRoot = Join-Path $packageRoot "backend-runtime\backend"
+    Set-Content -LiteralPath (Join-Path $targetRoot "fanban_backend_runtime.pth") -Value $backendRoot -Encoding utf8
+}
+
 $dotnet = Get-ChildItem -Path (Join-Path $root "dotnet") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
 $vc = Get-ChildItem -Path (Join-Path $root "vc_redist") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$pythonInstaller = Get-ChildItem -Path (Join-Path $root "python") -Filter *.zip -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$nssmArchive = Get-ChildItem -Path (Join-Path $root "nssm") -Filter *.zip -File -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if (Test-DotNet48OrAboveInstalled) {
     Write-Host ".NET Framework 4.8 或更高版本已安装，跳过。"
@@ -316,6 +683,31 @@ if ($vcInfo.installed) {
     & $vc.FullName /install /quiet /norestart
 } else {
     Write-Warning "VC++ 2015-2022 x64 运行时未安装，且离线安装器不存在，请手工补充。"
+}
+
+if (Test-PackagePythonInstalled -PythonPath $pythonExe) {
+    Write-Host ("离线 Python 运行时已就绪: " + $pythonExe)
+} else {
+    Expand-PackagePythonRuntime -ArchivePath $(if ($pythonInstaller) { $pythonInstaller.FullName } else { "" }) -TargetDir $pythonRuntimeDir
+    Enable-EmbeddedPythonSitePackages -PythonRuntimeRoot $pythonRuntimeDir
+}
+
+if (-not (Test-PackagePythonInstalled -PythonPath $pythonExe)) {
+    throw "离线 Python 运行时准备失败，请检查 install/python 下的压缩包内容与目标机权限。"
+}
+
+Enable-EmbeddedPythonSitePackages -PythonRuntimeRoot $pythonRuntimeDir
+Sync-PythonSitePackages -SeedRoot $pythonPackagesSeed -PythonRuntimeRoot $pythonRuntimeDir
+Write-Host ("已同步部署包 Python 依赖到: " + (Join-Path $pythonRuntimeDir "Lib\site-packages"))
+
+if (Test-NssmReady -NssmPath $nssmExe) {
+    Write-Host ("NSSM 已就绪: " + $nssmExe)
+} else {
+    Install-BundledNssm -ArchivePath $(if ($nssmArchive) { $nssmArchive.FullName } else { "" }) -TargetDir $nssmInstallDir
+}
+
+if (-not (Test-NssmReady -NssmPath $nssmExe)) {
+    throw "NSSM 准备失败，请检查 install\\nssm 下的离线压缩包内容与目标机权限。"
 }
 '''
     _write_text(output_root / "install" / "install_runtime_prereqs.ps1", install_runtime)
@@ -585,8 +977,8 @@ if ($proxyWarning) {
     register_backend_service = r'''param(
     [string]$ServiceName = "FanBanBackend",
     [string]$DisplayName = "FanBan Backend",
-    [ValidateSet("auto", "nssm", "scheduled-task")]
-    [string]$Mode = "auto"
+    [ValidateSet("nssm", "scheduled-task")]
+    [string]$Mode = "nssm"
 )
 
 $ErrorActionPreference = "Stop"
@@ -614,7 +1006,8 @@ function Register-WithNssm([string]$nssmPath) {
     & $nssmPath set $ServiceName AppDirectory $root
     & $nssmPath set $ServiceName DisplayName $DisplayName
     & $nssmPath set $ServiceName Start SERVICE_AUTO_START
-    Write-Host ("已使用 NSSM 注册 Windows 服务: " + $ServiceName)
+    & $nssmPath start $ServiceName | Out-Null
+    Write-Host ("已使用 NSSM 注册并启动 Windows 服务: " + $ServiceName)
 }
 
 function Register-WithScheduledTask {
@@ -623,15 +1016,16 @@ function Register-WithScheduledTask {
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Write-Warning ("未检测到 NSSM，已回退为开机自启动计划任务: " + $ServiceName)
+    Start-ScheduledTask -TaskName $ServiceName
+    Write-Warning ("已按显式指定方式注册并立即启动计划任务: " + $ServiceName)
 }
 
 $nssmPath = Get-NssmPath
-if ($Mode -eq "nssm" -and [string]::IsNullOrWhiteSpace($nssmPath)) {
-    throw "指定使用 NSSM，但未找到 nssm.exe"
+if ([string]::IsNullOrWhiteSpace($nssmPath)) {
+    throw "未找到 nssm.exe，请先执行 install_runtime_prereqs.ps1 准备部署包内的 NSSM。"
 }
 
-if ($Mode -eq "nssm" -or ($Mode -eq "auto" -and -not [string]::IsNullOrWhiteSpace($nssmPath))) {
+if ($Mode -eq "nssm") {
     Register-WithNssm -nssmPath $nssmPath
 } else {
     Register-WithScheduledTask
@@ -644,14 +1038,23 @@ if ($Mode -eq "nssm" -or ($Mode -eq "auto" -and -not [string]::IsNullOrWhiteSpac
 )
 
 $ErrorActionPreference = "Stop"
+$localNssm = Join-Path $PSScriptRoot "nssm\nssm.exe"
+$nssmSource = ""
 
-$nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
-if ($null -eq $nssmCommand) {
-    $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+if (Test-Path -LiteralPath $localNssm -PathType Leaf) {
+    $nssmSource = $localNssm
+} else {
+    $nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
+    if ($null -eq $nssmCommand) {
+        $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+    }
+    if ($null -ne $nssmCommand) {
+        $nssmSource = [string]$nssmCommand.Source
+    }
 }
 
-if ($null -ne $nssmCommand) {
-    & $nssmCommand.Source remove $ServiceName confirm 2>$null | Out-Null
+if (-not [string]::IsNullOrWhiteSpace($nssmSource)) {
+    & $nssmSource remove $ServiceName confirm 2>$null | Out-Null
 }
 
 if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
@@ -667,6 +1070,9 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
 ## 目录用途
 - `frontend-dist/`: IIS 前端站点目录
 - `backend-runtime/`: 后端运行目录
+- `python-runtime/`: 目标机离线 Python 运行时
+- `python-packages/`: 随包分发的 Python site-packages
+- `install/nssm/`: NSSM 离线压缩包与展开后的 `nssm.exe`
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
 - `documents/Resources/`: 受管打印和校准资源
 - `documents_bin/`: 模板与词库资源
@@ -677,11 +1083,11 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
 
 1. 先执行 `install\install_runtime_prereqs.ps1`
 2. 再执行 `scripts\prepare_terminal.ps1`
-3. 配置 IIS：`install\configure_iis_site.ps1`
-4. 注册后端常驻：`install\register_backend_service.ps1`
-5. 确认 AutoCAD 与 Office 探测通过
-6. 手工启动时执行 `scripts\start_backend.ps1`
-7. 执行 `scripts\check_health.ps1`
+3. 再执行 `scripts\deep_check_terminal.ps1`
+4. 配置 IIS：`install\configure_iis_site.ps1`
+5. 注册后端常驻：`install\register_backend_service.ps1`
+6. 执行 `scripts\check_health.ps1`
+7. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
 
 ## 前端地址怎么定
 
@@ -691,6 +1097,8 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
   - `http://部署机IP:8080/`
   - `http://自定义主机名/`
 - `configure_iis_site.ps1` 里通过 `HostName` 和 `Port` 控制最终地址，不固定写死 IP。
+- `prepare_terminal.ps1` 会再次调用 `install_runtime_prereqs.ps1` 做补齐后验收，这是有意保留的幂等校验，不是重复安装。
+- `scripts\start_backend.ps1` 会自动加载 `scripts\runtime.env.ps1`，所以正常部署不需要手工再执行一次环境文件；只有你想在当前 PowerShell 会话里直接复用这些环境变量时，才需要手工点源它。
 '''
     _write_text(output_root / DEPLOY_README, readme)
 
@@ -699,6 +1107,10 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
         missing_lines.append("- 未找到 `.NET Framework 4.8` 离线安装器，请手工放入 `install/dotnet/`。")
     if vc_redist_installer is None:
         missing_lines.append("- 未找到 `VC++ 2015-2022 x64` 离线安装器，请手工放入 `install/vc_redist/`。")
+    if python_installer is None:
+        missing_lines.append("- 未找到 `Python 3.13 x64` 离线安装器，请手工放入 `install/python/`。")
+    if nssm_archive is None:
+        missing_lines.append("- 未找到 `NSSM` 离线压缩包，请手工放入 `install/nssm/`。")
     if url_rewrite_installer is None:
         missing_lines.append("- 未找到 `URL Rewrite` 离线安装器，请手工放入 `install/iis/url_rewrite/`。")
     if arr_installer is None:
@@ -721,6 +1133,20 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
     else:
         (output_root / "install" / "vc_redist").mkdir(parents=True, exist_ok=True)
 
+    if python_installer is not None:
+        target = output_root / "install" / "python" / python_installer.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(python_installer, target)
+    else:
+        (output_root / "install" / "python").mkdir(parents=True, exist_ok=True)
+
+    if nssm_archive is not None:
+        target = output_root / "install" / "nssm" / nssm_archive.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(nssm_archive, target)
+    else:
+        (output_root / "install" / "nssm").mkdir(parents=True, exist_ok=True)
+
     if url_rewrite_installer is not None:
         target = output_root / "install" / "iis" / "url_rewrite" / url_rewrite_installer.name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -742,6 +1168,8 @@ def build_terminal_deploy_package(
     output_root: Path,
     dotnet_installer: Path | None = None,
     vc_redist_installer: Path | None = None,
+    python_installer: Path | None = None,
+    nssm_archive: Path | None = None,
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> Path:
@@ -755,12 +1183,65 @@ def build_terminal_deploy_package(
     for entry in copy_plan:
         _copy_entry(entry, output_root)
 
+    _sanitize_python_packages(output_root)
+
     _write_support_files(
         output_root,
         dotnet_installer=dotnet_installer,
         vc_redist_installer=vc_redist_installer,
+        python_installer=python_installer,
+        nssm_archive=nssm_archive,
         url_rewrite_installer=url_rewrite_installer,
         arr_installer=arr_installer,
     )
+    write_package_manifest(output_root, package_kind="full")
 
     return output_root
+
+
+def publish_terminal_deploy_artifacts(
+    *,
+    repo_root: Path,
+    output_root: Path,
+    delta_root: Path | None = None,
+    dotnet_installer: Path | None = None,
+    vc_redist_installer: Path | None = None,
+    python_installer: Path | None = None,
+    nssm_archive: Path | None = None,
+    url_rewrite_installer: Path | None = None,
+    arr_installer: Path | None = None,
+) -> DeployArtifacts:
+    baseline_root = output_root if output_root.exists() else None
+    resolved_delta_root = delta_root or output_root.parent / f"{output_root.name}-delta"
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    staging_root = output_root.parent / "_stg"
+    if staging_root.exists():
+        shutil.rmtree(staging_root)
+
+    try:
+        build_terminal_deploy_package(
+            repo_root=repo_root,
+            output_root=staging_root,
+            dotnet_installer=dotnet_installer,
+            vc_redist_installer=vc_redist_installer,
+            python_installer=python_installer,
+            nssm_archive=nssm_archive,
+            url_rewrite_installer=url_rewrite_installer,
+            arr_installer=arr_installer,
+        )
+        build_terminal_deploy_delta_package(
+            baseline_root=baseline_root,
+            target_root=staging_root,
+            delta_root=resolved_delta_root,
+            baseline_label=str(output_root),
+            target_label=str(output_root),
+        )
+
+        if output_root.exists():
+            shutil.rmtree(output_root)
+        shutil.move(str(staging_root), str(output_root))
+    finally:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+
+    return DeployArtifacts(full_root=output_root, delta_root=resolved_delta_root)

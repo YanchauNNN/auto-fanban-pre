@@ -91,7 +91,7 @@ def _build_drawing_outputs(context: Mapping[str, Any]) -> list[dict[str, Any]]:
             {
                 "name": output_name_for_sheet_set(sheet_set),
                 "internal_code": titleblock.get("internal_code"),
-                "dwg_name": None,
+                "dwg_name": sheet_set.dwg_path.name if sheet_set.dwg_path else None,
                 "pdf_name": sheet_set.pdf_path.name if sheet_set.pdf_path else None,
                 "page_total": sheet_set.generated_page_count or sheet_set.page_total,
             }

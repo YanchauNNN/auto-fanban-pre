@@ -5,6 +5,7 @@
     [string]$StorageRoot = "",
     [ValidateSet("quick", "deep")]
     [string]$OfficeProbeMode = "quick",
+    [string]$ReuseQuickProbeJson = "",
     [ValidateSet("", "word_export", "excel_export", "word_template", "excel_template")]
     [string]$OfficeWorkerTask = "",
     [string]$OfficeWorkerTemplatePath = "",
@@ -16,7 +17,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:ProbeScriptPath = $PSCommandPath
-$script:ProbeVersion = "fanban-env-probe@2.1-deploy-20260317"
+$script:ProbeVersion = "fanban-env-probe@2.2-deploy-20260318"
 
 function Get-Timestamp {
     return (Get-Date).ToString("yyyyMMdd-HHmmss")
@@ -199,6 +200,69 @@ function Remove-ProbePath {
     if (Test-Path -LiteralPath $PathText) {
         Remove-Item -LiteralPath $PathText -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Format-HResultHex {
+    param([int]$HResult)
+
+    try {
+        return ("0x{0:X8}" -f ([uint32]$HResult))
+    } catch {
+        return ""
+    }
+}
+
+function Write-ProbeTextFile {
+    param(
+        [string]$PathText,
+        [string]$Content
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathText)) {
+        return
+    }
+
+    $parent = Split-Path -Parent $PathText
+    if (-not [string]::IsNullOrWhiteSpace($parent) -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $normalized = if ($null -eq $Content) { "" } else { $Content }
+    $normalized | Out-File -LiteralPath $PathText -Encoding utf8 -Force
+}
+
+function ConvertTo-PlainValue {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $map = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $map[[string]$key] = ConvertTo-PlainValue -Value $Value[$key]
+        }
+        return $map
+    }
+
+    if ($Value -is [pscustomobject]) {
+        $map = [ordered]@{}
+        foreach ($prop in $Value.PSObject.Properties) {
+            $map[[string]$prop.Name] = ConvertTo-PlainValue -Value $prop.Value
+        }
+        return $map
+    }
+
+    if ($Value -is [System.Collections.IEnumerable] -and -not ($Value -is [string])) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += ,(ConvertTo-PlainValue -Value $item)
+        }
+        return $items
+    }
+
+    return $Value
 }
 
 function Get-RegistrySubKeys {
@@ -480,7 +544,7 @@ function Get-IPv4Addresses {
     } catch {
     }
 
-    return ,($items.ToArray())
+    return $items.ToArray()
 }
 
 function Get-FirewallFacts {
@@ -528,6 +592,31 @@ function Resolve-RepoRoot {
 
     return (Get-Location).Path
 }
+
+function Import-ProbeBaseline {
+    param([string]$PathText)
+
+    if ([string]::IsNullOrWhiteSpace($PathText) -or -not (Test-Path -LiteralPath $PathText -PathType Leaf)) {
+        return $null
+    }
+
+    try {
+        $raw = Get-Content -LiteralPath $PathText -Raw -ErrorAction Stop
+        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        $baseline = ConvertTo-PlainValue -Value $parsed
+        foreach ($key in @("host", "repo", "python", "sqlite", "storage", "network", "autocad")) {
+            if (-not $baseline.Contains($key)) {
+                Write-Warning ("quick 探针结果缺少必要字段，忽略复用: " + $key)
+                return $null
+            }
+        }
+        return $baseline
+    } catch {
+        Write-Warning ("无法复用 quick 探针结果，继续执行完整 deep 探针: " + $_.Exception.Message)
+        return $null
+    }
+}
+
 function Get-RepoFacts {
     param([string]$ActualRepoRoot)
 
@@ -719,6 +808,9 @@ else:
 function Get-PythonFacts {
     param([string]$ActualRepoRoot)
 
+    $packagePython = Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "python-runtime\python.exe")
+    )
     $venvPython = Resolve-PreferredPath -Candidates @(
         (Join-Path $ActualRepoRoot "backend\.venv\Scripts\python.exe"),
         (Join-Path $ActualRepoRoot "backend-runtime\backend\.venv\Scripts\python.exe")
@@ -727,6 +819,7 @@ function Get-PythonFacts {
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 
     $candidates = @(
+        (Test-PythonCandidate -Label "package_runtime" -Command $packagePython -BaseArguments @() -Exists (Test-Path -LiteralPath $packagePython -PathType Leaf) -PathHint $packagePython),
         (Test-PythonCandidate -Label "backend_venv" -Command $venvPython -BaseArguments @() -Exists (Test-Path -LiteralPath $venvPython -PathType Leaf) -PathHint $venvPython),
         (Test-PythonCandidate -Label "python" -Command "python" -BaseArguments @() -Exists ($null -ne $pythonCommand) -PathHint $(if ($null -ne $pythonCommand) { [string]$pythonCommand.Source } else { "" })),
         (Test-PythonCandidate -Label "py_3_13" -Command "py" -BaseArguments @("-3.13") -Exists ($null -ne $pyLauncher) -PathHint $(if ($null -ne $pyLauncher) { [string]$pyLauncher.Source } else { "" }))
@@ -762,6 +855,10 @@ function Get-PythonFacts {
             executable = $selectedExe
             version = if ($null -ne $selected) { [string]$selected.version } else { "" }
             label = if ($null -ne $selected) { [string]$selected.label } else { "" }
+        }
+        package_runtime = [ordered]@{
+            status = if ((Test-Path -LiteralPath $packagePython -PathType Leaf)) { "pass" } else { "skip" }
+            path = (Resolve-FullPathOrRaw $packagePython)
         }
         venv = [ordered]@{
             status = if ((Test-Path -LiteralPath $venvPython -PathType Leaf)) { "pass" } else { "skip" }
@@ -1210,6 +1307,7 @@ function Resolve-BackendPythonForOfficeProbe {
     param([string]$ActualRepoRoot)
 
     return Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "python-runtime\python.exe"),
         (Join-Path $ActualRepoRoot "backend-runtime\backend\.venv\Scripts\python.exe"),
         (Join-Path $ActualRepoRoot "backend\.venv\Scripts\python.exe")
     )
@@ -1249,28 +1347,35 @@ function Invoke-BackendPdfExportCore {
     $tempDir = New-TempDirectory -Prefix "fanban_backend_pdf_export"
     $helperPath = Join-Path $tempDir "backend_pdf_export_probe.py"
     $pdfPath = Join-Path $tempDir "probe.pdf"
+    $tracebackPath = Join-Path $tempDir "python_traceback.txt"
+    $preserveEvidence = $false
     $helperCode = @'
 from pathlib import Path
 import sys
+import traceback
 
 backend_root = Path(sys.argv[1])
 input_path = Path(sys.argv[2])
 output_path = Path(sys.argv[3])
+traceback_path = Path(sys.argv[4])
 
 if str(backend_root) not in sys.path:
     sys.path.insert(0, str(backend_root))
 
 from src.doc_gen.pdf_engine import PDFExporter
 
-exporter = PDFExporter(preferred_engine="office_com")
-if input_path.suffix.lower() == ".docx":
-    exporter.export_docx_to_pdf(input_path, output_path)
-elif input_path.suffix.lower() == ".xlsx":
-    exporter.export_xlsx_to_pdf(input_path, output_path)
-else:
-    raise RuntimeError(f"unsupported input suffix: {input_path.suffix}")
-
-print("ok")
+try:
+    exporter = PDFExporter(preferred_engine="office_com")
+    if input_path.suffix.lower() == ".docx":
+        exporter.export_docx_to_pdf(input_path, output_path)
+    elif input_path.suffix.lower() == ".xlsx":
+        exporter.export_xlsx_to_pdf(input_path, output_path)
+    else:
+        raise RuntimeError(f"unsupported input suffix: {input_path.suffix}")
+    print("ok")
+except Exception:
+    traceback_path.write_text(traceback.format_exc(), encoding="utf-8")
+    raise
 '@
 
     try {
@@ -1281,10 +1386,16 @@ print("ok")
             $helperPath,
             $backendRoot,
             $TemplatePath,
-            $pdfPath
+            $pdfPath,
+            $tracebackPath
         )
 
         $pdfExists = Test-Path -LiteralPath $pdfPath -PathType Leaf
+        $tracebackText = if (Test-Path -LiteralPath $tracebackPath -PathType Leaf) {
+            Get-Content -LiteralPath $tracebackPath -Raw -ErrorAction SilentlyContinue
+        } else {
+            ""
+        }
         $details = [ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
@@ -1295,14 +1406,24 @@ print("ok")
             pdf_exists = $pdfExists
             exit_code = $invoke.exit_code
             output = [string]$invoke.stdout
+            traceback_path = if (Test-Path -LiteralPath $tracebackPath -PathType Leaf) { $tracebackPath } else { "" }
+            traceback = [string]$tracebackText
         }
         if (-not $invoke.success) {
+            $preserveEvidence = $true
+            $details.preserved_temp_dir = $tempDir
             $details.launcher_error = if ($invoke.Contains("error")) { [string]$invoke.error } else { "" }
             return New-CheckResult -Status "fail" -Details $details -Error $(if ($invoke.Contains("error") -and -not [string]::IsNullOrWhiteSpace([string]$invoke.error)) { [string]$invoke.error } else { [string]$invoke.stdout })
         }
+        if (-not $pdfExists) {
+            $preserveEvidence = $true
+            $details.preserved_temp_dir = $tempDir
+        }
         return New-CheckResult -Status $(if ($pdfExists) { "pass" } else { "fail" }) -Details $details -Error $(if ($pdfExists) { "" } else { "backend pdf export did not produce a pdf" })
     } finally {
-        Remove-ProbePath -PathText $tempDir
+        if (-not $preserveEvidence) {
+            Remove-ProbePath -PathText $tempDir
+        }
     }
 }
 
@@ -1356,7 +1477,7 @@ function Invoke-WordTemplateOpenCore {
     }
 
     $tempDir = New-TempDirectory -Prefix "fanban_word_template"
-    $workingCopy = Join-Path $tempDir ([System.IO.Path]::GetFileName($TemplatePath))
+    $workingCopy = Join-Path $tempDir ("fanban_excel_" + $TemplateLabel + ".xlsx")
     $app = $null
     $doc = $null
 
@@ -1418,26 +1539,57 @@ function Invoke-ExcelTemplateOpenCore {
 
     $tempDir = New-TempDirectory -Prefix "fanban_excel_template"
     $workingCopy = Join-Path $tempDir ([System.IO.Path]::GetFileName($TemplatePath))
+    $failureNotePath = Join-Path $tempDir "excel_probe_failure.txt"
     $app = $null
     $workbook = $null
+    $preserveEvidence = $false
 
     try {
         Copy-Item -LiteralPath $TemplatePath -Destination $workingCopy -Force
+        try { Unblock-File -LiteralPath $workingCopy -ErrorAction Stop } catch {}
         $app = New-Object -ComObject Excel.Application
         $app.Visible = $false
         $app.DisplayAlerts = $false
+        try { $app.AskToUpdateLinks = $false } catch {}
+        try { $app.EnableEvents = $false } catch {}
+        try { $app.ScreenUpdating = $false } catch {}
+        try { $app.AutomationSecurity = 3 } catch {}
         $workbook = $app.Workbooks.Open($workingCopy, 0, $true)
 
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
             opened_copy = $workingCopy
+            excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
         })
     } catch {
+        $preserveEvidence = $true
+        $exceptionType = if ($null -ne $_.Exception) { [string]$_.Exception.GetType().FullName } else { "" }
+        $exceptionHResult = if ($null -ne $_.Exception) { Format-HResultHex -HResult $_.Exception.HResult } else { "" }
+        $scriptStack = [string]$_.ScriptStackTrace
+        $diagnosticLines = @(
+            ("template=" + $TemplateLabel),
+            ("template_path=" + (Resolve-FullPathOrRaw $TemplatePath)),
+            ("opened_copy=" + $workingCopy),
+            ("excel_version=" + $(if ($null -ne $app) { [string]$app.Version } else { "" })),
+            ("exception_type=" + $exceptionType),
+            ("exception_hresult=" + $exceptionHResult),
+            ("message=" + $_.Exception.Message),
+            "",
+            "script_stack:",
+            $scriptStack
+        )
+        Write-ProbeTextFile -PathText $failureNotePath -Content ($diagnosticLines -join [Environment]::NewLine)
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
             opened_copy = $workingCopy
+            preserved_temp_dir = $tempDir
+            diagnostics_path = $failureNotePath
+            excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
+            exception_type = $exceptionType
+            exception_hresult = $exceptionHResult
+            script_stack = $scriptStack
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $workbook) {
@@ -1450,7 +1602,9 @@ function Invoke-ExcelTemplateOpenCore {
         }
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
-        Remove-ProbePath -PathText $tempDir
+        if (-not $preserveEvidence) {
+            Remove-ProbePath -PathText $tempDir
+        }
     }
 }
 
@@ -1596,6 +1750,8 @@ function Get-HostFacts {
 }
 
 function Get-ServiceHostingFacts {
+    param([string]$ActualRepoRoot)
+
     $isAdmin = $false
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -1605,9 +1761,23 @@ function Get-ServiceHostingFacts {
     }
 
     $scCommand = Get-Command sc.exe -ErrorAction SilentlyContinue
-    $nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
-    if ($null -eq $nssmCommand) {
-        $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+    $bundledNssm = Resolve-PreferredPath -Candidates @(
+        (Join-Path $ActualRepoRoot "install\nssm\nssm.exe")
+    )
+    $nssmPath = ""
+    $nssmSource = ""
+    if (-not [string]::IsNullOrWhiteSpace($bundledNssm) -and (Test-Path -LiteralPath $bundledNssm -PathType Leaf)) {
+        $nssmPath = $bundledNssm
+        $nssmSource = "deploy_bundle"
+    } else {
+        $nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
+        if ($null -eq $nssmCommand) {
+            $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+        }
+        if ($null -ne $nssmCommand) {
+            $nssmPath = [string]$nssmCommand.Source
+            $nssmSource = "path"
+        }
     }
 
     return [ordered]@{
@@ -1619,9 +1789,10 @@ function Get-ServiceHostingFacts {
         sc_exe = New-CheckResult -Status $(if ($null -ne $scCommand) { "pass" } else { "fail" }) -Details ([ordered]@{
             path = if ($null -ne $scCommand) { [string]$scCommand.Source } else { "" }
         }) -Error $(if ($null -ne $scCommand) { "" } else { "sc.exe is unavailable" })
-        nssm = New-CheckResult -Status $(if ($null -ne $nssmCommand) { "pass" } else { "skip" }) -Details ([ordered]@{
-            path = if ($null -ne $nssmCommand) { [string]$nssmCommand.Source } else { "" }
-        }) -Error $(if ($null -ne $nssmCommand) { "" } else { "nssm is not installed" })
+        nssm = New-CheckResult -Status $(if (-not [string]::IsNullOrWhiteSpace($nssmPath)) { "pass" } else { "skip" }) -Details ([ordered]@{
+            path = $nssmPath
+            source = $nssmSource
+        }) -Error $(if (-not [string]::IsNullOrWhiteSpace($nssmPath)) { "" } else { "nssm is unavailable" })
     }
 }
 
@@ -1672,31 +1843,75 @@ if ([string]::IsNullOrWhiteSpace($actualOutJson)) {
     $actualOutJson = $OutJson
 }
 
-Write-ProbeStage -Stage "1/8" -Message "收集主机基础信息"
-$hostFacts = Get-HostFacts
+$quickBaseline = $null
+$reusedSections = @()
+if ($OfficeProbeMode -eq "deep" -and -not [string]::IsNullOrWhiteSpace($ReuseQuickProbeJson)) {
+    $quickBaseline = Import-ProbeBaseline -PathText $ReuseQuickProbeJson
+    if ($null -ne $quickBaseline) {
+        $reusedSections = @("host", "repo", "python", "sqlite", "storage", "network", "autocad")
+    }
+}
 
-Write-ProbeStage -Stage "2/8" -Message "检查仓库和模板资源"
-$repoFacts = Get-RepoFacts -ActualRepoRoot $actualRepoRoot
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "1/8" -Message "复用 quick 探针结果：主机基础信息"
+    $hostFacts = $quickBaseline.host
+} else {
+    Write-ProbeStage -Stage "1/8" -Message "收集主机基础信息"
+    $hostFacts = Get-HostFacts
+}
 
-Write-ProbeStage -Stage "3/8" -Message "检查 Python 运行环境"
-$pythonFacts = Get-PythonFacts -ActualRepoRoot $actualRepoRoot
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "2/8" -Message "复用 quick 探针结果：仓库和模板资源"
+    $repoFacts = $quickBaseline.repo
+} else {
+    Write-ProbeStage -Stage "2/8" -Message "检查仓库和模板资源"
+    $repoFacts = Get-RepoFacts -ActualRepoRoot $actualRepoRoot
+}
 
-Write-ProbeStage -Stage "4/8" -Message "执行 SQLite 读写探针"
-$sqliteFacts = Test-SqliteProbe -PythonExe ([string]$pythonFacts.selected.executable)
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "3/8" -Message "复用 quick 探针结果：Python 运行环境"
+    $pythonFacts = $quickBaseline.python
+} else {
+    Write-ProbeStage -Stage "3/8" -Message "检查 Python 运行环境"
+    $pythonFacts = Get-PythonFacts -ActualRepoRoot $actualRepoRoot
+}
 
-Write-ProbeStage -Stage "5/8" -Message "检查 storage 目录和磁盘空间"
-$storageFacts = Get-StorageFacts -ActualStorageRoot $actualStorageRoot
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "4/8" -Message "复用 quick 探针结果：SQLite 读写探针"
+    $sqliteFacts = $quickBaseline.sqlite
+} else {
+    Write-ProbeStage -Stage "4/8" -Message "执行 SQLite 读写探针"
+    $sqliteFacts = Test-SqliteProbe -PythonExe ([string]$pythonFacts.selected.executable)
+}
 
-Write-ProbeStage -Stage "6/8" -Message "检查网络端口和防火墙状态"
-$networkFacts = Get-NetworkFacts -TargetPort $Port
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "5/8" -Message "复用 quick 探针结果：storage 目录和磁盘空间"
+    $storageFacts = $quickBaseline.storage
+} else {
+    Write-ProbeStage -Stage "5/8" -Message "检查 storage 目录和磁盘空间"
+    $storageFacts = Get-StorageFacts -ActualStorageRoot $actualStorageRoot
+}
 
-Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
-$autocadFacts = Get-AutoCADFacts
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "6/8" -Message "复用 quick 探针结果：网络端口和防火墙状态"
+    $networkFacts = $quickBaseline.network
+} else {
+    Write-ProbeStage -Stage "6/8" -Message "检查网络端口和防火墙状态"
+    $networkFacts = Get-NetworkFacts -TargetPort $Port
+}
+
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "7/8" -Message "复用 quick 探针结果：AutoCAD / 打印资源"
+    $autocadFacts = $quickBaseline.autocad
+} else {
+    Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
+    $autocadFacts = Get-AutoCADFacts
+}
 
 Write-ProbeStage -Stage "8/8" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
 $officeFacts = Get-OfficeFacts -RepoFacts $repoFacts -ProbeMode $OfficeProbeMode
 
-$serviceHostingFacts = Get-ServiceHostingFacts
+$serviceHostingFacts = Get-ServiceHostingFacts -ActualRepoRoot $actualRepoRoot
 
 $blockingIssues = @()
 $warnings = @()
@@ -1875,7 +2090,7 @@ if ($serviceHostingFacts.nssm.status -eq "skip") {
     $warnings += [ordered]@{
         section = "web_service"
         code = "nssm"
-        message = "nssm is not installed; use built-in Windows service tooling or install nssm later"
+        message = "nssm is unavailable; rerun install_runtime_prereqs.ps1 to provision the bundled service wrapper"
     }
 }
 
@@ -1956,6 +2171,8 @@ $result = [ordered]@{
             out_json = $actualOutJson
             port = $Port
             office_probe_mode = $OfficeProbeMode
+            reused_quick_probe_json = if ($null -ne $quickBaseline) { Resolve-FullPathOrRaw $ReuseQuickProbeJson } else { "" }
+            reused_sections = @($reusedSections)
         }
     }
     host = $hostFacts

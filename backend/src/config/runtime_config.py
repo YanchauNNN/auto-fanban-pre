@@ -168,7 +168,7 @@ class PDFEngineConfig(BaseModel):
     """PDF引擎配置"""
 
     preferred: str = "office_com"
-    fallback: str = "libreoffice"
+    fallback: str = "disabled"
 
 
 class AuditCheckGenericIdentifierConfig(BaseModel):

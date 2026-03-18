@@ -38,6 +38,7 @@ class SheetSet(BaseModel):
     flags: list[str] = Field(default_factory=list)
     generated_page_count: int | None = None
     pdf_path: Path | None = None
+    dwg_path: Path | None = None
 
     def get_inherited_titleblock(self) -> dict:
         """获取从Master继承的图签字段"""
