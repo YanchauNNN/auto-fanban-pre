@@ -428,9 +428,59 @@ describe("App", () => {
     expect(screen.getByText("受影响图纸 6")).toBeInTheDocument();
     expect(screen.queryByText("????")).not.toBeInTheDocument();
     expect(screen.queryByText("auditing")).not.toBeInTheDocument();
-    expect(screen.getByText("任务包已完成")).toBeInTheDocument();
+    expect(screen.getAllByText("任务包完成").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("交付")[0]).toBeInTheDocument();
     expect(screen.getAllByText("纠错")[0]).toBeInTheDocument();
+  });
+
+  it("shows a completed single deliverable job with a detail link", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          jobId: "job-deliverable-solo",
+          batchId: "batch-solo-1",
+          groupId: null,
+          isGroup: false,
+          sourceFilename: "18185NE-JGS11.dwg",
+          sourceFilenames: ["18185NE-JGS11.dwg"],
+          taskKind: "deliverable",
+          taskRole: null,
+          jobMode: "deliverable",
+          projectNo: "1818",
+          status: "succeeded",
+          stage: "PACKAGE_ZIP",
+          percent: 100,
+          message: "????",
+          createdAt: "2026-03-18T10:20:30+08:00",
+          finishedAt: "2026-03-18T10:25:30+08:00",
+          runAuditCheck: false,
+          childJobIds: [],
+          findingsCount: 0,
+          affectedDrawingsCount: 0,
+          artifacts: {
+            packageAvailable: true,
+            iedAvailable: true,
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+          retryAvailable: false,
+          sharedRunId: null,
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.getByText("出图完成")).toBeInTheDocument();
+    expect(screen.getByText("交付任务已完成")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看任务" })).toHaveAttribute(
+      "href",
+      "/jobs/job-deliverable-solo",
+    );
+    expect(screen.queryByText("PACKAGE_ZIP")).not.toBeInTheDocument();
+    expect(screen.queryByText("????")).not.toBeInTheDocument();
   });
 
   it("shows an audit summary modal when an audit job completes with findings", async () => {

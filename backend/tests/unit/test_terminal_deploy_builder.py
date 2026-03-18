@@ -224,6 +224,11 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "HostName" in configure_iis
     assert "system.webServer/proxy" in configure_iis
     assert "ARR" in configure_iis
+    assert "Get-ConflictingHttpBindingSiteName" in configure_iis
+    assert "IIS 绑定冲突" in configure_iis
+    assert "Default Web Site" in configure_iis
+    assert "HostName 只负责 IIS 主机头绑定" in configure_iis
+    assert "不会自动创建 DNS 或 hosts 解析" in configure_iis
     assert "RewriteModule" in check_iis_proxy
     assert "Application Request Routing" in check_iis_proxy
     assert "msiexec.exe" in install_iis_proxy
@@ -233,6 +238,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Test-ArrInstalled" in install_iis_proxy
     assert "nssm" in register_service
     assert '[string]$Mode = "nssm"' in register_service
+    assert "Get-ExistingWindowsService" in register_service
+    assert "Stop-ExistingWindowsService" in register_service
+    assert "Get-ExistingWindowsService -ServiceName $ServiceName" in register_service
     assert "& $nssmPath start $ServiceName" in register_service
     assert "Start-ScheduledTask -TaskName $ServiceName" in register_service
     assert 'throw "未找到 nssm.exe，请先执行 install_runtime_prereqs.ps1 准备部署包内的 NSSM。"' in register_service
@@ -446,6 +454,35 @@ $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $OutJson -Encoding ut
     assert deep_probe["storage_root"] == storage_root
     assert deep_probe["office_probe_mode"] == "deep"
     assert deep_probe["reuse_quick_probe_json"] == str(quick_probe)
+
+
+def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(output_root / "scripts" / "start_backend.ps1"),
+        ],
+        capture_output=True,
+    )
+
+    stderr = completed.stderr.decode("utf-8", errors="ignore")
+    stdout = completed.stdout.decode("utf-8", errors="ignore")
+    merged = stdout + "\n" + stderr
+
+    assert "VariableNotWritable" not in merged
+    assert "Python 运行环境不存在" in merged
 
 
 

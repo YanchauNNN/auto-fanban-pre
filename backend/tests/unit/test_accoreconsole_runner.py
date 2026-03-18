@@ -496,3 +496,23 @@ def test_resolve_runner_script_dir_with_default_relative_path():
     runner = AcCoreConsoleRunner(config=RuntimeConfig())
     assert runner.script_dir.exists()
     assert runner.script_dir.name == "scripts"
+
+
+def test_resolve_runner_path_supports_deployed_backend_runtime_layout(
+    monkeypatch,
+    tmp_path: Path,
+):
+    deploy_root = tmp_path / "FanBanServer"
+    deployed_module = (
+        deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "accoreconsole_runner.py"
+    )
+    deployed_module.parent.mkdir(parents=True, exist_ok=True)
+    deployed_module.write_text("# fake deployed runner", encoding="utf-8")
+    deployed_script_dir = deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "scripts"
+    deployed_script_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr("src.cad.accoreconsole_runner.__file__", str(deployed_module))
+
+    resolved = AcCoreConsoleRunner._resolve_runner_path(r"..\backend\src\cad\scripts")
+
+    assert resolved == deployed_script_dir.resolve()

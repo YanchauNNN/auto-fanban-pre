@@ -25,6 +25,7 @@ import contextlib
 import gc
 import math
 import os
+import shutil
 from copy import copy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -371,24 +372,55 @@ class CatalogGenerator(ICatalogGenerator):
         workbook = None
         worksheet = None
         row_range = None
+        temp_dir = None
+        working_copy = xlsx_path
+        should_copy_back = False
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
             PDFExporter._prepare_excel_for_headless_run(excel)
-            PDFExporter._clear_windows_zone_identifier(xlsx_path)
-            workbook = excel.Workbooks.Open(str(xlsx_path.absolute()))
-            worksheet = workbook.Worksheets(1)
-            row_range = worksheet.Rows(f"{start_row}:{last_row}")
-            row_range.AutoFit()
+            working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
+                xlsx_path,
+                label=xlsx_path.stem,
+            )
+            workbook = PDFExporter._open_excel_workbook(excel, working_copy, read_only=False)
+            worksheet = PDFExporter._retry_excel_com_call(
+                lambda: workbook.Worksheets(1),
+                "Workbook.Worksheets(1)",
+            )
+            row_range = PDFExporter._retry_excel_com_call(
+                lambda: worksheet.Rows(f"{start_row}:{last_row}"),
+                "Worksheet.Rows(range)",
+            )
+            PDFExporter._retry_excel_com_call(
+                lambda: row_range.AutoFit(),
+                "Rows.AutoFit",
+            )
             row_range = None
 
             for row in range(start_row, last_row + 1):
-                auto_height = float(worksheet.Rows(row).RowHeight or 0)
+                row_ref = PDFExporter._retry_excel_com_call(
+                    lambda: worksheet.Rows(row),
+                    f"Worksheet.Rows({row})",
+                )
+                auto_height = float(
+                    PDFExporter._retry_excel_com_call(
+                        lambda: row_ref.RowHeight or 0,
+                        f"Rows({row}).RowHeight",
+                    )
+                )
                 bucket_height = self._bucket_row_height_from_measured_height(auto_height)
                 if bucket_height:
-                    worksheet.Rows(row).RowHeight = bucket_height
+                    PDFExporter._retry_excel_com_call(
+                        lambda: setattr(row_ref, "RowHeight", bucket_height),
+                        f"Rows({row}).RowHeight=set",
+                    )
 
-            workbook.Save()
+            PDFExporter._retry_excel_com_call(
+                lambda: workbook.Save(),
+                "Workbook.Save",
+            )
+            should_copy_back = True
         except Exception:
             return
         finally:
@@ -402,6 +434,11 @@ class CatalogGenerator(ICatalogGenerator):
                 with contextlib.suppress(Exception):
                     excel.Quit()
             excel = None
+            if should_copy_back and temp_dir is not None:
+                with contextlib.suppress(Exception):
+                    shutil.copy2(working_copy, xlsx_path)
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
             gc.collect()
             if pythoncom is not None:
                 with contextlib.suppress(Exception):
@@ -497,14 +534,26 @@ class CatalogGenerator(ICatalogGenerator):
         excel = None
         wb = None
         ws = None
+        temp_dir = None
+        working_copy = xlsx_path
         try:
             pythoncom.CoInitialize()
             excel = win32com.client.DispatchEx("Excel.Application")
             PDFExporter._prepare_excel_for_headless_run(excel)
-            PDFExporter._clear_windows_zone_identifier(xlsx_path)
-            wb = excel.Workbooks.Open(str(xlsx_path.absolute()))
-            ws = wb.Worksheets(1)
-            page_count = int(ws.HPageBreaks.Count) + 1
+            working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
+                xlsx_path,
+                label=xlsx_path.stem,
+            )
+            wb = PDFExporter._open_excel_workbook(excel, working_copy, read_only=True)
+            ws = PDFExporter._retry_excel_com_call(
+                lambda: wb.Worksheets(1),
+                "Workbook.Worksheets(1)",
+            )
+            page_break_count = PDFExporter._retry_excel_com_call(
+                lambda: ws.HPageBreaks.Count,
+                "Worksheet.HPageBreaks.Count",
+            )
+            page_count = int(page_break_count) + 1
             return max(1, page_count)
         finally:
             ws = None
@@ -516,6 +565,8 @@ class CatalogGenerator(ICatalogGenerator):
                 with contextlib.suppress(Exception):
                     excel.Quit()
             excel = None
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
             gc.collect()
             if pythoncom is not None:
                 with contextlib.suppress(Exception):

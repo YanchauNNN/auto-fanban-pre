@@ -204,3 +204,14 @@ def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> N
     assert ws["D2"].value == "Test Album"
     assert ws["D4"].value == "第01图册图纸(文件)目录"
 
+
+def test_catalog_excel_com_paths_use_pdf_exporter_retry_helpers() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    source_text = (repo_root / "backend" / "src" / "doc_gen" / "catalog.py").read_text(
+        encoding="utf-8",
+    )
+
+    assert "PDFExporter._prepare_excel_path_for_com(" in source_text
+    assert "PDFExporter._open_excel_workbook(" in source_text
+    assert "PDFExporter._retry_excel_com_call(" in source_text
+

@@ -506,7 +506,12 @@ function JobCard({
 
       <div className={styles.jobMetaRow}>
         {card.kind === "single_job" ? (
-          card.summary.taskKind ? <TaskKindBadge kind={card.summary.taskKind} /> : null
+          <>
+            {card.summary.taskKind ? <TaskKindBadge kind={card.summary.taskKind} /> : null}
+            <Link className={styles.subtaskLink} to={`/jobs/${card.jobId}`}>
+              查看任务
+            </Link>
+          </>
         ) : (
           <>
             <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>

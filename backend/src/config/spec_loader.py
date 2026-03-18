@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 DEFAULT_SPEC_PATH = Path("documents/参数规范.yaml")
@@ -62,6 +62,7 @@ class CoverBinding(BaseModel):
 class BusinessSpec(BaseModel):
     """业务规范（参数规范.yaml 的结构化表示）"""
     schema_version: str
+    _source_path: Path | None = PrivateAttr(default=None)
 
     # 枚举定义
     enums: dict[str, Any] = Field(default_factory=dict)
@@ -136,20 +137,33 @@ class BusinessSpec(BaseModel):
                 if isinstance(cover_1818, dict):
                     normalized_variant = str(variant or "").strip()
                     return str(
-                        cover_1818.get(normalized_variant)
-                        or cover_1818.get("default")
-                        or ""
+                        self.resolve_repo_path(
+                            cover_1818.get(normalized_variant)
+                            or cover_1818.get("default")
+                            or ""
+                        )
                     )
-                return str(cover_1818)
+                return str(self.resolve_repo_path(cover_1818))
             template = selection.get("cover", {}).get("default", "")
-            return template.replace("{variant}", variant)
+            return str(self.resolve_repo_path(template.replace("{variant}", variant)))
 
         if doc_type == "catalog":
             if project_no == "1818":
-                return selection.get("catalog", {}).get("1818", "")
-            return selection.get("catalog", {}).get("default", "")
+                return str(self.resolve_repo_path(selection.get("catalog", {}).get("1818", "")))
+            return str(self.resolve_repo_path(selection.get("catalog", {}).get("default", "")))
 
-        return selection.get(doc_type, "")
+        return str(self.resolve_repo_path(selection.get(doc_type, "")))
+
+    def resolve_repo_path(self, path_value: str | Path) -> Path:
+        path = Path(path_value)
+        if path.is_absolute():
+            return path
+        if self._source_path is not None:
+            config_dir = self._source_path.parent
+            if config_dir.name.lower() == "documents":
+                return (config_dir.parent / path).resolve()
+            return (config_dir / path).resolve()
+        return path
 
 
 class SpecLoader:
@@ -174,7 +188,9 @@ class SpecLoader:
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-        return BusinessSpec(**data)
+        spec = BusinessSpec(**data)
+        spec._source_path = path
+        return spec
 
     @classmethod
     def load(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:

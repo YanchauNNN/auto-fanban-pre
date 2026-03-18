@@ -125,13 +125,19 @@ def default_asset_roots() -> list[Path]:
     if getattr(sys, "frozen", False):
         exe_root = Path(sys.executable).resolve().parent
         roots.extend([exe_root / "assets", exe_root / "_internal" / "assets"])
-    repo_root = Path(__file__).resolve().parents[3]
-    roots.extend(
-        [
-            repo_root / "test" / "dist" / "assets",
-            repo_root / "documents" / "Resources",
-        ]
-    )
+    module_path = Path(__file__).resolve()
+    repo_like_roots: list[Path] = []
+    for idx in (3, 4):
+        with_root = module_path.parents[idx] if len(module_path.parents) > idx else None
+        if with_root is not None and with_root not in repo_like_roots:
+            repo_like_roots.append(with_root)
+    for repo_root in repo_like_roots:
+        roots.extend(
+            [
+                repo_root / "test" / "dist" / "assets",
+                repo_root / "documents" / "Resources",
+            ]
+        )
     unique: list[Path] = []
     seen: set[str] = set()
     for root in roots:

@@ -114,7 +114,9 @@ def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:
         encoding="utf-8",
     )
 
+    assert "function Invoke-ExcelOpenWithRetry" in script_text
     assert 'fanban_excel_' in script_text
     assert "Unblock-File -LiteralPath $workingCopy" in script_text
     assert '$app.AskToUpdateLinks = $false' in script_text
     assert '$app.EnableEvents = $false' in script_text
+    assert "GetFileName($TemplatePath)" not in script_text

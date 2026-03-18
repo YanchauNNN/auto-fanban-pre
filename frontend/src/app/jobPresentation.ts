@@ -49,6 +49,8 @@ export type JobCardModel =
 
 type PresentableJob = Pick<JobSummary, "isGroup" | "taskKind" | "stage" | "status" | "message">;
 
+const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+
 const STATUS_LABELS: Record<string, string> = {
   queued: "排队中",
   running: "运行中",
@@ -141,6 +143,7 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
 
     if (hasDeliverable && hasAudit) {
       const aggregate = buildSyntheticAggregate(sortedBucket);
+      const syntheticPresentation = { ...aggregate, isGroup: true as const };
       models.push({
         kind: "synthetic_group",
         key: `synthetic:${aggregate.batchId}:${aggregate.sourceFilename}`,
@@ -148,8 +151,8 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
         title: aggregate.sourceFilename,
         status: aggregate.status,
         percent: aggregate.percent,
-        stageLabel: getStageLabel(aggregate.stage, aggregate),
-        messageLabel: getMessageLabel(aggregate),
+        stageLabel: getStageLabel(aggregate.stage, syntheticPresentation),
+        messageLabel: getMessageLabel(syntheticPresentation),
         findingsCount: aggregate.findingsCount,
         affectedDrawingsCount: aggregate.affectedDrawingsCount,
         childCount: sortedBucket.length,
@@ -176,6 +179,45 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
 }
 
 export function getStageLabel(stage: string | null, job: PresentableJob): string {
+  if (job.status === "succeeded") {
+    if (job.isGroup) {
+      return "任务包完成";
+    }
+    if (job.taskKind === "audit_check") {
+      return "纠错完成";
+    }
+    if (job.taskKind === "audit_replace") {
+      return "翻版完成";
+    }
+    return "出图完成";
+  }
+
+  if (job.status === "failed") {
+    if (job.isGroup) {
+      return "任务包失败";
+    }
+    if (job.taskKind === "audit_check") {
+      return "纠错失败";
+    }
+    if (job.taskKind === "audit_replace") {
+      return "翻版失败";
+    }
+    return "出图失败";
+  }
+
+  if (job.status === "cancelled") {
+    if (job.isGroup) {
+      return "任务包已取消";
+    }
+    if (job.taskKind === "audit_check") {
+      return "纠错已取消";
+    }
+    if (job.taskKind === "audit_replace") {
+      return "翻版已取消";
+    }
+    return "出图已取消";
+  }
+
   if (stage && STAGE_LABELS[stage]) {
     return STAGE_LABELS[stage];
   }
@@ -197,7 +239,37 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
 
 export function getMessageLabel(job: PresentableJob): string {
   const message = (job.message ?? "").trim();
-  if (isReadableMessage(message)) {
+  if (!TERMINAL_JOB_STATUSES.has(job.status) && isReadableMessage(message)) {
+    return message;
+  }
+
+  if (job.status === "succeeded") {
+    if (job.isGroup) {
+      return "任务包完成";
+    }
+    if (job.taskKind === "audit_check") {
+      return "纠错任务已完成";
+    }
+    if (job.taskKind === "audit_replace") {
+      return "翻版任务已完成";
+    }
+    return "交付任务已完成";
+  }
+
+  if (job.status === "cancelled") {
+    if (job.isGroup) {
+      return "任务包已取消";
+    }
+    if (job.taskKind === "audit_check") {
+      return "纠错任务已取消";
+    }
+    if (job.taskKind === "audit_replace") {
+      return "翻版任务已取消";
+    }
+    return "交付任务已取消";
+  }
+
+  if (job.status === "failed" && isReadableMessage(message)) {
     return message;
   }
 

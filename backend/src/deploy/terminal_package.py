@@ -307,7 +307,7 @@ def _write_support_files(
         (storage_root / rel).mkdir(parents=True, exist_ok=True)
 
     start_backend = r'''param(
-    [string]$Host = "127.0.0.1",
+    [string]$ListenHost = "127.0.0.1",
     [int]$Port = 8000
 )
 
@@ -326,7 +326,7 @@ if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
 
 Push-Location (Join-Path $root "backend-runtime")
 try {
-    & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $Host --port $Port
+    & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $ListenHost --port $Port
 } finally {
     Pop-Location
 }
@@ -857,6 +857,29 @@ if (-not (Test-Path -LiteralPath $PhysicalPath -PathType Container)) {
     throw "前端静态目录不存在: $PhysicalPath"
 }
 
+function Get-ConflictingHttpBindingSiteName {
+    param(
+        [string]$CurrentSiteName,
+        [string]$BindingInformation
+    )
+
+    $sites = Get-Website -ErrorAction SilentlyContinue
+    foreach ($site in $sites) {
+        if ($site.Name -eq $CurrentSiteName) {
+            continue
+        }
+
+        $bindings = Get-WebBinding -Name $site.Name -Protocol http -ErrorAction SilentlyContinue
+        foreach ($binding in $bindings) {
+            if ($binding.bindingInformation -eq $BindingInformation) {
+                return $site.Name
+            }
+        }
+    }
+
+    return $null
+}
+
 if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
     New-WebAppPool -Name $AppPoolName | Out-Null
 }
@@ -864,6 +887,15 @@ Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value
 Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"
 
 $bindingInformation = "{0}:{1}:{2}" -f $BindAddress, $Port, $HostName
+$conflictingSiteName = Get-ConflictingHttpBindingSiteName -CurrentSiteName $SiteName -BindingInformation $bindingInformation
+if (-not [string]::IsNullOrWhiteSpace($conflictingSiteName)) {
+    $conflictHint = if ([string]::IsNullOrWhiteSpace($HostName)) {
+        "当前是空 Host 绑定，通常会与 Default Web Site 或其他占用该端口的站点冲突。请先停止或调整冲突站点，或者改用其他端口；如果你本来就是按主机名访问，请继续使用非空 HostName。"
+    } else {
+        "请调整冲突站点的绑定，或者改用其他端口/主机名。"
+    }
+    throw ("IIS 绑定冲突: 站点 '{0}' 已占用 http 绑定 {1}。{2}" -f $conflictingSiteName, $bindingInformation, $conflictHint)
+}
 
 if (-not (Test-Path "IIS:\Sites\$SiteName")) {
     New-Website -Name $SiteName -PhysicalPath $PhysicalPath -Port $Port -IPAddress $BindAddress -HostHeader $HostName | Out-Null
@@ -968,6 +1000,9 @@ Start-Website -Name $SiteName | Out-Null
 $displayHost = if ([string]::IsNullOrWhiteSpace($HostName)) { "<部署机IP或主机名>" } else { $HostName }
 $displayPort = if ($Port -eq 80) { "" } else { ":" + $Port }
 Write-Host ("IIS 站点已配置完成。前端访问地址: http://{0}{1}/" -f $displayHost, $displayPort)
+if (-not [string]::IsNullOrWhiteSpace($HostName)) {
+    Write-Warning "HostName 只负责 IIS 主机头绑定，不会自动创建 DNS 或 hosts 解析。若要直接访问该主机名，请先让部署机和客户端都能解析到正确 IP。"
+}
 if ($proxyWarning) {
     Write-Warning $proxyWarning
 }
@@ -1000,8 +1035,32 @@ function Get-NssmPath {
     return if ($null -ne $cmd) { [string]$cmd.Source } else { "" }
 }
 
+function Get-ExistingWindowsService {
+    param([string]$ServiceName)
+
+    return Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+}
+
+function Stop-ExistingWindowsService {
+    param([string]$ServiceName)
+
+    $existingService = Get-ExistingWindowsService -ServiceName $ServiceName
+    if ($null -eq $existingService) {
+        return
+    }
+
+    if ($existingService.Status -ne "Stopped") {
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        $existingService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
+    }
+}
+
 function Register-WithNssm([string]$nssmPath) {
-    & $nssmPath remove $ServiceName confirm 2>$null | Out-Null
+    $existingService = Get-ExistingWindowsService -ServiceName $ServiceName
+    if ($null -ne $existingService) {
+        Stop-ExistingWindowsService -ServiceName $ServiceName
+        & $nssmPath remove $ServiceName confirm | Out-Null
+    }
     & $nssmPath install $ServiceName "powershell.exe" "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
     & $nssmPath set $ServiceName AppDirectory $root
     & $nssmPath set $ServiceName DisplayName $DisplayName
@@ -1054,7 +1113,14 @@ if (Test-Path -LiteralPath $localNssm -PathType Leaf) {
 }
 
 if (-not [string]::IsNullOrWhiteSpace($nssmSource)) {
-    & $nssmSource remove $ServiceName confirm 2>$null | Out-Null
+    $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($null -ne $existingService) {
+        if ($existingService.Status -ne "Stopped") {
+            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+            $existingService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
+        }
+        & $nssmSource remove $ServiceName confirm | Out-Null
+    }
 }
 
 if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
@@ -1097,6 +1163,8 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
   - `http://部署机IP:8080/`
   - `http://自定义主机名/`
 - `configure_iis_site.ps1` 里通过 `HostName` 和 `Port` 控制最终地址，不固定写死 IP。
+- 如果按部署机 IP 访问，直接省略 `HostName` 参数即可，不要显式传 `-HostName ""`。
+- `HostName` 只负责 IIS 主机头绑定，不会自动创建 DNS 或 hosts 解析；如果你要直接访问 `http://fanban-server/` 这类地址，必须先让部署机和客户端都能解析这个名字。
 - `prepare_terminal.ps1` 会再次调用 `install_runtime_prereqs.ps1` 做补齐后验收，这是有意保留的幂等校验，不是重复安装。
 - `scripts\start_backend.ps1` 会自动加载 `scripts\runtime.env.ps1`，所以正常部署不需要手工再执行一次环境文件；只有你想在当前 PowerShell 会话里直接复用这些环境变量时，才需要手工点源它。
 '''

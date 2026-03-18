@@ -26,11 +26,14 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from ..config import get_config
 from ..interfaces import ExportError, IPDFExporter
+
+_RPC_CALL_REJECTED = -2147418111
 
 
 class PDFExporter(IPDFExporter):
@@ -179,12 +182,50 @@ class PDFExporter(IPDFExporter):
         normalized = re.sub(r"[^A-Za-z0-9_-]+", "_", label).strip("_")
         return normalized or "workbook"
 
-    def _prepare_excel_path_for_com(self, xlsx_path: Path, *, label: str) -> tuple[Path, Path]:
+    @staticmethod
+    def _is_call_rejected(exc: Exception) -> bool:
+        with contextlib.suppress(Exception):
+            if getattr(exc, "hresult", None) == _RPC_CALL_REJECTED:
+                return True
+        message = str(exc).lower()
+        return ("被呼叫方拒绝接收呼叫" in str(exc)) or ("call was rejected by callee" in message)
+
+    @classmethod
+    def _retry_excel_com_call(
+        cls,
+        fn: Callable[[], Any],
+        desc: str,
+        *,
+        retries: int = 10,
+    ) -> Any:
+        last_exc: Exception | None = None
+        for _ in range(retries):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(0.8 if cls._is_call_rejected(exc) else 0.3)
+        raise RuntimeError(f"Excel COM 调用失败 {desc}: {last_exc}") from last_exc
+
+    @classmethod
+    def _prepare_excel_path_for_com(cls, xlsx_path: Path, *, label: str) -> tuple[Path, Path]:
         temp_dir = Path(tempfile.mkdtemp(prefix="fanban_excel_com_"))
-        working_copy = temp_dir / f"{self._sanitize_excel_label(label)}{xlsx_path.suffix.lower()}"
+        working_copy = temp_dir / f"{cls._sanitize_excel_label(label)}{xlsx_path.suffix.lower()}"
         shutil.copy2(xlsx_path, working_copy)
-        self._clear_windows_zone_identifier(working_copy)
+        cls._clear_windows_zone_identifier(working_copy)
         return working_copy, temp_dir
+
+    @classmethod
+    def _open_excel_workbook(cls, excel: object, workbook_path: Path, *, read_only: bool) -> object:
+        excel_app = cast(Any, excel)
+        workbooks = cls._retry_excel_com_call(
+            lambda: excel_app.Workbooks,
+            "Excel.Workbooks",
+        )
+        return cls._retry_excel_com_call(
+            lambda: cast(Any, workbooks).Open(str(workbook_path.absolute()), 0, read_only),
+            f"Excel.Workbooks.Open({workbook_path.name})",
+        )
 
     def _export_docx_via_com(self, docx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Word到PDF"""
@@ -241,8 +282,11 @@ class PDFExporter(IPDFExporter):
                 label=pdf_path.stem or xlsx_path.stem,
             )
 
-            wb = excel.Workbooks.Open(str(working_copy.absolute()), 0, True)
-            wb.ExportAsFixedFormat(0, str(pdf_path.absolute()))  # 0 = PDF
+            wb = self._open_excel_workbook(excel, working_copy, read_only=True)
+            self._retry_excel_com_call(
+                lambda: cast(Any, wb).ExportAsFixedFormat(0, str(pdf_path.absolute())),
+                "Workbook.ExportAsFixedFormat",
+            )
         finally:
             if wb:
                 with contextlib.suppress(Exception):

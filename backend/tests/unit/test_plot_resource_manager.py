@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import src.cad.plot_resource_manager as plot_resource_manager_module
 from src.cad.autocad_path_resolver import AutoCADPathInfo
 from src.cad.plot_resource_manager import (
     ALL_MANAGED_CTB_NAMES,
@@ -218,6 +219,22 @@ def test_default_asset_roots_prefers_documents_resources():
 
     assert repo_root / "documents" / "Resources" in roots
     assert repo_root / "documents" not in roots
+
+
+def test_default_asset_roots_supports_deployed_backend_runtime_layout(monkeypatch, tmp_path: Path):
+    deploy_root = tmp_path / "FanBanServer"
+    backend_runtime = deploy_root / "backend-runtime"
+    backend_source = backend_runtime / "backend" / "src" / "cad" / "plot_resource_manager.py"
+    backend_source.parent.mkdir(parents=True, exist_ok=True)
+    backend_source.write_text("# fake deployed module", encoding="utf-8")
+    deployed_resources = deploy_root / "documents" / "Resources"
+    deployed_resources.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(plot_resource_manager_module, "__file__", str(backend_source))
+
+    roots = default_asset_roots()
+
+    assert deployed_resources in roots
 
 
 def test_build_script_uses_documents_resources_as_managed_source():

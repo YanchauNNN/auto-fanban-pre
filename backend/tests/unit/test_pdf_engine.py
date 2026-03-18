@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import shutil
 from pathlib import Path
 from typing import Any, cast
 
@@ -151,6 +152,46 @@ class _FakeExcelApp:
         self.AutomationSecurity = 1
 
 
+class _FakeRejectedComError(RuntimeError):
+    def __init__(self, message: str, *, hresult: int | None = None) -> None:
+        super().__init__(message)
+        self.hresult = hresult
+
+
+class _FakeWorkbookCollection:
+    def __init__(self) -> None:
+        self.open_attempts = 0
+
+    def Open(self, path: str, update_links: int, read_only: bool) -> dict[str, object]:  # noqa: N802
+        self.open_attempts += 1
+        if self.open_attempts == 1:
+            raise _FakeRejectedComError(
+                "call was rejected by callee",
+                hresult=-2147418111,
+            )
+        return {
+            "path": path,
+            "update_links": update_links,
+            "read_only": read_only,
+        }
+
+
+class _FakeExcelWithBusyWorkbooks:
+    def __init__(self) -> None:
+        self.workbook_access_attempts = 0
+        self.collection = _FakeWorkbookCollection()
+
+    @property
+    def Workbooks(self) -> _FakeWorkbookCollection:  # noqa: N802
+        self.workbook_access_attempts += 1
+        if self.workbook_access_attempts == 1:
+            raise _FakeRejectedComError(
+                "被呼叫方拒绝接收呼叫。",
+                hresult=-2147418111,
+            )
+        return self.collection
+
+
 def test_prepare_word_for_headless_run_suppresses_normal_prompt() -> None:
     exporter = PDFExporter(preferred_engine="office_com")
     word = _FakeWordApp()
@@ -210,3 +251,22 @@ def test_prepare_excel_path_for_com_creates_ascii_temp_copy(temp_dir: Path) -> N
     assert working_copy.name == "common_catalog.xlsx"
     assert working_copy.read_bytes() == b"excel-bytes"
     assert cleanup_dir.exists()
+
+
+def test_open_excel_workbook_retries_when_call_is_rejected(monkeypatch, temp_dir: Path) -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    source = temp_dir / "input.xlsx"
+    source.write_bytes(b"excel-bytes")
+    working_copy, cleanup_dir = exporter._prepare_excel_path_for_com(
+        source,
+        label="common_catalog",
+    )
+    excel = _FakeExcelWithBusyWorkbooks()
+
+    workbook = exporter._open_excel_workbook(excel, working_copy, read_only=True)
+
+    assert workbook["path"] == str(working_copy.absolute())
+    assert workbook["read_only"] is True
+    assert excel.workbook_access_attempts == 2
+    assert excel.collection.open_attempts == 2
+    shutil.rmtree(cleanup_dir, ignore_errors=True)

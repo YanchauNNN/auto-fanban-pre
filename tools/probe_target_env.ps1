@@ -1524,6 +1524,59 @@ function Test-WordTemplateOpen {
     return Invoke-OfficeWorkerWithTimeout -TaskName "word_template" -TemplatePath $TemplatePath -TemplateLabel $TemplateLabel -TimeoutSec $OfficeWorkerTimeoutSec
 }
 
+function Get-SafeAsciiLeafName {
+    param(
+        [string]$Prefix,
+        [string]$Label,
+        [string]$Extension
+    )
+
+    $safeLabel = [Regex]::Replace(([string]$Label), "[^A-Za-z0-9_-]+", "_").Trim("_")
+    if ([string]::IsNullOrWhiteSpace($safeLabel)) {
+        $safeLabel = "template"
+    }
+    $resolvedExtension = [string]$Extension
+    if (-not [string]::IsNullOrWhiteSpace($resolvedExtension) -and -not $resolvedExtension.StartsWith(".")) {
+        $resolvedExtension = "." + $resolvedExtension
+    }
+    return ($Prefix + $safeLabel + $resolvedExtension)
+}
+
+function Test-IsCallRejected {
+    param([string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return $false
+    }
+    return ($Message -like "*拒绝接收呼叫*" -or $Message -like "*call was rejected by callee*")
+}
+
+function Invoke-ExcelOpenWithRetry {
+    param(
+        [object]$ExcelApp,
+        [string]$WorkbookPath,
+        [bool]$ReadOnly = $true,
+        [int]$Retries = 10
+    )
+
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
+        try {
+            return $ExcelApp.Workbooks.Open($WorkbookPath, 0, $ReadOnly)
+        } catch {
+            $lastError = $_
+            $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
+            $delayMs = if (Test-IsCallRejected -Message $message) { 800 } else { 300 }
+            Start-Sleep -Milliseconds $delayMs
+        }
+    }
+
+    if ($null -ne $lastError -and $null -ne $lastError.Exception) {
+        throw $lastError.Exception
+    }
+    throw "Excel.Workbooks.Open failed: $WorkbookPath"
+}
+
 function Invoke-ExcelTemplateOpenCore {
     param(
         [string]$TemplatePath,
@@ -1538,7 +1591,7 @@ function Invoke-ExcelTemplateOpenCore {
     }
 
     $tempDir = New-TempDirectory -Prefix "fanban_excel_template"
-    $workingCopy = Join-Path $tempDir ([System.IO.Path]::GetFileName($TemplatePath))
+    $workingCopy = Join-Path $tempDir (Get-SafeAsciiLeafName -Prefix "fanban_excel_" -Label $TemplateLabel -Extension ([System.IO.Path]::GetExtension($TemplatePath)))
     $failureNotePath = Join-Path $tempDir "excel_probe_failure.txt"
     $app = $null
     $workbook = $null
@@ -1554,7 +1607,7 @@ function Invoke-ExcelTemplateOpenCore {
         try { $app.EnableEvents = $false } catch {}
         try { $app.ScreenUpdating = $false } catch {}
         try { $app.AutomationSecurity = 3 } catch {}
-        $workbook = $app.Workbooks.Open($workingCopy, 0, $true)
+        $workbook = Invoke-ExcelOpenWithRetry -ExcelApp $app -WorkbookPath $workingCopy -ReadOnly $true
 
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             template = $TemplateLabel
