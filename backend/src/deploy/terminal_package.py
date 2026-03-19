@@ -298,7 +298,6 @@ def _write_support_files(
     dotnet_installer: Path | None,
     vc_redist_installer: Path | None,
     python_installer: Path | None,
-    nssm_archive: Path | None,
     url_rewrite_installer: Path | None,
     arr_installer: Path | None,
 ) -> None:
@@ -480,8 +479,6 @@ $packageRoot = Split-Path -Parent $PSScriptRoot
 $pythonRuntimeDir = Join-Path $packageRoot "python-runtime"
 $pythonExe = Join-Path $pythonRuntimeDir "python.exe"
 $pythonPackagesSeed = Join-Path $packageRoot "python-packages\Lib\site-packages"
-$nssmInstallDir = Join-Path $root "nssm"
-$nssmExe = Join-Path $nssmInstallDir "nssm.exe"
 
 function Get-DotNetRelease {
     $keys = @(
@@ -541,12 +538,6 @@ function Test-PackagePythonInstalled {
     }
 }
 
-function Test-NssmReady {
-    param([string]$NssmPath)
-
-    return (Test-Path -LiteralPath $NssmPath -PathType Leaf)
-}
-
 function Expand-PackagePythonRuntime {
     param(
         [string]$ArchivePath,
@@ -564,43 +555,6 @@ function Expand-PackagePythonRuntime {
     New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
     Write-Host ("解压离线 Python 运行时: " + $ArchivePath)
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $TargetDir -Force
-}
-
-function Install-BundledNssm {
-    param(
-        [string]$ArchivePath,
-        [string]$TargetDir
-    )
-
-    if ([string]::IsNullOrWhiteSpace($ArchivePath) -or -not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
-        throw "部署包缺少 NSSM 离线压缩包，请检查 install\\nssm。"
-    }
-
-    $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban_nssm_" + [guid]::NewGuid().ToString("N"))
-    try {
-        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-        New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
-
-        Write-Host ("解压 NSSM 离线包: " + $ArchivePath)
-        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $extractRoot -Force
-
-        $sourceExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter "nssm.exe" -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "[\\/](win64|amd64)[\\/]" } |
-            Select-Object -First 1
-        if ($null -eq $sourceExe) {
-            $sourceExe = Get-ChildItem -LiteralPath $extractRoot -Recurse -Filter "nssm.exe" -File -ErrorAction SilentlyContinue |
-                Select-Object -First 1
-        }
-        if ($null -eq $sourceExe) {
-            throw "NSSM 压缩包中未找到 nssm.exe。"
-        }
-
-        Copy-Item -LiteralPath $sourceExe.FullName -Destination (Join-Path $TargetDir "nssm.exe") -Force
-    } finally {
-        if (Test-Path -LiteralPath $extractRoot) {
-            Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
 }
 
 function Enable-EmbeddedPythonSitePackages {
@@ -663,7 +617,6 @@ function Sync-PythonSitePackages {
 $dotnet = Get-ChildItem -Path (Join-Path $root "dotnet") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
 $vc = Get-ChildItem -Path (Join-Path $root "vc_redist") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
 $pythonInstaller = Get-ChildItem -Path (Join-Path $root "python") -Filter *.zip -File -ErrorAction SilentlyContinue | Select-Object -First 1
-$nssmArchive = Get-ChildItem -Path (Join-Path $root "nssm") -Filter *.zip -File -ErrorAction SilentlyContinue | Select-Object -First 1
 
 if (Test-DotNet48OrAboveInstalled) {
     Write-Host ".NET Framework 4.8 或更高版本已安装，跳过。"
@@ -699,16 +652,6 @@ if (-not (Test-PackagePythonInstalled -PythonPath $pythonExe)) {
 Enable-EmbeddedPythonSitePackages -PythonRuntimeRoot $pythonRuntimeDir
 Sync-PythonSitePackages -SeedRoot $pythonPackagesSeed -PythonRuntimeRoot $pythonRuntimeDir
 Write-Host ("已同步部署包 Python 依赖到: " + (Join-Path $pythonRuntimeDir "Lib\site-packages"))
-
-if (Test-NssmReady -NssmPath $nssmExe) {
-    Write-Host ("NSSM 已就绪: " + $nssmExe)
-} else {
-    Install-BundledNssm -ArchivePath $(if ($nssmArchive) { $nssmArchive.FullName } else { "" }) -TargetDir $nssmInstallDir
-}
-
-if (-not (Test-NssmReady -NssmPath $nssmExe)) {
-    throw "NSSM 准备失败，请检查 install\\nssm 下的离线压缩包内容与目标机权限。"
-}
 '''
     _write_text(output_root / "install" / "install_runtime_prereqs.ps1", install_runtime)
 
@@ -1009,11 +952,13 @@ if ($proxyWarning) {
 '''
     _write_text(output_root / "install" / "configure_iis_site.ps1", configure_iis_site)
 
-    register_backend_service = r'''param(
-    [string]$ServiceName = "FanBanBackend",
-    [string]$DisplayName = "FanBan Backend",
-    [ValidateSet("nssm", "scheduled-task")]
-    [string]$Mode = "nssm"
+    register_backend_task = r'''param(
+    [string]$TaskName = "FanBanBackend",
+    [Parameter(Mandatory = $true)]
+    [string]$UserName,
+    [string]$ListenHost = "127.0.0.1",
+    [int]$Port = 8000,
+    [switch]$StartImmediately = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -1023,113 +968,80 @@ if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
     throw "启动脚本不存在: $startScript"
 }
 
-function Get-NssmPath {
-    $candidate = Join-Path $PSScriptRoot "nssm\nssm.exe"
-    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-        return $candidate
-    }
-    $cmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
-    if ($null -eq $cmd) {
-        $cmd = Get-Command nssm -ErrorAction SilentlyContinue
-    }
-    return if ($null -ne $cmd) { [string]$cmd.Source } else { "" }
-}
+function Remove-LegacyWindowsService {
+    param([string]$LegacyName)
 
-function Get-ExistingWindowsService {
-    param([string]$ServiceName)
-
-    return Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-}
-
-function Stop-ExistingWindowsService {
-    param([string]$ServiceName)
-
-    $existingService = Get-ExistingWindowsService -ServiceName $ServiceName
-    if ($null -eq $existingService) {
+    $legacyService = Get-Service -Name $LegacyName -ErrorAction SilentlyContinue
+    if ($null -eq $legacyService) {
         return
     }
 
-    if ($existingService.Status -ne "Stopped") {
-        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-        $existingService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
+    if ($legacyService.Status -ne "Stopped") {
+        Stop-Service -Name $LegacyName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
     }
+
+    & sc.exe delete $LegacyName | Out-Null
+    Write-Warning ("检测到旧版 Windows 服务，已尝试删除: " + $LegacyName)
 }
 
-function Register-WithNssm([string]$nssmPath) {
-    $existingService = Get-ExistingWindowsService -ServiceName $ServiceName
-    if ($null -ne $existingService) {
-        Stop-ExistingWindowsService -ServiceName $ServiceName
-        & $nssmPath remove $ServiceName confirm | Out-Null
+function Build-TaskActionArguments {
+    return "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`" -ListenHost `"$ListenHost`" -Port $Port"
+}
+
+Remove-LegacyWindowsService -LegacyName $TaskName
+
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+}
+
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (Build-TaskActionArguments)
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
+$principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType InteractiveToken -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -Hidden
+
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Write-Host ("已注册登录触发任务: " + $TaskName)
+Write-Host ("运行账号: " + $UserName)
+Write-Host "该任务依赖交互式登录会话；执行 Office COM 任务时，请保持该账号已登录。"
+
+if ($StartImmediately) {
+    try {
+        Start-ScheduledTask -TaskName $TaskName
+        Write-Host ("已尝试立即启动任务: " + $TaskName)
+    } catch {
+        Write-Warning "任务已注册，但当前未能立即启动。通常是因为目标账号尚未处于登录状态；请先登录该账号，再重新执行本脚本或手工启动任务。"
     }
-    & $nssmPath install $ServiceName "powershell.exe" "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
-    & $nssmPath set $ServiceName AppDirectory $root
-    & $nssmPath set $ServiceName DisplayName $DisplayName
-    & $nssmPath set $ServiceName Start SERVICE_AUTO_START
-    & $nssmPath start $ServiceName | Out-Null
-    Write-Host ("已使用 NSSM 注册并启动 Windows 服务: " + $ServiceName)
-}
-
-function Register-WithScheduledTask {
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $ServiceName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Start-ScheduledTask -TaskName $ServiceName
-    Write-Warning ("已按显式指定方式注册并立即启动计划任务: " + $ServiceName)
-}
-
-$nssmPath = Get-NssmPath
-if ([string]::IsNullOrWhiteSpace($nssmPath)) {
-    throw "未找到 nssm.exe，请先执行 install_runtime_prereqs.ps1 准备部署包内的 NSSM。"
-}
-
-if ($Mode -eq "nssm") {
-    Register-WithNssm -nssmPath $nssmPath
-} else {
-    Register-WithScheduledTask
 }
 '''
-    _write_text(output_root / "install" / "register_backend_service.ps1", register_backend_service)
+    _write_text(output_root / "install" / "register_backend_task.ps1", register_backend_task)
 
-    unregister_backend_service = r'''param(
-    [string]$ServiceName = "FanBanBackend"
+    unregister_backend_task = r'''param(
+    [string]$TaskName = "FanBanBackend"
 )
 
 $ErrorActionPreference = "Stop"
-$localNssm = Join-Path $PSScriptRoot "nssm\nssm.exe"
-$nssmSource = ""
 
-if (Test-Path -LiteralPath $localNssm -PathType Leaf) {
-    $nssmSource = $localNssm
-} else {
-    $nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
-    if ($null -eq $nssmCommand) {
-        $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    try {
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    } catch {
     }
-    if ($null -ne $nssmCommand) {
-        $nssmSource = [string]$nssmCommand.Source
-    }
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-if (-not [string]::IsNullOrWhiteSpace($nssmSource)) {
-    $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($null -ne $existingService) {
-        if ($existingService.Status -ne "Stopped") {
-            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-            $existingService.WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15))
-        }
-        & $nssmSource remove $ServiceName confirm | Out-Null
+$legacyService = Get-Service -Name $TaskName -ErrorAction SilentlyContinue
+if ($null -ne $legacyService) {
+    if ($legacyService.Status -ne "Stopped") {
+        Stop-Service -Name $TaskName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
     }
+    & sc.exe delete $TaskName | Out-Null
 }
 
-if (Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
-}
-
-Write-Host ("已移除服务/计划任务: " + $ServiceName)
+Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 '''
-    _write_text(output_root / "install" / "unregister_backend_service.ps1", unregister_backend_service)
+    _write_text(output_root / "install" / "unregister_backend_task.ps1", unregister_backend_task)
 
     readme = r'''# 部署说明
 
@@ -1138,7 +1050,6 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
 - `backend-runtime/`: 后端运行目录
 - `python-runtime/`: 目标机离线 Python 运行时
 - `python-packages/`: 随包分发的 Python site-packages
-- `install/nssm/`: NSSM 离线压缩包与展开后的 `nssm.exe`
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
 - `documents/Resources/`: 受管打印和校准资源
 - `documents_bin/`: 模板与词库资源
@@ -1151,9 +1062,15 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
 2. 再执行 `scripts\prepare_terminal.ps1`
 3. 再执行 `scripts\deep_check_terminal.ps1`
 4. 配置 IIS：`install\configure_iis_site.ps1`
-5. 注册后端常驻：`install\register_backend_service.ps1`
+5. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
 6. 执行 `scripts\check_health.ps1`
 7. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+
+## 为什么默认不用 Windows 服务
+
+- 当前后端任务链包含 Office COM 自动化。
+- Office COM 在交互式登录会话里稳定性显著高于 `LocalSystem` 等服务态会话。
+- 因此正式部署默认改为“登录时触发”的隐藏计划任务，而不是 `NSSM` / Windows 服务。
 
 ## 前端地址怎么定
 
@@ -1177,8 +1094,6 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
         missing_lines.append("- 未找到 `VC++ 2015-2022 x64` 离线安装器，请手工放入 `install/vc_redist/`。")
     if python_installer is None:
         missing_lines.append("- 未找到 `Python 3.13 x64` 离线安装器，请手工放入 `install/python/`。")
-    if nssm_archive is None:
-        missing_lines.append("- 未找到 `NSSM` 离线压缩包，请手工放入 `install/nssm/`。")
     if url_rewrite_installer is None:
         missing_lines.append("- 未找到 `URL Rewrite` 离线安装器，请手工放入 `install/iis/url_rewrite/`。")
     if arr_installer is None:
@@ -1208,13 +1123,6 @@ Write-Host ("已移除服务/计划任务: " + $ServiceName)
     else:
         (output_root / "install" / "python").mkdir(parents=True, exist_ok=True)
 
-    if nssm_archive is not None:
-        target = output_root / "install" / "nssm" / nssm_archive.name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(nssm_archive, target)
-    else:
-        (output_root / "install" / "nssm").mkdir(parents=True, exist_ok=True)
-
     if url_rewrite_installer is not None:
         target = output_root / "install" / "iis" / "url_rewrite" / url_rewrite_installer.name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1237,7 +1145,6 @@ def build_terminal_deploy_package(
     dotnet_installer: Path | None = None,
     vc_redist_installer: Path | None = None,
     python_installer: Path | None = None,
-    nssm_archive: Path | None = None,
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> Path:
@@ -1258,7 +1165,6 @@ def build_terminal_deploy_package(
         dotnet_installer=dotnet_installer,
         vc_redist_installer=vc_redist_installer,
         python_installer=python_installer,
-        nssm_archive=nssm_archive,
         url_rewrite_installer=url_rewrite_installer,
         arr_installer=arr_installer,
     )
@@ -1275,7 +1181,6 @@ def publish_terminal_deploy_artifacts(
     dotnet_installer: Path | None = None,
     vc_redist_installer: Path | None = None,
     python_installer: Path | None = None,
-    nssm_archive: Path | None = None,
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> DeployArtifacts:
@@ -1293,7 +1198,6 @@ def publish_terminal_deploy_artifacts(
             dotnet_installer=dotnet_installer,
             vc_redist_installer=vc_redist_installer,
             python_installer=python_installer,
-            nssm_archive=nssm_archive,
             url_rewrite_installer=url_rewrite_installer,
             arr_installer=arr_installer,
         )

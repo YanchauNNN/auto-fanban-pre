@@ -1813,39 +1813,27 @@ function Get-ServiceHostingFacts {
     } catch {
     }
 
-    $scCommand = Get-Command sc.exe -ErrorAction SilentlyContinue
-    $bundledNssm = Resolve-PreferredPath -Candidates @(
-        (Join-Path $ActualRepoRoot "install\nssm\nssm.exe")
-    )
-    $nssmPath = ""
-    $nssmSource = ""
-    if (-not [string]::IsNullOrWhiteSpace($bundledNssm) -and (Test-Path -LiteralPath $bundledNssm -PathType Leaf)) {
-        $nssmPath = $bundledNssm
-        $nssmSource = "deploy_bundle"
-    } else {
-        $nssmCommand = Get-Command nssm.exe -ErrorAction SilentlyContinue
-        if ($null -eq $nssmCommand) {
-            $nssmCommand = Get-Command nssm -ErrorAction SilentlyContinue
-        }
-        if ($null -ne $nssmCommand) {
-            $nssmPath = [string]$nssmCommand.Source
-            $nssmSource = "path"
-        }
-    }
+    $registerScheduledTask = Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue
+    $startScheduledTask = Get-Command Start-ScheduledTask -ErrorAction SilentlyContinue
+    $registerTaskScript = Join-Path $ActualRepoRoot "install\register_backend_task.ps1"
+    $unregisterTaskScript = Join-Path $ActualRepoRoot "install\unregister_backend_task.ps1"
 
     return [ordered]@{
         status = "pass"
-        recommended_mode = "windows_service"
+        recommended_mode = "logon_task"
         admin_context = New-CheckResult -Status $(if ($isAdmin) { "pass" } else { "skip" }) -Details ([ordered]@{
             is_admin = $isAdmin
         }) -Error $(if ($isAdmin) { "" } else { "current session is not elevated" })
-        sc_exe = New-CheckResult -Status $(if ($null -ne $scCommand) { "pass" } else { "fail" }) -Details ([ordered]@{
-            path = if ($null -ne $scCommand) { [string]$scCommand.Source } else { "" }
-        }) -Error $(if ($null -ne $scCommand) { "" } else { "sc.exe is unavailable" })
-        nssm = New-CheckResult -Status $(if (-not [string]::IsNullOrWhiteSpace($nssmPath)) { "pass" } else { "skip" }) -Details ([ordered]@{
-            path = $nssmPath
-            source = $nssmSource
-        }) -Error $(if (-not [string]::IsNullOrWhiteSpace($nssmPath)) { "" } else { "nssm is unavailable" })
+        scheduled_tasks = New-CheckResult -Status $(if ($null -ne $registerScheduledTask -and $null -ne $startScheduledTask) { "pass" } else { "fail" }) -Details ([ordered]@{
+            register_scheduled_task = if ($null -ne $registerScheduledTask) { [string]$registerScheduledTask.Source } else { "" }
+            start_scheduled_task = if ($null -ne $startScheduledTask) { [string]$startScheduledTask.Source } else { "" }
+        }) -Error $(if ($null -ne $registerScheduledTask -and $null -ne $startScheduledTask) { "" } else { "ScheduledTasks PowerShell cmdlets are unavailable" })
+        register_task_script = New-CheckResult -Status $(if (Test-Path -LiteralPath $registerTaskScript -PathType Leaf) { "pass" } else { "fail" }) -Details ([ordered]@{
+            path = $registerTaskScript
+        }) -Error $(if (Test-Path -LiteralPath $registerTaskScript -PathType Leaf) { "" } else { "register_backend_task.ps1 is missing" })
+        unregister_task_script = New-CheckResult -Status $(if (Test-Path -LiteralPath $unregisterTaskScript -PathType Leaf) { "pass" } else { "fail" }) -Details ([ordered]@{
+            path = $unregisterTaskScript
+        }) -Error $(if (Test-Path -LiteralPath $unregisterTaskScript -PathType Leaf) { "" } else { "unregister_backend_task.ps1 is missing" })
     }
 }
 
@@ -2129,21 +2117,28 @@ if ($serviceHostingFacts.admin_context.status -ne "pass") {
     $warnings += [ordered]@{
         section = "web_service"
         code = "admin_context"
-        message = "current shell is not elevated; Windows service installation may require elevation"
+        message = "current shell is not elevated; registering or removing the logon task may require elevation"
     }
 }
-if ($serviceHostingFacts.sc_exe.status -ne "pass") {
+if ($serviceHostingFacts.scheduled_tasks.status -ne "pass") {
     $warnings += [ordered]@{
         section = "web_service"
-        code = "sc_exe"
-        message = "sc.exe is unavailable in the current environment"
+        code = "scheduled_tasks"
+        message = "ScheduledTasks PowerShell cmdlets are unavailable in the current environment"
     }
 }
-if ($serviceHostingFacts.nssm.status -eq "skip") {
+if ($serviceHostingFacts.register_task_script.status -ne "pass") {
     $warnings += [ordered]@{
         section = "web_service"
-        code = "nssm"
-        message = "nssm is unavailable; rerun install_runtime_prereqs.ps1 to provision the bundled service wrapper"
+        code = "register_backend_task"
+        message = "register_backend_task.ps1 is missing from the deployment package"
+    }
+}
+if ($serviceHostingFacts.unregister_task_script.status -ne "pass") {
+    $warnings += [ordered]@{
+        section = "web_service"
+        code = "unregister_backend_task"
+        message = "unregister_backend_task.ps1 is missing from the deployment package"
     }
 }
 

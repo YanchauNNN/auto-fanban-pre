@@ -60,11 +60,6 @@ def main() -> int:
         help="???Python 3.13 x64 ???????",
     )
     parser.add_argument(
-        "--nssm-archive",
-        default=os.environ.get("FANBAN_NSSM_ARCHIVE", ""),
-        help="???NSSM ???????ZIP?",
-    )
-    parser.add_argument(
         "--url-rewrite-installer",
         default=os.environ.get("FANBAN_URL_REWRITE_INSTALLER", ""),
         help="???IIS URL Rewrite ???????",
@@ -86,7 +81,6 @@ def main() -> int:
         dotnet_installer=_resolve_optional_path(args.dotnet_installer),
         vc_redist_installer=_resolve_optional_path(args.vc_redist_installer),
         python_installer=_resolve_optional_path(args.python_installer),
-        nssm_archive=_resolve_optional_path(args.nssm_archive),
         url_rewrite_installer=_resolve_optional_path(args.url_rewrite_installer),
         arr_installer=_resolve_optional_path(args.arr_installer),
     )
@@ -96,7 +90,6 @@ def main() -> int:
         dotnet_installer=installers.dotnet,
         vc_redist_installer=installers.vc_redist,
         python_installer=installers.python,
-        nssm_archive=installers.nssm,
         url_rewrite_installer=installers.url_rewrite,
         arr_installer=installers.arr,
     )

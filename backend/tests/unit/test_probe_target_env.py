@@ -83,7 +83,7 @@ def test_probe_target_env_prefers_package_python_runtime() -> None:
     assert 'Label "package_runtime"' in script_text
 
 
-def test_probe_target_env_keeps_excel_failure_evidence_and_checks_bundled_nssm() -> None:
+def test_probe_target_env_keeps_excel_failure_evidence_and_checks_logon_task_support() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
         encoding="utf-8",
@@ -92,8 +92,9 @@ def test_probe_target_env_keeps_excel_failure_evidence_and_checks_bundled_nssm()
     assert "excel_probe_failure.txt" in script_text
     assert "exception_hresult" in script_text
     assert "diagnostics_path" in script_text
-    assert "install\\nssm\\nssm.exe" in script_text
-    assert "deploy_bundle" in script_text
+    assert "register_backend_task.ps1" in script_text
+    assert "unregister_backend_task.ps1" in script_text
+    assert "recommended_mode = \"logon_task\"" in script_text
 
 
 def test_probe_target_env_can_reuse_quick_probe_baseline_for_deep_checks() -> None:

@@ -10,8 +10,6 @@ from urllib.request import urlopen
 DOTNET48_URL = "https://go.microsoft.com/fwlink/?linkid=2088631"
 VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 PYTHON_313_X64_URL = "https://www.python.org/ftp/python/3.13.12/python-3.13.12-embed-amd64.zip"
-# Windows 10/Server 2016+ should prefer the featured pre-release build per nssm.cc/download.
-NSSM_ZIP_URL = "https://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip"
 URL_REWRITE_X64_URL = (
     "https://download.microsoft.com/download/1/2/8/"
     "128E2E22-C1B9-44A4-BE2A-5859ED1D4592/rewrite_amd64_zh-CN.msi"
@@ -21,7 +19,6 @@ ARR_X64_URL = "https://go.microsoft.com/fwlink/?LinkID=615136"
 DOTNET48_FILENAME = "ndp48-x86-x64-allos-enu.exe"
 VC_REDIST_X64_FILENAME = "VC_redist.x64.exe"
 PYTHON_313_X64_FILENAME = "python-3.13.12-embed-amd64.zip"
-NSSM_ZIP_FILENAME = "nssm-2.24-101-g897c7ad.zip"
 URL_REWRITE_X64_FILENAME = "rewrite_amd64_zh-CN.msi"
 ARR_X64_FILENAME = "requestRouter_amd64.msi"
 
@@ -33,7 +30,6 @@ class PrereqInstallerBundle:
     dotnet: Path | None
     vc_redist: Path | None
     python: Path | None
-    nssm: Path | None
     url_rewrite: Path | None
     arr: Path | None
 
@@ -62,7 +58,6 @@ def ensure_prereq_installers(
     dotnet_installer: Path | None = None,
     vc_redist_installer: Path | None = None,
     python_installer: Path | None = None,
-    nssm_archive: Path | None = None,
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
     downloader: Downloader = download_file,
@@ -88,13 +83,6 @@ def ensure_prereq_installers(
         url=PYTHON_313_X64_URL,
         downloader=downloader,
     )
-    nssm = _resolve_or_download(
-        explicit_path=nssm_archive,
-        download_root=download_root / "nssm",
-        filename=NSSM_ZIP_FILENAME,
-        url=NSSM_ZIP_URL,
-        downloader=downloader,
-    )
     url_rewrite = _resolve_or_download(
         explicit_path=url_rewrite_installer,
         download_root=download_root / "iis" / "url_rewrite",
@@ -113,7 +101,6 @@ def ensure_prereq_installers(
         dotnet=dotnet,
         vc_redist=vc_redist,
         python=python,
-        nssm=nssm,
         url_rewrite=url_rewrite,
         arr=arr,
     )

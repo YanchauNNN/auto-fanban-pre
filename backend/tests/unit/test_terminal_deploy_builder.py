@@ -22,6 +22,8 @@ RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
+REGISTER_TASK_SCRIPT = "register_backend_task.ps1"
+UNREGISTER_TASK_SCRIPT = "unregister_backend_task.ps1"
 
 
 def _write_file(path: Path, content: str = "x") -> None:
@@ -133,7 +135,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     text = missing_readme.read_text(encoding="utf-8")
     assert ".NET Framework 4.8" in text
     assert "VC++ 2015-2022 x64" in text
-    assert "NSSM" in text
+    assert "NSSM" not in text
 
 
 def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prepare_scripts(tmp_path: Path) -> None:
@@ -143,11 +145,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     dotnet = tmp_path / "installers" / "ndp48-x86-x64-allos-enu.exe"
     vc = tmp_path / "installers" / "VC_redist.x64.exe"
     python = tmp_path / "installers" / "python-3.13.12-embed-amd64.zip"
-    nssm = tmp_path / "installers" / "nssm-2.24-101-g897c7ad.zip"
     _write_file(dotnet)
     _write_file(vc)
     _write_file(python)
-    _write_file(nssm)
 
     build_terminal_deploy_package(
         repo_root=repo_root,
@@ -155,20 +155,19 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
         dotnet_installer=dotnet,
         vc_redist_installer=vc,
         python_installer=python,
-        nssm_archive=nssm,
     )
 
     assert (output_root / "install" / "dotnet" / dotnet.name).exists()
     assert (output_root / "install" / "vc_redist" / vc.name).exists()
     assert (output_root / "install" / "python" / python.name).exists()
-    assert (output_root / "install" / "nssm" / nssm.name).exists()
+    assert not (output_root / "install" / "nssm").exists()
     assert (output_root / "install" / "iis" / "url_rewrite").exists()
     assert (output_root / "install" / "iis" / "arr").exists()
     assert (output_root / "install" / "configure_iis_site.ps1").exists()
     assert (output_root / "install" / "check_iis_proxy_prereqs.ps1").exists()
     assert (output_root / "install" / "install_iis_proxy_prereqs.ps1").exists()
-    assert (output_root / "install" / "register_backend_service.ps1").exists()
-    assert (output_root / "install" / "unregister_backend_service.ps1").exists()
+    assert (output_root / "install" / REGISTER_TASK_SCRIPT).exists()
+    assert (output_root / "install" / UNREGISTER_TASK_SCRIPT).exists()
 
     start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
     prepare_terminal = (output_root / "scripts" / "prepare_terminal.ps1").read_text(encoding="utf-8")
@@ -178,7 +177,7 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     configure_iis = (output_root / "install" / "configure_iis_site.ps1").read_text(encoding="utf-8")
     check_iis_proxy = (output_root / "install" / "check_iis_proxy_prereqs.ps1").read_text(encoding="utf-8")
     install_iis_proxy = (output_root / "install" / "install_iis_proxy_prereqs.ps1").read_text(encoding="utf-8")
-    register_service = (output_root / "install" / "register_backend_service.ps1").read_text(encoding="utf-8")
+    register_task = (output_root / "install" / REGISTER_TASK_SCRIPT).read_text(encoding="utf-8")
 
     assert 'python-runtime\\python.exe' in start_backend
     assert 'Push-Location (Join-Path $root "backend-runtime")' in start_backend
@@ -208,16 +207,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Enable-EmbeddedPythonSitePackages" in install_runtime
     assert "-Encoding ascii" in install_runtime
     assert "Sync-PythonSitePackages" in install_runtime
-    assert "Install-BundledNssm" in install_runtime
-    install_nssm_section = install_runtime.split("function Install-BundledNssm", 1)[1].split(
-        "function Enable-EmbeddedPythonSitePackages",
-        1,
-    )[0]
-    assert "Remove-Item -LiteralPath $TargetDir -Recurse -Force" not in install_nssm_section
-    assert "NSSM 已就绪" in install_runtime
     assert "python-runtime" in install_runtime
     assert "python-packages\\Lib\\site-packages" in install_runtime
-    assert 'Join-Path $root "nssm"' in install_runtime
+    assert "NSSM" not in install_runtime
     assert "fanban_backend_runtime.pth" in install_runtime
     assert ".NET Framework 4.8" in install_runtime
     assert "New-Website" in configure_iis or "Set-ItemProperty" in configure_iis
@@ -236,15 +228,14 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "requestRouter_amd64.msi" in install_iis_proxy or "arr" in install_iis_proxy
     assert "Test-UrlRewriteInstalled" in install_iis_proxy
     assert "Test-ArrInstalled" in install_iis_proxy
-    assert "nssm" in register_service
-    assert '[string]$Mode = "nssm"' in register_service
-    assert "Get-ExistingWindowsService" in register_service
-    assert "Stop-ExistingWindowsService" in register_service
-    assert "Get-ExistingWindowsService -ServiceName $ServiceName" in register_service
-    assert "& $nssmPath start $ServiceName" in register_service
-    assert "Start-ScheduledTask -TaskName $ServiceName" in register_service
-    assert 'throw "未找到 nssm.exe，请先执行 install_runtime_prereqs.ps1 准备部署包内的 NSSM。"' in register_service
-    assert "Register-ScheduledTask" in register_service
+    assert "Register-ScheduledTask" in register_task
+    assert "New-ScheduledTaskTrigger -AtLogOn" in register_task
+    assert "New-ScheduledTaskPrincipal" in register_task
+    assert "InteractiveToken" in register_task
+    assert "WindowStyle Hidden" in register_task
+    assert "Start-ScheduledTask -TaskName $TaskName" in register_task
+    assert "nssm" not in register_task.lower()
+    assert "$UserName" in register_task
 
     ps1_bytes = (output_root / "install" / "check_iis_proxy_prereqs.ps1").read_bytes()
     assert ps1_bytes.startswith(b"\xef\xbb\xbf")
@@ -339,22 +330,19 @@ def test_ensure_prereq_installers_downloads_missing_files(tmp_path: Path) -> Non
     assert installers.dotnet is not None
     assert installers.vc_redist is not None
     assert installers.python is not None
-    assert installers.nssm is not None
     assert installers.url_rewrite is not None
     assert installers.arr is not None
     assert installers.dotnet.exists()
     assert installers.vc_redist.exists()
     assert installers.python.exists()
-    assert installers.nssm.exists()
     assert installers.url_rewrite.exists()
     assert installers.arr.exists()
-    assert len(downloads) == 6
+    assert len(downloads) == 5
     assert "2088631" in downloads[0][0]
     assert "vc_redist.x64.exe" in downloads[1][0]
     assert "python-3.13.12-embed-amd64.zip" in downloads[2][0]
-    assert "nssm" in downloads[3][0].lower()
-    assert "rewrite_amd64_zh-CN.msi" in downloads[4][0]
-    assert "LinkID=615136" in downloads[5][0] or "requestRouter_amd64.msi" in downloads[5][0]
+    assert "rewrite_amd64_zh-CN.msi" in downloads[3][0]
+    assert "LinkID=615136" in downloads[4][0] or "requestRouter_amd64.msi" in downloads[4][0]
 
 
 def test_generated_powershell_scripts_parse_cleanly(tmp_path: Path) -> None:
