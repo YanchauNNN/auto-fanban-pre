@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import ezdxf
-import pytest
 
 from src.cad.detection import AnchorCalibratedLocator, CandidateFinder, PaperFitter
 from src.config import BusinessSpec
@@ -69,6 +68,32 @@ def test_calibrated_locator_without_anchor_falls_back_to_geometry() -> None:
     doc.layers.new("HIGH")
     msp = doc.modelspace()
     add_rect_polyline(msp, "HIGH", 0, 0, 100, 50)
+
+    frames = locator.locate_frames(msp, Path("dummy.dxf"))
+
+    assert len(frames) == 1
+
+
+def test_calibrated_locator_falls_back_to_non_priority_insert_layer_for_unresolved_anchor() -> None:
+    locator = AnchorCalibratedLocator(
+        _calibrated_spec(),
+        CandidateFinder(
+            layer_order=["HIGH", "LOW"],
+            entity_order=["LWPOLYLINE"],
+            min_dim=1.0,
+        ),
+        PaperFitter(),
+    )
+    doc = ezdxf.new()
+    doc.layers.new("123")
+    block = doc.blocks.new(name="FRAME_IN_BLOCK")
+    add_rect_polyline(block, "0", 0, 0, 100, 50)
+
+    msp = doc.modelspace()
+    # Calibrated locator uses the anchor text bbox right-bottom as reference.
+    # Place the text so bbox.xmax/ymin aligns with the frame right-bottom (100, 0).
+    msp.add_text("ANCHOR", dxfattribs={"insert": (91, 0), "height": 2.5})
+    msp.add_blockref("FRAME_IN_BLOCK", (0, 0), dxfattribs={"layer": "123"})
 
     frames = locator.locate_frames(msp, Path("dummy.dxf"))
 

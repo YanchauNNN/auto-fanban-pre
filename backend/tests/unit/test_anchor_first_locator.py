@@ -9,6 +9,7 @@ from pathlib import Path
 import ezdxf
 
 from src.cad.detection.anchor_first_locator import AnchorFirstLocator
+from src.cad.detection.candidate_finder import CandidateFinder
 from src.config import BusinessSpec
 from src.models import BBox
 
@@ -256,3 +257,27 @@ def test_locate_frames_expands_a4_neighbors_from_local_layers_without_extra_anch
 
     assert len(frames) == 4
     assert any(call[0] == ("LOW",) and call[1] is not None for call in finder.calls)
+
+
+def test_locate_frames_falls_back_to_non_priority_insert_layer_for_unresolved_anchor() -> None:
+    spec = _layered_anchor_spec()
+    finder = CandidateFinder(
+        min_dim=1.0,
+        coord_tol=0.5,
+        layer_order=["HIGH", "LOW"],
+        entity_order=["LWPOLYLINE"],
+    )
+    locator = AnchorFirstLocator(spec, finder, DummyFitter())
+
+    doc = ezdxf.new()
+    doc.layers.new("123")
+    block = doc.blocks.new(name="FRAME_IN_BLOCK")
+    block.add_lwpolyline([(0, 0), (100, 0), (100, 50), (0, 50)], close=True, dxfattribs={"layer": "0"})
+
+    msp = doc.modelspace()
+    msp.add_text("ANCHOR", dxfattribs={"insert": (10, 10), "height": 2.5})
+    msp.add_blockref("FRAME_IN_BLOCK", (0, 0), dxfattribs={"layer": "123"})
+
+    frames = locator.locate_frames(msp, Path("dummy.dxf"))
+
+    assert len(frames) == 1

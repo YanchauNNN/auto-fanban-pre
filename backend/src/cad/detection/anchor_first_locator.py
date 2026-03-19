@@ -161,6 +161,7 @@ class AnchorFirstLocator:
         local_windows = self._build_local_windows(anchor_items, unresolved_ids)
         local_window_hits_by_layer: dict[str, int] = {}
         used_local_only_layers: list[str] = []
+        used_dynamic_layers: list[str] = []
 
         if unresolved_ids and self.local_only_layers:
             self.logger.info(
@@ -199,6 +200,48 @@ class AnchorFirstLocator:
                 local_window_hits_by_layer[layer] = layer_hits
                 if len(selected_by_anchor) >= len(anchor_items):
                     break
+
+        if len(selected_by_anchor) < len(anchor_items):
+            dynamic_layers = self._collect_additional_layers(msp)
+            if dynamic_layers:
+                self.logger.info(
+                    "进入额外图层局部补检: dxf=%s unresolved=%d windows=%d layers=%s",
+                    dxf_path.name,
+                    len(anchor_items) - len(selected_by_anchor),
+                    len(local_windows),
+                    ",".join(dynamic_layers),
+                )
+                for layer in dynamic_layers:
+                    layer_hits = 0
+                    layer_used = False
+                    for window_info in local_windows:
+                        layer_candidates = self._build_candidates_for_layers(
+                            msp,
+                            [layer],
+                            window=window_info["window"],
+                            localize_line_rebuild=True,
+                        )
+                        if not layer_candidates:
+                            continue
+                        layer_used = True
+                        self._merge_candidates(candidates, layer_candidates, seen_candidates)
+                        before = len(selected_by_anchor)
+                        self._resolve_anchor_matches(
+                            anchor_items,
+                            candidates,
+                            selected_by_anchor,
+                            anchor_ids=window_info["anchor_ids"],
+                        )
+                        layer_hits += len(selected_by_anchor) - before
+                        if len(selected_by_anchor) >= len(anchor_items):
+                            break
+                    if layer_used:
+                        used_dynamic_layers.append(layer)
+                    local_window_hits_by_layer[layer] = (
+                        local_window_hits_by_layer.get(layer, 0) + layer_hits
+                    )
+                    if len(selected_by_anchor) >= len(anchor_items):
+                        break
 
         frames: list[FrameMeta] = []
         used_candidates: set[tuple[float, float, float, float]] = set()
@@ -259,6 +302,7 @@ class AnchorFirstLocator:
             "local_windows_total": len(local_windows) + a4_local_windows_total,
             "local_window_hits_by_layer": local_window_hits_by_layer,
             "used_local_only_layers": used_local_only_layers,
+            "used_dynamic_layers": used_dynamic_layers,
         }
         return frames
 
@@ -599,6 +643,21 @@ class AnchorFirstLocator:
                 if not merged:
                     windows.append({"window": bbox, "anchor_ids": [idx]})
         return windows
+
+    def _collect_additional_layers(self, msp) -> list[str]:
+        excluded = set(self.global_layers) | set(self.local_only_layers)
+        layers: list[str] = []
+        seen: set[str] = set()
+        for entity in msp:
+            try:
+                layer = str(getattr(entity.dxf, "layer", "") or "")
+            except Exception:
+                continue
+            if not layer or layer in excluded or layer in seen:
+                continue
+            seen.add(layer)
+            layers.append(layer)
+        return layers
 
     def _expand_local_a4_neighbors(
         self,

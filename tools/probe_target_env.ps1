@@ -1208,18 +1208,122 @@ function Get-AutoCADFacts {
     }
 }
 
+function Get-ExecutablePathFromCommandText {
+    param([string]$CommandText)
+
+    if ([string]::IsNullOrWhiteSpace($CommandText)) {
+        return ""
+    }
+
+    $expanded = [Environment]::ExpandEnvironmentVariables($CommandText.Trim())
+    if ($expanded.StartsWith('"')) {
+        $closingQuote = $expanded.IndexOf('"', 1)
+        if ($closingQuote -gt 1) {
+            return $expanded.Substring(1, $closingQuote - 1)
+        }
+    }
+
+    $exeMatch = [regex]::Match($expanded, '^[^ ]+\.exe', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($exeMatch.Success) {
+        return $exeMatch.Value
+    }
+
+    return ($expanded -split '\s+')[0]
+}
+
+function Get-ComRegistrationFacts {
+    param([string]$ProgId)
+
+    $facts = [ordered]@{
+        prog_id = $ProgId
+        progid_key = ""
+        progid_exists = $false
+        clsid = ""
+        clsid_key = ""
+        local_server32_key = ""
+        local_server32_raw = ""
+        local_server_path = ""
+        local_server_exists = $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ProgId)) {
+        return $facts
+    }
+
+    $progIdKey = "Registry::HKEY_CLASSES_ROOT\$ProgId"
+    $facts.progid_key = $progIdKey
+    if (-not (Test-Path -LiteralPath $progIdKey -PathType Container)) {
+        return $facts
+    }
+
+    $facts.progid_exists = $true
+
+    $clsid = ""
+    try {
+        $progIdItem = Get-Item -LiteralPath $progIdKey -ErrorAction Stop
+        $clsid = [string]$progIdItem.GetValue("CLSID", "")
+    } catch {
+    }
+    if ([string]::IsNullOrWhiteSpace($clsid)) {
+        $clsidValueKey = Join-Path $progIdKey "CLSID"
+        if (Test-Path -LiteralPath $clsidValueKey -PathType Container) {
+            try {
+                $clsidItem = Get-Item -LiteralPath $clsidValueKey -ErrorAction Stop
+                $clsid = [string]$clsidItem.GetValue("", "")
+            } catch {
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($clsid)) {
+        return $facts
+    }
+
+    $facts.clsid = $clsid
+    $clsidKey = "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid"
+    $facts.clsid_key = $clsidKey
+    $localServer32Key = Join-Path $clsidKey "LocalServer32"
+    $facts.local_server32_key = $localServer32Key
+    if (-not (Test-Path -LiteralPath $localServer32Key -PathType Container)) {
+        return $facts
+    }
+
+    try {
+        $localServer32Item = Get-Item -LiteralPath $localServer32Key -ErrorAction Stop
+        $localServer32Raw = [string]$localServer32Item.GetValue("", "")
+        $facts.local_server32_raw = $localServer32Raw
+        $localServerPath = Get-ExecutablePathFromCommandText -CommandText $localServer32Raw
+        $facts.local_server_path = $localServerPath
+        if (-not [string]::IsNullOrWhiteSpace($localServerPath)) {
+            $facts.local_server_exists = (Test-Path -LiteralPath $localServerPath -PathType Leaf)
+        }
+    } catch {
+    }
+
+    return $facts
+}
+
 function Test-WordCom {
     $app = $null
+    $comFacts = Get-ComRegistrationFacts -ProgId "Word.Application"
     try {
         $app = New-Object -ComObject Word.Application
         Set-WordHeadlessState -WordApp $app
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             prog_id = "Word.Application"
             version = [string]$app.Version
+            clsid = $comFacts.clsid
+            local_server32_raw = $comFacts.local_server32_raw
+            local_server_path = $comFacts.local_server_path
+            local_server_exists = $comFacts.local_server_exists
         })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             prog_id = "Word.Application"
+            clsid = $comFacts.clsid
+            local_server32_raw = $comFacts.local_server32_raw
+            local_server_path = $comFacts.local_server_path
+            local_server_exists = $comFacts.local_server_exists
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $app) {
@@ -1234,6 +1338,7 @@ function Test-WordCom {
 
 function Test-ExcelCom {
     $app = $null
+    $comFacts = Get-ComRegistrationFacts -ProgId "Excel.Application"
     try {
         $app = New-Object -ComObject Excel.Application
         $app.Visible = $false
@@ -1241,10 +1346,18 @@ function Test-ExcelCom {
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             prog_id = "Excel.Application"
             version = [string]$app.Version
+            clsid = $comFacts.clsid
+            local_server32_raw = $comFacts.local_server32_raw
+            local_server_path = $comFacts.local_server_path
+            local_server_exists = $comFacts.local_server_exists
         })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             prog_id = "Excel.Application"
+            clsid = $comFacts.clsid
+            local_server32_raw = $comFacts.local_server32_raw
+            local_server_path = $comFacts.local_server_path
+            local_server_exists = $comFacts.local_server_exists
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $app) {

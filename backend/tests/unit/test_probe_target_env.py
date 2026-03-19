@@ -121,3 +121,17 @@ def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:
     assert '$app.AskToUpdateLinks = $false' in script_text
     assert '$app.EnableEvents = $false' in script_text
     assert "GetFileName($TemplatePath)" not in script_text
+
+
+def test_probe_target_env_collects_office_com_registration_diagnostics() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Get-ComRegistrationFacts" in script_text
+    assert "function Get-ExecutablePathFromCommandText" in script_text
+    assert "local_server32_raw" in script_text
+    assert "local_server_path" in script_text
+    assert "local_server_exists" in script_text
+    assert "Get-ComRegistrationFacts -ProgId \"Excel.Application\"" in script_text
