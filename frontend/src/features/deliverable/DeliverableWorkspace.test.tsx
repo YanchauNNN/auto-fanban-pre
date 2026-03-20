@@ -64,13 +64,36 @@ const schema: FormSchema = {
           options: [],
         },
         {
+          key: "file_category",
+          label: "文件类别",
+          type: "combobox",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "文件类别(U列)",
+          options: [
+            "1 总体文件",
+            "1.1 管理性文件",
+            "1.1.1 项目管理大纲",
+            "1.1.2 质量保证文件",
+            "1.1.3 项目设计管理程序（进度、接口）",
+            "1.1.4 项目月报",
+            "1.1.5 项目季报",
+            "1.2 总体技术文件",
+            "1.2.1 设计总说明书",
+            "1.2.2 设计参数汇总表",
+            "1.2.3 技术要求说明",
+            "1.2.4 接口协调文件",
+          ],
+        },
+        {
           key: "cover_revision",
-          label: "封面版次",
+          label: "封面和目录版次",
           type: "text",
           required: false,
           requiredWhen: null,
           defaultValue: "",
-          description: "封面版次",
+          description: "封面和目录版次",
           options: [],
         },
       ],
@@ -189,6 +212,28 @@ describe("DeliverableWorkspace", () => {
 
     expect(screen.getByText("子项名称（中文），例如：反应堆厂房")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "红色更宽" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("shows all file category candidates inside a scrollable dropdown menu", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "文件类别" }));
+
+    expect(await screen.findByRole("option", { name: "1 总体文件" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "1.2.4 接口协调文件" })).toBeInTheDocument();
   });
 
   it("maps 422 param errors into field and form messages", async () => {

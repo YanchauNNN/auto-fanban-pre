@@ -70,6 +70,18 @@ describe("normalizeFormSchema", () => {
                 desc: "deprecated",
                 options: [],
               },
+              {
+                key: "cover_revision",
+                label: "cover_revision",
+                type: "text",
+                required: false,
+                required_when: null,
+                source: "frontend",
+                default: "A",
+                format: null,
+                desc: "封面版次，写入封面版次位（追加模式）",
+                options: [],
+              },
             ],
           },
           {
@@ -88,6 +100,18 @@ describe("normalizeFormSchema", () => {
                 desc: "编制者",
                 options: [],
               },
+              {
+                key: "ied_chief_designer",
+                label: "ied_chief_designer",
+                type: "text",
+                required: false,
+                required_when: null,
+                source: "frontend",
+                default: null,
+                format: "姓名@ID",
+                desc: "责任设总(W列)，填写规则同编制人/校核人等人员字段",
+                options: [],
+              },
             ],
           },
         ],
@@ -99,15 +123,17 @@ describe("normalizeFormSchema", () => {
 
     expect(normalized.sections).toHaveLength(2);
     expect(normalized.sections[0].title).toBe("任务与项目");
-    expect(normalized.sections[0].fields).toHaveLength(3);
+    expect(normalized.sections[0].fields).toHaveLength(4);
     expect(normalized.sections[0].fields[0].label).toBe("项目号");
     expect(normalized.sections[0].fields[0].description).toBe(
       "可留空，会优先从DWG文件名自动推断",
     );
     expect(normalized.sections[0].fields[1].description).toBe("封面模板选择");
     expect(normalized.sections[0].fields[2].description).toBe("写入设计文件/IED");
+    expect(normalized.sections[0].fields[3].label).toBe("封面和目录版次");
     expect(normalized.sections[1].title).toBe("IED 基础信息");
     expect(normalized.sections[1].fields[0].type).toBe("nameId");
+    expect(normalized.sections[1].fields[1].label).toBe("责任设总");
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);
   });
 

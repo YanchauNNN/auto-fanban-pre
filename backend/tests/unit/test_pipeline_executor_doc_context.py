@@ -11,7 +11,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.cad.titleblock_consistency import TitleblockConsistencyService
-from src.models import DocContext, FrameMeta, GlobalDocParams, Job, JobType, PageInfo, SheetSet
+from src.models import (
+    BBox,
+    DocContext,
+    FrameMeta,
+    FrameRuntime,
+    GlobalDocParams,
+    Job,
+    JobType,
+    PageInfo,
+    SheetSet,
+    TitleblockFields,
+)
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.packager import Packager
 
@@ -324,3 +335,105 @@ def test_stage_fix_titleblock_consistency_updates_working_source_and_flags(
     assert "SCALE_FIX_SKIPPED" in frame.runtime.flags
     report_path = tmp_path / "work" / "titleblock_consistency" / "consistency_report.json"
     assert report_path.exists()
+
+
+def test_stage_fix_titleblock_consistency_autofixes_a4_marker_revision(
+    tmp_path: Path,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(
+            deliverable_consistency_fix=SimpleNamespace(enabled=True),
+        ),
+    )
+    executor._update_progress = MagicMock()
+    executor.titleblock_consistency = TitleblockConsistencyService()
+
+    source_dwg = tmp_path / "source.dwg"
+    source_dwg.write_text("dwg", encoding="utf-8")
+    corrected = tmp_path / "work" / "titleblock_consistency" / "source.consistency.dwg"
+
+    master = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="master-a4",
+            source_file=source_dwg,
+            cad_source_file=source_dwg,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="18185NE-JGS11-001",
+            revision="A",
+            page_index=1,
+            page_total=2,
+        ),
+    )
+    slave = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="slave-a4",
+            source_file=source_dwg,
+            cad_source_file=source_dwg,
+            outer_bbox=BBox(xmin=0, ymin=100, xmax=100, ymax=200),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(page_index=2, page_total=2),
+        raw_extracts={
+            "A4_page_marker": [
+                {
+                    "text": "18185NE-JGS11-001(B)",
+                    "x": 95.0,
+                    "y": 190.0,
+                    "bbox": {"xmin": 80.0, "ymin": 185.0, "xmax": 99.0, "ymax": 195.0},
+                }
+            ],
+            "A4_page_marker_meta": {"internal_code": "18185NE-JGS11-001", "revision": "B"},
+        },
+    )
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master,
+    )
+    slave_page = PageInfo(
+        page_index=2,
+        outer_bbox=slave.runtime.outer_bbox,
+        has_titleblock=False,
+        frame_meta=slave,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-a4-marker-fix",
+        page_total=2,
+        pages=[master_page, slave_page],
+        master_page=master_page,
+    )
+
+    captured_plans: list[Any] = []
+
+    def _apply(**kwargs: Any) -> dict[str, Any]:
+        captured_plans.extend(kwargs["plans"])
+        corrected.parent.mkdir(parents=True, exist_ok=True)
+        corrected.write_text("fixed", encoding="utf-8")
+        return {"errors": []}
+
+    executor.titleblock_consistency_bridge = cast(Any, SimpleNamespace(apply=_apply))
+
+    job = Job(
+        job_id="job-consistency-fix-a4-marker",
+        job_type=JobType.DELIVERABLE,
+        project_no="1818",
+        work_dir=tmp_path,
+    )
+
+    PipelineExecutor._stage_fix_titleblock_consistency(
+        executor,
+        job,
+        {"frames": [], "sheet_sets": [sheet_set]},
+    )
+
+    assert [plan.field_name for plan in captured_plans] == ["a4_marker_revision"]
+    assert slave.runtime.cad_source_file == corrected
+    assert "A4_MARKER_REVISION_MISMATCH" in slave.runtime.flags
+    assert "A4_MARKER_REVISION_AUTO_FIXED" in slave.runtime.flags
+    assert slave.raw_extracts["A4_page_marker_meta"]["revision"] == "A"

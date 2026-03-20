@@ -58,6 +58,13 @@ class FieldConsistencyPlan:
 
 class TitleblockConsistencyService:
     _SCALE_RE = re.compile(r"1\s*:\s*\d+(?:\.\d+)?", re.IGNORECASE)
+    _A4_MARKER_FULL_RE = re.compile(
+        r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})"
+        r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|(?P<colon>[：:])\s*(?P<rev_colon>[A-Z0-9]+))",
+        re.IGNORECASE,
+    )
+    _A4_MARKER_PAREN_ONLY_RE = re.compile(r"^\(\s*(?P<rev>[A-Z0-9]+)\s*\)$", re.IGNORECASE)
+    _A4_MARKER_COLON_ONLY_RE = re.compile(r"^(?P<colon>[：:])\s*(?P<rev>[A-Z0-9]+)$", re.IGNORECASE)
 
     def __init__(self) -> None:
         self.spec = load_spec()
@@ -100,10 +107,10 @@ class TitleblockConsistencyService:
     ) -> list[FrameMeta]:
         by_id: dict[str, FrameMeta] = {frame.frame_id: frame for frame in frames}
         for sheet_set in sheet_sets:
-            master_page = getattr(sheet_set, "master_page", None)
-            master_frame = getattr(master_page, "frame_meta", None)
-            if master_frame is not None:
-                by_id.setdefault(master_frame.frame_id, master_frame)
+            for page in getattr(sheet_set, "pages", []):
+                frame = getattr(page, "frame_meta", None)
+                if frame is not None:
+                    by_id.setdefault(frame.frame_id, frame)
         return list(by_id.values())
 
     def build_frame_plans(self, frame: FrameMeta) -> list[FieldConsistencyPlan]:
@@ -121,6 +128,23 @@ class TitleblockConsistencyService:
 
         return plans
 
+    def build_sheet_set_plans(self, sheet_set: SheetSet) -> list[FieldConsistencyPlan]:
+        master_page = sheet_set.master_page
+        master_frame = getattr(master_page, "frame_meta", None)
+        master_revision = str(getattr(master_frame.titleblock, "revision", "") or "").strip().upper() if master_frame else ""
+        if not master_frame or not master_revision:
+            return []
+
+        plans: list[FieldConsistencyPlan] = []
+        for page in sheet_set.pages:
+            frame = getattr(page, "frame_meta", None)
+            if frame is None or frame.frame_id == master_frame.frame_id:
+                continue
+            plan = self._build_a4_marker_revision_plan(frame, expected_revision=master_revision)
+            if plan is not None:
+                plans.append(plan)
+        return plans
+
     def plan_replacements(
         self,
         fragments: list[dict[str, Any]],
@@ -135,6 +159,14 @@ class TitleblockConsistencyService:
         if not ordered:
             return []
 
+        field_specific = self._plan_field_specific_replacements(
+            ordered,
+            expected_text=expected_text,
+            field_name=field_name,
+        )
+        if field_specific is not None:
+            return field_specific
+
         if len(ordered) == 1:
             old_text = str(ordered[0].get("text") or "")
             if self._compact_text(old_text) == self._compact_text(expected_text):
@@ -144,14 +176,6 @@ class TitleblockConsistencyService:
         current_text = self._current_field_text(field_name, ordered)
         if self._compact_text(current_text) == self._compact_text(expected_text):
             return []
-
-        field_specific = self._plan_field_specific_replacements(
-            ordered,
-            expected_text=expected_text,
-            field_name=field_name,
-        )
-        if field_specific is not None:
-            return field_specific
 
         if len(current_parts) != len(expected_parts):
             return []
@@ -169,7 +193,24 @@ class TitleblockConsistencyService:
             )
         return replacements
 
-    def apply_expected_texts(self, frame: FrameMeta) -> None:
+    def apply_expected_texts(
+        self,
+        frame: FrameMeta,
+        plan: FieldConsistencyPlan | None = None,
+    ) -> None:
+        if plan is not None and plan.field_name == "a4_marker_revision":
+            marker_meta = frame.raw_extracts.get("A4_page_marker_meta")
+            if isinstance(marker_meta, dict):
+                marker_meta["revision"] = plan.expected_text
+            marker_fragments = frame.raw_extracts.get("A4_page_marker")
+            if isinstance(marker_fragments, list):
+                for replacement in plan.replacements:
+                    if 0 <= replacement.index < len(marker_fragments):
+                        fragment = marker_fragments[replacement.index]
+                        if isinstance(fragment, dict):
+                            fragment["text"] = replacement.new_text
+            return
+
         paper_text = self.drawing_paper_text(frame)
         if paper_text:
             frame.titleblock.paper_size_text = paper_text
@@ -370,7 +411,78 @@ class TitleblockConsistencyService:
             return self._plan_prefix_preserving_replacements(fragments, expected_text)
         if field_name == "scale_text":
             return self._plan_scale_replacements(fragments, expected_text)
+        if field_name == "a4_marker_revision":
+            return self._plan_a4_marker_revision_replacements(fragments, expected_text)
         return None
+
+    def _build_a4_marker_revision_plan(
+        self,
+        frame: FrameMeta,
+        *,
+        expected_revision: str,
+    ) -> FieldConsistencyPlan | None:
+        marker_meta = frame.raw_extracts.get("A4_page_marker_meta")
+        if not isinstance(marker_meta, dict):
+            return None
+
+        current_revision = str(marker_meta.get("revision") or "").strip().upper()
+        if not current_revision or current_revision == expected_revision:
+            return None
+
+        raw_fragments = frame.raw_extracts.get("A4_page_marker")
+        if not isinstance(raw_fragments, list):
+            return None
+        fragments = self._sort_fragments(list(raw_fragments))
+        if not fragments:
+            return None
+
+        replacements = self.plan_replacements(
+            fragments,
+            expected_text=expected_revision,
+            field_name="a4_marker_revision",
+        )
+        roi_bbox = self._resolve_fragment_bbox(fragments)
+        if roi_bbox is None:
+            return None
+
+        return FieldConsistencyPlan(
+            frame_id=frame.frame_id,
+            field_name="a4_marker_revision",
+            expected_text=expected_revision,
+            current_text=current_revision,
+            roi_bbox=roi_bbox,
+            replacements=replacements,
+            fragments=fragments,
+        )
+
+    def _resolve_fragment_bbox(self, fragments: list[dict[str, Any]]) -> BBox | None:
+        xs_min: list[float] = []
+        ys_min: list[float] = []
+        xs_max: list[float] = []
+        ys_max: list[float] = []
+        for fragment in fragments:
+            bbox = fragment.get("bbox")
+            if isinstance(bbox, dict):
+                try:
+                    xs_min.append(float(bbox["xmin"]))
+                    ys_min.append(float(bbox["ymin"]))
+                    xs_max.append(float(bbox["xmax"]))
+                    ys_max.append(float(bbox["ymax"]))
+                    continue
+                except (KeyError, TypeError, ValueError):
+                    pass
+            try:
+                x = float(fragment.get("x", 0.0))
+                y = float(fragment.get("y", 0.0))
+            except (TypeError, ValueError):
+                continue
+            xs_min.append(x)
+            ys_min.append(y)
+            xs_max.append(x)
+            ys_max.append(y)
+        if not xs_min or not ys_min or not xs_max or not ys_max:
+            return None
+        return BBox(xmin=min(xs_min), ymin=min(ys_min), xmax=max(xs_max), ymax=max(ys_max))
 
     def _plan_prefix_preserving_replacements(
         self,
@@ -430,6 +542,26 @@ class TitleblockConsistencyService:
             )
         return replacements
 
+    def _plan_a4_marker_revision_replacements(
+        self,
+        fragments: list[dict[str, Any]],
+        expected_revision: str,
+    ) -> list[TextReplacement]:
+        replacements: list[TextReplacement] = []
+        for idx, fragment in enumerate(fragments):
+            original = str(fragment.get("text") or "")
+            rewritten = self._rewrite_a4_marker_revision(original, expected_revision)
+            if rewritten is None or rewritten == original:
+                continue
+            replacements.append(
+                TextReplacement(
+                    index=idx,
+                    old_text=original,
+                    new_text=rewritten,
+                )
+            )
+        return replacements
+
     @classmethod
     def _extract_scale_text(cls, text: str) -> str | None:
         match = cls._SCALE_RE.search(text or "")
@@ -451,6 +583,28 @@ class TitleblockConsistencyService:
         if match is None:
             return expected_text
         return f"{original[:match.start()]}{expected_text}{original[match.end():]}"
+
+    @classmethod
+    def _rewrite_a4_marker_revision(cls, original: str, expected_revision: str) -> str | None:
+        match = cls._A4_MARKER_FULL_RE.search(original or "")
+        if match is not None:
+            if match.group("rev_paren"):
+                replacement = f"{match.group('code')}({expected_revision})"
+            else:
+                colon = match.group("colon") or "："
+                replacement = f"{match.group('code')}{colon}{expected_revision}"
+            return f"{original[:match.start()]}{replacement}{original[match.end():]}"
+
+        match = cls._A4_MARKER_PAREN_ONLY_RE.fullmatch((original or "").strip())
+        if match is not None:
+            return f"({expected_revision})"
+
+        match = cls._A4_MARKER_COLON_ONLY_RE.fullmatch((original or "").strip())
+        if match is not None:
+            colon = match.group("colon") or "："
+            return f"{colon}{expected_revision}"
+
+        return None
 
     @staticmethod
     def _apply_compact_rewrite(original: str, expected_compact: str) -> str:

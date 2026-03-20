@@ -51,7 +51,7 @@ const FIELD_LABELS: Record<string, string> = {
   subitem_name_en: "子项名称（英文）",
   album_title_cn: "图册名称（中文）",
   album_title_en: "图册名称（英文）",
-  cover_revision: "封面版次",
+  cover_revision: "封面和目录版次",
   upgrade_start_seq: "升版起始号",
   upgrade_end_seq: "升版结束号",
   upgrade_revision: "升版版本",
@@ -73,7 +73,7 @@ const FIELD_LABELS: Record<string, string> = {
   ied_design_type: "设计类型",
   ied_responsible_unit: "责任单位",
   ied_discipline_office: "专业室",
-  ied_chief_designer: "责任设计",
+  ied_chief_designer: "责任设总",
   ied_person_qual_category: "人员资格类别",
   ied_fu_flag: "FU 标记",
   ied_internal_tag: "IED 内部标识",
@@ -98,6 +98,7 @@ const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
   project_no: "可留空，会优先从DWG文件名自动推断",
   cover_variant: "封面模板选择",
   classification: "写入设计文件/IED",
+  cover_revision: "封面和目录版次，写入封面和目录版次位（追加模式）",
 };
 
 const NAME_ID_FIELDS = new Set([

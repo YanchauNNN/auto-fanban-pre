@@ -337,6 +337,15 @@ class PipelineExecutor:
             if plans:
                 source_to_plans.setdefault(source_path, []).extend(plans)
 
+        for sheet_set in context["sheet_sets"]:
+            for plan in self.titleblock_consistency.build_sheet_set_plans(sheet_set):
+                frame = frame_by_id.get(plan.frame_id)
+                if frame is None:
+                    continue
+                source_path = Path(frame.runtime.cad_source_file or frame.runtime.source_file)
+                source_to_all_frames.setdefault(source_path, []).append(frame)
+                source_to_plans.setdefault(source_path, []).append(plan)
+
         if not source_to_plans:
             self._update_progress(job, message="图签图幅/比例一致性已通过", force=True)
             return
@@ -408,7 +417,7 @@ class PipelineExecutor:
                         continue
                     self._mark_consistency_flag(frame, plan.field_name, "MISMATCH")
                     self._mark_consistency_flag(frame, plan.field_name, "AUTO_FIXED")
-                    self.titleblock_consistency.apply_expected_texts(frame)
+                    self.titleblock_consistency.apply_expected_texts(frame, plan)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("图签一致性修正失败: %s: %s", source_path, exc)
                 source_report["errors"].append(str(exc))
@@ -429,6 +438,7 @@ class PipelineExecutor:
         mapping = {
             "paper_size_text": "PAPER_SIZE",
             "scale_text": "SCALE",
+            "a4_marker_revision": "A4_MARKER_REVISION",
         }
         prefix = mapping.get(field_name)
         if prefix:

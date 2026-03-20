@@ -61,6 +61,7 @@ def make_a4_frame(
     y_offset: float = 0.0,
     page_total: int | None = 7,
     page_index: int | None = None,
+    revision: str | None = None,
     internal_code: str | None = None,
     external_code: str | None = None,
     engineering_no: str | None = None,
@@ -87,6 +88,7 @@ def make_a4_frame(
     titleblock = TitleblockFields(
         page_total=page_total,
         page_index=page_index,
+        revision=revision,
         internal_code=internal_code,
         external_code=external_code,
         engineering_no=engineering_no,
@@ -119,6 +121,7 @@ def make_master_frame(
     x_offset: float = 0.0,
     y_offset: float = 0.0,
     page_total: int = 7,
+    revision: str | None = "A",
 ) -> FrameMeta:
     """创建完整 Master A4 帧"""
     return make_a4_frame(
@@ -126,6 +129,7 @@ def make_master_frame(
         y_offset=y_offset,
         page_total=page_total,
         page_index=1,
+        revision=revision,
         internal_code="1234567-JG001-001",
         external_code="JD1NHT11001B25C42SD",
         engineering_no="1234",
@@ -385,6 +389,42 @@ class TestSlavePageTotalMismatch:
         assert len(sheet_sets) == 1
         assert sheet_sets[0].page_total == 3  # 实际帧数
         assert "A4张数有误，请检查" in sheet_sets[0].flags
+
+
+class TestRevisionConsistency:
+    """右上角版本号与主图版次不一致时产生 flag"""
+
+    def test_marker_revision_mismatch(self):
+        grouper = _make_grouper()
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=2, revision="A")
+        slave = make_slave_frame(
+            x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=2,
+        )
+        slave.raw_extracts["A4_page_marker_meta"] = {
+            "internal_code": "1234567-JG001-001",
+            "revision": "B",
+        }
+
+        _, sheet_sets = grouper.group_a4_pages([master, slave])
+
+        assert len(sheet_sets) == 1
+        assert "A4多页_版次不一致" in sheet_sets[0].flags
+
+    def test_marker_revision_match_does_not_flag(self):
+        grouper = _make_grouper()
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=2, revision="A")
+        slave = make_slave_frame(
+            x_offset=0, y_offset=_A4_H + 5, page_index=2, page_total=2,
+        )
+        slave.raw_extracts["A4_page_marker_meta"] = {
+            "internal_code": "1234567-JG001-001",
+            "revision": "A",
+        }
+
+        _, sheet_sets = grouper.group_a4_pages([master, slave])
+
+        assert len(sheet_sets) == 1
+        assert "A4多页_版次不一致" not in sheet_sets[0].flags
 
 
 class TestMasterMissingFieldsFlag:

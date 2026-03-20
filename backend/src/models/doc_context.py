@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 from .frame import FrameMeta
 from .sheet_set import SheetSet
 
-
 _DISCIPLINE_EN_HINTS: dict[str, tuple[str, ...]] = {
     "结构": ("structure", "structural"),
     "建筑": ("architecture", "architectural", "building"),

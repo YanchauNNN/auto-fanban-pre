@@ -17,6 +17,9 @@
     }
   },
   "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportPrivateImportUsage": "none"
+  },
   "python.analysis.extraPaths": [
     "${workspaceFolder}/backend/src"
   ],

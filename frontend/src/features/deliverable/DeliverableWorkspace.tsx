@@ -52,6 +52,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
 const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
+const SCROLLABLE_FULL_OPTION_FIELDS = new Set(["file_category"]);
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
@@ -826,7 +827,7 @@ function ComboboxField({
       : field.options.filter((option) =>
           option.toLowerCase().includes(deferredValue.trim().toLowerCase()),
         )
-  ).slice(0, MAX_COMBO_OPTIONS);
+  ).slice(0, SCROLLABLE_FULL_OPTION_FIELDS.has(field.key) ? undefined : MAX_COMBO_OPTIONS);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -871,7 +872,13 @@ function ComboboxField({
       </div>
 
       {open && filteredOptions.length > 0 ? (
-        <div className={styles.comboMenu} id={listId} role="listbox">
+        <div
+          className={`${styles.comboMenu} ${
+            SCROLLABLE_FULL_OPTION_FIELDS.has(field.key) ? styles.comboMenuScrollable : ""
+          }`}
+          id={listId}
+          role="listbox"
+        >
           {filteredOptions.map((option) => (
             <button
               key={option}

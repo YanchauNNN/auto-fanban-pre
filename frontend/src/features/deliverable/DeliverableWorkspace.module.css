@@ -342,6 +342,33 @@
   box-shadow: 0 18px 40px rgba(10, 30, 57, 0.14);
 }
 
+.comboMenuScrollable {
+  max-height: 18.5rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(33, 74, 126, 0.48) rgba(20, 73, 135, 0.08);
+}
+
+.comboMenuScrollable::-webkit-scrollbar {
+  width: 10px;
+}
+
+.comboMenuScrollable::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(20, 73, 135, 0.08);
+}
+
+.comboMenuScrollable::-webkit-scrollbar-thumb {
+  border: 2px solid rgba(255, 255, 255, 0.98);
+  border-radius: 999px;
+  background: rgba(33, 74, 126, 0.48);
+}
+
+.comboMenuScrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 73, 135, 0.62);
+}
+
 .comboOption {
   justify-content: flex-start;
   padding: 0.55rem 0.7rem;

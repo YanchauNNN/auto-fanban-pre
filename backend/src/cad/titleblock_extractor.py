@@ -290,12 +290,18 @@ class TitleblockExtractor(ITitleblockExtractor):
             "A4_page_marker": [self._text_item_to_dict(t) for t in roi_items]
         }
         page_total, page_index = self._parse_page_marker_from_text(roi_items)
+        marker_internal_code, marker_revision = self._parse_a4_marker_identity(roi_items)
         if page_index is None:
             page_total, page_index = self._fallback_a4_page_marker(frame, items)
         if page_total is not None:
             frame.titleblock.page_total = page_total
         if page_index is not None:
             frame.titleblock.page_index = page_index
+        if marker_internal_code or marker_revision:
+            frame.raw_extracts["A4_page_marker_meta"] = {
+                "internal_code": marker_internal_code,
+                "revision": marker_revision,
+            }
 
     def _parse_page_marker_from_text(
         self, items: list[TextItem]
@@ -325,6 +331,22 @@ class TitleblockExtractor(ITitleblockExtractor):
                 idx_raw = m.group(1)
                 idx = 1 if idx_raw.upper() == "X" else int(idx_raw) if idx_raw.isdigit() else None
                 return None, idx
+        return None, None
+
+    def _parse_a4_marker_identity(
+        self, items: list[TextItem]
+    ) -> tuple[str | None, str | None]:
+        pattern = re.compile(
+            r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})"
+            r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|[:：]\s*(?P<rev_colon>[A-Z0-9]+))?",
+            flags=re.IGNORECASE,
+        )
+        for cand in self._candidate_strings(items):
+            match = pattern.search(cand.upper())
+            if not match:
+                continue
+            revision = match.group("rev_paren") or match.group("rev_colon")
+            return match.group("code"), revision.upper() if revision else None
         return None, None
 
     def _fallback_a4_page_marker(
@@ -552,7 +574,11 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _parse_title_bilingual(self, items: list[TextItem]) -> tuple[str | None, str | None]:
         if not items:
             return None, None
-        lines = self._extract_title_lines(items)
+        lines = [
+            line
+            for line in self._extract_title_lines(items)
+            if not self._looks_like_page_info_line(line)
+        ]
         if not lines:
             return None, None
         cn_lines: list[str] = []
@@ -671,6 +697,19 @@ class TitleblockExtractor(ITitleblockExtractor):
     @staticmethod
     def _normalize_anchor(text: str) -> str:
         return "".join(ch for ch in (text or "") if not ch.isspace())
+
+    @classmethod
+    def _looks_like_page_info_line(cls, text: str) -> bool:
+        compact = cls._strip_all_whitespace(text)
+        if not compact:
+            return False
+        if re.fullmatch(r"第[0-9Xx]*张共[0-9Xx]*张", compact):
+            return True
+        if re.fullmatch(r"共[0-9Xx]*张第[0-9Xx]*张", compact):
+            return True
+
+        normalized = cls._normalize_spaces(text).upper()
+        return re.fullmatch(r"PAGE\s*[0-9Xx]*\s*OF\s*[0-9Xx]*", normalized) is not None
 
     def _match_any_text(self, text: str, patterns: Iterable[str]) -> bool:
         normalized = self._normalize_anchor(text)

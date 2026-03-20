@@ -176,6 +176,7 @@ class A4MultipageGrouper(IA4MultipageGrouper):
 
         # 4. 辅助张数校验：Master/Slave 的 page_total 与实际张数比对
         self._check_page_count_consistency(master, cluster, flags)
+        self._check_revision_consistency(master, cluster, flags)
 
         # 5. 构建页面列表（Slave 也保存 frame_meta 引用）
         pages = []
@@ -263,6 +264,29 @@ class A4MultipageGrouper(IA4MultipageGrouper):
         master_pt = master.titleblock.page_total
         if master_pt is not None and master_pt != actual:
             flags.append("A4张数有误，请检查")
+
+    def _check_revision_consistency(
+        self,
+        master: FrameMeta,
+        cluster: list[FrameMeta],
+        flags: list[str],
+    ) -> None:
+        master_revision = (master.titleblock.revision or "").strip().upper()
+        if not master_revision:
+            return
+
+        for frame in cluster:
+            if frame.frame_id == master.frame_id:
+                continue
+            marker_meta = frame.raw_extracts.get("A4_page_marker_meta")
+            if not isinstance(marker_meta, dict):
+                continue
+            marker_revision = str(marker_meta.get("revision") or "").strip().upper()
+            if not marker_revision:
+                continue
+            if marker_revision != master_revision:
+                flags.append("A4多页_版次不一致")
+                return
 
     def _identify_master(self, cluster: list[FrameMeta]) -> FrameMeta | None:
         """识别Master页（字段命中最多，或page_index=1）"""

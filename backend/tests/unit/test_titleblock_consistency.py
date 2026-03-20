@@ -6,7 +6,7 @@ from src.cad.titleblock_consistency import (
     TextReplacement,
     TitleblockConsistencyService,
 )
-from src.models import BBox, FrameMeta, FrameRuntime, TitleblockFields
+from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
 
 def test_paper_text_from_variant_normalizes_special_cases() -> None:
@@ -133,3 +133,148 @@ def test_build_frame_plans_uses_parsed_scale_text_not_raw_roi_noise() -> None:
     plans = service.build_frame_plans(frame)
 
     assert [plan.field_name for plan in plans] == []
+
+
+def test_build_sheet_set_plans_creates_a4_marker_revision_fix_plan() -> None:
+    service = TitleblockConsistencyService()
+    source_file = Path(__file__)
+    master = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="master-frame",
+            source_file=source_file,
+            cad_source_file=source_file,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="18185NE-JGS11-001",
+            revision="A",
+            page_index=1,
+            page_total=2,
+        ),
+    )
+    slave = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="slave-frame",
+            source_file=source_file,
+            cad_source_file=source_file,
+            outer_bbox=BBox(xmin=0, ymin=100, xmax=100, ymax=200),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(page_index=2, page_total=2),
+        raw_extracts={
+            "A4_page_marker": [
+                {
+                    "text": "18185NE-JGS11-001(B)",
+                    "x": 95.0,
+                    "y": 190.0,
+                    "bbox": {"xmin": 80.0, "ymin": 185.0, "xmax": 99.0, "ymax": 195.0},
+                }
+            ],
+            "A4_page_marker_meta": {"internal_code": "18185NE-JGS11-001", "revision": "B"},
+        },
+    )
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master,
+    )
+    slave_page = PageInfo(
+        page_index=2,
+        outer_bbox=slave.runtime.outer_bbox,
+        has_titleblock=False,
+        frame_meta=slave,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-a4-revision",
+        page_total=2,
+        pages=[master_page, slave_page],
+        master_page=master_page,
+    )
+
+    plans = service.build_sheet_set_plans(sheet_set)
+
+    assert len(plans) == 1
+    plan = plans[0]
+    assert plan.field_name == "a4_marker_revision"
+    assert plan.frame_id == slave.frame_id
+    assert plan.expected_text == "A"
+    assert plan.current_text == "B"
+    assert plan.replacements == [
+        TextReplacement(
+            index=0,
+            old_text="18185NE-JGS11-001(B)",
+            new_text="18185NE-JGS11-001(A)",
+        )
+    ]
+
+
+def test_build_sheet_set_plans_preserves_colon_style_for_a4_marker_revision() -> None:
+    service = TitleblockConsistencyService()
+    source_file = Path(__file__)
+    master = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="master-frame-colon",
+            source_file=source_file,
+            cad_source_file=source_file,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="18185NE-JGS11-001",
+            revision="A",
+            page_index=1,
+            page_total=2,
+        ),
+    )
+    slave = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="slave-frame-colon",
+            source_file=source_file,
+            cad_source_file=source_file,
+            outer_bbox=BBox(xmin=0, ymin=100, xmax=100, ymax=200),
+            paper_variant_id="CNPE_A4",
+        ),
+        titleblock=TitleblockFields(page_index=2, page_total=2),
+        raw_extracts={
+            "A4_page_marker": [
+                {
+                    "text": "18185NE-JGS11-001：B",
+                    "x": 95.0,
+                    "y": 190.0,
+                    "bbox": {"xmin": 80.0, "ymin": 185.0, "xmax": 99.0, "ymax": 195.0},
+                }
+            ],
+            "A4_page_marker_meta": {"internal_code": "18185NE-JGS11-001", "revision": "B"},
+        },
+    )
+    master_page = PageInfo(
+        page_index=1,
+        outer_bbox=master.runtime.outer_bbox,
+        has_titleblock=True,
+        frame_meta=master,
+    )
+    slave_page = PageInfo(
+        page_index=2,
+        outer_bbox=slave.runtime.outer_bbox,
+        has_titleblock=False,
+        frame_meta=slave,
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-set-a4-revision-colon",
+        page_total=2,
+        pages=[master_page, slave_page],
+        master_page=master_page,
+    )
+
+    plans = service.build_sheet_set_plans(sheet_set)
+
+    assert len(plans) == 1
+    assert plans[0].replacements == [
+        TextReplacement(
+            index=0,
+            old_text="18185NE-JGS11-001：B",
+            new_text="18185NE-JGS11-001：A",
+        )
+    ]

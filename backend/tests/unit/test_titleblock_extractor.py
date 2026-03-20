@@ -79,6 +79,20 @@ def test_parse_title_bilingual() -> None:
     assert title_en == "English Title"
 
 
+def test_parse_title_bilingual_ignores_page_placeholder_line() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("5NE 8.450及 8.450以上预制楼梯", x=10.0, y=120.0),
+        _item("模板图", x=10.0, y=110.0),
+        _item("第 张 共 张", x=10.0, y=100.0),
+        _item("5NE 8.450 and Above 8.450 Prefabricated Stairs", x=10.0, y=90.0),
+        _item("Formwork", x=10.0, y=80.0),
+    ]
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+    assert title_cn == "5NE 8.450及 8.450以上预制楼梯\n模板图"
+    assert title_en == "5NE 8.450 and Above 8.450 Prefabricated Stairs\nFormwork"
+
+
 def test_parse_page_info_with_x() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse
@@ -86,6 +100,26 @@ def test_parse_page_info_with_x() -> None:
     total, idx = extractor._parse_page_info(items, parse_cfg)
     assert total == 2
     assert idx == 1
+
+
+def test_parse_a4_page_marker_identity_with_parenthesized_revision() -> None:
+    extractor = TitleblockExtractor()
+    items = [_item("18185NE-JGS11-001(A)", x=10.0, y=100.0)]
+
+    internal_code, revision = extractor._parse_a4_marker_identity(items)
+
+    assert internal_code == "18185NE-JGS11-001"
+    assert revision == "A"
+
+
+def test_parse_a4_page_marker_identity_with_colon_revision() -> None:
+    extractor = TitleblockExtractor()
+    items = [_item("18185NE-JGS11-001：A", x=10.0, y=100.0)]
+
+    internal_code, revision = extractor._parse_a4_marker_identity(items)
+
+    assert internal_code == "18185NE-JGS11-001"
+    assert revision == "A"
 
 
 def test_pick_top_by_y() -> None:
