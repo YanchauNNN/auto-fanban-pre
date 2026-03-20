@@ -839,7 +839,7 @@ titleblock_extract:
       - "线段重建仅在layer_priority范围内执行，并受线段数量/组合上限保护。"
     layer_priority:
       global_layers: ["_TSZ_PLOT_MARK", "_TSZ-PLOT_MARK", "TK"]
-      local_only_layers: ["图框", "ttkk", "0", "BORDER", "GT_1"]
+      local_only_layers: ["图框", "ttkk", "0", "BORDER","TITLE", "GT_1"]
       entity_order: ["LWPOLYLINE", "POLYLINE", "LINE"]
     acceptance:
       min_area_rank: "按面积排序取top-N"

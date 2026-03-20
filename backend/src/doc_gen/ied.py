@@ -26,6 +26,7 @@ from openpyxl import load_workbook
 
 from ..config import load_spec
 from ..interfaces import GenerationError, IIEDGenerator
+from .catalog_display_title import build_catalog_display_title
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -143,8 +144,8 @@ class IEDGenerator(IIEDGenerator):
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
             "revision": derived.catalog_revision,
-            "title_cn": derived.catalog_title_cn,
-            "title_en": derived.catalog_title_en,
+            "title_cn": build_catalog_display_title(ctx, self.spec),
+            "title_en": "",
         })
 
         # 图纸行

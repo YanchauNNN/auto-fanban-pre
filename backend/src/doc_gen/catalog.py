@@ -35,6 +35,7 @@ from openpyxl.cell.cell import MergedCell
 
 from ..config import load_spec
 from ..interfaces import GenerationError, ICatalogGenerator, IPDFExporter
+from .catalog_display_title import build_catalog_display_title
 from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
 
@@ -319,7 +320,9 @@ class CatalogGenerator(ICatalogGenerator):
         # E: 名称（1818需要中英文换行）
         if "E" in columns:
             title = data.get("title_cn", "")
-            if ctx.is_1818 and data.get("title_en"):
+            if data.get("type") == "catalog":
+                title = build_catalog_display_title(ctx, self.spec)
+            elif ctx.is_1818 and data.get("title_en"):
                 title = f"{title}\n{data['title_en']}"
             ws[f"E{row}"] = title
             cell = ws[f"E{row}"]
@@ -399,20 +402,25 @@ class CatalogGenerator(ICatalogGenerator):
             row_range = None
 
             for row in range(start_row, last_row + 1):
+                current_row = row
                 row_ref = PDFExporter._retry_excel_com_call(
-                    lambda: worksheet.Rows(row),
+                    lambda current_row=current_row: worksheet.Rows(current_row),
                     f"Worksheet.Rows({row})",
                 )
                 auto_height = float(
                     PDFExporter._retry_excel_com_call(
-                        lambda: row_ref.RowHeight or 0,
+                        lambda row_ref=row_ref: row_ref.RowHeight or 0,
                         f"Rows({row}).RowHeight",
                     )
                 )
                 bucket_height = self._bucket_row_height_from_measured_height(auto_height)
                 if bucket_height:
                     PDFExporter._retry_excel_com_call(
-                        lambda: setattr(row_ref, "RowHeight", bucket_height),
+                        lambda row_ref=row_ref, bucket_height=bucket_height: setattr(
+                            row_ref,
+                            "RowHeight",
+                            bucket_height,
+                        ),
                         f"Rows({row}).RowHeight=set",
                     )
 

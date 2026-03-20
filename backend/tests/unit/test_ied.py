@@ -66,8 +66,11 @@ def _build_context() -> DocContext:
         classification="非密",
         work_hours="66",
         cover_revision="A",
+        album_title_cn="测试图册",
+        album_title_en="Test Album",
     )
     derived = DerivedFields(
+        album_code="01",
         album_internal_code="1234567-JG001",
         cover_external_code="JD1NHT11F01B25C42SD",
         cover_internal_code="1234567-JG001-FM",
@@ -113,3 +116,24 @@ def test_ied_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["G4"].value == "JD1NHT11001B25C42SD"
     assert ws["I4"].value == "1234567-JG001-001"
     assert ws["K4"].value == "图纸1"
+
+
+def test_ied_catalog_row_title_matches_catalog_e10_for_1818(temp_dir: Path) -> None:
+    gen = IEDGenerator()
+    ctx = _build_context()
+    ctx.params.project_no = "1818"
+    bindings = gen.spec.get_ied_bindings()
+    output_xlsx = temp_dir / "IED计划-1818.xlsx"
+
+    gen._write_ied(
+        template_path="documents_bin/IED计划模板文件.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    wb = load_workbook(output_xlsx)
+    ws = wb[bindings.get("sheet", "IED导入模板 (修改)")]
+
+    assert ws["K3"].value == "测试图册\n第01图册图纸(文件)目录\nTest Album\nDOCUMENT CONTENTS"
+    assert ws["L3"].value in ("", None)

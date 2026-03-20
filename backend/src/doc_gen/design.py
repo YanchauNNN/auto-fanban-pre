@@ -29,6 +29,7 @@ from ..cad.titleblock_consistency import TitleblockConsistencyService
 from ..config import load_spec
 from ..interfaces import GenerationError, IDesignFileGenerator
 from ..models import normalize_discipline_label
+from .catalog_display_title import build_catalog_display_title
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -161,8 +162,8 @@ class DesignFileGenerator(IDesignFileGenerator):
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
             "revision": derived.catalog_revision,
-            "title_cn": derived.catalog_title_cn,
-            "title_en": derived.catalog_title_en,
+            "title_cn": build_catalog_display_title(ctx, self.spec),
+            "title_en": "",
             "paper_size_text": self.consistency.catalog_paper_text(),
             "page_total": derived.catalog_page_total or 1,
             "status": params.doc_status,

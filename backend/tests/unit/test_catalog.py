@@ -205,6 +205,42 @@ def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> N
     assert ws["D4"].value == "第01图册图纸(文件)目录"
 
 
+def test_catalog_writes_non_1818_catalog_row_title_from_header_segments(temp_dir: Path) -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="2016")
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "目录-2016.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/目录模板文件.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["E10"].value == "测试图册\n第01图册图纸(文件)目录"
+
+
+def test_catalog_writes_1818_catalog_row_title_from_header_segments(temp_dir: Path) -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "目录-1818-row-title.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/1818图册目录模板.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["E10"].value == "测试图册\n第01图册图纸(文件)目录\nTest Album\nDOCUMENT CONTENTS"
+
+
 def test_catalog_excel_com_paths_use_pdf_exporter_retry_helpers() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     source_text = (repo_root / "backend" / "src" / "doc_gen" / "catalog.py").read_text(

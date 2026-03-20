@@ -87,6 +87,21 @@ def test_plan_replacements_can_patch_split_paper_suffix() -> None:
     assert replacements == [TextReplacement(index=1, old_text="2", new_text="2H")]
 
 
+def test_plan_replacements_can_patch_single_paper_fragment() -> None:
+    service = TitleblockConsistencyService()
+    fragments = [
+        {"text": "A0", "x": 10.0, "y": 0.0},
+    ]
+
+    replacements = service.plan_replacements(
+        fragments,
+        expected_text="A0H",
+        field_name="paper_size_text",
+    )
+
+    assert replacements == [TextReplacement(index=0, old_text="A0", new_text="A0H")]
+
+
 def test_plan_replacements_can_patch_compound_paper_fragment() -> None:
     service = TitleblockConsistencyService()
     fragments = [

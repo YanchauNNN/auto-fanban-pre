@@ -489,6 +489,18 @@ class TitleblockConsistencyService:
         fragments: list[dict[str, Any]],
         expected_text: str,
     ) -> list[TextReplacement]:
+        if len(fragments) == 1:
+            original = str(fragments[0].get("text") or "")
+            if self._compact_text(original) == self._compact_text(expected_text):
+                return []
+            return [
+                TextReplacement(
+                    index=0,
+                    old_text=original,
+                    new_text=self._apply_compact_rewrite(original, self._compact_text(expected_text)),
+                )
+            ]
+
         if len(fragments) < 2:
             return []
 

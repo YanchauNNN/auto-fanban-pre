@@ -53,6 +53,7 @@ def _build_context() -> DocContext:
         subitem_name="子项名称",
         discipline="结构",
         album_title_cn="测试图册",
+        album_title_en="Test Album",
         cover_revision="A",
         doc_status="CFC",
         wbs_code="WBS-001",
@@ -61,6 +62,7 @@ def _build_context() -> DocContext:
         work_hours="88",
     )
     derived = DerivedFields(
+        album_code="01",
         album_internal_code="1234567-JG001",
         cover_external_code="JD1NHT11F01B25C42SD",
         cover_internal_code="1234567-JG001-FM",
@@ -131,6 +133,8 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     # 第3行：目录
     assert ws["D3"].value == "JD1NHT11T01B25C42SD"
     assert ws["E3"].value == "1234567-JG001-TM"
+    assert ws["G3"].value == "测试图册\n第01图册图纸(文件)目录"
+    assert ws["H3"].value in ("", None)
     assert ws["T3"].value == 3
     assert ws["U3"].value == "图纸"
 
@@ -208,3 +212,22 @@ def test_design_column_o_maps_discipline_code_from_1818_structure_hint(temp_dir:
     assert ws is not None
     assert ws["N2"].value == "结构"
     assert ws["O2"].value == "JG"
+
+
+def test_design_catalog_row_title_matches_catalog_e10_for_1818(temp_dir: Path) -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    ctx.params.project_no = "1818"
+
+    output_xlsx = temp_dir / "设计文件-1818.xlsx"
+    gen._write_design(
+        template_path="documents_bin/设计文件模板.xlsx",
+        output_path=output_xlsx,
+        bindings=gen.spec.get_design_bindings(),
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["G3"].value == "测试图册\n第01图册图纸(文件)目录\nTest Album\nDOCUMENT CONTENTS"
+    assert ws["H3"].value in ("", None)
