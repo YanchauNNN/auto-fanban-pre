@@ -96,10 +96,8 @@ class GlobalDocParams(BaseModel):
     cover_revision: str = "A"
 
     # === 目录参数 ===
-    upgrade_start_seq: int | None = None
-    upgrade_end_seq: int | None = None
-    upgrade_revision: str | None = None
-    upgrade_note_text: str = "升版"
+    is_upgrade: bool = False
+    upgrade_sheet_codes: str = ""
 
     # === 设计文件参数 ===
     wbs_code: str | None = None
@@ -151,6 +149,9 @@ def normalize_global_doc_params(raw_params: dict[str, Any]) -> dict[str, Any]:
             continue
         if field.default is None:
             normalized[field_name] = None
+            continue
+        if field.annotation is bool or isinstance(field.default, bool):
+            normalized[field_name] = bool(field.default)
 
     return normalized
 

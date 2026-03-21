@@ -112,6 +112,18 @@ describe("normalizeFormSchema", () => {
                 desc: "责任设总(W列)，填写规则同编制人/校核人等人员字段",
                 options: [],
               },
+              {
+                key: "ied_discipline_office",
+                label: "ied_discipline_office",
+                type: "combobox",
+                required: false,
+                required_when: null,
+                source: "frontend",
+                default: null,
+                format: null,
+                desc: "专业室(BJ列，当前版本不写入IED，仅保留兼容字段)",
+                options: ["结构室", "建筑室"],
+              },
             ],
           },
         ],
@@ -134,6 +146,10 @@ describe("normalizeFormSchema", () => {
     expect(normalized.sections[1].title).toBe("IED 基础信息");
     expect(normalized.sections[1].fields[0].type).toBe("nameId");
     expect(normalized.sections[1].fields[1].label).toBe("责任设总");
+    expect(normalized.sections[1].fields[1].description).toBe("例如：王任超@wangrca");
+    expect(normalized.sections[1].fields.some((field) => field.key === "ied_discipline_office")).toBe(
+      false,
+    );
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);
   });
 
@@ -257,12 +273,10 @@ describe("isAdvancedField", () => {
 
 describe("buildRecommendedProjectNos", () => {
   it("merges inferred project numbers with schema options and removes duplicates", () => {
-    expect(
-      buildRecommendedProjectNos(["1818", "2016", "1818", ""], [
-        "2016",
-        "2020",
-        "1818",
-      ]),
-    ).toEqual(["1818", "2016", "2020"]);
+    expect(buildRecommendedProjectNos(["1818", "2016", "1818", ""], ["2016", "2020", "1818"])).toEqual([
+      "1818",
+      "2016",
+      "2020",
+    ]);
   });
 });

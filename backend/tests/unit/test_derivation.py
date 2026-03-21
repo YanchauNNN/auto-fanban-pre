@@ -102,7 +102,6 @@ class TestDerivationEngine:
         params = GlobalDocParams(
             project_no="2016",
             cover_revision="A",
-            upgrade_revision="B",
         )
         frame_a = sample_frame.model_copy(deep=True)
         frame_a.titleblock.revision = "A"
@@ -115,28 +114,44 @@ class TestDerivationEngine:
         assert derived.document_revision == "C"
         assert derived.catalog_revision == "C"
 
-    def test_derive_catalog_revision_falls_back_to_upgrade_or_cover_without_drawing_revisions(
+    def test_derive_catalog_revision_falls_back_to_cover_without_drawing_revisions(
         self,
         engine: DerivationEngine,
     ):
         params = GlobalDocParams(
             project_no="2016",
             cover_revision="A",
-            upgrade_revision="B",
         )
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
-        assert derived.document_revision == "B"
-        assert derived.catalog_revision == "B"
+        assert derived.document_revision == "A"
+        assert derived.catalog_revision == "A"
 
         params2 = GlobalDocParams(
             project_no="2016",
-            cover_revision="A",
+            cover_revision="C",
         )
         ctx2 = DocContext(params=params2, frames=[])
         derived2 = engine.compute(ctx2)
-        assert derived2.document_revision == "A"
-        assert derived2.catalog_revision == "A"
+        assert derived2.document_revision == "C"
+        assert derived2.catalog_revision == "C"
+
+    def test_upgrade_toggle_does_not_affect_document_revision(
+        self,
+        engine: DerivationEngine,
+    ):
+        params = GlobalDocParams(
+            project_no="2016",
+            cover_revision="B",
+            is_upgrade=True,
+            upgrade_sheet_codes="001~099",
+        )
+        ctx = DocContext(params=params, frames=[])
+
+        derived = engine.compute(ctx)
+
+        assert derived.document_revision == "B"
+        assert derived.catalog_revision == "B"
 
     def test_derive_fixed_cover_and_catalog_paper_labels(self, engine: DerivationEngine):
         """封面与目录固定图幅值应符合设计文件业务口径"""

@@ -57,9 +57,8 @@ def _build_context(project_no: str = "2016") -> DocContext:
         album_title_en="Test Album",
         cover_revision="A",
         doc_status="CFC",
-        upgrade_start_seq=2,
-        upgrade_end_seq=3,
-        upgrade_note_text="升版",
+        is_upgrade=False,
+        upgrade_sheet_codes="",
     )
     derived = DerivedFields(
         album_code="01",
@@ -100,7 +99,7 @@ def _build_context_with_sheet_set_001() -> DocContext:
     return ctx
 
 
-def test_catalog_row_order_and_upgrade_note() -> None:
+def test_catalog_row_order_and_upgrade_note_defaults_blank() -> None:
     gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
     rows = gen._build_detail_rows(ctx)
@@ -113,8 +112,50 @@ def test_catalog_row_order_and_upgrade_note() -> None:
         "1234567-JG001-003",
     ]
     assert rows[2]["upgrade_note"] == ""
-    assert rows[3]["upgrade_note"] == "升版"
+    assert rows[3]["upgrade_note"] == ""
+    assert rows[4]["upgrade_note"] == ""
+
+
+def test_catalog_marks_only_catalog_row_when_upgrade_enabled_without_sheet_codes() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context()
+    ctx.params.is_upgrade = True
+    ctx.params.upgrade_sheet_codes = ""
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["upgrade_note"] == "升版"
+    assert rows[1]["upgrade_note"] == "升版"
+    assert all(row["upgrade_note"] == "" for row in rows[2:])
+
+
+def test_catalog_marks_matching_drawing_rows_for_upgrade_sheet_codes() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context()
+    ctx.params.is_upgrade = True
+    ctx.params.upgrade_sheet_codes = "001、3"
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[1]["upgrade_note"] == "升版"
+    assert rows[2]["upgrade_note"] == "升版"
+    assert rows[3]["upgrade_note"] == ""
     assert rows[4]["upgrade_note"] == "升版"
+
+
+def test_catalog_1818_uses_upgrade_upgrade_label() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    ctx.params.is_upgrade = True
+    ctx.params.upgrade_sheet_codes = "2"
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["upgrade_note"] == "升版 upgrade"
+    assert rows[1]["upgrade_note"] == "升版 upgrade"
+    assert rows[2]["upgrade_note"] == ""
+    assert rows[3]["upgrade_note"] == "升版 upgrade"
+    assert rows[4]["upgrade_note"] == ""
 
 
 def test_catalog_cover_and_catalog_rows_share_document_revision() -> None:

@@ -38,6 +38,11 @@ from ..interfaces import GenerationError, ICatalogGenerator, IPDFExporter
 from .catalog_display_title import build_catalog_display_title
 from .naming import make_document_output_name
 from .pdf_engine import PDFExporter
+from .upgrade_marking import (
+    UpgradeSheetCodeParseError,
+    get_upgrade_note_text,
+    parse_upgrade_sheet_codes,
+)
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -239,6 +244,15 @@ class CatalogGenerator(ICatalogGenerator):
         rows = []
         derived = ctx.derived
         params = ctx.params
+        upgrade_note_text = get_upgrade_note_text(params.project_no) if params.is_upgrade else ""
+        upgraded_sheet_codes: set[str] = set()
+
+        if params.is_upgrade and params.upgrade_sheet_codes.strip():
+            try:
+                upgraded_sheet_codes = set(parse_upgrade_sheet_codes(params.upgrade_sheet_codes))
+            except UpgradeSheetCodeParseError as exc:
+                invalid = "、".join(exc.invalid_fragments)
+                raise GenerationError(f"升版图纸编号格式错误: {invalid}") from exc
 
         # 1. 封面行
         rows.append({
@@ -250,7 +264,7 @@ class CatalogGenerator(ICatalogGenerator):
             "revision": ctx.get_document_revision(),
             "status": params.doc_status,
             "page_total": 1,
-            "upgrade_note": "",
+            "upgrade_note": upgrade_note_text,
         })
 
         # 2. 目录行
@@ -263,7 +277,7 @@ class CatalogGenerator(ICatalogGenerator):
             "revision": ctx.get_document_revision(),
             "status": params.doc_status,
             "page_total": 0,  # 占位，后续回填
-            "upgrade_note": "",
+            "upgrade_note": upgrade_note_text,
         })
 
         # 3. 图纸行（按internal_code尾号升序）
@@ -273,13 +287,8 @@ class CatalogGenerator(ICatalogGenerator):
 
             # 判断是否需要升版标记
             upgrade_note = ""
-            if (
-                params.upgrade_start_seq is not None
-                and params.upgrade_end_seq is not None
-                and seq_no is not None
-                and params.upgrade_start_seq <= seq_no <= params.upgrade_end_seq
-            ):
-                upgrade_note = params.upgrade_note_text
+            if params.is_upgrade and seq_no is not None and f"{seq_no:03d}" in upgraded_sheet_codes:
+                upgrade_note = upgrade_note_text
 
             rows.append({
                 "type": "drawing",

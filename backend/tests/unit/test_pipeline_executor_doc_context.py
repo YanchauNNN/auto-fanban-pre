@@ -42,8 +42,8 @@ def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> 
             "project_no": "2016",
             "cover_variant": "通用",
             "classification": "非密",
-            "upgrade_start_seq": "",
-            "upgrade_end_seq": "",
+            "is_upgrade": "",
+            "upgrade_sheet_codes": "",
         },
     )
 
@@ -55,8 +55,8 @@ def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> 
 
     assert doc_ctx.params.project_no == "2016"
     assert doc_ctx.params.cover_variant == "通用"
-    assert doc_ctx.params.upgrade_start_seq is None
-    assert doc_ctx.params.upgrade_end_seq is None
+    assert doc_ctx.params.is_upgrade is False
+    assert doc_ctx.params.upgrade_sheet_codes == ""
 
 
 def test_build_doc_context_inherits_required_titleblock_fields_from_sheet_set_master(

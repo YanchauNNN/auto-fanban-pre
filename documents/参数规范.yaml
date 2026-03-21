@@ -206,10 +206,25 @@ doc_generation:
 
     # ========== 目录参数 ==========
     catalog:
-      upgrade_start_seq:  { type: int, required: false, source: frontend, desc: "升版起始尾号(如5表示005)" }
-      upgrade_end_seq:    { type: int, required: false, source: frontend, desc: "升版结束尾号(如12表示012)" }
-      upgrade_revision:   { type: str, required: false, source: frontend, desc: "升版版本(如B/C)" }
-      upgrade_note_text:  { type: str, required: false, source: frontend, default: "升版", desc: "升版标记文本" }
+      is_upgrade:
+        type: str
+        required: false
+        source: frontend
+        default: "false"
+        desc: "是否启用升版标记；默认否，不参与任何版本号推导"
+        ui:
+          widget: toggle
+      upgrade_sheet_codes:
+        type: str
+        required: false
+        source: frontend
+        default: ""
+        format: "upgrade-sheet-codes"
+        desc: "升版图纸编号，匹配internal_code最后三位；支持单值和区间组合，留空表示仅标记目录文件本身为升版"
+        ui:
+          widget: text
+          placeholder: "例如：001~099、001、003、005~009"
+          tooltip: "输入图纸内部编码最后三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、 ， , 。 . ； ;；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。"
 
     # ========== 设计文件参数 ==========
     design:
@@ -385,13 +400,13 @@ doc_generation:
     # === 版次派生 ===
     document_revision:
       from: "frames[].titleblock.revision"
-      transform: "max_nonempty_revision_with_fallback(cover_revision, upgrade_revision)"
-      desc: "统一文档版次：优先取图纸(001~XXX)最高版次；若图纸无版次则回退升版版本/封面版次"
+      transform: "max_nonempty_revision_with_fallback(cover_revision)"
+      desc: "统一文档版次：优先取图纸(001~XXX)最高版次；若图纸无版次则回退封面版次"
 
     catalog_revision:
       from: "document_revision"
       transform: "identity"
-      desc: "目录版次，与封面保持一致，并与图纸(001~XXX)最高版次一致；无图纸版次时回退升版版本/封面版次"
+      desc: "目录版次，与封面保持一致，并与图纸(001~XXX)最高版次一致；无图纸版次时回退封面版次"
     
     # === 固定值 ===
     cover_paper_size_text:   { value: "A4图纸" }
@@ -417,8 +432,6 @@ doc_generation:
       ied_person_qual_category: "一般核安全物项-民用"
       system_code: "NA"
       system_name: "NA"
-      upgrade_note_text: "升版"
-    
     # 目录排序规则
     catalog_sort:
       method: "by_internal_code"
@@ -587,7 +600,7 @@ doc_generation:
           format: "{title_cn}\\n{title_en}"
           note: "换行符分隔，需设置单元格自动换行"
         
-        upgrade_note_rule: "当internal_code尾号在[upgrade_start_seq, upgrade_end_seq]范围内时写入upgrade_note_text"
+        upgrade_note_rule: "当is_upgrade=true时，封面行与目录行固定写项目对应升版标记；当upgrade_sheet_codes解析后命中internal_code尾号时，对应图纸行写入相同标记；is_upgrade=false时全部留空"
       
       pagination:
         paper_size: "A4横向"
@@ -1194,5 +1207,6 @@ a4_multipage:
         - { page_index: 1, outer_bbox: [], has_titleblock: true }
         - { page_index: 2, outer_bbox: [], has_titleblock: false }
       flags: ["比例不一致", "A4多页_页码不连续"]
+
 
 

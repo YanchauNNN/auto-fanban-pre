@@ -10,6 +10,7 @@ from typing import Any
 
 from ..config import load_spec
 from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
+from .upgrade_marking import UpgradeSheetCodeParseError, parse_upgrade_sheet_codes
 
 _COND_RE = re.compile(
     r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*['"]([^'"]*)['"]\s*$""",
@@ -55,6 +56,12 @@ class DocParamValidator:
                 continue
 
             fmt = rule.get("format")
+            if (
+                field_name == "upgrade_sheet_codes"
+                and not self._coerce_bool(normalized.get("is_upgrade"))
+            ):
+                continue
+
             if fmt and not self._is_empty(value) and not self._validate_format(str(value), str(fmt)):
                 errors.setdefault(field_name, []).append(f"format:{fmt}")
 
@@ -134,4 +141,18 @@ class DocParamValidator:
         if fmt == "姓名@ID":
             return _NAME_ID_RE.match(value) is not None
 
+        if fmt == "upgrade-sheet-codes":
+            try:
+                parse_upgrade_sheet_codes(value)
+            except UpgradeSheetCodeParseError:
+                return False
+            return True
+
         return True
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        return text in {"1", "true", "yes", "on"}

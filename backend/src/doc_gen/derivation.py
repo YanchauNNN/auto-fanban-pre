@@ -147,8 +147,7 @@ class DerivationEngine:
             return max(drawing_revisions, key=self._revision_sort_key)
 
         return (
-            self._normalize_revision(ctx.params.upgrade_revision)
-            or self._normalize_revision(ctx.params.cover_revision)
+            self._normalize_revision(ctx.params.cover_revision)
             or "A"
         )
 

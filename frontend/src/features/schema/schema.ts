@@ -99,7 +99,10 @@ const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
   cover_variant: "封面模板选择",
   classification: "写入设计文件/IED",
   cover_revision: "封面和目录版次，写入封面和目录版次位（追加模式）",
+  ied_chief_designer: "例如：王任超@wangrca",
 };
+
+const HIDDEN_FRONTEND_FIELDS = new Set(["ied_discipline_office"]);
 
 const NAME_ID_FIELDS = new Set([
   "ied_chief_designer",
@@ -153,6 +156,7 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
         fields: section.fields
           .filter((field) => (field.source ?? "frontend") === "frontend")
           .filter((field) => field.key !== "approved_by")
+          .filter((field) => !HIDDEN_FRONTEND_FIELDS.has(field.key))
           .map((field) => normalizeField(field)),
       }))
       .filter((section) => section.fields.length > 0),
@@ -178,10 +182,7 @@ export function evaluateRequiredWhen(
   return operator === "==" ? actual === expected : actual !== expected;
 }
 
-export function isAdvancedField(
-  field: FormField,
-  values: Record<string, string> = {},
-) {
+export function isAdvancedField(field: FormField, values: Record<string, string> = {}) {
   if (field.required || !ADVANCED_FIELDS.has(field.key)) {
     return false;
   }
