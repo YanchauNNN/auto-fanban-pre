@@ -52,10 +52,8 @@ const FIELD_LABELS: Record<string, string> = {
   album_title_cn: "图册名称（中文）",
   album_title_en: "图册名称（英文）",
   cover_revision: "封面和目录版次",
-  upgrade_start_seq: "升版起始号",
-  upgrade_end_seq: "升版结束号",
-  upgrade_revision: "升版版本",
-  upgrade_note_text: "升版标记",
+  is_upgrade: "是否升版",
+  upgrade_sheet_codes: "升版图纸编号",
   wbs_code: "WBS 编码",
   system_code: "系统代码",
   system_name: "系统名称",
@@ -99,10 +97,23 @@ const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
   cover_variant: "封面模板选择",
   classification: "写入设计文件/IED",
   cover_revision: "封面和目录版次，写入封面和目录版次位（追加模式）",
+  is_upgrade:
+    "启用后只需填写升版图纸编号；关闭时会隐藏输入框，但会保留已输入的内容。",
+  upgrade_sheet_codes:
+    "输入图纸内部编码末三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、, . ; ；；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。",
   ied_chief_designer: "例如：王任超@wangrca",
 };
 
-const HIDDEN_FRONTEND_FIELDS = new Set(["ied_discipline_office"]);
+const LEGACY_UPGRADE_FIELDS = new Set([
+  "upgrade_start_seq",
+  "upgrade_end_seq",
+  "upgrade_revision",
+  "upgrade_note_text",
+]);
+
+const CUSTOM_RENDERED_FIELDS = new Set(["is_upgrade", "upgrade_sheet_codes"]);
+
+const HIDDEN_FRONTEND_FIELDS = new Set(["ied_discipline_office", ...LEGACY_UPGRADE_FIELDS]);
 
 const NAME_ID_FIELDS = new Set([
   "ied_chief_designer",
@@ -116,10 +127,8 @@ const NAME_ID_FIELDS = new Set([
 
 const ADVANCED_FIELDS = new Set([
   "cover_revision",
-  "upgrade_start_seq",
-  "upgrade_end_seq",
-  "upgrade_revision",
-  "upgrade_note_text",
+  "is_upgrade",
+  "upgrade_sheet_codes",
   "system_code",
   "system_name",
   "design_status",
@@ -188,6 +197,10 @@ export function isAdvancedField(field: FormField, values: Record<string, string>
   }
 
   return !evaluateRequiredWhen(field.requiredWhen, values);
+}
+
+export function isCustomRenderedField(fieldKey: string) {
+  return CUSTOM_RENDERED_FIELDS.has(fieldKey);
 }
 
 export function buildRecommendedProjectNos(

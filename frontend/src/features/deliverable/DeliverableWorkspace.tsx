@@ -1,4 +1,4 @@
-import {
+﻿import {
   startTransition,
   useDeferredValue,
   useEffect,
@@ -12,6 +12,7 @@ import {
   buildRecommendedProjectNos,
   evaluateRequiredWhen,
   isAdvancedField,
+  isCustomRenderedField,
 } from "../schema/schema";
 import type {
   ApiAdapter,
@@ -53,6 +54,12 @@ const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
 const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
 const SCROLLABLE_FULL_OPTION_FIELDS = new Set(["file_category"]);
+const LEGACY_UPGRADE_KEYS = new Set([
+  "upgrade_start_seq",
+  "upgrade_end_seq",
+  "upgrade_revision",
+  "upgrade_note_text",
+]);
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
@@ -107,6 +114,7 @@ export function DeliverableWorkspace({
     () => buildRecommendedProjectNos(draft.inference.inferredProjectNos, projectNoOptions),
     [draft.inference.inferredProjectNos, projectNoOptions],
   );
+  const upgradeEnabled = draft.values.is_upgrade === "true";
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [savedPresets, selectedPresetId],
@@ -185,8 +193,10 @@ export function DeliverableWorkspace({
     }));
     setIsSubmitting(true);
 
+    const submissionValues = buildSubmissionValues(draft.values);
+
     try {
-      const payload = await adapter.createBatch(draft.values, draft.files, draft.runAuditCheck);
+      const payload = await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
       onNotice?.(
         draft.runAuditCheck ? "出图与纠错任务包已创建。" : "出图任务已创建。",
       );
@@ -229,6 +239,22 @@ export function DeliverableWorkspace({
       fieldErrors: {
         ...current.fieldErrors,
         [key]: [],
+      },
+    }));
+  }
+
+  function handleUpgradeToggle() {
+    setPresetUpdatedNotice(false);
+    setDraft((current) => ({
+      ...current,
+      values: {
+        ...current.values,
+        is_upgrade: current.values.is_upgrade === "true" ? "false" : "true",
+      },
+      fieldErrors: {
+        ...current.fieldErrors,
+        is_upgrade: [],
+        upgrade_sheet_codes: [],
       },
     }));
   }
@@ -707,7 +733,9 @@ export function DeliverableWorkspace({
                       <div className={styles.advancedBlock} key={`advanced-${section.id}`}>
                         <h4>{section.title}</h4>
                         <div className={styles.fieldGrid}>
-                          {section.fields.map((field) => (
+                          {section.fields
+                            .filter((field) => !isCustomRenderedField(field.key))
+                            .map((field) => (
                             <FieldControl
                               key={field.key}
                               error={draft.fieldErrors[field.key]?.[0]}
@@ -716,10 +744,49 @@ export function DeliverableWorkspace({
                               value={draft.values[field.key] ?? ""}
                               values={draft.values}
                             />
-                          ))}
+                            ))}
                         </div>
                       </div>
                     ))}
+                    <div className={styles.advancedBlock} data-testid="upgrade-config-block">
+                      <h4>升版设置</h4>
+                      <div className={styles.intentNotice}>
+                        <button
+                          aria-pressed={upgradeEnabled}
+                          className={`${styles.intentChip} ${
+                            upgradeEnabled ? styles.intentChipActive : ""
+                          }`}
+                          type="button"
+                          onClick={handleUpgradeToggle}
+                        >
+                          是否升版
+                        </button>
+                      </div>
+                      <span className={styles.helperText}>
+                        启用后可填写升版图纸编号；关闭时会隐藏输入框，但已输入内容会保留。
+                      </span>
+                      {upgradeEnabled ? (
+                        <div className={styles.fieldGrid}>
+                          <FieldControl
+                            error={draft.fieldErrors.upgrade_sheet_codes?.[0]}
+                            field={{
+                              key: "upgrade_sheet_codes",
+                              label: "升版图纸编号",
+                              type: "text",
+                              required: false,
+                              requiredWhen: null,
+                              defaultValue: "",
+                              description:
+                                "输入图纸内部编码末三位，支持单个编号和区间组合；留空表示仅标记目录文件本身为升版。",
+                              options: [],
+                            }}
+                            onChange={(value) => handleFieldChange("upgrade_sheet_codes", value)}
+                            value={draft.values.upgrade_sheet_codes ?? ""}
+                            values={draft.values}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </section>
               ) : null}
@@ -908,9 +975,13 @@ function filterSections(
   return schema.sections
     .map((section) => ({
       ...section,
-      fields: section.fields.filter((field) =>
-        advanced ? isAdvancedField(field, values) : !isAdvancedField(field, values),
-      ),
+      fields: section.fields.filter((field) => {
+        if (LEGACY_UPGRADE_KEYS.has(field.key)) {
+          return false;
+        }
+
+        return advanced ? isAdvancedField(field, values) : !isAdvancedField(field, values);
+      }),
     }))
     .filter((section) => section.fields.length > 0);
 }
@@ -982,6 +1053,8 @@ function applyFilesToDraft(draft: TaskConfigDraft, files: File[]) {
     values: {
       ...draft.values,
       project_no: nextProjectNo,
+      is_upgrade: draft.values.is_upgrade ?? "false",
+      upgrade_sheet_codes: draft.values.upgrade_sheet_codes ?? "",
     },
     fieldErrors: {},
     formErrors: [],
@@ -1031,3 +1104,19 @@ function getFieldPlaceholder(field: FormField) {
 
   return `请输入${field.label}`;
 }
+
+function buildSubmissionValues(values: Record<string, string>) {
+  const sanitized = { ...values };
+
+  delete sanitized.upgrade_start_seq;
+  delete sanitized.upgrade_end_seq;
+  delete sanitized.upgrade_revision;
+  delete sanitized.upgrade_note_text;
+
+  const isUpgradeEnabled = sanitized.is_upgrade === "true";
+  sanitized.is_upgrade = isUpgradeEnabled ? "true" : "false";
+  sanitized.upgrade_sheet_codes = isUpgradeEnabled ? sanitized.upgrade_sheet_codes ?? "" : "";
+
+  return sanitized;
+}
+

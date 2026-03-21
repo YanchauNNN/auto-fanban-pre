@@ -9,11 +9,11 @@ import "@fontsource/rajdhani/700.css";
 import {
   QueryClient,
   QueryClientProvider,
-  useQuery,
   useQueries,
+  useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   BrowserRouter,
   Link,
@@ -23,6 +23,9 @@ import {
   useParams,
 } from "react-router-dom";
 
+import groupLogoUrl from "../assets/group-logo.jpg";
+import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
+import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
 import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
@@ -49,14 +52,23 @@ import {
 } from "./jobPresentation";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
+const DEFAULT_VISIBLE_JOB_CARDS = 8;
 
-const JOB_STATUS_FILTERS: Array<{ label: string; value?: string }> = [
+const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
   { label: "排队中", value: "queued" },
   { label: "运行中", value: "running" },
   { label: "成功", value: "succeeded" },
   { label: "失败", value: "failed" },
 ];
+
+const MODULE_OPTIONS = [
+  { key: "business", label: "业务模块" },
+  { key: "account", label: "账号模块" },
+  { key: "workload", label: "工作量模块" },
+] as const;
+
+type HomeModule = (typeof MODULE_OPTIONS)[number]["key"];
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   queued: { label: "排队中", tone: "queued" },
@@ -66,6 +78,11 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
   succeeded: { label: "成功", tone: "succeeded" },
   failed: { label: "失败", tone: "failed" },
 };
+
+const HERO_PANEL_STYLE = {
+  "--hero-photo": `url("${nuclearPlantHeroUrl}")`,
+  "--structure-watermark": `url("${structureLogoWatermarkUrl}")`,
+} as CSSProperties;
 
 export function App() {
   const [queryClient] = useState(() => new QueryClient());
@@ -97,7 +114,8 @@ function WorkspacePage() {
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
-  const [recentJobsExpanded, setRecentJobsExpanded] = useState(false);
+  const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
+  const [activeModule, setActiveModule] = useState<HomeModule>("business");
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
   const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
@@ -124,7 +142,7 @@ function WorkspacePage() {
     queryKey: ["jobs", jobsStatusFilter ?? "all"],
     queryFn: () => adapter.listJobs(jobsStatusFilter),
     refetchInterval: (query) => {
-      const items = ((query.state.data as JobList | undefined)?.items ?? []);
+      const items = (query.state.data as JobList | undefined)?.items ?? [];
       const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
       return hasActive ? 3000 : 12000;
     },
@@ -142,14 +160,18 @@ function WorkspacePage() {
 
     return jobCards.filter((card) => card.title.toLowerCase().includes(normalizedRecentJobsSearch));
   }, [jobCards, normalizedRecentJobsSearch]);
-  const shouldCollapseRecentJobs = !normalizedRecentJobsSearch && filteredJobCards.length > 4;
-  const visibleJobCards =
-    shouldCollapseRecentJobs && !recentJobsExpanded ? filteredJobCards.slice(0, 4) : filteredJobCards;
-  const hiddenJobCardCount = shouldCollapseRecentJobs ? filteredJobCards.length - 4 : 0;
+  const hiddenJobCardCount = normalizedRecentJobsSearch
+    ? 0
+    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
+  const visibleJobCards = normalizedRecentJobsSearch
+    ? filteredJobCards
+    : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
 
   useEffect(() => {
-    setRecentJobsExpanded(false);
-  }, [jobsStatusFilter, normalizedRecentJobsSearch]);
+    if (normalizedRecentJobsSearch) {
+      setAllJobsModalOpen(false);
+    }
+  }, [normalizedRecentJobsSearch]);
 
   useEffect(() => {
     const items = jobsQuery.data?.items;
@@ -283,161 +305,233 @@ function WorkspacePage() {
   const activeAuditSummary = auditSummaryQueue[0] ?? null;
 
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <div>
-          <p className={styles.brandTop}>CNPE Drawing Desk</p>
-          <h1>图纸处理工作台</h1>
-          <p className={styles.brandBody}>
-            当前主线已经把出图和纠错接到同一个工作台里。出图走任务配置弹窗，纯纠错走独立弹窗。
-          </p>
-        </div>
-
-        <section className={styles.healthCard}>
-          <h2>系统状态</h2>
-          {healthQuery.data ? (
-            <dl className={styles.healthGrid}>
-              <StatRow label="服务" value={healthQuery.data.ready ? "可用" : "异常"} />
-              <StatRow label="存储" value={healthQuery.data.storageWritable ? "可写" : "不可写"} />
-              <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
-              <StatRow label="AutoCAD" value={healthQuery.data.autocadReady ? "就绪" : "缺失"} />
-              <StatRow label="Office" value={healthQuery.data.officeReady ? "就绪" : "缺失"} />
-            </dl>
-          ) : (
-            <p className={styles.muted}>正在读取系统状态…</p>
-          )}
-        </section>
-      </aside>
-
-      <main className={styles.mainColumn}>
-        <section className={styles.controlPanel}>
-          <div>
-            <p className={styles.brandTop}>Task Entry</p>
-            <h2>新建任务</h2>
-            <p className={styles.brandBody}>
-              出图继续从系统文件选择器进入；纠错从独立弹窗进入。出图时如果勾选纠错，会按任务包一起创建。
-            </p>
-          </div>
-
-          <div className={styles.uploadActions}>
-            <button
-              className={styles.primaryActionButton}
-              disabled={!schemaQuery.data}
-              type="button"
-              onClick={handleDeliverableUploadClick}
-            >
-              出图
-            </button>
-            <button
-              className={styles.primaryActionButton}
-              disabled={!schemaQuery.data}
-              type="button"
-              onClick={() => setAuditConfigOpen(true)}
-            >
-              {auditDraftAvailable ? "继续纠错" : "纠错"}
-            </button>
-            {deliverableDraftAvailable ? (
-              <button
-                className={styles.secondaryActionButton}
-                type="button"
-                onClick={() => setDeliverableConfigOpen(true)}
-              >
-                继续草稿
-              </button>
-            ) : null}
-          </div>
-
-          <input
-            ref={deliverableFileInputRef}
-            accept=".dwg"
-            aria-label="选择出图 DWG 文件"
-            className={styles.hiddenFileInput}
-            multiple
-            type="file"
-            onChange={handleDeliverableFileSelection}
-          />
-
-          <div className={styles.entryHint}>
-            <span>真实可提交：出图、纠错</span>
-            <span>仍未开放：翻版真实提交</span>
-            <span>草稿策略：关闭保留，提交成功或清空后重置</span>
-          </div>
-
-          {auditNotice ? (
-            <div className={styles.noticeBanner}>
-              <span>{auditNotice}</span>
-              <button className={styles.noticeClose} type="button" onClick={() => setAuditNotice(null)}>
-                关闭
-              </button>
+    <div className={styles.workspacePage}>
+      <header className={styles.titleStrip} data-testid="title-strip">
+        <div className={styles.titleStripLayout}>
+          <div className={styles.titleStripBrand}>
+            <img alt="中核集团标识" className={styles.titleStripLogo} src={groupLogoUrl} />
+            <div className={styles.titleStripText}>
+              <p className={styles.brandTop}>CNPE Structural Drawing Platform</p>
+              <h1>中核工程—建筑结构所出图平台</h1>
             </div>
-          ) : null}
-        </section>
-      </main>
-
-      <aside className={styles.jobsColumn}>
-        <header className={styles.jobsHeader}>
-          <div>
-            <p className={styles.brandTop}>Recent Jobs</p>
-            <h2>最近任务</h2>
           </div>
-          <button className={styles.subtleButton} type="button" onClick={() => jobsQuery.refetch()}>
-            刷新
-          </button>
-        </header>
-
-        <div className={styles.filterRow}>
-          {JOB_STATUS_FILTERS.map((filter) => {
-            const active = (jobsStatusFilter ?? "") === (filter.value ?? "");
-            return (
-              <button
-                key={filter.label}
-                className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
-                type="button"
-                onClick={() => setJobsStatusFilter(filter.value)}
-              >
-                {filter.label}
-              </button>
-            );
-          })}
+          <section className={styles.titleStripStatus} data-testid="title-strip-status">
+            <p className={styles.titleStripStatusLabel}>System Status</p>
+            {healthQuery.data ? (
+              <div className={styles.titleStripHealthGrid}>
+                <StatRow label="服务" value={healthQuery.data.ready ? "就绪" : "异常"} />
+                <StatRow
+                  label="存储"
+                  value={healthQuery.data.storageWritable ? "正常" : "异常"}
+                />
+                <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
+                <StatRow
+                  label="AutoCAD"
+                  value={healthQuery.data.autocadReady ? "可用" : "缺失"}
+                />
+                <StatRow
+                  label="Office"
+                  value={healthQuery.data.officeReady ? "可用" : "缺失"}
+                />
+              </div>
+            ) : (
+              <p className={styles.titleStripHealthLoading}>正在读取</p>
+            )}
+          </section>
         </div>
+      </header>
 
-        <div className={styles.searchRow}>
-          <input
-            aria-label="搜索任务名称"
-            className={styles.searchInput}
-            placeholder="搜索任务名称"
-            type="search"
-            value={recentJobsSearch}
-            onChange={(event) => setRecentJobsSearch(event.target.value)}
-          />
-          {shouldCollapseRecentJobs ? (
+      <nav className={styles.moduleToolbar} data-testid="module-toolbar">
+        {MODULE_OPTIONS.map((module) => {
+          const active = activeModule === module.key;
+          return (
             <button
-              className={styles.collapseToggle}
+              aria-pressed={active}
+              className={`${styles.moduleToolbarButton} ${
+                active ? styles.moduleToolbarButtonActive : ""
+              }`}
+              key={module.key}
               type="button"
-              onClick={() => setRecentJobsExpanded((current) => !current)}
+              onClick={() => setActiveModule(module.key)}
             >
-              {recentJobsExpanded ? "收起" : `展开其余 ${hiddenJobCardCount} 个`}
+              {module.label}
             </button>
-          ) : null}
-        </div>
+          );
+        })}
+      </nav>
 
-        <div className={styles.jobsPanel}>
-          {visibleJobCards.length > 0 ? (
-            visibleJobCards.map((card) => (
-              <JobCard
-                adapter={adapter}
-                card={card}
-                highlighted={Boolean(card.summary.batchId && card.summary.batchId === highlightedBatchId)}
-                key={card.key}
-              />
-            ))
+      <div className={styles.shell}>
+        <main className={styles.mainColumn}>
+          {activeModule === "business" ? (
+            <section className={styles.modulePanel} data-testid="module-business-panel">
+              <section className={styles.controlPanel} style={HERO_PANEL_STYLE}>
+                <div className={styles.controlPanelBackdrop} />
+                <div
+                  className={styles.controlPanelWatermark}
+                  data-testid="hero-watermark"
+                />
+                <div className={styles.controlPanelContent}>
+                  <div>
+                    <p className={styles.brandTop}>Task Entry</p>
+                    <h2>新建任务</h2>
+                  </div>
+
+                  <div className={styles.uploadActions}>
+                    <button
+                      className={styles.primaryActionButton}
+                      disabled={!schemaQuery.data}
+                      type="button"
+                      onClick={handleDeliverableUploadClick}
+                    >
+                      出图
+                    </button>
+                    <button
+                      className={styles.primaryActionButton}
+                      disabled={!schemaQuery.data}
+                      type="button"
+                      onClick={() => setAuditConfigOpen(true)}
+                    >
+                      {auditDraftAvailable ? "继续纠错" : "纠错"}
+                    </button>
+                    <span className={styles.disabledPreviewWrap} title="敬请期待">
+                      <button
+                        aria-disabled="true"
+                        className={styles.disabledPreviewButton}
+                        type="button"
+                      >
+                        翻版
+                      </button>
+                    </span>
+                    {deliverableDraftAvailable ? (
+                      <button
+                        className={styles.secondaryActionButton}
+                        type="button"
+                        onClick={() => setDeliverableConfigOpen(true)}
+                      >
+                        继续草稿
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <input
+                    ref={deliverableFileInputRef}
+                    accept=".dwg"
+                    aria-label="选择出图 DWG 文件"
+                    className={styles.hiddenFileInput}
+                    multiple
+                    type="file"
+                    onChange={handleDeliverableFileSelection}
+                  />
+
+                  {auditNotice ? (
+                    <div className={styles.noticeBanner}>
+                      <span>{auditNotice}</span>
+                      <button
+                        className={styles.noticeClose}
+                        type="button"
+                        onClick={() => setAuditNotice(null)}
+                      >
+                        关闭
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className={styles.jobsSection} data-testid="recent-jobs-section">
+                <header className={styles.jobsHeader}>
+                  <div>
+                    <p className={styles.brandTop}>Recent Jobs</p>
+                    <h2>最近任务</h2>
+                  </div>
+                  <button className={styles.subtleButton} type="button" onClick={() => jobsQuery.refetch()}>
+                    刷新
+                  </button>
+                </header>
+
+                <div className={styles.filterRow}>
+                  {JOB_FILTER_OPTIONS.map((filter) => {
+                    const active = (jobsStatusFilter ?? "") === (filter.value ?? "");
+                    return (
+                      <button
+                        className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
+                        key={filter.label}
+                        type="button"
+                        onClick={() => setJobsStatusFilter(filter.value)}
+                      >
+                        {filter.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className={styles.searchRow}>
+                  <input
+                    aria-label="搜索任务名称"
+                    className={styles.searchInput}
+                    placeholder="搜索任务名称"
+                    role="searchbox"
+                    type="search"
+                    value={recentJobsSearch}
+                    onChange={(event) => setRecentJobsSearch(event.target.value)}
+                  />
+                  {hiddenJobCardCount > 0 ? (
+                    <button
+                      className={styles.collapseToggle}
+                      type="button"
+                      onClick={() => setAllJobsModalOpen(true)}
+                    >
+                      展开其余 {hiddenJobCardCount} 个
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className={styles.jobsGrid}>
+                  {visibleJobCards.length > 0 ? (
+                    visibleJobCards.map((card) => (
+                      <JobCard
+                        adapter={adapter}
+                        card={card}
+                        highlighted={Boolean(
+                          card.summary.batchId && card.summary.batchId === highlightedBatchId,
+                        )}
+                        key={card.key}
+                      />
+                    ))
+                  ) : (
+                    <div className={styles.emptyPanel}>
+                      <p>{normalizedRecentJobsSearch ? "没有匹配的任务。" : "当前没有任务记录。"}</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </section>
+          ) : activeModule === "account" ? (
+            <section className={styles.placeholderPanel} data-testid="module-account-panel">
+              <p className={styles.brandTop}>Account Module</p>
+              <h2>账号模块预留</h2>
+            </section>
           ) : (
-            <div className={styles.emptyPanel}>
-              <p>{normalizedRecentJobsSearch ? "没有匹配的任务。" : "当前没有任务记录。"}</p>
-            </div>
+            <section className={styles.placeholderPanel} data-testid="module-workload-panel">
+              <p className={styles.brandTop}>Workload Module</p>
+              <h2>工作量模块预留</h2>
+            </section>
           )}
-        </div>
-      </aside>
+        </main>
+      </div>
+
+      {allJobsModalOpen ? (
+        <JobsBrowserModal
+          adapter={adapter}
+          cards={filteredJobCards}
+          filterValue={jobsStatusFilter}
+          searchValue={recentJobsSearch}
+          onClose={() => setAllJobsModalOpen(false)}
+          onFilterChange={setJobsStatusFilter}
+          onRefresh={() => jobsQuery.refetch()}
+          onSearchChange={setRecentJobsSearch}
+        />
+      ) : null}
 
       {schemaQuery.data ? (
         <>
@@ -472,6 +566,92 @@ function WorkspacePage() {
   );
 }
 
+function JobsBrowserModal({
+  adapter,
+  cards,
+  filterValue,
+  searchValue,
+  onFilterChange,
+  onSearchChange,
+  onRefresh,
+  onClose,
+}: {
+  adapter: ApiAdapter;
+  cards: JobCardModel[];
+  filterValue?: string;
+  searchValue: string;
+  onFilterChange: (value?: string) => void;
+  onSearchChange: (value: string) => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className={styles.jobsModalBackdrop}>
+      <div
+        aria-label="全部任务浏览器"
+        aria-modal="true"
+        className={styles.jobsModal}
+        role="dialog"
+      >
+        <header className={styles.jobsModalHeader}>
+          <div>
+            <p className={styles.brandTop}>Jobs Browser</p>
+            <h2>全部任务</h2>
+          </div>
+          <div className={styles.jobsModalActions}>
+            <button className={styles.subtleButton} type="button" onClick={onRefresh}>
+              刷新
+            </button>
+            <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
+              关闭
+            </button>
+          </div>
+        </header>
+
+        <div className={styles.filterRow}>
+          {JOB_FILTER_OPTIONS.map((filter) => {
+            const active = (filterValue ?? "") === (filter.value ?? "");
+            return (
+              <button
+                className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
+                key={filter.label}
+                type="button"
+                onClick={() => onFilterChange(filter.value)}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className={styles.searchRow}>
+          <input
+            aria-label="搜索任务名称"
+            className={styles.searchInput}
+            placeholder="搜索任务名称"
+            role="searchbox"
+            type="search"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </div>
+
+        <div className={styles.jobsModalBody}>
+          {cards.length > 0 ? (
+            cards.map((card) => (
+              <JobCard adapter={adapter} card={card} highlighted={false} key={card.key} />
+            ))
+          ) : (
+            <div className={styles.emptyPanel}>
+              <p>没有匹配的任务。</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function JobCard({
   adapter,
   card,
@@ -486,23 +666,28 @@ function JobCard({
     queryFn: () => adapter.getJobDetail(card.jobId),
     enabled: card.kind === "real_group",
     refetchInterval:
-      card.kind === "real_group" && ACTIVE_JOB_STATUSES.includes(card.status as never) ? 3000 : false,
+      card.kind === "real_group" && ACTIVE_JOB_STATUSES.includes(card.status as never)
+        ? 3000
+        : false,
   });
 
-  const childJobs = card.kind === "real_group"
-    ? (groupDetailQuery.data?.children ?? card.childJobs)
-    : card.childJobs;
+  const childJobs =
+    card.kind === "real_group" ? (groupDetailQuery.data?.children ?? card.childJobs) : card.childJobs;
 
   return (
-    <div className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}>
+    <div
+      className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}
+      data-testid="recent-job-card"
+    >
       <div className={styles.jobCardHeader}>
         <strong>{card.title}</strong>
-        <StatusPill status={card.status} />
+        <div className={styles.jobCardHeaderMeta}>
+          {card.kind !== "single_job" ? (
+            <p className={styles.packageMeta}>包含 {Math.max(childJobs.length, card.childCount)} 个子任务</p>
+          ) : null}
+          <StatusPill status={card.status} />
+        </div>
       </div>
-
-      {card.kind !== "single_job" ? (
-        <p className={styles.packageMeta}>包含 {Math.max(childJobs.length, card.childCount)} 个子任务</p>
-      ) : null}
 
       <div className={styles.jobMetaRow}>
         {card.kind === "single_job" ? (
@@ -603,10 +788,6 @@ function SingleJobDetailPanel({
         <div>
           <p className={styles.brandTop}>Job Detail</p>
           <h1>{detail.sourceFilename}</h1>
-          <p className={styles.brandBody}>
-            {detail.jobId} / {detail.projectNo ?? "未标记项目"} /{" "}
-            {getTaskKindLabel(detail.taskKind ?? "deliverable")}
-          </p>
         </div>
         <StatusPill status={detail.status} />
       </header>
@@ -630,7 +811,10 @@ function SingleJobDetailPanel({
         <InfoBlock label="进度" value={`${detail.percent}%`} />
         <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
         <InfoBlock label="状态说明" value={messageLabel} />
-        <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
+        <InfoBlock
+          label="完成时间"
+          value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"}
+        />
       </div>
 
       <div className={styles.progressBarLarge}>
@@ -715,9 +899,6 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <div>
           <p className={styles.brandTop}>Group Detail</p>
           <h1>{detail.sourceFilename}</h1>
-          <p className={styles.brandBody}>
-            {detail.jobId} / {detail.projectNo ?? "未标记项目"} / 任务包
-          </p>
         </div>
         <StatusPill status={detail.status} />
       </header>
@@ -728,9 +909,15 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
           <InfoBlock label="当前阶段" value={stageLabel} />
           <InfoBlock label="进度" value={`${detail.percent}%`} />
           <InfoBlock label="状态说明" value={messageLabel} />
-          <InfoBlock label="子任务数" value={String(Math.max(childJobs.length, detail.childJobIds.length))} />
+          <InfoBlock
+            label="子任务数"
+            value={String(Math.max(childJobs.length, detail.childJobIds.length))}
+          />
           <InfoBlock label="已启用纠错" value={detail.runAuditCheck ? "是" : "否"} />
-          <InfoBlock label="完成时间" value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"} />
+          <InfoBlock
+            label="完成时间"
+            value={detail.finishedAt ? formatTimestamp(detail.finishedAt) : "-"}
+          />
         </div>
         <div className={styles.progressBarLarge}>
           <div style={{ width: `${detail.percent}%` }} />
@@ -742,7 +929,10 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <div className={styles.downloadGrid}>
           <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
           <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
-          <ArtifactButton href={detail.artifacts.reportDownloadUrl ?? undefined} label="下载纠错报告" />
+          <ArtifactButton
+            href={detail.artifacts.reportDownloadUrl ?? undefined}
+            label="下载纠错报告"
+          />
         </div>
       </section>
 
@@ -767,10 +957,13 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
               ) : child.taskKind === "audit_check" ? (
                 <AuditResultCard
                   affectedDrawingsCount={
-                    childDetailsById.get(child.jobId)?.affectedDrawingsCount ?? child.affectedDrawingsCount
+                    childDetailsById.get(child.jobId)?.affectedDrawingsCount ??
+                    child.affectedDrawingsCount
                   }
                   findingGroups={childDetailsById.get(child.jobId)?.findingGroups}
-                  findingsCount={childDetailsById.get(child.jobId)?.findingsCount ?? child.findingsCount}
+                  findingsCount={
+                    childDetailsById.get(child.jobId)?.findingsCount ?? child.findingsCount
+                  }
                 />
               ) : (
                 <p className={styles.muted}>暂无可展示的子任务结果。</p>
@@ -907,10 +1100,10 @@ function AuditResultCard({
 
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
-    <>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </>
+    <div className={styles.titleStripHealthItem} data-testid="title-strip-status-item">
+      <span className={styles.titleStripHealthItemLabel}>{label}</span>
+      <strong className={styles.titleStripHealthItemValue}>{value}</strong>
+    </div>
   );
 }
 
@@ -970,7 +1163,6 @@ function TaskKindBadge({ kind }: { kind: TaskKind }) {
 
 function StatusPill({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { label: status, tone: "default" };
-
   return <span className={`${styles.statusPill} ${statusToneClass(meta.tone)}`}>{meta.label}</span>;
 }
 

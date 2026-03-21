@@ -129,10 +129,7 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
     findingsCount: group.findingsCount,
     affectedDrawingsCount: group.affectedDrawingsCount,
     childCount: Math.max(group.childJobIds.length, group.children?.length ?? 0, group.runAuditCheck ? 2 : 1),
-    childJobs:
-      group.children && group.children.length > 0
-        ? group.children
-        : buildGroupChildPlaceholders(group),
+    childJobs: group.children && group.children.length > 0 ? group.children : buildGroupChildPlaceholders(group),
     summary: group,
   }));
 
@@ -223,18 +220,15 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
   }
 
   if (job.isGroup) {
-    return job.status === "succeeded" ? "任务包完成" : "任务包处理中";
+    return "任务包处理中";
   }
-
   if (job.taskKind === "audit_check") {
-    return job.status === "succeeded" ? "纠错完成" : "纠错处理中";
+    return "纠错处理中";
   }
-
   if (job.taskKind === "audit_replace") {
-    return job.status === "succeeded" ? "翻版完成" : "翻版处理中";
+    return "翻版处理中";
   }
-
-  return job.status === "succeeded" ? "出图完成" : "出图处理中";
+  return "出图处理中";
 }
 
 export function getMessageLabel(job: PresentableJob): string {
@@ -245,7 +239,7 @@ export function getMessageLabel(job: PresentableJob): string {
 
   if (job.status === "succeeded") {
     if (job.isGroup) {
-      return "任务包完成";
+      return "任务包已完成";
     }
     if (job.taskKind === "audit_check") {
       return "纠错任务已完成";
@@ -328,10 +322,7 @@ function buildSyntheticAggregate(children: readonly JobSummary[]): JobSummary {
   const stage = deriveSyntheticStage(children, status);
   const percent = aggregatePercent(children);
   const findingsCount = children.reduce((sum, child) => sum + child.findingsCount, 0);
-  const affectedDrawingsCount = children.reduce(
-    (sum, child) => sum + child.affectedDrawingsCount,
-    0,
-  );
+  const affectedDrawingsCount = children.reduce((sum, child) => sum + child.affectedDrawingsCount, 0);
 
   return {
     ...representative,
@@ -428,13 +419,9 @@ function sortJobs(items: readonly JobSummary[]) {
 }
 
 function buildGroupChildPlaceholders(job: JobSummary): JobSummary[] {
-  const placeholderKinds: TaskKind[] = job.runAuditCheck
-    ? ["deliverable", "audit_check"]
-    : ["deliverable"];
+  const placeholderKinds: TaskKind[] = job.runAuditCheck ? ["deliverable", "audit_check"] : ["deliverable"];
   const jobIds =
-    job.childJobIds.length > 0
-      ? job.childJobIds
-      : placeholderKinds.map((kind) => `${job.jobId}-${kind}`);
+    job.childJobIds.length > 0 ? job.childJobIds : placeholderKinds.map((kind) => `${job.jobId}-${kind}`);
 
   return jobIds.map((childJobId, index) => {
     const taskKind: TaskKind = placeholderKinds[index] ?? "deliverable";

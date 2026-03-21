@@ -1,4 +1,4 @@
-.shell,
+.workspacePage,
 .detailPage {
   min-height: 100vh;
   background:
@@ -6,14 +6,137 @@
     linear-gradient(180deg, #edf3f9, #f7f9fc 52%, #eef4fb);
 }
 
-.shell {
-  display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 360px;
-  gap: 1.25rem;
-  padding: 1.25rem;
+.workspacePage {
+  padding: 0 1.25rem 1.25rem;
 }
 
-.sidebar,
+.titleStrip {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 -1.25rem 1.1rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.1);
+  background: linear-gradient(180deg, rgba(247, 250, 253, 0.97), rgba(241, 246, 252, 0.94));
+  backdrop-filter: blur(12px);
+}
+
+.titleStripLayout {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.titleStripBrand {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.titleStripLogo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 20px;
+  padding: 0.55rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  box-shadow: 0 14px 30px rgba(13, 44, 80, 0.08);
+}
+
+.titleStripText h1 {
+  margin: 0;
+  color: #153c66;
+  font-size: clamp(1.25rem, 1.8vw, 1.65rem);
+}
+
+.titleStripStatus {
+  flex-shrink: 0;
+  min-width: 288px;
+  padding: 0.75rem 0.9rem;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 28px rgba(13, 44, 80, 0.06);
+}
+
+.titleStripStatusLabel {
+  margin: 0 0 0.45rem;
+  font-family: "Rajdhani", sans-serif;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #5b80aa;
+  font-size: 0.86rem;
+}
+
+.titleStripHealthGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.titleStripHealthItem {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.18rem;
+  min-height: 4.3rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: 16px;
+  border: 1px solid rgba(20, 70, 128, 0.08);
+  background: rgba(20, 70, 128, 0.04);
+  text-align: center;
+}
+
+.titleStripHealthItemLabel {
+  color: #6b86a3;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.titleStripHealthItemValue {
+  color: #14395e;
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.titleStripHealthLoading {
+  margin: 0;
+  color: #6d88a4;
+  font-size: 0.9rem;
+}
+
+.moduleToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.45rem 0.2rem 0.1rem;
+}
+
+.moduleToolbarButton {
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #315880;
+  padding: 0.72rem 1.15rem;
+  font-weight: 700;
+}
+
+.moduleToolbarButtonActive {
+  border-color: rgba(20, 70, 128, 0.24);
+  background: linear-gradient(135deg, #194f90, #276fbd);
+  color: #fff;
+  box-shadow: 0 14px 28px rgba(20, 70, 128, 0.15);
+}
+
+.shell {
+  display: block;
+}
+
 .jobsColumn,
 .detailPanel {
   border-radius: 30px;
@@ -29,26 +152,88 @@
   gap: 1rem;
 }
 
-.controlPanel {
+.modulePanel,
+.placeholderPanel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  min-height: 220px;
+}
+
+.placeholderPanel {
+  border-radius: 30px;
+  padding: 1.35rem;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 22px 58px rgba(13, 44, 80, 0.08);
+  min-height: 320px;
+}
+
+.controlPanel {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 320px;
   border-radius: 30px;
   padding: 1.35rem;
   border: 1px solid rgba(20, 70, 128, 0.12);
   background:
-    linear-gradient(135deg, rgba(20, 70, 128, 0.08), rgba(255, 255, 255, 0.95)),
+    linear-gradient(135deg, rgba(20, 70, 128, 0.08), rgba(255, 255, 255, 0.9)),
     linear-gradient(90deg, rgba(37, 103, 177, 0.04) 1px, transparent 1px),
     linear-gradient(rgba(37, 103, 177, 0.04) 1px, transparent 1px);
   background-size: auto, 20px 20px, 20px 20px;
   box-shadow: 0 22px 58px rgba(13, 44, 80, 0.08);
 }
 
+.controlPanelBackdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(247, 250, 253, 0.98) 0%,
+      rgba(247, 250, 253, 0.94) 18%,
+      rgba(247, 250, 253, 0.72) 38%,
+      rgba(247, 250, 253, 0.4) 58%,
+      rgba(247, 250, 253, 0.82) 100%
+    ),
+    linear-gradient(180deg, rgba(233, 242, 252, 0.18), rgba(14, 53, 101, 0.08)),
+    radial-gradient(circle at 78% 52%, rgba(65, 133, 214, 0.18), transparent 38%),
+    var(--hero-photo);
+  background-position: center, center, center, center;
+  background-size: auto, auto, auto, cover;
+  background-repeat: no-repeat;
+}
+
+.controlPanelWatermark {
+  position: absolute;
+  right: -2rem;
+  bottom: -2rem;
+  width: min(24vw, 320px);
+  aspect-ratio: 1;
+  background-image: var(--structure-watermark);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  opacity: 0.055;
+  filter: saturate(0.85);
+}
+
+.controlPanelContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .uploadActions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+  align-items: center;
 }
 
 .primaryActionButton,
@@ -75,6 +260,26 @@
   border: 1px solid rgba(20, 70, 128, 0.16);
   background: rgba(20, 70, 128, 0.05);
   color: #174781;
+}
+
+.disabledPreviewWrap {
+  display: inline-flex;
+}
+
+.disabledPreviewButton {
+  border-radius: 999px;
+  padding: 0.85rem 1.15rem;
+  font-weight: 700;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  background: rgba(255, 255, 255, 0.56);
+  color: #7f93ac;
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.38);
+}
+
+.disabledPreviewWrap:hover .disabledPreviewButton {
+  border-color: rgba(20, 70, 128, 0.22);
+  background: rgba(255, 255, 255, 0.76);
 }
 
 .hiddenFileInput {
@@ -141,6 +346,25 @@
   border-radius: 22px;
   border: 1px solid rgba(20, 70, 128, 0.1);
   background: rgba(242, 247, 253, 0.85);
+}
+
+.healthCard {
+  margin-top: 0;
+}
+
+.jobsSection {
+  margin-top: 0.1rem;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(242, 247, 253, 0.85);
+}
+
+.jobsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.85rem;
 }
 
 .healthGrid {
@@ -255,11 +479,14 @@
 }
 
 .jobCard {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   margin-top: 0.6rem;
   padding: 0.8rem 0.85rem;
+  min-height: 10.8rem;
+  height: 100%;
   border-radius: 16px;
   border: 1px solid rgba(20, 70, 128, 0.1);
   background: white;
@@ -277,13 +504,27 @@
   display: flex;
   justify-content: space-between;
   gap: 0.55rem;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
 }
 
 .jobCardHeader strong {
   font-size: 0.95rem;
   line-height: 1.25;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.jobMetaRow {
+  margin-top: 0.45rem;
+}
+
+.jobCardHeaderMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex: 0 0 auto;
 }
 
 .kindBadge,
@@ -354,6 +595,7 @@
   color: #557696;
   font-size: 0.82rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .packageTaskList {
@@ -596,27 +838,117 @@
   font-size: 0.85rem;
 }
 
+.jobsModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4.75rem 1.25rem 1.25rem;
+  background: rgba(11, 31, 54, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.jobsModal {
+  width: min(1120px, 100%);
+  max-height: calc(100vh - 6rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  border-radius: 30px;
+  padding: 1.25rem;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  background: rgba(252, 253, 255, 0.96);
+  box-shadow: 0 28px 70px rgba(13, 44, 80, 0.18);
+}
+
+.jobsModalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.jobsModalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.jobsModalBody {
+  overflow-y: auto;
+  padding-right: 0.4rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.jobsModalBody::-webkit-scrollbar {
+  width: 12px;
+}
+
+.jobsModalBody::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(20, 70, 128, 0.22);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.jobsModalBody::-webkit-scrollbar-track {
+  background: rgba(20, 70, 128, 0.05);
+  border-radius: 999px;
+}
+
 @media (max-width: 1360px) {
-  .shell {
-    grid-template-columns: 240px minmax(0, 1fr);
+  .jobsGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .jobsColumn {
-    grid-column: 1 / -1;
+  .titleStripLayout {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
 @media (max-width: 980px) {
-  .shell,
   .detailGrid,
   .downloadGrid,
   .columns {
     grid-template-columns: 1fr;
   }
 
+  .workspacePage {
+    padding-inline: 0.85rem;
+  }
+
+  .titleStrip {
+    margin-inline: -0.85rem;
+    padding-inline: 0.85rem;
+  }
+
+  .titleStripBrand,
+  .jobsModalHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .titleStripHealthGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .moduleToolbar {
+    gap: 0.6rem;
+  }
+
+  .moduleToolbarButton {
+    width: 100%;
+  }
+
   .resultSummaryGrid,
   .outputGrid,
-  .findingGroupList {
+  .findingGroupList,
+  .jobsModalBody {
     grid-template-columns: 1fr;
   }
 
@@ -633,5 +965,16 @@
 
   .collapseToggle {
     width: 100%;
+  }
+
+  .jobsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .jobsGrid,
+  .titleStripHealthGrid {
+    grid-template-columns: 1fr;
   }
 }

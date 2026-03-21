@@ -45,6 +45,26 @@ const schema: FormSchema = {
           options: [],
         },
         {
+          key: "is_upgrade",
+          label: "是否升版",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "false",
+          description: "是否启用升版标记",
+          options: [],
+        },
+        {
+          key: "upgrade_sheet_codes",
+          label: "升版图纸编号",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "输入图纸内部编码最后三位",
+          options: [],
+        },
+        {
           key: "ied_prepared_date",
           label: "编制日期",
           type: "date",
@@ -69,6 +89,8 @@ describe("taskPresets", () => {
     draft.intent = "audit_replace";
     draft.values.project_no = "2016";
     draft.values.album_title_cn = "示例图册";
+    draft.values.is_upgrade = "true";
+    draft.values.upgrade_sheet_codes = "001、003";
     draft.values.ied_prepared_date = "2026-03-12";
     draft.replaceConfig = {
       sourceProjectNo: "2016",
@@ -80,6 +102,8 @@ describe("taskPresets", () => {
 
     expect(loadTaskPresets()).toEqual([preset]);
     expect(loadTaskPresets()[0].values.ied_prepared_date).toBeUndefined();
+    expect(loadTaskPresets()[0].values.is_upgrade).toBe("true");
+    expect(loadTaskPresets()[0].values.upgrade_sheet_codes).toBe("001、003");
   });
 
   it("renames and deletes saved presets", () => {
@@ -148,6 +172,8 @@ describe("taskPresets", () => {
         ...draft.values,
         project_no: "2020",
         album_title_cn: "翻版图册",
+        is_upgrade: "true",
+        upgrade_sheet_codes: "001~003",
         ied_prepared_date: "2026-03-12",
       },
       replaceConfig: {
@@ -161,9 +187,9 @@ describe("taskPresets", () => {
     expect(nextDraft.files).toHaveLength(1);
     expect(nextDraft.inference.primaryProjectNo).toBe("2016");
     expect(nextDraft.values.project_no).toBe("2020");
-    expect(nextDraft.values.ied_prepared_date).toBe(
-      new Date().toISOString().slice(0, 10),
-    );
+    expect(nextDraft.values.is_upgrade).toBe("true");
+    expect(nextDraft.values.upgrade_sheet_codes).toBe("001~003");
+    expect(nextDraft.values.ied_prepared_date).toBe(new Date().toISOString().slice(0, 10));
     expect(nextDraft.intent).toBe("audit_replace");
     expect(nextDraft.runAuditCheck).toBe(true);
     expect(nextDraft.replaceConfig.targetProjectNo).toBe("1818");

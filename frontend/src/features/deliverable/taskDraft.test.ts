@@ -36,6 +36,26 @@ const schema: FormSchema = {
           options: [],
         },
         {
+          key: "is_upgrade",
+          label: "是否升版",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "false",
+          description: "是否启用升版标记",
+          options: [],
+        },
+        {
+          key: "upgrade_sheet_codes",
+          label: "升版图纸编号",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "输入图纸内部编码最后三位",
+          options: [],
+        },
+        {
           key: "ied_prepared_date",
           label: "编制日期",
           type: "date",
@@ -61,6 +81,8 @@ describe("createTaskConfigDraft", () => {
       plot_style_key: "red_wider",
       project_no: "",
       album_title_cn: "默认图册",
+      is_upgrade: "false",
+      upgrade_sheet_codes: "",
       ied_prepared_date: new Date().toISOString().slice(0, 10),
     });
     expect(draft.replaceConfig).toEqual({
@@ -79,6 +101,8 @@ describe("syncTaskConfigDraft", () => {
       values: {
         project_no: "1818",
         album_title_cn: "已修改图册",
+        is_upgrade: "true",
+        upgrade_sheet_codes: "001、003",
         ied_prepared_date: "2026-03-12",
       },
       fieldErrors: {
@@ -126,6 +150,8 @@ describe("syncTaskConfigDraft", () => {
       plot_style_key: "red_wider",
       project_no: "1818",
       album_title_cn: "已修改图册",
+      is_upgrade: "true",
+      upgrade_sheet_codes: "001、003",
       ied_prepared_date: "2026-03-12",
       subitem_name: "默认子项",
     });
