@@ -26,7 +26,7 @@ from openpyxl import load_workbook
 
 from ..config import load_spec
 from ..interfaces import GenerationError, IIEDGenerator
-from .catalog_display_title import build_catalog_display_title
+from .catalog_display_title import build_catalog_single_line_titles, flatten_title_text
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -127,6 +127,7 @@ class IEDGenerator(IIEDGenerator):
         rows = []
         derived = ctx.derived
         params = ctx.params
+        catalog_title_cn, catalog_title_en = build_catalog_single_line_titles(ctx, self.spec)
 
         # 封面行
         rows.append({
@@ -144,8 +145,8 @@ class IEDGenerator(IIEDGenerator):
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
             "revision": derived.catalog_revision,
-            "title_cn": build_catalog_display_title(ctx, self.spec),
-            "title_en": "",
+            "title_cn": catalog_title_cn,
+            "title_en": catalog_title_en,
         })
 
         # 图纸行
@@ -207,6 +208,8 @@ class IEDGenerator(IIEDGenerator):
             value = row_data.get(source, "")
             if source == "title_en" and not ctx.is_1818:
                 return ""
+            if source in {"title_cn", "title_en"}:
+                return flatten_title_text(value)
             return value or ""
 
         if source in global_data:

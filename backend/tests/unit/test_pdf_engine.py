@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -192,6 +193,42 @@ class _FakeExcelWithBusyWorkbooks:
         return self.collection
 
 
+class _FakeBrokenExcelComClient:
+    def __init__(self) -> None:
+        self.active_object: object | None = None
+        self.dispatch_calls = 0
+        self.get_active_calls = 0
+
+    def DispatchEx(self, prog_id: str) -> object:  # noqa: N802
+        self.dispatch_calls += 1
+        raise _FakeRejectedComError(
+            "系统找不到指定的文件。",
+            hresult=-2147024894,
+        )
+
+    def GetActiveObject(self, prog_id: str) -> object:  # noqa: N802
+        self.get_active_calls += 1
+        if self.active_object is None:
+            raise RuntimeError("active object unavailable")
+        return self.active_object
+
+
+class _FakeProcess:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self._exited = False
+
+    def poll(self) -> int | None:
+        return 0 if self._exited else None
+
+    def terminate(self) -> None:
+        self._exited = True
+
+    def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002
+        self._exited = True
+        return 0
+
+
 def test_prepare_word_for_headless_run_suppresses_normal_prompt() -> None:
     exporter = PDFExporter(preferred_engine="office_com")
     word = _FakeWordApp()
@@ -263,10 +300,75 @@ def test_open_excel_workbook_retries_when_call_is_rejected(monkeypatch, temp_dir
     )
     excel = _FakeExcelWithBusyWorkbooks()
 
-    workbook = exporter._open_excel_workbook(excel, working_copy, read_only=True)
+    workbook = cast(dict[str, object], exporter._open_excel_workbook(excel, working_copy, read_only=True))
 
     assert workbook["path"] == str(working_copy.absolute())
     assert workbook["read_only"] is True
     assert excel.workbook_access_attempts == 2
     assert excel.collection.open_attempts == 2
     shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+def test_create_excel_application_falls_back_to_excel_executable_candidates(
+    monkeypatch,
+) -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    win32_client = _FakeBrokenExcelComClient()
+    fake_excel = _FakeExcelApp()
+    launched: list[Path] = []
+
+    monkeypatch.setattr(
+        PDFExporter,
+        "_iter_excel_executable_candidates",
+        classmethod(lambda cls: [Path("C:/Office15/EXCEL.EXE"), Path("C:/Office16/EXCEL.EXE")]),
+    )
+
+    def fake_launch(cls, candidate: Path):  # noqa: ANN001
+        launched.append(candidate)
+        if candidate.name == "EXCEL.EXE" and "Office16" in candidate.as_posix():
+            win32_client.active_object = fake_excel
+            return _FakeProcess(4242)
+        return _FakeProcess(3131)
+
+    monkeypatch.setattr(
+        PDFExporter,
+        "_launch_excel_candidate_for_automation",
+        classmethod(fake_launch),
+    )
+    monkeypatch.setattr(
+        PDFExporter,
+        "_wait_for_excel_active_object",
+        classmethod(lambda cls, module: module.client.GetActiveObject("Excel.Application")),
+    )
+    monkeypatch.setattr(
+        PDFExporter,
+        "_excel_app_matches_pid",
+        classmethod(lambda cls, excel, pid: pid == 4242),
+    )
+
+    excel, owned = exporter._create_excel_application(SimpleNamespace(client=win32_client))
+
+    assert excel is fake_excel
+    assert owned is True
+    assert launched == [Path("C:/Office15/EXCEL.EXE"), Path("C:/Office16/EXCEL.EXE")]
+    assert win32_client.dispatch_calls == 1
+
+
+def test_create_excel_application_uses_dispatchex_when_available() -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    excel = _FakeExcelApp()
+
+    class _Client:
+        def __init__(self) -> None:
+            self.dispatch_calls = 0
+
+        def DispatchEx(self, prog_id: str) -> object:  # noqa: N802
+            self.dispatch_calls += 1
+            return excel
+
+    client = _Client()
+    acquired, owned = exporter._create_excel_application(SimpleNamespace(client=client))
+
+    assert acquired is excel
+    assert owned is True
+    assert client.dispatch_calls == 1

@@ -997,7 +997,7 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (Build-TaskActionArguments)
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
-$principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType InteractiveToken -RunLevel Highest
+$principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -Hidden
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null

@@ -150,6 +150,39 @@ def test_build_frame_plans_uses_parsed_scale_text_not_raw_roi_noise() -> None:
     assert [plan.field_name for plan in plans] == []
 
 
+def test_build_frame_plans_ignores_cjk_noise_in_paper_size_roi() -> None:
+    service = TitleblockConsistencyService()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-paper-noise",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            paper_variant_id="CNPE_A0",
+            geom_scale_factor=100.0,
+            sx=50.0,
+            sy=50.0,
+            roi_profile_id="BASE10",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="18185NX-JGS56-001",
+            paper_size_text="0\nA\n结构",
+            scale_text="1:100",
+            scale_denominator=100,
+        ),
+        raw_extracts={
+            "图幅": [
+                {"text": "0", "x": 10.0, "y": 0.0},
+                {"text": "A", "x": 20.0, "y": 0.0},
+                {"text": "结构", "x": 30.0, "y": 0.0},
+            ]
+        },
+    )
+
+    plans = service.build_frame_plans(frame)
+
+    assert [plan.field_name for plan in plans] == []
+
+
 def test_build_sheet_set_plans_creates_a4_marker_revision_fix_plan() -> None:
     service = TitleblockConsistencyService()
     source_file = Path(__file__)

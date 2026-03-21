@@ -6,31 +6,48 @@ from openpyxl import load_workbook
 
 
 def build_catalog_display_title(ctx, spec) -> str:
-    parts: list[str] = []
+    cn_parts, en_parts = _build_catalog_title_parts(ctx, spec)
+    return "\n".join(part for part in [*cn_parts, *en_parts] if part)
+
+
+def build_catalog_single_line_titles(ctx, spec) -> tuple[str, str]:
+    cn_parts, en_parts = _build_catalog_title_parts(ctx, spec)
+    return ("".join(cn_parts), "".join(en_parts))
+
+
+def flatten_title_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return "".join(part.strip() for part in str(value).splitlines() if part.strip())
+
+
+def _build_catalog_title_parts(ctx, spec) -> tuple[list[str], list[str]]:
+    cn_parts: list[str] = []
+    en_parts: list[str] = []
 
     album_title_cn = str(ctx.params.album_title_cn or "").strip()
     if album_title_cn:
-        parts.append(album_title_cn)
+        cn_parts.append(album_title_cn)
 
     album_code = str(ctx.derived.album_code or "").strip()
     header = spec.get_catalog_bindings().get("header", {})
     title_binding = header.get("album_code_title", {})
-    template = title_binding.get("template", "第{album_code}图册图纸(文件)目录")
+    template = title_binding.get("template", "?{album_code}????(??)??")
     if album_code:
-        parts.append(str(template).format(album_code=album_code).strip())
+        cn_parts.append(str(template).format(album_code=album_code).strip())
 
     if ctx.is_1818:
         album_title_en = str(ctx.params.album_title_en or "").strip()
         if album_title_en:
-            parts.append(album_title_en)
+            en_parts.append(album_title_en)
 
         english_title = _load_1818_catalog_english_line(
             Path(spec.get_template_path("catalog", ctx.params.project_no)),
         )
         if english_title:
-            parts.append(english_title)
+            en_parts.append(english_title)
 
-    return "\n".join(part for part in parts if part)
+    return cn_parts, en_parts
 
 
 def _load_1818_catalog_english_line(template_path: Path) -> str:

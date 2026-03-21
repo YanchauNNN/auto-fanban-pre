@@ -28,7 +28,7 @@ import os
 import shutil
 from copy import copy
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
@@ -372,6 +372,7 @@ class CatalogGenerator(ICatalogGenerator):
             return
 
         excel = None
+        excel_owned = False
         workbook = None
         worksheet = None
         row_range = None
@@ -380,23 +381,26 @@ class CatalogGenerator(ICatalogGenerator):
         should_copy_back = False
         try:
             pythoncom.CoInitialize()
-            excel = win32com.client.DispatchEx("Excel.Application")
+            excel, excel_owned = PDFExporter._create_excel_application(win32com)
             PDFExporter._prepare_excel_for_headless_run(excel)
             working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
                 xlsx_path,
                 label=xlsx_path.stem,
             )
             workbook = PDFExporter._open_excel_workbook(excel, working_copy, read_only=False)
+            workbook_com = cast(Any, workbook)
             worksheet = PDFExporter._retry_excel_com_call(
-                lambda: workbook.Worksheets(1),
+                lambda: workbook_com.Worksheets(1),
                 "Workbook.Worksheets(1)",
             )
+            worksheet_com = cast(Any, worksheet)
             row_range = PDFExporter._retry_excel_com_call(
-                lambda: worksheet.Rows(f"{start_row}:{last_row}"),
+                lambda: worksheet_com.Rows(f"{start_row}:{last_row}"),
                 "Worksheet.Rows(range)",
             )
+            row_range_com = cast(Any, row_range)
             PDFExporter._retry_excel_com_call(
-                lambda: row_range.AutoFit(),
+                lambda: row_range_com.AutoFit(),
                 "Rows.AutoFit",
             )
             row_range = None
@@ -404,20 +408,21 @@ class CatalogGenerator(ICatalogGenerator):
             for row in range(start_row, last_row + 1):
                 current_row = row
                 row_ref = PDFExporter._retry_excel_com_call(
-                    lambda current_row=current_row: worksheet.Rows(current_row),
+                    lambda current_row=current_row: worksheet_com.Rows(current_row),
                     f"Worksheet.Rows({row})",
                 )
+                row_ref_com = cast(Any, row_ref)
                 auto_height = float(
                     PDFExporter._retry_excel_com_call(
-                        lambda row_ref=row_ref: row_ref.RowHeight or 0,
+                        lambda row_ref_com=row_ref_com: row_ref_com.RowHeight or 0,
                         f"Rows({row}).RowHeight",
                     )
                 )
                 bucket_height = self._bucket_row_height_from_measured_height(auto_height)
                 if bucket_height:
                     PDFExporter._retry_excel_com_call(
-                        lambda row_ref=row_ref, bucket_height=bucket_height: setattr(
-                            row_ref,
+                        lambda row_ref_com=row_ref_com, bucket_height=bucket_height: setattr(
+                            row_ref_com,
                             "RowHeight",
                             bucket_height,
                         ),
@@ -425,7 +430,7 @@ class CatalogGenerator(ICatalogGenerator):
                     )
 
             PDFExporter._retry_excel_com_call(
-                lambda: workbook.Save(),
+                lambda: workbook_com.Save(),
                 "Workbook.Save",
             )
             should_copy_back = True
@@ -436,11 +441,11 @@ class CatalogGenerator(ICatalogGenerator):
             row_range = None
             if workbook:
                 with contextlib.suppress(Exception):
-                    workbook.Close(False)
+                    cast(Any, workbook).Close(False)
             workbook = None
-            if excel:
+            if excel and excel_owned:
                 with contextlib.suppress(Exception):
-                    excel.Quit()
+                    cast(Any, excel).Quit()
             excel = None
             if should_copy_back and temp_dir is not None:
                 with contextlib.suppress(Exception):
@@ -540,25 +545,28 @@ class CatalogGenerator(ICatalogGenerator):
             raise RuntimeError("pywin32 不可用") from exc
 
         excel = None
+        excel_owned = False
         wb = None
         ws = None
         temp_dir = None
         working_copy = xlsx_path
         try:
             pythoncom.CoInitialize()
-            excel = win32com.client.DispatchEx("Excel.Application")
+            excel, excel_owned = PDFExporter._create_excel_application(win32com)
             PDFExporter._prepare_excel_for_headless_run(excel)
             working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
                 xlsx_path,
                 label=xlsx_path.stem,
             )
             wb = PDFExporter._open_excel_workbook(excel, working_copy, read_only=True)
+            workbook_com = cast(Any, wb)
             ws = PDFExporter._retry_excel_com_call(
-                lambda: wb.Worksheets(1),
+                lambda: workbook_com.Worksheets(1),
                 "Workbook.Worksheets(1)",
             )
+            worksheet_com = cast(Any, ws)
             page_break_count = PDFExporter._retry_excel_com_call(
-                lambda: ws.HPageBreaks.Count,
+                lambda: worksheet_com.HPageBreaks.Count,
                 "Worksheet.HPageBreaks.Count",
             )
             page_count = int(page_break_count) + 1
@@ -567,11 +575,11 @@ class CatalogGenerator(ICatalogGenerator):
             ws = None
             if wb:
                 with contextlib.suppress(Exception):
-                    wb.Close(False)
+                    cast(Any, wb).Close(False)
             wb = None
-            if excel:
+            if excel and excel_owned:
                 with contextlib.suppress(Exception):
-                    excel.Quit()
+                    cast(Any, excel).Quit()
             excel = None
             if temp_dir is not None:
                 shutil.rmtree(temp_dir, ignore_errors=True)

@@ -29,7 +29,7 @@ from ..cad.titleblock_consistency import TitleblockConsistencyService
 from ..config import load_spec
 from ..interfaces import GenerationError, IDesignFileGenerator
 from ..models import normalize_discipline_label
-from .catalog_display_title import build_catalog_display_title
+from .catalog_display_title import build_catalog_single_line_titles, flatten_title_text
 
 if TYPE_CHECKING:
     from ..models import DocContext
@@ -140,6 +140,7 @@ class DesignFileGenerator(IDesignFileGenerator):
         derived = ctx.derived
         params = ctx.params
         discipline = normalize_discipline_label(params.discipline, self.spec.get_mappings()) or ""
+        catalog_title_cn, catalog_title_en = build_catalog_single_line_titles(ctx, self.spec)
 
         # 封面行
         rows.append({
@@ -162,8 +163,8 @@ class DesignFileGenerator(IDesignFileGenerator):
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
             "revision": derived.catalog_revision,
-            "title_cn": build_catalog_display_title(ctx, self.spec),
-            "title_en": "",
+            "title_cn": catalog_title_cn,
+            "title_en": catalog_title_en,
             "paper_size_text": self.consistency.catalog_paper_text(),
             "page_total": derived.catalog_page_total or 1,
             "status": params.doc_status,
@@ -255,6 +256,9 @@ class DesignFileGenerator(IDesignFileGenerator):
                 value,
                 template_lookups.get("disciplines", []),
             )
+
+        if source in {"title_cn", "title_en"}:
+            return flatten_title_text(value)
 
         return value
 

@@ -27,13 +27,15 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from ..config import get_config
 from ..interfaces import ExportError, IPDFExporter
 
 _RPC_CALL_REJECTED = -2147418111
+_FILE_NOT_FOUND_HRESULT = -2147024894
 
 
 class PDFExporter(IPDFExporter):
@@ -190,6 +192,176 @@ class PDFExporter(IPDFExporter):
         message = str(exc).lower()
         return ("被呼叫方拒绝接收呼叫" in str(exc)) or ("call was rejected by callee" in message)
 
+    @staticmethod
+    def _is_missing_excel_server_registration(exc: Exception) -> bool:
+        with contextlib.suppress(Exception):
+            if getattr(exc, "hresult", None) == _FILE_NOT_FOUND_HRESULT:
+                return True
+        message = str(exc).lower()
+        return ("系统找不到指定的文件" in str(exc)) or ("cannot find the file" in message)
+
+    @staticmethod
+    def _get_executable_path_from_command_text(command_text: str | None) -> Path | None:
+        text = str(command_text or "").strip()
+        if not text:
+            return None
+        if text.startswith('"'):
+            parts = text.split('"')
+            if len(parts) >= 2:
+                candidate = parts[1].strip()
+                return Path(candidate) if candidate else None
+        executable = re.split(r"\s+", text, maxsplit=1)[0].strip()
+        return Path(executable) if executable else None
+
+    @classmethod
+    def _iter_excel_executable_candidates(cls) -> list[Path]:
+        candidates: list[Path] = []
+        seen: set[str] = set()
+
+        def add_candidate(path: Path | str | None) -> None:
+            if path is None:
+                return
+            candidate = Path(path)
+            if not candidate.exists() or not candidate.is_file():
+                return
+            normalized = str(candidate.resolve()).lower()
+            if normalized in seen:
+                return
+            seen.add(normalized)
+            candidates.append(candidate)
+
+        with contextlib.suppress(Exception):
+            import winreg
+
+            app_path_keys = [
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\excel.exe"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe"),
+            ]
+            for root, subkey in app_path_keys:
+                try:
+                    with winreg.OpenKey(root, subkey) as key:
+                        value, _ = winreg.QueryValueEx(key, "")
+                except OSError:
+                    continue
+                add_candidate(cls._get_executable_path_from_command_text(str(value)))
+
+            try:
+                with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"Excel.Application\CLSID") as key:
+                    clsid, _ = winreg.QueryValueEx(key, "")
+                clsid = str(clsid or "").strip()
+                if clsid:
+                    for subkey in (
+                        fr"CLSID\{clsid}\LocalServer32",
+                        fr"WOW6432Node\CLSID\{clsid}\LocalServer32",
+                    ):
+                        try:
+                            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, fr"SOFTWARE\Classes\{subkey}") as key:
+                                value, _ = winreg.QueryValueEx(key, "")
+                            add_candidate(cls._get_executable_path_from_command_text(str(value)))
+                        except OSError:
+                            continue
+                        try:
+                            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, subkey) as key:
+                                value, _ = winreg.QueryValueEx(key, "")
+                            add_candidate(cls._get_executable_path_from_command_text(str(value)))
+                        except OSError:
+                            continue
+            except OSError:
+                pass
+
+        office_roots = [
+            Path(path)
+            for path in {
+                os.environ.get("PROGRAMFILES"),
+                os.environ.get("PROGRAMW6432"),
+                os.environ.get("PROGRAMFILES(X86)"),
+            }
+            if path
+        ]
+        office_versions = [f"Office{version}" for version in range(30, 11, -1)]
+        for root in office_roots:
+            microsoft_office = root / "Microsoft Office"
+            for version in office_versions:
+                add_candidate(microsoft_office / "root" / version / "EXCEL.EXE")
+                add_candidate(microsoft_office / version / "EXCEL.EXE")
+
+        return candidates
+
+    @staticmethod
+    def _launch_excel_candidate_for_automation(candidate: Path) -> subprocess.Popen[bytes]:
+        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return subprocess.Popen(
+            [str(candidate), "/automation"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+
+    @classmethod
+    def _wait_for_excel_active_object(
+        cls,
+        win32com_module: Any,
+        *,
+        retries: int = 18,
+        delay_sec: float = 0.5,
+    ) -> object:
+        last_exc: Exception | None = None
+        for _ in range(retries):
+            try:
+                return win32com_module.client.GetActiveObject("Excel.Application")
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(delay_sec)
+        raise RuntimeError(f"无法附着 Excel.Application 活动对象: {last_exc}") from last_exc
+
+    @staticmethod
+    def _excel_app_matches_pid(excel: object, pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            import win32process  # type: ignore[import]
+        except ImportError:
+            return False
+        with contextlib.suppress(Exception):
+            excel_app = cast(Any, excel)
+            hwnd = int(excel_app.Hwnd)
+            _thread_id, process_id = win32process.GetWindowThreadProcessId(hwnd)
+            return int(process_id) == int(pid)
+        return False
+
+    @classmethod
+    def _create_excel_application(cls, win32com_module: Any) -> tuple[object, bool]:
+        try:
+            return win32com_module.client.DispatchEx("Excel.Application"), True
+        except Exception as dispatch_exc:
+            if not cls._is_missing_excel_server_registration(dispatch_exc):
+                raise
+            last_exc: Exception = dispatch_exc
+
+        for candidate in cls._iter_excel_executable_candidates():
+            process: subprocess.Popen[bytes] | None = None
+            try:
+                process = cls._launch_excel_candidate_for_automation(candidate)
+                excel = cls._wait_for_excel_active_object(win32com_module)
+                if not cls._excel_app_matches_pid(excel, int(process.pid)):
+                    if process.poll() is None:
+                        with contextlib.suppress(Exception):
+                            process.terminate()
+                            process.wait(timeout=5)
+                    continue
+                return excel, True
+            except Exception as exc:
+                last_exc = exc
+                if process is not None and process.poll() is None:
+                    with contextlib.suppress(Exception):
+                        process.terminate()
+                        process.wait(timeout=5)
+                continue
+
+        raise RuntimeError(f"无法创建 Excel.Application: {last_exc}") from last_exc
+
     @classmethod
     def _retry_excel_com_call(
         cls,
@@ -271,11 +443,12 @@ class PDFExporter(IPDFExporter):
             raise ExportError("pywin32未安装，无法使用Office COM") from err
 
         excel = None
+        excel_owned = False
         wb = None
         temp_dir = None
         try:
             pythoncom.CoInitialize()
-            excel = win32com.client.DispatchEx("Excel.Application")
+            excel, excel_owned = self._create_excel_application(win32com)
             self._prepare_excel_for_headless_run(excel)
             working_copy, temp_dir = self._prepare_excel_path_for_com(
                 xlsx_path,
@@ -290,11 +463,11 @@ class PDFExporter(IPDFExporter):
         finally:
             if wb:
                 with contextlib.suppress(Exception):
-                    wb.Close(False)
+                    cast(Any, wb).Close(False)
             wb = None
-            if excel:
+            if excel and excel_owned:
                 with contextlib.suppress(Exception):
-                    excel.Quit()
+                    cast(Any, excel).Quit()
             excel = None
             gc.collect()
             if pythoncom is not None:

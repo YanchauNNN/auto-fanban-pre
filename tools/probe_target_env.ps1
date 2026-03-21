@@ -1303,6 +1303,173 @@ function Get-ComRegistrationFacts {
     return $facts
 }
 
+function Test-IsMissingExcelServerRegistration {
+    param(
+        [string]$Message,
+        [string]$HResult = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Message) -and [string]::IsNullOrWhiteSpace($HResult)) {
+        return $false
+    }
+
+    return (
+        $HResult -eq "0x80070002" -or
+        $Message -like "*系统找不到指定的文件*" -or
+        $Message.ToLowerInvariant() -like "*cannot find the file*"
+    )
+}
+
+function Add-UniqueExecutableCandidate {
+    param(
+        [string]$PathText,
+        [System.Collections.Generic.List[string]]$Bucket,
+        [System.Collections.Generic.HashSet[string]]$Seen
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathText)) {
+        return
+    }
+
+    $candidate = $PathText
+    try {
+        $candidate = [System.IO.Path]::GetFullPath($PathText)
+    } catch {
+    }
+
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        return
+    }
+
+    if ($Seen.Add($candidate)) {
+        [void]$Bucket.Add($candidate)
+    }
+}
+
+function Get-ExcelExecutableCandidates {
+    $bucket = New-Object 'System.Collections.Generic.List[string]'
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $comFacts = Get-ComRegistrationFacts -ProgId "Excel.Application"
+
+    Add-UniqueExecutableCandidate -PathText ([string]$comFacts.local_server_path) -Bucket $bucket -Seen $seen
+
+    $appPathKeys = @(
+        "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe",
+        "Registry::HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\excel.exe",
+        "Registry::HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe"
+    )
+    foreach ($appPathKey in $appPathKeys) {
+        if (-not (Test-Path -LiteralPath $appPathKey -PathType Container)) {
+            continue
+        }
+        try {
+            $item = Get-Item -LiteralPath $appPathKey -ErrorAction Stop
+            $raw = [string]$item.GetValue("", "")
+            $candidate = Get-ExecutablePathFromCommandText -CommandText $raw
+            Add-UniqueExecutableCandidate -PathText $candidate -Bucket $bucket -Seen $seen
+        } catch {
+        }
+    }
+
+    $officeRoots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:ProgramW6432
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    $officeVersions = 30..12 | ForEach-Object { "Office{0}" -f $_ }
+    foreach ($officeRoot in $officeRoots) {
+        foreach ($officeVersion in $officeVersions) {
+            Add-UniqueExecutableCandidate -PathText (Join-Path $officeRoot ("Microsoft Office\root\" + $officeVersion + "\EXCEL.EXE")) -Bucket $bucket -Seen $seen
+            Add-UniqueExecutableCandidate -PathText (Join-Path $officeRoot ("Microsoft Office\" + $officeVersion + "\EXCEL.EXE")) -Bucket $bucket -Seen $seen
+        }
+    }
+
+    return @($bucket.ToArray())
+}
+
+function Start-ExcelAutomationCandidate {
+    param([string]$ExecutablePath)
+
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath) -or -not (Test-Path -LiteralPath $ExecutablePath -PathType Leaf)) {
+        return $null
+    }
+
+    return Start-Process -FilePath $ExecutablePath -ArgumentList "/automation" -PassThru -WindowStyle Hidden
+}
+
+function Wait-ExcelActiveObject {
+    param(
+        [int]$Retries = 18,
+        [int]$DelayMs = 500
+    )
+
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
+        try {
+            return [System.Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
+        } catch {
+            $lastError = $_
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+
+    if ($null -ne $lastError -and $null -ne $lastError.Exception) {
+        throw $lastError.Exception
+    }
+    throw "Excel.Application active object unavailable"
+}
+
+function Get-ExcelComObjectWithBootstrap {
+    $app = $null
+    $lastError = $null
+    try {
+        $app = New-Object -ComObject Excel.Application
+        return [ordered]@{
+            app = $app
+            bootstrap_mode = "com"
+            bootstrap_candidate = ""
+        }
+    } catch {
+        $lastError = $_
+        $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
+        $hresult = if ($null -ne $_.Exception) { Format-HResultHex -HResult $_.Exception.HResult } else { "" }
+        if (-not (Test-IsMissingExcelServerRegistration -Message $message -HResult $hresult)) {
+            throw
+        }
+    }
+
+    $candidates = @(Get-ExcelExecutableCandidates)
+    foreach ($candidate in $candidates) {
+        $proc = $null
+        $app = $null
+        try {
+            $proc = Start-ExcelAutomationCandidate -ExecutablePath $candidate
+            $app = Wait-ExcelActiveObject
+            return [ordered]@{
+                app = $app
+                bootstrap_mode = "candidate"
+                bootstrap_candidate = $candidate
+            }
+        } catch {
+            $lastError = $_
+        } finally {
+            if ($null -eq $app -and $null -ne $proc) {
+                try {
+                    if (-not $proc.HasExited) {
+                        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                }
+            }
+        }
+    }
+
+    if ($null -ne $lastError -and $null -ne $lastError.Exception) {
+        throw $lastError.Exception
+    }
+    throw "无法创建 Excel.Application"
+}
+
 function Test-WordCom {
     $app = $null
     $comFacts = Get-ComRegistrationFacts -ProgId "Word.Application"
@@ -1338,9 +1505,11 @@ function Test-WordCom {
 
 function Test-ExcelCom {
     $app = $null
+    $bootstrap = $null
     $comFacts = Get-ComRegistrationFacts -ProgId "Excel.Application"
     try {
-        $app = New-Object -ComObject Excel.Application
+        $bootstrap = Get-ExcelComObjectWithBootstrap
+        $app = $bootstrap.app
         $app.Visible = $false
         $app.DisplayAlerts = $false
         return New-CheckResult -Status "pass" -Details ([ordered]@{
@@ -1350,6 +1519,8 @@ function Test-ExcelCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
+            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
         })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
@@ -1358,6 +1529,9 @@ function Test-ExcelCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
+            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
+            bootstrap_candidates = @(Get-ExcelExecutableCandidates)
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $app) {
@@ -1707,13 +1881,15 @@ function Invoke-ExcelTemplateOpenCore {
     $workingCopy = Join-Path $tempDir (Get-SafeAsciiLeafName -Prefix "fanban_excel_" -Label $TemplateLabel -Extension ([System.IO.Path]::GetExtension($TemplatePath)))
     $failureNotePath = Join-Path $tempDir "excel_probe_failure.txt"
     $app = $null
+    $bootstrap = $null
     $workbook = $null
     $preserveEvidence = $false
 
     try {
         Copy-Item -LiteralPath $TemplatePath -Destination $workingCopy -Force
         try { Unblock-File -LiteralPath $workingCopy -ErrorAction Stop } catch {}
-        $app = New-Object -ComObject Excel.Application
+        $bootstrap = Get-ExcelComObjectWithBootstrap
+        $app = $bootstrap.app
         $app.Visible = $false
         $app.DisplayAlerts = $false
         try { $app.AskToUpdateLinks = $false } catch {}
@@ -1727,6 +1903,8 @@ function Invoke-ExcelTemplateOpenCore {
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
             opened_copy = $workingCopy
             excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
+            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
+            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
         })
     } catch {
         $preserveEvidence = $true
@@ -1738,6 +1916,8 @@ function Invoke-ExcelTemplateOpenCore {
             ("template_path=" + (Resolve-FullPathOrRaw $TemplatePath)),
             ("opened_copy=" + $workingCopy),
             ("excel_version=" + $(if ($null -ne $app) { [string]$app.Version } else { "" })),
+            ("bootstrap_mode=" + $(if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" })),
+            ("bootstrap_candidate=" + $(if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" })),
             ("exception_type=" + $exceptionType),
             ("exception_hresult=" + $exceptionHResult),
             ("message=" + $_.Exception.Message),
@@ -1753,6 +1933,8 @@ function Invoke-ExcelTemplateOpenCore {
             preserved_temp_dir = $tempDir
             diagnostics_path = $failureNotePath
             excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
+            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
+            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
             exception_type = $exceptionType
             exception_hresult = $exceptionHResult
             script_stack = $scriptStack

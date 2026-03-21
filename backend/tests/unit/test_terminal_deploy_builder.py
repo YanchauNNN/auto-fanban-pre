@@ -6,8 +6,8 @@ from pathlib import Path
 
 from src.deploy.prereq_installers import ensure_prereq_installers
 from src.deploy.terminal_package import (
-    DELTA_DIR_NAME,
     DELTA_DELETE_LIST,
+    DELTA_DIR_NAME,
     DELTA_MANIFEST,
     DELTA_OVERWRITE_LIST,
     DELTA_USAGE,
@@ -231,7 +231,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Register-ScheduledTask" in register_task
     assert "New-ScheduledTaskTrigger -AtLogOn" in register_task
     assert "New-ScheduledTaskPrincipal" in register_task
-    assert "InteractiveToken" in register_task
+    assert "Interactive" in register_task
+    assert "InteractiveToken" not in register_task
     assert "WindowStyle Hidden" in register_task
     assert "Start-ScheduledTask -TaskName $TaskName" in register_task
     assert "nssm" not in register_task.lower()

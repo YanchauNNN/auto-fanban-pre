@@ -58,6 +58,8 @@ class FieldConsistencyPlan:
 
 class TitleblockConsistencyService:
     _SCALE_RE = re.compile(r"1\s*:\s*\d+(?:\.\d+)?", re.IGNORECASE)
+    _PAPER_TEXT_RE = re.compile(r"^A\d(?:\+\d(?:/\d+)?)?H?$", re.IGNORECASE)
+    _PAPER_SUFFIX_RE = re.compile(r"^\d(?:\+\d(?:/\d+)?)?H?$", re.IGNORECASE)
     _A4_MARKER_FULL_RE = re.compile(
         r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})"
         r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|(?P<colon>[：:])\s*(?P<rev_colon>[A-Z0-9]+))",
@@ -308,6 +310,9 @@ class TitleblockConsistencyService:
     ) -> str:
         ordered = self._sort_fragments(list(fragments))
         if field_name == "paper_size_text":
+            paper_text = self._extract_paper_text_from_fragments(ordered)
+            if paper_text:
+                return paper_text
             normalized = self._compose_overlay_paper_text(ordered)
             if normalized is not None:
                 return normalized
@@ -328,7 +333,10 @@ class TitleblockConsistencyService:
         fragments: list[dict[str, Any]],
     ) -> str:
         if field_name == "paper_size_text":
-            return frame.titleblock.paper_size_text or self._current_field_text(field_name, fragments)
+            normalized = self._normalize_paper_text(frame.titleblock.paper_size_text or "")
+            if normalized:
+                return normalized
+            return self._current_field_text(field_name, fragments)
         if field_name == "scale_text":
             return frame.titleblock.scale_text or self._current_field_text(field_name, fragments)
         return self._current_field_text(field_name, fragments)
@@ -385,11 +393,64 @@ class TitleblockConsistencyService:
 
         return None
 
+    def _extract_paper_text_from_fragments(self, fragments: list[dict[str, Any]]) -> str:
+        if not fragments:
+            return ""
+
+        overlay = self._compose_overlay_paper_text(fragments)
+        if overlay is not None:
+            return overlay
+
+        candidates = [
+            self._sanitize_paper_fragment_text(fragment.get("text"))
+            for fragment in fragments
+        ]
+        candidates = [candidate for candidate in candidates if candidate]
+        if not candidates:
+            return ""
+
+        for candidate in candidates:
+            if self._PAPER_TEXT_RE.fullmatch(candidate):
+                return candidate
+
+        if candidates.count("A") == 1:
+            suffix = "".join(candidate for candidate in candidates if candidate != "A")
+            if self._PAPER_SUFFIX_RE.fullmatch(suffix):
+                return f"A{suffix}"
+
+        return self._normalize_paper_text("".join(candidates))
+
+    def _normalize_paper_text(self, value: Any) -> str:
+        sanitized = self._sanitize_paper_fragment_text(value)
+        if not sanitized:
+            return ""
+        if self._PAPER_TEXT_RE.fullmatch(sanitized):
+            return sanitized
+        if sanitized.count("A") == 1:
+            suffix = sanitized.replace("A", "", 1)
+            if self._PAPER_SUFFIX_RE.fullmatch(suffix):
+                return f"A{suffix}"
+        return ""
+
+    def _sanitize_paper_fragment_text(self, value: Any) -> str:
+        compact = self._compact_text(value)
+        if not compact:
+            return ""
+        return re.sub(r"[^A-Z0-9+/]", "", compact)
+
     def _select_relevant_fragments(
         self,
         field_name: str | None,
         fragments: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        if field_name == "paper_size_text":
+            paper_fragments = [
+                fragment
+                for fragment in fragments
+                if self._sanitize_paper_fragment_text(fragment.get("text"))
+            ]
+            return paper_fragments or fragments
+
         if field_name != "scale_text":
             return fragments
 

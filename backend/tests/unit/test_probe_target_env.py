@@ -135,3 +135,16 @@ def test_probe_target_env_collects_office_com_registration_diagnostics() -> None
     assert "local_server_path" in script_text
     assert "local_server_exists" in script_text
     assert "Get-ComRegistrationFacts -ProgId \"Excel.Application\"" in script_text
+
+
+def test_probe_target_env_can_bootstrap_excel_from_executable_candidates() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Get-ExcelExecutableCandidates" in script_text
+    assert "function Start-ExcelAutomationCandidate" in script_text
+    assert "function Get-ExcelComObjectWithBootstrap" in script_text
+    assert 'GetActiveObject("Excel.Application")' in script_text
+    assert "/automation" in script_text
