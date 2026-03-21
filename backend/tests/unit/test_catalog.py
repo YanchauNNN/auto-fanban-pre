@@ -117,6 +117,18 @@ def test_catalog_row_order_and_upgrade_note() -> None:
     assert rows[4]["upgrade_note"] == "升版"
 
 
+def test_catalog_cover_and_catalog_rows_share_document_revision() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context()
+    ctx.derived.document_revision = "C"
+    ctx.derived.catalog_revision = "C"
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["revision"] == "C"
+    assert rows[1]["revision"] == "C"
+
+
 def test_catalog_1818_title_in_same_cell_with_newline() -> None:
     gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="1818")

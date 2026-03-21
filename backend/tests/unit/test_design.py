@@ -147,6 +147,17 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["U4"].value == "图纸"
 
 
+def test_design_cover_and_catalog_rows_share_document_revision() -> None:
+    gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
+    ctx = _build_context()
+    ctx.derived.document_revision = "C"
+    ctx.derived.catalog_revision = "C"
+    rows = gen._build_rows(ctx)
+
+    assert rows[0]["revision"] == "C"
+    assert rows[1]["revision"] == "C"
+
+
 def test_design_generate_xlsx_only_without_pdf(temp_dir: Path) -> None:
     gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
     ctx = _build_context()

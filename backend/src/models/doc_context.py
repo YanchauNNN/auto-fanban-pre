@@ -179,6 +179,7 @@ class DerivedFields(BaseModel):
     discipline_en: str | None = None       # 仅1818
 
     # 版次派生
+    document_revision: str | None = None
     catalog_revision: str | None = None
 
     # 固定值
@@ -286,4 +287,14 @@ class DocContext(BaseModel):
                     return sheet_set.page_total
 
         return frame.titleblock.page_total or 1
+
+    def get_document_revision(self) -> str:
+        """返回封面/目录等卷册级文档应使用的统一版次。"""
+
+        return (
+            self.derived.document_revision
+            or self.derived.catalog_revision
+            or self.params.cover_revision
+            or "A"
+        )
 

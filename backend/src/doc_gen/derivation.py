@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..config import load_spec
 from ..models import DerivedFields, DocContext, normalize_discipline_label
 
@@ -92,10 +94,8 @@ class DerivationEngine:
                 derived.discipline_en = self.mappings.get("discipline_to_en", {}).get(discipline)
 
         # === 版次派生 ===
-        # catalog_revision = coalesce_nonempty(upgrade_revision, cover_revision)
-        derived.catalog_revision = (
-            ctx.params.upgrade_revision or ctx.params.cover_revision or "A"
-        )
+        derived.document_revision = self._resolve_document_revision(ctx)
+        derived.catalog_revision = derived.document_revision
 
         # === 固定值 ===
         derived.cover_paper_size_text = "A4图纸"
@@ -129,3 +129,39 @@ class DerivationEngine:
         if len(s) >= end:
             return s[:start] + replacement + s[end:]
         return s
+
+    @staticmethod
+    def _normalize_revision(value: str | None) -> str:
+        return str(value or "").strip().upper()
+
+    def _resolve_document_revision(self, ctx: DocContext) -> str:
+        drawing_revisions = [
+            revision
+            for revision in (
+                self._normalize_revision(frame.titleblock.revision)
+                for frame in ctx.get_sorted_document_frames()
+            )
+            if revision
+        ]
+        if drawing_revisions:
+            return max(drawing_revisions, key=self._revision_sort_key)
+
+        return (
+            self._normalize_revision(ctx.params.upgrade_revision)
+            or self._normalize_revision(ctx.params.cover_revision)
+            or "A"
+        )
+
+    @staticmethod
+    def _revision_sort_key(revision: str) -> tuple[tuple[int, int | str], ...]:
+        parts = re.findall(r"[A-Z]+|\d+", revision.upper())
+        if not parts:
+            return ((0, revision.upper()),)
+
+        key: list[tuple[int, int | str]] = []
+        for part in parts:
+            if part.isdigit():
+                key.append((1, int(part)))
+            else:
+                key.append((0, part))
+        return tuple(key)

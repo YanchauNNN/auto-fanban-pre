@@ -126,7 +126,6 @@ class IEDGenerator(IIEDGenerator):
         """构建行数据"""
         rows = []
         derived = ctx.derived
-        params = ctx.params
         catalog_title_cn, catalog_title_en = build_catalog_single_line_titles(ctx, self.spec)
 
         # 封面行
@@ -134,7 +133,7 @@ class IEDGenerator(IIEDGenerator):
             "type": "cover",
             "external_code": derived.cover_external_code,
             "internal_code": derived.cover_internal_code,
-            "revision": params.cover_revision,
+            "revision": ctx.get_document_revision(),
             "title_cn": derived.cover_title_cn,
             "title_en": derived.cover_title_en,
         })
@@ -144,7 +143,7 @@ class IEDGenerator(IIEDGenerator):
             "type": "catalog",
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
-            "revision": derived.catalog_revision,
+            "revision": ctx.get_document_revision(),
             "title_cn": catalog_title_cn,
             "title_en": catalog_title_en,
         })

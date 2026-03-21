@@ -111,11 +111,34 @@ def test_ied_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["BA2"].value == "2026-03-01"
     assert ws["BJ2"].value in ("", None)
     assert ws["BK2"].value == "非密"
+    assert ws["BR2"].value == "否"
+    assert ws["BW2"].value == "NA"
 
     # 第4行：图纸行
     assert ws["G4"].value == "JD1NHT11001B25C42SD"
     assert ws["I4"].value == "1234567-JG001-001"
     assert ws["K4"].value == "图纸1"
+    assert ws["BR4"].value == "否"
+    assert ws["BW4"].value == "NA"
+
+
+def test_ied_cover_and_catalog_rows_share_document_revision() -> None:
+    gen = IEDGenerator()
+    ctx = _build_context()
+    ctx.derived.document_revision = "C"
+    ctx.derived.catalog_revision = "C"
+    rows = gen._build_rows(ctx)
+
+    assert rows[0]["revision"] == "C"
+    assert rows[1]["revision"] == "C"
+
+
+def test_ied_bindings_set_fixed_br_bw_values() -> None:
+    bindings = IEDGenerator().spec.get_ied_bindings()
+    columns = bindings.get("columns", {})
+
+    assert columns["BR"]["value"] == "否"
+    assert columns["BW"]["value"] == "NA"
 
 
 def test_ied_catalog_row_title_matches_catalog_e10_for_1818(temp_dir: Path) -> None:

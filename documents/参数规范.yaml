@@ -383,10 +383,15 @@ doc_generation:
       desc: "设计阶段(CFC映射为施工图设计)"
     
     # === 版次派生 ===
+    document_revision:
+      from: "frames[].titleblock.revision"
+      transform: "max_nonempty_revision_with_fallback(cover_revision, upgrade_revision)"
+      desc: "统一文档版次：优先取图纸(001~XXX)最高版次；若图纸无版次则回退升版版本/封面版次"
+
     catalog_revision:
-      from: "[upgrade_revision, cover_revision]"
-      transform: "coalesce_nonempty"
-      desc: "目录版次，优先取升版版本"
+      from: "document_revision"
+      transform: "identity"
+      desc: "目录版次，与封面保持一致，并与图纸(001~XXX)最高版次一致；无图纸版次时回退升版版本/封面版次"
     
     # === 固定值 ===
     cover_paper_size_text:   { value: "A4图纸" }
@@ -556,7 +561,7 @@ doc_generation:
             external_code: "cover_external_code"
             title_cn: "cover_title_cn"
             title_en: "cover_title_en"      # 仅1818：同一单元格内写入，格式为 title_cn + '\\n' + title_en
-            revision: "cover_revision"
+            revision: "document_revision"
             status: "doc_status"            # 取001图纸status
             page_total: 1                   # 固定值
           目录行:
@@ -564,7 +569,7 @@ doc_generation:
             external_code: "catalog_external_code"
             title_cn: "catalog_title_cn"
             title_en: "catalog_title_en"    # 仅1818：同一单元格内写入，格式为 title_cn + '\\n' + title_en
-            revision: "catalog_revision"
+            revision: "document_revision"
             status: "doc_status"            # 取001图纸status
             page_total: "catalog_page_total"  # 由PDF计页得到
           图纸行:
@@ -636,7 +641,7 @@ doc_generation:
         G:  { name: "文件编码",     source: "external_code",          cover_catalog: "[cover/catalog]_external_code" }
         H:  { name: "原文件编码",   value: "" }
         I:  { name: "内部编码",     source: "internal_code",          cover_catalog: "[cover/catalog]_internal_code" }
-        J:  { name: "版本",         source: "revision",               cover: "cover_revision", catalog: "catalog_revision" }
+        J:  { name: "版本",         source: "revision",               cover: "document_revision", catalog: "document_revision" }
         K:  { name: "中文标题",     source: "title_cn",               cover_catalog: "[cover/catalog]_title_cn" }
         L:  { name: "英文标题",     source: "title_en",               when: "1818" }
         M:  { name: "人员资格类别", source: "ied_person_qual_category", global: true }
@@ -708,12 +713,12 @@ doc_generation:
         BO: { name: "预估图纸量",     value: "" }
         BP: { name: "原定费用(元)",   value: "" }
         BQ: { name: "计划WR日期",     value: "" }
-        BR: { name: "是否三维模型",   value: "" }
+        BR: { name: "是否三维模型",   value: "否" }
         BS: { name: "是否交付数据",   value: "" }
         BT: { name: "数据类型",       value: "" }
         BU: { name: "EM包",           value: "" }
         BV: { name: "安装大类",       value: "" }
-        BW: { name: "责任系统",       value: "" }
+        BW: { name: "责任系统",       value: "NA" }
 
   # --------------------------------------------------------------------------
   # 2.5 每张图元数据结构

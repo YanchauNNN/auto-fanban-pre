@@ -93,9 +93,32 @@ class TestDerivationEngine:
 
         assert derived.discipline_en == "Structural Engineering"
 
-    def test_derive_catalog_revision(self, engine: DerivationEngine):
-        """测试目录版次派生"""
-        # 有升版版本时优先
+    def test_derive_catalog_revision_uses_highest_drawing_revision(
+        self,
+        engine: DerivationEngine,
+        sample_frame,
+    ):
+        """目录/封面版次应与图纸最高版次保持一致。"""
+        params = GlobalDocParams(
+            project_no="2016",
+            cover_revision="A",
+            upgrade_revision="B",
+        )
+        frame_a = sample_frame.model_copy(deep=True)
+        frame_a.titleblock.revision = "A"
+        frame_b = sample_frame.model_copy(deep=True)
+        frame_b.titleblock.internal_code = "1234567-JG001-002"
+        frame_b.titleblock.external_code = "JD1NHT11002B25C42SD"
+        frame_b.titleblock.revision = "C"
+        ctx = DocContext(params=params, frames=[frame_a, frame_b])
+        derived = engine.compute(ctx)
+        assert derived.document_revision == "C"
+        assert derived.catalog_revision == "C"
+
+    def test_derive_catalog_revision_falls_back_to_upgrade_or_cover_without_drawing_revisions(
+        self,
+        engine: DerivationEngine,
+    ):
         params = GlobalDocParams(
             project_no="2016",
             cover_revision="A",
@@ -103,15 +126,16 @@ class TestDerivationEngine:
         )
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
+        assert derived.document_revision == "B"
         assert derived.catalog_revision == "B"
 
-        # 无升版版本时取封面版次
         params2 = GlobalDocParams(
             project_no="2016",
             cover_revision="A",
         )
         ctx2 = DocContext(params=params2, frames=[])
         derived2 = engine.compute(ctx2)
+        assert derived2.document_revision == "A"
         assert derived2.catalog_revision == "A"
 
     def test_derive_fixed_cover_and_catalog_paper_labels(self, engine: DerivationEngine):

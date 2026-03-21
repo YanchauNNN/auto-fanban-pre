@@ -89,7 +89,7 @@ class CoverGenerator(ICoverGenerator):
     def _build_output_stem(self, ctx: DocContext) -> str:
         return make_document_output_name(
             external_code=ctx.derived.cover_external_code,
-            revision=ctx.params.cover_revision,
+            revision=ctx.get_document_revision(),
             status=ctx.params.doc_status,
             internal_code=ctx.derived.cover_internal_code,
             fallback_name="封面",
@@ -129,7 +129,7 @@ class CoverGenerator(ICoverGenerator):
             "album_title_en": params.album_title_en,  # 仅1818
             "album_code": derived.album_code,
             "album_internal_code": derived.album_internal_code,
-            "cover_revision": params.cover_revision,
+            "cover_revision": ctx.get_document_revision(),
             "doc_status": params.doc_status,
             "cover_external_code": derived.cover_external_code,
         }

@@ -104,6 +104,19 @@ def test_prepare_data_1818_includes_discipline_en() -> None:
     assert data["discipline_en"] == "Structural Engineering"
 
 
+def test_cover_uses_document_revision_for_output_and_binding() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context()
+    ctx.derived.document_revision = "C"
+    ctx.derived.cover_internal_code = "1234567-JG001-FM"
+
+    data = gen._prepare_data(ctx)
+    output_stem = gen._build_output_stem(ctx)
+
+    assert data["cover_revision"] == "C"
+    assert output_stem == "JD1NHT11F01B25C42SDCCFC (1234567-JG001-FM)"
+
+
 def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context(project_no="2016")
