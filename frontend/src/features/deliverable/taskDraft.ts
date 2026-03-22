@@ -17,7 +17,7 @@ export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
     intent: "deliverable",
     runAuditCheck: false,
     files: [],
-    values: getDefaultTaskValues(schema),
+    values: normalizeCombinedIedValues(getDefaultTaskValues(schema)),
     fieldErrors: {},
     formErrors: [],
     inference: {
@@ -45,15 +45,15 @@ export function syncTaskConfigDraft(
   return {
     ...currentDraft,
     runAuditCheck: currentDraft.runAuditCheck ?? false,
-    values: {
+    values: normalizeCombinedIedValues({
       ...defaultValues,
       ...currentDraft.values,
-    },
+    }),
   };
 }
 
 export function getDefaultTaskValues(schema: FormSchema) {
-  return {
+  return normalizeCombinedIedValues({
     ...LOCAL_DEFAULT_VALUES,
     ...Object.fromEntries(
       schema.sections.flatMap((section) =>
@@ -65,7 +65,7 @@ export function getDefaultTaskValues(schema: FormSchema) {
         ]),
       ),
     ),
-  };
+  });
 }
 
 export function isAutoTodayField(fieldKey: string) {
@@ -74,4 +74,18 @@ export function isAutoTodayField(fieldKey: string) {
 
 export function getTodayValue() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeCombinedIedValues(values: Record<string, string>) {
+  const checkedBy = values.ied_checked_by?.trim() || values.ied_discipline_leader?.trim() || "";
+  const checkedDate =
+    values.ied_checked_date?.trim() || values.ied_discipline_leader_date?.trim() || "";
+
+  return {
+    ...values,
+    ied_checked_by: checkedBy,
+    ied_discipline_leader: checkedBy,
+    ied_checked_date: checkedDate,
+    ied_discipline_leader_date: checkedDate,
+  };
 }

@@ -1038,7 +1038,7 @@ function getProjectNoOptions(schema: FormSchema) {
 
 function applyFilesToDraft(draft: TaskConfigDraft, files: File[]) {
   const inference = inferProjectNumbers(files);
-  const currentProjectNo = draft.values.project_no.trim();
+  const currentProjectNo = (draft.values.project_no ?? "").trim();
   const shouldAutofillProjectNo =
     !currentProjectNo || currentProjectNo === draft.inference.primaryProjectNo;
   const nextProjectNo =
@@ -1116,6 +1116,17 @@ function buildSubmissionValues(values: Record<string, string>) {
   const isUpgradeEnabled = sanitized.is_upgrade === "true";
   sanitized.is_upgrade = isUpgradeEnabled ? "true" : "false";
   sanitized.upgrade_sheet_codes = isUpgradeEnabled ? sanitized.upgrade_sheet_codes ?? "" : "";
+
+  const combinedChecker = (sanitized.ied_checked_by ?? sanitized.ied_discipline_leader ?? "").trim();
+  const combinedCheckerDate = (
+    sanitized.ied_checked_date ??
+    sanitized.ied_discipline_leader_date ??
+    ""
+  ).trim();
+  sanitized.ied_checked_by = combinedChecker;
+  sanitized.ied_discipline_leader = combinedChecker;
+  sanitized.ied_checked_date = combinedCheckerDate;
+  sanitized.ied_discipline_leader_date = combinedCheckerDate;
 
   return sanitized;
 }

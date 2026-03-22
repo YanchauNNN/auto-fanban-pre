@@ -1,11 +1,11 @@
 ﻿科室编码,科室,账号,姓名,角色,密码
 25C0,建筑结构所,hbjjswd,河北建筑结构所文,管理员,password
-25C0,建筑结构所,l-gengtj,耿铁军,设计人员,password
-25C0,建筑结构所,l-sunyy,孙媛媛,设计人员,password
-25C0,建筑结构所,l-zhouxy,周祥玉,设计人员,password
-25C0,建筑结构所,lipya,李鹏阳,设计人员,password
+25C2,结构二室,,l-gengtj,耿铁军,设计人员,password
+25C1,结构一室,,l-sunyy,孙媛媛,设计人员,password
+25C1,结构一室,,l-zhouxy,周祥玉,设计人员,password
+25C1,结构一室,,lipya,李鹏阳,设计人员,password
 25C0,建筑结构所,wangdd,王丹丹,管理员,password
-25C0,建筑结构所,xuexh,薛晓航,设计人员,password
+25C1,结构一室,xuexh,薛晓航,设计人员,password
 25C0,建筑结构所,yanwei,闫伟,所领导,password
 25C0,建筑结构所,zengtj,曾添君,设计人员,password
 25C0,建筑结构所,zhangjinga,张静,所领导,password

@@ -52,7 +52,7 @@ const schema: FormSchema = {
           required: false,
           requiredWhen: null,
           defaultValue: "",
-          description: "输入图纸内部编码最后三位",
+          description: "输入图纸内部编码末三位",
           options: [],
         },
         {
@@ -84,6 +84,10 @@ describe("createTaskConfigDraft", () => {
       is_upgrade: "false",
       upgrade_sheet_codes: "",
       ied_prepared_date: new Date().toISOString().slice(0, 10),
+      ied_checked_by: "",
+      ied_discipline_leader: "",
+      ied_checked_date: "",
+      ied_discipline_leader_date: "",
     });
     expect(draft.replaceConfig).toEqual({
       sourceProjectNo: "",
@@ -154,8 +158,49 @@ describe("syncTaskConfigDraft", () => {
       upgrade_sheet_codes: "001、003",
       ied_prepared_date: "2026-03-12",
       subitem_name: "默认子项",
+      ied_checked_by: "",
+      ied_discipline_leader: "",
+      ied_checked_date: "",
+      ied_discipline_leader_date: "",
     });
     expect(draft.files).toHaveLength(1);
     expect(draft.replaceConfig.targetProjectNo).toBe("2020");
+  });
+
+  it("backfills the merged checker inputs from legacy discipline leader values", () => {
+    const currentDraft: TaskConfigDraft = {
+      intent: "deliverable",
+      runAuditCheck: false,
+      files: [],
+      values: {
+        project_no: "",
+        album_title_cn: "默认图册",
+        is_upgrade: "false",
+        upgrade_sheet_codes: "",
+        ied_prepared_date: "2026-03-12",
+        ied_checked_by: "",
+        ied_checked_date: "",
+        ied_discipline_leader: "王任超@wangrca",
+        ied_discipline_leader_date: "2026-03-22",
+      },
+      fieldErrors: {},
+      formErrors: [],
+      inference: {
+        inferredProjectNos: [],
+        primaryProjectNo: "",
+        hasConflict: false,
+      },
+      replaceConfig: {
+        sourceProjectNo: "",
+        targetProjectNo: "",
+      },
+    };
+
+    const draft = syncTaskConfigDraft(schema, currentDraft);
+
+    expect(draft.values.ied_checked_by).toBe("王任超@wangrca");
+    expect(draft.values.ied_discipline_leader).toBe("王任超@wangrca");
+    expect(draft.values.ied_checked_date).toBe("2026-03-22");
+    expect(draft.values.ied_discipline_leader_date).toBe("2026-03-22");
   });
 });
