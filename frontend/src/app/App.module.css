@@ -194,9 +194,9 @@
     linear-gradient(
       90deg,
       rgba(247, 250, 253, 0.98) 0%,
-      rgba(247, 250, 253, 0.94) 18%,
-      rgba(247, 250, 253, 0.72) 38%,
-      rgba(247, 250, 253, 0.4) 58%,
+      rgba(247, 250, 253, 0.92) 10%,
+      rgba(247, 250, 253, 0.68) 26%,
+      rgba(247, 250, 253, 0.34) 46%,
       rgba(247, 250, 253, 0.82) 100%
     ),
     linear-gradient(180deg, rgba(233, 242, 252, 0.18), rgba(14, 53, 101, 0.08)),
@@ -231,9 +231,9 @@
 
 .uploadActions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.75rem;
-  align-items: center;
+  align-items: flex-start;
 }
 
 .primaryActionButton,
@@ -263,7 +263,9 @@
 }
 
 .disabledPreviewWrap {
+  position: relative;
   display: inline-flex;
+  align-items: center;
 }
 
 .disabledPreviewButton {
@@ -280,6 +282,36 @@
 .disabledPreviewWrap:hover .disabledPreviewButton {
   border-color: rgba(20, 70, 128, 0.22);
   background: rgba(255, 255, 255, 0.76);
+}
+
+.disabledPreviewTooltip {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  z-index: 4;
+  border-radius: 14px;
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  background: rgba(19, 62, 109, 0.96);
+  color: #f8fbff;
+  padding: 0.48rem 0.72rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.2;
+  box-shadow: 0 12px 28px rgba(13, 44, 80, 0.18);
+  white-space: nowrap;
+}
+
+.disabledPreviewTooltip::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 18px;
+  width: 12px;
+  height: 12px;
+  transform: rotate(45deg);
+  background: rgba(19, 62, 109, 0.96);
+  border-top: 1px solid rgba(20, 70, 128, 0.14);
+  border-left: 1px solid rgba(20, 70, 128, 0.14);
 }
 
 .hiddenFileInput {

@@ -116,6 +116,8 @@ function WorkspacePage() {
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
   const [activeModule, setActiveModule] = useState<HomeModule>("business");
+  const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
+  const [showReplaceTooltip, setShowReplaceTooltip] = useState(false);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
   const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
@@ -125,6 +127,7 @@ function WorkspacePage() {
   const [auditDraftAvailable, setAuditDraftAvailable] = useState(false);
   const [auditSummaryQueue, setAuditSummaryQueue] = useState<JobDetail[]>([]);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
+  const jobsRefreshResetTimerRef = useRef<number | null>(null);
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -172,6 +175,14 @@ function WorkspacePage() {
       setAllJobsModalOpen(false);
     }
   }, [normalizedRecentJobsSearch]);
+
+  useEffect(() => {
+    return () => {
+      if (jobsRefreshResetTimerRef.current !== null) {
+        window.clearTimeout(jobsRefreshResetTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const items = jobsQuery.data?.items;
@@ -290,6 +301,26 @@ function WorkspacePage() {
     deliverableFileInputRef.current?.click();
   }
 
+  async function handleJobsRefresh() {
+    if (jobsRefreshResetTimerRef.current !== null) {
+      window.clearTimeout(jobsRefreshResetTimerRef.current);
+      jobsRefreshResetTimerRef.current = null;
+    }
+
+    setJobsRefreshState("refreshing");
+
+    try {
+      await jobsQuery.refetch();
+      setJobsRefreshState("done");
+      jobsRefreshResetTimerRef.current = window.setTimeout(() => {
+        setJobsRefreshState("idle");
+        jobsRefreshResetTimerRef.current = null;
+      }, 1200);
+    } catch {
+      setJobsRefreshState("idle");
+    }
+  }
+
   function handleDeliverableFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0 || !schemaQuery.data) {
@@ -393,14 +424,31 @@ function WorkspacePage() {
                     >
                       {auditDraftAvailable ? "继续纠错" : "纠错"}
                     </button>
-                    <span className={styles.disabledPreviewWrap} title="敬请期待">
+                    <span
+                      className={styles.disabledPreviewWrap}
+                      data-testid="replace-preview-wrap"
+                      onBlur={() => setShowReplaceTooltip(false)}
+                      onFocus={() => setShowReplaceTooltip(true)}
+                      onMouseEnter={() => setShowReplaceTooltip(true)}
+                      onMouseLeave={() => setShowReplaceTooltip(false)}
+                    >
                       <button
                         aria-disabled="true"
                         className={styles.disabledPreviewButton}
+                        tabIndex={-1}
                         type="button"
                       >
                         翻版
                       </button>
+                      {showReplaceTooltip ? (
+                        <span
+                          aria-label="敬请期待"
+                          className={styles.disabledPreviewTooltip}
+                          role="tooltip"
+                        >
+                          敬请期待
+                        </span>
+                      ) : null}
                     </span>
                     {deliverableDraftAvailable ? (
                       <button
@@ -441,11 +489,15 @@ function WorkspacePage() {
               <section className={styles.jobsSection} data-testid="recent-jobs-section">
                 <header className={styles.jobsHeader}>
                   <div>
-                    <p className={styles.brandTop}>Recent Jobs</p>
-                    <h2>最近任务</h2>
+                    <p className={styles.brandTop}>Task Record</p>
+                    <h2>任务记录</h2>
                   </div>
-                  <button className={styles.subtleButton} type="button" onClick={() => jobsQuery.refetch()}>
-                    刷新
+                  <button className={styles.subtleButton} type="button" onClick={() => void handleJobsRefresh()}>
+                    {jobsRefreshState === "refreshing"
+                      ? "刷新中"
+                      : jobsRefreshState === "done"
+                        ? "已刷新"
+                        : "刷新"}
                   </button>
                 </header>
 
@@ -525,10 +577,11 @@ function WorkspacePage() {
           adapter={adapter}
           cards={filteredJobCards}
           filterValue={jobsStatusFilter}
+          refreshState={jobsRefreshState}
           searchValue={recentJobsSearch}
           onClose={() => setAllJobsModalOpen(false)}
           onFilterChange={setJobsStatusFilter}
-          onRefresh={() => jobsQuery.refetch()}
+          onRefresh={handleJobsRefresh}
           onSearchChange={setRecentJobsSearch}
         />
       ) : null}
@@ -570,6 +623,7 @@ function JobsBrowserModal({
   adapter,
   cards,
   filterValue,
+  refreshState,
   searchValue,
   onFilterChange,
   onSearchChange,
@@ -579,10 +633,11 @@ function JobsBrowserModal({
   adapter: ApiAdapter;
   cards: JobCardModel[];
   filterValue?: string;
+  refreshState: "idle" | "refreshing" | "done";
   searchValue: string;
   onFilterChange: (value?: string) => void;
   onSearchChange: (value: string) => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
   onClose: () => void;
 }) {
   return (
@@ -595,12 +650,16 @@ function JobsBrowserModal({
       >
         <header className={styles.jobsModalHeader}>
           <div>
-            <p className={styles.brandTop}>Jobs Browser</p>
-            <h2>全部任务</h2>
+            <p className={styles.brandTop}>Task Record</p>
+            <h2>全部任务记录</h2>
           </div>
           <div className={styles.jobsModalActions}>
-            <button className={styles.subtleButton} type="button" onClick={onRefresh}>
-              刷新
+            <button className={styles.subtleButton} type="button" onClick={() => void onRefresh()}>
+              {refreshState === "refreshing"
+                ? "刷新中"
+                : refreshState === "done"
+                  ? "已刷新"
+                  : "刷新"}
             </button>
             <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
               关闭

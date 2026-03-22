@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 
@@ -75,6 +75,10 @@ beforeEach(() => {
     total: 0,
     items: [],
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function makeSingleJob(index: number, sourceFilename: string) {
@@ -160,6 +164,33 @@ describe("homepage shell", () => {
     await user.click(workloadButton);
     expect(screen.getByTestId("module-workload-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("module-account-panel")).not.toBeInTheDocument();
+  });
+
+  it("shows task record labels and refresh feedback", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("Task Record")).toBeInTheDocument();
+    expect(screen.getByText("任务记录")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const refreshButton = screen.getAllByRole("button", { name: "刷新" })[0];
+    await user.click(refreshButton);
+
+    expect(await screen.findByRole("button", { name: "已刷新" })).toBeInTheDocument();
+  });
+
+  it("shows the themed replace tooltip immediately on hover", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const replacePreview = await screen.findByTestId("replace-preview-wrap");
+    expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
+
+    await user.hover(replacePreview);
+    expect(screen.getByRole("tooltip", { name: "敬请期待" })).toBeInTheDocument();
+
+    await user.unhover(replacePreview);
+    expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
   });
 });
 
