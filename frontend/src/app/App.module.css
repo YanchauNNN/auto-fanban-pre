@@ -286,8 +286,9 @@
 
 .disabledPreviewTooltip {
   position: absolute;
-  top: calc(100% + 0.55rem);
-  left: 0;
+  top: 50%;
+  left: calc(100% + 0.55rem);
+  transform: translateY(-50%);
   z-index: 4;
   border-radius: 14px;
   border: 1px solid rgba(20, 70, 128, 0.14);
@@ -304,14 +305,14 @@
 .disabledPreviewTooltip::before {
   content: "";
   position: absolute;
-  top: -6px;
-  left: 18px;
+  top: 50%;
+  left: -6px;
   width: 12px;
   height: 12px;
-  transform: rotate(45deg);
+  transform: translateY(-50%) rotate(45deg);
   background: rgba(19, 62, 109, 0.96);
-  border-top: 1px solid rgba(20, 70, 128, 0.14);
   border-left: 1px solid rgba(20, 70, 128, 0.14);
+  border-bottom: 1px solid rgba(20, 70, 128, 0.14);
 }
 
 .hiddenFileInput {

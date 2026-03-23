@@ -138,6 +138,29 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "NSSM" not in text
 
 
+def test_build_terminal_deploy_package_prefers_local_autocad_pdf2_pc3_when_available(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    managed_pc3 = repo_root / "documents" / "Resources" / PC3_NAME
+    managed_pc3.write_text("repo-pc3", encoding="utf-8")
+
+    appdata = tmp_path / "AppData" / "Roaming"
+    local_plotters = appdata / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters"
+    local_plotters.mkdir(parents=True, exist_ok=True)
+    (local_plotters / PC3_NAME).write_text("local-pc3", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    assert (output_root / "documents" / "Resources" / PC3_NAME).read_text(encoding="utf-8") == "local-pc3"
+
+
 def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prepare_scripts(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _make_fake_repo(repo_root)

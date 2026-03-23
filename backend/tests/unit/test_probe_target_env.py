@@ -148,3 +148,14 @@ def test_probe_target_env_can_bootstrap_excel_from_executable_candidates() -> No
     assert "function Get-ExcelComObjectWithBootstrap" in script_text
     assert 'GetActiveObject("Excel.Application")' in script_text
     assert "/automation" in script_text
+
+
+def test_probe_target_env_requires_managed_pdf2_pc3_and_does_not_use_dwg_fallback() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'recommendedPc3 = "DWG To PDF.pc3"' not in script_text
+    assert "used_fallback_dwg_to_pdf" not in script_text
+    assert "documents\\Resources\\打印PDF2.pc3" in script_text

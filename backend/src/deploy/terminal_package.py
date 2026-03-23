@@ -2,9 +2,10 @@
 
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
@@ -19,6 +20,7 @@ DELTA_MANIFEST = "delta-manifest.json"
 DELTA_OVERWRITE_LIST = "覆盖清单.txt"
 DELTA_DELETE_LIST = "删除清单.txt"
 DELTA_USAGE = "使用说明.txt"
+MANAGED_PDF2_PC3_NAME = "打印PDF2.pc3"
 
 
 @dataclass(frozen=True)
@@ -119,8 +121,38 @@ def _sanitize_python_packages(output_root: Path) -> None:
             target.unlink()
 
 
+def _find_local_managed_pdf2_pc3() -> Path | None:
+    preferred_candidates: list[Path] = []
+    for base in filter(None, (os.getenv("APPDATA"), os.getenv("LOCALAPPDATA"))):
+        preferred_candidates.append(
+            Path(base) / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters" / MANAGED_PDF2_PC3_NAME
+        )
+
+    for candidate in preferred_candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+
+    for base in filter(None, (os.getenv("APPDATA"), os.getenv("LOCALAPPDATA"))):
+        autodesk_root = Path(base) / "Autodesk"
+        if not autodesk_root.exists() or not autodesk_root.is_dir():
+            continue
+        for candidate in sorted(autodesk_root.rglob(MANAGED_PDF2_PC3_NAME), reverse=True):
+            if candidate.is_file() and "Plotters" in candidate.parts:
+                return candidate
+    return None
+
+
+def _overlay_local_managed_plotter_assets(output_root: Path) -> None:
+    local_pc3 = _find_local_managed_pdf2_pc3()
+    if local_pc3 is None:
+        return
+    target = output_root / "documents" / "Resources" / MANAGED_PDF2_PC3_NAME
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(local_pc3, target)
+
+
 def _timestamp_utc() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _hash_file(path: Path) -> str:
@@ -189,9 +221,7 @@ def _is_delta_relevant_path(rel_path: str) -> bool:
     path = Path(rel_path)
     if "__pycache__" in path.parts:
         return False
-    if path.suffix.lower() in {".pyc", ".pyo"}:
-        return False
-    return True
+    return path.suffix.lower() not in {".pyc", ".pyo"}
 
 
 def build_terminal_deploy_delta_package(
@@ -1159,6 +1189,7 @@ def build_terminal_deploy_package(
         _copy_entry(entry, output_root)
 
     _sanitize_python_packages(output_root)
+    _overlay_local_managed_plotter_assets(output_root)
 
     _write_support_files(
         output_root,

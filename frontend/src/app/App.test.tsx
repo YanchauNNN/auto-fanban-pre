@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+﻿import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -187,7 +187,10 @@ describe("homepage shell", () => {
     expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
 
     await user.hover(replacePreview);
-    expect(screen.getByRole("tooltip", { name: "敬请期待" })).toBeInTheDocument();
+    expect(screen.getByRole("tooltip", { name: "敬请期待" })).toHaveAttribute(
+      "data-side",
+      "right",
+    );
 
     await user.unhover(replacePreview);
     expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();

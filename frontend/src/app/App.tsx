@@ -444,6 +444,7 @@ function WorkspacePage() {
                         <span
                           aria-label="敬请期待"
                           className={styles.disabledPreviewTooltip}
+                          data-side="right"
                           role="tooltip"
                         >
                           敬请期待

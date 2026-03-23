@@ -1128,6 +1128,8 @@ function Invoke-OfficeWorkerWithTimeout {
 }
 
 function Get-AutoCADFacts {
+    param([string]$ActualRepoRoot)
+
     $installDirs = Find-AutoCADInstallDirs
     $installFacts = @()
     foreach ($dir in $installDirs) {
@@ -1157,14 +1159,14 @@ function Get-AutoCADFacts {
     $recommendedPc3 = ""
     $recommendedCtb = ""
     $recommendedCtbPath = ""
-    $usedFallbackDwgToPdf = $false
+    $managedPdf2Pc3Path = Join-Path $ActualRepoRoot "documents\Resources\打印PDF2.pc3"
+    $managedPdf2Pc3Exists = (Test-Path -LiteralPath $managedPdf2Pc3Path -PathType Leaf)
 
     if ($null -ne $bestPlotter) {
-        if ($bestPlotter.has_custom_pdf2_pc3 -and $bestPlotter.custom_pdf2_pc3_names.Count -gt 0) {
+        if ($managedPdf2Pc3Exists) {
+            $recommendedPc3 = "打印PDF2.pc3"
+        } elseif ($bestPlotter.has_custom_pdf2_pc3 -and $bestPlotter.custom_pdf2_pc3_names.Count -gt 0) {
             $recommendedPc3 = [string]$bestPlotter.custom_pdf2_pc3_names[0]
-        } elseif ($bestPlotter.has_dwg_to_pdf_pc3) {
-            $recommendedPc3 = "DWG To PDF.pc3"
-            $usedFallbackDwgToPdf = $true
         }
 
         if ($bestPlotter.has_monochrome_ctb) {
@@ -1202,7 +1204,8 @@ function Get-AutoCADFacts {
             pc3_name = $recommendedPc3
             ctb_name = $recommendedCtb
             ctb_path = $recommendedCtbPath
-            used_fallback_dwg_to_pdf = $usedFallbackDwgToPdf
+            managed_pdf2_pc3_path = $managedPdf2Pc3Path
+            managed_pdf2_pc3_exists = $managedPdf2Pc3Exists
             has_fonts_dir = $hasFontsDir
         }
     }
@@ -2241,7 +2244,7 @@ if ($null -ne $quickBaseline) {
     $autocadFacts = $quickBaseline.autocad
 } else {
     Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
-    $autocadFacts = Get-AutoCADFacts
+$autocadFacts = Get-AutoCADFacts -ActualRepoRoot $actualRepoRoot
 }
 
 Write-ProbeStage -Stage "8/8" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
@@ -2356,14 +2359,7 @@ if ([string]::IsNullOrWhiteSpace([string]$autocadFacts.best_guess.pc3_name) -or 
     $blockingIssues += [ordered]@{
         section = "autocad"
         code = "plot_assets"
-        message = "no usable PC3 and monochrome CTB combination was detected"
-    }
-}
-if ([bool]$autocadFacts.best_guess.used_fallback_dwg_to_pdf) {
-    $warnings += [ordered]@{
-        section = "autocad"
-        code = "plotter_fallback"
-        message = "using DWG To PDF.pc3 fallback instead of the preferred custom PDF2 PC3"
+        message = "managed 打印PDF2.pc3 or monochrome CTB was not detected"
     }
 }
 if (-not [bool]$autocadFacts.best_guess.has_fonts_dir) {
