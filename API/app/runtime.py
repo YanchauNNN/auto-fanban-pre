@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
+from src.audit_replace.executor import AuditReplaceExecutor
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.config import get_config
@@ -39,6 +40,10 @@ class UploadedFilePayload:
 class PipelineJobProcessor:
     def __call__(self, job: Job) -> None:
         if job.job_type == JobType.AUDIT_REPLACE:
+            mode = str(job.options.get("mode", "")).strip().lower()
+            if mode == "replace":
+                AuditReplaceExecutor().execute(job)
+                return
             AuditCheckExecutor().execute(job)
             return
         PipelineExecutor().execute(job)
@@ -180,18 +185,22 @@ class DeliverableApiRuntime:
         raw_params: dict[str, Any],
     ) -> dict[str, Any]:
         normalized_mode = str(mode or '').strip().lower()
-        if normalized_mode != 'check':
+        if normalized_mode not in {'check', 'replace'}:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={'upload_errors': {}, 'param_errors': {'mode': ['unsupported_audit_mode']}},
             )
 
         upload_errors = self._validate_uploads(files)
-        resolved_submissions = [
-            (upload, self._resolve_audit_params_for_upload(raw_params, upload.filename))
-            for upload in files
-        ]
-        param_errors = self._collect_audit_param_errors(resolved_submissions)
+        if normalized_mode == 'check':
+            resolved_submissions = [
+                (upload, self._resolve_audit_params_for_upload(raw_params, upload.filename))
+                for upload in files
+            ]
+            param_errors = self._collect_audit_param_errors(resolved_submissions)
+        else:
+            resolved_submissions = [(upload, self._resolve_replace_params(raw_params)) for upload in files]
+            param_errors = self._collect_replace_param_errors(raw_params)
         if upload_errors or param_errors:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -201,6 +210,34 @@ class DeliverableApiRuntime:
         explicit_batch_id = str(raw_params.get('batch_id') or '').strip()
         batch_id = explicit_batch_id or self._new_batch_id()
         jobs: list[dict[str, Any]] = []
+        if normalized_mode == 'replace':
+            for upload, resolved_params in resolved_submissions:
+                source_filename = Path(upload.filename).name or 'upload.dwg'
+                if self._coerce_bool(resolved_params.get('run_deliverable')):
+                    jobs.append(
+                        self._create_replace_grouped_submission(
+                            batch_id=batch_id,
+                            upload=upload,
+                            resolved_params=resolved_params,
+                        )
+                    )
+                    continue
+
+                job = self.job_manager.create_job(
+                    job_type=JobType.AUDIT_REPLACE.value,
+                    project_no=str(resolved_params['target_project_no']),
+                    options={'mode': 'replace'},
+                    params={key: value for key, value in resolved_params.items() if key != 'batch_id'},
+                    batch_id=batch_id,
+                    source_filename=source_filename,
+                    task_role='audit_replace',
+                )
+                self._store_job_upload(job, upload)
+                self.job_manager.update_job(job)
+                self._job_queue.put(job.job_id)
+                jobs.append(self._serialize_job_summary(job))
+            return {'batch_id': batch_id, 'jobs': jobs}
+
         for upload, resolved_params in resolved_submissions:
             source_filename = Path(upload.filename).name or 'upload.dwg'
             job = self.job_manager.create_job(
@@ -232,6 +269,19 @@ class DeliverableApiRuntime:
         resolved['project_no'] = explicit or inferred or ''
         return resolved
 
+    @staticmethod
+    def _resolve_replace_params(raw_params: dict[str, Any]) -> dict[str, Any]:
+        resolved = dict(raw_params)
+        resolved['source_project_no'] = str(raw_params.get('source_project_no') or '').strip()
+        resolved['target_project_no'] = str(raw_params.get('target_project_no') or '').strip()
+        resolved['run_deliverable'] = DeliverableApiRuntime._coerce_bool(raw_params.get('run_deliverable'))
+        deliverable_params = raw_params.get('deliverable_params')
+        if isinstance(deliverable_params, dict):
+            normalized_deliverable = dict(deliverable_params)
+            normalized_deliverable['project_no'] = resolved['target_project_no']
+            resolved['deliverable_params'] = normalized_deliverable
+        return resolved
+
     def _collect_param_errors(
         self,
         resolved_submissions: list[tuple[UploadedFilePayload, dict[str, Any]]],
@@ -254,6 +304,9 @@ class DeliverableApiRuntime:
             if not str(params.get('project_no') or '').strip():
                 merged.setdefault('project_no', []).append('required_for_audit_check')
         return merged
+
+    def _collect_replace_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
+        return self.validator.validate_replace_frontend_params(raw_params)
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
         groups = [
             self._serialize_group_summary(group)
@@ -292,6 +345,7 @@ class DeliverableApiRuntime:
             'package': job.artifacts.package_zip,
             'ied': job.artifacts.ied_xlsx,
             'report': job.artifacts.report_xlsx,
+            'replaced': job.artifacts.replaced_dwg,
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
@@ -342,6 +396,57 @@ class DeliverableApiRuntime:
             self.job_manager.update_job(child)
 
         group.child_job_ids = [deliverable_job.job_id, audit_job.job_id]
+        self.group_manager.update_group(group)
+        self._group_queue.put(group.group_id)
+        return self._serialize_group_summary(group)
+
+    def _create_replace_grouped_submission(
+        self,
+        *,
+        batch_id: str,
+        upload: UploadedFilePayload,
+        resolved_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_filename = Path(upload.filename).name or 'upload.dwg'
+        target_project_no = str(resolved_params['target_project_no'])
+        group = self.group_manager.create_group(
+            batch_id=batch_id,
+            source_filenames=[source_filename],
+            project_no=target_project_no,
+            run_audit_check=False,
+        )
+        upload_path = self._store_group_upload(group, upload)
+        group.shared_dir = self.config.get_group_dir(group.group_id) / 'shared' / self._safe_source_key(source_filename)
+        group.metadata['source_input_path'] = str(upload_path)
+        group.metadata['group_mode'] = 'replace_then_deliverable'
+
+        replace_job = self.job_manager.create_job(
+            job_type=JobType.AUDIT_REPLACE.value,
+            project_no=target_project_no,
+            options={'mode': 'replace'},
+            params={key: value for key, value in resolved_params.items() if key != 'batch_id'},
+            batch_id=batch_id,
+            source_filename=source_filename,
+            group_id=group.group_id,
+            task_role='audit_replace',
+            shared_run_id=group.shared_run_id,
+        )
+        deliverable_job = self.job_manager.create_job(
+            job_type=JobType.DELIVERABLE.value,
+            project_no=target_project_no,
+            options={'enabled': True, 'export_pdf': True, 'split_only': False},
+            params=dict(resolved_params.get('deliverable_params') or {}),
+            batch_id=batch_id,
+            source_filename=source_filename,
+            group_id=group.group_id,
+            task_role='deliverable_main',
+            shared_run_id=group.shared_run_id,
+        )
+        for child in (replace_job, deliverable_job):
+            child.input_files = [upload_path.resolve()]
+            self.job_manager.update_job(child)
+
+        group.child_job_ids = [replace_job.job_id, deliverable_job.job_id]
         self.group_manager.update_group(group)
         self._group_queue.put(group.group_id)
         return self._serialize_group_summary(group)
@@ -408,10 +513,8 @@ class DeliverableApiRuntime:
             group.progress.message = '共享前处理完成'
             self.group_manager.update_group(group)
 
-            for child_job_id in group.child_job_ids:
-                child = self.job_manager.get_job(child_job_id)
-                if child is None:
-                    continue
+            child_jobs = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
+            for child in child_jobs:
                 child.params['shared_prep_dir'] = str(prep.shared_dir)
                 child.params['shared_source_dwg'] = str(prep.source_input_dwg)
                 child.params['shared_source_dxf'] = str(prep.source_converted_dxf)
@@ -422,8 +525,11 @@ class DeliverableApiRuntime:
             group.progress.message = '子任务执行中'
             self.group_manager.update_group(group)
 
-            child_futures = [self._heavy_executor.submit(self._run_job, child_job_id) for child_job_id in group.child_job_ids]
-            wait(child_futures)
+            if str(group.metadata.get('group_mode') or '').strip() == 'replace_then_deliverable':
+                self._run_replace_then_deliverable_group(group, child_jobs)
+            else:
+                child_futures = [self._heavy_executor.submit(self._run_job, child.job_id) for child in child_jobs]
+                wait(child_futures)
 
             children = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
             group.flags = self._merge_unique(*(child.flags for child in children))
@@ -441,6 +547,40 @@ class DeliverableApiRuntime:
             group.mark_failed(str(exc))
             group.progress.message = f'任务组失败: {exc}'
             self.group_manager.update_group(group)
+
+    def _run_replace_then_deliverable_group(self, group: TaskGroup, children: list[Job]) -> None:
+        replace_job = next((child for child in children if child.task_role == 'audit_replace'), None)
+        deliverable_job = next((child for child in children if child.task_role == 'deliverable_main'), None)
+        if replace_job is None or deliverable_job is None:
+            raise RuntimeError('replace_then_deliverable group is missing required child jobs')
+
+        self._run_job(replace_job.job_id)
+        replace_job = self.job_manager.get_job(replace_job.job_id)
+        if replace_job is None or replace_job.status != JobStatus.SUCCEEDED or replace_job.artifacts.replaced_dwg is None:
+            if deliverable_job.status == JobStatus.QUEUED:
+                deliverable_job.mark_failed('replace_job_failed')
+                self.job_manager.update_job(deliverable_job)
+            return
+
+        replaced_dwg = Path(replace_job.artifacts.replaced_dwg).resolve()
+        deliverable_shared_dir = (
+            self.config.get_group_dir(group.group_id)
+            / 'shared'
+            / self._safe_source_key(replaced_dwg.name)
+            / 'deliverable'
+        )
+        deliverable_prep = self.shared_prep_service.prepare(
+            group_id=f'{group.group_id}-deliverable',
+            source_dwg=replaced_dwg,
+            shared_dir=deliverable_shared_dir,
+        )
+
+        deliverable_job.input_files = [replaced_dwg]
+        deliverable_job.params['shared_prep_dir'] = str(deliverable_prep.shared_dir)
+        deliverable_job.params['shared_source_dwg'] = str(deliverable_prep.source_input_dwg)
+        deliverable_job.params['shared_source_dxf'] = str(deliverable_prep.source_converted_dxf)
+        self.job_manager.update_job(deliverable_job)
+        self._run_job(deliverable_job.job_id)
 
     def _run_job(self, job_id: str) -> None:
         job = self.job_manager.get_job(job_id)
@@ -572,6 +712,12 @@ class DeliverableApiRuntime:
         safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in stem)
         return safe.strip('_') or 'source'
 
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
         task_kind = 'deliverable'
         job_mode = 'deliverable'
@@ -633,7 +779,19 @@ class DeliverableApiRuntime:
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
         elif job.job_type == JobType.AUDIT_REPLACE:
-            payload['finding_groups'] = report_payload.get('finding_groups', [])
+            mode = str(job.options.get('mode', '')).strip().lower()
+            if mode == 'check':
+                payload['finding_groups'] = report_payload.get('finding_groups', [])
+            else:
+                payload['replace_summary'] = {
+                    'replacement_count': int(report_payload.get('replacement_count', 0) or 0),
+                    'skipped_count': int(report_payload.get('skipped_count', 0) or 0),
+                    'affected_drawings_count': int(report_payload.get('affected_drawings_count', 0) or 0),
+                    'source_project_no': str(report_payload.get('source_project_no') or ''),
+                    'target_project_no': str(report_payload.get('target_project_no') or ''),
+                    'top_replaced_texts': list(report_payload.get('top_replaced_texts', []) or []),
+                    'top_internal_codes': list(report_payload.get('top_internal_codes', []) or []),
+                }
         return payload
 
     def _serialize_job_artifacts(self, job: Job, *, include_urls: bool = False, job_id: str | None = None) -> dict[str, Any]:
@@ -652,7 +810,7 @@ class DeliverableApiRuntime:
                 'package_download_url': f'/api/jobs/{job_id}/download/package' if package_available else None,
                 'ied_download_url': f'/api/jobs/{job_id}/download/ied' if ied_available else None,
                 'report_download_url': f'/api/jobs/{job_id}/download/report' if report_available else None,
-                'replaced_dwg_download_url': None,
+                'replaced_dwg_download_url': f'/api/jobs/{job_id}/download/replaced' if replaced_dwg_available else None,
             })
         return payload
     def _serialize_group_summary(self, group: TaskGroup) -> dict[str, Any]:
@@ -704,14 +862,18 @@ class DeliverableApiRuntime:
         package_available = bool(artifacts.package_zip and Path(artifacts.package_zip).exists())
         ied_available = bool(artifacts.ied_xlsx and Path(artifacts.ied_xlsx).exists())
         report_available = bool(artifacts.report_xlsx and Path(artifacts.report_xlsx).exists())
+        replaced_dwg_available = bool(artifacts.replaced_dwg and Path(artifacts.replaced_dwg).exists())
         return {
             'package_available': package_available,
             'ied_available': ied_available,
             'report_available': report_available,
-            'replaced_dwg_available': False,
+            'replaced_dwg_available': replaced_dwg_available,
             'package_download_url': f'/api/jobs/{group.group_id}/download/package' if package_available else None,
             'ied_download_url': f'/api/jobs/{group.group_id}/download/ied' if ied_available else None,
             'report_download_url': f'/api/jobs/{group.group_id}/download/report' if report_available else None,
+            'replaced_dwg_download_url': (
+                f'/api/jobs/{group.group_id}/download/replaced' if replaced_dwg_available else None
+            ),
         }
 
     def _resolve_group_artifact_owner(self, group: TaskGroup, artifact: str) -> Job | None:
@@ -721,6 +883,8 @@ class DeliverableApiRuntime:
             if artifact == 'ied' and child.artifacts.ied_xlsx:
                 return child
             if artifact == 'report' and child.artifacts.report_xlsx:
+                return child
+            if artifact == 'replaced' and child.artifacts.replaced_dwg:
                 return child
         return None
 

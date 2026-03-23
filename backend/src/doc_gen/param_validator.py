@@ -67,6 +67,32 @@ class DocParamValidator:
 
         return errors
 
+    def validate_replace_frontend_params(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
+        errors: dict[str, list[str]] = {}
+        source_project_no = str(raw_params.get("source_project_no") or "").strip()
+        target_project_no = str(raw_params.get("target_project_no") or "").strip()
+        run_deliverable = self._coerce_bool(raw_params.get("run_deliverable"))
+
+        if not source_project_no:
+            errors.setdefault("source_project_no", []).append("required_for_replace")
+        if not target_project_no:
+            errors.setdefault("target_project_no", []).append("required_for_replace")
+        elif source_project_no and source_project_no == target_project_no:
+            errors.setdefault("target_project_no", []).append("must_differ_from_source_project_no")
+
+        if not run_deliverable:
+            return errors
+
+        deliverable_params = raw_params.get("deliverable_params")
+        if not isinstance(deliverable_params, dict):
+            errors.setdefault("deliverable_params", []).append("invalid_deliverable_params")
+            return errors
+
+        nested_errors = self.validate_frontend_params(deliverable_params)
+        if nested_errors:
+            errors.setdefault("deliverable_params", []).append("invalid_deliverable_params")
+        return errors
+
     def _flatten_param_rules(self, source: str | None = None) -> dict[str, dict[str, Any]]:
         params_cfg = self.spec.doc_generation.get("params", {})
         flat: dict[str, dict[str, Any]] = {}

@@ -298,6 +298,6 @@ describe("isCustomRenderedField", () => {
   it("marks the new upgrade fields as custom rendered", () => {
     expect(isCustomRenderedField("is_upgrade")).toBe(true);
     expect(isCustomRenderedField("upgrade_sheet_codes")).toBe(true);
-    expect(isCustomRenderedField("cover_revision")).toBe(false);
+    expect(isCustomRenderedField("cover_revision")).toBe(true);
   });
 });

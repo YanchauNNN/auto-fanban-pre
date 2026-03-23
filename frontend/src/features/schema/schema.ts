@@ -113,7 +113,7 @@ const LEGACY_UPGRADE_FIELDS = new Set([
   "upgrade_note_text",
 ]);
 
-const CUSTOM_RENDERED_FIELDS = new Set(["is_upgrade", "upgrade_sheet_codes"]);
+const CUSTOM_RENDERED_FIELDS = new Set(["cover_revision", "is_upgrade", "upgrade_sheet_codes"]);
 
 const HIDDEN_FRONTEND_FIELDS = new Set([
   "ied_discipline_office",

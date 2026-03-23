@@ -121,3 +121,13 @@ def download_report(request: Request, job_id: str) -> FileResponse:
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+@router.get("/{job_id}/download/replaced")
+def download_replaced_dwg(request: Request, job_id: str) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "replaced")
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="application/acad",
+    )

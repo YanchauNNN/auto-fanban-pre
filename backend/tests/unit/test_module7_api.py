@@ -19,6 +19,45 @@ class FakeJobProcessor:
     def __call__(self, job: Job) -> None:
         job.work_dir = Path(job.work_dir or "")
         if job.job_type == JobType.AUDIT_REPLACE:
+            mode = str(job.options.get("mode", "")).strip().lower()
+            if mode == "replace":
+                job.mark_running(stage="AUDIT_REPLACE")
+                job.progress.message = "replacing"
+                reports_dir = job.work_dir / "reports"
+                reports_dir.mkdir(parents=True, exist_ok=True)
+                report_xlsx = reports_dir / "report.xlsx"
+                report_json = reports_dir / "report.json"
+                replaced_dwg = job.work_dir / "replaced.dwg"
+                workbook = Workbook()
+                summary_sheet = workbook.active
+                assert summary_sheet is not None
+                summary_sheet.title = "Summary"
+                summary_sheet.append(["source_filename", job.source_filename or "upload.dwg"])
+                summary_sheet.append(["source_project_no", job.params.get("source_project_no", "")])
+                summary_sheet.append(["target_project_no", job.params.get("target_project_no", "")])
+                summary_sheet.append(["replacement_count", 2])
+                workbook.save(report_xlsx)
+                workbook.close()
+                replaced_dwg.write_bytes(b"dwg-replaced")
+                report_json.write_text(
+                    json.dumps(
+                        {
+                            "replacement_count": 2,
+                            "source_project_no": job.params.get("source_project_no", ""),
+                            "target_project_no": job.params.get("target_project_no", ""),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                job.artifacts.reports_dir = reports_dir
+                job.artifacts.report_xlsx = report_xlsx
+                job.artifacts.report_json = report_json
+                job.artifacts.replaced_dwg = replaced_dwg
+                job.progress.details["replacement_count"] = 2
+                job.mark_succeeded()
+                return
+
             job.mark_running(stage="AUDIT_CHECK")
             job.progress.message = "auditing"
             reports_dir = job.work_dir / "reports"
@@ -241,10 +280,19 @@ def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
         def execute(self, job: Job) -> None:
             self.calls.append(job.job_id)
 
+    class ReplaceExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def execute(self, job: Job) -> None:
+            self.calls.append(job.job_id)
+
     deliverable = DeliverableExecutor()
     audit = AuditExecutor()
+    replace = ReplaceExecutor()
     monkeypatch.setattr("API.app.runtime.PipelineExecutor", lambda: deliverable)
     monkeypatch.setattr("API.app.runtime.AuditCheckExecutor", lambda: audit)
+    monkeypatch.setattr("API.app.runtime.AuditReplaceExecutor", lambda: replace)
 
     processor = PipelineJobProcessor()
     processor(Job(job_id="job-deliverable", job_type=JobType.DELIVERABLE, project_no="2016"))
@@ -256,9 +304,18 @@ def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
             options={"mode": "check"},
         ),
     )
+    processor(
+        Job(
+            job_id="job-replace",
+            job_type=JobType.AUDIT_REPLACE,
+            project_no="1818",
+            options={"mode": "replace"},
+        ),
+    )
 
     assert deliverable.calls == ["job-deliverable"]
     assert audit.calls == ["job-audit"]
+    assert replace.calls == ["job-replace"]
 def test_health_endpoint_allows_local_frontend_origin(monkeypatch, tmp_path: Path) -> None:
     with _create_client(monkeypatch, tmp_path) as client:
         response = client.get(
@@ -579,6 +636,218 @@ def test_create_audit_check_reuses_explicit_batch_id_when_provided(
     payload = response.json()
     assert payload["batch_id"] == "batch-shared-1"
     assert payload["jobs"][0]["batch_id"] == "batch-shared-1"
+
+
+def test_create_audit_replace_rejects_missing_or_same_project_pair(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        missing_source = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {"source_project_no": "", "target_project_no": "1818", "run_deliverable": False},
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("1818-A01.dwg", b"dwg", "application/acad"))],
+        )
+        missing_target = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {"source_project_no": "2016", "target_project_no": "", "run_deliverable": False},
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+        same_pair = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {"source_project_no": "2016", "target_project_no": "2016", "run_deliverable": False},
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert missing_source.status_code == 422
+    assert missing_source.json()["detail"]["param_errors"]["source_project_no"] == ["required_for_replace"]
+    assert missing_target.status_code == 422
+    assert missing_target.json()["detail"]["param_errors"]["target_project_no"] == ["required_for_replace"]
+    assert same_pair.status_code == 422
+    assert same_pair.json()["detail"]["param_errors"]["target_project_no"] == [
+        "must_differ_from_source_project_no"
+    ]
+
+
+def test_create_audit_replace_processes_job_without_deliverable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2016",
+                        "target_project_no": "1818",
+                        "run_deliverable": False,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 1
+        assert payload["jobs"][0]["task_kind"] == "audit_replace"
+        assert payload["jobs"][0]["job_mode"] == "replace"
+
+        job_id = payload["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert detail["status"] == "succeeded"
+        assert detail["artifacts"]["report_available"] is True
+        assert detail["artifacts"]["replaced_dwg_available"] is True
+        assert detail["artifacts"]["package_available"] is False
+        assert detail["artifacts"]["replaced_dwg_download_url"] == f"/api/jobs/{job_id}/download/replaced"
+        assert detail["replace_summary"]["replacement_count"] == 2
+        assert detail["replace_summary"]["source_project_no"] == "2016"
+        assert detail["replace_summary"]["target_project_no"] == "1818"
+
+        replaced_download = client.get(f"/api/jobs/{job_id}/download/replaced")
+        assert replaced_download.status_code == 200
+        assert replaced_download.content == b"dwg-replaced"
+
+
+def test_create_audit_replace_creates_group_when_run_deliverable_enabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params.pop("project_no")
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2016",
+                        "target_project_no": "1818",
+                        "run_deliverable": True,
+                        "deliverable_params": params,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert len(payload["jobs"]) == 1
+    group_summary = payload["jobs"][0]
+    assert group_summary["is_group"] is True
+    assert len(group_summary["child_job_ids"]) == 2
+
+
+def test_create_audit_replace_with_deliverable_runs_replace_before_deliverable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class ReplaceThenDeliverableProcessor:
+        def __call__(self, job: Job) -> None:
+            job.work_dir = Path(job.work_dir or "")
+            if job.job_type == JobType.AUDIT_REPLACE and str(job.options.get("mode")) == "replace":
+                job.mark_running(stage="AUDIT_REPLACE")
+                replaced_dwg = job.work_dir / "replaced.dwg"
+                replaced_dwg.write_bytes(b"replaced-dwg")
+                reports_dir = job.work_dir / "reports"
+                reports_dir.mkdir(parents=True, exist_ok=True)
+                report_xlsx = reports_dir / "report.xlsx"
+                report_json = reports_dir / "report.json"
+                workbook = Workbook()
+                summary_sheet = workbook.active
+                assert summary_sheet is not None
+                summary_sheet.title = "Summary"
+                summary_sheet.append(["replacement_count", 1])
+                workbook.save(report_xlsx)
+                workbook.close()
+                report_json.write_text(
+                    json.dumps(
+                        {
+                            "replacement_count": 1,
+                            "source_project_no": "2016",
+                            "target_project_no": "1818",
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                job.artifacts.replaced_dwg = replaced_dwg
+                job.artifacts.report_xlsx = report_xlsx
+                job.artifacts.report_json = report_json
+                job.mark_succeeded()
+                return
+
+            assert job.job_type == JobType.DELIVERABLE
+            assert len(job.input_files) == 1
+            assert Path(job.input_files[0]).read_bytes() == b"replaced-dwg"
+            job.mark_running(stage="GENERATE_DOCS")
+            package_zip = job.work_dir / "package.zip"
+            package_zip.write_bytes(b"PK\x03\x04deliverable")
+            job.artifacts.package_zip = package_zip
+            job.mark_succeeded()
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    params = _deliverable_params()
+    params.pop("project_no")
+    with TestClient(
+        create_app(
+            job_processor=ReplaceThenDeliverableProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+        ),
+    ) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2016",
+                        "target_project_no": "1818",
+                        "run_deliverable": True,
+                        "deliverable_params": params,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        group_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, group_id, timeout_sec=5.0)
+        assert detail["status"] == "succeeded"
+        children = {child["task_role"]: child for child in detail["children"]}
+        assert children["audit_replace"]["artifacts"]["replaced_dwg_available"] is True
+        assert children["deliverable_main"]["artifacts"]["package_available"] is True
 
 
 def test_create_batch_processes_jobs_and_exposes_downloads(

@@ -91,3 +91,25 @@ def test_validate_frontend_params_rejects_invalid_upgrade_sheet_codes() -> None:
     errors = validator.validate_frontend_params(payload)
 
     assert errors["upgrade_sheet_codes"] == ["format:upgrade-sheet-codes"]
+
+
+def test_validate_frontend_params_replace_deliverable_params_only_when_requested() -> None:
+    validator = DocParamValidator()
+
+    without_deliverable = {
+        "source_project_no": "2016",
+        "target_project_no": "1818",
+        "run_deliverable": "false",
+        "deliverable_params": {"album_title_cn": ""},
+    }
+    with_deliverable = {
+        "source_project_no": "2016",
+        "target_project_no": "1818",
+        "run_deliverable": "true",
+        "deliverable_params": {"album_title_cn": ""},
+    }
+
+    assert validator.validate_replace_frontend_params(without_deliverable) == {}
+    assert validator.validate_replace_frontend_params(with_deliverable)["deliverable_params"] == [
+        "invalid_deliverable_params"
+    ]

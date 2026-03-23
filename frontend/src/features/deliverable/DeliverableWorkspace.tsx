@@ -114,6 +114,14 @@ export function DeliverableWorkspace({
     () => buildRecommendedProjectNos(draft.inference.inferredProjectNos, projectNoOptions),
     [draft.inference.inferredProjectNos, projectNoOptions],
   );
+  const coverRevisionField = useMemo(
+    () => findSchemaField(schema, "cover_revision"),
+    [schema],
+  );
+  const upgradeSheetCodesField = useMemo(
+    () => findSchemaField(schema, "upgrade_sheet_codes"),
+    [schema],
+  );
   const upgradeEnabled = draft.values.is_upgrade === "true";
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
@@ -659,42 +667,17 @@ export function DeliverableWorkspace({
               ) : null}
 
               {primarySections.map((section) => (
-                <section className={styles.section} key={`primary-${section.id}`}>
-                  <header className={styles.sectionHeader}>
-                    <h3>{section.title}</h3>
-                    {section.id === "project" ? (
-                      <div
-                        className={`${styles.sectionNote} ${
-                          draft.inference.hasConflict ? styles.sectionNoteWarning : ""
-                        }`}
-                      >
-                        {draft.inference.primaryProjectNo ? (
-                          <p>
-                            已从文件名识别项目号 <strong>{draft.inference.primaryProjectNo}</strong>
-                            ，已自动填入项目号，可手动修改。
-                          </p>
-                        ) : (
-                          <p>当前文件名未识别出项目号，提交时后端仍会继续尝试推断。</p>
-                        )}
-                        {draft.inference.hasConflict ? (
-                          <p>同一批文件识别到多个项目号，请以人工输入为准。</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </header>
-                  <div className={styles.fieldGrid}>
-                    {section.fields.map((field) => (
-                      <FieldControl
-                        key={field.key}
-                        error={draft.fieldErrors[field.key]?.[0]}
-                        field={field}
-                        onChange={(value) => handleFieldChange(field.key, value)}
-                        value={draft.values[field.key] ?? ""}
-                        values={draft.values}
-                      />
-                    ))}
-                  </div>
-                </section>
+                <FragmentWithUpgradeSection
+                  key={`primary-${section.id}`}
+                  coverRevisionField={coverRevisionField}
+                  draft={draft}
+                  fieldErrors={draft.fieldErrors}
+                  onFieldChange={handleFieldChange}
+                  onUpgradeToggle={handleUpgradeToggle}
+                  section={section}
+                  upgradeEnabled={upgradeEnabled}
+                  upgradeSheetCodesField={upgradeSheetCodesField}
+                />
               ))}
 
               <section className={styles.section}>
@@ -748,45 +731,6 @@ export function DeliverableWorkspace({
                         </div>
                       </div>
                     ))}
-                    <div className={styles.advancedBlock} data-testid="upgrade-config-block">
-                      <h4>升版设置</h4>
-                      <div className={styles.intentNotice}>
-                        <button
-                          aria-pressed={upgradeEnabled}
-                          className={`${styles.intentChip} ${
-                            upgradeEnabled ? styles.intentChipActive : ""
-                          }`}
-                          type="button"
-                          onClick={handleUpgradeToggle}
-                        >
-                          是否升版
-                        </button>
-                      </div>
-                      <span className={styles.helperText}>
-                        启用后可填写升版图纸编号；关闭时会隐藏输入框，但已输入内容会保留。
-                      </span>
-                      {upgradeEnabled ? (
-                        <div className={styles.fieldGrid}>
-                          <FieldControl
-                            error={draft.fieldErrors.upgrade_sheet_codes?.[0]}
-                            field={{
-                              key: "upgrade_sheet_codes",
-                              label: "升版图纸编号",
-                              type: "text",
-                              required: false,
-                              requiredWhen: null,
-                              defaultValue: "",
-                              description:
-                                "输入图纸内部编码末三位，支持单个编号和区间组合；留空表示仅标记目录文件本身为升版。",
-                              options: [],
-                            }}
-                            onChange={(value) => handleFieldChange("upgrade_sheet_codes", value)}
-                            value={draft.values.upgrade_sheet_codes ?? ""}
-                            values={draft.values}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
                   </div>
                 </section>
               ) : null}
@@ -868,6 +812,110 @@ function FieldControl({
       {helperText ? <span className={styles.helperText}>{helperText}</span> : null}
       {error ? <span className={styles.errorText}>{error}</span> : null}
     </div>
+  );
+}
+
+function FragmentWithUpgradeSection({
+  section,
+  draft,
+  fieldErrors,
+  onFieldChange,
+  onUpgradeToggle,
+  upgradeEnabled,
+  coverRevisionField,
+  upgradeSheetCodesField,
+}: {
+  section: FormSchema["sections"][number];
+  draft: TaskConfigDraft;
+  fieldErrors: Record<string, string[]>;
+  onFieldChange: (key: string, value: string) => void;
+  onUpgradeToggle: () => void;
+  upgradeEnabled: boolean;
+  coverRevisionField: FormField | undefined;
+  upgradeSheetCodesField: FormField | undefined;
+}) {
+  return (
+    <>
+      <section className={styles.section}>
+        <header className={styles.sectionHeader}>
+          <h3>{section.title}</h3>
+          {section.id === "project" ? (
+            <div
+              className={`${styles.sectionNote} ${
+                draft.inference.hasConflict ? styles.sectionNoteWarning : ""
+              }`}
+            >
+              {draft.inference.primaryProjectNo ? (
+                <p>
+                  已从文件名识别项目号 <strong>{draft.inference.primaryProjectNo}</strong>
+                  ，已自动填入项目号，可手动修改。
+                </p>
+              ) : (
+                <p>当前文件名未识别出项目号，提交时后端仍会继续尝试推断。</p>
+              )}
+              {draft.inference.hasConflict ? (
+                <p>同一批文件识别到多个项目号，请以人工输入为准。</p>
+              ) : null}
+            </div>
+          ) : null}
+        </header>
+        <div className={styles.fieldGrid}>
+          {section.fields.map((field) => (
+            <FieldControl
+              key={field.key}
+              error={fieldErrors[field.key]?.[0]}
+              field={field}
+              onChange={(value) => onFieldChange(field.key, value)}
+              value={draft.values[field.key] ?? ""}
+              values={draft.values}
+            />
+          ))}
+        </div>
+      </section>
+
+      {section.id === "project" ? (
+        <section className={styles.section} data-testid="upgrade-config-section">
+          <header className={styles.sectionHeader}>
+            <h3>升版设置</h3>
+          </header>
+          <div className={styles.intentNotice}>
+            <button
+              aria-pressed={upgradeEnabled}
+              className={`${styles.intentChip} ${upgradeEnabled ? styles.intentChipActive : ""}`}
+              type="button"
+              onClick={onUpgradeToggle}
+            >
+              是否升版
+            </button>
+          </div>
+          <span className={styles.helperText}>
+            启用后可填写封面和目录版次、升版图纸编号；关闭时会隐藏输入框，但会保留已输入内容。
+          </span>
+          {upgradeEnabled ? (
+            <div className={styles.fieldGrid}>
+              {coverRevisionField ? (
+                <FieldControl
+                  error={fieldErrors.cover_revision?.[0]}
+                  field={coverRevisionField}
+                  onChange={(value) => onFieldChange("cover_revision", value)}
+                  value={draft.values.cover_revision ?? ""}
+                  values={draft.values}
+                />
+              ) : null}
+              {upgradeSheetCodesField ? (
+                <FieldControl
+                  error={fieldErrors.upgrade_sheet_codes?.[0]}
+                  field={upgradeSheetCodesField}
+                  onChange={(value) => onFieldChange("upgrade_sheet_codes", value)}
+                  value={draft.values.upgrade_sheet_codes ?? ""}
+                  values={draft.values}
+                />
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+    </>
   );
 }
 
@@ -1115,6 +1163,7 @@ function buildSubmissionValues(values: Record<string, string>) {
 
   const isUpgradeEnabled = sanitized.is_upgrade === "true";
   sanitized.is_upgrade = isUpgradeEnabled ? "true" : "false";
+  sanitized.cover_revision = isUpgradeEnabled ? sanitized.cover_revision ?? "" : "";
   sanitized.upgrade_sheet_codes = isUpgradeEnabled ? sanitized.upgrade_sheet_codes ?? "" : "";
 
   const combinedChecker = (sanitized.ied_checked_by ?? sanitized.ied_discipline_leader ?? "").trim();
@@ -1129,5 +1178,9 @@ function buildSubmissionValues(values: Record<string, string>) {
   sanitized.ied_discipline_leader_date = combinedCheckerDate;
 
   return sanitized;
+}
+
+function findSchemaField(schema: FormSchema, key: string) {
+  return schema.sections.flatMap((section) => section.fields).find((field) => field.key === key);
 }
 

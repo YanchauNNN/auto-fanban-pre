@@ -113,7 +113,7 @@ const schema: FormSchema = {
           required: false,
           requiredWhen: null,
           defaultValue: "",
-          description: "输入图纸内部编码最后三位，支持单个编号和区间组合。",
+          description: "输入图纸内部编码末三位，支持单个编号和区间组合。",
           options: [],
         },
         {
@@ -160,6 +160,13 @@ function createAdapter(): ApiAdapter {
 }
 
 describe("DeliverableWorkspace", () => {
+  const coverRevisionLabel =
+    schema.sections[1].fields.find((field) => field.key === "cover_revision")?.label ?? "";
+  const isUpgradeLabel =
+    schema.sections[1].fields.find((field) => field.key === "is_upgrade")?.label ?? "";
+  const upgradeSheetCodesLabel =
+    schema.sections[1].fields.find((field) => field.key === "upgrade_sheet_codes")?.label ?? "";
+
   it("shows an update notice after updating the current preset and clears it on further edits", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
@@ -263,6 +270,49 @@ describe("DeliverableWorkspace", () => {
 
     expect(await screen.findByRole("option", { name: "1 总体文件" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "1.2.4 接口协调文件" })).toBeInTheDocument();
+  });
+
+  it("moves upgrade controls into the primary area and reveals related inputs only when enabled", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    const upgradeToggle = screen.getByRole("button", { name: isUpgradeLabel });
+    expect(upgradeToggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByLabelText(coverRevisionLabel)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(upgradeSheetCodesLabel)).not.toBeInTheDocument();
+
+    await user.click(upgradeToggle);
+
+    const coverRevision = screen.getByLabelText(coverRevisionLabel);
+    const upgradeSheetCodes = screen.getByLabelText(upgradeSheetCodesLabel);
+    await user.type(coverRevision, "B");
+    await user.type(upgradeSheetCodes, "005~012");
+
+    await user.click(screen.getByRole("button", { name: "展开高级选项" }));
+
+    expect(screen.getAllByRole("button", { name: isUpgradeLabel })).toHaveLength(1);
+    expect(screen.getAllByLabelText(coverRevisionLabel)).toHaveLength(1);
+    expect(screen.getAllByLabelText(upgradeSheetCodesLabel)).toHaveLength(1);
+
+    await user.click(upgradeToggle);
+    expect(screen.queryByLabelText(coverRevisionLabel)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(upgradeSheetCodesLabel)).not.toBeInTheDocument();
+
+    await user.click(upgradeToggle);
+    expect(screen.getByLabelText(coverRevisionLabel)).toHaveValue("B");
+    expect(screen.getByLabelText(upgradeSheetCodesLabel)).toHaveValue("005~012");
   });
 
   it("maps 422 param errors into field and form messages", async () => {
@@ -370,7 +420,7 @@ describe("DeliverableWorkspace", () => {
     expect(screen.queryByRole("button", { name: /当日/ })).not.toBeInTheDocument();
   });
 
-  it("shows the new upgrade block, keeps entered codes while toggling, and hides old fields", async () => {
+  it("keeps entered upgrade codes while toggling and does not repeat legacy fields in advanced options", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
 
@@ -386,24 +436,27 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "展开高级选项" }));
-
     expect(screen.queryByLabelText("升版起始号")).not.toBeInTheDocument();
-    const upgradeBlock = screen.getByTestId("upgrade-config-block");
-    const toggle = within(upgradeBlock).getByRole("button", { name: "是否升版" });
+    const upgradeBlock = screen.getByTestId("upgrade-config-section");
+    const toggle = within(upgradeBlock).getByRole("button", { name: isUpgradeLabel });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     await user.click(toggle);
-    const codesInput = within(upgradeBlock).getByLabelText("升版图纸编号");
+    const codesInput = within(upgradeBlock).getByLabelText(upgradeSheetCodesLabel);
     await user.type(codesInput, "001、003、005~009");
     await user.click(toggle);
-    expect(screen.queryByLabelText("升版图纸编号")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(upgradeSheetCodesLabel)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开高级选项" }));
+    expect(screen.queryByLabelText("升版起始号")).not.toBeInTheDocument();
 
     await user.click(toggle);
-    expect(within(upgradeBlock).getByLabelText("升版图纸编号")).toHaveValue("001、003、005~009");
+    expect(within(upgradeBlock).getByLabelText(upgradeSheetCodesLabel)).toHaveValue(
+      "001、003、005~009",
+    );
   });
 
-  it("submits only the new upgrade fields and clears upgrade_sheet_codes when upgrade is disabled", async () => {
+  it("submits only the new upgrade fields and clears upgrade-related values when upgrade is disabled", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
     adapter.createBatch = vi.fn().mockResolvedValue({
@@ -426,12 +479,12 @@ describe("DeliverableWorkspace", () => {
     await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
     await user.click(screen.getByRole("button", { name: "同线宽" }));
-    await user.click(screen.getByRole("button", { name: "展开高级选项" }));
 
-    const upgradeBlock = screen.getByTestId("upgrade-config-block");
-    const toggle = within(upgradeBlock).getByRole("button", { name: "是否升版" });
+    const upgradeBlock = screen.getByTestId("upgrade-config-section");
+    const toggle = within(upgradeBlock).getByRole("button", { name: isUpgradeLabel });
     await user.click(toggle);
-    await user.type(within(upgradeBlock).getByLabelText("升版图纸编号"), "001、003");
+    await user.type(within(upgradeBlock).getByLabelText(coverRevisionLabel), "B");
+    await user.type(within(upgradeBlock).getByLabelText(upgradeSheetCodesLabel), "001、003");
     await user.click(toggle);
     await user.click(screen.getByRole("button", { name: "纠错" }));
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
@@ -443,6 +496,7 @@ describe("DeliverableWorkspace", () => {
           project_no: "2016",
           plot_style_key: "same_width",
           is_upgrade: "false",
+          cover_revision: "",
           upgrade_sheet_codes: "",
         }),
         expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
