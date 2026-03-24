@@ -18,6 +18,7 @@
   padding: 0.9rem 1.25rem;
   border-bottom: 1px solid rgba(20, 70, 128, 0.1);
   background: linear-gradient(180deg, rgba(247, 250, 253, 0.97), rgba(241, 246, 252, 0.94));
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 
@@ -125,6 +126,26 @@
   margin: 0;
   color: #6d88a4;
   font-size: 0.9rem;
+}
+
+.titleStripHealthWarning {
+  margin: 0;
+  color: #9f3c1d;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.titleStripMaintenanceBanner {
+  margin-top: 0.85rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(181, 76, 31, 0.18);
+  background: linear-gradient(135deg, rgba(255, 234, 224, 0.96), rgba(255, 247, 242, 0.94));
+  color: #963614;
+  font-weight: 700;
+  font-size: 1rem;
+  text-align: center;
+  box-shadow: 0 14px 28px rgba(181, 76, 31, 0.12);
 }
 
 .moduleToolbar {
@@ -1224,6 +1245,7 @@
   align-items: flex-start;
   padding: 4.75rem 1.25rem 1.25rem;
   background: rgba(11, 31, 54, 0.22);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
@@ -1275,6 +1297,16 @@
 .jobsModalBody::-webkit-scrollbar-track {
   background: rgba(20, 70, 128, 0.05);
   border-radius: 999px;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .titleStrip {
+    background: rgba(243, 247, 252, 0.98);
+  }
+
+  .jobsModalBackdrop {
+    background: rgba(11, 31, 54, 0.12);
+  }
 }
 
 @media (max-width: 1360px) {

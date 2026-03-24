@@ -139,6 +139,7 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     )
 
     ws = _read_cover_embedded_wb(output_docx)
+    assert str(ws["A7"].value or "").strip() == "浙江金七门核电厂1、2号机组"
     assert ws["I11"].value == "1234"
     assert ws["I13"].value == "JG001"
     assert ws["I21"].value
@@ -147,6 +148,31 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
 
     chars = [str(ws[f"{col}29"].value or "") for col in "BCDEFGHIJKLMNOPQRST"]
     assert "".join(chars) == "JD1NHT11F01B25C42SD"
+
+
+def test_write_cover_updates_common_project_name_from_yaml(temp_dir: Path) -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="2026")
+    bindings = gen.spec.get_cover_bindings(ctx.params.project_no)
+    data = gen._prepare_data(ctx)
+
+    output_docx = temp_dir / "封面-2026.docx"
+
+    def force_embedded_fallback(*, output_path, bindings, data):  # noqa: ANN001
+        raise RuntimeError("force embedded fallback")
+
+    gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+
+    gen._write_cover(
+        template_path="documents_bin/封面模板文件.docx",
+        output_path=output_docx,
+        bindings=bindings,
+        data=data,
+        ctx=ctx,
+    )
+
+    ws = _read_cover_embedded_wb(output_docx)
+    assert str(ws["A7"].value or "").strip() == "江苏徐圩核能供热发电厂一期工程"
 
 
 def test_write_cover_1818_uses_com_when_no_embedded_xlsx(

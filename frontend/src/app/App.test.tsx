@@ -133,13 +133,48 @@ describe("homepage shell", () => {
     });
   });
 
+  it("shows a maintenance warning and disables main entries when health check fails", async () => {
+    mockGetHealth.mockRejectedValueOnce(new Error("backend offline"));
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+  });
+
+  it("shows a maintenance warning when backend health is not ready", async () => {
+    mockGetHealth.mockResolvedValueOnce({
+      status: "maintenance",
+      ready: false,
+      storageWritable: true,
+      workerAlive: true,
+      queueDepth: 0,
+      autocadReady: true,
+      officeReady: true,
+      serverTime: "2026-03-24T10:20:30+08:00",
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+  });
+
   it("renders the title strip, module toolbar, and primary actions", async () => {
     render(<App />);
 
     expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
     expect(screen.getByTestId("title-strip-status")).toBeInTheDocument();
     expect(await screen.findAllByTestId("title-strip-status-item")).toHaveLength(5);
-    expect(screen.getByText("中核工程—建筑结构所出图平台")).toBeInTheDocument();
+    expect(screen.getByText("中核工程-河北分公司-建筑结构所出图平台")).toBeInTheDocument();
     expect(screen.getByTestId("hero-watermark")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
@@ -256,6 +291,52 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
+  it("filters recent jobs locally by status without refetching the list", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 4,
+      items: [
+        {
+          ...makeSingleJob(1, "queued-job.dwg"),
+          status: "queued",
+        },
+        {
+          ...makeSingleJob(2, "running-job.dwg"),
+          status: "running",
+        },
+        {
+          ...makeSingleJob(3, "success-job.dwg"),
+          status: "succeeded",
+        },
+        {
+          ...makeSingleJob(4, "failed-job.dwg"),
+          status: "failed",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("success-job.dwg")).toBeInTheDocument();
+    expect(mockListJobs).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "排队中" }));
+    expect(screen.getByRole("button", { name: "排队中" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("queued-job.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
+    expect(screen.queryByText("success-job.dwg")).not.toBeInTheDocument();
+    expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
+    expect(mockListJobs).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "成功" }));
+    expect(screen.getByRole("button", { name: "成功" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("success-job.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("queued-job.dwg")).not.toBeInTheDocument();
+    expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
+    expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
+    expect(mockListJobs).toHaveBeenCalledTimes(1);
+  });
+
   it("shows eight cards by default and opens the rest in a modal", async () => {
     mockListJobs.mockResolvedValue({
       total: 10,

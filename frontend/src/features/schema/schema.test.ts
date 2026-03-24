@@ -42,7 +42,7 @@ describe("normalizeFormSchema", () => {
                 source: "frontend",
                 default: "通用",
                 format: null,
-                desc: "封面模板选择；1818 与非1818均使用通用/压力容器/核安全设备三选一，1818会切到对应专用模板",
+                desc: "封面模板选择；1818 与非1818均使用通用/压力容器/核安全设备三选一；1818会切到对应专用模板",
                 options: ["通用", "压力容器", "核安全设备"],
               },
               {
@@ -222,7 +222,58 @@ describe("normalizeFormSchema", () => {
     });
 
     expect(normalized.sections[0].fields[0].type).toBe("combobox");
-    expect(normalized.sections[0].fields[0].options).toEqual(["安装技术要求", "初步设计"]);
+    expect(normalized.sections[0].fields[0].options).toEqual([
+      "安装技术要求",
+      "初步设计",
+      "BOP子项施工图",
+    ]);
+  });
+
+  it("prioritizes 河北分公司-建筑结构所 responsible units while keeping combobox metadata", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [
+          {
+            id: "ied",
+            title: "ied",
+            fields: [
+              {
+                key: "ied_responsible_unit",
+                label: "ied_responsible_unit",
+                type: "combobox",
+                required: false,
+                required_when: "ied_status == '发布'",
+                source: "frontend",
+                default: null,
+                format: null,
+                desc: "责任单位(X列)",
+                options: [
+                  "北京核化工研究设计院-放射性废物管理工程所-放射性废物管理二室",
+                  "河北分公司-建筑结构所-结构一室",
+                  "公用系统所-水工工艺二室",
+                  "河北分公司-建筑结构所-建筑总图室",
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      audit_replace: {
+        project_options: ["2016", "1818"],
+      },
+    });
+
+    expect(normalized.sections[0].fields[0].type).toBe("combobox");
+    expect(normalized.sections[0].fields[0].options.slice(0, 2)).toEqual([
+      "河北分公司-建筑结构所-结构一室",
+      "河北分公司-建筑结构所-建筑总图室",
+    ]);
   });
 });
 

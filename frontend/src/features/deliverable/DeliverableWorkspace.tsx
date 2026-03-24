@@ -1315,17 +1315,6 @@ function buildSubmissionValues(
   sanitized.is_upgrade = isUpgradeEnabled ? "true" : "false";
   sanitized.cover_revision = isUpgradeEnabled ? sanitized.cover_revision ?? "" : "";
   sanitized.upgrade_sheet_codes = isUpgradeEnabled ? sanitized.upgrade_sheet_codes ?? "" : "";
-
-  const combinedChecker = (sanitized.ied_checked_by ?? sanitized.ied_discipline_leader ?? "").trim();
-  const combinedCheckerDate = (
-    sanitized.ied_checked_date ??
-    sanitized.ied_discipline_leader_date ??
-    ""
-  ).trim();
-  sanitized.ied_checked_by = combinedChecker;
-  sanitized.ied_discipline_leader = combinedChecker;
-  sanitized.ied_checked_date = combinedCheckerDate;
-  sanitized.ied_discipline_leader_date = combinedCheckerDate;
   sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
   if (fontConfig.fontReplacePolicy === "replace_missing" && fontConfig.fontReplacementFont) {
     sanitized.font_replacement_font = fontConfig.fontReplacementFont;

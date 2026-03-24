@@ -246,3 +246,62 @@ runtime_options:
             tmp_path / "documents_bin" / "词库收集.xlsx"
         ).resolve()
 
+    def test_runtime_config_reads_paths_cad_runtime_and_plot_assets(
+        self,
+        tmp_path: Path,
+    ):
+        """运行期规范应覆盖根路径、CAD槽位与打印资源参数。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  paths:
+    base_dir:
+      type: str
+      default: "."
+    storage_dir:
+      type: str
+      default: "custom-storage"
+    spec_path:
+      type: str
+      default: "documents/参数规范.yaml"
+    runtime_spec_path:
+      type: str
+      default: "documents/参数规范_运行期.yaml"
+  cad_runtime:
+    slot_count:
+      type: int
+      default: 6
+  plot_assets:
+    asset_roots:
+      type: "list[str]"
+      default: ["assets-a", "assets-b"]
+    pmp_name:
+      type: str
+      default: "custom.pmp"
+    managed_ctb_names:
+      type: "list[str]"
+      default: ["custom.ctb", "review.ctb"]
+    min_valid_ctb_bytes:
+      type: int
+      default: 4096
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.base_dir == tmp_path.resolve()
+        assert config.storage_dir == (tmp_path / "custom-storage").resolve()
+        assert config.spec_path == (tmp_path / "documents" / "参数规范.yaml").resolve()
+        assert config.runtime_spec_path == runtime_spec.resolve()
+        assert config.cad_runtime.slot_count == 6
+        assert config.plot_assets.asset_roots == [
+            (tmp_path / "assets-a").resolve(),
+            (tmp_path / "assets-b").resolve(),
+        ]
+        assert config.plot_assets.pmp_name == "custom.pmp"
+        assert config.plot_assets.managed_ctb_names == ["custom.ctb", "review.ctb"]
+        assert config.plot_assets.min_valid_ctb_bytes == 4096
+

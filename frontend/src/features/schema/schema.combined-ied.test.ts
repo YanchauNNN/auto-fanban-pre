@@ -1,7 +1,7 @@
 import { normalizeFormSchema } from "./schema";
 
-describe("normalizeFormSchema combined IED checker fields", () => {
-  it("shows combined checker fields and hides the duplicated discipline leader fields", () => {
+describe("normalizeFormSchema independent IED checker fields", () => {
+  it("keeps checker and discipline leader fields visible as separate inputs", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",
       upload_limits: {
@@ -74,9 +74,15 @@ describe("normalizeFormSchema combined IED checker fields", () => {
 
     const iedFields = normalized.sections[0]?.fields ?? [];
 
-    expect(iedFields.map((field) => field.key)).toEqual(["ied_checked_by", "ied_checked_date"]);
-    expect(iedFields[0]?.label).toBe("校核者与工种负责人");
-    expect(iedFields[0]?.description).toBe("例如：王任超@wangrca");
-    expect(iedFields[1]?.label).toBe("校核日期与工种审核日期");
+    expect(iedFields.map((field) => field.key)).toEqual([
+      "ied_checked_by",
+      "ied_checked_date",
+      "ied_discipline_leader",
+      "ied_discipline_leader_date",
+    ]);
+    expect(iedFields[0]?.label).toBe("校核者");
+    expect(iedFields[1]?.label).toBe("校核日期");
+    expect(iedFields[2]?.label).toBe("工种负责人");
+    expect(iedFields[3]?.label).toBe("工种负责人审核日期");
   });
 });

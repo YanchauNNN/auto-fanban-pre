@@ -35,9 +35,12 @@ class CADSlot:
 
 
 class CADSlotPool:
-    def __init__(self, *, config: RuntimeConfig | None = None, slot_count: int = 4) -> None:
+    def __init__(self, *, config: RuntimeConfig | None = None, slot_count: int | None = None) -> None:
         self.config = config or get_config()
-        self.slot_count = max(int(slot_count), 1)
+        effective_slot_count = (
+            slot_count if slot_count is not None else getattr(self.config.cad_runtime, "slot_count", 4)
+        )
+        self.slot_count = max(int(effective_slot_count), 1)
         self.runtime_root = self.config.storage_dir / "runtime" / "cad-slots"
         self._lock = threading.Lock()
         self._queue: queue.Queue[str] = queue.Queue()
@@ -82,6 +85,17 @@ class CADSlotPool:
 
     def _initialize_slots(self, installation: AutoCADInstallation | None) -> None:
         self.runtime_root.mkdir(parents=True, exist_ok=True)
+        plot_cfg = self.config.module5_export.plot
+        plot_assets_cfg = self.config.plot_assets
+        managed_ctb_names = list(
+            dict.fromkeys(
+                [
+                    *list(plot_assets_cfg.managed_ctb_names),
+                    *list(getattr(plot_cfg, "plot_style_profiles", {}).values()),
+                    str(plot_cfg.ctb_name),
+                ]
+            )
+        )
         for idx in range(1, self.slot_count + 1):
             slot_id = f"slot-{idx:02d}"
             slot_root = self.runtime_root / slot_id
@@ -148,6 +162,12 @@ class CADSlotPool:
                     pc3_path=None,
                     fallback_pdf_pc3_path=None,
                 ),
+                asset_roots=list(plot_assets_cfg.asset_roots),
+                pc3_name=str(plot_cfg.pc3_name),
+                pmp_name=str(plot_assets_cfg.pmp_name),
+                ctb_name=str(plot_cfg.ctb_name),
+                managed_ctb_names=managed_ctb_names,
+                min_valid_ctb_bytes=int(plot_assets_cfg.min_valid_ctb_bytes),
                 target_plotters_dirs=[plotters_dir],
                 target_plot_styles_dirs=[plot_styles_dir],
             )

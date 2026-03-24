@@ -117,6 +117,7 @@ class CoverGenerator(ICoverGenerator):
         )
 
         return {
+            "project_name": None if params.project_no == "1818" else self.spec.get_project_name(params.project_no),
             "engineering_no": params.engineering_no,
             "subitem_no": params.subitem_no,
             "subitem_name": params.subitem_name,

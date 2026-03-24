@@ -22,7 +22,6 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
-
 DEFAULT_SPEC_PATH = Path("documents/参数规范.yaml")
 SPEC_PATH_ENV_VAR = "FANBAN_SPEC_PATH"
 
@@ -153,6 +152,16 @@ class BusinessSpec(BaseModel):
             return str(self.resolve_repo_path(selection.get("catalog", {}).get("default", "")))
 
         return str(self.resolve_repo_path(selection.get(doc_type, "")))
+
+    def get_project_name(self, project_no: str) -> str | None:
+        """根据项目号返回枚举中配置的项目名称。"""
+        for item in self.enums.get("project_no", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id") or "").strip() == str(project_no or "").strip():
+                name = str(item.get("name") or "").strip()
+                return name or None
+        return None
 
     def resolve_repo_path(self, path_value: str | Path) -> Path:
         path = Path(path_value)

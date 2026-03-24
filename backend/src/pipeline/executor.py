@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -89,87 +90,139 @@ class PipelineExecutor:
 
     def execute(self, job: Job) -> None:
         """?????"""
+        self._start_execution(job)
+
+        try:
+            context, stages = self._prepare_execution_plan(job)
+            self._run_stages(job, context, stages)
+            self._finalize_success(job, context)
+        except Exception as e:
+            self._fail_execution(job, e)
+            raise
+
+    def execute_slot_bound_phase(self, job: Job) -> Callable[[], None] | None:
+        self._start_execution(job)
+
+        try:
+            context, stages = self._prepare_execution_plan(job)
+            slot_bound_stages, post_slot_stages = self._split_slot_bound_and_post_stages(stages)
+            self._run_stages(job, context, slot_bound_stages)
+        except Exception as e:
+            self._fail_execution(job, e)
+            raise
+
+        if not post_slot_stages:
+            try:
+                self._finalize_success(job, context)
+            except Exception as e:
+                self._fail_execution(job, e)
+                raise
+            return None
+
+        def run_post_slot_phase() -> None:
+            try:
+                self._run_stages(job, context, post_slot_stages)
+                self._finalize_success(job, context)
+            except Exception as e:
+                self._fail_execution(job, e)
+                raise
+
+        return run_post_slot_phase
+
+    def _start_execution(self, job: Job) -> None:
         job.mark_running()
         self._update_progress(job, message="????", force=True)
 
-        try:
-            work_dir = self.config.get_job_dir(job.job_id)
-            job.work_dir = work_dir
-            work_dir.mkdir(parents=True, exist_ok=True)
+    def _prepare_execution_plan(self, job: Job) -> tuple[dict[str, Any], list[Any]]:
+        work_dir = self.config.get_job_dir(job.job_id)
+        job.work_dir = work_dir
+        work_dir.mkdir(parents=True, exist_ok=True)
 
-            split_only = bool(job.options.get("split_only", False))
-            shared_prep_dir = str(job.params.get("shared_prep_dir") or "").strip()
-            if shared_prep_dir:
-                prep = SharedPrepService.load(Path(shared_prep_dir))
-                context: dict = {
-                    "dxf_files": [prep.source_converted_dxf],
-                    "dxf_to_dwg": {
-                        str(prep.source_converted_dxf.resolve()): prep.source_input_dwg.resolve(),
-                    },
-                    "frames": prep.frames,
-                    "sheet_sets": prep.sheet_sets,
-                    "cad_dxf_results": {},
-                    "shared_prep_dir": str(prep.shared_dir),
-                }
-                allowed = {
+        split_only = bool(job.options.get("split_only", False))
+        shared_prep_dir = str(job.params.get("shared_prep_dir") or "").strip()
+        if shared_prep_dir:
+            prep = SharedPrepService.load(Path(shared_prep_dir))
+            context: dict[str, Any] = {
+                "dxf_files": [prep.source_converted_dxf],
+                "dxf_to_dwg": {
+                    str(prep.source_converted_dxf.resolve()): prep.source_input_dwg.resolve(),
+                },
+                "frames": prep.frames,
+                "sheet_sets": prep.sheet_sets,
+                "cad_dxf_results": {},
+                "shared_prep_dir": str(prep.shared_dir),
+            }
+            allowed = {
+                StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
+                StageEnum.SPLIT_AND_RENAME.value,
+                StageEnum.EXPORT_PDF_AND_DWG.value,
+            }
+            if not split_only:
+                allowed.update(
+                    {
+                        StageEnum.GENERATE_DOCS.value,
+                        StageEnum.PACKAGE_ZIP.value,
+                    }
+                )
+            stages = [stage for stage in DELIVERABLE_STAGES if stage.name in allowed]
+            return context, stages
+
+        context = {
+            "dxf_files": [],
+            "dxf_to_dwg": {},
+            "frames": [],
+            "sheet_sets": [],
+            # Stage 7 (cad_dxf) ??: {source_dxf: result_json_dict}
+            "cad_dxf_results": {},
+        }
+        stages = (
+            [
+                stage
+                for stage in DELIVERABLE_STAGES
+                if stage.name
+                in {
+                    StageEnum.INGEST.value,
+                    StageEnum.FONT_PREFLIGHT_AND_REPLACE.value,
+                    StageEnum.CONVERT_DWG_TO_DXF.value,
+                    StageEnum.DETECT_FRAMES.value,
+                    StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
+                    StageEnum.SCALE_FIT_AND_CHECK.value,
+                    StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
+                    StageEnum.A4_MULTIPAGE_GROUPING.value,
                     StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
                     StageEnum.SPLIT_AND_RENAME.value,
                     StageEnum.EXPORT_PDF_AND_DWG.value,
                 }
-                if not split_only:
-                    allowed.update(
-                        {
-                            StageEnum.GENERATE_DOCS.value,
-                            StageEnum.PACKAGE_ZIP.value,
-                        }
-                    )
-                stages = [stage for stage in DELIVERABLE_STAGES if stage.name in allowed]
-            else:
-                context = {
-                    "dxf_files": [],
-                    "dxf_to_dwg": {},
-                    "frames": [],
-                    "sheet_sets": [],
-                    # Stage 7 (cad_dxf) ??: {source_dxf: result_json_dict}
-                    "cad_dxf_results": {},
-                }
-                stages = (
-                    [
-                        stage
-                        for stage in DELIVERABLE_STAGES
-                        if stage.name
-                        in {
-                            StageEnum.INGEST.value,
-                            StageEnum.FONT_PREFLIGHT_AND_REPLACE.value,
-                            StageEnum.CONVERT_DWG_TO_DXF.value,
-                            StageEnum.DETECT_FRAMES.value,
-                            StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
-                            StageEnum.SCALE_FIT_AND_CHECK.value,
-                            StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value,
-                            StageEnum.A4_MULTIPAGE_GROUPING.value,
-                            StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
-                            StageEnum.SPLIT_AND_RENAME.value,
-                            StageEnum.EXPORT_PDF_AND_DWG.value,
-                        }
-                    ]
-                    if split_only
-                    else DELIVERABLE_STAGES
-                )
-            for stage in stages:
-                self._execute_stage(job, stage, context)
+            ]
+            if split_only
+            else DELIVERABLE_STAGES
+        )
+        return context, stages
 
-            # ?? frame/sheet_set flags ? job
-            self._aggregate_flags(job, context)
-            self._raise_if_fatal_export_errors(job)
+    def _run_stages(self, job: Job, context: dict[str, Any], stages: list[Any]) -> None:
+        for stage in stages:
+            self._execute_stage(job, stage, context)
 
-            job.mark_succeeded()
-            self._update_progress(job, message="????", force=True)
+    @staticmethod
+    def _split_slot_bound_and_post_stages(stages: list[Any]) -> tuple[list[Any], list[Any]]:
+        post_stage_names = {
+            StageEnum.GENERATE_DOCS.value,
+            StageEnum.PACKAGE_ZIP.value,
+        }
+        slot_bound_stages = [stage for stage in stages if stage.name not in post_stage_names]
+        post_slot_stages = [stage for stage in stages if stage.name in post_stage_names]
+        return slot_bound_stages, post_slot_stages
 
-        except Exception as e:
-            logger.exception(f"???????: {job.job_id}")
-            job.mark_failed(str(e))
-            self._update_progress(job, message=f"????: {e}", force=True)
-            raise
+    def _finalize_success(self, job: Job, context: dict[str, Any]) -> None:
+        self._aggregate_flags(job, context)
+        self._raise_if_fatal_export_errors(job)
+        job.mark_succeeded()
+        self._update_progress(job, message="????", force=True)
+
+    def _fail_execution(self, job: Job, exc: Exception) -> None:
+        logger.exception(f"???????: {job.job_id}")
+        job.mark_failed(str(exc))
+        self._update_progress(job, message=f"????: {exc}", force=True)
 
     # ==================================================================
     # 阶段分发

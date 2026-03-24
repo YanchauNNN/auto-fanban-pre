@@ -339,6 +339,8 @@ def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> 
     assert payload["ready"] is True
     assert "storage_writable" in payload
     assert "worker_alive" in payload
+    assert "active_doc_jobs" in payload
+    assert "active_total_jobs" in payload
 
 
 def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
@@ -394,6 +396,37 @@ def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
     assert deliverable.calls == ["job-deliverable"]
     assert audit.calls == ["job-audit"]
     assert replace.calls == ["job-replace"]
+
+
+def test_pipeline_job_processor_exposes_slot_bound_phase_for_deliverables(monkeypatch) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.runtime import PipelineJobProcessor
+
+    class DeliverableExecutor:
+        def __init__(self) -> None:
+            self.phase_calls: list[str] = []
+
+        def execute_slot_bound_phase(self, job: Job):
+            self.phase_calls.append(job.job_id)
+            return None
+
+        def execute(self, job: Job) -> None:
+            raise AssertionError("deliverable should use execute_slot_bound_phase")
+
+    deliverable = DeliverableExecutor()
+    monkeypatch.setattr("API.app.runtime.PipelineExecutor", lambda **_: deliverable)
+
+    processor = PipelineJobProcessor()
+    result = processor.execute_slot_bound_phase(
+        Job(job_id="job-deliverable", job_type=JobType.DELIVERABLE, project_no="2016")
+    )
+
+    assert result is None
+    assert deliverable.phase_calls == ["job-deliverable"]
+
+
 def test_health_endpoint_allows_local_frontend_origin(monkeypatch, tmp_path: Path) -> None:
     with _create_client(monkeypatch, tmp_path) as client:
         response = client.get(
@@ -1243,6 +1276,277 @@ def test_grouped_batches_can_run_children_concurrently(
             assert detail["status"] == "succeeded"
 
     assert processor.max_seen >= 2
+
+
+def test_multi_file_batch_keeps_backlog_visible_until_worker_capacity_frees(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    class SlowTrackingProcessor:
+        def __init__(self) -> None:
+            self.inner = FakeJobProcessor()
+            self.current = 0
+            self.max_seen = 0
+            self.lock = threading.Lock()
+
+        def __call__(self, job: Job) -> None:
+            with self.lock:
+                self.current += 1
+                self.max_seen = max(self.max_seen, self.current)
+            try:
+                time.sleep(0.4)
+                self.inner(job)
+            finally:
+                with self.lock:
+                    self.current -= 1
+
+    def _wait_for_runtime_health(
+        client: TestClient,
+        *,
+        predicate,
+        timeout_sec: float = 3.0,
+    ) -> dict:
+        deadline = time.time() + timeout_sec
+        last_payload: dict | None = None
+        while time.time() < deadline:
+            response = client.get("/api/system/health")
+            assert response.status_code == 200
+            payload = response.json()
+            last_payload = payload
+            if predicate(payload):
+                return payload
+            time.sleep(0.05)
+        raise AssertionError(f"runtime health did not satisfy predicate: {last_payload}")
+
+    _configure_api_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_FILES", "20")
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_TOTAL_MB", "50")
+    SpecLoader.clear_cache()
+    reload_config()
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    processor = SlowTrackingProcessor()
+    with TestClient(
+        create_app(
+            job_processor=processor,
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(_deliverable_params(), ensure_ascii=False)},
+            files=[
+                ("files[]", (f"2026-A{index:02d}.dwg", f"dwg-{index}".encode(), "application/acad"))
+                for index in range(1, 9)
+            ],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 8
+
+        health = _wait_for_runtime_health(
+            client,
+            predicate=lambda item: item["active_jobs"] >= 4,
+        )
+        assert health["active_jobs"] == 4
+        assert health["queue_depth"] == 4
+
+        details = [client.get(f"/api/jobs/{job['job_id']}").json() for job in payload["jobs"]]
+        assert sum(detail["slot_id"] is not None for detail in details) == 4
+        assert sum(detail["slot_id"] is None for detail in details) == 4
+
+        for job in payload["jobs"]:
+            detail = _poll_job(client, job["job_id"], timeout_sec=8.0)
+            assert detail["status"] == "succeeded"
+
+    assert processor.max_seen == 4
+
+
+def test_slot_bound_phase_allows_next_wave_to_start_before_docs_finish(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    class PhaseAwareProcessor:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.cad_current = 0
+            self.max_cad_seen = 0
+            self.cad_start: dict[str, float] = {}
+            self.doc_end: dict[str, float] = {}
+
+        def __call__(self, job: Job) -> None:
+            self._run_cad(job)
+            self._run_docs(job)
+
+        def execute_slot_bound_phase(self, job: Job):
+            self._run_cad(job)
+
+            def finish() -> None:
+                self._run_docs(job)
+
+            return finish
+
+        def _run_cad(self, job: Job) -> None:
+            with self.lock:
+                self.cad_current += 1
+                self.max_cad_seen = max(self.max_cad_seen, self.cad_current)
+            job.mark_running(stage="EXPORT_PDF_AND_DWG")
+            self.cad_start[job.job_id] = time.monotonic()
+            time.sleep(0.2)
+            with self.lock:
+                self.cad_current -= 1
+
+        def _run_docs(self, job: Job) -> None:
+            job.progress.stage = "GENERATE_DOCS"
+            time.sleep(0.6)
+            job.mark_succeeded()
+            self.doc_end[job.job_id] = time.monotonic()
+
+    _configure_api_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_FILES", "20")
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_TOTAL_MB", "50")
+    monkeypatch.setenv("FANBAN_CONCURRENCY__MAX_JOBS", "2")
+    SpecLoader.clear_cache()
+    reload_config()
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    processor = PhaseAwareProcessor()
+    with TestClient(create_app(job_processor=processor)) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(_deliverable_params(), ensure_ascii=False)},
+            files=[
+                ("files[]", (f"2026-P{index:02d}.dwg", f"dwg-{index}".encode(), "application/acad"))
+                for index in range(1, 5)
+            ],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 4
+
+        for job in payload["jobs"]:
+            detail = _poll_job(client, job["job_id"], timeout_sec=8.0)
+            assert detail["status"] == "succeeded"
+
+    assert processor.max_cad_seen == 2
+    cad_starts = sorted(processor.cad_start.values())
+    doc_ends = sorted(processor.doc_end.values())
+    assert len(cad_starts) == 4
+    assert len(doc_ends) == 4
+    assert cad_starts[2] < doc_ends[0]
+
+
+def test_grouped_batch_keeps_pending_groups_in_external_queue(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    class SlowTrackingProcessor:
+        def __init__(self) -> None:
+            self.inner = FakeJobProcessor()
+            self.current = 0
+            self.max_seen = 0
+            self.lock = threading.Lock()
+
+        def __call__(self, job: Job) -> None:
+            with self.lock:
+                self.current += 1
+                self.max_seen = max(self.max_seen, self.current)
+            try:
+                time.sleep(0.4)
+                self.inner(job)
+            finally:
+                with self.lock:
+                    self.current -= 1
+
+    def _wait_for_runtime_health(
+        client: TestClient,
+        *,
+        predicate,
+        timeout_sec: float = 3.0,
+    ) -> dict:
+        deadline = time.time() + timeout_sec
+        last_payload: dict | None = None
+        while time.time() < deadline:
+            response = client.get("/api/system/health")
+            assert response.status_code == 200
+            payload = response.json()
+            last_payload = payload
+            if predicate(payload):
+                return payload
+            time.sleep(0.05)
+        raise AssertionError(f"runtime health did not satisfy predicate: {last_payload}")
+
+    _configure_api_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_FILES", "20")
+    monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_TOTAL_MB", "50")
+    SpecLoader.clear_cache()
+    reload_config()
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    processor = SlowTrackingProcessor()
+    with TestClient(
+        create_app(
+            job_processor=processor,
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        params = _deliverable_params()
+        params["subitem_name_en"] = "Example Subitem"
+        params["album_title_en"] = "Example Album"
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[
+                ("files[]", (f"2026-G{index:02d}.dwg", f"dwg-{index}".encode(), "application/acad"))
+                for index in range(1, 5)
+            ],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 4
+
+        health = _wait_for_runtime_health(
+            client,
+            predicate=lambda item: item["active_groups"] >= 2 and item["active_jobs"] >= 4,
+        )
+        assert health["active_groups"] == 2
+        assert health["active_jobs"] == 4
+        assert health["queue_depth"] == 2
+
+        details = [client.get(f"/api/jobs/{item['job_id']}").json() for item in payload["jobs"]]
+        assert sum(detail["status"] == "running" for detail in details) == 2
+        assert sum(detail["status"] == "queued" for detail in details) == 2
+
+        for item in payload["jobs"]:
+            detail = _poll_job(client, item["job_id"], timeout_sec=8.0)
+            assert detail["status"] == "succeeded"
+
+    assert processor.max_seen == 4
 
 
 def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -> None:

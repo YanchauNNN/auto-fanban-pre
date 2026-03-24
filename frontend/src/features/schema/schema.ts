@@ -78,8 +78,8 @@ const FIELD_LABELS: Record<string, string> = {
   ied_prepared_by: "编制者",
   ied_prepared_by_2: "第二编制者",
   ied_prepared_date: "编制日期",
-  ied_checked_by: "校核者与工种负责人",
-  ied_checked_date: "校核日期与工种审核日期",
+  ied_checked_by: "校核者",
+  ied_checked_date: "校核日期",
   ied_discipline_leader: "工种负责人",
   ied_discipline_leader_date: "工种负责人审核日期",
   ied_reviewed_by: "审核者",
@@ -98,12 +98,14 @@ const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
   classification: "写入设计文件/IED",
   cover_revision: "封面和目录版次，写入封面和目录版次位（追加模式）",
   is_upgrade:
-    "启用后只需填写升版图纸编号；关闭时会隐藏输入框，但会保留已输入的内容。",
+    "启用后只需填写升版图纸编号；关闭时会隐藏输入框，但会保留已输入内容。",
   upgrade_sheet_codes:
-    "输入图纸内部编码末三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、 . ; ；；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。",
+    "输入图纸内部编码末三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、, . ; ；；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。",
   ied_chief_designer: "例如：王任超@wangrca",
   ied_checked_by: "例如：王任超@wangrca",
   ied_checked_date: "点击选择日期",
+  ied_discipline_leader: "例如：王任超@wangrca",
+  ied_discipline_leader_date: "点击选择日期",
 };
 
 const LEGACY_UPGRADE_FIELDS = new Set([
@@ -115,12 +117,7 @@ const LEGACY_UPGRADE_FIELDS = new Set([
 
 const CUSTOM_RENDERED_FIELDS = new Set(["cover_revision", "is_upgrade", "upgrade_sheet_codes"]);
 
-const HIDDEN_FRONTEND_FIELDS = new Set([
-  "ied_discipline_office",
-  "ied_discipline_leader",
-  "ied_discipline_leader_date",
-  ...LEGACY_UPGRADE_FIELDS,
-]);
+const HIDDEN_FRONTEND_FIELDS = new Set(["ied_discipline_office", ...LEGACY_UPGRADE_FIELDS]);
 
 const NAME_ID_FIELDS = new Set([
   "ied_chief_designer",
@@ -156,6 +153,9 @@ const ADVANCED_FIELDS = new Set([
   "ied_external_plan_date",
   "ied_fu_plan_date",
 ]);
+
+const RESPONSIBLE_UNIT_PRIORITY_PREFIX = "河北分公司-建筑结构所";
+const EXTRA_IED_DESIGN_TYPES = ["BOP子项施工图"];
 
 export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
   return {
@@ -236,8 +236,35 @@ function normalizeField(field: RawField): FormField {
     requiredWhen: field.required_when,
     defaultValue: field.default ?? "",
     description: FIELD_DESCRIPTION_OVERRIDES[field.key] ?? field.desc,
-    options: field.options,
+    options: normalizeFieldOptions(field.key, field.options),
   };
+}
+
+function normalizeFieldOptions(fieldKey: string, options: readonly string[]) {
+  const deduped = Array.from(
+    new Set(
+      options
+        .map((option) => option.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (fieldKey === "ied_design_type") {
+    for (const option of EXTRA_IED_DESIGN_TYPES) {
+      if (!deduped.includes(option)) {
+        deduped.push(option);
+      }
+    }
+  }
+
+  if (fieldKey === "ied_responsible_unit") {
+    return [
+      ...deduped.filter((option) => option.startsWith(RESPONSIBLE_UNIT_PRIORITY_PREFIX)),
+      ...deduped.filter((option) => !option.startsWith(RESPONSIBLE_UNIT_PRIORITY_PREFIX)),
+    ];
+  }
+
+  return deduped;
 }
 
 function resolveFieldType(field: RawField): FormFieldType {

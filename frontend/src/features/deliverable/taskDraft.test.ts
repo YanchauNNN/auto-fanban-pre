@@ -84,10 +84,6 @@ describe("createTaskConfigDraft", () => {
       is_upgrade: "false",
       upgrade_sheet_codes: "",
       ied_prepared_date: new Date().toISOString().slice(0, 10),
-      ied_checked_by: "",
-      ied_discipline_leader: "",
-      ied_checked_date: "",
-      ied_discipline_leader_date: "",
     });
     expect(draft.replaceConfig).toEqual({
       sourceProjectNo: "",
@@ -158,16 +154,65 @@ describe("syncTaskConfigDraft", () => {
       upgrade_sheet_codes: "001、003",
       ied_prepared_date: "2026-03-12",
       subitem_name: "默认子项",
-      ied_checked_by: "",
-      ied_discipline_leader: "",
-      ied_checked_date: "",
-      ied_discipline_leader_date: "",
     });
     expect(draft.files).toHaveLength(1);
     expect(draft.replaceConfig.targetProjectNo).toBe("2020");
   });
 
-  it("backfills the merged checker inputs from legacy discipline leader values", () => {
+  it("preserves checker and discipline leader values independently", () => {
+    const schemaWithIndependentIedFields: FormSchema = {
+      ...schema,
+      sections: [
+        ...schema.sections,
+        {
+          id: "ied",
+          title: "IED",
+          fields: [
+            {
+              key: "ied_checked_by",
+              label: "校核者",
+              type: "nameId",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "校核者",
+              options: [],
+            },
+            {
+              key: "ied_checked_date",
+              label: "校核日期",
+              type: "date",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "校核日期",
+              options: [],
+            },
+            {
+              key: "ied_discipline_leader",
+              label: "工种负责人",
+              type: "nameId",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "工种负责人",
+              options: [],
+            },
+            {
+              key: "ied_discipline_leader_date",
+              label: "工种负责人审核日期",
+              type: "date",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "工种负责人审核日期",
+              options: [],
+            },
+          ],
+        },
+      ],
+    };
+
     const currentDraft: TaskConfigDraft = {
       intent: "deliverable",
       runAuditCheck: false,
@@ -178,10 +223,10 @@ describe("syncTaskConfigDraft", () => {
         is_upgrade: "false",
         upgrade_sheet_codes: "",
         ied_prepared_date: "2026-03-12",
-        ied_checked_by: "",
-        ied_checked_date: "",
-        ied_discipline_leader: "王任超@wangrca",
-        ied_discipline_leader_date: "2026-03-22",
+        ied_checked_by: "王任超@wangrca",
+        ied_checked_date: "2026-03-22",
+        ied_discipline_leader: "孟志勇@mengzy",
+        ied_discipline_leader_date: "2026-03-24",
       },
       fieldErrors: {},
       formErrors: [],
@@ -196,11 +241,11 @@ describe("syncTaskConfigDraft", () => {
       },
     };
 
-    const draft = syncTaskConfigDraft(schema, currentDraft);
+    const draft = syncTaskConfigDraft(schemaWithIndependentIedFields, currentDraft);
 
     expect(draft.values.ied_checked_by).toBe("王任超@wangrca");
-    expect(draft.values.ied_discipline_leader).toBe("王任超@wangrca");
     expect(draft.values.ied_checked_date).toBe("2026-03-22");
-    expect(draft.values.ied_discipline_leader_date).toBe("2026-03-22");
+    expect(draft.values.ied_discipline_leader).toBe("孟志勇@mengzy");
+    expect(draft.values.ied_discipline_leader_date).toBe("2026-03-24");
   });
 });

@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-query";
 import {
   useEffect,
+  useDeferredValue,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -61,6 +62,7 @@ import {
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
+const BACKEND_MAINTENANCE_MESSAGE = "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）";
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
@@ -211,6 +213,7 @@ function WorkspacePage() {
     queryKey: ["health"],
     queryFn: () => adapter.getHealth(),
     refetchInterval: 15000,
+    retry: false,
   });
 
   const schemaQuery = useQuery({
@@ -219,6 +222,8 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
+  const backendUnavailable = healthQuery.isError || healthQuery.data?.ready === false;
+  const entryActionsDisabled = !actionsReady || backendUnavailable;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
     ? auditDraftAvailable
@@ -227,8 +232,8 @@ function WorkspacePage() {
     : "正在加载配置";
 
   const jobsQuery = useQuery({
-    queryKey: ["jobs", jobsStatusFilter ?? "all"],
-    queryFn: () => adapter.listJobs(jobsStatusFilter),
+    queryKey: ["jobs"],
+    queryFn: () => adapter.listJobs(),
     refetchInterval: (query) => {
       const items = (query.state.data as JobList | undefined)?.items ?? [];
       const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
@@ -240,14 +245,24 @@ function WorkspacePage() {
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
     [jobsQuery.data?.items],
   );
-  const normalizedRecentJobsSearch = recentJobsSearch.trim().toLowerCase();
-  const filteredJobCards = useMemo(() => {
-    if (!normalizedRecentJobsSearch) {
+  const deferredRecentJobsSearch = useDeferredValue(recentJobsSearch);
+  const normalizedRecentJobsSearch = deferredRecentJobsSearch.trim().toLowerCase();
+  const statusFilteredJobCards = useMemo(() => {
+    if (!jobsStatusFilter) {
       return jobCards;
     }
 
-    return jobCards.filter((card) => card.title.toLowerCase().includes(normalizedRecentJobsSearch));
-  }, [jobCards, normalizedRecentJobsSearch]);
+    return jobCards.filter((card) => card.status === jobsStatusFilter);
+  }, [jobCards, jobsStatusFilter]);
+  const filteredJobCards = useMemo(() => {
+    if (!normalizedRecentJobsSearch) {
+      return statusFilteredJobCards;
+    }
+
+    return statusFilteredJobCards.filter((card) =>
+      card.title.toLowerCase().includes(normalizedRecentJobsSearch),
+    );
+  }, [normalizedRecentJobsSearch, statusFilteredJobCards]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
     : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
@@ -475,7 +490,7 @@ function WorkspacePage() {
             <img alt="中核集团标识" className={styles.titleStripLogo} src={groupLogoUrl} />
             <div className={styles.titleStripText}>
               <p className={styles.brandTop}>CNPE Structural Drawing Platform</p>
-              <h1>中核工程—建筑结构所出图平台</h1>
+              <h1>中核工程-河北分公司-建筑结构所出图平台</h1>
             </div>
           </div>
           <section className={styles.titleStripStatus} data-testid="title-strip-status">
@@ -506,11 +521,18 @@ function WorkspacePage() {
                   value={healthQuery.data.officeReady ? "可用" : "缺失"}
                 />
               </div>
+            ) : healthQuery.isError ? (
+              <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
             ) : (
               <p className={styles.titleStripHealthLoading}>正在读取</p>
             )}
           </section>
         </div>
+        {backendUnavailable ? (
+          <div className={styles.titleStripMaintenanceBanner} role="alert">
+            {BACKEND_MAINTENANCE_MESSAGE}
+          </div>
+        ) : null}
       </header>
 
       <nav className={styles.moduleToolbar} data-testid="module-toolbar">
@@ -558,7 +580,7 @@ function WorkspacePage() {
                     <button
                       className={styles.primaryActionButton}
                       aria-busy={!actionsReady}
-                      disabled={!actionsReady}
+                      disabled={entryActionsDisabled}
                       type="button"
                       onClick={handleDeliverableUploadClick}
                     >
@@ -567,7 +589,7 @@ function WorkspacePage() {
                     <button
                       className={styles.primaryActionButton}
                       aria-busy={!actionsReady}
-                      disabled={!actionsReady}
+                      disabled={entryActionsDisabled}
                       type="button"
                       onClick={() => setAuditConfigOpen(true)}
                     >
@@ -576,7 +598,7 @@ function WorkspacePage() {
                     <button
                       className={styles.primaryActionButton}
                       aria-busy={!actionsReady}
-                      disabled={!actionsReady}
+                      disabled={entryActionsDisabled}
                       type="button"
                       onClick={() => setReplaceConfigOpen(true)}
                     >
@@ -638,6 +660,7 @@ function WorkspacePage() {
                     const active = (jobsStatusFilter ?? "") === (filter.value ?? "");
                     return (
                       <button
+                        aria-pressed={active}
                         className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
                         key={filter.label}
                         type="button"
@@ -826,6 +849,7 @@ function JobsBrowserModal({
             const active = (filterValue ?? "") === (filter.value ?? "");
             return (
               <button
+                aria-pressed={active}
                 className={`${styles.filterButton} ${active ? styles.filterButtonActive : ""}`}
                 key={filter.label}
                 type="button"
@@ -1151,8 +1175,12 @@ function TutorialConfigDialog() {
                 <strong>王任超@wangrca</strong>
               </div>
               <div className={styles.tutorialField}>
-                <span>校核者与工种负责人</span>
+                <span>校核者</span>
                 <strong>孟志勇@mengzy</strong>
+              </div>
+              <div className={styles.tutorialField}>
+                <span>工种负责人</span>
+                <strong>孙雷@sunl</strong>
               </div>
             </div>
           </div>

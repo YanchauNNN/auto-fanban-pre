@@ -4,8 +4,9 @@ import importlib.util
 import json
 import queue
 import threading
+import time
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,11 @@ class PipelineJobProcessor:
     def __init__(self, *, font_preflight_service: FontPreflightService | None = None) -> None:
         self.font_preflight_service = font_preflight_service
 
+    def _deliverable_executor(self) -> PipelineExecutor:
+        if self.font_preflight_service is None:
+            return PipelineExecutor()
+        return PipelineExecutor(font_preflight_service=self.font_preflight_service)
+
     def __call__(self, job: Job) -> None:
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()
@@ -50,10 +56,13 @@ class PipelineJobProcessor:
                 return
             AuditCheckExecutor().execute(job)
             return
-        if self.font_preflight_service is None:
-            PipelineExecutor().execute(job)
-            return
-        PipelineExecutor(font_preflight_service=self.font_preflight_service).execute(job)
+        self._deliverable_executor().execute(job)
+
+    def execute_slot_bound_phase(self, job: Job) -> Callable[[], None] | None:
+        if job.job_type == JobType.AUDIT_REPLACE:
+            self(job)
+            return None
+        return self._deliverable_executor().execute_slot_bound_phase(job)
 
 
 class DeliverableApiRuntime:
@@ -76,7 +85,16 @@ class DeliverableApiRuntime:
         self.shared_prep_service = shared_prep_service or SharedPrepService(
             font_preflight_service=self.font_preflight_service
         )
-        self.cad_slot_pool = CADSlotPool(config=self.config, slot_count=4)
+        self.cad_slot_pool = CADSlotPool(
+            config=self.config,
+            slot_count=max(int(self.config.cad_runtime.slot_count), 1),
+        )
+        self._max_active_groups = max(int(self.config.concurrency.max_workers), 1)
+        self._max_active_jobs = max(
+            1,
+            min(int(self.config.concurrency.max_jobs), self.cad_slot_pool.slot_count),
+        )
+        self._max_doc_jobs = max(int(self.config.concurrency.max_jobs), 1)
 
         self._group_queue: queue.Queue[str | None] = queue.Queue()
         self._job_queue: queue.Queue[str | None] = queue.Queue()
@@ -84,12 +102,24 @@ class DeliverableApiRuntime:
         self._group_dispatcher_thread: threading.Thread | None = None
         self._job_dispatcher_thread: threading.Thread | None = None
 
-        self._group_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='fanban-group')
-        self._heavy_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='fanban-heavy')
-        self._doc_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='fanban-doc')
+        self._group_executor = ThreadPoolExecutor(
+            max_workers=self._max_active_groups,
+            thread_name_prefix='fanban-group',
+        )
+        self._heavy_executor = ThreadPoolExecutor(
+            max_workers=self._max_active_jobs,
+            thread_name_prefix='fanban-heavy',
+        )
+        self._doc_executor = ThreadPoolExecutor(
+            max_workers=self._max_doc_jobs,
+            thread_name_prefix='fanban-doc',
+        )
         self._group_futures: set[Future[None]] = set()
         self._job_futures: set[Future[None]] = set()
+        self._doc_futures: set[Future[None]] = set()
         self._future_lock = threading.Lock()
+        self._job_completion_events: dict[str, threading.Event] = {}
+        self._job_completion_lock = threading.Lock()
 
     def start(self) -> None:
         self._recover_groups_and_jobs()
@@ -137,6 +167,8 @@ class DeliverableApiRuntime:
             'office_ready': importlib.util.find_spec('win32com.client') is not None,
             'active_groups': self._active_group_count(),
             'active_jobs': self._active_job_count(),
+            'active_doc_jobs': self._active_doc_count(),
+            'active_total_jobs': self._active_job_count() + self._active_doc_count(),
         }
 
     def form_schema(self) -> dict[str, Any]:
@@ -242,7 +274,7 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
-            self._job_queue.put(job.job_id)
+            self._enqueue_job(job.job_id)
             jobs.append(self._serialize_job_summary(job))
         return {'batch_id': batch_id, 'jobs': jobs}
 
@@ -303,7 +335,7 @@ class DeliverableApiRuntime:
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
-                self._job_queue.put(job.job_id)
+                self._enqueue_job(job.job_id)
                 jobs.append(self._serialize_job_summary(job))
             return {'batch_id': batch_id, 'jobs': jobs}
 
@@ -320,7 +352,7 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
-            self._job_queue.put(job.job_id)
+            self._enqueue_job(job.job_id)
             jobs.append(self._serialize_job_summary(job))
         return {'batch_id': batch_id, 'jobs': jobs}
 
@@ -488,7 +520,7 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [deliverable_job.job_id, audit_job.job_id]
         self.group_manager.update_group(group)
-        self._group_queue.put(group.group_id)
+        self._enqueue_group(group.group_id)
         return self._serialize_group_summary(group)
 
     def _create_replace_grouped_submission(
@@ -539,7 +571,7 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [replace_job.job_id, deliverable_job.job_id]
         self.group_manager.update_group(group)
-        self._group_queue.put(group.group_id)
+        self._enqueue_group(group.group_id)
         return self._serialize_group_summary(group)
 
     def _recover_groups_and_jobs(self) -> None:
@@ -556,14 +588,16 @@ class DeliverableApiRuntime:
 
     def _group_dispatch_loop(self) -> None:
         while not self._stop_event.is_set():
+            self._prune_futures()
+            if self._active_group_count() >= self._max_active_groups:
+                self._stop_event.wait(0.05)
+                continue
             try:
                 group_id = self._group_queue.get(timeout=0.2)
             except queue.Empty:
-                self._prune_futures()
                 continue
             if group_id is None:
                 break
-            self._prune_futures()
             future = self._group_executor.submit(self._process_group, group_id)
             with self._future_lock:
                 self._group_futures.add(future)
@@ -572,18 +606,17 @@ class DeliverableApiRuntime:
 
     def _job_dispatch_loop(self) -> None:
         while not self._stop_event.is_set():
+            self._prune_futures()
+            if self._active_job_count() >= self._max_active_jobs:
+                self._stop_event.wait(0.05)
+                continue
             try:
                 job_id = self._job_queue.get(timeout=0.2)
             except queue.Empty:
-                self._prune_futures()
                 continue
             if job_id is None:
                 break
-            self._prune_futures()
-            future = self._heavy_executor.submit(self._run_job, job_id)
-            with self._future_lock:
-                self._job_futures.add(future)
-            future.add_done_callback(self._discard_job_future)
+            self._submit_heavy_job(job_id)
             self._job_queue.task_done()
 
     def _process_group(self, group_id: str) -> None:
@@ -636,8 +669,10 @@ class DeliverableApiRuntime:
             if str(group.metadata.get('group_mode') or '').strip() == 'replace_then_deliverable':
                 self._run_replace_then_deliverable_group(group, child_jobs)
             else:
-                child_futures = [self._heavy_executor.submit(self._run_job, child.job_id) for child in child_jobs]
-                wait(child_futures)
+                for child in child_jobs:
+                    self._enqueue_job(child.job_id)
+                for child in child_jobs:
+                    self._wait_for_job_completion(child.job_id)
 
             children = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
             group.flags = self._merge_unique(*(child.flags for child in children))
@@ -662,8 +697,8 @@ class DeliverableApiRuntime:
         if replace_job is None or deliverable_job is None:
             raise RuntimeError('replace_then_deliverable group is missing required child jobs')
 
-        self._run_job(replace_job.job_id)
-        replace_job = self.job_manager.get_job(replace_job.job_id)
+        self._enqueue_job(replace_job.job_id)
+        replace_job = self._wait_for_job_completion(replace_job.job_id)
         if replace_job is None or replace_job.status != JobStatus.SUCCEEDED or replace_job.artifacts.replaced_dwg is None:
             if deliverable_job.status == JobStatus.QUEUED:
                 deliverable_job.mark_failed('replace_job_failed')
@@ -706,13 +741,15 @@ class DeliverableApiRuntime:
             deliverable_prep.font_preflight_summary.get("replaced_style_count", 0) or 0
         )
         self.job_manager.update_job(deliverable_job)
-        self._run_job(deliverable_job.job_id)
+        self._enqueue_job(deliverable_job.job_id)
+        self._wait_for_job_completion(deliverable_job.job_id)
 
     def _run_job(self, job_id: str) -> None:
         job = self.job_manager.get_job(job_id)
         if job is None or job.status != JobStatus.QUEUED:
             return
         slot = None
+        completion_deferred = False
         try:
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
             resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
@@ -745,7 +782,18 @@ class DeliverableApiRuntime:
             }
             job.work_dir = self.config.get_job_dir(job.job_id)
             job.work_dir.mkdir(parents=True, exist_ok=True)
-            self.job_processor(job)
+            staged_processor = getattr(self.job_processor, 'execute_slot_bound_phase', None)
+            if callable(staged_processor):
+                post_slot_work = staged_processor(job)
+                self.job_manager.update_job(job)
+                if post_slot_work is not None:
+                    self.cad_slot_pool.release(slot.slot_id)
+                    slot = None
+                    completion_deferred = True
+                    self._submit_doc_job(job.job_id, post_slot_work)
+                    return
+            else:
+                self.job_processor(job)
         except Exception as exc:  # noqa: BLE001
             if job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
                 job.mark_failed(str(exc))
@@ -753,6 +801,74 @@ class DeliverableApiRuntime:
             self.job_manager.update_job(job)
             if slot is not None:
                 self.cad_slot_pool.release(slot.slot_id)
+            if not completion_deferred:
+                self._signal_job_completion(job.job_id)
+
+    def _enqueue_group(self, group_id: str) -> None:
+        self._group_queue.put(group_id)
+
+    def _enqueue_job(self, job_id: str) -> None:
+        with self._job_completion_lock:
+            event = self._job_completion_events.get(job_id)
+            if event is None:
+                event = threading.Event()
+                self._job_completion_events[job_id] = event
+            event.clear()
+        self._job_queue.put(job_id)
+
+    def _submit_heavy_job(self, job_id: str) -> Future[None]:
+        future = self._heavy_executor.submit(self._run_job, job_id)
+        with self._future_lock:
+            self._job_futures.add(future)
+        future.add_done_callback(self._discard_job_future)
+        return future
+
+    def _submit_doc_job(
+        self,
+        job_id: str,
+        post_slot_work: Callable[[], None],
+    ) -> Future[None]:
+        future = self._doc_executor.submit(self._run_doc_job, job_id, post_slot_work)
+        with self._future_lock:
+            self._doc_futures.add(future)
+        future.add_done_callback(self._discard_doc_future)
+        return future
+
+    def _run_doc_job(
+        self,
+        job_id: str,
+        post_slot_work: Callable[[], None],
+    ) -> None:
+        job = self.job_manager.get_job(job_id)
+        try:
+            post_slot_work()
+        except Exception as exc:  # noqa: BLE001
+            if job is not None and job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
+                job.mark_failed(str(exc))
+        finally:
+            if job is not None:
+                self.job_manager.update_job(job)
+            self._signal_job_completion(job_id)
+
+    def _wait_for_job_completion(self, job_id: str, timeout_sec: float = 3600.0) -> Job | None:
+        deadline = time.monotonic() + timeout_sec
+        while not self._stop_event.is_set():
+            with self._job_completion_lock:
+                event = self._job_completion_events.setdefault(job_id, threading.Event())
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f'job did not finish within {timeout_sec}s: {job_id}')
+            if event.wait(timeout=min(0.2, remaining)):
+                return self.job_manager.get_job(job_id)
+        raise RuntimeError(f'service stopping before job completion: {job_id}')
+
+    def _signal_job_completion(self, job_id: str) -> None:
+        with self._job_completion_lock:
+            event = self._job_completion_events.get(job_id)
+            if event is None:
+                event = threading.Event()
+                self._job_completion_events[job_id] = event
+            event.set()
 
     def _resolve_job_plot_style(self, job: Job) -> tuple[str, str]:
         plot_cfg = self.config.module5_export.plot
@@ -1080,10 +1196,15 @@ class DeliverableApiRuntime:
         with self._future_lock:
             self._job_futures.discard(future)
 
+    def _discard_doc_future(self, future: Future[None]) -> None:
+        with self._future_lock:
+            self._doc_futures.discard(future)
+
     def _prune_futures(self) -> None:
         with self._future_lock:
             self._group_futures = {future for future in self._group_futures if not future.done()}
             self._job_futures = {future for future in self._job_futures if not future.done()}
+            self._doc_futures = {future for future in self._doc_futures if not future.done()}
 
     def _active_group_count(self) -> int:
         self._prune_futures()
@@ -1094,3 +1215,8 @@ class DeliverableApiRuntime:
         self._prune_futures()
         with self._future_lock:
             return len(self._job_futures)
+
+    def _active_doc_count(self) -> int:
+        self._prune_futures()
+        with self._future_lock:
+            return len(self._doc_futures)

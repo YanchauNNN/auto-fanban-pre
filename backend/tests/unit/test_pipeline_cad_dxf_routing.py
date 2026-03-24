@@ -107,6 +107,44 @@ def test_execute_uses_shared_prep_and_skips_early_detection_stages(tmp_path: Pat
     assert StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value in seen_stages
 
 
+def test_execute_slot_bound_phase_defers_docs_until_post_phase(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(get_job_dir=lambda job_id: tmp_path / "storage" / "jobs" / job_id),
+    )
+    executor._last_progress_write = 0.0
+    executor._progress_interval_sec = 0.0
+    executor._update_progress = MagicMock()
+    seen_stages: list[str] = []
+
+    def fake_execute_stage(job, stage, context):
+        seen_stages.append(stage.name)
+
+    executor._execute_stage = fake_execute_stage
+    executor._aggregate_flags = lambda job, context: None
+    executor._raise_if_fatal_export_errors = lambda job: None
+
+    job = Job(
+        job_id="job-slot-bound-phase",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+    )
+
+    post_phase = PipelineExecutor.execute_slot_bound_phase(executor, job)
+
+    all_stage_names = [stage.name for stage in DELIVERABLE_STAGES]
+    export_index = all_stage_names.index(StageEnum.EXPORT_PDF_AND_DWG.value)
+    assert seen_stages == all_stage_names[: export_index + 1]
+    assert callable(post_phase)
+    assert job.status == JobStatus.RUNNING
+
+    post_phase()
+
+    assert seen_stages == all_stage_names
+    assert job.status == JobStatus.SUCCEEDED
+
+
 def test_stage_order_includes_font_preflight_before_convert() -> None:
     stage_names = [stage.name for stage in DELIVERABLE_STAGES]
 

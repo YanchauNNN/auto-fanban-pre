@@ -29,6 +29,7 @@ ALL_MANAGED_CTB_NAMES = (
     MANAGED_REVIEW_WHITE_CTB_NAME,
 )
 MIN_VALID_CTB_BYTES = 512
+DEFAULT_PLOT_ASSET_ROOT_ENV_VAR = "FANBAN_PLOT_ASSET_ROOT"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def ensure_plot_resources(
     pmp_name: str = PDF2_PMP_NAME,
     ctb_name: str = MANAGED_CTB_NAME,
     managed_ctb_names: Iterable[str] | None = None,
+    min_valid_ctb_bytes: int = MIN_VALID_CTB_BYTES,
     target_plotters_dirs: Iterable[Path] | None = None,
     target_plot_styles_dirs: Iterable[Path] | None = None,
 ) -> PlotResourceContext:
@@ -67,7 +69,12 @@ def ensure_plot_resources(
         managed_ctb_names=managed_ctb_names,
     )
     ctb_sources = {
-        name: _pick_ctb_source(path_info, roots, name)
+        name: _pick_ctb_source(
+            path_info,
+            roots,
+            name,
+            min_valid_ctb_bytes=min_valid_ctb_bytes,
+        )
         for name in ctb_names_to_deploy
     }
 
@@ -118,26 +125,37 @@ def ensure_plot_resources(
 
 
 def default_asset_roots() -> list[Path]:
-    env_root = os.getenv("FANBAN_PLOT_ASSET_ROOT")
+    plot_assets_cfg = _load_plot_assets_config()
+    env_var_name = (
+        str(getattr(plot_assets_cfg, "env_asset_root_var", "") or "").strip()
+        or DEFAULT_PLOT_ASSET_ROOT_ENV_VAR
+    )
+    env_root = os.getenv(env_var_name)
     roots: list[Path] = []
     if env_root:
         roots.append(Path(env_root))
-    if getattr(sys, "frozen", False):
+    configured_roots = list(getattr(plot_assets_cfg, "asset_roots", []) or [])
+    if configured_roots:
+        roots.extend(Path(root) for root in configured_roots)
+    else:
+        module_path = Path(__file__).resolve()
+        repo_like_roots: list[Path] = []
+        for idx in (3, 4):
+            with_root = module_path.parents[idx] if len(module_path.parents) > idx else None
+            if with_root is not None and with_root not in repo_like_roots:
+                repo_like_roots.append(with_root)
+        for repo_root in repo_like_roots:
+            roots.extend(
+                [
+                    repo_root / "test" / "dist" / "assets",
+                    repo_root / "documents" / "Resources",
+                ]
+            )
+    if getattr(sys, "frozen", False) and bool(
+        getattr(plot_assets_cfg, "include_frozen_asset_dirs", True),
+    ):
         exe_root = Path(sys.executable).resolve().parent
         roots.extend([exe_root / "assets", exe_root / "_internal" / "assets"])
-    module_path = Path(__file__).resolve()
-    repo_like_roots: list[Path] = []
-    for idx in (3, 4):
-        with_root = module_path.parents[idx] if len(module_path.parents) > idx else None
-        if with_root is not None and with_root not in repo_like_roots:
-            repo_like_roots.append(with_root)
-    for repo_root in repo_like_roots:
-        roots.extend(
-            [
-                repo_root / "test" / "dist" / "assets",
-                repo_root / "documents" / "Resources",
-            ]
-        )
     unique: list[Path] = []
     seen: set[str] = set()
     for root in roots:
@@ -256,6 +274,8 @@ def _pick_ctb_source(
     path_info: AutoCADPathInfo,
     roots: list[Path],
     ctb_name: str,
+    *,
+    min_valid_ctb_bytes: int,
 ) -> Path:
     source = _pick_asset_source(
         roots,
@@ -264,12 +284,15 @@ def _pick_ctb_source(
             Path(ctb_name),
         ],
     )
-    if source is not None and _is_valid_ctb_file(source):
+    if source is not None and _is_valid_ctb_file(source, min_valid_bytes=min_valid_ctb_bytes):
         return source
     if (
         path_info.monochrome_ctb_path is not None
         and Path(path_info.monochrome_ctb_path).exists()
-        and _is_valid_ctb_file(Path(path_info.monochrome_ctb_path))
+        and _is_valid_ctb_file(
+            Path(path_info.monochrome_ctb_path),
+            min_valid_bytes=min_valid_ctb_bytes,
+        )
     ):
         return Path(path_info.monochrome_ctb_path)
     raise FileNotFoundError(f"????CTB??: {ctb_name}")
@@ -324,11 +347,20 @@ def _extract_year_hint(path_info: AutoCADPathInfo) -> str | None:
     return None
 
 
-def _is_valid_ctb_file(path: Path) -> bool:
+def _is_valid_ctb_file(path: Path, *, min_valid_bytes: int = MIN_VALID_CTB_BYTES) -> bool:
     try:
         data = path.read_bytes()
     except OSError:
         return False
-    if len(data) < MIN_VALID_CTB_BYTES:
+    if len(data) < min_valid_bytes:
         return False
     return data != b"bundled-ctb"
+
+
+def _load_plot_assets_config():
+    try:
+        from ..config import get_config
+
+        return get_config().plot_assets
+    except Exception:
+        return None

@@ -7,9 +7,44 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2026-03-13"
+last_updated: "2026-03-24"
 
 runtime_options:
+  # --------------------------------------------------------------------------
+  # 0) 运行根路径与配置解析
+  # --------------------------------------------------------------------------
+  paths:
+    base_dir: { type: str, default: ".", desc: "资源相对根目录；源码模式下解析为仓库根，打包模式下解析为 _internal 目录" }
+    storage_dir: { type: str, default: "storage", desc: "任务存储根目录；实际会派生出 storage/jobs、storage/groups、storage/runtime、storage/preflight、storage/runtime/cad-slots。相对路径在源码模式下相对仓库根，在打包模式下相对 exe 所在目录" }
+    spec_path: { type: str, default: "documents/参数规范.yaml", desc: "业务规范文件路径；相对 base_dir 解析" }
+    runtime_spec_path: { type: str, default: "documents/参数规范_运行期.yaml", desc: "当前运行期规范文件路径；相对 base_dir 解析" }
+
+  bootstrap_contract:
+    spec_path_env_var: { type: str, default: "FANBAN_SPEC_PATH", desc: "业务规范文件路径的启动期环境变量；属于引导变量，在 YAML 加载前生效" }
+    runtime_spec_path_env_var: { type: str, default: "FANBAN_RUNTIME_SPEC_PATH", desc: "运行期规范文件路径的启动期环境变量；属于引导变量，在 YAML 加载前生效" }
+    autocad_install_dir_env_var: { type: str, default: "FANBAN_AUTOCAD_INSTALL_DIR", desc: "AutoCAD 安装目录环境变量；用于自动探测链的高优先级覆盖" }
+    plot_asset_root_env_var: { type: str, default: "FANBAN_PLOT_ASSET_ROOT", desc: "打印资源资产根目录环境变量；高于 plot_assets.asset_roots" }
+    runtime_spec_fallback_paths:
+      type: "list[str]"
+      default: ["documents/参数规范_运行期.yaml", "config/参数规范_运行期.yaml"]
+      desc: "运行期规范的默认查找顺序；当未显式传参、也未设置 FANBAN_RUNTIME_SPEC_PATH 时按此顺序回退"
+    env_prefix: { type: str, default: "FANBAN_", desc: "运行期通用环境变量前缀；任何 RuntimeConfig 字段都可通过该前缀覆盖" }
+    env_nested_delimiter: { type: str, default: "__", desc: "运行期环境变量嵌套分隔符；例如 FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" }
+    launcher_managed_env_keys:
+      type: "list[str]"
+      default:
+        - "FANBAN_SPEC_PATH"
+        - "FANBAN_RUNTIME_SPEC_PATH"
+        - "FANBAN_ODA__EXE_PATH"
+        - "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR"
+        - "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH"
+        - "FANBAN_PLOT_ASSET_ROOT"
+        - "FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME"
+        - "FANBAN_AUTOCAD_INSTALL_DIR"
+        - "FANBAN_MODULE5_EXPORT__CAD_RUNNER__ACCORECONSOLE_EXE"
+        - "FANBAN_AUTOCAD__CTB_PATH"
+      desc: "打包启动器 configure_runtime_environment 会主动设置或覆盖的关键环境变量键"
+
   # --------------------------------------------------------------------------
   # 1) 并发与队列
   # --------------------------------------------------------------------------
@@ -32,6 +67,38 @@ runtime_options:
   # --------------------------------------------------------------------------
   # 3) 路径与外部程序
   # --------------------------------------------------------------------------
+  cad_runtime:
+    slot_count: { type: int, default: 4, desc: "CAD 槽位池数量；会限制重任务最大并发数，API runtime 不应再硬编码" }
+
+  plot_assets:
+    asset_roots:
+      type: "list[str]"
+      default: ["test/dist/assets", "documents/Resources"]
+      desc: "打印资源搜索根目录列表；当未设置 FANBAN_PLOT_ASSET_ROOT 时按顺序查找，打包运行时还会自动附加 exe/assets 与 exe/_internal/assets"
+    env_asset_root_var: { type: str, default: "FANBAN_PLOT_ASSET_ROOT", desc: "打印资源根目录环境变量名称" }
+    include_frozen_asset_dirs: { type: bool, default: true, desc: "打包运行时是否自动附加 exe/assets 与 exe/_internal/assets 到搜索链" }
+    pmp_name: { type: str, default: "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp", desc: "托管打印资源使用的 PMP 文件名" }
+    managed_ctb_names:
+      type: "list[str]"
+      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "打白图.ctb"]
+      desc: "系统需要确保部署到 AutoCAD 可见目录的托管 CTB 文件名集合"
+    min_valid_ctb_bytes: { type: int, default: 512, desc: "CTB 文件最小有效体积；小于该阈值视为无效资源" }
+    source_priority:
+      type: "list[str]"
+      default:
+        - "环境变量根目录(FANBAN_PLOT_ASSET_ROOT)"
+        - "YAML asset_roots 顺序"
+        - "打包附加目录(exe/assets)"
+        - "打包附加目录(exe/_internal/assets)"
+      desc: "打印资产来源优先级；前一层找到有效资源后不再继续向后搜索"
+    deployment_targets:
+      type: "list[str]"
+      default:
+        - "AutoCAD Plotters"
+        - "AutoCAD Plotters/PMP Files"
+        - "AutoCAD Plotters/Plot Styles"
+      desc: "托管打印资源的部署目标目录"
+
   oda_converter:
     exe_path: { type: str, required: true, default: "..\\bin\\ODAFileConverter 25.12.0\\ODAFileConverter.exe", desc: "ODA File Converter 可执行文件路径（可使用相对路径，默认相对config目录）" }
     work_dir: { type: str, required: false, desc: "ODA 临时工作目录（可选）" }
@@ -100,11 +167,11 @@ runtime_options:
       pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
   autocad:
-    install_dir: { type: str, required: false, default: "", desc: "AutoCAD 安装目录；留空时自动探测本机安装" }
+    install_dir: { type: str, required: false, default: "", desc: "AutoCAD 安装目录；留空时自动探测本机安装。探测优先级为：YAML/显式配置 -> FANBAN_AUTOCAD_INSTALL_DIR -> 注册表 -> 默认安装候选目录" }
     prog_id_candidates: { type: "list[str]", default: ["AutoCAD.Application.24.1", "AutoCAD.Application.24.0", "AutoCAD.Application"], desc: "AutoCAD COM ProgID 回退序列（2022→2021→通用）" }
     visible: { type: bool, default: false, desc: "是否显示 AutoCAD 主窗口（调试时可设 true）" }
     plot_timeout_sec: { type: int, default: 300, desc: "AutoCAD 打印超时（秒）" }
-    ctb_path: { type: str, required: false, default: "", desc: "CTB 路径；留空时自动探测本机 Plot Styles 中的 fanban_monochrome.ctb" }
+    ctb_path: { type: str, required: false, default: "", desc: "CTB 路径；留空时自动探测本机 Plot Styles 中的 fanban_monochrome.ctb。打包启动器会优先改写为托管 CTB 的部署路径" }
     pc3_name: { type: str, default: "打印PDF2.pc3", desc: "AutoCAD 使用的 PC3 配置名" }
     retry: { type: int, default: 1, desc: "AutoCAD 打印失败重试次数" }
 

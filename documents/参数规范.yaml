@@ -490,6 +490,7 @@ doc_generation:
     cover_bindings:
       # 通用封面（封面模板文件*.docx，内嵌Sheet"封面"）
       common:
+        project_name:        { cell: "A7:U7", merge: true, desc: "项目名称（非1818由project_no枚举动态写入）" }
         engineering_no:      { cell: "I11", label: "D11" }
         subitem_no:          { cell: "I13", label: "D13" }
         subitem_name:        { cell: "I15", label: "D15" }

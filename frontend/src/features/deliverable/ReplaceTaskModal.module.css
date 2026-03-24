@@ -7,6 +7,7 @@
   justify-content: center;
   padding: 1.5rem;
   background: rgba(6, 18, 34, 0.48);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
@@ -21,6 +22,12 @@
   background-size: auto, 18px 18px, 18px 18px;
   box-shadow: 0 24px 80px rgba(9, 28, 53, 0.28);
   padding: 1.35rem;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .backdrop {
+    background: rgba(6, 18, 34, 0.18);
+  }
 }
 
 .header {

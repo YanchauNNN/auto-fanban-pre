@@ -287,6 +287,31 @@ class DxfPdfExportConfig(BaseModel):
     )
 
 
+class CadRuntimeConfig(BaseModel):
+    """CAD 运行时资源池配置"""
+
+    slot_count: int = 4
+
+
+class PlotAssetsConfig(BaseModel):
+    """打印资源资产配置"""
+
+    asset_roots: list[Path] = Field(
+        default_factory=lambda: [Path("test/dist/assets"), Path("documents/Resources")],
+    )
+    env_asset_root_var: str = "FANBAN_PLOT_ASSET_ROOT"
+    include_frozen_asset_dirs: bool = True
+    pmp_name: str = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
+    managed_ctb_names: list[str] = Field(
+        default_factory=lambda: [
+            "fanban_monochrome.ctb",
+            "fanban_monochrome-same width.ctb",
+            "打白图.ctb",
+        ],
+    )
+    min_valid_ctb_bytes: int = 512
+
+
 class RuntimeConfig(BaseSettings):
     """运行期配置（支持环境变量覆盖）"""
 
@@ -313,6 +338,8 @@ class RuntimeConfig(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
     dxf_pdf_export: DxfPdfExportConfig = Field(default_factory=DxfPdfExportConfig)
+    cad_runtime: CadRuntimeConfig = Field(default_factory=CadRuntimeConfig)
+    plot_assets: PlotAssetsConfig = Field(default_factory=PlotAssetsConfig)
 
     model_config = {
         "env_prefix": "FANBAN_",
@@ -331,6 +358,7 @@ class RuntimeConfig(BaseSettings):
             data = yaml.safe_load(f)
 
         runtime_opts = data.get("runtime_options", {})
+        path_values = cls._extract(runtime_opts, "paths")
 
         yaml_values = {
             "concurrency": ConcurrencyConfig(**cls._extract(runtime_opts, "concurrency")),
@@ -355,7 +383,12 @@ class RuntimeConfig(BaseSettings):
             "dxf_pdf_export": DxfPdfExportConfig(
                 **cls._extract(runtime_opts, "dxf_pdf_export"),
             ),
+            "cad_runtime": CadRuntimeConfig(**cls._extract(runtime_opts, "cad_runtime")),
+            "plot_assets": PlotAssetsConfig(**cls._extract(runtime_opts, "plot_assets")),
         }
+        for path_key in ("base_dir", "storage_dir", "spec_path", "runtime_spec_path"):
+            if path_key in path_values:
+                yaml_values[path_key] = path_values[path_key]
 
         # BaseSettings 直接传参会压过环境变量；这里先按 YAML 组装，再显式应用 FANBAN_* 覆盖。
         config = cls.model_validate(yaml_values)
@@ -475,14 +508,19 @@ class RuntimeConfig(BaseSettings):
             lexicon_path = Path(self.audit_check.lexicon_path)
             if not lexicon_path.is_absolute():
                 self.audit_check.lexicon_path = str((self.base_dir / lexicon_path).resolve())
+        self.plot_assets.asset_roots = [
+            root if root.is_absolute() else (self.base_dir / root).resolve()
+            for root in self.plot_assets.asset_roots
+        ]
 
     def _normalize_root_paths(self, base_dir: Path) -> None:
         """???????????????????? Path???????????"""
         project_root = self._resolve_project_root(base_dir)
+        runtime_root = self._resolve_runtime_root(base_dir)
         self.base_dir = self._resolve_root_path(self.base_dir, project_root)
-        self.storage_dir = self._coerce_path(self.storage_dir)
-        self.spec_path = self._coerce_path(self.spec_path)
-        self.runtime_spec_path = self._coerce_path(self.runtime_spec_path)
+        self.storage_dir = self._resolve_root_path(self.storage_dir, runtime_root)
+        self.spec_path = self._resolve_root_path(self.spec_path, project_root)
+        self.runtime_spec_path = self._resolve_root_path(self.runtime_spec_path, project_root)
 
     @staticmethod
     def _coerce_path(value: str | Path) -> Path:
@@ -501,6 +539,13 @@ class RuntimeConfig(BaseSettings):
         if normalized.name.lower() in {"documents", "config"}:
             return normalized.parent
         return normalized
+
+    @classmethod
+    def _resolve_runtime_root(cls, config_dir: Path) -> Path:
+        project_root = cls._resolve_project_root(config_dir)
+        if project_root.name == "_internal" and project_root.parent.exists():
+            return project_root.parent
+        return project_root
 
     def get_job_dir(self, job_id: str) -> Path:
         """获取任务工作目录"""

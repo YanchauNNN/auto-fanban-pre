@@ -336,10 +336,26 @@ class CADDXFExecutor:
         path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
         target_plotters_dirs = self._slot_target_dirs(slot_runtime, "plotters_dir")
         target_plot_styles_dirs = self._slot_target_dirs(slot_runtime, "plot_styles_dir")
+        plot_cfg = self.config.module5_export.plot
+        plot_assets_cfg = self.config.plot_assets
+        effective_ctb_name = ctb_name or plot_cfg.ctb_name
+        managed_ctb_names = list(
+            dict.fromkeys(
+                [
+                    *list(plot_assets_cfg.managed_ctb_names),
+                    *list(getattr(plot_cfg, "plot_style_profiles", {}).values()),
+                    str(effective_ctb_name),
+                ]
+            )
+        )
         return ensure_plot_resources(
             path_info=path_info,
-            pc3_name=self.config.module5_export.plot.pc3_name,
-            ctb_name=ctb_name or self.config.module5_export.plot.ctb_name,
+            asset_roots=list(plot_assets_cfg.asset_roots),
+            pc3_name=plot_cfg.pc3_name,
+            pmp_name=plot_assets_cfg.pmp_name,
+            ctb_name=effective_ctb_name,
+            managed_ctb_names=managed_ctb_names,
+            min_valid_ctb_bytes=plot_assets_cfg.min_valid_ctb_bytes,
             target_plotters_dirs=target_plotters_dirs,
             target_plot_styles_dirs=target_plot_styles_dirs,
         )

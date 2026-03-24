@@ -4,11 +4,46 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from src.cad.plot_resource_manager import (
+    MANAGED_CTB_NAME,
+    MANAGED_REVIEW_WHITE_CTB_NAME,
+    MANAGED_SAME_WIDTH_CTB_NAME,
+    PDF2_PC3_NAME,
+    PDF2_PMP_NAME,
+)
 from src.cad.slot_pool import CADSlotPool
 
 
-def test_cad_slot_pool_initializes_four_slots(tmp_path: Path) -> None:
-    config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
+def _build_slot_pool_config(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
+        storage_dir=tmp_path / "storage",
+        autocad=SimpleNamespace(install_dir=""),
+        module5_export=SimpleNamespace(
+            plot=SimpleNamespace(
+                pc3_name=PDF2_PC3_NAME,
+                ctb_name=MANAGED_CTB_NAME,
+                plot_style_profiles={
+                    "default": MANAGED_CTB_NAME,
+                    "review": MANAGED_SAME_WIDTH_CTB_NAME,
+                },
+            )
+        ),
+        plot_assets=SimpleNamespace(
+            asset_roots=[],
+            pmp_name=PDF2_PMP_NAME,
+            managed_ctb_names=[
+                MANAGED_CTB_NAME,
+                MANAGED_SAME_WIDTH_CTB_NAME,
+                MANAGED_REVIEW_WHITE_CTB_NAME,
+            ],
+            min_valid_ctb_bytes=512,
+        ),
+    )
+
+
+def test_cad_slot_pool_initializes_four_slots(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("src.cad.slot_pool.ensure_plot_resources", lambda **kwargs: None)
+    config = _build_slot_pool_config(tmp_path)
     config.storage_dir.mkdir(parents=True, exist_ok=True)
 
     pool = CADSlotPool(config=cast(Any, config), slot_count=4)
@@ -25,8 +60,9 @@ def test_cad_slot_pool_initializes_four_slots(tmp_path: Path) -> None:
         assert slot.logs_dir.exists()
 
 
-def test_cad_slot_pool_acquire_and_release_updates_status(tmp_path: Path) -> None:
-    config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
+def test_cad_slot_pool_acquire_and_release_updates_status(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("src.cad.slot_pool.ensure_plot_resources", lambda **kwargs: None)
+    config = _build_slot_pool_config(tmp_path)
     config.storage_dir.mkdir(parents=True, exist_ok=True)
     pool = CADSlotPool(config=cast(Any, config), slot_count=1)
 
@@ -47,27 +83,68 @@ def test_cad_slot_pool_preloads_all_managed_plot_styles(tmp_path: Path, monkeypa
     plot_styles_root = resources_root / "plot_styles"
     plotters_root.mkdir(parents=True, exist_ok=True)
     plot_styles_root.mkdir(parents=True, exist_ok=True)
-    (plotters_root / "打印PDF2.pc3").write_text("pc3", encoding="utf-8")
-    (plotters_root / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp").write_text(
-        "pmp",
-        encoding="utf-8",
-    )
+    (plotters_root / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_root / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
     for name in (
-        "fanban_monochrome.ctb",
-        "fanban_monochrome-same width.ctb",
-        "打白图.ctb",
+        MANAGED_CTB_NAME,
+        MANAGED_SAME_WIDTH_CTB_NAME,
+        MANAGED_REVIEW_WHITE_CTB_NAME,
     ):
         (plot_styles_root / name).write_text(name * 64, encoding="utf-8")
 
     monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(resources_root))
-    config = SimpleNamespace(storage_dir=tmp_path / "storage", autocad=SimpleNamespace(install_dir=""))
+    config = _build_slot_pool_config(tmp_path)
+    config.plot_assets.asset_roots = [resources_root]
     config.storage_dir.mkdir(parents=True, exist_ok=True)
 
     pool = CADSlotPool(config=cast(Any, config), slot_count=1)
 
     slot = pool.list_slots()[0]
-    assert (slot.plotters_dir / "打印PDF2.pc3").exists()
-    assert (slot.pmp_dir / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp").exists()
-    assert (slot.plot_styles_dir / "fanban_monochrome.ctb").exists()
-    assert (slot.plot_styles_dir / "fanban_monochrome-same width.ctb").exists()
-    assert (slot.plot_styles_dir / "打白图.ctb").exists()
+    assert (slot.plotters_dir / PDF2_PC3_NAME).exists()
+    assert (slot.pmp_dir / PDF2_PMP_NAME).exists()
+    assert (slot.plot_styles_dir / MANAGED_CTB_NAME).exists()
+    assert (slot.plot_styles_dir / MANAGED_SAME_WIDTH_CTB_NAME).exists()
+    assert (slot.plot_styles_dir / MANAGED_REVIEW_WHITE_CTB_NAME).exists()
+
+
+def test_cad_slot_pool_passes_configured_plot_resource_settings(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_ensure_plot_resources(**kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr("src.cad.slot_pool.ensure_plot_resources", _fake_ensure_plot_resources)
+    config = SimpleNamespace(
+        storage_dir=tmp_path / "storage",
+        autocad=SimpleNamespace(install_dir=""),
+        module5_export=SimpleNamespace(
+            plot=SimpleNamespace(
+                pc3_name="custom.pc3",
+                ctb_name="custom.ctb",
+                plot_style_profiles={
+                    "default": "custom.ctb",
+                    "review": "review.ctb",
+                },
+            )
+        ),
+        plot_assets=SimpleNamespace(
+            asset_roots=[tmp_path / "assets-a", tmp_path / "assets-b"],
+            pmp_name="custom.pmp",
+            managed_ctb_names=["custom.ctb", "review.ctb"],
+            min_valid_ctb_bytes=4096,
+        ),
+    )
+    config.storage_dir.mkdir(parents=True, exist_ok=True)
+
+    CADSlotPool(config=cast(Any, config), slot_count=1)
+
+    assert captured["pc3_name"] == "custom.pc3"
+    assert captured["ctb_name"] == "custom.ctb"
+    assert captured["pmp_name"] == "custom.pmp"
+    assert captured["managed_ctb_names"] == ["custom.ctb", "review.ctb"]
+    assert captured["min_valid_ctb_bytes"] == 4096
+    assert captured["asset_roots"] == [tmp_path / "assets-a", tmp_path / "assets-b"]

@@ -58,7 +58,7 @@ const schema: FormSchema = normalizeFormSchema({
             source: "frontend",
             default: "",
             format: null,
-            desc: "图册名称（中文），例如：XXX厂房XX标高模板图",
+            desc: "图册名称（中文）",
             options: [],
           },
         ],
@@ -156,8 +156,8 @@ function createAdapter(): ApiAdapter {
   };
 }
 
-describe("DeliverableWorkspace combined IED checker fields", () => {
-  it("renders one combined person/date pair and submits both backend targets with the same values", async () => {
+describe("DeliverableWorkspace independent IED checker fields", () => {
+  it("renders checker and discipline leader inputs separately and submits their distinct values", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
 
@@ -173,15 +173,17 @@ describe("DeliverableWorkspace combined IED checker fields", () => {
       />,
     );
 
-    expect(screen.queryByLabelText("工种负责人")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("工种负责人审核日期")).not.toBeInTheDocument();
-
     await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
-    await user.type(screen.getByLabelText("校核者与工种负责人"), "王任超@wangrca");
+    await user.type(screen.getByLabelText("校核者"), "王任超@wangrca");
+    await user.type(screen.getByLabelText("工种负责人"), "孟志勇@mengzy");
 
-    const dateInput = screen.getByLabelText("校核日期与工种审核日期");
-    await user.clear(dateInput);
-    await user.type(dateInput, "2026-03-22");
+    const checkedDateInput = screen.getByLabelText("校核日期");
+    await user.clear(checkedDateInput);
+    await user.type(checkedDateInput, "2026-03-22");
+
+    const disciplineLeaderDateInput = screen.getByLabelText("工种负责人审核日期");
+    await user.clear(disciplineLeaderDateInput);
+    await user.type(disciplineLeaderDateInput, "2026-03-24");
 
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
 
@@ -189,9 +191,9 @@ describe("DeliverableWorkspace combined IED checker fields", () => {
       expect(adapter.createBatch).toHaveBeenCalledWith(
         expect.objectContaining({
           ied_checked_by: "王任超@wangrca",
-          ied_discipline_leader: "王任超@wangrca",
           ied_checked_date: "2026-03-22",
-          ied_discipline_leader_date: "2026-03-22",
+          ied_discipline_leader: "孟志勇@mengzy",
+          ied_discipline_leader_date: "2026-03-24",
         }),
         expect.any(Array),
         false,
