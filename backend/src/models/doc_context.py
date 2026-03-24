@@ -181,6 +181,7 @@ class DerivedFields(BaseModel):
 
     # 版次派生
     document_revision: str | None = None
+    cover_catalog_revision: str | None = None
     catalog_revision: str | None = None
 
     # 固定值
@@ -290,12 +291,22 @@ class DocContext(BaseModel):
         return frame.titleblock.page_total or 1
 
     def get_document_revision(self) -> str:
-        """返回封面/目录等卷册级文档应使用的统一版次。"""
+        """返回图纸链路文档应使用的统一版次。"""
 
         return (
             self.derived.document_revision
+            or self.params.revision
+            or "A"
+        )
+
+    def get_cover_catalog_revision(self) -> str:
+        """返回封面/目录专用版次。"""
+
+        return (
+            self.derived.cover_catalog_revision
             or self.derived.catalog_revision
             or self.params.cover_revision
+            or ("B" if self.params.is_upgrade else "A")
             or "A"
         )
 

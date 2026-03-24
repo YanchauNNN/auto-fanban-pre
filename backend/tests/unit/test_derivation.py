@@ -93,12 +93,12 @@ class TestDerivationEngine:
 
         assert derived.discipline_en == "Structural Engineering"
 
-    def test_derive_catalog_revision_uses_highest_drawing_revision(
+    def test_derive_cover_catalog_revision_is_independent_from_highest_drawing_revision(
         self,
         engine: DerivationEngine,
         sample_frame,
     ):
-        """目录/封面版次应与图纸最高版次保持一致。"""
+        """封面/目录版次应仅受封面参数控制，不随图纸最高版次抬升。"""
         params = GlobalDocParams(
             project_no="2016",
             cover_revision="A",
@@ -112,9 +112,10 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[frame_a, frame_b])
         derived = engine.compute(ctx)
         assert derived.document_revision == "C"
-        assert derived.catalog_revision == "C"
+        assert derived.catalog_revision == "A"
+        assert derived.cover_catalog_revision == "A"
 
-    def test_derive_catalog_revision_falls_back_to_cover_without_drawing_revisions(
+    def test_derive_cover_catalog_revision_falls_back_to_cover_without_drawing_revisions(
         self,
         engine: DerivationEngine,
     ):
@@ -126,6 +127,7 @@ class TestDerivationEngine:
         derived = engine.compute(ctx)
         assert derived.document_revision == "A"
         assert derived.catalog_revision == "A"
+        assert derived.cover_catalog_revision == "A"
 
         params2 = GlobalDocParams(
             project_no="2016",
@@ -133,16 +135,17 @@ class TestDerivationEngine:
         )
         ctx2 = DocContext(params=params2, frames=[])
         derived2 = engine.compute(ctx2)
-        assert derived2.document_revision == "C"
+        assert derived2.document_revision == "A"
         assert derived2.catalog_revision == "C"
+        assert derived2.cover_catalog_revision == "C"
 
-    def test_upgrade_toggle_does_not_affect_document_revision(
+    def test_upgrade_toggle_defaults_cover_catalog_revision_to_b_when_cover_revision_blank(
         self,
         engine: DerivationEngine,
     ):
         params = GlobalDocParams(
             project_no="2016",
-            cover_revision="B",
+            cover_revision="",
             is_upgrade=True,
             upgrade_sheet_codes="001~099",
         )
@@ -150,8 +153,30 @@ class TestDerivationEngine:
 
         derived = engine.compute(ctx)
 
-        assert derived.document_revision == "B"
+        assert derived.document_revision == "A"
         assert derived.catalog_revision == "B"
+        assert derived.cover_catalog_revision == "B"
+
+    def test_upgrade_cover_catalog_revision_does_not_override_drawing_chain(
+        self,
+        engine: DerivationEngine,
+        sample_frame,
+    ):
+        params = GlobalDocParams(
+            project_no="2016",
+            cover_revision="B",
+            is_upgrade=True,
+            upgrade_sheet_codes="001~099",
+        )
+        frame_a = sample_frame.model_copy(deep=True)
+        frame_a.titleblock.revision = "A"
+        ctx = DocContext(params=params, frames=[frame_a])
+
+        derived = engine.compute(ctx)
+
+        assert derived.document_revision == "A"
+        assert derived.catalog_revision == "B"
+        assert derived.cover_catalog_revision == "B"
 
     def test_derive_fixed_cover_and_catalog_paper_labels(self, engine: DerivationEngine):
         """封面与目录固定图幅值应符合设计文件业务口径"""

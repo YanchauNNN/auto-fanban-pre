@@ -95,7 +95,8 @@ class DerivationEngine:
 
         # === 版次派生 ===
         derived.document_revision = self._resolve_document_revision(ctx)
-        derived.catalog_revision = derived.document_revision
+        derived.cover_catalog_revision = self._resolve_cover_catalog_revision(ctx)
+        derived.catalog_revision = derived.cover_catalog_revision
 
         # === 固定值 ===
         derived.cover_paper_size_text = "A4图纸"
@@ -146,10 +147,15 @@ class DerivationEngine:
         if drawing_revisions:
             return max(drawing_revisions, key=self._revision_sort_key)
 
-        return (
-            self._normalize_revision(ctx.params.cover_revision)
-            or "A"
-        )
+        return self._normalize_revision(ctx.params.revision) or "A"
+
+    def _resolve_cover_catalog_revision(self, ctx: DocContext) -> str:
+        cover_revision = self._normalize_revision(ctx.params.cover_revision)
+        if cover_revision:
+            return cover_revision
+        if ctx.params.is_upgrade:
+            return "B"
+        return "A"
 
     @staticmethod
     def _revision_sort_key(revision: str) -> tuple[tuple[int, int | str], ...]:

@@ -202,7 +202,7 @@ doc_generation:
         required: false
         source: frontend
         default: "A"
-        desc: "封面版次，写入封面版次位（追加模式）"
+        desc: "封面和目录版次，写入封面和目录版次位（追加模式）；当is_upgrade=true且留空时默认按B处理"
 
     # ========== 目录参数 ==========
     catalog:
@@ -211,7 +211,7 @@ doc_generation:
         required: false
         source: frontend
         default: "false"
-        desc: "是否启用升版标记；默认否，不参与任何版本号推导"
+        desc: "是否启用升版标记；默认否，不参与图纸版次推导。封面/目录版次由cover_revision独立控制"
         ui:
           widget: toggle
       upgrade_sheet_codes:
@@ -400,13 +400,13 @@ doc_generation:
     # === 版次派生 ===
     document_revision:
       from: "frames[].titleblock.revision"
-      transform: "max_nonempty_revision_with_fallback(cover_revision)"
-      desc: "统一文档版次：优先取图纸(001~XXX)最高版次；若图纸无版次则回退封面版次"
+      transform: "max_nonempty_revision_with_fallback(params.revision,'A')"
+      desc: "图纸链路版次：优先取图纸(001~XXX)最高版次；若图纸无版次则回退001图纸聚合版次，再回退A"
 
     catalog_revision:
-      from: "document_revision"
-      transform: "identity"
-      desc: "目录版次，与封面保持一致，并与图纸(001~XXX)最高版次一致；无图纸版次时回退封面版次"
+      from: "cover_revision + is_upgrade"
+      transform: "coalesce_nonempty(cover_revision, is_upgrade ? 'B' : 'A')"
+      desc: "封面/目录专用版次：优先取cover_revision；若is_upgrade=true且未填写，则默认B；否则为A"
     
     # === 固定值 ===
     cover_paper_size_text:   { value: "A4图纸" }
@@ -574,7 +574,7 @@ doc_generation:
             external_code: "cover_external_code"
             title_cn: "cover_title_cn"
             title_en: "cover_title_en"      # 仅1818：同一单元格内写入，格式为 title_cn + '\\n' + title_en
-            revision: "document_revision"
+            revision: "catalog_revision"
             status: "doc_status"            # 取001图纸status
             page_total: 1                   # 固定值
           目录行:
@@ -582,7 +582,7 @@ doc_generation:
             external_code: "catalog_external_code"
             title_cn: "catalog_title_cn"
             title_en: "catalog_title_en"    # 仅1818：同一单元格内写入，格式为 title_cn + '\\n' + title_en
-            revision: "document_revision"
+            revision: "catalog_revision"
             status: "doc_status"            # 取001图纸status
             page_total: "catalog_page_total"  # 由PDF计页得到
           图纸行:

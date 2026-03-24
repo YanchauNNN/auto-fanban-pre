@@ -133,7 +133,7 @@ class IEDGenerator(IIEDGenerator):
             "type": "cover",
             "external_code": derived.cover_external_code,
             "internal_code": derived.cover_internal_code,
-            "revision": ctx.get_document_revision(),
+            "revision": ctx.get_cover_catalog_revision(),
             "title_cn": derived.cover_title_cn,
             "title_en": derived.cover_title_en,
         })
@@ -143,7 +143,7 @@ class IEDGenerator(IIEDGenerator):
             "type": "catalog",
             "external_code": derived.catalog_external_code,
             "internal_code": derived.catalog_internal_code,
-            "revision": ctx.get_document_revision(),
+            "revision": ctx.get_cover_catalog_revision(),
             "title_cn": catalog_title_cn,
             "title_en": catalog_title_en,
         })

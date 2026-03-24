@@ -104,10 +104,11 @@ def test_prepare_data_1818_includes_discipline_en() -> None:
     assert data["discipline_en"] == "Structural Engineering"
 
 
-def test_cover_uses_document_revision_for_output_and_binding() -> None:
+def test_cover_uses_cover_catalog_revision_for_output_and_binding() -> None:
     gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
-    ctx.derived.document_revision = "C"
+    ctx.derived.cover_catalog_revision = "C"
+    ctx.derived.catalog_revision = "C"
     ctx.derived.cover_internal_code = "1234567-JG001-FM"
 
     data = gen._prepare_data(ctx)

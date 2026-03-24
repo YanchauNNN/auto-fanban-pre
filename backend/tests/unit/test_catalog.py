@@ -71,6 +71,7 @@ def _build_context(project_no: str = "2016") -> DocContext:
         cover_title_en="Test Album Cover",
         catalog_title_en="Test Album Contents",
         catalog_revision="A",
+        cover_catalog_revision="A",
     )
     frames = [_make_frame(3), _make_frame(1), _make_frame(2)]
     return DocContext(params=params, derived=derived, frames=frames)
@@ -158,16 +159,18 @@ def test_catalog_1818_uses_upgrade_upgrade_label() -> None:
     assert rows[4]["upgrade_note"] == ""
 
 
-def test_catalog_cover_and_catalog_rows_share_document_revision() -> None:
+def test_catalog_cover_and_catalog_rows_use_cover_catalog_revision() -> None:
     gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
-    ctx.derived.document_revision = "C"
+    ctx.derived.document_revision = "A"
     ctx.derived.catalog_revision = "C"
+    ctx.derived.cover_catalog_revision = "C"
 
     rows = gen._build_detail_rows(ctx)
 
     assert rows[0]["revision"] == "C"
     assert rows[1]["revision"] == "C"
+    assert rows[2]["revision"] == "A"
 
 
 def test_catalog_1818_title_in_same_cell_with_newline() -> None:

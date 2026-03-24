@@ -117,6 +117,19 @@ function makeSingleJob(index: number, sourceFilename: string) {
 }
 
 describe("homepage shell", () => {
+  it("shows a clear loading state before form schema is ready", async () => {
+    mockGetFormSchema.mockImplementation(() => new Promise(() => {}));
+
+    render(<App />);
+
+    const loadingButtons = await screen.findAllByRole("button", { name: "正在加载配置" });
+    expect(loadingButtons).toHaveLength(2);
+    loadingButtons.forEach((button) => {
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-busy", "true");
+    });
+  });
+
   it("renders the title strip, module toolbar, and primary actions", async () => {
     render(<App />);
 
@@ -125,6 +138,7 @@ describe("homepage shell", () => {
     expect(await screen.findAllByTestId("title-strip-status-item")).toHaveLength(5);
     expect(screen.getByText("中核工程—建筑结构所出图平台")).toBeInTheDocument();
     expect(screen.getByTestId("hero-watermark")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "翻版" })).toHaveAttribute("aria-disabled", "true");
@@ -194,6 +208,56 @@ describe("homepage shell", () => {
 
     await user.unhover(replacePreview);
     expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
+  });
+
+  it("opens tutorial mode and walks through the simulated deliverable flow", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "教程" }));
+
+    expect(screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下一步" })).toBeInTheDocument();
+    expect(screen.getByTestId("tutorial-target-entry")).toHaveAttribute(
+      "data-tutorial-active",
+      "true",
+    );
+    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "entry");
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body.style.paddingRight).toMatch(/\d+px|^$/);
+
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("dialog", { name: "教程文件选择" })).toBeInTheDocument();
+    expect(screen.getByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "picker_select");
+
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("dialog", { name: "教程任务配置" })).toBeInTheDocument();
+    expect(
+      screen.getByText("若勾选纠错，系统会与出图一起创建为同一任务包；本教程仅演示流程，不会真的提交任务。"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "config");
+
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("dialog", { name: "教程任务记录" })).toBeInTheDocument();
+    expect(screen.getByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "record");
+
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("dialog", { name: "教程任务详情" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
+    expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "退出" }));
+    expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
+    expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程任务配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程任务记录" })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tutorial-spotlight")).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
+    expect(document.body.style.paddingRight).toBe("");
   });
 });
 

@@ -129,6 +129,45 @@ export function DeliverableWorkspace({
   );
 
   useEffect(() => {
+    if (!upgradeEnabled) {
+      return;
+    }
+
+    const schemaDefault = coverRevisionField?.defaultValue?.trim() ?? "";
+    const currentCoverRevision = draft.values.cover_revision?.trim() ?? "";
+    if (
+      currentCoverRevision &&
+      currentCoverRevision !== schemaDefault &&
+      currentCoverRevision !== "A"
+    ) {
+      return;
+    }
+
+    setDraft((current) => {
+      const nextCurrentCover = current.values.cover_revision?.trim() ?? "";
+      if (
+        nextCurrentCover &&
+        nextCurrentCover !== schemaDefault &&
+        nextCurrentCover !== "A"
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        values: {
+          ...current.values,
+          cover_revision: "B",
+        },
+        fieldErrors: {
+          ...current.fieldErrors,
+          cover_revision: [],
+        },
+      };
+    });
+  }, [coverRevisionField?.defaultValue, draft.values.cover_revision, upgradeEnabled]);
+
+  useEffect(() => {
     onDraftAvailabilityChange(hasTaskConfigDraft(schema, draft));
   }, [draft, onDraftAvailabilityChange, schema]);
 
@@ -253,11 +292,20 @@ export function DeliverableWorkspace({
 
   function handleUpgradeToggle() {
     setPresetUpdatedNotice(false);
+    const schemaDefault = coverRevisionField?.defaultValue?.trim() ?? "";
     setDraft((current) => ({
       ...current,
       values: {
         ...current.values,
         is_upgrade: current.values.is_upgrade === "true" ? "false" : "true",
+        cover_revision:
+          current.values.is_upgrade === "true"
+            ? current.values.cover_revision ?? ""
+            : !current.values.cover_revision?.trim() ||
+                current.values.cover_revision?.trim() === schemaDefault ||
+                current.values.cover_revision?.trim() === "A"
+              ? "B"
+              : current.values.cover_revision,
       },
       fieldErrors: {
         ...current.fieldErrors,

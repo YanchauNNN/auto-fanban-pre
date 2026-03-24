@@ -96,7 +96,7 @@ class CatalogGenerator(ICatalogGenerator):
     def _build_output_stem(self, ctx: DocContext) -> str:
         return make_document_output_name(
             external_code=ctx.derived.catalog_external_code,
-            revision=ctx.get_document_revision(),
+            revision=ctx.get_cover_catalog_revision(),
             status=ctx.params.doc_status,
             internal_code=ctx.derived.catalog_internal_code,
             fallback_name="目录",
@@ -261,7 +261,7 @@ class CatalogGenerator(ICatalogGenerator):
             "external_code": derived.cover_external_code,
             "title_cn": derived.cover_title_cn,
             "title_en": derived.cover_title_en,
-            "revision": ctx.get_document_revision(),
+            "revision": ctx.get_cover_catalog_revision(),
             "status": params.doc_status,
             "page_total": 1,
             "upgrade_note": upgrade_note_text,
@@ -274,7 +274,7 @@ class CatalogGenerator(ICatalogGenerator):
             "external_code": derived.catalog_external_code,
             "title_cn": derived.catalog_title_cn,
             "title_en": derived.catalog_title_en,
-            "revision": ctx.get_document_revision(),
+            "revision": ctx.get_cover_catalog_revision(),
             "status": params.doc_status,
             "page_total": 0,  # 占位，后续回填
             "upgrade_note": upgrade_note_text,

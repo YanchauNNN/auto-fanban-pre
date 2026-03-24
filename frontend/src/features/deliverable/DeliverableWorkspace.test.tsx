@@ -297,7 +297,7 @@ describe("DeliverableWorkspace", () => {
 
     const coverRevision = screen.getByLabelText(coverRevisionLabel);
     const upgradeSheetCodes = screen.getByLabelText(upgradeSheetCodesLabel);
-    await user.type(coverRevision, "B");
+    expect(coverRevision).toHaveValue("B");
     await user.type(upgradeSheetCodes, "005~012");
 
     await user.click(screen.getByRole("button", { name: "展开高级选项" }));

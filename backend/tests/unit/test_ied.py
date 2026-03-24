@@ -122,15 +122,17 @@ def test_ied_write_rows_with_bindings(temp_dir: Path) -> None:
     assert ws["BW4"].value == "NA"
 
 
-def test_ied_cover_and_catalog_rows_share_document_revision() -> None:
+def test_ied_cover_and_catalog_rows_share_cover_catalog_revision() -> None:
     gen = IEDGenerator()
     ctx = _build_context()
     ctx.derived.document_revision = "C"
-    ctx.derived.catalog_revision = "C"
+    ctx.derived.catalog_revision = "B"
+    ctx.derived.cover_catalog_revision = "B"
     rows = gen._build_rows(ctx)
 
-    assert rows[0]["revision"] == "C"
-    assert rows[1]["revision"] == "C"
+    assert rows[0]["revision"] == "B"
+    assert rows[1]["revision"] == "B"
+    assert rows[2]["revision"] == "A"
 
 
 def test_ied_bindings_set_fixed_br_bw_values() -> None:
