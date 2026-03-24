@@ -180,6 +180,146 @@ describe("HttpAdapter", () => {
     expect(jobs.items[0]?.affectedDrawingsCount).toBe(4);
   });
 
+  it("creates replace-only jobs with mode=replace and run_deliverable=false", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-replace-1",
+          jobs: [
+            {
+              job_id: "replace-job-1",
+              batch_id: "batch-replace-1",
+              source_filename: "20261NH-JGS51-B合并版.dwg",
+              task_kind: "audit_replace",
+              job_mode: "replace",
+              project_no: "2026",
+              status: "queued",
+              stage: "INIT",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-24T09:00:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "20261NH-JGS51-B合并版.dwg", {
+      type: "application/acad",
+    });
+
+    const created = await adapter.createAuditReplace({
+      sourceProjectNo: "2026",
+      targetProjectNo: "2016",
+      files: [file],
+      runDeliverable: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/audit-replace",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      }),
+    );
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("mode")).toBe("replace");
+    expect(formData.get("params_json")).toBe(
+      JSON.stringify({
+        source_project_no: "2026",
+        target_project_no: "2016",
+        run_deliverable: false,
+      }),
+    );
+    expect(created.jobs[0]?.taskKind).toBe("audit_replace");
+  });
+
+  it("creates replace-plus-deliverable groups with deliverable_params", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-replace-group-1",
+          jobs: [
+            {
+              job_id: "group-replace-1",
+              group_id: "group-replace-1",
+              batch_id: "batch-replace-group-1",
+              is_group: true,
+              source_filename: "20261NH-JGS51-B合并版.dwg",
+              source_filenames: ["20261NH-JGS51-B合并版.dwg"],
+              project_no: "2016",
+              status: "queued",
+              stage: "PREP_SOURCE",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-24T09:01:00+08:00",
+              finished_at: null,
+              child_job_ids: ["job-replace-1", "job-deliverable-1"],
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "20261NH-JGS51-B合并版.dwg", {
+      type: "application/acad",
+    });
+
+    const created = await adapter.createAuditReplace({
+      sourceProjectNo: "2026",
+      targetProjectNo: "2016",
+      files: [file],
+      runDeliverable: true,
+      deliverableParams: {
+        project_no: "2016",
+        cover_variant: "通用",
+      },
+    });
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("mode")).toBe("replace");
+    expect(formData.get("params_json")).toBe(
+      JSON.stringify({
+        source_project_no: "2026",
+        target_project_no: "2016",
+        run_deliverable: true,
+        deliverable_params: {
+          project_no: "2016",
+          cover_variant: "通用",
+        },
+      }),
+    );
+    expect(created.jobs[0]).toMatchObject({
+      isGroup: true,
+      groupId: "group-replace-1",
+      childJobIds: ["job-replace-1", "job-deliverable-1"],
+    });
+  });
+
   it("creates grouped deliverable batches with run_audit_check=true when requested", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

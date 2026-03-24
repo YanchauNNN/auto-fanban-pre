@@ -71,6 +71,11 @@ class Job(BaseModel):
     pc3_path: str | None = None
     pmp_path: str | None = None
     ctb_path: str | None = None
+    font_preflight_summary: dict[str, Any] = Field(default_factory=dict)
+    missing_fonts_detected: bool = False
+    font_replacement_applied: bool = False
+    replacement_font: str | None = None
+    replaced_style_count: int = 0
 
     # 输入
     input_files: list[Path] = Field(default_factory=list)

@@ -9,7 +9,6 @@
 } from "react";
 
 import {
-  buildRecommendedProjectNos,
   evaluateRequiredWhen,
   isAdvancedField,
   isCustomRenderedField,
@@ -21,7 +20,6 @@ import type {
   FormSchema,
   TaskConfigDraft,
   TaskConfigPreset,
-  TaskIntent,
 } from "../../platform/api/types";
 import {
   applyTaskPreset,
@@ -34,7 +32,6 @@ import {
 } from "./taskPresets";
 import { createTaskConfigDraft, getDefaultTaskValues, syncTaskConfigDraft } from "./taskDraft";
 import { inferProjectNumbers } from "./uploadInference";
-import { ReplaceTaskModal } from "./ReplaceTaskModal";
 import { TaskConfigModal } from "./TaskConfigModal";
 import styles from "./DeliverableWorkspace.module.css";
 
@@ -43,8 +40,14 @@ type DeliverableWorkspaceProps = {
   schema: FormSchema;
   isOpen: boolean;
   incomingFiles: File[];
+  pendingReplaceConfig?: {
+    sourceProjectNo: string;
+    targetProjectNo: string;
+    runDeliverable: boolean;
+  } | null;
   onBatchCreated: (payload: CreateBatchPayload) => void;
   onNotice?: (message: string) => void;
+  onClearPendingReplaceFlow?: () => void;
   onClose: () => void;
   onDraftAvailabilityChange: (available: boolean) => void;
 };
@@ -71,16 +74,16 @@ export function DeliverableWorkspace({
   schema,
   isOpen,
   incomingFiles,
+  pendingReplaceConfig = null,
   onBatchCreated,
   onNotice,
+  onClearPendingReplaceFlow,
   onClose,
   onDraftAvailabilityChange,
 }: DeliverableWorkspaceProps) {
   const [draft, setDraft] = useState<TaskConfigDraft>(() => createTaskConfigDraft(schema));
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [replaceModalOpen, setReplaceModalOpen] = useState(false);
-  const [replaceConfigError, setReplaceConfigError] = useState<string | null>(null);
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -96,10 +99,10 @@ export function DeliverableWorkspace({
       return;
     }
 
-    setDraft((current) => applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles));
-    setReplaceModalOpen(false);
-    setReplaceConfigError(null);
-  }, [incomingFiles, schema]);
+    setDraft((current) =>
+      applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles, pendingReplaceConfig),
+    );
+  }, [incomingFiles, pendingReplaceConfig, schema]);
 
   const primarySections = useMemo(
     () => filterSections(schema, draft.values, false),
@@ -108,11 +111,6 @@ export function DeliverableWorkspace({
   const advancedSections = useMemo(
     () => filterSections(schema, draft.values, true),
     [draft.values, schema],
-  );
-  const projectNoOptions = useMemo(() => getProjectNoOptions(schema), [schema]);
-  const recommendedProjectNos = useMemo(
-    () => buildRecommendedProjectNos(draft.inference.inferredProjectNos, projectNoOptions),
-    [draft.inference.inferredProjectNos, projectNoOptions],
   );
   const coverRevisionField = useMemo(
     () => findSchemaField(schema, "cover_revision"),
@@ -178,14 +176,6 @@ export function DeliverableWorkspace({
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (draft.intent !== "deliverable") {
-      setDraft((current) => ({
-        ...current,
-        formErrors: [getIntentUnavailableMessage(current.intent)],
-      }));
-      return;
-    }
-
     const nextFieldErrors: Record<string, string[]> = {};
     const nextFormErrors: string[] = [];
 
@@ -243,15 +233,26 @@ export function DeliverableWorkspace({
     const submissionValues = buildSubmissionValues(draft.values);
 
     try {
-      const payload = await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
+      const payload = pendingReplaceConfig?.runDeliverable
+        ? await adapter.createAuditReplace({
+            sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
+            targetProjectNo: pendingReplaceConfig.targetProjectNo,
+            files: draft.files,
+            runDeliverable: true,
+            deliverableParams: submissionValues,
+          })
+        : await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
       onNotice?.(
-        draft.runAuditCheck ? "出图与纠错任务包已创建。" : "出图任务已创建。",
+        pendingReplaceConfig?.runDeliverable
+          ? "翻版与出图任务包已创建。"
+          : draft.runAuditCheck
+            ? "出图与纠错任务包已创建。"
+            : "出图任务已创建。",
       );
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
-      setReplaceModalOpen(false);
-      setReplaceConfigError(null);
+      onClearPendingReplaceFlow?.();
       startTransition(() => onBatchCreated(payload));
       onClose();
     } catch (error) {
@@ -321,52 +322,23 @@ export function DeliverableWorkspace({
     }
 
     setPresetUpdatedNotice(false);
-    setDraft((current) => applyFilesToDraft(syncTaskConfigDraft(schema, current), files));
-    setReplaceModalOpen(false);
-    setReplaceConfigError(null);
+    setDraft((current) =>
+      applyFilesToDraft(syncTaskConfigDraft(schema, current), files, pendingReplaceConfig),
+    );
   }
 
   function handleClearDraft() {
     setPresetUpdatedNotice(false);
     setDraft(createTaskConfigDraft(schema));
     setShowAdvanced(false);
-    setReplaceModalOpen(false);
-    setReplaceConfigError(null);
     setPresetError(null);
+    onClearPendingReplaceFlow?.();
     onClose();
   }
 
   function handleClose() {
-    setReplaceModalOpen(false);
-    setReplaceConfigError(null);
     setPresetError(null);
     onClose();
-  }
-
-  function handleIntentChange(intent: TaskIntent) {
-    setPresetUpdatedNotice(false);
-    const nextIntent = draft.intent === intent ? "deliverable" : intent;
-
-    setDraft((current) => ({
-      ...current,
-      intent: nextIntent,
-      fieldErrors: {},
-      formErrors: [],
-      replaceConfig:
-        nextIntent === "audit_replace"
-          ? {
-              sourceProjectNo:
-                current.replaceConfig.sourceProjectNo || current.inference.primaryProjectNo,
-              targetProjectNo: current.replaceConfig.targetProjectNo,
-            }
-          : {
-              sourceProjectNo: current.inference.primaryProjectNo,
-              targetProjectNo: "",
-            },
-    }));
-
-    setReplaceConfigError(null);
-    setReplaceModalOpen(nextIntent === "audit_replace");
   }
 
   function handleAuditToggle() {
@@ -375,35 +347,6 @@ export function DeliverableWorkspace({
       ...current,
       runAuditCheck: !current.runAuditCheck,
     }));
-  }
-
-  function handleReplaceConfigChange(
-    field: "sourceProjectNo" | "targetProjectNo",
-    value: string,
-  ) {
-    setPresetUpdatedNotice(false);
-    setDraft((current) => ({
-      ...current,
-      replaceConfig: {
-        ...current.replaceConfig,
-        [field]: value,
-      },
-    }));
-    setReplaceConfigError(null);
-  }
-
-  function handleReplaceConfigConfirm() {
-    const nextError = validateReplaceConfig(
-      draft.replaceConfig.sourceProjectNo,
-      draft.replaceConfig.targetProjectNo,
-    );
-    if (nextError) {
-      setReplaceConfigError(nextError);
-      return;
-    }
-
-    setReplaceConfigError(null);
-    setReplaceModalOpen(false);
   }
 
   function handlePresetSelectionChange(nextId: string) {
@@ -420,7 +363,7 @@ export function DeliverableWorkspace({
       return;
     }
 
-    const nextPreset = createTaskPreset(trimmedName, draft);
+    const nextPreset = createTaskPreset(trimmedName, toDeliverableOnlyDraft(draft));
     const nextPresets = saveTaskPreset(nextPreset);
     setSavedPresets(nextPresets);
     setSelectedPresetId(nextPreset.id);
@@ -435,7 +378,9 @@ export function DeliverableWorkspace({
       return;
     }
 
-    setDraft((current) => applyTaskPreset(schema, current, selectedPreset));
+    setDraft((current) =>
+      toDeliverableOnlyDraft(applyTaskPreset(schema, current, selectedPreset)),
+    );
     setShowAdvanced(false);
     setPresetError(null);
     setPresetUpdatedNotice(false);
@@ -470,7 +415,11 @@ export function DeliverableWorkspace({
       return;
     }
 
-    const nextPreset = updateTaskPreset(selectedPresetId, trimmedName, draft);
+    const nextPreset = updateTaskPreset(
+      selectedPresetId,
+      trimmedName,
+      toDeliverableOnlyDraft(draft),
+    );
     const nextPresets = saveTaskPreset(nextPreset);
     setSavedPresets(nextPresets);
     setPresetName(trimmedName);
@@ -492,7 +441,7 @@ export function DeliverableWorkspace({
     setPresetUpdatedNotice(false);
   }
 
-  const submitLabel = draft.intent === "deliverable" ? "创建交付任务" : "创建任务";
+  const submitLabel = "创建交付任务";
 
   return (
     <>
@@ -632,74 +581,41 @@ export function DeliverableWorkspace({
                 <div className={styles.summaryHeaderRow}>
                   <h3>次级任务开关</h3>
                   <span>
-                    {draft.intent === "audit_replace"
-                      ? "翻版"
+                    {pendingReplaceConfig?.runDeliverable
+                      ? "翻版+交付"
                       : draft.runAuditCheck
                         ? "交付+纠错"
                         : "交付"}
                   </span>
                 </div>
                 <div className={styles.intentNotice}>
-                  <button
-                    aria-pressed={draft.runAuditCheck}
-                    className={`${styles.intentChip} ${
-                      draft.runAuditCheck ? styles.intentChipActive : ""
-                    }`}
-                    type="button"
-                    onClick={handleAuditToggle}
-                  >
-                    纠错
-                  </button>
-                  <button
-                    aria-pressed={draft.intent === "audit_replace"}
-                    className={`${styles.intentChip} ${
-                      draft.intent === "audit_replace" ? styles.intentChipActive : ""
-                    }`}
-                    type="button"
-                    onClick={() => handleIntentChange("audit_replace")}
-                  >
-                    翻版
-                  </button>
+                  {pendingReplaceConfig?.runDeliverable ? null : (
+                    <button
+                      aria-pressed={draft.runAuditCheck}
+                      className={`${styles.intentChip} ${
+                        draft.runAuditCheck ? styles.intentChipActive : ""
+                      }`}
+                      type="button"
+                      onClick={handleAuditToggle}
+                    >
+                      纠错
+                    </button>
+                  )}
                 </div>
                 <div className={styles.intentHelp}>
-                  {draft.intent === "deliverable" ? (
+                  {pendingReplaceConfig?.runDeliverable ? (
+                    <p>
+                      当前将以翻版+出图模式提交。
+                      <strong>{` ${pendingReplaceConfig.sourceProjectNo} -> ${pendingReplaceConfig.targetProjectNo}`}</strong>
+                      ，本页参数会整体写入 <code>deliverable_params</code>。
+                    </p>
+                  ) : (
                     <p>
                       当前按交付处理链路提交。
                       {draft.runAuditCheck
                         ? "已选中同时执行纠错，提交后会直接创建一个包含交付和纠错子任务的任务包。"
                         : "未选中纠错时，只会创建出图任务。"}
                     </p>
-                  ) : (
-                    <div className={styles.replaceSummary}>
-                      <p>
-                        {draft.replaceConfig.sourceProjectNo || draft.replaceConfig.targetProjectNo
-                          ? `原始项目号 ${draft.replaceConfig.sourceProjectNo || "未填写"} → 目标项目号 ${
-                              draft.replaceConfig.targetProjectNo || "未填写"
-                            }`
-                          : "尚未填写翻版项目号，请先完成翻版配置。"}
-                      </p>
-                      <div className={styles.recommendations}>
-                        <button
-                          className={styles.recommendationChip}
-                          type="button"
-                          onClick={() => setReplaceModalOpen(true)}
-                        >
-                          编辑翻版配置
-                        </button>
-                        {recommendedProjectNos.map((projectNo) => (
-                          <button
-                            key={`replace-source-${projectNo}`}
-                            className={styles.recommendationChip}
-                            type="button"
-                            onClick={() =>
-                              handleReplaceConfigChange("sourceProjectNo", projectNo)
-                            }
-                          >
-                            {projectNo}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
                   )}
                 </div>
               </div>
@@ -792,21 +708,6 @@ export function DeliverableWorkspace({
           </form>
         </div>
       </TaskConfigModal>
-
-      {replaceModalOpen ? (
-        <ReplaceTaskModal
-          error={replaceConfigError}
-          recommendedProjectNos={recommendedProjectNos}
-          sourceProjectNo={draft.replaceConfig.sourceProjectNo}
-          targetProjectNo={draft.replaceConfig.targetProjectNo}
-          onChange={handleReplaceConfigChange}
-          onClose={() => {
-            setReplaceModalOpen(false);
-            setReplaceConfigError(null);
-          }}
-          onConfirm={handleReplaceConfigConfirm}
-        />
-      ) : null}
     </>
   );
 }
@@ -1091,14 +992,6 @@ function hasTaskConfigDraft(schema: FormSchema, draft: TaskConfigDraft) {
     return true;
   }
 
-  if (draft.intent !== "deliverable") {
-    return true;
-  }
-
-  if (draft.replaceConfig.sourceProjectNo || draft.replaceConfig.targetProjectNo) {
-    return true;
-  }
-
   const defaultValues = getDefaultTaskValues(schema);
 
   return Object.entries(defaultValues).some(
@@ -1111,34 +1004,23 @@ function getExtension(filename: string) {
   return dot >= 0 ? filename.slice(dot).toLowerCase() : "";
 }
 
-function getProjectNoOptions(schema: FormSchema) {
-  const fieldOptions =
-    schema.sections
-    .flatMap((section) => section.fields)
-    .find((field) => field.key === "project_no")?.options ?? [];
-
-  const merged = new Set<string>();
-  for (const projectNo of [
-    ...(schema.auditReplaceProjectOptions ?? []),
-    ...fieldOptions,
-  ]) {
-    const normalized = projectNo.trim();
-    if (!normalized) {
-      continue;
-    }
-    merged.add(normalized);
-  }
-
-  return Array.from(merged);
-}
-
-function applyFilesToDraft(draft: TaskConfigDraft, files: File[]) {
+function applyFilesToDraft(
+  draft: TaskConfigDraft,
+  files: File[],
+  pendingReplaceConfig?: DeliverableWorkspaceProps["pendingReplaceConfig"],
+) {
   const inference = inferProjectNumbers(files);
   const currentProjectNo = (draft.values.project_no ?? "").trim();
+  const replaceTargetProjectNo = pendingReplaceConfig?.runDeliverable
+    ? pendingReplaceConfig.targetProjectNo.trim()
+    : "";
   const shouldAutofillProjectNo =
-    !currentProjectNo || currentProjectNo === draft.inference.primaryProjectNo;
-  const nextProjectNo =
-    inference.primaryProjectNo && shouldAutofillProjectNo
+    !currentProjectNo ||
+    currentProjectNo === draft.inference.primaryProjectNo ||
+    currentProjectNo === draft.replaceConfig.targetProjectNo;
+  const nextProjectNo = replaceTargetProjectNo
+    ? replaceTargetProjectNo
+    : inference.primaryProjectNo && shouldAutofillProjectNo
       ? inference.primaryProjectNo
       : currentProjectNo;
 
@@ -1156,37 +1038,24 @@ function applyFilesToDraft(draft: TaskConfigDraft, files: File[]) {
     formErrors: [],
     inference,
     replaceConfig: {
-      sourceProjectNo: inference.primaryProjectNo || draft.replaceConfig.sourceProjectNo,
-      targetProjectNo: "",
+      sourceProjectNo:
+        pendingReplaceConfig?.sourceProjectNo ??
+        inference.primaryProjectNo ??
+        draft.replaceConfig.sourceProjectNo,
+      targetProjectNo: replaceTargetProjectNo,
     },
   };
 }
 
-function getIntentUnavailableMessage(intent: TaskIntent) {
-  if (intent === "audit_replace") {
-    return "翻版接口未开放，当前无法提交。";
-  }
-
-  return "";
-}
-
-function validateReplaceConfig(sourceProjectNo: string, targetProjectNo: string) {
-  const source = sourceProjectNo.trim();
-  const target = targetProjectNo.trim();
-
-  if (!source) {
-    return "请填写原始项目号。";
-  }
-
-  if (!target) {
-    return "请填写目标项目号。";
-  }
-
-  if (source === target) {
-    return "原始项目号和目标项目号不能相同。";
-  }
-
-  return null;
+function toDeliverableOnlyDraft(draft: TaskConfigDraft): TaskConfigDraft {
+  return {
+    ...draft,
+    intent: "deliverable",
+    replaceConfig: {
+      sourceProjectNo: "",
+      targetProjectNo: "",
+    },
+  };
 }
 
 function getFieldPlaceholder(field: FormField) {

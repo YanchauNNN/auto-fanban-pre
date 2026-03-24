@@ -16,6 +16,7 @@ from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import AutoCADPathInfo, resolve_autocad_paths
 from .cad_dxf_executor import CADDXFExecutor
 from .dxf_pdf_exporter import DxfPdfExporter
+from .font_preflight import FontPreflightService
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
@@ -34,6 +35,7 @@ __all__ = [
     "AcCoreConsoleRunner",
     "FrameSplitter",
     "DxfPdfExporter",
+    "FontPreflightService",
     "AutoCADPathInfo",
     "resolve_autocad_paths",
     "PlotResourceContext",

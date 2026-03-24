@@ -740,12 +740,12 @@
 
 .tutorialPanel {
   position: fixed;
-  top: 5.75rem;
-  right: 1.25rem;
+  top: 5.25rem;
+  right: 1rem;
   z-index: 32;
-  width: min(34rem, calc(100vw - 2.5rem));
-  min-width: min(28rem, calc(100vw - 2.5rem));
-  padding: 1.25rem 1.3rem;
+  width: min(40rem, calc(100vw - 2rem));
+  min-width: min(34rem, calc(100vw - 2rem));
+  padding: 1.55rem 1.65rem;
   border-radius: 22px;
   border: 1px solid rgba(20, 70, 128, 0.14);
   background: rgba(255, 255, 255, 0.96);
@@ -764,13 +764,14 @@
 }
 
 .tutorialPanel h2 {
-  margin: 0 0 0.55rem;
+  margin: 0 0 0.75rem;
   color: #153c66;
-  font-size: 1.32rem;
+  font-size: 1.48rem;
 }
 
 .tutorialPanel p {
-  line-height: 1.72;
+  line-height: 1.82;
+  font-size: 1rem;
 }
 
 .tutorialActions {

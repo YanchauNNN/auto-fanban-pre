@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 from ..cad import (
     A4MultipageGrouper,
     CADDXFExecutor,
+    FontPreflightService,
     FrameDetector,
     ODAConverter,
     TitleblockConsistencyBridge,
@@ -63,7 +64,7 @@ logger = logging.getLogger(__name__)
 class PipelineExecutor:
     """流水线执行器"""
 
-    def __init__(self):
+    def __init__(self, *, font_preflight_service: FontPreflightService | None = None):
         self.config = get_config()
         self.spec = load_spec()
         self._last_progress_write = 0.0
@@ -72,6 +73,7 @@ class PipelineExecutor:
         # 初始化各模块
         self.oda = ODAConverter()
         self.frame_detector = FrameDetector()
+        self.font_preflight_service = font_preflight_service or FontPreflightService()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
         self.titleblock_consistency = TitleblockConsistencyService()
@@ -138,6 +140,7 @@ class PipelineExecutor:
                         if stage.name
                         in {
                             StageEnum.INGEST.value,
+                            StageEnum.FONT_PREFLIGHT_AND_REPLACE.value,
                             StageEnum.CONVERT_DWG_TO_DXF.value,
                             StageEnum.DETECT_FRAMES.value,
                             StageEnum.VERIFY_FRAMES_BY_ANCHOR.value,
@@ -181,6 +184,7 @@ class PipelineExecutor:
         try:
             handler = {
                 StageEnum.INGEST.value: self._stage_ingest,
+                StageEnum.FONT_PREFLIGHT_AND_REPLACE.value: self._stage_font_preflight_and_replace,
                 StageEnum.CONVERT_DWG_TO_DXF.value: self._stage_convert,
                 StageEnum.DETECT_FRAMES.value: self._stage_detect_frames,
                 StageEnum.VERIFY_FRAMES_BY_ANCHOR.value: self._stage_verify_frames,
@@ -224,6 +228,62 @@ class PipelineExecutor:
                 import shutil
 
                 shutil.copy(f, input_dir / f.name)
+
+    def _stage_font_preflight_and_replace(self, job: Job, context: dict) -> None:
+        input_dir = self._require_work_dir(job) / "input"
+        dwg_files = sorted(input_dir.glob("*.dwg"))
+        policy = str(job.params.get("font_replace_policy") or "none").strip().lower() or "none"
+        replacement_font = str(job.params.get("font_replacement_font") or "").strip() or None
+        slot_runtime = job.params.get("cad_slot_runtime")
+        if policy == "replace_missing":
+            if replacement_font is None:
+                raise RuntimeError("missing fonts detected but font_replacement_font is missing")
+            if not self.font_preflight_service.validate_replacement_font(replacement_font):
+                raise RuntimeError(f"font_replacement_font unavailable: {replacement_font}")
+
+        results: list[dict[str, Any]] = []
+        for dwg_file in dwg_files:
+            self._update_progress(
+                job,
+                current_file=dwg_file.name,
+                message="DWG?????",
+            )
+            result = self.font_preflight_service.inspect_dwg(
+                source_dwg=dwg_file,
+                replacement_policy=policy,
+                replacement_font=replacement_font,
+                workspace_dir=input_dir / ".font-preflight" / dwg_file.stem,
+                slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
+            )
+            results.append(result)
+
+        errors = [
+            str(error)
+            for item in results
+            for error in list(item.get("errors") or [])
+            if str(error).strip()
+        ]
+        missing_detected = any(bool(list(item.get("missing_fonts") or [])) for item in results)
+        replacement_applied = any(bool(item.get("font_replacement_applied")) for item in results)
+        replaced_style_count = sum(int(item.get("replaced_style_count", 0) or 0) for item in results)
+        summary = {
+            "files": results,
+            "policy": policy,
+        }
+        job.font_preflight_summary = summary
+        job.missing_fonts_detected = missing_detected
+        job.font_replacement_applied = replacement_applied
+        job.replacement_font = replacement_font
+        job.replaced_style_count = replaced_style_count
+        job.progress.details["font_missing_style_count"] = sum(
+            int(item.get("missing_style_count", 0) or 0) for item in results
+        )
+        job.progress.details["font_replaced_style_count"] = replaced_style_count
+
+        if errors:
+            raise RuntimeError("font preflight failed: " + "; ".join(errors))
+        if missing_detected and policy != "replace_missing":
+            raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
 
     def _stage_convert(self, job: Job, context: dict) -> None:
         work_dir = self._require_work_dir(job)

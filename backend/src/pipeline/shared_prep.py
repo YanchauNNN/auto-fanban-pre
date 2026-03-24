@@ -5,7 +5,13 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
+from ..cad import (
+    A4MultipageGrouper,
+    FontPreflightService,
+    FrameDetector,
+    ODAConverter,
+    TitleblockExtractor,
+)
 from ..models import FrameMeta, SheetSet
 
 
@@ -14,18 +20,29 @@ class SharedPrepArtifacts:
     shared_dir: Path
     source_input_dwg: Path
     source_converted_dxf: Path
+    font_preflight_summary: dict[str, object]
     frames: list[FrameMeta]
     sheet_sets: list[SheetSet]
 
 
 class SharedPrepService:
-    def __init__(self) -> None:
+    def __init__(self, font_preflight_service: FontPreflightService | None = None) -> None:
         self.oda = ODAConverter()
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
+        self.font_preflight_service = font_preflight_service or FontPreflightService()
 
-    def prepare(self, *, group_id: str, source_dwg: Path, shared_dir: Path) -> SharedPrepArtifacts:
+    def prepare(
+        self,
+        *,
+        group_id: str,
+        source_dwg: Path,
+        shared_dir: Path,
+        font_replace_policy: str = "none",
+        font_replacement_font: str | None = None,
+        slot_runtime: dict[str, str] | None = None,
+    ) -> SharedPrepArtifacts:
         source_dwg = source_dwg.resolve()
         shared_dir = shared_dir.resolve()
         shared_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +52,31 @@ class SharedPrepService:
             shutil.copy2(source_dwg, staged_source)
         else:
             staged_source = source_dwg
+
+        policy = str(font_replace_policy or "none").strip().lower() or "none"
+        if policy == "replace_missing":
+            if not font_replacement_font:
+                raise RuntimeError("missing fonts detected but font_replacement_font is missing")
+            if not self.font_preflight_service.validate_replacement_font(font_replacement_font):
+                raise RuntimeError(
+                    f"font_replacement_font unavailable: {font_replacement_font}"
+                )
+
+        font_preflight_summary = self.font_preflight_service.inspect_dwg(
+            source_dwg=staged_source,
+            replacement_policy=policy,
+            replacement_font=font_replacement_font,
+            workspace_dir=shared_dir / "font_preflight",
+            slot_runtime=slot_runtime,
+        )
+        errors = list(font_preflight_summary.get("errors") or [])
+        missing_fonts = list(font_preflight_summary.get("missing_fonts") or [])
+        if errors:
+            raise RuntimeError(
+                "font preflight failed: " + "; ".join(str(item) for item in errors)
+            )
+        if missing_fonts and policy != "replace_missing":
+            raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
 
         dxf_path = self.oda.dwg_to_dxf(staged_source, shared_dir)
         frames = self.frame_detector.detect_frames(dxf_path)
@@ -75,6 +117,7 @@ class SharedPrepService:
                 "group_id": group_id,
                 "source_input_dwg": str(staged_source),
                 "source_converted_dxf": str(dxf_path),
+                "font_preflight_summary": font_preflight_summary,
                 "frames_total": len(frames),
                 "sheet_sets_total": len(sheet_sets),
             },
@@ -83,6 +126,7 @@ class SharedPrepService:
             shared_dir=shared_dir,
             source_input_dwg=staged_source,
             source_converted_dxf=dxf_path,
+            font_preflight_summary=font_preflight_summary,
             frames=frames,
             sheet_sets=sheet_sets,
         )
@@ -107,6 +151,7 @@ class SharedPrepService:
             shared_dir=shared_dir,
             source_input_dwg=Path(source_input),
             source_converted_dxf=Path(source_dxf),
+            font_preflight_summary=dict(summary.get("font_preflight_summary") or {}),
             frames=[FrameMeta.model_validate(item) for item in frames_raw],
             sheet_sets=[SheetSet.model_validate(item) for item in sheet_sets_raw],
         )

@@ -12,6 +12,7 @@ from .routers.meta import router as meta_router
 from .routers.system import router as system_router
 from .runtime import DeliverableApiRuntime
 
+from src.cad import FontPreflightService
 from src.models import Job
 from src.pipeline.shared_prep import SharedPrepService
 
@@ -19,10 +20,12 @@ from src.pipeline.shared_prep import SharedPrepService
 def create_app(
     job_processor: Callable[[Job], None] | None = None,
     shared_prep_service: SharedPrepService | None = None,
+    font_preflight_service: FontPreflightService | None = None,
 ) -> FastAPI:
     runtime = DeliverableApiRuntime(
         job_processor=job_processor,
         shared_prep_service=shared_prep_service,
+        font_preflight_service=font_preflight_service,
     )
 
     @asynccontextmanager

@@ -1,4 +1,4 @@
-import "@fontsource/jetbrains-mono/400.css";
+﻿import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/noto-sans-sc/400.css";
 import "@fontsource/noto-sans-sc/500.css";
@@ -36,6 +36,7 @@ import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
 import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
 import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
+import { ReplaceWorkspace } from "../features/replace/ReplaceWorkspace";
 import type {
   ApiAdapter,
   CreateBatchPayload,
@@ -93,75 +94,37 @@ const HERO_PANEL_STYLE = {
 
 const TUTORIAL_SAMPLE_FILE = "demo-2026-structural-package.dwg";
 const TUTORIAL_SAMPLE_PROJECT = "2026";
-const LEGACY_DELIVERABLE_TUTORIAL_STEPS = [
-  {
-    id: "entry",
-    title: "步骤 1 / 6",
-    body:
-      "先从首页“新建任务”区域开始。这里是出图流程的真正入口：点击“出图”后，系统会调起 DWG 文件选择器，随后依次进入任务配置、任务记录与产物下载页面。先记住这个区域，后续所有操作都会围绕这里展开。",
-  },
-  {
-    id: "picker_select",
-    title: "步骤 2 / 6",
-    body:
-      "这一步模拟系统文件选择器中的“文件列表”区域。正式使用时，需要在这个窗口里找到本次要处理的 DWG 图册文件，并确认当前高亮的是正确的源图册。教程里用内置样例来演示，不会真的读取磁盘文件。",
-  },
-  {
-    id: "picker_confirm",
-    title: "步骤 3 / 6",
-    body:
-      "确认样例 DWG 已经选中后，点击右下角“打开”。这一步对应真实流程里的文件确认动作：点开后就会进入任务配置页面，开始补齐项目、设计文件和 IED 信息。",
-  },
-  {
-    id: "config",
-    title: "步骤 4 / 6",
-    body:
-      "进入任务配置后，需要补齐设计文件、IED 基础信息和打印设置。若此时勾选“纠错”，系统会把纠错与出图一起创建为同一任务包；教程里会明确说明这一点，但不会真的提交任务。",
-  },
-  {
-    id: "record",
-    title: "步骤 5 / 6",
-    body:
-      "提交后，业务首页下方的“任务记录”会出现新的任务包卡片。这里可以快速查看任务状态、子任务关系，并从卡片进入任务包详情页，继续查看出图与纠错的完成情况。",
-  },
-  {
-    id: "detail",
-    title: "步骤 6 / 6",
-    body:
-      "最后进入任务包详情页。这里可以查看任务概览，并从下载区获取任务包、IED 计划和纠错报告等产物。这一步就是完整出图流程的收口位置：确认结果、回看子任务并下载产物。",
-  },
-] as const;
 
 const DELIVERABLE_TUTORIAL_STEPS = [
   {
     id: "entry",
     title: "步骤 1 / 5",
     body:
-      "先从首页“新建任务”区域开始。这里是出图流程的真正入口：点击“出图”后，系统会调起 DWG 文件选择器，随后依次进入任务配置、任务记录与产物下载页面。先记住这个区域，后续所有操作都会围绕这里展开。",
+      "先从首页的“新建任务”区域开始。正式使用时，点击这里的“出图”按钮，系统会拉起 DWG 文件选择窗口，整个出图流程就从这里启动。",
   },
   {
     id: "picker_select",
     title: "步骤 2 / 5",
     body:
-      "这一步模拟系统文件选择器。正式使用时，需要在这个窗口里找到本次要处理的 DWG 图册文件，确认高亮的是正确源文件后，再点击右下角“打开”进入任务配置页面。教程里用内置样例来演示，不会真的读取磁盘文件。",
+      "这里模拟系统文件选择窗口。正式使用时，需要在文件列表中选中本次要处理的 DWG 图册文件，再点击“打开”，进入任务配置页面。",
   },
   {
     id: "config",
     title: "步骤 3 / 5",
     body:
-      "进入任务配置后，需要补齐设计文件、IED 基础信息和打印设置。若此时勾选“纠错”，系统会把纠错与出图一起创建为同一任务包；教程里会明确说明这一点，但不会真的提交任务。",
+      "进入任务配置后，需要补齐项目、设计文件、IED 与打印设置等关键参数。若勾选纠错，系统会与出图一起创建为同一任务包，本教程只做流程演示。",
   },
   {
     id: "record",
     title: "步骤 4 / 5",
     body:
-      "提交后，业务首页下方的“任务记录”会出现新的任务包卡片。这里可以快速查看任务状态、子任务关系，并从卡片进入任务包详情页，继续查看出图与纠错的完成情况。",
+      "提交后，下方的任务记录会出现新的任务包卡片。你可以在这里看到任务状态、子任务关系，并点击进入详情页继续查看结果。",
   },
   {
     id: "detail",
     title: "步骤 5 / 5",
     body:
-      "最后进入任务包详情页。这里可以查看任务概览，并从下载区获取任务包、IED 计划和纠错报告等产物。这一步就是完整出图流程的收口位置：确认结果、回看子任务并下载产物。",
+      "最后进入任务包详情页，在下载区获取任务包、IED 计划和纠错报告等产物，这就是完整的出图结果查看和下载流程。",
   },
 ] as const;
 
@@ -223,12 +186,17 @@ function WorkspacePage() {
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
   const [activeModule, setActiveModule] = useState<HomeModule>("business");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
-  const [showReplaceTooltip, setShowReplaceTooltip] = useState(false);
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
   const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
   const [incomingFiles, setIncomingFiles] = useState<File[]>([]);
+  const [replaceConfigOpen, setReplaceConfigOpen] = useState(false);
+  const [pendingReplaceConfig, setPendingReplaceConfig] = useState<{
+    sourceProjectNo: string;
+    targetProjectNo: string;
+    runDeliverable: boolean;
+  } | null>(null);
 
   const [auditConfigOpen, setAuditConfigOpen] = useState(false);
   const [auditDraftAvailable, setAuditDraftAvailable] = useState(false);
@@ -410,12 +378,28 @@ function WorkspacePage() {
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
     setDeliverableConfigOpen(false);
+    setReplaceConfigOpen(false);
     setAuditConfigOpen(false);
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
   }
 
   function handleDeliverableUploadClick() {
+    setPendingReplaceConfig(null);
     deliverableFileInputRef.current?.click();
+  }
+
+  function handleReplaceFlowToDeliverable(payload: {
+    files: File[];
+    replaceConfig: {
+      sourceProjectNo: string;
+      targetProjectNo: string;
+      runDeliverable: boolean;
+    };
+  }) {
+    setIncomingFiles(payload.files);
+    setPendingReplaceConfig(payload.replaceConfig);
+    setReplaceConfigOpen(false);
+    setDeliverableConfigOpen(true);
   }
 
   function handleOpenTutorial() {
@@ -475,6 +459,7 @@ function WorkspacePage() {
       return;
     }
 
+    setPendingReplaceConfig(null);
     setIncomingFiles(files);
     setDeliverableConfigOpen(true);
     event.currentTarget.value = "";
@@ -588,33 +573,15 @@ function WorkspacePage() {
                     >
                       {auditActionLabel}
                     </button>
-                    <span
-                      className={styles.disabledPreviewWrap}
-                      data-testid="replace-preview-wrap"
-                      onBlur={() => setShowReplaceTooltip(false)}
-                      onFocus={() => setShowReplaceTooltip(true)}
-                      onMouseEnter={() => setShowReplaceTooltip(true)}
-                      onMouseLeave={() => setShowReplaceTooltip(false)}
+                    <button
+                      className={styles.primaryActionButton}
+                      aria-busy={!actionsReady}
+                      disabled={!actionsReady}
+                      type="button"
+                      onClick={() => setReplaceConfigOpen(true)}
                     >
-                      <button
-                        aria-disabled="true"
-                        className={styles.disabledPreviewButton}
-                        tabIndex={-1}
-                        type="button"
-                      >
-                        翻版
-                      </button>
-                      {showReplaceTooltip ? (
-                        <span
-                          aria-label="敬请期待"
-                          className={styles.disabledPreviewTooltip}
-                          data-side="right"
-                          role="tooltip"
-                        >
-                          敬请期待
-                        </span>
-                      ) : null}
-                    </span>
+                      翻版
+                    </button>
                     {deliverableDraftAvailable ? (
                       <button
                         className={styles.secondaryActionButton}
@@ -758,9 +725,20 @@ function WorkspacePage() {
             incomingFiles={incomingFiles}
             isOpen={deliverableConfigOpen}
             onBatchCreated={handleBatchCreated}
+            onClearPendingReplaceFlow={() => setPendingReplaceConfig(null)}
             onNotice={setAuditNotice}
             onClose={() => setDeliverableConfigOpen(false)}
             onDraftAvailabilityChange={setDeliverableDraftAvailable}
+            pendingReplaceConfig={pendingReplaceConfig}
+            schema={schemaQuery.data}
+          />
+          <ReplaceWorkspace
+            adapter={adapter}
+            isOpen={replaceConfigOpen}
+            onBatchCreated={handleBatchCreated}
+            onClose={() => setReplaceConfigOpen(false)}
+            onContinueToDeliverable={handleReplaceFlowToDeliverable}
+            onDraftAvailabilityChange={() => {}}
             schema={schemaQuery.data}
           />
           <AuditCheckWorkspace
@@ -1125,7 +1103,7 @@ function TutorialConfigDialog() {
           <div className={styles.tutorialConfigSection}>
             <div className={styles.tutorialSectionTitleRow}>
               <strong>任务与项目</strong>
-              <span>教程示例</span>
+              <span>示例流程</span>
             </div>
             <div className={styles.tutorialConfigGrid}>
               <div className={styles.tutorialField}>
@@ -1169,7 +1147,7 @@ function TutorialConfigDialog() {
                 <strong>发布</strong>
               </div>
               <div className={styles.tutorialField}>
-                <span>责任设总</span>
+                <span>编制者</span>
                 <strong>王任超@wangrca</strong>
               </div>
               <div className={styles.tutorialField}>
@@ -1181,7 +1159,7 @@ function TutorialConfigDialog() {
           <div className={styles.tutorialConfigSection}>
             <div className={styles.tutorialSectionTitleRow}>
               <strong>打印设置</strong>
-              <span>提交时随任务一起生效</span>
+              <span>选择本次出图打印样式</span>
             </div>
             <div className={styles.tutorialPrintChips}>
               <span className={styles.tutorialPrintChipActive}>红色更宽</span>
@@ -1329,24 +1307,18 @@ function DeliverableTutorialOverlay({
   onPrevious: () => void;
 }) {
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousBodyPaddingRight = document.body.style.paddingRight;
-    const previousBodyWidth = document.body.style.width;
+    const previousBodyOverflow = document.body.style.overflow;
     const previousHtmlOverflow = document.documentElement.style.overflow;
-    const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
+    const previousScrollbarGutter = document.documentElement.style.scrollbarGutter;
 
     document.documentElement.style.overflow = "hidden";
+    document.documentElement.style.scrollbarGutter = "stable";
     document.body.style.overflow = "hidden";
-    document.body.style.width = "100%";
-    if (scrollbarWidth > 0) {
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
-    }
 
     return () => {
       document.documentElement.style.overflow = previousHtmlOverflow;
-      document.body.style.overflow = previousOverflow;
-      document.body.style.paddingRight = previousBodyPaddingRight;
-      document.body.style.width = previousBodyWidth;
+      document.documentElement.style.scrollbarGutter = previousScrollbarGutter;
+      document.body.style.overflow = previousBodyOverflow;
     };
   }, []);
 
@@ -1357,7 +1329,9 @@ function DeliverableTutorialOverlay({
         <p className={styles.brandTop}>Deliverable Tutorial</p>
         <h2>{step.title}</h2>
         <p className={styles.brandBody}>{step.body}</p>
-        <div className={styles.tutorialAuditHint}>当前为演示模式，不会创建真实任务，也不会改动任务记录。</div>
+        <div className={styles.tutorialAuditHint}>
+          当前为演示模式，不会创建真实任务，也不会改动任务记录。
+        </div>
         <div className={styles.tutorialActions}>
           <button
             className={styles.secondaryActionButton}
@@ -1492,6 +1466,16 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
+      {detail.taskKind === "audit_replace" ? (
+        <section className={styles.detailSection}>
+          <h2>翻版摘要</h2>
+          <ReplaceResultCard
+            affectedDrawingsCount={detail.affectedDrawingsCount}
+            replaceSummary={detail.replaceSummary}
+          />
+        </section>
+      ) : null}
+
       {detail.taskKind === "deliverable" ? (
         <section className={styles.detailSection}>
           <h2>出图结果</h2>
@@ -1587,7 +1571,11 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
           <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
           <ArtifactButton
             href={detail.artifacts.reportDownloadUrl ?? undefined}
-            label="下载纠错报告"
+            label="下载 report.xlsx"
+          />
+          <ArtifactButton
+            href={detail.artifacts.replacedDwgDownloadUrl ?? undefined}
+            label="下载替换后 DWG"
           />
         </div>
       </section>
@@ -1621,6 +1609,14 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
                     childDetailsById.get(child.jobId)?.findingsCount ?? child.findingsCount
                   }
                 />
+              ) : child.taskKind === "audit_replace" ? (
+                <ReplaceResultCard
+                  affectedDrawingsCount={
+                    childDetailsById.get(child.jobId)?.affectedDrawingsCount ??
+                    child.affectedDrawingsCount
+                  }
+                  replaceSummary={childDetailsById.get(child.jobId)?.replaceSummary}
+                />
               ) : (
                 <p className={styles.muted}>暂无可展示的子任务结果。</p>
               )}
@@ -1629,7 +1625,9 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
                 <Link className={styles.subtaskLink} to={`/jobs/${child.jobId}`}>
                   查看子任务 {child.taskRole ?? child.jobId}
                 </Link>
-                <div className={styles.childTaskDownloads}>{renderArtifactButtons(child)}</div>
+                <div className={styles.childTaskDownloads}>
+                  {renderArtifactButtons(child, "child")}
+                </div>
               </div>
             </div>
           ))}
@@ -1788,6 +1786,64 @@ function InfoBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ReplaceResultCard({
+  affectedDrawingsCount,
+  replaceSummary,
+}: {
+  affectedDrawingsCount: number;
+  replaceSummary: JobDetail["replaceSummary"];
+}) {
+  if (!replaceSummary) {
+    return <p className={styles.muted}>正在整理翻版结果。</p>;
+  }
+
+  return (
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="替换数量" value={String(replaceSummary.replacementCount)} />
+        <InfoBlock
+          label="受影响图纸数"
+          value={String(replaceSummary.affectedDrawingsCount || affectedDrawingsCount)}
+        />
+        <InfoBlock label="源项目号" value={replaceSummary.sourceProjectNo} />
+        <InfoBlock label="目标项目号" value={replaceSummary.targetProjectNo} />
+      </div>
+
+      <div className={styles.resultSectionBlock}>
+        <h3>高频替换文本</h3>
+        {replaceSummary.topReplacedTexts.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {replaceSummary.topReplacedTexts.map((text) => (
+              <div className={styles.outputCard} key={text}>
+                <strong>替换文本</strong>
+                <span>{`文本值：${text}`}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>当前没有高频替换文本。</p>
+        )}
+      </div>
+
+      <div className={styles.resultSectionBlock}>
+        <h3>重点图纸编码</h3>
+        {replaceSummary.topInternalCodes.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {replaceSummary.topInternalCodes.map((code) => (
+              <div className={styles.outputCard} key={code}>
+                <strong>图纸编码</strong>
+                <span>{code}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>当前没有重点图纸编码。</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ListBlock({
   title,
   items,
@@ -1848,18 +1904,33 @@ function kindToneClass(kind: TaskKind) {
   return styles.kindDeliverable;
 }
 
-function renderArtifactButtons(job: JobSummary) {
+function renderArtifactButtons(job: JobSummary, scope: "default" | "child" = "default") {
+  const labels =
+    scope === "child"
+      ? {
+          package: "下载子任务 package.zip",
+          ied: "下载子任务 IED计划.xlsx",
+          report: "下载子任务 report.xlsx",
+          replacedDwg: "下载子任务替换后 DWG",
+        }
+      : {
+          package: "下载 package.zip",
+          ied: "下载 IED计划.xlsx",
+          report: "下载 report.xlsx",
+          replacedDwg: "下载替换后 DWG",
+        };
+
   if (job.taskKind === "deliverable") {
     return [
       <ArtifactButton
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
-        label="下载 package.zip"
+        label={labels.package}
       />,
       <ArtifactButton
         href={job.artifacts.iedDownloadUrl ?? undefined}
         key="ied"
-        label="下载 IED计划.xlsx"
+        label={labels.ied}
       />,
     ];
   }
@@ -1869,16 +1940,25 @@ function renderArtifactButtons(job: JobSummary) {
       <ArtifactButton
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
-        label="下载 report.xlsx"
+        label={labels.report}
       />,
     ];
   }
 
+  if (job.taskKind !== "audit_replace") {
+    return [];
+  }
+
   return [
+    <ArtifactButton
+      href={job.artifacts.reportDownloadUrl ?? undefined}
+      key="report"
+      label={labels.report}
+    />,
     <ArtifactButton
       href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
       key="replaced-dwg"
-      label="下载替换后 DWG"
+      label={labels.replacedDwg}
     />,
   ];
 }
@@ -1906,3 +1986,4 @@ function formatPageTotal(pageTotal: number) {
   }
   return `${pageTotal} 页`;
 }
+

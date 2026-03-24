@@ -153,6 +153,7 @@ function createAdapter(): ApiAdapter {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
     createAuditCheck: vi.fn(),
+    createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
@@ -229,6 +230,47 @@ describe("DeliverableWorkspace", () => {
     expect(await screen.findByRole("option", { name: "通用" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "压力容器" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "核安全设备" })).toBeInTheDocument();
+  });
+
+  it("uses the replace target project number as the deliverable project number during handoff", async () => {
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        pendingReplaceConfig={{
+          sourceProjectNo: "2026",
+          targetProjectNo: "2016",
+          runDeliverable: true,
+        }}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByRole("combobox", { name: "项目号" })).toHaveValue("2016");
+  });
+
+  it("does not expose a replace entry inside the deliverable workspace anymore", () => {
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
   });
 
   it("shows helper copy and defaults plot style to red_wider", () => {
@@ -509,6 +551,52 @@ describe("DeliverableWorkspace", () => {
       expect(submittedValues).not.toHaveProperty("upgrade_revision");
       expect(submittedValues).not.toHaveProperty("upgrade_note_text");
       expect(adapter.createAuditCheck).not.toHaveBeenCalled();
+    });
+  });
+
+  it("submits through replace-plus-deliverable when a pending replace flow is attached", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditReplace = vi.fn().mockResolvedValue({
+      batchId: "batch-replace-group-1",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        pendingReplaceConfig={{
+          sourceProjectNo: "2026",
+          targetProjectNo: "2016",
+          runDeliverable: true,
+        }}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("图册名称（中文）"), "翻版后出图图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createAuditReplace).toHaveBeenCalledWith({
+        sourceProjectNo: "2026",
+        targetProjectNo: "2016",
+        files: expect.arrayContaining([
+          expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
+        ]),
+        runDeliverable: true,
+        deliverableParams: expect.objectContaining({
+          album_title_cn: "翻版后出图图册",
+          subitem_name: "反应堆厂房",
+        }),
+      });
+      expect(adapter.createBatch).not.toHaveBeenCalled();
     });
   });
 });

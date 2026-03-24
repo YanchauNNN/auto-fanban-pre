@@ -2,6 +2,7 @@ import { normalizeFormSchema } from "../../features/schema/schema";
 import type {
   ApiAdapter,
   ApiError,
+  CreateAuditReplaceParams,
   CreateBatchPayload,
   DeliverableOutputs,
   FindingGroup,
@@ -87,6 +88,15 @@ type RawJobDetail = RawJobSummary & {
     count?: number | null;
     internal_codes?: string[] | null;
   }> | null;
+  replace_summary?: {
+    replacement_count?: number | null;
+    skipped_count?: number | null;
+    affected_drawings_count?: number | null;
+    source_project_no?: string | null;
+    target_project_no?: string | null;
+    top_replaced_texts?: string[] | null;
+    top_internal_codes?: string[] | null;
+  } | null;
 };
 
 type RawFormSchema = {
@@ -213,6 +223,44 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createAuditReplace({
+    sourceProjectNo,
+    targetProjectNo,
+    files,
+    runDeliverable,
+    deliverableParams,
+  }: CreateAuditReplaceParams): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("mode", "replace");
+    formData.append(
+      "params_json",
+      JSON.stringify({
+        source_project_no: sourceProjectNo,
+        target_project_no: targetProjectNo,
+        run_deliverable: runDeliverable,
+        ...(runDeliverable && deliverableParams
+          ? { deliverable_params: deliverableParams }
+          : {}),
+      }),
+    );
+    for (const file of files) {
+      formData.append("files[]", file);
+    }
+
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/audit-replace", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
   async listJobs(status?: string): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
@@ -244,6 +292,7 @@ export class HttpAdapter implements ApiAdapter {
       sharedDir: payload.shared_dir ?? null,
       deliverableOutputs: this.normalizeDeliverableOutputs(payload.deliverable_outputs),
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
+      replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
     };
   }
 
@@ -362,5 +411,21 @@ export class HttpAdapter implements ApiAdapter {
       count: group.count ?? 0,
       internalCodes: group.internal_codes ?? [],
     }));
+  }
+
+  private normalizeReplaceSummary(payload: RawJobDetail["replace_summary"]) {
+    if (!payload) {
+      return undefined;
+    }
+
+    return {
+      replacementCount: payload.replacement_count ?? 0,
+      skippedCount: payload.skipped_count ?? 0,
+      affectedDrawingsCount: payload.affected_drawings_count ?? 0,
+      sourceProjectNo: payload.source_project_no ?? "",
+      targetProjectNo: payload.target_project_no ?? "",
+      topReplacedTexts: payload.top_replaced_texts ?? [],
+      topInternalCodes: payload.top_internal_codes ?? [],
+    };
   }
 }

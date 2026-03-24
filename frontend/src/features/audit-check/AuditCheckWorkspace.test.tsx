@@ -22,6 +22,7 @@ function createAdapter(): ApiAdapter {
     getFormSchema: vi.fn(),
     createBatch: vi.fn(),
     createAuditCheck: vi.fn(),
+    createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
   };

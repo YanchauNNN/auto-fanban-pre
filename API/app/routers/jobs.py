@@ -11,6 +11,23 @@ from ..runtime import UploadedFilePayload
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
+@router.post("/preflight-fonts")
+async def preflight_fonts(
+    request: Request,
+    files: list[UploadFile] = File(..., alias="files[]"),
+) -> JSONResponse:
+    uploads = [
+        UploadedFilePayload(
+            filename=upload.filename or "upload.dwg",
+            content=await upload.read(),
+            content_type=upload.content_type,
+        )
+        for upload in files
+    ]
+    payload = request.app.state.runtime.preflight_fonts(files=uploads)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
+
+
 @router.post("/batch")
 async def create_batch(
     request: Request,

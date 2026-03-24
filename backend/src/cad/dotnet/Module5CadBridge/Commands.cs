@@ -45,6 +45,14 @@ public class Commands
                 var auditScanner = new AuditCheckScanner(task, trace);
                 auditScanner.Execute(result);
             }
+            else if (
+                task.WorkflowStage.Equals("font_preflight", StringComparison.OrdinalIgnoreCase)
+                || task.WorkflowStage.Equals("font_replace_missing", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                var fontProcessor = new FontPreflightProcessor(task, trace);
+                fontProcessor.Execute(result);
+            }
             else if (task.WorkflowStage.Equals("titleblock_consistency_fix", StringComparison.OrdinalIgnoreCase))
             {
                 var fixer = new TitleblockConsistencyFixer(task, trace);
@@ -153,6 +161,7 @@ internal sealed class BridgeTask
     public List<BridgeFrameTask> Frames { get; private set; } = new();
     public List<BridgeSheetSetTask> SheetSets { get; private set; } = new();
     public List<BridgeConsistencyAction> ConsistencyActions { get; private set; } = new();
+    public string ReplacementFont { get; private set; } = string.Empty;
 
     public static BridgeTask Load(string taskPath)
     {
@@ -171,6 +180,7 @@ internal sealed class BridgeTask
             SourceDxf = BridgeValue.GetString(root, "source_dxf", string.Empty),
             OutputDir = BridgeValue.GetString(root, "output_dir", string.Empty),
             OutputDwg = BridgeValue.GetString(root, "output_dwg", string.Empty),
+            ReplacementFont = BridgeValue.GetString(root, "replacement_font", string.Empty),
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),
             Output = BridgeOutputConfig.FromObject(root.TryGetValue("output", out var outputObj) ? outputObj : null),
@@ -221,6 +231,7 @@ internal sealed class BridgeResultEnvelope
     public List<Dictionary<string, object>> SheetSets { get; } = new();
     public List<Dictionary<string, object>> Texts { get; } = new();
     public List<string> Errors { get; } = new();
+    public Dictionary<string, object> AdditionalData { get; } = new();
 
     public string ToJson()
     {
@@ -234,6 +245,10 @@ internal sealed class BridgeResultEnvelope
             ["texts"] = Texts,
             ["errors"] = Errors,
         };
+        foreach (var item in AdditionalData)
+        {
+            root[item.Key] = item.Value;
+        }
         var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         return serializer.Serialize(root);
     }

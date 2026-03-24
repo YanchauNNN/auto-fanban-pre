@@ -8,6 +8,7 @@ const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
 const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
+const mockCreateAuditReplace = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobDetail = vi.fn();
 
@@ -17,6 +18,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     getFormSchema: mockGetFormSchema,
     createBatch: mockCreateBatch,
     createAuditCheck: mockCreateAuditCheck,
+    createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
   }),
@@ -29,6 +31,7 @@ beforeEach(() => {
   mockGetFormSchema.mockReset();
   mockCreateBatch.mockReset();
   mockCreateAuditCheck.mockReset();
+  mockCreateAuditReplace.mockReset();
   mockListJobs.mockReset();
   mockGetJobDetail.mockReset();
 
@@ -141,7 +144,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "翻版" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
 
     const toolbar = screen.getByTestId("module-toolbar");
     expect(within(toolbar).getByRole("button", { name: "业务模块" })).toHaveAttribute(
@@ -193,21 +196,12 @@ describe("homepage shell", () => {
     expect(await screen.findByRole("button", { name: "已刷新" })).toBeInTheDocument();
   });
 
-  it("shows the themed replace tooltip immediately on hover", async () => {
+  it("opens the real replace workspace from the homepage", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const replacePreview = await screen.findByTestId("replace-preview-wrap");
-    expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
-
-    await user.hover(replacePreview);
-    expect(screen.getByRole("tooltip", { name: "敬请期待" })).toHaveAttribute(
-      "data-side",
-      "right",
-    );
-
-    await user.unhover(replacePreview);
-    expect(screen.queryByRole("tooltip", { name: "敬请期待" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "翻版" }));
+    expect(screen.getByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
   });
 
   it("opens tutorial mode and walks through the simulated deliverable flow", async () => {
@@ -224,7 +218,7 @@ describe("homepage shell", () => {
     );
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "entry");
     expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.paddingRight).toMatch(/\d+px|^$/);
+    expect(document.documentElement.style.scrollbarGutter).toBe("stable");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByRole("dialog", { name: "教程文件选择" })).toBeInTheDocument();
@@ -257,7 +251,7 @@ describe("homepage shell", () => {
     expect(screen.queryByRole("dialog", { name: "教程任务记录" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("tutorial-spotlight")).not.toBeInTheDocument();
     expect(document.body.style.overflow).toBe("");
-    expect(document.body.style.paddingRight).toBe("");
+    expect(document.documentElement.style.scrollbarGutter).toBe("");
   });
 });
 
@@ -440,5 +434,203 @@ describe("job cards", () => {
 
     expect(await screen.findByText("出图完成")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看任务" })).toBeInTheDocument();
+  });
+});
+
+describe("job detail pages", () => {
+  it("shows replace summary plus both report and replaced dwg downloads for replace jobs", async () => {
+    window.history.pushState({}, "", "/jobs/replace-job-1");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "replace-job-1",
+      batchId: "batch-replace-1",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "20261NH-JGS51-B合并版.dwg",
+      sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+      taskKind: "audit_replace",
+      taskRole: null,
+      jobMode: "replace",
+      projectNo: "2026",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-03-24T09:00:00+08:00",
+      finishedAt: "2026-03-24T09:10:00+08:00",
+      startedAt: "2026-03-24T09:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 10,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: true,
+        replacedDwgAvailable: true,
+        reportDownloadUrl: "/api/jobs/replace-job-1/download/report",
+        replacedDwgDownloadUrl: "/api/jobs/replace-job-1/download/replaced",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      replaceSummary: {
+        replacementCount: 51,
+        skippedCount: 0,
+        affectedDrawingsCount: 10,
+        sourceProjectNo: "2026",
+        targetProjectNo: "2016",
+        topReplacedTexts: ["2026", "2026XNI-JGS02"],
+        topInternalCodes: ["20261NH-JGS51-001"],
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("翻版摘要")).toBeInTheDocument();
+    expect(screen.getByText("51")).toBeInTheDocument();
+    expect(screen.getByText("2026")).toBeInTheDocument();
+    expect(screen.getByText("2016")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
+  });
+
+  it("shows aggregate replaced dwg downloads for replace-plus-deliverable groups", async () => {
+    window.history.pushState({}, "", "/jobs/group-replace-1");
+    mockGetJobDetail
+      .mockResolvedValueOnce({
+        jobId: "group-replace-1",
+        batchId: "batch-replace-group-1",
+        groupId: "group-replace-1",
+        isGroup: true,
+        sourceFilename: "20261NH-JGS51-B合并版.dwg",
+        sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+        taskKind: null,
+        taskRole: null,
+        jobMode: null,
+        projectNo: "2016",
+        status: "succeeded",
+        stage: "GROUP_COMPLETE",
+        percent: 100,
+        message: "",
+        createdAt: "2026-03-24T09:01:00+08:00",
+        finishedAt: "2026-03-24T09:20:00+08:00",
+        startedAt: "2026-03-24T09:01:10+08:00",
+        currentFile: null,
+        runAuditCheck: false,
+        childJobIds: ["replace-job-1", "deliverable-job-1"],
+        findingsCount: 0,
+        affectedDrawingsCount: 10,
+        artifacts: {
+          packageAvailable: true,
+          iedAvailable: true,
+          reportAvailable: true,
+          replacedDwgAvailable: true,
+          packageDownloadUrl: "/api/jobs/group-replace-1/download/package",
+          iedDownloadUrl: "/api/jobs/group-replace-1/download/ied",
+          reportDownloadUrl: "/api/jobs/group-replace-1/download/report",
+          replacedDwgDownloadUrl: "/api/jobs/group-replace-1/download/replaced",
+        },
+        retryAvailable: false,
+        sharedRunId: "shared-run-1",
+        flags: [],
+        errors: [],
+        topWrongTexts: [],
+        topInternalCodes: [],
+        children: [
+          {
+            ...makeSingleJob(1, "20261NH-JGS51-B合并版.dwg"),
+            jobId: "replace-job-1",
+            batchId: "batch-replace-group-1",
+            groupId: "group-replace-1",
+            taskKind: "audit_replace",
+            taskRole: "audit_replace",
+            jobMode: "replace",
+            projectNo: "2026",
+            status: "succeeded",
+            stage: "EXPORT_REPORT",
+            artifacts: {
+              packageAvailable: false,
+              iedAvailable: false,
+              reportAvailable: true,
+              replacedDwgAvailable: true,
+              reportDownloadUrl: "/api/jobs/replace-job-1/download/report",
+              replacedDwgDownloadUrl: "/api/jobs/replace-job-1/download/replaced",
+            },
+          },
+          {
+            ...makeSingleJob(2, "20261NH-JGS51-B合并版.dwg"),
+            jobId: "deliverable-job-1",
+            batchId: "batch-replace-group-1",
+            groupId: "group-replace-1",
+            taskKind: "deliverable",
+            taskRole: "deliverable_main",
+            jobMode: "deliverable",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        jobId: "replace-job-1",
+        batchId: "batch-replace-group-1",
+        groupId: "group-replace-1",
+        isGroup: false,
+        sourceFilename: "20261NH-JGS51-B合并版.dwg",
+        sourceFilenames: ["20261NH-JGS51-B合并版.dwg"],
+        taskKind: "audit_replace",
+        taskRole: "audit_replace",
+        jobMode: "replace",
+        projectNo: "2026",
+        status: "succeeded",
+        stage: "EXPORT_REPORT",
+        percent: 100,
+        message: "",
+        createdAt: "2026-03-24T09:01:00+08:00",
+        finishedAt: "2026-03-24T09:10:00+08:00",
+        startedAt: "2026-03-24T09:01:10+08:00",
+        currentFile: null,
+        runAuditCheck: false,
+        childJobIds: [],
+        findingsCount: 0,
+        affectedDrawingsCount: 10,
+        artifacts: {
+          packageAvailable: false,
+          iedAvailable: false,
+          reportAvailable: true,
+          replacedDwgAvailable: true,
+          reportDownloadUrl: "/api/jobs/replace-job-1/download/report",
+          replacedDwgDownloadUrl: "/api/jobs/replace-job-1/download/replaced",
+        },
+        retryAvailable: false,
+        sharedRunId: "shared-run-1",
+        flags: [],
+        errors: [],
+        topWrongTexts: [],
+        topInternalCodes: [],
+        replaceSummary: {
+          replacementCount: 51,
+          skippedCount: 0,
+          affectedDrawingsCount: 10,
+          sourceProjectNo: "2026",
+          targetProjectNo: "2016",
+          topReplacedTexts: ["2026"],
+          topInternalCodes: ["20261NH-JGS51-001"],
+        },
+      })
+      .mockResolvedValueOnce({
+        ...makeSingleJob(2, "20261NH-JGS51-B合并版.dwg"),
+        jobId: "deliverable-job-1",
+        batchId: "batch-replace-group-1",
+        groupId: "group-replace-1",
+        taskKind: "deliverable",
+        taskRole: "deliverable_main",
+        jobMode: "deliverable",
+      });
+
+    render(<App />);
+
+    expect(await screen.findByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });
 });

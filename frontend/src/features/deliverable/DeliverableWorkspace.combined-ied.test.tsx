@@ -129,6 +129,7 @@ function createAdapter(): ApiAdapter {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
     createAuditCheck: vi.fn(),
+    createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn().mockResolvedValue({

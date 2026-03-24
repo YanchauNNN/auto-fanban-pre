@@ -15,6 +15,81 @@ from src.models import Job, JobStatus, JobType
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
 
 
+class FakeFontPreflightService:
+    def __init__(self) -> None:
+        self.replacement_options = [
+            {
+                "label": "SimSun (simsun.ttc)",
+                "value": "simsun.ttc",
+                "family": "SimSun",
+                "path": r"C:\Windows\Fonts\simsun.ttc",
+            },
+            {
+                "label": "Arial (arial.ttf)",
+                "value": "arial.ttf",
+                "family": "Arial",
+                "path": r"C:\Windows\Fonts\arial.ttf",
+            },
+        ]
+        self.inspect_calls: list[dict[str, object]] = []
+
+    def list_replacement_options(self) -> list[dict[str, str]]:
+        return list(self.replacement_options)
+
+    def validate_replacement_font(self, font_name: str) -> bool:
+        return any(option["value"] == font_name for option in self.replacement_options)
+
+    def inspect_dwg(
+        self,
+        *,
+        source_dwg: Path,
+        replacement_policy: str = "none",
+        replacement_font: str | None = None,
+        workspace_dir: Path | None = None,
+        slot_runtime: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        self.inspect_calls.append(
+            {
+                "source_dwg": source_dwg,
+                "replacement_policy": replacement_policy,
+                "replacement_font": replacement_font,
+                "workspace_dir": workspace_dir,
+                "slot_runtime": slot_runtime,
+            }
+        )
+        filename = source_dwg.name
+        if filename == "missing-font.dwg":
+            return {
+                "filename": filename,
+                "status": "missing_fonts",
+                "missing_fonts": [
+                    {
+                        "style_name": "STYLE1",
+                        "font_name": "missing.shx",
+                        "bigfont_name": "",
+                        "kind": "shx",
+                        "used_in_block": True,
+                    }
+                ],
+                "detected_style_count": 3,
+                "missing_style_count": 1,
+                "font_replacement_applied": replacement_policy == "replace_missing",
+                "replacement_font": replacement_font,
+                "replaced_style_count": 1 if replacement_policy == "replace_missing" else 0,
+            }
+
+        return {
+            "filename": filename,
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 2,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        }
+
+
 class FakeJobProcessor:
     def __call__(self, job: Job) -> None:
         job.work_dir = Path(job.work_dir or "")
@@ -214,14 +289,17 @@ def _configure_api_env(monkeypatch, tmp_path: Path) -> None:
     reload_config()
 
 
-def _create_client(monkeypatch, tmp_path: Path, processor=None) -> TestClient:
+def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=None) -> TestClient:
     _configure_api_env(monkeypatch, tmp_path)
     repo_root = Path(__file__).resolve().parents[3]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from API.app.main import create_app
 
-    app = create_app(job_processor=processor or FakeJobProcessor())
+    app = create_app(
+        job_processor=processor or FakeJobProcessor(),
+        font_preflight_service=font_service,
+    )
     return TestClient(app)
 
 
@@ -466,6 +544,80 @@ def test_create_batch_rejects_non_dwg_upload(monkeypatch, tmp_path: Path) -> Non
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"]["upload_errors"]["files"] == ["only .dwg files are allowed"]
+
+
+def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypatch, tmp_path: Path) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[
+                ("files[]", ("missing-font.dwg", b"dwg-a", "application/acad")),
+                ("files[]", ("ok-font.dwg", b"dwg-b", "application/acad")),
+            ],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["replacement_options"] == font_service.replacement_options
+    assert payload["files"] == [
+        {
+            "filename": "missing-font.dwg",
+            "status": "missing_fonts",
+            "missing_fonts": [
+                {
+                    "style_name": "STYLE1",
+                    "font_name": "missing.shx",
+                    "bigfont_name": "",
+                    "kind": "shx",
+                    "used_in_block": True,
+                }
+            ],
+            "detected_style_count": 3,
+            "missing_style_count": 1,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        },
+        {
+            "filename": "ok-font.dwg",
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 2,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        },
+    ]
+
+
+def test_create_batch_rejects_replace_missing_without_replacement_font(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path, font_service=FakeFontPreflightService()) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **_deliverable_params(),
+                        "font_replace_policy": "replace_missing",
+                    },
+                    ensure_ascii=False,
+                )
+            },
+            files=[("files[]", ("missing-font.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["param_errors"]["font_replacement_font"] == [
+        "required_when_font_replace_policy_is_replace_missing"
+    ]
 
 
 def test_create_batch_rejects_missing_required_param(monkeypatch, tmp_path: Path) -> None:
@@ -924,7 +1076,16 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
 
 
 class FakeSharedPrepService(SharedPrepService):
-    def prepare(self, *, group_id: str, source_dwg: Path, shared_dir: Path) -> SharedPrepArtifacts:
+    def prepare(
+        self,
+        *,
+        group_id: str,
+        source_dwg: Path,
+        shared_dir: Path,
+        font_replace_policy: str = "none",
+        font_replacement_font: str | None = None,
+        slot_runtime: dict[str, str] | None = None,
+    ) -> SharedPrepArtifacts:
         shared_dir.mkdir(parents=True, exist_ok=True)
         staged_source = shared_dir / source_dwg.name
         staged_source.write_bytes(source_dwg.read_bytes())
@@ -950,6 +1111,16 @@ class FakeSharedPrepService(SharedPrepService):
             shared_dir=shared_dir,
             source_input_dwg=staged_source,
             source_converted_dxf=converted_dxf,
+            font_preflight_summary={
+                "filename": staged_source.name,
+                "status": "ok",
+                "missing_fonts": [],
+                "detected_style_count": 0,
+                "missing_style_count": 0,
+                "font_replacement_applied": font_replace_policy == "replace_missing",
+                "replacement_font": font_replacement_font,
+                "replaced_style_count": 0,
+            },
             frames=[],
             sheet_sets=[],
         )

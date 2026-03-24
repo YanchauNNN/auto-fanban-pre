@@ -81,6 +81,24 @@ export type FindingGroup = {
   internalCodes: string[];
 };
 
+export type ReplaceSummary = {
+  replacementCount: number;
+  skippedCount: number;
+  affectedDrawingsCount: number;
+  sourceProjectNo: string;
+  targetProjectNo: string;
+  topReplacedTexts: string[];
+  topInternalCodes: string[];
+};
+
+export type CreateAuditReplaceParams = {
+  sourceProjectNo: string;
+  targetProjectNo: string;
+  files: File[];
+  runDeliverable: boolean;
+  deliverableParams?: Record<string, string>;
+};
+
 export type JobSummary = {
   jobId: string;
   batchId: string | null;
@@ -127,6 +145,7 @@ export type JobDetail = JobSummary & {
   sharedDir?: string | null;
   deliverableOutputs?: DeliverableOutputs;
   findingGroups?: FindingGroup[];
+  replaceSummary?: ReplaceSummary;
 };
 
 export type JobList = {
@@ -194,6 +213,7 @@ export type ApiAdapter = {
     files: File[],
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
+  createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
   listJobs: (status?: string) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

@@ -19,6 +19,7 @@ from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
+from src.cad.font_preflight import FontPreflightService
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import Job, JobArtifacts, JobStatus, JobType, TaskGroup
@@ -38,6 +39,9 @@ class UploadedFilePayload:
 
 
 class PipelineJobProcessor:
+    def __init__(self, *, font_preflight_service: FontPreflightService | None = None) -> None:
+        self.font_preflight_service = font_preflight_service
+
     def __call__(self, job: Job) -> None:
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()
@@ -46,7 +50,10 @@ class PipelineJobProcessor:
                 return
             AuditCheckExecutor().execute(job)
             return
-        PipelineExecutor().execute(job)
+        if self.font_preflight_service is None:
+            PipelineExecutor().execute(job)
+            return
+        PipelineExecutor(font_preflight_service=self.font_preflight_service).execute(job)
 
 
 class DeliverableApiRuntime:
@@ -54,6 +61,7 @@ class DeliverableApiRuntime:
         self,
         job_processor: Callable[[Job], None] | None = None,
         shared_prep_service: SharedPrepService | None = None,
+        font_preflight_service: FontPreflightService | None = None,
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
@@ -61,8 +69,13 @@ class DeliverableApiRuntime:
         self.group_manager = GroupManager()
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
-        self.job_processor = job_processor or PipelineJobProcessor()
-        self.shared_prep_service = shared_prep_service or SharedPrepService()
+        self.font_preflight_service = font_preflight_service or FontPreflightService()
+        self.job_processor = job_processor or PipelineJobProcessor(
+            font_preflight_service=self.font_preflight_service
+        )
+        self.shared_prep_service = shared_prep_service or SharedPrepService(
+            font_preflight_service=self.font_preflight_service
+        )
         self.cad_slot_pool = CADSlotPool(config=self.config, slot_count=4)
 
         self._group_queue: queue.Queue[str | None] = queue.Queue()
@@ -129,6 +142,56 @@ class DeliverableApiRuntime:
     def form_schema(self) -> dict[str, Any]:
         return self.metadata.build_form_schema()
 
+    def preflight_fonts(self, *, files: list[UploadedFilePayload]) -> dict[str, Any]:
+        upload_errors = self._validate_uploads(files)
+        if upload_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": upload_errors, "param_errors": {}},
+            )
+
+        preflight_id = f"preflight-{uuid.uuid4().hex[:8]}"
+        preflight_root = self.config.storage_dir / "preflight" / preflight_id
+        input_dir = preflight_root / "input"
+        input_dir.mkdir(parents=True, exist_ok=True)
+
+        results: list[dict[str, Any]] = []
+        for upload in files:
+            source_path = input_dir / (Path(upload.filename).name or "upload.dwg")
+            source_path.write_bytes(upload.content)
+            workspace_dir = preflight_root / source_path.stem
+            try:
+                results.append(
+                    self.font_preflight_service.inspect_dwg(
+                        source_dwg=source_path,
+                        replacement_policy="none",
+                        replacement_font=None,
+                        workspace_dir=workspace_dir,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                results.append(
+                    {
+                        "filename": source_path.name,
+                        "status": "failed",
+                        "missing_fonts": [],
+                        "detected_style_count": 0,
+                        "missing_style_count": 0,
+                        "font_replacement_applied": False,
+                        "replacement_font": None,
+                        "replaced_style_count": 0,
+                        "errors": [str(exc)],
+                    }
+                )
+
+        return {
+            "files": results,
+            "replacement_options": self.font_preflight_service.list_replacement_options(),
+            "requires_confirmation": any(
+                str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
+            ),
+        }
+
     def create_batch(
         self,
         *,
@@ -141,6 +204,12 @@ class DeliverableApiRuntime:
             (upload, self._resolve_params_for_upload(raw_params, upload.filename)) for upload in files
         ]
         param_errors = self._collect_param_errors(resolved_submissions)
+        font_param_errors = self._collect_font_param_errors(raw_params)
+        for field_name, field_errors in font_param_errors.items():
+            bucket = param_errors.setdefault(field_name, [])
+            for error in field_errors:
+                if error not in bucket:
+                    bucket.append(error)
         if upload_errors or param_errors:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -307,6 +376,28 @@ class DeliverableApiRuntime:
 
     def _collect_replace_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
         return self.validator.validate_replace_frontend_params(raw_params)
+
+    def _collect_font_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
+        errors: dict[str, list[str]] = {}
+        policy = str(raw_params.get("font_replace_policy") or "none").strip().lower() or "none"
+        replacement_font = str(raw_params.get("font_replacement_font") or "").strip()
+
+        if policy not in {"none", "replace_missing"}:
+            errors.setdefault("font_replace_policy", []).append("unsupported_font_replace_policy")
+            return errors
+
+        if policy != "replace_missing":
+            return errors
+
+        if not replacement_font:
+            errors.setdefault("font_replacement_font", []).append(
+                "required_when_font_replace_policy_is_replace_missing"
+            )
+            return errors
+
+        if not self.font_preflight_service.validate_replacement_font(replacement_font):
+            errors.setdefault("font_replacement_font", []).append("unavailable_font_replacement_font")
+        return errors
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
         groups = [
             self._serialize_group_summary(group)
@@ -507,17 +598,34 @@ class DeliverableApiRuntime:
 
             source_input = self._resolve_group_source_input(group)
             shared_dir = group.shared_dir or (self.config.get_group_dir(group.group_id) / 'shared' / self._safe_source_key(source_input.name))
-            prep = self.shared_prep_service.prepare(group_id=group.group_id, source_dwg=source_input, shared_dir=shared_dir)
+            child_jobs = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
+            font_params = next(
+                (child.params for child in child_jobs if child.task_role == 'deliverable_main'),
+                child_jobs[0].params if child_jobs else {},
+            )
+            prep = self.shared_prep_service.prepare(
+                group_id=group.group_id,
+                source_dwg=source_input,
+                shared_dir=shared_dir,
+                font_replace_policy=str(font_params.get("font_replace_policy") or "none"),
+                font_replacement_font=str(font_params.get("font_replacement_font") or "").strip() or None,
+            )
             group.shared_dir = prep.shared_dir
             group.progress.percent = 35
             group.progress.message = '共享前处理完成'
             self.group_manager.update_group(group)
-
-            child_jobs = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
             for child in child_jobs:
                 child.params['shared_prep_dir'] = str(prep.shared_dir)
                 child.params['shared_source_dwg'] = str(prep.source_input_dwg)
                 child.params['shared_source_dxf'] = str(prep.source_converted_dxf)
+                child.font_preflight_summary = {
+                    "files": [prep.font_preflight_summary],
+                    "policy": str(font_params.get("font_replace_policy") or "none"),
+                }
+                child.missing_fonts_detected = str(prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"
+                child.font_replacement_applied = bool(prep.font_preflight_summary.get("font_replacement_applied", False))
+                child.replacement_font = str(prep.font_preflight_summary.get("replacement_font") or "").strip() or None
+                child.replaced_style_count = int(prep.font_preflight_summary.get("replaced_style_count", 0) or 0)
                 self.job_manager.update_job(child)
 
             group.progress.stage = 'DELIVERABLE_BRANCH' if group.run_audit_check else 'DOCS_AND_PACKAGE'
@@ -573,12 +681,30 @@ class DeliverableApiRuntime:
             group_id=f'{group.group_id}-deliverable',
             source_dwg=replaced_dwg,
             shared_dir=deliverable_shared_dir,
+            font_replace_policy=str(deliverable_job.params.get("font_replace_policy") or "none"),
+            font_replacement_font=str(deliverable_job.params.get("font_replacement_font") or "").strip() or None,
         )
 
         deliverable_job.input_files = [replaced_dwg]
         deliverable_job.params['shared_prep_dir'] = str(deliverable_prep.shared_dir)
         deliverable_job.params['shared_source_dwg'] = str(deliverable_prep.source_input_dwg)
         deliverable_job.params['shared_source_dxf'] = str(deliverable_prep.source_converted_dxf)
+        deliverable_job.font_preflight_summary = {
+            "files": [deliverable_prep.font_preflight_summary],
+            "policy": str(deliverable_job.params.get("font_replace_policy") or "none"),
+        }
+        deliverable_job.missing_fonts_detected = (
+            str(deliverable_prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"
+        )
+        deliverable_job.font_replacement_applied = bool(
+            deliverable_prep.font_preflight_summary.get("font_replacement_applied", False)
+        )
+        deliverable_job.replacement_font = (
+            str(deliverable_prep.font_preflight_summary.get("replacement_font") or "").strip() or None
+        )
+        deliverable_job.replaced_style_count = int(
+            deliverable_prep.font_preflight_summary.get("replaced_style_count", 0) or 0
+        )
         self.job_manager.update_job(deliverable_job)
         self._run_job(deliverable_job.job_id)
 
@@ -744,6 +870,11 @@ class DeliverableApiRuntime:
             'pc3_path': job.pc3_path,
             'pmp_path': job.pmp_path,
             'ctb_path': job.ctb_path,
+            'font_preflight_summary': job.font_preflight_summary,
+            'missing_fonts_detected': job.missing_fonts_detected,
+            'font_replacement_applied': job.font_replacement_applied,
+            'replacement_font': job.replacement_font,
+            'replaced_style_count': job.replaced_style_count,
             'is_group': False,
             'source_filename': job.source_filename,
             'task_kind': task_kind,
@@ -775,6 +906,11 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_job_artifacts(job, include_urls=True, job_id=job.job_id),
             'plot_style_key': job.plot_style_key,
             'plot_resource_mode': job.plot_resource_mode,
+            'font_preflight_summary': job.font_preflight_summary,
+            'missing_fonts_detected': job.missing_fonts_detected,
+            'font_replacement_applied': job.font_replacement_applied,
+            'replacement_font': job.replacement_font,
+            'replaced_style_count': job.replaced_style_count,
         })
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})

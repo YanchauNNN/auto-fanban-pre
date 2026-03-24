@@ -1,15 +1,15 @@
 ﻿from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.models import Job, JobStatus, JobType
 from src.pipeline.executor import PipelineExecutor
-from src.pipeline.stages import StageEnum
+from src.pipeline.stages import DELIVERABLE_STAGES, StageEnum
 
 
 def _make_executor_with_engine(engine: str) -> PipelineExecutor:
@@ -103,4 +103,13 @@ def test_execute_uses_shared_prep_and_skips_early_detection_stages(tmp_path: Pat
     assert StageEnum.DETECT_FRAMES.value not in seen_stages
     assert StageEnum.EXTRACT_TITLEBLOCK_FIELDS.value not in seen_stages
     assert StageEnum.A4_MULTIPAGE_GROUPING.value not in seen_stages
+    assert StageEnum.FONT_PREFLIGHT_AND_REPLACE.value not in seen_stages
     assert StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value in seen_stages
+
+
+def test_stage_order_includes_font_preflight_before_convert() -> None:
+    stage_names = [stage.name for stage in DELIVERABLE_STAGES]
+
+    assert stage_names.index(StageEnum.FONT_PREFLIGHT_AND_REPLACE.value) < stage_names.index(
+        StageEnum.CONVERT_DWG_TO_DXF.value
+    )

@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.cad.font_preflight import FontPreflightService
+from src.models import Job, JobType
+from src.pipeline.executor import PipelineExecutor
+
+
+class _FakeInventory:
+    def __init__(self, options: list[dict[str, str]]) -> None:
+        self._options = options
+
+    def list_options(self) -> list[dict[str, str]]:
+        return list(self._options)
+
+    def is_valid_font(self, value: str) -> bool:
+        return any(option["value"] == value for option in self._options)
+
+
+class _FakeBridge:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def preflight(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append({"method": "preflight", **kwargs})
+        return {
+            "status": "missing_fonts",
+            "missing_fonts": [
+                {
+                    "style_name": "STYLE1",
+                    "font_name": "missing.shx",
+                    "bigfont_name": "",
+                    "kind": "shx",
+                    "used_in_block": True,
+                }
+            ],
+            "detected_style_count": 4,
+            "missing_style_count": 1,
+            "font_replacement_applied": False,
+            "replaced_style_count": 0,
+        }
+
+    def replace_missing(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append({"method": "replace_missing", **kwargs})
+        return {
+            "status": "missing_fonts",
+            "missing_fonts": [
+                {
+                    "style_name": "STYLE1",
+                    "font_name": "missing.shx",
+                    "bigfont_name": "",
+                    "kind": "shx",
+                    "used_in_block": True,
+                }
+            ],
+            "detected_style_count": 4,
+            "missing_style_count": 1,
+            "font_replacement_applied": True,
+            "replacement_font": kwargs["replacement_font"],
+            "replaced_style_count": 1,
+        }
+
+
+def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) -> None:
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([{"label": "SimSun", "value": "simsun.ttc", "family": "SimSun", "path": "C:/Windows/Fonts/simsun.ttc"}])),
+        bridge=cast(Any, _FakeBridge()),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="font_replacement_font is unavailable"):
+        service.inspect_dwg(
+            source_dwg=source,
+            replacement_policy="replace_missing",
+            replacement_font="arial.ttf",
+            workspace_dir=tmp_path / "work",
+        )
+
+
+def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([{"label": "SimSun", "value": "simsun.ttc", "family": "SimSun", "path": "C:/Windows/Fonts/simsun.ttc"}])),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="replace_missing",
+        replacement_font="simsun.ttc",
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["method"] == "replace_missing"
+    assert result["font_replacement_applied"] is True
+    assert result["replacement_font"] == "simsun.ttc"
+    assert result["replaced_style_count"] == 1
+
+
+def test_stage_font_preflight_blocks_when_missing_fonts_are_unconfirmed(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.font_preflight_service = MagicMock()
+    executor.font_preflight_service.inspect_dwg.return_value = {
+        "filename": "sample.dwg",
+        "status": "missing_fonts",
+        "missing_fonts": [{"style_name": "STYLE1"}],
+        "detected_style_count": 2,
+        "missing_style_count": 1,
+        "font_replacement_applied": False,
+        "replacement_font": None,
+        "replaced_style_count": 0,
+    }
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    (input_dir / "sample.dwg").write_text("dwg", encoding="utf-8")
+
+    job = Job(
+        job_id="job-font-stage-missing",
+        job_type=JobType.DELIVERABLE,
+        project_no="2016",
+        work_dir=tmp_path,
+        params={"font_replace_policy": "none"},
+    )
+
+    with pytest.raises(RuntimeError, match="missing fonts detected"):
+        PipelineExecutor._stage_font_preflight_and_replace(executor, job, {})
+
+    assert job.missing_fonts_detected is True
+    assert job.font_replacement_applied is False
+
+
+def test_stage_font_preflight_updates_job_summary_after_replacement(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.font_preflight_service = MagicMock()
+    executor.font_preflight_service.validate_replacement_font.return_value = True
+    executor.font_preflight_service.inspect_dwg.return_value = {
+        "filename": "sample.dwg",
+        "status": "missing_fonts",
+        "missing_fonts": [{"style_name": "STYLE1"}],
+        "detected_style_count": 2,
+        "missing_style_count": 1,
+        "font_replacement_applied": True,
+        "replacement_font": "simsun.ttc",
+        "replaced_style_count": 1,
+    }
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    (input_dir / "sample.dwg").write_text("dwg", encoding="utf-8")
+
+    job = Job(
+        job_id="job-font-stage-replaced",
+        job_type=JobType.DELIVERABLE,
+        project_no="2016",
+        work_dir=tmp_path,
+        params={"font_replace_policy": "replace_missing", "font_replacement_font": "simsun.ttc"},
+    )
+
+    PipelineExecutor._stage_font_preflight_and_replace(executor, job, {})
+
+    assert job.font_preflight_summary["policy"] == "replace_missing"
+    assert job.missing_fonts_detected is True
+    assert job.font_replacement_applied is True
+    assert job.replacement_font == "simsun.ttc"
+    assert job.replaced_style_count == 1
