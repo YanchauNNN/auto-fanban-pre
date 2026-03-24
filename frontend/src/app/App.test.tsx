@@ -6,6 +6,7 @@ import { App } from "./App";
 
 const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
+const mockPreflightFonts = vi.fn();
 const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
@@ -16,6 +17,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
+    preflightFonts: mockPreflightFonts,
     createBatch: mockCreateBatch,
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
@@ -29,6 +31,7 @@ beforeEach(() => {
 
   mockGetHealth.mockReset();
   mockGetFormSchema.mockReset();
+  mockPreflightFonts.mockReset();
   mockCreateBatch.mockReset();
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
@@ -77,6 +80,11 @@ beforeEach(() => {
   mockListJobs.mockResolvedValue({
     total: 0,
     items: [],
+  });
+  mockPreflightFonts.mockResolvedValue({
+    files: [],
+    replacementOptions: [],
+    requiresConfirmation: false,
   });
 });
 
@@ -239,7 +247,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
   });
 
-  it("opens tutorial mode and walks through the simulated deliverable flow", async () => {
+  it("opens tutorial mode and walks through the real deliverable flow preview", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -256,30 +264,35 @@ describe("homepage shell", () => {
     expect(document.documentElement.style.scrollbarGutter).toBe("stable");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
-    expect(screen.getByRole("dialog", { name: "教程文件选择" })).toBeInTheDocument();
-    expect(screen.getByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
+    expect(screen.getByText(/点击“出图”后，浏览器会拉起系统文件选择窗口/)).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "picker_select");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
-    expect(screen.getByRole("dialog", { name: "教程任务配置" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程任务配置" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建交付任务" })).toBeInTheDocument();
     expect(
-      screen.getByText("若勾选纠错，系统会与出图一起创建为同一任务包；本教程仅演示流程，不会真的提交任务。"),
+      screen.getByText("上传文件后直接在弹窗内完成配置。关闭不会丢失草稿；只有手动清空或提交成功后才会重置。"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "config");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
-    expect(screen.getByRole("dialog", { name: "教程任务记录" })).toBeInTheDocument();
-    expect(screen.getByText("18185NE-JGS11.dwg")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程任务记录" })).not.toBeInTheDocument();
+    expect(screen.getByText("demo-2026-structural-package.dwg")).toBeInTheDocument();
+    expect(screen.getByText("查看任务包")).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "record");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
-    expect(screen.getByRole("dialog", { name: "教程任务详情" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
+    expect(screen.getByText("任务包概览")).toBeInTheDocument();
+    expect(screen.getByText("聚合下载")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "退出" }));
-    expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
+    expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
     expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "教程任务配置" })).not.toBeInTheDocument();

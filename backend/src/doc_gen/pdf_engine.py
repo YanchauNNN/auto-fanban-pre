@@ -33,6 +33,7 @@ from typing import Any, cast
 
 from ..config import get_config
 from ..interfaces import ExportError, IPDFExporter
+from .office_automation import get_office_automation_limiter
 
 _RPC_CALL_REJECTED = -2147418111
 _FILE_NOT_FOUND_HRESULT = -2147024894
@@ -410,28 +411,29 @@ class PDFExporter(IPDFExporter):
 
         word = None
         doc = None
-        try:
-            pythoncom.CoInitialize()
-            word = win32com.client.DispatchEx("Word.Application")
-            self._prepare_word_for_headless_run(word)
+        with get_office_automation_limiter().word_session():
+            try:
+                pythoncom.CoInitialize()
+                word = win32com.client.DispatchEx("Word.Application")
+                self._prepare_word_for_headless_run(word)
 
-            doc = word.Documents.Open(str(docx_path.absolute()))
-            doc.ExportAsFixedFormat(str(pdf_path.absolute()), 17)  # 17 = PDF
-        finally:
-            if doc:
-                self._mark_word_document_saved(doc)
-                with contextlib.suppress(Exception):
-                    doc.Close(False)
-            doc = None
-            if word:
-                self._mark_word_normal_template_saved(word)
-                with contextlib.suppress(Exception):
-                    word.Quit()
-            word = None
-            gc.collect()
-            if pythoncom is not None:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                doc = word.Documents.Open(str(docx_path.absolute()))
+                doc.ExportAsFixedFormat(str(pdf_path.absolute()), 17)  # 17 = PDF
+            finally:
+                if doc:
+                    self._mark_word_document_saved(doc)
+                    with contextlib.suppress(Exception):
+                        doc.Close(False)
+                doc = None
+                if word:
+                    self._mark_word_normal_template_saved(word)
+                    with contextlib.suppress(Exception):
+                        word.Quit()
+                word = None
+                gc.collect()
+                if pythoncom is not None:
+                    with contextlib.suppress(Exception):
+                        pythoncom.CoUninitialize()
 
     def _export_xlsx_via_com(self, xlsx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Excel到PDF"""
@@ -446,35 +448,36 @@ class PDFExporter(IPDFExporter):
         excel_owned = False
         wb = None
         temp_dir = None
-        try:
-            pythoncom.CoInitialize()
-            excel, excel_owned = self._create_excel_application(win32com)
-            self._prepare_excel_for_headless_run(excel)
-            working_copy, temp_dir = self._prepare_excel_path_for_com(
-                xlsx_path,
-                label=pdf_path.stem or xlsx_path.stem,
-            )
+        with get_office_automation_limiter().excel_session():
+            try:
+                pythoncom.CoInitialize()
+                excel, excel_owned = self._create_excel_application(win32com)
+                self._prepare_excel_for_headless_run(excel)
+                working_copy, temp_dir = self._prepare_excel_path_for_com(
+                    xlsx_path,
+                    label=pdf_path.stem or xlsx_path.stem,
+                )
 
-            wb = self._open_excel_workbook(excel, working_copy, read_only=True)
-            self._retry_excel_com_call(
-                lambda: cast(Any, wb).ExportAsFixedFormat(0, str(pdf_path.absolute())),
-                "Workbook.ExportAsFixedFormat",
-            )
-        finally:
-            if wb:
-                with contextlib.suppress(Exception):
-                    cast(Any, wb).Close(False)
-            wb = None
-            if excel and excel_owned:
-                with contextlib.suppress(Exception):
-                    cast(Any, excel).Quit()
-            excel = None
-            gc.collect()
-            if pythoncom is not None:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
-            if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                wb = self._open_excel_workbook(excel, working_copy, read_only=True)
+                self._retry_excel_com_call(
+                    lambda: cast(Any, wb).ExportAsFixedFormat(0, str(pdf_path.absolute())),
+                    "Workbook.ExportAsFixedFormat",
+                )
+            finally:
+                if wb:
+                    with contextlib.suppress(Exception):
+                        cast(Any, wb).Close(False)
+                wb = None
+                if excel and excel_owned:
+                    with contextlib.suppress(Exception):
+                        cast(Any, excel).Quit()
+                excel = None
+                gc.collect()
+                if pythoncom is not None:
+                    with contextlib.suppress(Exception):
+                        pythoncom.CoUninitialize()
+                if temp_dir is not None:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _export_via_libreoffice(self, input_path: Path, pdf_path: Path) -> None:
         """通过LibreOffice导出PDF"""

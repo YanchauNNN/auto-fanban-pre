@@ -58,7 +58,7 @@ class FakeFontPreflightService:
             }
         )
         filename = source_dwg.name
-        if filename == "missing-font.dwg":
+        if filename.startswith("missing-font"):
             return {
                 "filename": filename,
                 "status": "missing_fonts",
@@ -625,6 +625,54 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
             "replaced_style_count": 0,
         },
     ]
+
+
+def test_preflight_fonts_uses_ascii_working_copy_for_non_ascii_upload_names(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[("files[]", ("20261NH-JGS51-B合并版.dwg", b"dwg-a", "application/acad"))],
+        )
+
+    assert response.status_code == 200
+    assert len(font_service.inspect_calls) == 1
+    source_path = font_service.inspect_calls[0]["source_dwg"]
+    assert isinstance(source_path, Path)
+    assert source_path.suffix.lower() == ".dwg"
+    assert source_path.name != "20261NH-JGS51-B合并版.dwg"
+    assert all(ord(ch) < 128 for ch in source_path.name)
+
+
+def test_create_batch_preserves_source_filename_but_stores_ascii_upload_copy(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(_deliverable_params(), ensure_ascii=False)},
+            files=[("files[]", ("20261NH-JGS51-B合并版.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        job_id = payload["jobs"][0]["job_id"]
+        assert payload["jobs"][0]["source_filename"] == "20261NH-JGS51-B合并版.dwg"
+
+        detail = _poll_job(client, job_id)
+        assert detail["source_filename"] == "20261NH-JGS51-B合并版.dwg"
+
+    uploads_dir = tmp_path / "storage" / "jobs" / job_id / "uploads"
+    stored_files = list(uploads_dir.iterdir())
+    assert len(stored_files) == 1
+    assert stored_files[0].suffix.lower() == ".dwg"
+    assert stored_files[0].name != "20261NH-JGS51-B合并版.dwg"
+    assert all(ord(ch) < 128 for ch in stored_files[0].name)
 
 
 def test_create_batch_rejects_replace_missing_without_replacement_font(

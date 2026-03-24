@@ -1209,5 +1209,80 @@ a4_multipage:
         - { page_index: 2, outer_bbox: [], has_titleblock: false }
       flags: ["比例不一致", "A4多页_页码不连续"]
 
+# ============================================================================
+# 五、管理业务线事实源 (management_features)
+# ============================================================================
+management_features:
+  account:
+    csv_source: "documents_bin/姓名角色表.csv"
+    fields:
+      office_code: "科室编码"
+      office_name: "科室"
+      account_id: "账号"
+      display_name: "姓名"
+      role: "角色"
+      password: "密码"
+    valid_roles: ["设计人员", "室主任", "所领导", "管理员"]
+    admin_created_default_password: "password"
+
+  organization:
+    office_hierarchy:
+      建筑结构所: ["结构一室", "结构二室", "建筑总图室"]
+
+  task_visibility:
+    roles:
+      设计人员: "self_only"
+      室主任: "office_only"
+      所领导: "all"
+      管理员: "all"
+    legacy_default_scope: "admin_only"
+
+  workflow:
+    submit_rule:
+      initiator_binding: "current_login_user"
+      require_creator_submit: true
+    nodes:
+      - key: "one_review"
+        label: "一审"
+        assignee_source: "ied_checked_by"
+        factor_key: "one_review_factor"
+      - key: "two_review"
+        label: "二审"
+        assignee_source: "ied_reviewed_by"
+        factor_key: "two_review_factor"
+      - key: "three_review"
+        label: "三审"
+        assignee_source: "ied_approved_by"
+        factor_key: "three_review_factor"
+    factor:
+      default: 1.0
+      min: 0.8
+      max: 1.1
+      precision: 2
+    deduplication_rules:
+      unique_role_fields:
+        - "ied_prepared_by"
+        - "ied_checked_by"
+        - "ied_reviewed_by"
+        - "ied_approved_by"
+    one_review:
+      assignee_source: "ied_checked_by"
+      require_checked_by: true
+    preserve_discipline_leader: true
+
+  workload:
+    a1_equivalent:
+      A0: 2.0
+      A1: 1.0
+      A2: 0.5
+      A3: 0.25
+      A4: 0.125
+    precision: 2
+    settlement_trigger: "archive_success"
+
+  archive:
+    overwrite_mode: "clear_target_then_archive"
+    level_pattern: "{engineering_no}/{subitem_no}/{album_internal_code}/{revision}"
+
 
 

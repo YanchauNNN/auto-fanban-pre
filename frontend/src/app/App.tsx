@@ -108,7 +108,7 @@ const DELIVERABLE_TUTORIAL_STEPS = [
     id: "picker_select",
     title: "步骤 2 / 5",
     body:
-      "这里模拟系统文件选择窗口。正式使用时，需要在文件列表中选中本次要处理的 DWG 图册文件，再点击“打开”，进入任务配置页面。",
+      "点击“出图”后，浏览器会拉起系统文件选择窗口。正式使用时，需要在文件列表中选中本次要处理的 DWG 图册文件，再点击“打开”，进入任务配置页面。",
   },
   {
     id: "config",
@@ -130,6 +130,277 @@ const DELIVERABLE_TUTORIAL_STEPS = [
   },
 ] as const;
 
+const TUTORIAL_GROUP_JOB_ID = "tutorial-group-detail";
+const TUTORIAL_DELIVERABLE_JOB_ID = "tutorial-deliverable-child";
+const TUTORIAL_AUDIT_JOB_ID = "tutorial-audit-child";
+const TUTORIAL_CREATED_AT = "2026-03-24T10:20:30+08:00";
+const TUTORIAL_FINISHED_AT = "2026-03-24T10:38:30+08:00";
+
+const TUTORIAL_DELIVERABLE_CHILD_SUMMARY: JobSummary = {
+  jobId: TUTORIAL_DELIVERABLE_JOB_ID,
+  batchId: "tutorial-batch",
+  isGroup: false,
+  groupId: TUTORIAL_GROUP_JOB_ID,
+  sourceFilename: TUTORIAL_SAMPLE_FILE,
+  sourceFilenames: [TUTORIAL_SAMPLE_FILE],
+  taskKind: "deliverable",
+  jobMode: "deliverable",
+  projectNo: TUTORIAL_SAMPLE_PROJECT,
+  status: "succeeded",
+  stage: "PACKAGE_ZIP",
+  percent: 100,
+  message: "",
+  createdAt: TUTORIAL_CREATED_AT,
+  finishedAt: TUTORIAL_FINISHED_AT,
+  runAuditCheck: true,
+  childJobIds: [],
+  findingsCount: 0,
+  affectedDrawingsCount: 0,
+  artifacts: {
+    packageAvailable: true,
+    iedAvailable: true,
+    reportAvailable: false,
+    replacedDwgAvailable: false,
+    packageDownloadUrl: "/tutorial/download/package.zip",
+    iedDownloadUrl: "/tutorial/download/ied.xlsx",
+    reportDownloadUrl: null,
+    replacedDwgDownloadUrl: null,
+  },
+  retryAvailable: false,
+  taskRole: "出图子任务",
+  sharedRunId: "tutorial-run",
+};
+
+const TUTORIAL_AUDIT_CHILD_SUMMARY: JobSummary = {
+  jobId: TUTORIAL_AUDIT_JOB_ID,
+  batchId: "tutorial-batch",
+  isGroup: false,
+  groupId: TUTORIAL_GROUP_JOB_ID,
+  sourceFilename: TUTORIAL_SAMPLE_FILE,
+  sourceFilenames: [TUTORIAL_SAMPLE_FILE],
+  taskKind: "audit_check",
+  jobMode: "audit_check",
+  projectNo: TUTORIAL_SAMPLE_PROJECT,
+  status: "succeeded",
+  stage: "EXPORT_REPORT",
+  percent: 100,
+  message: "",
+  createdAt: TUTORIAL_CREATED_AT,
+  finishedAt: TUTORIAL_FINISHED_AT,
+  runAuditCheck: true,
+  childJobIds: [],
+  findingsCount: 3,
+  affectedDrawingsCount: 2,
+  artifacts: {
+    packageAvailable: false,
+    iedAvailable: false,
+    reportAvailable: true,
+    replacedDwgAvailable: false,
+    packageDownloadUrl: null,
+    iedDownloadUrl: null,
+    reportDownloadUrl: "/tutorial/download/audit-report.xlsx",
+    replacedDwgDownloadUrl: null,
+  },
+  retryAvailable: false,
+  taskRole: "纠错子任务",
+  sharedRunId: "tutorial-run",
+};
+
+const TUTORIAL_GROUP_SUMMARY: JobSummary = {
+  jobId: TUTORIAL_GROUP_JOB_ID,
+  batchId: "tutorial-batch",
+  isGroup: true,
+  groupId: null,
+  sourceFilename: TUTORIAL_SAMPLE_FILE,
+  sourceFilenames: [TUTORIAL_SAMPLE_FILE],
+  taskKind: null,
+  jobMode: "group",
+  projectNo: TUTORIAL_SAMPLE_PROJECT,
+  status: "succeeded",
+  stage: "GROUP_COMPLETE",
+  percent: 100,
+  message: "",
+  createdAt: TUTORIAL_CREATED_AT,
+  finishedAt: TUTORIAL_FINISHED_AT,
+  runAuditCheck: true,
+  childJobIds: [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_AUDIT_JOB_ID],
+  findingsCount: 3,
+  affectedDrawingsCount: 2,
+  artifacts: {
+    packageAvailable: true,
+    iedAvailable: true,
+    reportAvailable: true,
+    replacedDwgAvailable: false,
+    packageDownloadUrl: "/tutorial/download/package.zip",
+    iedDownloadUrl: "/tutorial/download/ied.xlsx",
+    reportDownloadUrl: "/tutorial/download/report.xlsx",
+    replacedDwgDownloadUrl: null,
+  },
+  retryAvailable: false,
+  taskRole: null,
+  sharedRunId: "tutorial-run",
+  children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
+};
+
+const TUTORIAL_RECORD_CARD: JobCardModel = {
+  kind: "real_group",
+  key: `group:${TUTORIAL_GROUP_JOB_ID}`,
+  jobId: TUTORIAL_GROUP_JOB_ID,
+  title: TUTORIAL_SAMPLE_FILE,
+  status: TUTORIAL_GROUP_SUMMARY.status,
+  percent: TUTORIAL_GROUP_SUMMARY.percent,
+  stageLabel: getStageLabel(TUTORIAL_GROUP_SUMMARY.stage, TUTORIAL_GROUP_SUMMARY),
+  messageLabel: getMessageLabel(TUTORIAL_GROUP_SUMMARY),
+  findingsCount: TUTORIAL_GROUP_SUMMARY.findingsCount,
+  affectedDrawingsCount: TUTORIAL_GROUP_SUMMARY.affectedDrawingsCount,
+  childCount: 2,
+  childJobs: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
+  summary: TUTORIAL_GROUP_SUMMARY,
+};
+
+const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
+  ...TUTORIAL_DELIVERABLE_CHILD_SUMMARY,
+  startedAt: TUTORIAL_CREATED_AT,
+  currentFile: null,
+  flags: [],
+  errors: [],
+  topWrongTexts: [],
+  topInternalCodes: [],
+  deliverableOutputs: {
+    dwgCount: 4,
+    pdfCount: 4,
+    documents: [
+      { name: "IED计划表.xlsx", kind: "xlsx" },
+      { name: "目录.docx", kind: "docx" },
+    ],
+    drawings: [
+      {
+        name: "核岛结构施工图册",
+        internalCode: "JGS-101",
+        dwgName: "JGS-101.dwg",
+        pdfName: "JGS-101.pdf",
+        pageTotal: 12,
+      },
+      {
+        name: "基础布置图",
+        internalCode: "JGS-102",
+        dwgName: "JGS-102.dwg",
+        pdfName: "JGS-102.pdf",
+        pageTotal: 8,
+      },
+    ],
+  },
+  fontPreflightSummary: {
+    policy: "replace_missing",
+    files: [
+      {
+        filename: TUTORIAL_SAMPLE_FILE,
+        status: "missing_fonts",
+        missingFonts: [],
+        detectedStyleCount: 16,
+        missingStyleCount: 2,
+        fontReplacementApplied: true,
+        replacementFont: "simhei.ttf",
+        replacedStyleCount: 2,
+        errors: [],
+      },
+    ],
+  },
+  missingFontsDetected: true,
+  fontReplacementApplied: true,
+  replacementFont: "simhei.ttf",
+  replacedStyleCount: 2,
+};
+
+const TUTORIAL_AUDIT_CHILD_DETAIL: JobDetail = {
+  ...TUTORIAL_AUDIT_CHILD_SUMMARY,
+  startedAt: TUTORIAL_CREATED_AT,
+  currentFile: null,
+  flags: [],
+  errors: [],
+  topWrongTexts: ["梁配筋标注不一致"],
+  topInternalCodes: ["JGS-101", "JGS-102"],
+  findingGroups: [
+    {
+      matchedText: "梁配筋标注不一致",
+      count: 2,
+      internalCodes: ["JGS-101", "JGS-102"],
+    },
+    {
+      matchedText: "图签日期未更新",
+      count: 1,
+      internalCodes: ["JGS-105"],
+    },
+  ],
+};
+
+const TUTORIAL_GROUP_DETAIL: JobDetail = {
+  ...TUTORIAL_GROUP_SUMMARY,
+  startedAt: TUTORIAL_CREATED_AT,
+  currentFile: null,
+  flags: [],
+  errors: [],
+  topWrongTexts: [],
+  topInternalCodes: [],
+  children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
+};
+
+const TUTORIAL_DETAIL_LOOKUP = new Map<string, JobDetail>([
+  [TUTORIAL_GROUP_JOB_ID, TUTORIAL_GROUP_DETAIL],
+  [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_DELIVERABLE_CHILD_DETAIL],
+  [TUTORIAL_AUDIT_JOB_ID, TUTORIAL_AUDIT_CHILD_DETAIL],
+]);
+
+const TUTORIAL_DELIVERABLE_VALUES = {
+  project_no: TUTORIAL_SAMPLE_PROJECT,
+  cover_variant: "通用",
+  album_title_cn: "建筑结构施工图册",
+  subitem_name: "BOP 子项结构施工图",
+  file_category: "1.2.1 设计总说明书",
+  plot_style_key: "red_wider",
+};
+
+const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
+  getHealth: async () => ({
+    status: "ok",
+    ready: true,
+    storageWritable: true,
+    workerAlive: true,
+    queueDepth: 0,
+    autocadReady: true,
+    officeReady: true,
+    serverTime: TUTORIAL_CREATED_AT,
+  }),
+  getFormSchema: async () => {
+    throw new Error("Tutorial preview does not load schema.");
+  },
+  preflightFonts: async () => ({
+    files: [],
+    replacementOptions: [],
+    requiresConfirmation: false,
+  }),
+  createBatch: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
+  createAuditCheck: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
+  createAuditReplace: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
+  listJobs: async () => ({
+    total: 1,
+    items: [TUTORIAL_GROUP_SUMMARY],
+  }),
+  getJobDetail: async (jobId: string) => {
+    const detail = TUTORIAL_DETAIL_LOOKUP.get(jobId);
+    if (!detail) {
+      throw new Error(`Missing tutorial preview detail for ${jobId}.`);
+    }
+    return detail;
+  },
+};
+
 type TutorialStep = (typeof DELIVERABLE_TUTORIAL_STEPS)[number];
 type TutorialStepId = TutorialStep["id"];
 
@@ -145,7 +416,7 @@ function getTutorialTargetSelector(stepId: TutorialStepId): string {
     case "entry":
       return '[data-tutorial-target="entry"]';
     case "picker_select":
-      return '[data-tutorial-target="picker-select"]';
+      return '[data-tutorial-target="picker-trigger"]';
     case "config":
       return '[data-tutorial-target="config"]';
     case "record":
@@ -208,6 +479,10 @@ function WorkspacePage() {
   const tutorialActive = tutorialStepIndex !== null;
   const tutorialStep =
     tutorialStepIndex === null ? null : DELIVERABLE_TUTORIAL_STEPS[tutorialStepIndex];
+  const tutorialIncomingFiles = useMemo(
+    () => [new File(["tutorial-dwg"], TUTORIAL_SAMPLE_FILE, { type: "application/acad" })],
+    [],
+  );
 
   const healthQuery = useQuery({
     queryKey: ["health"],
@@ -269,6 +544,10 @@ function WorkspacePage() {
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
+  const tutorialShowsRecordPreview = tutorialStep?.id === "record" || tutorialStep?.id === "detail";
+  const displayedJobCards = tutorialShowsRecordPreview
+    ? [TUTORIAL_RECORD_CARD, ...visibleJobCards]
+    : visibleJobCards;
 
   useEffect(() => {
     if (normalizedRecentJobsSearch) {
@@ -419,6 +698,10 @@ function WorkspacePage() {
 
   function handleOpenTutorial() {
     setActiveModule("business");
+    setDeliverableConfigOpen(false);
+    setReplaceConfigOpen(false);
+    setAuditConfigOpen(false);
+    setPendingReplaceConfig(null);
     setTutorialStepIndex(0);
     setAllJobsModalOpen(false);
   }
@@ -580,6 +863,7 @@ function WorkspacePage() {
                     <button
                       className={styles.primaryActionButton}
                       aria-busy={!actionsReady}
+                      data-tutorial-target="picker-trigger"
                       disabled={entryActionsDisabled}
                       type="button"
                       onClick={handleDeliverableUploadClick}
@@ -694,17 +978,36 @@ function WorkspacePage() {
                 </div>
 
                 <div className={styles.jobsGrid}>
-                  {visibleJobCards.length > 0 ? (
-                    visibleJobCards.map((card) => (
-                      <JobCard
-                        adapter={adapter}
-                        card={card}
-                        highlighted={Boolean(
-                          card.summary.batchId && card.summary.batchId === highlightedBatchId,
-                        )}
-                        key={card.key}
-                      />
-                    ))
+                  {displayedJobCards.length > 0 ? (
+                    displayedJobCards.map((card) => {
+                      const isTutorialRecordCard = card.key === TUTORIAL_RECORD_CARD.key;
+                      const node = (
+                        <JobCard
+                          adapter={isTutorialRecordCard ? TUTORIAL_PREVIEW_ADAPTER : adapter}
+                          card={card}
+                          highlighted={Boolean(
+                            !isTutorialRecordCard &&
+                              card.summary.batchId &&
+                              card.summary.batchId === highlightedBatchId,
+                          )}
+                          key={card.key}
+                        />
+                      );
+
+                      if (!isTutorialRecordCard) {
+                        return node;
+                      }
+
+                      return (
+                        <div
+                          data-testid="tutorial-record-preview"
+                          data-tutorial-target={tutorialStep?.id === "record" ? "record" : undefined}
+                          key={card.key}
+                        >
+                          {node}
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className={styles.emptyPanel}>
                       <p>{normalizedRecentJobsSearch ? "没有匹配的任务。" : "当前没有任务记录。"}</p>
@@ -755,6 +1058,22 @@ function WorkspacePage() {
             pendingReplaceConfig={pendingReplaceConfig}
             schema={schemaQuery.data}
           />
+          <DeliverableWorkspace
+            adapter={TUTORIAL_PREVIEW_ADAPTER}
+            incomingFiles={tutorialIncomingFiles}
+            isOpen={tutorialStep?.id === "config"}
+            onBatchCreated={() => {}}
+            onClearPendingReplaceFlow={() => {}}
+            onNotice={() => {}}
+            onClose={() => {}}
+            onDraftAvailabilityChange={() => {}}
+            schema={schemaQuery.data}
+            tutorialPreview={{
+              dialogTarget: "config",
+              initialValues: TUTORIAL_DELIVERABLE_VALUES,
+              initialRunAuditCheck: true,
+            }}
+          />
           <ReplaceWorkspace
             adapter={adapter}
             isOpen={replaceConfigOpen}
@@ -781,6 +1100,8 @@ function WorkspacePage() {
           onClose={() => setAuditSummaryQueue((current) => current.slice(1))}
         />
       ) : null}
+
+      {tutorialStep?.id === "detail" ? <TutorialGroupDetailPreview /> : null}
 
       {tutorialActive && tutorialStep ? (
         <DeliverableTutorialOverlay
@@ -1044,275 +1365,12 @@ function TutorialSpotlight({ stepId }: { stepId: TutorialStepId }) {
   );
 }
 
-function TutorialFilePicker({ stepId }: { stepId: TutorialStepId }) {
+function TutorialGroupDetailPreview() {
   return (
     <div className={styles.tutorialScene}>
-      <div
-        aria-label="教程文件选择"
-        aria-modal="true"
-        className={styles.tutorialPicker}
-        role="dialog"
-      >
-        <div className={styles.tutorialPickerHeader}>
-          <span>打开</span>
-          <button className={styles.tutorialWindowClose} tabIndex={-1} type="button">
-            ×
-          </button>
-        </div>
-        <div className={styles.tutorialPickerBody}>
-          <div className={styles.tutorialPickerSidebar}>
-            <span>下载</span>
-            <span>文档</span>
-            <span>图片</span>
-            <span>Terminal</span>
-          </div>
-          <div className={styles.tutorialPickerMain}>
-            <div className={styles.tutorialPickerPath}>
-              E:\project\auto-fanban-pre\test\zhangxiaomin-feedback
-            </div>
-            <div
-              className={styles.tutorialPickerFileList}
-              data-tutorial-active={stepId === "picker_select" ? "true" : "false"}
-              data-tutorial-target="picker-select"
-            >
-              <div className={styles.tutorialPickerFileRow}>
-                <span>1</span>
-                <span>文件夹</span>
-              </div>
-              <div className={`${styles.tutorialPickerFileRow} ${styles.tutorialPickerFileRowActive}`}>
-                <span>18185NE-JGS11.dwg</span>
-                <span>DWG 文件</span>
-              </div>
-              <div className={styles.tutorialPickerFileRow}>
-                <span>1818-JGS11.dwg</span>
-                <span>DWG 文件</span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className={styles.tutorialPickerFooter}>
-          <div className={styles.tutorialPickerFilename}>文件名：18185NE-JGS11.dwg</div>
-          <div className={styles.tutorialPickerActions}>
-            <button className={styles.secondaryActionButton} type="button">
-              打开
-            </button>
-            <button className={styles.subtleButton} type="button">
-              取消
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TutorialConfigDialog() {
-  return (
-    <div className={styles.tutorialScene}>
-      <div
-        aria-label="教程任务配置"
-        aria-modal="true"
-        className={`${styles.tutorialDialog} ${styles.tutorialConfigDialog}`}
-        data-testid="tutorial-config-dialog"
-        data-tutorial-target="config"
-        role="dialog"
-      >
-        <header className={styles.tutorialDialogHeader}>
-          <div>
-            <p className={styles.brandTop}>Deliverable Config</p>
-            <h3>任务配置</h3>
-          </div>
-        </header>
-        <div className={styles.tutorialDialogBody}>
-          <div className={styles.tutorialConfigSection}>
-            <div className={styles.tutorialSectionTitleRow}>
-              <strong>任务与项目</strong>
-              <span>示例流程</span>
-            </div>
-            <div className={styles.tutorialConfigGrid}>
-              <div className={styles.tutorialField}>
-                <span>示例文件</span>
-                <strong>{TUTORIAL_SAMPLE_FILE}</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>项目号</span>
-                <strong>{TUTORIAL_SAMPLE_PROJECT}</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>封面模板</span>
-                <strong>通用</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>密级</span>
-                <strong>非密</strong>
-              </div>
-            </div>
-          </div>
-          <div className={styles.tutorialConfigSection}>
-            <div className={styles.tutorialSectionTitleRow}>
-              <strong>设计文件与 IED</strong>
-              <span>关键必填项</span>
-            </div>
-            <div className={styles.tutorialConfigGrid}>
-              <div className={styles.tutorialField}>
-                <span>WBS 编码</span>
-                <strong>5NE-11</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>文件类别</span>
-                <strong>1.2.1 设计总说明书</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>工时数</span>
-                <strong>100</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>IED 状态</span>
-                <strong>发布</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>编制者</span>
-                <strong>王任超@wangrca</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>校核者</span>
-                <strong>孟志勇@mengzy</strong>
-              </div>
-              <div className={styles.tutorialField}>
-                <span>工种负责人</span>
-                <strong>孙雷@sunl</strong>
-              </div>
-            </div>
-          </div>
-          <div className={styles.tutorialConfigSection}>
-            <div className={styles.tutorialSectionTitleRow}>
-              <strong>打印设置</strong>
-              <span>选择本次出图打印样式</span>
-            </div>
-            <div className={styles.tutorialPrintChips}>
-              <span className={styles.tutorialPrintChipActive}>红色更宽</span>
-              <span className={styles.tutorialPrintChip}>同线宽</span>
-              <span className={styles.tutorialPrintChip}>交审图</span>
-            </div>
-          </div>
-          <div className={styles.tutorialAuditHint}>
-            若勾选纠错，系统会与出图一起创建为同一任务包；本教程仅演示流程，不会真的提交任务。
-          </div>
-          <div className={styles.tutorialDialogActions}>
-            <button className={styles.downloadButton} type="button">
-              创建出图任务
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TutorialRecordCard() {
-  return (
-    <div
-      className={`${styles.jobCard} ${styles.tutorialJobCard}`}
-      data-testid="tutorial-record-card"
-      data-tutorial-target="record"
-    >
-      <div className={styles.jobCardHeader}>
-        <strong>18185NE-JGS11.dwg</strong>
-        <div className={styles.jobCardHeaderMeta}>
-          <p className={styles.packageMeta}>包含 2 个子任务</p>
-          <span className={`${styles.statusPill} ${styles.statusSucceeded}`}>成功</span>
-        </div>
-      </div>
-
-      <div className={styles.jobMetaRow}>
-        <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
-        <span className={styles.subtaskLink}>
-          <span className={`${styles.kindBadge} ${styles.kindDeliverable}`}>交付</span>
-          <span className={styles.subtaskStatus}>成功</span>
-        </span>
-        <span className={styles.subtaskLink}>
-          <span className={`${styles.kindBadge} ${styles.kindAudit}`}>纠错</span>
-          <span className={styles.subtaskStatus}>成功</span>
-        </span>
-        <span className={styles.subtaskLink}>查看任务包</span>
-      </div>
-
-      <p className={styles.jobStage}>任务包完成</p>
-      <p className={styles.jobMessage}>任务包已完成</p>
-
-      <div className={styles.progressBar}>
-        <div style={{ width: "100%" }} />
-      </div>
-    </div>
-  );
-}
-
-function TutorialRecordScene() {
-  return (
-    <div className={styles.tutorialScene}>
-      <div aria-label="教程任务记录" aria-modal="true" className={styles.tutorialRecordScene} role="dialog">
-        <header className={styles.jobsHeader}>
-          <div>
-            <p className={styles.brandTop}>Task Record</p>
-            <h2>任务记录</h2>
-          </div>
-        </header>
-        <div className={styles.searchRow}>
-          <input
-            aria-label="搜索任务名称"
-            className={styles.searchInput}
-            placeholder="搜索任务名称"
-            readOnly
-            role="searchbox"
-            type="search"
-            value=""
-          />
-        </div>
-        <TutorialRecordCard />
-      </div>
-    </div>
-  );
-}
-
-function TutorialDetailDialog() {
-  return (
-    <div className={styles.tutorialScene}>
-      <div
-        aria-label="教程任务详情"
-        aria-modal="true"
-        className={`${styles.tutorialDialog} ${styles.tutorialDetailDialog}`}
-        data-testid="tutorial-detail-dialog"
-        data-tutorial-target="detail"
-        role="dialog"
-      >
-        <header className={styles.tutorialDialogHeader}>
-          <div>
-            <p className={styles.brandTop}>Group Detail</p>
-            <h3>18185NE-JGS11.dwg</h3>
-          </div>
-        </header>
-        <div className={styles.tutorialDialogBody}>
-          <div className={styles.detailGrid}>
-            <div className={styles.infoBlock}>
-              <span>当前阶段</span>
-              <strong>任务包完成</strong>
-            </div>
-            <div className={styles.infoBlock}>
-              <span>进度</span>
-              <strong>100%</strong>
-            </div>
-          </div>
-          <div className={styles.downloadGrid}>
-            <button className={styles.downloadButton} type="button">
-              下载任务包
-            </button>
-            <button className={styles.downloadButton} type="button">
-              下载 IED
-            </button>
-            <button className={styles.downloadButton} type="button">
-              下载纠错报告
-            </button>
-          </div>
+      <div className={styles.tutorialDetailPreview} data-tutorial-target="detail">
+        <div className={styles.detailPage}>
+          <GroupDetailPanel adapter={TUTORIAL_PREVIEW_ADAPTER} detail={TUTORIAL_GROUP_DETAIL} />
         </div>
       </div>
     </div>
@@ -1382,11 +1440,6 @@ function DeliverableTutorialOverlay({
           </button>
         </div>
       </aside>
-
-      {step.id === "picker_select" && <TutorialFilePicker stepId={step.id} />}
-      {step.id === "config" && <TutorialConfigDialog />}
-      {step.id === "record" && <TutorialRecordScene />}
-      {step.id === "detail" && <TutorialDetailDialog />}
     </>
   );
 }

@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from API.app.main import create_app
+from fastapi.testclient import TestClient
+
+from ..management_test_helpers import configure_management_env
+from .test_task_group_submit_flow import _login, _seed_group
+
+
+def test_workload_queries_return_expected_scopes(monkeypatch, tmp_path) -> None:
+    project_root = configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        admin_token = _login(client, "admin")
+        group_id = _seed_group(client, tmp_path)
+        client.patch(
+            "/api/admin/config",
+            json={"archive_root_path": str(project_root / "archive-root")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        client.post(f"/api/task-groups/{group_id}/submit", headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"})
+        client.post(f"/api/workflow/{group_id}/approve", json={"factor": 1.0}, headers={"Authorization": f"Bearer {_login(client, 'lisi')}"})
+        client.post(f"/api/workflow/{group_id}/approve", json={"factor": 1.0}, headers={"Authorization": f"Bearer {_login(client, 'wangwu')}"})
+        client.post(f"/api/workflow/{group_id}/approve", json={"factor": 1.0}, headers={"Authorization": f"Bearer {admin_token}"})
+
+        me = client.get("/api/workload/me", headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"})
+        office = client.get("/api/workload/office", headers={"Authorization": f"Bearer {_login(client, 'lisi')}"})
+        institute = client.get("/api/workload/institute", headers={"Authorization": f"Bearer {_login(client, 'wangwu')}"})
+        admin = client.get("/api/workload/admin", headers={"Authorization": f"Bearer {admin_token}"})
+
+        assert me.status_code == 200
+        assert me.json()["scope"] == "me"
+        assert office.status_code == 200
+        assert office.json()["scope"] == "office"
+        assert institute.status_code == 200
+        assert institute.json()["scope"] == "institute"
+        assert admin.status_code == 200
+        assert admin.json()["scope"] == "admin"

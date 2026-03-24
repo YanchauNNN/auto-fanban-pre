@@ -37,6 +37,7 @@ from ..config import load_spec
 from ..interfaces import GenerationError, ICatalogGenerator, IPDFExporter
 from .catalog_display_title import build_catalog_display_title
 from .naming import make_document_output_name
+from .office_automation import get_office_automation_limiter
 from .pdf_engine import PDFExporter
 from .upgrade_marking import (
     UpgradeSheetCodeParseError,
@@ -388,83 +389,84 @@ class CatalogGenerator(ICatalogGenerator):
         temp_dir = None
         working_copy = xlsx_path
         should_copy_back = False
-        try:
-            pythoncom.CoInitialize()
-            excel, excel_owned = PDFExporter._create_excel_application(win32com)
-            PDFExporter._prepare_excel_for_headless_run(excel)
-            working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
-                xlsx_path,
-                label=xlsx_path.stem,
-            )
-            workbook = PDFExporter._open_excel_workbook(excel, working_copy, read_only=False)
-            workbook_com = cast(Any, workbook)
-            worksheet = PDFExporter._retry_excel_com_call(
-                lambda: workbook_com.Worksheets(1),
-                "Workbook.Worksheets(1)",
-            )
-            worksheet_com = cast(Any, worksheet)
-            row_range = PDFExporter._retry_excel_com_call(
-                lambda: worksheet_com.Rows(f"{start_row}:{last_row}"),
-                "Worksheet.Rows(range)",
-            )
-            row_range_com = cast(Any, row_range)
-            PDFExporter._retry_excel_com_call(
-                lambda: row_range_com.AutoFit(),
-                "Rows.AutoFit",
-            )
-            row_range = None
-
-            for row in range(start_row, last_row + 1):
-                current_row = row
-                row_ref = PDFExporter._retry_excel_com_call(
-                    lambda current_row=current_row: worksheet_com.Rows(current_row),
-                    f"Worksheet.Rows({row})",
+        with get_office_automation_limiter().excel_session():
+            try:
+                pythoncom.CoInitialize()
+                excel, excel_owned = PDFExporter._create_excel_application(win32com)
+                PDFExporter._prepare_excel_for_headless_run(excel)
+                working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
+                    xlsx_path,
+                    label=xlsx_path.stem,
                 )
-                row_ref_com = cast(Any, row_ref)
-                auto_height = float(
-                    PDFExporter._retry_excel_com_call(
-                        lambda row_ref_com=row_ref_com: row_ref_com.RowHeight or 0,
-                        f"Rows({row}).RowHeight",
-                    )
+                workbook = PDFExporter._open_excel_workbook(excel, working_copy, read_only=False)
+                workbook_com = cast(Any, workbook)
+                worksheet = PDFExporter._retry_excel_com_call(
+                    lambda: workbook_com.Worksheets(1),
+                    "Workbook.Worksheets(1)",
                 )
-                bucket_height = self._bucket_row_height_from_measured_height(auto_height)
-                if bucket_height:
-                    PDFExporter._retry_excel_com_call(
-                        lambda row_ref_com=row_ref_com, bucket_height=bucket_height: setattr(
-                            row_ref_com,
-                            "RowHeight",
-                            bucket_height,
-                        ),
-                        f"Rows({row}).RowHeight=set",
-                    )
+                worksheet_com = cast(Any, worksheet)
+                row_range = PDFExporter._retry_excel_com_call(
+                    lambda: worksheet_com.Rows(f"{start_row}:{last_row}"),
+                    "Worksheet.Rows(range)",
+                )
+                row_range_com = cast(Any, row_range)
+                PDFExporter._retry_excel_com_call(
+                    lambda: row_range_com.AutoFit(),
+                    "Rows.AutoFit",
+                )
+                row_range = None
 
-            PDFExporter._retry_excel_com_call(
-                lambda: workbook_com.Save(),
-                "Workbook.Save",
-            )
-            should_copy_back = True
-        except Exception:
-            return
-        finally:
-            worksheet = None
-            row_range = None
-            if workbook:
-                with contextlib.suppress(Exception):
-                    cast(Any, workbook).Close(False)
-            workbook = None
-            if excel and excel_owned:
-                with contextlib.suppress(Exception):
-                    cast(Any, excel).Quit()
-            excel = None
-            if should_copy_back and temp_dir is not None:
-                with contextlib.suppress(Exception):
-                    shutil.copy2(working_copy, xlsx_path)
-            if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            gc.collect()
-            if pythoncom is not None:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+                for row in range(start_row, last_row + 1):
+                    current_row = row
+                    row_ref = PDFExporter._retry_excel_com_call(
+                        lambda current_row=current_row: worksheet_com.Rows(current_row),
+                        f"Worksheet.Rows({row})",
+                    )
+                    row_ref_com = cast(Any, row_ref)
+                    auto_height = float(
+                        PDFExporter._retry_excel_com_call(
+                            lambda row_ref_com=row_ref_com: row_ref_com.RowHeight or 0,
+                            f"Rows({row}).RowHeight",
+                        )
+                    )
+                    bucket_height = self._bucket_row_height_from_measured_height(auto_height)
+                    if bucket_height:
+                        PDFExporter._retry_excel_com_call(
+                            lambda row_ref_com=row_ref_com, bucket_height=bucket_height: setattr(
+                                row_ref_com,
+                                "RowHeight",
+                                bucket_height,
+                            ),
+                            f"Rows({row}).RowHeight=set",
+                        )
+
+                PDFExporter._retry_excel_com_call(
+                    lambda: workbook_com.Save(),
+                    "Workbook.Save",
+                )
+                should_copy_back = True
+            except Exception:
+                return
+            finally:
+                worksheet = None
+                row_range = None
+                if workbook:
+                    with contextlib.suppress(Exception):
+                        cast(Any, workbook).Close(False)
+                workbook = None
+                if excel and excel_owned:
+                    with contextlib.suppress(Exception):
+                        cast(Any, excel).Quit()
+                excel = None
+                if should_copy_back and temp_dir is not None:
+                    with contextlib.suppress(Exception):
+                        shutil.copy2(working_copy, xlsx_path)
+                if temp_dir is not None:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                gc.collect()
+                if pythoncom is not None:
+                    with contextlib.suppress(Exception):
+                        pythoncom.CoUninitialize()
 
     def _estimate_wrapped_line_count(self, text: str, column_width: float) -> int:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
@@ -559,43 +561,44 @@ class CatalogGenerator(ICatalogGenerator):
         ws = None
         temp_dir = None
         working_copy = xlsx_path
-        try:
-            pythoncom.CoInitialize()
-            excel, excel_owned = PDFExporter._create_excel_application(win32com)
-            PDFExporter._prepare_excel_for_headless_run(excel)
-            working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
-                xlsx_path,
-                label=xlsx_path.stem,
-            )
-            wb = PDFExporter._open_excel_workbook(excel, working_copy, read_only=True)
-            workbook_com = cast(Any, wb)
-            ws = PDFExporter._retry_excel_com_call(
-                lambda: workbook_com.Worksheets(1),
-                "Workbook.Worksheets(1)",
-            )
-            worksheet_com = cast(Any, ws)
-            page_break_count = PDFExporter._retry_excel_com_call(
-                lambda: worksheet_com.HPageBreaks.Count,
-                "Worksheet.HPageBreaks.Count",
-            )
-            page_count = int(page_break_count) + 1
-            return max(1, page_count)
-        finally:
-            ws = None
-            if wb:
-                with contextlib.suppress(Exception):
-                    cast(Any, wb).Close(False)
-            wb = None
-            if excel and excel_owned:
-                with contextlib.suppress(Exception):
-                    cast(Any, excel).Quit()
-            excel = None
-            if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            gc.collect()
-            if pythoncom is not None:
-                with contextlib.suppress(Exception):
-                    pythoncom.CoUninitialize()
+        with get_office_automation_limiter().excel_session():
+            try:
+                pythoncom.CoInitialize()
+                excel, excel_owned = PDFExporter._create_excel_application(win32com)
+                PDFExporter._prepare_excel_for_headless_run(excel)
+                working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
+                    xlsx_path,
+                    label=xlsx_path.stem,
+                )
+                wb = PDFExporter._open_excel_workbook(excel, working_copy, read_only=True)
+                workbook_com = cast(Any, wb)
+                ws = PDFExporter._retry_excel_com_call(
+                    lambda: workbook_com.Worksheets(1),
+                    "Workbook.Worksheets(1)",
+                )
+                worksheet_com = cast(Any, ws)
+                page_break_count = PDFExporter._retry_excel_com_call(
+                    lambda: worksheet_com.HPageBreaks.Count,
+                    "Worksheet.HPageBreaks.Count",
+                )
+                page_count = int(page_break_count) + 1
+                return max(1, page_count)
+            finally:
+                ws = None
+                if wb:
+                    with contextlib.suppress(Exception):
+                        cast(Any, wb).Close(False)
+                wb = None
+                if excel and excel_owned:
+                    with contextlib.suppress(Exception):
+                        cast(Any, excel).Quit()
+                excel = None
+                if temp_dir is not None:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                gc.collect()
+                if pythoncom is not None:
+                    with contextlib.suppress(Exception):
+                        pythoncom.CoUninitialize()
 
     @staticmethod
     def _should_use_excel_com() -> bool:

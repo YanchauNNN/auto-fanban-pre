@@ -51,6 +51,11 @@ type DeliverableWorkspaceProps = {
   onClearPendingReplaceFlow?: () => void;
   onClose: () => void;
   onDraftAvailabilityChange: (available: boolean) => void;
+  tutorialPreview?: {
+    dialogTarget?: string;
+    initialValues?: Record<string, string>;
+    initialRunAuditCheck?: boolean;
+  };
 };
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -86,6 +91,7 @@ export function DeliverableWorkspace({
   onClearPendingReplaceFlow,
   onClose,
   onDraftAvailabilityChange,
+  tutorialPreview,
 }: DeliverableWorkspaceProps) {
   const [draft, setDraft] = useState<TaskConfigDraft>(() => createTaskConfigDraft(schema));
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -99,6 +105,7 @@ export function DeliverableWorkspace({
   const [presetName, setPresetName] = useState("");
   const [presetError, setPresetError] = useState<string | null>(null);
   const [presetUpdatedNotice, setPresetUpdatedNotice] = useState(false);
+  const tutorialPreviewEnabled = Boolean(tutorialPreview);
 
   useEffect(() => {
     setDraft((current) => syncTaskConfigDraft(schema, current));
@@ -111,9 +118,12 @@ export function DeliverableWorkspace({
 
     resetFontPreflightState();
     setDraft((current) =>
-      applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles, pendingReplaceConfig),
+      applyTutorialPreview(
+        applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles, pendingReplaceConfig),
+        tutorialPreview,
+      ),
     );
-  }, [incomingFiles, pendingReplaceConfig, schema]);
+  }, [incomingFiles, pendingReplaceConfig, schema, tutorialPreview]);
 
   const primarySections = useMemo(
     () => filterSections(schema, draft.values, false),
@@ -273,6 +283,10 @@ export function DeliverableWorkspace({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (tutorialPreviewEnabled) {
+      return;
+    }
 
     const nextFieldErrors: Record<string, string[]> = {};
     const nextFormErrors: string[] = [];
@@ -553,8 +567,20 @@ export function DeliverableWorkspace({
 
   return (
     <>
-      <TaskConfigModal title="任务配置">
-        <div className={styles.modalLayout}>
+      <TaskConfigModal
+        title="任务配置"
+        dialogClassName={tutorialPreviewEnabled ? styles.tutorialPreviewDialog : undefined}
+        dialogDataAttributes={
+          tutorialPreview?.dialogTarget
+            ? { "data-tutorial-target": tutorialPreview.dialogTarget }
+            : undefined
+        }
+      >
+        <div
+          className={`${styles.modalLayout} ${
+            tutorialPreviewEnabled ? styles.modalLayoutPassive : ""
+          }`}
+        >
           <header className={styles.modalHeader}>
             <div>
               <p className={styles.kicker}>Task Config</p>
@@ -1264,6 +1290,26 @@ function applyFilesToDraft(
         draft.replaceConfig.sourceProjectNo,
       targetProjectNo: replaceTargetProjectNo,
     },
+  };
+}
+
+function applyTutorialPreview(
+  draft: TaskConfigDraft,
+  tutorialPreview: DeliverableWorkspaceProps["tutorialPreview"],
+) {
+  if (!tutorialPreview) {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    runAuditCheck: tutorialPreview.initialRunAuditCheck ?? draft.runAuditCheck,
+    values: {
+      ...draft.values,
+      ...tutorialPreview.initialValues,
+    },
+    fieldErrors: {},
+    formErrors: [],
   };
 }
 

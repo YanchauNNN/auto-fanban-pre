@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+from ..accounts.account_registry import AccountRegistry
+from ..accounts.personnel_normalizer import PersonnelNormalizer
+from ..archive.service import ArchiveService
+from ..models import AccountSnapshot, TaskGroup
+from ..pipeline.group_manager import GroupManager
+from ..pipeline.job_manager import JobManager
+from ..pipeline.shared_prep import SharedPrepService
+from ..task_groups.serializers import TaskGroupSerializers
+from ..task_groups.visibility import TaskGroupVisibility
+from ..workflow.input_validator import WorkflowInputValidator
+from ..workflow.service import WorkflowService
+from ..workflow.visibility import WorkflowVisibility
+from ..workload.calculator import WorkloadCalculator
+from ..workload.queries import WorkloadQueries
+from ..workload.settlement_service import WorkloadSettlementService
+
+
+class TaskGroupService:
+    def __init__(
+        self,
+        *,
+        group_manager: GroupManager,
+        job_manager: JobManager,
+        shared_prep_service: SharedPrepService,
+        account_registry: AccountRegistry,
+        personnel_normalizer: PersonnelNormalizer,
+        workflow_validator: WorkflowInputValidator,
+        workflow_service: WorkflowService,
+        task_group_visibility: TaskGroupVisibility,
+        workflow_visibility: WorkflowVisibility,
+        serializers: TaskGroupSerializers,
+        workload_calculator: WorkloadCalculator,
+        workload_settlement_service: WorkloadSettlementService,
+        workload_queries: WorkloadQueries,
+        archive_service: ArchiveService,
+    ) -> None:
+        self.group_manager = group_manager
+        self.job_manager = job_manager
+        self.shared_prep_service = shared_prep_service
+        self.account_registry = account_registry
+        self.personnel_normalizer = personnel_normalizer
+        self.workflow_validator = workflow_validator
+        self.workflow_service = workflow_service
+        self.task_group_visibility = task_group_visibility
+        self.workflow_visibility = workflow_visibility
+        self.serializers = serializers
+        self.workload_calculator = workload_calculator
+        self.workload_settlement_service = workload_settlement_service
+        self.workload_queries = workload_queries
+        self.archive_service = archive_service
+
+    def list_recent(self, account: AccountSnapshot, limit: int = 100) -> list[dict[str, object]]:
+        groups = self.group_manager.list_groups(limit=limit)
+        visible = [group for group in groups if self.task_group_visibility.can_view(group, account)]
+        return [self.serializers.summarize(group) for group in visible]
+
+    def get_detail(self, group_id: str, account: AccountSnapshot) -> dict[str, object]:
+        group = self._require_group(group_id)
+        if not self.task_group_visibility.can_view(group, account):
+            raise PermissionError("group not visible")
+        return self.serializers.detail(group)
+
+    def submit(self, group_id: str, initiator: AccountSnapshot) -> dict[str, object]:
+        group = self._require_group(group_id)
+        group.personnel_snapshot = self._build_personnel_snapshot(group)
+        errors = self.workflow_validator.validate_submit(group.personnel_snapshot)
+        if errors:
+            raise ValueError(";".join(errors))
+        prep = self.shared_prep_service.load(group.shared_dir or self.group_manager.config.get_group_dir(group.group_id) / "shared")
+        group.workload = self.workload_calculator.build_from_shared_prep(prep)
+        group = self.workflow_service.start(group, initiator)
+        group.mark_running("WORKFLOW_SUBMITTED")
+        self.group_manager.update_group(group)
+        return self.serializers.detail(group)
+
+    def restart_submit(self, group_id: str, initiator: AccountSnapshot) -> dict[str, object]:
+        return self.submit(group_id, initiator)
+
+    def approve(self, group_id: str, acting_account: AccountSnapshot, factor: float) -> dict[str, object]:
+        group = self._require_group(group_id)
+        self.workflow_service.approve(group, acting_account, factor)
+        self._apply_factors(group)
+        if group.workflow.status.value == "three_review_approved":
+            try:
+                self.archive_service.archive_group(group)
+                self.workload_settlement_service.settle(group)
+                group.mark_succeeded()
+            except Exception as exc:  # noqa: BLE001
+                self.archive_service.mark_failed(group, str(exc))
+                group.mark_failed(str(exc))
+        self.group_manager.update_group(group)
+        return self.serializers.detail(group)
+
+    def repair_current_node(self, group_id: str, assignee_snapshot: AccountSnapshot) -> dict[str, object]:
+        group = self._require_group(group_id)
+        self.workflow_service.repair_current_node(group, assignee_snapshot)
+        self.group_manager.update_group(group)
+        return self.serializers.detail(group)
+
+    def rebind_account_references(self, old_account_id: str, new_account_snapshot: AccountSnapshot) -> None:
+        for group in self.group_manager.load_all_groups():
+            changed = False
+            if group.owner_snapshot and group.owner_snapshot.creator_account == old_account_id:
+                group.owner_snapshot.creator_account = new_account_snapshot.account_id
+                group.owner_snapshot.creator_name = new_account_snapshot.display_name
+                group.owner_snapshot.creator_role = new_account_snapshot.role
+                group.owner_snapshot.creator_office = new_account_snapshot.office_name
+                changed = True
+            for personnel in group.personnel_snapshot.members.values():
+                if personnel.matched_account == old_account_id:
+                    personnel.matched_account = new_account_snapshot.account_id
+                    personnel.matched_name = new_account_snapshot.display_name
+                    personnel.normalized_value = f"{new_account_snapshot.display_name}@{new_account_snapshot.account_id}"
+                    changed = True
+            for node in group.workflow.nodes:
+                if node.assignee_account == old_account_id:
+                    node.assignee_account = new_account_snapshot.account_id
+                    node.assignee_name = new_account_snapshot.display_name
+                    changed = True
+                if node.acted_by_account == old_account_id:
+                    node.acted_by_account = new_account_snapshot.account_id
+                    node.acted_by_name = new_account_snapshot.display_name
+                    changed = True
+            if changed:
+                self.group_manager.update_group(group)
+
+    def workflow_monitor(self, account: AccountSnapshot) -> list[dict[str, object]]:
+        groups = self.group_manager.load_all_groups()
+        visible = [group for group in groups if self.workflow_visibility.can_view(group, account)]
+        return [self.serializers.summarize(group) for group in visible]
+
+    def _build_personnel_snapshot(self, group: TaskGroup):
+        primary_job = self.job_manager.get_job(group.child_job_ids[0]) if group.child_job_ids else None
+        if primary_job is None:
+            raise ValueError("group has no child jobs")
+        values = {
+            "ied_prepared_by": primary_job.params.get("ied_prepared_by"),
+            "ied_checked_by": primary_job.params.get("ied_checked_by"),
+            "ied_discipline_leader": primary_job.params.get("ied_discipline_leader"),
+            "ied_reviewed_by": primary_job.params.get("ied_reviewed_by"),
+            "ied_approved_by": primary_job.params.get("ied_approved_by"),
+        }
+        return self.personnel_normalizer.normalize_fields(values)
+
+    def _apply_factors(self, group: TaskGroup) -> None:
+        for node in group.workflow.nodes:
+            if node.node_key == "one_review":
+                group.workload.one_review_factor = node.factor
+            elif node.node_key == "two_review":
+                group.workload.two_review_factor = node.factor
+            elif node.node_key == "three_review":
+                group.workload.three_review_factor = node.factor
+        self.workload_calculator.refresh_final(group.workload)
+
+    def _require_group(self, group_id: str) -> TaskGroup:
+        group = self.group_manager.get_group(group_id)
+        if group is None:
+            raise ValueError("group not found")
+        return group

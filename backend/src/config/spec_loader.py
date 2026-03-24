@@ -75,6 +75,9 @@ class BusinessSpec(BaseModel):
     # A4多页规则
     a4_multipage: dict[str, Any] = Field(default_factory=dict)
 
+    # 管理业务线事实源
+    management_features: dict[str, Any] = Field(default_factory=dict)
+
     # === 便捷访问方法 ===
 
     def get_paper_variants(self) -> dict[str, PaperVariant]:
@@ -162,6 +165,9 @@ class BusinessSpec(BaseModel):
                 name = str(item.get("name") or "").strip()
                 return name or None
         return None
+
+    def get_management_features(self) -> dict[str, Any]:
+        return self.management_features
 
     def resolve_repo_path(self, path_value: str | Path) -> Path:
         path = Path(path_value)

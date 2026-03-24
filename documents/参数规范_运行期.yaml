@@ -51,6 +51,9 @@ runtime_options:
   concurrency:
     max_workers: { type: int, default: 2, desc: "单机并发工作线程数" }
     max_jobs:    { type: int, default: 4, desc: "同时运行的最大任务数" }
+    doc_max_jobs: { type: int, default: 1, desc: "文档后处理线程池最大并发；默认 1，优先保证 Office 自动化稳定" }
+    office_word_max_jobs: { type: int, default: 1, desc: "Word COM 自动化最大并发；默认串行，避免后台导出崩溃/挂起" }
+    office_excel_max_jobs: { type: int, default: 1, desc: "Excel COM 自动化最大并发；默认串行，避免后台导出崩溃/挂起" }
     max_queue:   { type: int, default: 20, desc: "等待队列最大长度" }
 
   # --------------------------------------------------------------------------
@@ -340,6 +343,16 @@ runtime_options:
     screening:                 { type: int,   default: 100,   desc: "淡显百分比(1~100)" }
     font_dirs:                 { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "字体搜索目录（追加到 ezdxf.options.support_dirs）" }
     fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
+
+  # --------------------------------------------------------------------------
+  # 12) 管理业务线运行期配置
+  # --------------------------------------------------------------------------
+  management:
+    enabled: { type: bool, default: true, desc: "是否启用管理业务线" }
+    admin_config_path: { type: str, default: "storage/runtime/admin_config.json", desc: "管理员当前值 JSON 文件路径" }
+    session_store_path: { type: str, default: "storage/runtime/sessions.json", desc: "登录态 JSON 文件路径" }
+    archive_retry_interval_seconds: { type: int, default: 30, desc: "归档失败自动重试初始间隔（秒）" }
+    archive_retry_max_interval_seconds: { type: int, default: 300, desc: "归档失败自动重试最大间隔（秒）" }
 
 
 

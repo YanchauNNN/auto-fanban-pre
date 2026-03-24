@@ -23,6 +23,9 @@ class ConcurrencyConfig(BaseModel):
 
     max_workers: int = 2
     max_jobs: int = 4
+    doc_max_jobs: int = 1
+    office_word_max_jobs: int = 1
+    office_excel_max_jobs: int = 1
     max_queue: int = 20
 
 
@@ -312,6 +315,16 @@ class PlotAssetsConfig(BaseModel):
     min_valid_ctb_bytes: int = 512
 
 
+class ManagementRuntimeConfig(BaseModel):
+    """管理业务线运行期配置"""
+
+    enabled: bool = True
+    admin_config_path: Path = Path("storage/runtime/admin_config.json")
+    session_store_path: Path = Path("storage/runtime/sessions.json")
+    archive_retry_interval_seconds: int = 30
+    archive_retry_max_interval_seconds: int = 300
+
+
 class RuntimeConfig(BaseSettings):
     """运行期配置（支持环境变量覆盖）"""
 
@@ -340,6 +353,7 @@ class RuntimeConfig(BaseSettings):
     dxf_pdf_export: DxfPdfExportConfig = Field(default_factory=DxfPdfExportConfig)
     cad_runtime: CadRuntimeConfig = Field(default_factory=CadRuntimeConfig)
     plot_assets: PlotAssetsConfig = Field(default_factory=PlotAssetsConfig)
+    management: ManagementRuntimeConfig = Field(default_factory=ManagementRuntimeConfig)
 
     model_config = {
         "env_prefix": "FANBAN_",
@@ -385,6 +399,7 @@ class RuntimeConfig(BaseSettings):
             ),
             "cad_runtime": CadRuntimeConfig(**cls._extract(runtime_opts, "cad_runtime")),
             "plot_assets": PlotAssetsConfig(**cls._extract(runtime_opts, "plot_assets")),
+            "management": ManagementRuntimeConfig(**cls._extract(runtime_opts, "management")),
         }
         for path_key in ("base_dir", "storage_dir", "spec_path", "runtime_spec_path"):
             if path_key in path_values:
@@ -521,6 +536,14 @@ class RuntimeConfig(BaseSettings):
         self.storage_dir = self._resolve_root_path(self.storage_dir, runtime_root)
         self.spec_path = self._resolve_root_path(self.spec_path, project_root)
         self.runtime_spec_path = self._resolve_root_path(self.runtime_spec_path, project_root)
+        self.management.admin_config_path = self._resolve_root_path(
+            self.management.admin_config_path,
+            runtime_root,
+        )
+        self.management.session_store_path = self._resolve_root_path(
+            self.management.session_store_path,
+            runtime_root,
+        )
 
     @staticmethod
     def _coerce_path(value: str | Path) -> Path:
@@ -561,6 +584,8 @@ class RuntimeConfig(BaseSettings):
         (self.storage_dir / "jobs").mkdir(exist_ok=True)
         (self.storage_dir / "groups").mkdir(exist_ok=True)
         (self.storage_dir / "runtime").mkdir(exist_ok=True)
+        self.management.admin_config_path.parent.mkdir(parents=True, exist_ok=True)
+        self.management.session_store_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 # 全局配置实例

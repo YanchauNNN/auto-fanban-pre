@@ -6,7 +6,16 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..archive.models import ArchiveState
+from ..workflow.models import WorkflowState
+from ..workload.models import WorkloadSummary
 from .job import JobArtifacts, JobProgress, JobStatus
+from .task_group_management import (
+    LegacyVisibilityState,
+    PersonnelSnapshot,
+    ReplacementState,
+    TaskOwnerSnapshot,
+)
 
 
 class TaskGroup(BaseModel):
@@ -26,6 +35,13 @@ class TaskGroup(BaseModel):
     finished_at: datetime | None = None
     shared_dir: Path | None = None
     artifacts: JobArtifacts = Field(default_factory=JobArtifacts)
+    owner_snapshot: TaskOwnerSnapshot | None = None
+    personnel_snapshot: PersonnelSnapshot = Field(default_factory=PersonnelSnapshot)
+    workflow: WorkflowState = Field(default_factory=WorkflowState)
+    workload: WorkloadSummary = Field(default_factory=WorkloadSummary)
+    archive: ArchiveState = Field(default_factory=ArchiveState)
+    replacement: ReplacementState = Field(default_factory=ReplacementState)
+    legacy_visibility: LegacyVisibilityState = Field(default_factory=LegacyVisibilityState)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}

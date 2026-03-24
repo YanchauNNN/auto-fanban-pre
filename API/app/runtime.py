@@ -1,10 +1,13 @@
 ﻿from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import queue
+import re
 import threading
 import time
+import unicodedata
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -94,7 +97,7 @@ class DeliverableApiRuntime:
             1,
             min(int(self.config.concurrency.max_jobs), self.cad_slot_pool.slot_count),
         )
-        self._max_doc_jobs = max(int(self.config.concurrency.max_jobs), 1)
+        self._max_doc_jobs = max(int(self.config.concurrency.doc_max_jobs), 1)
 
         self._group_queue: queue.Queue[str | None] = queue.Queue()
         self._job_queue: queue.Queue[str | None] = queue.Queue()
@@ -188,23 +191,28 @@ class DeliverableApiRuntime:
         input_dir.mkdir(parents=True, exist_ok=True)
 
         results: list[dict[str, Any]] = []
-        for upload in files:
-            source_path = input_dir / (Path(upload.filename).name or "upload.dwg")
+        for index, upload in enumerate(files, start=1):
+            original_filename = Path(upload.filename).name or 'upload.dwg'
+            source_path = input_dir / self._safe_storage_filename(
+                upload.filename,
+                fallback_stem=f"preflight_{index}",
+                seed=preflight_id,
+            )
             source_path.write_bytes(upload.content)
             workspace_dir = preflight_root / source_path.stem
             try:
-                results.append(
-                    self.font_preflight_service.inspect_dwg(
-                        source_dwg=source_path,
-                        replacement_policy="none",
-                        replacement_font=None,
-                        workspace_dir=workspace_dir,
-                    )
+                result = self.font_preflight_service.inspect_dwg(
+                    source_dwg=source_path,
+                    replacement_policy="none",
+                    replacement_font=None,
+                    workspace_dir=workspace_dir,
                 )
+                result["filename"] = original_filename
+                results.append(result)
             except Exception as exc:  # noqa: BLE001
                 results.append(
                     {
-                        "filename": source_path.name,
+                        "filename": original_filename,
                         "status": "failed",
                         "missing_fonts": [],
                         "detected_style_count": 0,
@@ -931,7 +939,11 @@ class DeliverableApiRuntime:
         job_dir = self.config.get_job_dir(job.job_id)
         upload_dir = job_dir / 'uploads'
         upload_dir.mkdir(parents=True, exist_ok=True)
-        upload_path = upload_dir / (Path(upload.filename).name or f'{job.job_id}.dwg')
+        upload_path = upload_dir / self._safe_storage_filename(
+            upload.filename,
+            fallback_stem=job.job_id,
+            seed=job.job_id,
+        )
         upload_path.write_bytes(upload.content)
         job.work_dir = job_dir
         job.input_files = [upload_path.resolve()]
@@ -940,7 +952,11 @@ class DeliverableApiRuntime:
         group_dir = self.config.get_group_dir(group.group_id)
         upload_dir = group_dir / 'input'
         upload_dir.mkdir(parents=True, exist_ok=True)
-        upload_path = upload_dir / (Path(upload.filename).name or f'{group.group_id}.dwg')
+        upload_path = upload_dir / self._safe_storage_filename(
+            upload.filename,
+            fallback_stem=group.group_id,
+            seed=group.group_id,
+        )
         upload_path.write_bytes(upload.content)
         return upload_path.resolve()
 
@@ -948,11 +964,32 @@ class DeliverableApiRuntime:
     def _new_batch_id() -> str:
         return f"batch-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
 
+    @classmethod
+    def _safe_source_key(cls, source_name: str) -> str:
+        stem = cls._ascii_token(Path(source_name).stem, fallback='source')
+        digest = hashlib.sha1(source_name.encode('utf-8')).hexdigest()[:8]
+        return f"{stem[:60]}-{digest}"
+
+    @classmethod
+    def _safe_storage_filename(
+        cls,
+        source_name: str,
+        *,
+        fallback_stem: str,
+        seed: str,
+    ) -> str:
+        path = Path(source_name)
+        suffix = path.suffix.lower() or '.dwg'
+        stem = cls._ascii_token(path.stem, fallback=fallback_stem)
+        digest = hashlib.sha1(f"{source_name}|{seed}".encode('utf-8')).hexdigest()[:8]
+        return f"{stem[:80]}-{digest}{suffix}"
+
     @staticmethod
-    def _safe_source_key(source_name: str) -> str:
-        stem = Path(source_name).stem
-        safe = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in stem)
-        return safe.strip('_') or 'source'
+    def _ascii_token(value: str, *, fallback: str) -> str:
+        normalized = unicodedata.normalize('NFKD', str(value or ''))
+        ascii_only = normalized.encode('ascii', 'ignore').decode('ascii')
+        safe = re.sub(r'[^A-Za-z0-9_-]+', '_', ascii_only).strip('_')
+        return safe or fallback
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:

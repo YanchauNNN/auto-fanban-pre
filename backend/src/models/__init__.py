@@ -19,6 +19,14 @@ from .frame import BBox, FrameMeta, FrameRuntime, TitleblockFields
 from .job import Job, JobArtifacts, JobStatus, JobType
 from .sheet_set import PageInfo, SheetSet
 from .task_group import TaskGroup
+from .task_group_management import (
+    AccountSnapshot,
+    LegacyVisibilityState,
+    NormalizedPersonnel,
+    PersonnelSnapshot,
+    ReplacementState,
+    TaskOwnerSnapshot,
+)
 
 __all__ = [
     "Job",
@@ -26,6 +34,12 @@ __all__ = [
     "JobStatus",
     "JobType",
     "TaskGroup",
+    "AccountSnapshot",
+    "TaskOwnerSnapshot",
+    "NormalizedPersonnel",
+    "PersonnelSnapshot",
+    "ReplacementState",
+    "LegacyVisibilityState",
     "FrameMeta",
     "FrameRuntime",
     "TitleblockFields",

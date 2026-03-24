@@ -7,9 +7,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import bootstrap  # noqa: F401
+from .management_services import ManagementServices
+from .routers.accounts import router as accounts_router
+from .routers.admin import router as admin_router
+from .routers.auth import router as auth_router
 from .routers.jobs import router as jobs_router
 from .routers.meta import router as meta_router
 from .routers.system import router as system_router
+from .routers.task_groups import router as task_groups_router
+from .routers.workflow import router as workflow_router
+from .routers.workload import router as workload_router
 from .runtime import DeliverableApiRuntime
 
 from src.cad import FontPreflightService
@@ -27,14 +34,18 @@ def create_app(
         shared_prep_service=shared_prep_service,
         font_preflight_service=font_preflight_service,
     )
+    management = ManagementServices.build(runtime)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.runtime = runtime
+        app.state.management = management
         runtime.start()
+        management.start()
         try:
             yield
         finally:
+            management.stop()
             runtime.stop()
 
     app = FastAPI(
@@ -52,6 +63,12 @@ def create_app(
     app.include_router(system_router)
     app.include_router(meta_router)
     app.include_router(jobs_router)
+    app.include_router(auth_router)
+    app.include_router(accounts_router)
+    app.include_router(task_groups_router)
+    app.include_router(workflow_router)
+    app.include_router(workload_router)
+    app.include_router(admin_router)
     return app
 
 

@@ -5,6 +5,16 @@
   padding: 1rem 1.05rem 0.95rem;
 }
 
+.modalLayoutPassive {
+  pointer-events: none;
+}
+
+.tutorialPreviewDialog {
+  box-shadow:
+    0 26px 88px rgba(9, 28, 53, 0.22),
+    0 0 0 1px rgba(255, 255, 255, 0.82);
+}
+
 .modalHeader {
   display: flex;
   align-items: flex-start;
