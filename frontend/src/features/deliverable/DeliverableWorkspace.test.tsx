@@ -152,6 +152,7 @@ function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
+    preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
@@ -360,6 +361,23 @@ describe("DeliverableWorkspace", () => {
   it("maps 422 param errors into field and form messages", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
     adapter.createBatch = vi.fn().mockRejectedValue({
       status: 422,
       detail: {
@@ -384,6 +402,7 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
+    expect(await screen.findByText("A01.dwg")).toBeInTheDocument();
     await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
@@ -392,6 +411,185 @@ describe("DeliverableWorkspace", () => {
       expect(screen.getByText("only .dwg files are allowed")).toBeInTheDocument();
       expect(screen.getByText("required")).toBeInTheDocument();
     });
+  });
+
+  it("preflights fonts before direct deliverable submit and proceeds immediately when all files are ok", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-font-ok",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByText("A01.dwg")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.preflightFonts).toHaveBeenCalledWith([
+        expect.objectContaining({ name: "A01.dwg" }),
+      ]);
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          font_replace_policy: "none",
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+
+    expect(
+      vi.mocked(adapter.preflightFonts).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(adapter.createBatch).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("opens a missing-font confirmation dialog and submits with the chosen replacement font", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "missing_fonts",
+          missingFonts: [
+            {
+              styleName: "HZTXT",
+              fontName: "missing.shx",
+              bigfontName: "",
+              kind: "shx",
+              usedInBlock: true,
+            },
+          ],
+          detectedStyleCount: 12,
+          missingStyleCount: 1,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [
+        {
+          label: "SimSun (TrueType) (simsun.ttc)",
+          value: "simsun.ttc",
+          family: "SimSun",
+          path: "C:\\Windows\\Fonts\\simsun.ttc",
+        },
+      ],
+      requiresConfirmation: true,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-font-replaced",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByText("A01.dwg")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
+    expect(within(dialog).getByText("A01.dwg")).toBeInTheDocument();
+    expect(within(dialog).getByText("HZTXT")).toBeInTheDocument();
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+
+    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simsun.ttc");
+    await user.click(within(dialog).getByRole("button", { name: "继续提交" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          font_replace_policy: "replace_missing",
+          font_replacement_font: "simsun.ttc",
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+  });
+
+  it("blocks final submit and shows file-level errors when preflight reports failed files", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "failed",
+          missingFonts: [],
+          detectedStyleCount: 0,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: ["A01.dwg：字体预检失败"],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    expect(await screen.findByText("A01.dwg：字体预检失败")).toBeInTheDocument();
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "缺失字体处理" })).not.toBeInTheDocument();
   });
 
   it("preserves the draft when the modal closes and reopens", async () => {
@@ -501,6 +699,23 @@ describe("DeliverableWorkspace", () => {
   it("submits only the new upgrade fields and clears upgrade-related values when upgrade is disabled", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "2016-A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
     adapter.createBatch = vi.fn().mockResolvedValue({
       batchId: "batch-deliverable-1",
       jobs: [],
@@ -557,6 +772,38 @@ describe("DeliverableWorkspace", () => {
   it("submits through replace-plus-deliverable when a pending replace flow is attached", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "20261NH-JGS51-B合并版.dwg",
+          status: "missing_fonts",
+          missingFonts: [
+            {
+              styleName: "HZTXT",
+              fontName: "missing.shx",
+              bigfontName: "",
+              kind: "shx",
+              usedInBlock: true,
+            },
+          ],
+          detectedStyleCount: 32,
+          missingStyleCount: 1,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [
+        {
+          label: "SimSun (TrueType) (simsun.ttc)",
+          value: "simsun.ttc",
+          family: "SimSun",
+          path: "C:\\Windows\\Fonts\\simsun.ttc",
+        },
+      ],
+      requiresConfirmation: true,
+    });
     adapter.createAuditReplace = vi.fn().mockResolvedValue({
       batchId: "batch-replace-group-1",
       jobs: [],
@@ -579,9 +826,13 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
+    expect(await screen.findByText("20261NH-JGS51-B合并版.dwg")).toBeInTheDocument();
     await user.type(screen.getByLabelText("图册名称（中文）"), "翻版后出图图册");
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+    const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
+    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simsun.ttc");
+    await user.click(within(dialog).getByRole("button", { name: "继续提交" }));
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledWith({
@@ -594,6 +845,8 @@ describe("DeliverableWorkspace", () => {
         deliverableParams: expect.objectContaining({
           album_title_cn: "翻版后出图图册",
           subitem_name: "反应堆厂房",
+          font_replace_policy: "replace_missing",
+          font_replacement_font: "simsun.ttc",
         }),
       });
       expect(adapter.createBatch).not.toHaveBeenCalled();

@@ -108,7 +108,8 @@
 
 .summaryActions,
 .presetStack,
-.advancedStack {
+.advancedStack,
+.fontFileList {
   display: grid;
   gap: 0.55rem;
 }
@@ -254,6 +255,45 @@
 .sectionNote p + p,
 .replaceSummary p + p {
   margin-top: 0.35rem;
+}
+
+.fontModalBody {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1rem 1.05rem 0.95rem;
+}
+
+.fontFileCard {
+  border-radius: 18px;
+  border: 1px solid rgba(33, 74, 126, 0.12);
+  background: rgba(248, 251, 255, 0.96);
+  padding: 0.85rem 0.9rem;
+}
+
+.fontMissingList {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.fontMissingItem {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.65rem 0.72rem;
+  border-radius: 12px;
+  background: rgba(20, 73, 135, 0.05);
+  color: #14395e;
+  font-size: 0.86rem;
+}
+
+.fontNoticeList {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.4rem;
+  color: #345a84;
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .sectionNoteWarning {

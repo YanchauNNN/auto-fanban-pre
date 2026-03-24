@@ -1486,6 +1486,13 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
+      {detail.taskKind === "deliverable" ? (
+        <section className={styles.detailSection}>
+          <h2>字体处理摘要</h2>
+          <FontPreflightCard detail={detail} />
+        </section>
+      ) : null}
+
       <section className={styles.detailSection}>
         <h2>告警与错误</h2>
         <div className={styles.columns}>
@@ -1700,6 +1707,46 @@ function DeliverableResultCard({
           <p className={styles.muted}>当前没有文档产物。</p>
         )}
       </div>
+    </div>
+  );
+}
+
+function FontPreflightCard({ detail }: { detail: JobDetail }) {
+  const summary = detail.fontPreflightSummary;
+  const files = summary?.files ?? [];
+  const statusText = detail.fontReplacementApplied
+    ? "已执行缺失字体替代"
+    : detail.missingFontsDetected
+      ? "检测到缺失字体，未执行替代"
+      : "未检测到缺失字体";
+
+  return (
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="处理结果" value={statusText} />
+        <InfoBlock label="替代策略" value={summary?.policy || "none"} />
+        <InfoBlock label="替代字体" value={detail.replacementFont ?? "-"} />
+        <InfoBlock label="替换样式数" value={String(detail.replacedStyleCount ?? 0)} />
+      </div>
+
+      {files.length > 0 ? (
+        <div className={styles.resultSectionBlock}>
+          <h3>文件级结果</h3>
+          <div className={styles.outputGrid}>
+            {files.map((file) => (
+              <div className={styles.outputCard} key={`${file.filename}-${file.status}`}>
+                <strong>{file.filename}</strong>
+                <span>{getFontPreflightStatusLabel(file.status)}</span>
+                <ul className={styles.outputMetaList}>
+                  <li>{`检测样式数：${file.detectedStyleCount}`}</li>
+                  <li>{`缺失样式数：${file.missingStyleCount}`}</li>
+                  <li>{`替换样式数：${file.replacedStyleCount}`}</li>
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1985,5 +2032,18 @@ function formatPageTotal(pageTotal: number) {
     return "-";
   }
   return `${pageTotal} 页`;
+}
+
+function getFontPreflightStatusLabel(status: string) {
+  switch (status.trim().toLowerCase()) {
+    case "ok":
+      return "未检测到缺失字体";
+    case "missing_fonts":
+      return "检测到缺失字体";
+    case "failed":
+      return "字体预检失败";
+    default:
+      return status || "-";
+  }
 }
 

@@ -5,6 +5,8 @@ import type {
   CreateAuditReplaceParams,
   CreateBatchPayload,
   DeliverableOutputs,
+  FontPreflightSummary,
+  FontPreflightResult,
   FindingGroup,
   FormSchema,
   HealthStatus,
@@ -55,6 +57,14 @@ type RawJobSummary = {
   pc3_path?: string | null;
   pmp_path?: string | null;
   ctb_path?: string | null;
+  font_preflight_summary?: {
+    files?: RawFontPreflightResult["files"];
+    policy?: string | null;
+  } | null;
+  missing_fonts_detected?: boolean | null;
+  font_replacement_applied?: boolean | null;
+  replacement_font?: string | null;
+  replaced_style_count?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
   children?: RawJobSummary[] | null;
@@ -97,6 +107,33 @@ type RawJobDetail = RawJobSummary & {
     top_replaced_texts?: string[] | null;
     top_internal_codes?: string[] | null;
   } | null;
+};
+
+type RawFontPreflightResult = {
+  files?: Array<{
+    filename?: string | null;
+    status?: string | null;
+    missing_fonts?: Array<{
+      style_name?: string | null;
+      font_name?: string | null;
+      bigfont_name?: string | null;
+      kind?: string | null;
+      used_in_block?: boolean | null;
+    }> | null;
+    detected_style_count?: number | null;
+    missing_style_count?: number | null;
+    font_replacement_applied?: boolean | null;
+    replacement_font?: string | null;
+    replaced_style_count?: number | null;
+    errors?: string[] | null;
+  }> | null;
+  replacement_options?: Array<{
+    label?: string | null;
+    value?: string | null;
+    family?: string | null;
+    path?: string | null;
+  }> | null;
+  requires_confirmation?: boolean | null;
 };
 
 type RawFormSchema = {
@@ -163,6 +200,45 @@ export class HttpAdapter implements ApiAdapter {
   async getFormSchema(): Promise<FormSchema> {
     const payload = await this.fetchJson<RawFormSchema>("/api/meta/form-schema");
     return normalizeFormSchema(payload);
+  }
+
+  async preflightFonts(files: File[]): Promise<FontPreflightResult> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files[]", file);
+    }
+
+    const payload = await this.fetchJson<RawFontPreflightResult>("/api/jobs/preflight-fonts", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      files: (payload.files ?? []).map((file) => ({
+        filename: file.filename ?? "",
+        status: file.status ?? "",
+        missingFonts: (file.missing_fonts ?? []).map((font) => ({
+          styleName: font.style_name ?? "",
+          fontName: font.font_name ?? "",
+          bigfontName: font.bigfont_name ?? "",
+          kind: font.kind ?? "unknown",
+          usedInBlock: Boolean(font.used_in_block),
+        })),
+        detectedStyleCount: file.detected_style_count ?? 0,
+        missingStyleCount: file.missing_style_count ?? 0,
+        fontReplacementApplied: Boolean(file.font_replacement_applied),
+        replacementFont: file.replacement_font ?? null,
+        replacedStyleCount: file.replaced_style_count ?? 0,
+        errors: file.errors ?? [],
+      })),
+      replacementOptions: (payload.replacement_options ?? []).map((option) => ({
+        label: option.label ?? "",
+        value: option.value ?? "",
+        family: option.family ?? "",
+        path: option.path ?? "",
+      })),
+      requiresConfirmation: Boolean(payload.requires_confirmation),
+    };
   }
 
   async createBatch(
@@ -340,6 +416,11 @@ export class HttpAdapter implements ApiAdapter {
       pc3Path: payload.pc3_path ?? null,
       pmpPath: payload.pmp_path ?? null,
       ctbPath: payload.ctb_path ?? null,
+      fontPreflightSummary: this.normalizeFontPreflightSummary(payload.font_preflight_summary),
+      missingFontsDetected: payload.missing_fonts_detected ?? false,
+      fontReplacementApplied: payload.font_replacement_applied ?? false,
+      replacementFont: payload.replacement_font ?? null,
+      replacedStyleCount: payload.replaced_style_count ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
     };
   }
@@ -426,6 +507,35 @@ export class HttpAdapter implements ApiAdapter {
       targetProjectNo: payload.target_project_no ?? "",
       topReplacedTexts: payload.top_replaced_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
+    };
+  }
+
+  private normalizeFontPreflightSummary(
+    payload: RawJobSummary["font_preflight_summary"],
+  ): FontPreflightSummary | null {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      files: (payload.files ?? []).map((file) => ({
+        filename: file.filename ?? "",
+        status: file.status ?? "",
+        missingFonts: (file.missing_fonts ?? []).map((font) => ({
+          styleName: font.style_name ?? "",
+          fontName: font.font_name ?? "",
+          bigfontName: font.bigfont_name ?? "",
+          kind: font.kind ?? "unknown",
+          usedInBlock: Boolean(font.used_in_block),
+        })),
+        detectedStyleCount: file.detected_style_count ?? 0,
+        missingStyleCount: file.missing_style_count ?? 0,
+        fontReplacementApplied: Boolean(file.font_replacement_applied),
+        replacementFont: file.replacement_font ?? null,
+        replacedStyleCount: file.replaced_style_count ?? 0,
+        errors: file.errors ?? [],
+      })),
+      policy: payload.policy ?? "none",
     };
   }
 }

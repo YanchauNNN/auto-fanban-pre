@@ -33,6 +33,8 @@ type ReplaceDraft = {
   formErrors: string[];
 };
 
+const REPLACE_DRAFT_STORAGE_KEY = "auto-fanban.replace-draft";
+
 export function ReplaceWorkspace({
   adapter,
   schema,
@@ -42,7 +44,9 @@ export function ReplaceWorkspace({
   onContinueToDeliverable,
   onDraftAvailabilityChange,
 }: ReplaceWorkspaceProps) {
-  const [draft, setDraft] = useState<ReplaceDraft>(createReplaceDraft());
+  const [draft, setDraft] = useState<ReplaceDraft>(() =>
+    createReplaceDraft(loadPersistedReplaceDraft()),
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const projectOptions = (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim());
 
@@ -60,6 +64,10 @@ export function ReplaceWorkspace({
     draft.targetProjectNo,
     onDraftAvailabilityChange,
   ]);
+
+  useEffect(() => {
+    persistReplaceDraft(draft);
+  }, [draft.mode, draft.sourceProjectNo, draft.targetProjectNo]);
 
   if (!isOpen) {
     return null;
@@ -139,6 +147,7 @@ export function ReplaceWorkspace({
         files: draft.files,
         runDeliverable: false,
       });
+      clearPersistedReplaceDraft();
       setDraft(createReplaceDraft());
       startTransition(() => onBatchCreated(payload));
       onClose();
@@ -200,6 +209,7 @@ export function ReplaceWorkspace({
   }
 
   function handleClearDraft() {
+    clearPersistedReplaceDraft();
     setDraft(createReplaceDraft());
     onClose();
   }
@@ -282,14 +292,22 @@ export function ReplaceWorkspace({
                   <span className={styles.hintStrong}>执行模式</span>
                   <div className={styles.recommendations}>
                     <button
-                      className={styles.recommendationChip}
+                      aria-pressed={draft.mode === "replace_only"}
+                      className={`${styles.recommendationChip} ${
+                        draft.mode === "replace_only" ? styles.recommendationChipActive : ""
+                      }`}
                       type="button"
                       onClick={() => handleModeChange("replace_only")}
                     >
                       仅翻版
                     </button>
                     <button
-                      className={styles.recommendationChip}
+                      aria-pressed={draft.mode === "replace_with_deliverable"}
+                      className={`${styles.recommendationChip} ${
+                        draft.mode === "replace_with_deliverable"
+                          ? styles.recommendationChipActive
+                          : ""
+                      }`}
                       type="button"
                       onClick={() => handleModeChange("replace_with_deliverable")}
                     >
@@ -389,15 +407,79 @@ export function ReplaceWorkspace({
   );
 }
 
-function createReplaceDraft(): ReplaceDraft {
+function createReplaceDraft(
+  persistedDraft?: Partial<Pick<ReplaceDraft, "mode" | "sourceProjectNo" | "targetProjectNo">>,
+): ReplaceDraft {
   return {
-    mode: "replace_only",
-    sourceProjectNo: "",
-    targetProjectNo: "",
+    mode: persistedDraft?.mode ?? "replace_only",
+    sourceProjectNo: persistedDraft?.sourceProjectNo ?? "",
+    targetProjectNo: persistedDraft?.targetProjectNo ?? "",
     files: [],
     fieldErrors: {},
     formErrors: [],
   };
+}
+
+function loadPersistedReplaceDraft(): Partial<
+  Pick<ReplaceDraft, "mode" | "sourceProjectNo" | "targetProjectNo">
+> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(REPLACE_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Partial<ReplaceDraft> | null;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return {
+      mode:
+        parsed.mode === "replace_with_deliverable" ? "replace_with_deliverable" : "replace_only",
+      sourceProjectNo:
+        typeof parsed.sourceProjectNo === "string" ? parsed.sourceProjectNo : "",
+      targetProjectNo:
+        typeof parsed.targetProjectNo === "string" ? parsed.targetProjectNo : "",
+    };
+  } catch {
+    return {};
+  }
+}
+
+function persistReplaceDraft(draft: ReplaceDraft) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedDraft = {
+    mode: draft.mode,
+    sourceProjectNo: draft.sourceProjectNo.trim(),
+    targetProjectNo: draft.targetProjectNo.trim(),
+  } as const;
+
+  if (
+    normalizedDraft.mode === "replace_only" &&
+    !normalizedDraft.sourceProjectNo &&
+    !normalizedDraft.targetProjectNo
+  ) {
+    window.localStorage.removeItem(REPLACE_DRAFT_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(REPLACE_DRAFT_STORAGE_KEY, JSON.stringify(normalizedDraft));
+}
+
+function clearPersistedReplaceDraft() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(REPLACE_DRAFT_STORAGE_KEY);
 }
 
 function getExtension(filename: string) {

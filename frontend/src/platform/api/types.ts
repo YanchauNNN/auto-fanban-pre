@@ -91,6 +91,44 @@ export type ReplaceSummary = {
   topInternalCodes: string[];
 };
 
+export type MissingFontEntry = {
+  styleName: string;
+  fontName: string;
+  bigfontName: string;
+  kind: string;
+  usedInBlock: boolean;
+};
+
+export type FontReplacementOption = {
+  label: string;
+  value: string;
+  family: string;
+  path: string;
+};
+
+export type FontPreflightFileResult = {
+  filename: string;
+  status: string;
+  missingFonts: MissingFontEntry[];
+  detectedStyleCount: number;
+  missingStyleCount: number;
+  fontReplacementApplied: boolean;
+  replacementFont: string | null;
+  replacedStyleCount: number;
+  errors: string[];
+};
+
+export type FontPreflightResult = {
+  files: FontPreflightFileResult[];
+  replacementOptions: FontReplacementOption[];
+  requiresConfirmation: boolean;
+};
+
+export type FontPreflightSummary = {
+  files: FontPreflightFileResult[];
+  policy: string;
+};
+
 export type CreateAuditReplaceParams = {
   sourceProjectNo: string;
   targetProjectNo: string;
@@ -132,6 +170,11 @@ export type JobSummary = {
   pc3Path?: string | null;
   pmpPath?: string | null;
   ctbPath?: string | null;
+  fontPreflightSummary?: FontPreflightSummary | null;
+  missingFontsDetected?: boolean;
+  fontReplacementApplied?: boolean;
+  replacementFont?: string | null;
+  replacedStyleCount?: number;
   children?: JobSummary[];
 };
 
@@ -203,6 +246,7 @@ export type ApiError = {
 export type ApiAdapter = {
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
+  preflightFonts: (files: File[]) => Promise<FontPreflightResult>;
   createBatch: (
     params: Record<string, string>,
     files: File[],

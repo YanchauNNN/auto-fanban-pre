@@ -16,6 +16,7 @@ import {
 import type {
   ApiAdapter,
   CreateBatchPayload,
+  FontPreflightResult,
   FormField,
   FormSchema,
   TaskConfigDraft,
@@ -69,6 +70,11 @@ const PLOT_STYLE_OPTIONS = [
   { key: "review_white", label: "交审图" },
 ] as const;
 
+type FontSubmitConfig = {
+  fontReplacePolicy: "none" | "replace_missing";
+  fontReplacementFont?: string;
+};
+
 export function DeliverableWorkspace({
   adapter,
   schema,
@@ -83,7 +89,11 @@ export function DeliverableWorkspace({
 }: DeliverableWorkspaceProps) {
   const [draft, setDraft] = useState<TaskConfigDraft>(() => createTaskConfigDraft(schema));
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [isPreflighting, setIsPreflighting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fontPreflightResult, setFontPreflightResult] = useState<FontPreflightResult | null>(null);
+  const [selectedReplacementFont, setSelectedReplacementFont] = useState("");
+  const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -99,6 +109,7 @@ export function DeliverableWorkspace({
       return;
     }
 
+    resetFontPreflightState();
     setDraft((current) =>
       applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles, pendingReplaceConfig),
     );
@@ -124,6 +135,13 @@ export function DeliverableWorkspace({
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [savedPresets, selectedPresetId],
+  );
+  const missingFontFiles = useMemo(
+    () =>
+      (fontPreflightResult?.files ?? []).filter(
+        (file) => normalizeFontPreflightStatus(file.status) === "missing_fonts",
+      ),
+    [fontPreflightResult],
   );
 
   useEffect(() => {
@@ -171,6 +189,86 @@ export function DeliverableWorkspace({
 
   if (!isOpen) {
     return null;
+  }
+
+  function resetFontPreflightState() {
+    setFontPreflightResult(null);
+    setSelectedReplacementFont("");
+    setFontReplacementError(null);
+  }
+
+  function setValidationErrors(
+    detail?: {
+      upload_errors?: Record<string, string[]>;
+      param_errors?: Record<string, string[]>;
+    },
+    extraFormErrors: string[] = [],
+  ) {
+    setDraft((current) => ({
+      ...current,
+      fieldErrors: detail?.param_errors ?? {},
+      formErrors: [...Object.values(detail?.upload_errors ?? {}).flat(), ...extraFormErrors],
+    }));
+  }
+
+  function extractValidationDetail(error: unknown) {
+    if (typeof error !== "object" || !error || !("detail" in error)) {
+      return undefined;
+    }
+
+    return (error as {
+      detail?: {
+        upload_errors?: Record<string, string[]>;
+        param_errors?: Record<string, string[]>;
+      };
+    }).detail;
+  }
+
+  async function submitDeliverable(fontConfig: FontSubmitConfig) {
+    setIsSubmitting(true);
+    setFontReplacementError(null);
+
+    const submissionValues = buildSubmissionValues(draft.values, fontConfig);
+
+    try {
+      const payload = pendingReplaceConfig?.runDeliverable
+        ? await adapter.createAuditReplace({
+            sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
+            targetProjectNo: pendingReplaceConfig.targetProjectNo,
+            files: draft.files,
+            runDeliverable: true,
+            deliverableParams: submissionValues,
+          })
+        : await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
+      onNotice?.(
+        pendingReplaceConfig?.runDeliverable
+          ? "翻版与出图任务包已创建。"
+          : draft.runAuditCheck
+            ? "出图与纠错任务包已创建。"
+            : "出图任务已创建。",
+      );
+
+      setDraft(createTaskConfigDraft(schema));
+      setShowAdvanced(false);
+      resetFontPreflightState();
+      onClearPendingReplaceFlow?.();
+      startTransition(() => onBatchCreated(payload));
+      onClose();
+    } catch (error) {
+      const detail = extractValidationDetail(error);
+      const fontErrors = [
+        ...(detail?.param_errors?.font_replace_policy ?? []),
+        ...(detail?.param_errors?.font_replacement_font ?? []),
+      ];
+
+      if (fontErrors.length > 0) {
+        setFontReplacementError(fontErrors.join("；"));
+      }
+
+      setValidationErrors(detail);
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -228,52 +326,59 @@ export function DeliverableWorkspace({
       fieldErrors: {},
       formErrors: [],
     }));
-    setIsSubmitting(true);
-
-    const submissionValues = buildSubmissionValues(draft.values);
+    resetFontPreflightState();
+    setIsPreflighting(true);
 
     try {
-      const payload = pendingReplaceConfig?.runDeliverable
-        ? await adapter.createAuditReplace({
-            sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
-            targetProjectNo: pendingReplaceConfig.targetProjectNo,
-            files: draft.files,
-            runDeliverable: true,
-            deliverableParams: submissionValues,
-          })
-        : await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
-      onNotice?.(
-        pendingReplaceConfig?.runDeliverable
-          ? "翻版与出图任务包已创建。"
-          : draft.runAuditCheck
-            ? "出图与纠错任务包已创建。"
-            : "出图任务已创建。",
+      const preflight = await adapter.preflightFonts(draft.files);
+      const failedFiles = preflight.files.filter(
+        (file) => normalizeFontPreflightStatus(file.status) === "failed",
       );
+      if (failedFiles.length > 0) {
+        setDraft((current) => ({
+          ...current,
+          fieldErrors: {},
+          formErrors: buildFontPreflightFailureMessages(failedFiles),
+        }));
+        return;
+      }
 
-      setDraft(createTaskConfigDraft(schema));
-      setShowAdvanced(false);
-      onClearPendingReplaceFlow?.();
-      startTransition(() => onBatchCreated(payload));
-      onClose();
+      const missingFiles = preflight.files.filter(
+        (file) => normalizeFontPreflightStatus(file.status) === "missing_fonts",
+      );
+      if (missingFiles.length > 0) {
+        if (preflight.replacementOptions.length === 0) {
+          setDraft((current) => ({
+            ...current,
+            fieldErrors: {},
+            formErrors: ["检测到缺失字体，但当前工作站没有可用替代字体。"],
+          }));
+          return;
+        }
+
+        setFontPreflightResult(preflight);
+        setSelectedReplacementFont("");
+        return;
+      }
+
+      await submitDeliverable({ fontReplacePolicy: "none" });
     } catch (error) {
-      const detail =
-        typeof error === "object" && error && "detail" in error
-          ? (error as {
-              detail?: {
-                upload_errors?: Record<string, string[]>;
-                param_errors?: Record<string, string[]>;
-              };
-            }).detail
-          : undefined;
-
-      setDraft((current) => ({
-        ...current,
-        fieldErrors: detail?.param_errors ?? {},
-        formErrors: Object.values(detail?.upload_errors ?? {}).flat(),
-      }));
+      setValidationErrors(extractValidationDetail(error), ["字体预检失败，请稍后重试。"]);
     } finally {
-      setIsSubmitting(false);
+      setIsPreflighting(false);
     }
+  }
+
+  async function handleConfirmFontReplacement() {
+    if (!selectedReplacementFont.trim()) {
+      setFontReplacementError("请先选择替代字体。");
+      return;
+    }
+
+    await submitDeliverable({
+      fontReplacePolicy: "replace_missing",
+      fontReplacementFont: selectedReplacementFont.trim(),
+    });
   }
 
   function handleFieldChange(key: string, value: string) {
@@ -322,6 +427,7 @@ export function DeliverableWorkspace({
     }
 
     setPresetUpdatedNotice(false);
+    resetFontPreflightState();
     setDraft((current) =>
       applyFilesToDraft(syncTaskConfigDraft(schema, current), files, pendingReplaceConfig),
     );
@@ -329,6 +435,7 @@ export function DeliverableWorkspace({
 
   function handleClearDraft() {
     setPresetUpdatedNotice(false);
+    resetFontPreflightState();
     setDraft(createTaskConfigDraft(schema));
     setShowAdvanced(false);
     setPresetError(null);
@@ -338,6 +445,7 @@ export function DeliverableWorkspace({
 
   function handleClose() {
     setPresetError(null);
+    resetFontPreflightState();
     onClose();
   }
 
@@ -701,13 +809,125 @@ export function DeliverableWorkspace({
             </section>
 
             <footer className={styles.actions}>
-              <button className={styles.primaryButton} disabled={isSubmitting} type="submit">
-                {isSubmitting ? "创建中..." : submitLabel}
+              <button
+                className={styles.primaryButton}
+                disabled={isSubmitting || isPreflighting}
+                type="submit"
+              >
+                {isSubmitting ? "创建中..." : isPreflighting ? "预检中..." : submitLabel}
               </button>
             </footer>
           </form>
         </div>
       </TaskConfigModal>
+
+      {fontPreflightResult ? (
+        <TaskConfigModal title="缺失字体处理">
+          <div className={styles.fontModalBody}>
+            <header className={styles.modalHeader}>
+              <div>
+                <p className={styles.kicker}>Font Preflight</p>
+                <h2>缺失字体处理</h2>
+                <p className={styles.description}>
+                  检测到当前批次存在缺失字体。请先选择统一替代字体，确认后再继续正式提交。
+                </p>
+              </div>
+            </header>
+
+            <section className={styles.section}>
+              <header className={styles.sectionHeader}>
+                <h3>缺失字体文件</h3>
+              </header>
+              <div className={styles.fontFileList}>
+                {missingFontFiles.map((file) => (
+                  <article className={styles.fontFileCard} key={file.filename}>
+                    <div className={styles.summaryHeaderRow}>
+                      <h3>{file.filename}</h3>
+                      <span>{`${file.missingStyleCount} 处缺失`}</span>
+                    </div>
+                    {file.missingFonts.length > 0 ? (
+                      <div className={styles.fontMissingList}>
+                        {file.missingFonts.map((font) => (
+                          <div
+                            className={styles.fontMissingItem}
+                            key={`${file.filename}-${font.styleName}-${font.fontName}`}
+                          >
+                            <strong>{font.styleName}</strong>
+                            <span>{`字体：${font.fontName || "-"}`}</span>
+                            <span>{`大字体：${font.bigfontName || "-"}`}</span>
+                            <span>{`类型：${font.kind}`}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className={styles.emptyState}>当前文件未返回具体缺失字体条目。</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className={styles.section}>
+              <header className={styles.sectionHeader}>
+                <h3>替代策略</h3>
+              </header>
+              <div className={styles.field}>
+                <label className={styles.fieldLabel} htmlFor="font-replacement-select">
+                  <span>替代字体</span>
+                  <em>必填</em>
+                </label>
+                <select
+                  aria-label="替代字体"
+                  className={styles.select}
+                  id="font-replacement-select"
+                  value={selectedReplacementFont}
+                  onChange={(event) => {
+                    setSelectedReplacementFont(event.target.value);
+                    setFontReplacementError(null);
+                  }}
+                >
+                  <option value="">请选择替代字体</option>
+                  {fontPreflightResult.replacementOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.helperText}>
+                  可选字体完全来自当前工作站与后端预检结果，前端不会写死任何字体列表。
+                </span>
+                {fontReplacementError ? (
+                  <span className={styles.errorText}>{fontReplacementError}</span>
+                ) : null}
+              </div>
+
+              <ul className={styles.fontNoticeList}>
+                <li>只会修改任务工作副本，不会修改原始上传文件。</li>
+                <li>替代只作用于检测到缺失的字体样式。</li>
+                <li>同一批次文件会统一使用当前选中的替代字体。</li>
+              </ul>
+            </section>
+
+            <footer className={styles.actions}>
+              <button
+                className={styles.ghostButton}
+                type="button"
+                onClick={resetFontPreflightState}
+              >
+                取消
+              </button>
+              <button
+                className={styles.primaryButton}
+                disabled={isSubmitting || !selectedReplacementFont.trim()}
+                type="button"
+                onClick={handleConfirmFontReplacement}
+              >
+                {isSubmitting ? "提交中..." : "继续提交"}
+              </button>
+            </footer>
+          </div>
+        </TaskConfigModal>
+      ) : null}
     </>
   );
 }
@@ -1070,7 +1290,20 @@ function getFieldPlaceholder(field: FormField) {
   return `请输入${field.label}`;
 }
 
-function buildSubmissionValues(values: Record<string, string>) {
+function normalizeFontPreflightStatus(status: string) {
+  return status.trim().toLowerCase();
+}
+
+function buildFontPreflightFailureMessages(files: FontPreflightResult["files"]) {
+  return files.flatMap((file) =>
+    file.errors.length > 0 ? file.errors : [`${file.filename}：字体预检失败`],
+  );
+}
+
+function buildSubmissionValues(
+  values: Record<string, string>,
+  fontConfig: FontSubmitConfig = { fontReplacePolicy: "none" },
+) {
   const sanitized = { ...values };
 
   delete sanitized.upgrade_start_seq;
@@ -1093,6 +1326,12 @@ function buildSubmissionValues(values: Record<string, string>) {
   sanitized.ied_discipline_leader = combinedChecker;
   sanitized.ied_checked_date = combinedCheckerDate;
   sanitized.ied_discipline_leader_date = combinedCheckerDate;
+  sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
+  if (fontConfig.fontReplacePolicy === "replace_missing" && fontConfig.fontReplacementFont) {
+    sanitized.font_replacement_font = fontConfig.fontReplacementFont;
+  } else {
+    delete sanitized.font_replacement_font;
+  }
 
   return sanitized;
 }

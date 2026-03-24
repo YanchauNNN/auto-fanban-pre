@@ -320,6 +320,91 @@ describe("HttpAdapter", () => {
     });
   });
 
+  it("preflights fonts before submit and returns backend replacement options", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          files: [
+            {
+              filename: "19163RC-JGS04-WD.dwg",
+              status: "missing_fonts",
+              missing_fonts: [
+                {
+                  style_name: "HZTXT",
+                  font_name: "missing.shx",
+                  bigfont_name: "",
+                  kind: "shx",
+                  used_in_block: true,
+                },
+              ],
+              detected_style_count: 30,
+              missing_style_count: 1,
+              font_replacement_applied: false,
+              replacement_font: null,
+              replaced_style_count: 0,
+            },
+          ],
+          replacement_options: [
+            {
+              label: "SimSun (TrueType) (simsun.ttc)",
+              value: "simsun.ttc",
+              family: "SimSun",
+              path: "C:\\Windows\\Fonts\\simsun.ttc",
+            },
+          ],
+          requires_confirmation: true,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "19163RC-JGS04-WD.dwg", {
+      type: "application/acad",
+    });
+
+    const result = await adapter.preflightFonts([file]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/preflight-fonts",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      }),
+    );
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.getAll("files[]")).toHaveLength(1);
+    expect(result.requiresConfirmation).toBe(true);
+    expect(result.replacementOptions).toEqual([
+      {
+        label: "SimSun (TrueType) (simsun.ttc)",
+        value: "simsun.ttc",
+        family: "SimSun",
+        path: "C:\\Windows\\Fonts\\simsun.ttc",
+      },
+    ]);
+    expect(result.files[0]).toEqual({
+      filename: "19163RC-JGS04-WD.dwg",
+      status: "missing_fonts",
+      missingFonts: [
+        {
+          styleName: "HZTXT",
+          fontName: "missing.shx",
+          bigfontName: "",
+          kind: "shx",
+          usedInBlock: true,
+        },
+      ],
+      detectedStyleCount: 30,
+      missingStyleCount: 1,
+      fontReplacementApplied: false,
+      replacementFont: null,
+      replacedStyleCount: 0,
+      errors: [],
+    });
+  });
+
   it("creates grouped deliverable batches with run_audit_check=true when requested", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

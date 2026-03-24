@@ -223,6 +223,13 @@
   padding: 0.4rem 0.75rem;
   font-size: 0.88rem;
   font-weight: 700;
+  cursor: pointer;
+}
+
+.recommendationChipActive {
+  border-color: rgba(33, 96, 170, 0.28);
+  background: linear-gradient(135deg, #144987, #236bb9);
+  color: #f8fbff;
 }
 
 .combobox {

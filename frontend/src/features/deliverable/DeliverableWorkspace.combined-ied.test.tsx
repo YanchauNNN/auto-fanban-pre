@@ -128,6 +128,23 @@ function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
+    preflightFonts: vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    }),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
     listJobs: vi.fn(),

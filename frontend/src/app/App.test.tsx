@@ -438,6 +438,178 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
+  it("shows a clean font summary when no missing fonts were detected for deliverable jobs", async () => {
+    window.history.pushState({}, "", "/jobs/deliverable-font-ok");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "deliverable-font-ok",
+      batchId: "batch-deliverable-font-ok",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "deliverable",
+      taskRole: null,
+      jobMode: "deliverable",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "PACKAGE_ZIP",
+      percent: 100,
+      message: "",
+      createdAt: "2026-03-24T14:00:00+08:00",
+      finishedAt: "2026-03-24T14:05:00+08:00",
+      startedAt: "2026-03-24T14:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/deliverable-font-ok/download/package",
+        iedDownloadUrl: "/api/jobs/deliverable-font-ok/download/ied",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [{ name: "IED.xlsx", kind: "xlsx" }],
+        drawings: [
+          {
+            name: "A01",
+            internalCode: "20161RS-JGS01-001",
+            dwgName: "A01.dwg",
+            pdfName: "A01.pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+      fontPreflightSummary: {
+        files: [
+          {
+            filename: "A01.dwg",
+            status: "ok",
+            missingFonts: [],
+            detectedStyleCount: 12,
+            missingStyleCount: 0,
+            fontReplacementApplied: false,
+            replacementFont: null,
+            replacedStyleCount: 0,
+            errors: [],
+          },
+        ],
+        policy: "none",
+      },
+      missingFontsDetected: false,
+      fontReplacementApplied: false,
+      replacementFont: null,
+      replacedStyleCount: 0,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("字体处理摘要")).toBeInTheDocument();
+    expect(screen.getAllByText("未检测到缺失字体").length).toBeGreaterThan(0);
+  });
+
+  it("shows replacement font details when deliverable jobs applied missing-font replacement", async () => {
+    window.history.pushState({}, "", "/jobs/deliverable-font-replaced");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "deliverable-font-replaced",
+      batchId: "batch-deliverable-font-replaced",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "deliverable",
+      taskRole: null,
+      jobMode: "deliverable",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "PACKAGE_ZIP",
+      percent: 100,
+      message: "",
+      createdAt: "2026-03-24T14:10:00+08:00",
+      finishedAt: "2026-03-24T14:20:00+08:00",
+      startedAt: "2026-03-24T14:10:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/deliverable-font-replaced/download/package",
+        iedDownloadUrl: "/api/jobs/deliverable-font-replaced/download/ied",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [{ name: "IED.xlsx", kind: "xlsx" }],
+        drawings: [
+          {
+            name: "A01",
+            internalCode: "20161RS-JGS01-001",
+            dwgName: "A01.dwg",
+            pdfName: "A01.pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+      fontPreflightSummary: {
+        files: [
+          {
+            filename: "A01.dwg",
+            status: "missing_fonts",
+            missingFonts: [
+              {
+                styleName: "HZTXT",
+                fontName: "missing.shx",
+                bigfontName: "",
+                kind: "shx",
+                usedInBlock: true,
+              },
+            ],
+            detectedStyleCount: 12,
+            missingStyleCount: 1,
+            replacedStyleCount: 3,
+            replacementFont: "simsun.ttc",
+            fontReplacementApplied: true,
+            errors: [],
+          },
+        ],
+        policy: "replace_missing",
+      },
+      missingFontsDetected: true,
+      fontReplacementApplied: true,
+      replacementFont: "simsun.ttc",
+      replacedStyleCount: 3,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("字体处理摘要")).toBeInTheDocument();
+    expect(screen.getByText("已执行缺失字体替代")).toBeInTheDocument();
+    expect(screen.getByText("simsun.ttc")).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
   it("shows replace summary plus both report and replaced dwg downloads for replace jobs", async () => {
     window.history.pushState({}, "", "/jobs/replace-job-1");
     mockGetJobDetail.mockResolvedValue({

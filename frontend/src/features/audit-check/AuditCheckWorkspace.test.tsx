@@ -20,6 +20,7 @@ function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
+    preflightFonts: vi.fn(),
     createBatch: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),

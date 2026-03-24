@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReplaceWorkspace } from "./ReplaceWorkspace";
 import type { ApiAdapter, FormSchema } from "../../platform/api/types";
@@ -20,6 +20,7 @@ function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
+    preflightFonts: vi.fn(),
     createBatch: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
@@ -29,6 +30,133 @@ function createAdapter(): ApiAdapter {
 }
 
 describe("ReplaceWorkspace", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("shows an active state for the selected replace mode", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    const replaceOnlyButton = screen.getByRole("button", { name: "仅翻版" });
+    const replaceWithDeliverableButton = screen.getByRole("button", {
+      name: "同步出图和翻版",
+    });
+
+    expect(replaceOnlyButton).toHaveAttribute("aria-pressed", "true");
+    expect(replaceWithDeliverableButton).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(replaceWithDeliverableButton);
+
+    expect(replaceOnlyButton).toHaveAttribute("aria-pressed", "false");
+    expect(replaceWithDeliverableButton).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("restores the persisted replace draft after remounting", async () => {
+    const user = userEvent.setup();
+    const firstRender = render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "同步出图和翻版" }));
+    await user.type(screen.getByLabelText("原始项目号"), "2026");
+    await user.type(screen.getByLabelText("目标项目号"), "2016");
+
+    firstRender.unmount();
+
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(screen.getByLabelText("原始项目号")).toHaveValue("2026");
+    expect(screen.getByLabelText("目标项目号")).toHaveValue("2016");
+    expect(screen.getByRole("button", { name: "同步出图和翻版" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("clears the persisted replace draft after a successful submit", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditReplace = vi.fn().mockResolvedValue({
+      batchId: "batch-replace-1",
+      jobs: [],
+    });
+
+    const firstRender = render(
+      <ReplaceWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("原始项目号"), "2026");
+    await user.type(screen.getByLabelText("目标项目号"), "2016");
+    await user.upload(
+      screen.getByLabelText("选择翻版 DWG 文件"),
+      new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
+    );
+    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+
+    await waitFor(() => {
+      expect(adapter.createAuditReplace).toHaveBeenCalledTimes(1);
+    });
+
+    firstRender.unmount();
+
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(screen.getByLabelText("原始项目号")).toHaveValue("");
+    expect(screen.getByLabelText("目标项目号")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "仅翻版" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("infers the source project number from uploaded dwg names", async () => {
     const user = userEvent.setup();
 
