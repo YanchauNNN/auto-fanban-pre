@@ -70,6 +70,7 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_note_text",
 ]);
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
+const PREFERRED_DEFAULT_REPLACEMENT_FONT = "tssdchn.shx";
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
@@ -1403,6 +1404,14 @@ function resolveInitialReplacementFont(
   options: FontPreflightResult["replacementOptions"],
   rememberedValue: string,
 ) {
+  const preferredDefaultOption = options.find(
+    (option) =>
+      option.value.trim().toLowerCase() === PREFERRED_DEFAULT_REPLACEMENT_FONT,
+  );
+  if (preferredDefaultOption) {
+    return preferredDefaultOption.value;
+  }
+
   const trimmedRememberedValue = rememberedValue.trim();
   if (
     trimmedRememberedValue &&

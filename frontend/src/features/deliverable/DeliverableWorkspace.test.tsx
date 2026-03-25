@@ -741,6 +741,133 @@ describe("DeliverableWorkspace", () => {
     });
   });
 
+  it("prefers tssdchn.shx over the remembered replacement font when it is available", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem("auto-fanban.last-font-replacement", "romans.shx");
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A03.dwg",
+          status: "missing_fonts",
+          missingFonts: [
+            {
+              styleName: "HZTXT",
+              fontName: "missing.shx",
+              bigfontName: "",
+              kind: "shx",
+              usedInBlock: true,
+            },
+          ],
+          detectedStyleCount: 18,
+          missingStyleCount: 1,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [
+        {
+          label: "tssdchn.shx (AutoCAD SHX)",
+          value: "tssdchn.shx",
+          family: "tssdchn",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\tssdchn.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+        {
+          label: "romans.shx (AutoCAD SHX)",
+          value: "romans.shx",
+          family: "romans",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\romans.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+      ],
+      requiresConfirmation: true,
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A03.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "font-default-priority");
+    await user.type(screen.getByLabelText(subitemNameLabel), "subitem-default-priority");
+    await user.click(screen.getByRole("button", { name: /创建交付任务/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: /缺失字体处理/ });
+    expect(within(dialog).getByLabelText(/替代字体/)).toHaveValue("tssdchn.shx");
+  });
+
+  it("auto-selects the only available replacement option when tssdchn.shx is unavailable", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A04.dwg",
+          status: "missing_fonts",
+          missingFonts: [
+            {
+              styleName: "HZTXT",
+              fontName: "missing.shx",
+              bigfontName: "",
+              kind: "shx",
+              usedInBlock: true,
+            },
+          ],
+          detectedStyleCount: 12,
+          missingStyleCount: 1,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [
+        {
+          label: "simplex.shx (AutoCAD SHX)",
+          value: "simplex.shx",
+          family: "simplex",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+      ],
+      requiresConfirmation: true,
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A04.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "font-single-option");
+    await user.type(screen.getByLabelText(subitemNameLabel), "subitem-single-option");
+    await user.click(screen.getByRole("button", { name: /创建交付任务/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: /缺失字体处理/ });
+    expect(within(dialog).getByLabelText(/替代字体/)).toHaveValue("simplex.shx");
+  });
+
   it("shows an explicit error when continue submit is clicked without a valid replacement choice", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
