@@ -69,6 +69,7 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_revision",
   "upgrade_note_text",
 ]);
+const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
@@ -270,6 +271,9 @@ export function DeliverableWorkspace({
             ? "出图与纠错任务包已创建。"
             : "出图任务已创建。",
       );
+      if (fontConfig.fontReplacePolicy === "replace_missing" && fontConfig.fontReplacementFont) {
+        saveLastReplacementFont(fontConfig.fontReplacementFont);
+      }
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
@@ -383,8 +387,15 @@ export function DeliverableWorkspace({
           return;
         }
 
+        const replacementOptions = filterPreferredReplacementOptions(preflight.replacementOptions);
         setFontPreflightResult(preflight);
-        setSelectedReplacementFont("");
+        setSelectedReplacementFont(
+          resolveInitialReplacementFont(
+            replacementOptions,
+            loadLastReplacementFont(),
+          ),
+        );
+        setFontReplacementError(null);
         return;
       }
 
@@ -397,14 +408,18 @@ export function DeliverableWorkspace({
   }
 
   async function handleConfirmFontReplacement() {
-    if (!selectedReplacementFont.trim()) {
+    if (isSubmitting) {
+      return;
+    }
+
+    if (!selectedReplacementOption) {
       setFontReplacementError("请先选择替代字体。");
       return;
     }
 
     await submitDeliverable({
       fontReplacePolicy: "replace_missing",
-      fontReplacementFont: selectedReplacementFont.trim(),
+      fontReplacementFont: selectedReplacementOption.value.trim(),
     });
   }
 
@@ -972,7 +987,7 @@ export function DeliverableWorkspace({
               </button>
               <button
                 className={styles.primaryButton}
-                disabled={isSubmitting || !selectedReplacementOption}
+                disabled={isSubmitting}
                 type="button"
                 onClick={handleConfirmFontReplacement}
               >
@@ -1384,6 +1399,25 @@ function filterPreferredReplacementOptions(options: FontPreflightResult["replace
   return options;
 }
 
+function resolveInitialReplacementFont(
+  options: FontPreflightResult["replacementOptions"],
+  rememberedValue: string,
+) {
+  const trimmedRememberedValue = rememberedValue.trim();
+  if (
+    trimmedRememberedValue &&
+    options.some((option) => option.value === trimmedRememberedValue)
+  ) {
+    return trimmedRememberedValue;
+  }
+
+  if (options.length === 1) {
+    return options[0]?.value ?? "";
+  }
+
+  return "";
+}
+
 function getFontReplacementKindLabel(kind: string) {
   switch (kind.trim().toLowerCase()) {
     case "shx":
@@ -1406,6 +1440,28 @@ function getFontReplacementSourceLabel(source: string) {
     default:
       return source || "后端预检";
   }
+}
+
+function loadLastReplacementFont() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(LAST_FONT_REPLACEMENT_STORAGE_KEY)?.trim() ?? "";
+}
+
+function saveLastReplacementFont(value: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    window.localStorage.removeItem(LAST_FONT_REPLACEMENT_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(LAST_FONT_REPLACEMENT_STORAGE_KEY, trimmedValue);
 }
 
 function buildSubmissionValues(

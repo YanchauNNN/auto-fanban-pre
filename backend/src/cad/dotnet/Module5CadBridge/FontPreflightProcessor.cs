@@ -13,6 +13,7 @@ internal sealed class FontPreflightProcessor
     private readonly BridgeTraceLogger _trace;
     private readonly HashSet<string> _installedFontFiles;
     private readonly HashSet<string> _installedFamilies;
+    private readonly List<string> _autocadFontDirs;
 
     public FontPreflightProcessor(BridgeTask task, BridgeTraceLogger trace)
     {
@@ -20,6 +21,7 @@ internal sealed class FontPreflightProcessor
         _trace = trace;
         _installedFontFiles = LoadInstalledFontFiles();
         _installedFamilies = LoadInstalledFontFamilies();
+        _autocadFontDirs = LoadAutoCADFontDirs();
     }
 
     public void Execute(BridgeResultEnvelope result)
@@ -69,11 +71,18 @@ internal sealed class FontPreflightProcessor
                 }
 
                 EnsureWriteEnabled(styleRecord);
-                styleRecord.FileName = _task.ReplacementFont;
-                styleRecord.BigFontFileName = string.Empty;
+                var replacementKind = DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
+                if (replacementKind.Equals("bigfont", StringComparison.OrdinalIgnoreCase))
+                {
+                    styleRecord.BigFontFileName = _task.ReplacementFont;
+                }
+                else
+                {
+                    styleRecord.FileName = _task.ReplacementFont;
+                }
                 replacedStyleCount += 1;
                 _trace.Log(
-                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} replacement={_task.ReplacementFont}"
+                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} kind={replacementKind} replacement={_task.ReplacementFont}"
                 );
             }
 
@@ -265,6 +274,14 @@ internal sealed class FontPreflightProcessor
         }
 
         var extension = Path.GetExtension(normalized).ToLowerInvariant();
+        if (extension == ".shx" || string.IsNullOrWhiteSpace(extension))
+        {
+            if (ExistsInAutoCADFontDirs(normalized))
+            {
+                return true;
+            }
+        }
+
         if (extension is ".ttf" or ".ttc" or ".otf")
         {
             if (_installedFontFiles.Contains(normalized))
@@ -290,6 +307,27 @@ internal sealed class FontPreflightProcessor
         catch
         {
             // Fall through to missing
+        }
+
+        return false;
+    }
+
+    private bool ExistsInAutoCADFontDirs(string normalizedFontName)
+    {
+        if (_autocadFontDirs.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var candidateName in BuildShxCandidateNames(normalizedFontName))
+        {
+            foreach (var fontsDir in _autocadFontDirs)
+            {
+                if (File.Exists(Path.Combine(fontsDir, candidateName)))
+                {
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -331,6 +369,20 @@ internal sealed class FontPreflightProcessor
         }
 
         return "unknown";
+    }
+
+    private static IEnumerable<string> BuildShxCandidateNames(string normalizedFontName)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedFontName))
+        {
+            yield break;
+        }
+
+        yield return normalizedFontName;
+        if (string.IsNullOrWhiteSpace(Path.GetExtension(normalizedFontName)))
+        {
+            yield return normalizedFontName + ".shx";
+        }
     }
 
     private static void EnsureWriteEnabled(DBObject obj)
@@ -379,6 +431,42 @@ internal sealed class FontPreflightProcessor
         catch
         {
             // ignore; file-name based lookup still works
+        }
+
+        return results;
+    }
+
+    private static List<string> LoadAutoCADFontDirs()
+    {
+        var results = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddDir(string raw)
+        {
+            var value = (raw ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            foreach (var part in value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var dir = part.Trim();
+                if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir) || !seen.Add(dir))
+                {
+                    continue;
+                }
+
+                results.Add(dir);
+            }
+        }
+
+        AddDir(Environment.GetEnvironmentVariable("FANBAN_AUTOCAD_FONTS_DIR") ?? string.Empty);
+
+        var installDir = Environment.GetEnvironmentVariable("FANBAN_AUTOCAD_INSTALL_DIR") ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(installDir))
+        {
+            AddDir(Path.Combine(installDir, "Fonts"));
         }
 
         return results;
