@@ -13,7 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from fastapi import HTTPException, status
 
@@ -26,7 +26,7 @@ from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
-from src.models import Job, JobArtifacts, JobStatus, JobType, TaskGroup
+from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
@@ -40,6 +40,20 @@ class UploadedFilePayload:
     filename: str
     content: bytes
     content_type: str | None = None
+
+
+def _summary_int(summary: dict[str, object], key: str) -> int:
+    value = summary.get(key, 0)
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        return int(text) if text else 0
+    return 0
 
 
 class PipelineJobProcessor:
@@ -238,6 +252,7 @@ class DeliverableApiRuntime:
         files: list[UploadedFilePayload],
         raw_params: dict[str, Any],
         run_audit_check: bool = False,
+        creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
         upload_errors = self._validate_uploads(files)
         resolved_submissions = [
@@ -263,6 +278,7 @@ class DeliverableApiRuntime:
                     batch_id=batch_id,
                     upload=upload,
                     resolved_params=resolved_params,
+                    creator_snapshot=creator_snapshot,
                 )
                 for upload, resolved_params in resolved_submissions
             ]
@@ -292,6 +308,7 @@ class DeliverableApiRuntime:
         mode: str,
         files: list[UploadedFilePayload],
         raw_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
         normalized_mode = str(mode or '').strip().lower()
         if normalized_mode not in {'check', 'replace'}:
@@ -328,6 +345,7 @@ class DeliverableApiRuntime:
                             batch_id=batch_id,
                             upload=upload,
                             resolved_params=resolved_params,
+                            creator_snapshot=creator_snapshot,
                         )
                     )
                     continue
@@ -488,6 +506,7 @@ class DeliverableApiRuntime:
         batch_id: str,
         upload: UploadedFilePayload,
         resolved_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
         source_filename = Path(upload.filename).name or 'upload.dwg'
         group = self.group_manager.create_group(
@@ -495,6 +514,7 @@ class DeliverableApiRuntime:
             source_filenames=[source_filename],
             project_no=str(resolved_params['project_no']),
             run_audit_check=True,
+            creator_snapshot=creator_snapshot,
         )
         upload_path = self._store_group_upload(group, upload)
         group.shared_dir = self.config.get_group_dir(group.group_id) / 'shared' / self._safe_source_key(source_filename)
@@ -537,6 +557,7 @@ class DeliverableApiRuntime:
         batch_id: str,
         upload: UploadedFilePayload,
         resolved_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
         source_filename = Path(upload.filename).name or 'upload.dwg'
         target_project_no = str(resolved_params['target_project_no'])
@@ -545,6 +566,7 @@ class DeliverableApiRuntime:
             source_filenames=[source_filename],
             project_no=target_project_no,
             run_audit_check=False,
+            creator_snapshot=creator_snapshot,
         )
         upload_path = self._store_group_upload(group, upload)
         group.shared_dir = self.config.get_group_dir(group.group_id) / 'shared' / self._safe_source_key(source_filename)
@@ -666,7 +688,7 @@ class DeliverableApiRuntime:
                 child.missing_fonts_detected = str(prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"
                 child.font_replacement_applied = bool(prep.font_preflight_summary.get("font_replacement_applied", False))
                 child.replacement_font = str(prep.font_preflight_summary.get("replacement_font") or "").strip() or None
-                child.replaced_style_count = int(prep.font_preflight_summary.get("replaced_style_count", 0) or 0)
+                child.replaced_style_count = _summary_int(prep.font_preflight_summary, "replaced_style_count")
                 self.job_manager.update_job(child)
 
             group.progress.stage = 'DELIVERABLE_BRANCH' if group.run_audit_check else 'DOCS_AND_PACKAGE'
@@ -745,8 +767,9 @@ class DeliverableApiRuntime:
         deliverable_job.replacement_font = (
             str(deliverable_prep.font_preflight_summary.get("replacement_font") or "").strip() or None
         )
-        deliverable_job.replaced_style_count = int(
-            deliverable_prep.font_preflight_summary.get("replaced_style_count", 0) or 0
+        deliverable_job.replaced_style_count = _summary_int(
+            deliverable_prep.font_preflight_summary,
+            "replaced_style_count",
         )
         self.job_manager.update_job(deliverable_job)
         self._enqueue_job(deliverable_job.job_id)
@@ -798,7 +821,7 @@ class DeliverableApiRuntime:
                     self.cad_slot_pool.release(slot.slot_id)
                     slot = None
                     completion_deferred = True
-                    self._submit_doc_job(job.job_id, post_slot_work)
+                    self._submit_doc_job(job.job_id, cast(Callable[[], None], post_slot_work))
                     return
             else:
                 self.job_processor(job)

@@ -13,6 +13,7 @@ from src.auth.password_service import PasswordService
 from src.auth.session_service import SessionService
 from src.task_groups.serializers import TaskGroupSerializers
 from src.task_groups.service import TaskGroupService
+from src.task_groups.submit_guards import TaskGroupSubmitGuards
 from src.task_groups.visibility import TaskGroupVisibility
 from src.workflow.assignee_resolver import WorkflowAssigneeResolver
 from src.workflow.input_validator import WorkflowInputValidator
@@ -63,6 +64,13 @@ class ManagementServices:
             group_manager=runtime.group_manager,
             config=runtime.config,
         )
+        submit_guards = TaskGroupSubmitGuards(
+            group_manager=runtime.group_manager,
+            job_manager=runtime.job_manager,
+            shared_prep_service=runtime.shared_prep_service,
+            admin_config_store=admin_config_store,
+            overwrite_service=overwrite_service,
+        )
         workload_calculator = WorkloadCalculator()
         workload_settlement_service = WorkloadSettlementService(workload_calculator)
         workload_queries = WorkloadQueries()
@@ -77,6 +85,7 @@ class ManagementServices:
             task_group_visibility=TaskGroupVisibility(),
             workflow_visibility=WorkflowVisibility(),
             serializers=TaskGroupSerializers(),
+            submit_guards=submit_guards,
             workload_calculator=workload_calculator,
             workload_settlement_service=workload_settlement_service,
             workload_queries=workload_queries,

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from ..models import NormalizedPersonnel, PersonnelSnapshot
+from .account_models import AccountRecord
 from .account_registry import AccountRegistry
 
 
@@ -58,7 +59,12 @@ class PersonnelNormalizer:
                 status="matched",
             )
         if len(by_name) > 1:
-            return NormalizedPersonnel(field_name=field_name, raw_value=text, status="ambiguous", errors=["duplicate_name_needs_selection"])
+            return NormalizedPersonnel(
+                field_name=field_name,
+                raw_value=text,
+                status="ambiguous",
+                errors=["duplicate_name_needs_selection"],
+            )
 
         by_account = self.registry.get_account(text)
         if by_account is not None:
@@ -71,7 +77,27 @@ class PersonnelNormalizer:
                 match_strategy="account",
                 status="matched",
             )
-        return NormalizedPersonnel(field_name=field_name, raw_value=text, status="invalid", errors=["unresolved_personnel"])
+        return NormalizedPersonnel(
+            field_name=field_name,
+            raw_value=text,
+            status="invalid",
+            errors=["unresolved_personnel"],
+        )
 
     def normalize_fields(self, values: dict[str, str | None]) -> PersonnelSnapshot:
-        return PersonnelSnapshot(members={field_name: self.normalize(field_name, raw_value) for field_name, raw_value in values.items()})
+        return PersonnelSnapshot(
+            members={field_name: self.normalize(field_name, raw_value) for field_name, raw_value in values.items()}
+        )
+
+    def resolve_with_candidates(
+        self,
+        field_name: str,
+        raw_value: str | None,
+    ) -> tuple[NormalizedPersonnel, list[AccountRecord]]:
+        result = self.normalize(field_name, raw_value)
+        if result.status != "ambiguous":
+            return result, []
+        text = str(raw_value or "").strip()
+        if "@" in text:
+            text = text.split("@", 1)[0].strip()
+        return result, self.registry.find_by_name(text)

@@ -36,3 +36,44 @@ def test_workload_queries_return_expected_scopes(monkeypatch, tmp_path) -> None:
         assert institute.json()["scope"] == "institute"
         assert admin.status_code == 200
         assert admin.json()["scope"] == "admin"
+
+
+def test_workload_queries_support_basic_filters(monkeypatch, tmp_path) -> None:
+    project_root = configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        admin_token = _login(client, "admin")
+        group_id = _seed_group(client, tmp_path)
+        client.patch(
+            "/api/admin/config",
+            json={"archive_root_path": str(project_root / "archive-root")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        client.post(
+            f"/api/task-groups/{group_id}/submit",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+        client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {_login(client, 'lisi')}"},
+        )
+        client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {_login(client, 'wangwu')}"},
+        )
+        client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        settled_only = client.get(
+            "/api/workload/me?status=settled&valid_only=true",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+        assert settled_only.status_code == 200
+        assert settled_only.json()["filters"]["status"] == "settled"
+        assert settled_only.json()["filters"]["valid_only"] is True
+        assert settled_only.json()["entries"]

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -43,8 +43,10 @@ def logout(
 
 
 @router.get("/me")
-def me(account=Depends(require_current_account)) -> dict[str, object]:
-    return account.model_dump(mode="json")
+def me(request: Request, account=Depends(require_current_account)) -> dict[str, object]:
+    payload = account.model_dump(mode="json")
+    payload["pending_todo_count"] = request.app.state.management.task_group_service.pending_todo_count(account)
+    return payload
 
 
 @router.post("/change-password")

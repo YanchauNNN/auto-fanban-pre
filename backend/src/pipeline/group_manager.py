@@ -1,13 +1,12 @@
 ﻿from __future__ import annotations
 
 import json
+import shutil
 import time
 import uuid
-from pathlib import Path
-from typing import Any
 
 from ..config import get_config
-from ..models import JobStatus, TaskGroup
+from ..models import AccountSnapshot, JobStatus, TaskGroup, TaskOwnerSnapshot
 
 
 class GroupManager:
@@ -23,6 +22,7 @@ class GroupManager:
         project_no: str,
         run_audit_check: bool,
         shared_run_id: str | None = None,
+        creator_snapshot: AccountSnapshot | None = None,
     ) -> TaskGroup:
         group_id = f"group-{uuid.uuid4().hex}"
         group = TaskGroup(
@@ -33,6 +33,13 @@ class GroupManager:
             run_audit_check=run_audit_check,
             shared_run_id=shared_run_id or group_id,
         )
+        if creator_snapshot is not None:
+            group.owner_snapshot = TaskOwnerSnapshot(
+                creator_account=creator_snapshot.account_id,
+                creator_name=creator_snapshot.display_name,
+                creator_role=creator_snapshot.role,
+                creator_office=creator_snapshot.office_name,
+            )
         self._groups[group_id] = group
         self.update_group(group)
         return group
@@ -103,3 +110,9 @@ class GroupManager:
             return TaskGroup(**data)
         except Exception:
             return None
+
+    def delete_group(self, group_id: str) -> None:
+        self._groups.pop(group_id, None)
+        group_dir = self.config.get_group_dir(group_id)
+        if group_dir.exists():
+            shutil.rmtree(group_dir, ignore_errors=True)

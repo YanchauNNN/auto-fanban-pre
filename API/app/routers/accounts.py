@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 
 from src.accounts.account_models import AccountCreatePayload, AccountUpdatePayload
 
@@ -8,6 +9,11 @@ from ..auth_helpers import require_current_account
 
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
+
+
+class NormalizePersonnelPayload(BaseModel):
+    field_name: str
+    raw_value: str | None = None
 
 
 def require_admin(account=Depends(require_current_account)):
@@ -29,6 +35,22 @@ def list_accounts(request: Request, _=Depends(require_admin)) -> dict[str, objec
 def invalid_rows(request: Request, _=Depends(require_admin)) -> dict[str, object]:
     rows = request.app.state.management.account_registry.list_invalid_rows()
     return {"items": [row.model_dump(mode="json") for row in rows]}
+
+
+@router.post("/normalize-personnel")
+def normalize_personnel(
+    payload: NormalizePersonnelPayload,
+    request: Request,
+    _=Depends(require_current_account),
+) -> dict[str, object]:
+    result, candidates = request.app.state.management.personnel_normalizer.resolve_with_candidates(
+        payload.field_name,
+        payload.raw_value,
+    )
+    return {
+        "normalized": result.model_dump(mode="json"),
+        "candidates": [candidate.to_snapshot().model_dump(mode="json") for candidate in candidates],
+    }
 
 
 @router.post("")

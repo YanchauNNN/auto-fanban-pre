@@ -47,3 +47,34 @@ def test_personnel_normalizer_flags_duplicate_names(monkeypatch, tmp_path) -> No
 
     assert result.status == "ambiguous"
     assert result.errors == ["duplicate_name_needs_selection"]
+
+
+def test_personnel_normalizer_returns_candidates_for_duplicate_names(monkeypatch, tmp_path) -> None:
+    configure_management_env(
+        monkeypatch,
+        tmp_path,
+        rows=[
+            {
+                "科室编码": "S01",
+                "科室": "结构一室",
+                "账号": "dup-1",
+                "姓名": "重名",
+                "角色": "设计人员",
+                "密码": "password",
+            },
+            {
+                "科室编码": "S02",
+                "科室": "结构二室",
+                "账号": "dup-2",
+                "姓名": "重名",
+                "角色": "设计人员",
+                "密码": "password",
+            },
+        ],
+    )
+    normalizer = PersonnelNormalizer(AccountRegistry(AccountCsvStore()))
+
+    result, candidates = normalizer.resolve_with_candidates("ied_checked_by", "重名")
+
+    assert result.status == "ambiguous"
+    assert [candidate.account_id for candidate in candidates] == ["dup-1", "dup-2"]

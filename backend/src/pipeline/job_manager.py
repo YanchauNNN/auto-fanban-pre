@@ -1,21 +1,7 @@
-"""
-任务管理器 - 任务创建/查询/更新
-
-职责：
-1. 创建任务并分配ID
-2. 任务状态持久化
-3. 任务查询
-
-测试要点：
-- test_create_job: 创建任务
-- test_get_job: 获取任务
-- test_update_job: 更新任务
-- test_cancel_job: 取消任务
-"""
-
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -27,11 +13,11 @@ from ..models import Job, JobStatus, JobType
 
 
 class JobManager(IJobManager):
-    """任务管理器实现"""
+    """Manage job creation, persistence, querying, and cancellation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.config = get_config()
-        self._jobs: dict[str, Job] = {}  # 内存缓存
+        self._jobs: dict[str, Job] = {}
 
     def create_job(
         self,
@@ -47,7 +33,7 @@ class JobManager(IJobManager):
         shared_run_id: str | None = None,
         **kwargs: Any,
     ) -> Job:
-        """创建任务"""
+        """Create a new job and persist its initial metadata."""
         input_files = kwargs.get("input_files", input_files)
         options = kwargs.get("options", options)
         params = kwargs.get("params", params)
@@ -73,34 +59,27 @@ class JobManager(IJobManager):
             params=params or {},
         )
 
-        # 保存到缓存
         self._jobs[job_id] = job
-
-        # 持久化
         self._persist_job(job)
-
         return job
 
     def get_job(self, job_id: str) -> Job | None:
-        """获取任务"""
-        # 先查缓存
+        """Load a job from cache or disk."""
         if job_id in self._jobs:
             return self._jobs[job_id]
 
-        # 尝试从磁盘加载
         job = self._load_job(job_id)
-        if job:
+        if job is not None:
             self._jobs[job_id] = job
-
         return job
 
     def update_job(self, job: Job) -> None:
-        """更新任务状态"""
+        """Persist updated job state."""
         self._jobs[job.job_id] = job
         self._persist_job(job)
 
     def cancel_job(self, job_id: str) -> bool:
-        """取消任务"""
+        """Cancel a queued or running job."""
         job = self.get_job(job_id)
         if not job:
             return False
@@ -117,19 +96,17 @@ class JobManager(IJobManager):
         status: JobStatus | None = None,
         limit: int = 100,
     ) -> list[Job]:
-        """列出任务"""
+        """List jobs, optionally filtered by status."""
         jobs = list(self._jobs.values())
 
         if status:
             jobs = [j for j in jobs if j.status == status]
 
-        # 按创建时间降序
         jobs.sort(key=lambda j: j.created_at, reverse=True)
-
         return jobs[:limit]
 
     def load_all_jobs(self) -> list[Job]:
-        """从磁盘加载全部任务并刷新内存缓存"""
+        """Load all jobs from disk and refresh the in-memory cache."""
         jobs_root = self.config.storage_dir / "jobs"
         if not jobs_root.exists():
             jobs = list(self._jobs.values())
@@ -152,7 +129,7 @@ class JobManager(IJobManager):
         return loaded
 
     def _persist_job(self, job: Job) -> None:
-        """持久化任务"""
+        """Persist job metadata to disk."""
         job_dir = self.config.get_job_dir(job.job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 
@@ -170,7 +147,7 @@ class JobManager(IJobManager):
                 time.sleep(0.02)
 
     def _load_job(self, job_id: str) -> Job | None:
-        """从磁盘加载任务"""
+        """Load job metadata from disk."""
         job_file = self.config.get_job_dir(job_id) / "job.json"
 
         if not job_file.exists():
@@ -182,3 +159,10 @@ class JobManager(IJobManager):
             return Job(**data)
         except Exception:
             return None
+
+    def delete_job(self, job_id: str) -> None:
+        """Remove a job from cache and delete its persisted artifacts."""
+        self._jobs.pop(job_id, None)
+        job_dir = self.config.get_job_dir(job_id)
+        if job_dir.exists():
+            shutil.rmtree(job_dir, ignore_errors=True)

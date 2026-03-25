@@ -8,6 +8,7 @@ from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
 from ..task_groups.serializers import TaskGroupSerializers
+from ..task_groups.submit_guards import TaskGroupSubmitGuards
 from ..task_groups.visibility import TaskGroupVisibility
 from ..workflow.input_validator import WorkflowInputValidator
 from ..workflow.service import WorkflowService
@@ -31,6 +32,7 @@ class TaskGroupService:
         task_group_visibility: TaskGroupVisibility,
         workflow_visibility: WorkflowVisibility,
         serializers: TaskGroupSerializers,
+        submit_guards: TaskGroupSubmitGuards,
         workload_calculator: WorkloadCalculator,
         workload_settlement_service: WorkloadSettlementService,
         workload_queries: WorkloadQueries,
@@ -46,6 +48,7 @@ class TaskGroupService:
         self.task_group_visibility = task_group_visibility
         self.workflow_visibility = workflow_visibility
         self.serializers = serializers
+        self.submit_guards = submit_guards
         self.workload_calculator = workload_calculator
         self.workload_settlement_service = workload_settlement_service
         self.workload_queries = workload_queries
@@ -54,16 +57,30 @@ class TaskGroupService:
     def list_recent(self, account: AccountSnapshot, limit: int = 100) -> list[dict[str, object]]:
         groups = self.group_manager.list_groups(limit=limit)
         visible = [group for group in groups if self.task_group_visibility.can_view(group, account)]
-        return [self.serializers.summarize(group) for group in visible]
+        return [self._serialize_summary(group, account) for group in visible]
 
     def get_detail(self, group_id: str, account: AccountSnapshot) -> dict[str, object]:
         group = self._require_group(group_id)
         if not self.task_group_visibility.can_view(group, account):
             raise PermissionError("group not visible")
-        return self.serializers.detail(group)
+        return self._serialize_detail(group, account)
 
-    def submit(self, group_id: str, initiator: AccountSnapshot) -> dict[str, object]:
+    def submit(
+        self,
+        group_id: str,
+        initiator: AccountSnapshot,
+        *,
+        overwrite_archive_existing: bool = False,
+        cancel_existing_in_progress: bool = False,
+    ) -> dict[str, object]:
         group = self._require_group(group_id)
+        if group.owner_snapshot and group.owner_snapshot.creator_account != initiator.account_id:
+            raise ValueError("submitter_must_match_creator")
+        self.submit_guards.ensure_submit_allowed(
+            group,
+            overwrite_archive_existing=overwrite_archive_existing,
+            cancel_existing_in_progress=cancel_existing_in_progress,
+        )
         group.personnel_snapshot = self._build_personnel_snapshot(group)
         errors = self.workflow_validator.validate_submit(group.personnel_snapshot)
         if errors:
@@ -73,14 +90,32 @@ class TaskGroupService:
         group = self.workflow_service.start(group, initiator)
         group.mark_running("WORKFLOW_SUBMITTED")
         self.group_manager.update_group(group)
-        return self.serializers.detail(group)
+        return self._serialize_detail(group, initiator)
 
-    def restart_submit(self, group_id: str, initiator: AccountSnapshot) -> dict[str, object]:
-        return self.submit(group_id, initiator)
+    def restart_submit(
+        self,
+        group_id: str,
+        initiator: AccountSnapshot,
+        *,
+        overwrite_archive_existing: bool = False,
+        cancel_existing_in_progress: bool = False,
+    ) -> dict[str, object]:
+        return self.submit(
+            group_id,
+            initiator,
+            overwrite_archive_existing=overwrite_archive_existing,
+            cancel_existing_in_progress=cancel_existing_in_progress,
+        )
 
-    def approve(self, group_id: str, acting_account: AccountSnapshot, factor: float) -> dict[str, object]:
+    def approve(
+        self,
+        group_id: str,
+        acting_account: AccountSnapshot,
+        factor: float,
+        node_key: str | None = None,
+    ) -> dict[str, object]:
         group = self._require_group(group_id)
-        self.workflow_service.approve(group, acting_account, factor)
+        self.workflow_service.approve(group, acting_account, factor, node_key=node_key)
         self._apply_factors(group)
         if group.workflow.status.value == "three_review_approved":
             try:
@@ -91,13 +126,13 @@ class TaskGroupService:
                 self.archive_service.mark_failed(group, str(exc))
                 group.mark_failed(str(exc))
         self.group_manager.update_group(group)
-        return self.serializers.detail(group)
+        return self._serialize_detail(group, acting_account)
 
     def repair_current_node(self, group_id: str, assignee_snapshot: AccountSnapshot) -> dict[str, object]:
         group = self._require_group(group_id)
         self.workflow_service.repair_current_node(group, assignee_snapshot)
         self.group_manager.update_group(group)
-        return self.serializers.detail(group)
+        return self._serialize_detail(group, assignee_snapshot)
 
     def rebind_account_references(self, old_account_id: str, new_account_snapshot: AccountSnapshot) -> None:
         for group in self.group_manager.load_all_groups():
@@ -129,7 +164,15 @@ class TaskGroupService:
     def workflow_monitor(self, account: AccountSnapshot) -> list[dict[str, object]]:
         groups = self.group_manager.load_all_groups()
         visible = [group for group in groups if self.workflow_visibility.can_view(group, account)]
-        return [self.serializers.summarize(group) for group in visible]
+        return [self._serialize_summary(group, account) for group in visible]
+
+    def pending_todo_count(self, account: AccountSnapshot) -> int:
+        count = 0
+        for group in self.group_manager.load_all_groups():
+            current = self.workflow_service.current_node(group)
+            if current is not None and current.assignee_account == account.account_id:
+                count += 1
+        return count
 
     def _build_personnel_snapshot(self, group: TaskGroup):
         primary_job = self.job_manager.get_job(group.child_job_ids[0]) if group.child_job_ids else None
@@ -159,3 +202,29 @@ class TaskGroupService:
         if group is None:
             raise ValueError("group not found")
         return group
+
+    def _serialize_summary(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, object]:
+        permissions = self._permissions(group, account)
+        return self.serializers.summarize(group, **permissions)
+
+    def _serialize_detail(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, object]:
+        permissions = self._permissions(group, account)
+        return self.serializers.detail(group, **permissions)
+
+    def _permissions(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, bool]:
+        current_node = self.workflow_service.current_node(group)
+        can_view_detail = self.task_group_visibility.can_view(group, account)
+        can_submit = group.workflow.status.value == "draft" and (
+            group.owner_snapshot is None or group.owner_snapshot.creator_account == account.account_id
+        )
+        can_approve = current_node is not None and current_node.assignee_account == account.account_id
+        is_related_to_current_user = bool(
+            (group.owner_snapshot and group.owner_snapshot.creator_account == account.account_id)
+            or any(node.assignee_account == account.account_id for node in group.workflow.nodes)
+        )
+        return {
+            "can_view_detail": can_view_detail,
+            "can_submit": can_submit,
+            "can_approve": can_approve,
+            "is_related_to_current_user": is_related_to_current_user,
+        }

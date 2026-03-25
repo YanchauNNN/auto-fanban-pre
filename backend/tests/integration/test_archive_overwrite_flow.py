@@ -25,7 +25,11 @@ def test_archive_overwrite_clears_existing_target_dir(monkeypatch, tmp_path) -> 
         )
         assert patch.status_code == 200
 
-        client.post(f"/api/task-groups/{group_id}/submit", headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"})
+        client.post(
+            f"/api/task-groups/{group_id}/submit",
+            json={"overwrite_archive_existing": True},
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
         client.post(f"/api/workflow/{group_id}/approve", json={"factor": 1.0}, headers={"Authorization": f"Bearer {_login(client, 'lisi')}"})
         client.post(f"/api/workflow/{group_id}/approve", json={"factor": 1.0}, headers={"Authorization": f"Bearer {_login(client, 'wangwu')}"})
         final = client.post(

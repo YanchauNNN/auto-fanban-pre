@@ -25,16 +25,16 @@ class ArchiveOverwriteService:
         replaced_group_id = str(group.replacement.replaced_group_id or "").strip()
         if not replaced_group_id:
             return
-        replaced_group = self.group_manager.get_group(replaced_group_id)
-        if replaced_group is None:
-            return
-        self._delete_group_records(replaced_group)
+        self.delete_group_records_by_id(replaced_group_id)
 
-    def _delete_group_records(self, group: TaskGroup) -> None:
-        group_dir = self.group_manager.config.get_group_dir(group.group_id)
-        if group_dir.exists():
-            shutil.rmtree(group_dir, ignore_errors=True)
+    def delete_group_records_by_id(self, group_id: str) -> None:
+        replaced_group = self.group_manager.get_group(group_id)
+        if replaced_group is None:
+            self.group_manager.delete_group(group_id)
+            return
+        self.delete_group_records(replaced_group)
+
+    def delete_group_records(self, group: TaskGroup) -> None:
         for child_job_id in group.child_job_ids:
-            job_dir = self.job_manager.config.get_job_dir(child_job_id)
-            if job_dir.exists():
-                shutil.rmtree(job_dir, ignore_errors=True)
+            self.job_manager.delete_job(child_job_id)
+        self.group_manager.delete_group(group.group_id)

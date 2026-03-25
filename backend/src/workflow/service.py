@@ -16,6 +16,8 @@ class WorkflowService:
 
     def start(self, group: TaskGroup, initiator: AccountSnapshot) -> TaskGroup:
         nodes = self.resolver.build_nodes(group.personnel_snapshot)
+        existing_duplicate_policy = group.workflow.duplicate_policy
+        existing_overwrite_target = group.workflow.overwrite_archive_target
         group.owner_snapshot = TaskOwnerSnapshot(
             creator_account=initiator.account_id,
             creator_name=initiator.display_name,
@@ -29,16 +31,27 @@ class WorkflowService:
             initiated_at=datetime.now(),
             initiated_by_account=initiator.account_id,
             initiated_by_name=initiator.display_name,
+            duplicate_policy=existing_duplicate_policy,
+            overwrite_archive_target=existing_overwrite_target,
             current_node_key=nodes[0].node_key if nodes else None,
             nodes=nodes,
         )
         return group
 
-    def approve(self, group: TaskGroup, acting_account: AccountSnapshot, factor: float) -> TaskGroup:
+    def approve(
+        self,
+        group: TaskGroup,
+        acting_account: AccountSnapshot,
+        factor: float,
+        *,
+        node_key: str | None = None,
+    ) -> TaskGroup:
         current = self.current_node(group)
         if current is None:
             raise ValueError('no current workflow node')
         current_index = group.workflow.nodes.index(current)
+        if node_key is not None and current.node_key != node_key:
+            raise ValueError('node_key_mismatch')
         if current.assignee_account != acting_account.account_id:
             raise ValueError('only current assignee can approve')
         factor_cfg = dict(self.workflow_cfg.get('factor') or {})
