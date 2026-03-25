@@ -153,6 +153,19 @@ export function DeliverableWorkspace({
       ),
     [fontPreflightResult],
   );
+  const displayedReplacementOptions = useMemo(
+    () => filterPreferredReplacementOptions(fontPreflightResult?.replacementOptions ?? []),
+    [fontPreflightResult],
+  );
+  const selectedReplacementOption = useMemo(
+    () =>
+      displayedReplacementOptions.find((option) => option.value === selectedReplacementFont) ?? null,
+    [displayedReplacementOptions, selectedReplacementFont],
+  );
+  const recommendedReplacementOption = useMemo(
+    () => selectedReplacementOption ?? displayedReplacementOptions[0] ?? null,
+    [displayedReplacementOptions, selectedReplacementOption],
+  );
 
   useEffect(() => {
     if (!upgradeEnabled) {
@@ -913,7 +926,7 @@ export function DeliverableWorkspace({
                   }}
                 >
                   <option value="">请选择替代字体</option>
-                  {fontPreflightResult.replacementOptions.map((option) => (
+                  {displayedReplacementOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
@@ -922,15 +935,30 @@ export function DeliverableWorkspace({
                 <span className={styles.helperText}>
                   可选字体完全来自当前工作站与后端预检结果，前端不会写死任何字体列表。
                 </span>
+                {displayedReplacementOptions.length > 0 &&
+                displayedReplacementOptions.length !== fontPreflightResult.replacementOptions.length ? (
+                  <span className={styles.helperText}>
+                    当前已优先收敛为 AutoCAD Fonts 目录候选，已隐藏其他 TrueType 回退项。
+                  </span>
+                ) : null}
+                {recommendedReplacementOption ? (
+                  <div className={styles.fontReplacementPreview}>
+                    <strong>{`当前候选：${recommendedReplacementOption.label}`}</strong>
+                    <span>{`来源：${getFontReplacementSourceLabel(recommendedReplacementOption.source)}`}</span>
+                    <span>{`类型：${getFontReplacementKindLabel(recommendedReplacementOption.kind)}`}</span>
+                  </div>
+                ) : null}
                 {fontReplacementError ? (
                   <span className={styles.errorText}>{fontReplacementError}</span>
                 ) : null}
               </div>
 
               <ul className={styles.fontNoticeList}>
-                <li>只会修改任务工作副本，不会修改原始上传文件。</li>
+                <li>只会修改任务工作副本。</li>
+                <li>不会修改原始上传文件。</li>
                 <li>替代只作用于检测到缺失的字体样式。</li>
                 <li>同一批次文件会统一使用当前选中的替代字体。</li>
+                <li>对 SHX 缺失，候选会优先来自 AutoCAD Fonts 目录。</li>
               </ul>
             </section>
 
@@ -944,7 +972,7 @@ export function DeliverableWorkspace({
               </button>
               <button
                 className={styles.primaryButton}
-                disabled={isSubmitting || !selectedReplacementFont.trim()}
+                disabled={isSubmitting || !selectedReplacementOption}
                 type="button"
                 onClick={handleConfirmFontReplacement}
               >
@@ -1344,6 +1372,40 @@ function buildFontPreflightFailureMessages(files: FontPreflightResult["files"]) 
   return files.flatMap((file) =>
     file.errors.length > 0 ? file.errors : [`${file.filename}：字体预检失败`],
   );
+}
+
+function filterPreferredReplacementOptions(options: FontPreflightResult["replacementOptions"]) {
+  const autocadOptions = options.filter(
+    (option) => option.source.trim().toLowerCase() === "autocad_fonts",
+  );
+  if (autocadOptions.length > 0) {
+    return autocadOptions;
+  }
+  return options;
+}
+
+function getFontReplacementKindLabel(kind: string) {
+  switch (kind.trim().toLowerCase()) {
+    case "shx":
+      return "SHX";
+    case "bigfont":
+      return "大字体";
+    case "ttf":
+      return "TrueType";
+    default:
+      return kind || "未知";
+  }
+}
+
+function getFontReplacementSourceLabel(source: string) {
+  switch (source.trim().toLowerCase()) {
+    case "autocad_fonts":
+      return "AutoCAD Fonts 目录";
+    case "windows_fonts":
+      return "Windows 字体库";
+    default:
+      return source || "后端预检";
+  }
 }
 
 function buildSubmissionValues(

@@ -1161,6 +1161,8 @@ function Get-AutoCADFacts {
     $recommendedCtbPath = ""
     $managedPdf2Pc3Path = Join-Path $ActualRepoRoot "documents\Resources\打印PDF2.pc3"
     $managedPdf2Pc3Exists = (Test-Path -LiteralPath $managedPdf2Pc3Path -PathType Leaf)
+    $managedMonochromeCtbPath = Join-Path $ActualRepoRoot "documents\Resources\fanban_monochrome.ctb"
+    $managedMonochromeCtbExists = (Test-Path -LiteralPath $managedMonochromeCtbPath -PathType Leaf)
 
     if ($null -ne $bestPlotter) {
         if ($managedPdf2Pc3Exists) {
@@ -1169,7 +1171,10 @@ function Get-AutoCADFacts {
             $recommendedPc3 = [string]$bestPlotter.custom_pdf2_pc3_names[0]
         }
 
-        if ($bestPlotter.has_monochrome_ctb) {
+        if ($managedMonochromeCtbExists) {
+            $recommendedCtb = "fanban_monochrome.ctb"
+            $recommendedCtbPath = $managedMonochromeCtbPath
+        } elseif ($bestPlotter.has_monochrome_ctb) {
             $recommendedCtb = "monochrome.ctb"
             $recommendedCtbPath = Join-Path ([string]$bestPlotter.plot_styles_dir) $recommendedCtb
         }

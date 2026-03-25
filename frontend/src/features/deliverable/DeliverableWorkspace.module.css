@@ -296,6 +296,21 @@
   font-size: 0.86rem;
 }
 
+.fontReplacementPreview {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.55rem;
+  padding: 0.72rem 0.78rem;
+  border-radius: 14px;
+  background: rgba(20, 73, 135, 0.05);
+  color: #14395e;
+  font-size: 0.84rem;
+}
+
+.fontReplacementPreview strong {
+  font-size: 0.88rem;
+}
+
 .fontNoticeList {
   margin: 0;
   padding-left: 1.2rem;

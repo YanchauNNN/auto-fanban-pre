@@ -104,6 +104,8 @@ export type FontReplacementOption = {
   value: string;
   family: string;
   path: string;
+  kind: string;
+  source: string;
 };
 
 export type FontPreflightFileResult = {

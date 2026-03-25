@@ -347,10 +347,12 @@ describe("HttpAdapter", () => {
           ],
           replacement_options: [
             {
-              label: "SimSun (TrueType) (simsun.ttc)",
-              value: "simsun.ttc",
-              family: "SimSun",
-              path: "C:\\Windows\\Fonts\\simsun.ttc",
+              label: "simplex.shx (AutoCAD SHX)",
+              value: "simplex.shx",
+              family: "simplex",
+              path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+              kind: "shx",
+              source: "autocad_fonts",
             },
           ],
           requires_confirmation: true,
@@ -378,10 +380,12 @@ describe("HttpAdapter", () => {
     expect(result.requiresConfirmation).toBe(true);
     expect(result.replacementOptions).toEqual([
       {
-        label: "SimSun (TrueType) (simsun.ttc)",
-        value: "simsun.ttc",
-        family: "SimSun",
-        path: "C:\\Windows\\Fonts\\simsun.ttc",
+        label: "simplex.shx (AutoCAD SHX)",
+        value: "simplex.shx",
+        family: "simplex",
+        path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+        kind: "shx",
+        source: "autocad_fonts",
       },
     ]);
     expect(result.files[0]).toEqual({

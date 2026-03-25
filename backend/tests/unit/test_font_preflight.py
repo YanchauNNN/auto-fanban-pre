@@ -14,8 +14,10 @@ from src.pipeline.executor import PipelineExecutor
 class _FakeInventory:
     def __init__(self, options: list[dict[str, str]]) -> None:
         self._options = options
+        self.requested_kinds: set[str] | None = None
 
-    def list_options(self) -> list[dict[str, str]]:
+    def list_options(self, *, preferred_kinds: set[str] | None = None) -> list[dict[str, str]]:
+        self.requested_kinds = set(preferred_kinds or []) or None
         return list(self._options)
 
     def is_valid_font(self, value: str) -> bool:
@@ -103,6 +105,36 @@ def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Pa
     assert result["font_replacement_applied"] is True
     assert result["replacement_font"] == "simsun.ttc"
     assert result["replaced_style_count"] == 1
+
+
+def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp_path: Path) -> None:
+    inventory = _FakeInventory(
+        [
+            {
+                "label": "simplex.shx",
+                "value": "simplex.shx",
+                "family": "simplex",
+                "path": r"D:\AutoCAD\Fonts\simplex.shx",
+                "kind": "shx",
+            },
+            {
+                "label": "SimSun (simsun.ttc)",
+                "value": "simsun.ttc",
+                "family": "SimSun",
+                "path": r"C:\Windows\Fonts\simsun.ttc",
+                "kind": "ttf",
+            },
+        ]
+    )
+    service = FontPreflightService(
+        inventory=cast(Any, inventory),
+        bridge=cast(Any, _FakeBridge()),
+    )
+
+    options = service.list_replacement_options(missing_kinds=["shx"])
+
+    assert inventory.requested_kinds == {"shx"}
+    assert options[0]["value"] == "simplex.shx"
 
 
 def test_stage_font_preflight_blocks_when_missing_fonts_are_unconfirmed(tmp_path: Path) -> None:

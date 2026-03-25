@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 
+import { lockBodyScroll } from "../../shared/documentScrollLock";
 import styles from "./TaskConfigModal.module.css";
 
 type TaskConfigModalProps = {
@@ -16,12 +17,7 @@ export function TaskConfigModal({
   dialogDataAttributes,
 }: TaskConfigModalProps) {
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
+    return lockBodyScroll();
   }, []);
 
   return (

@@ -19,21 +19,37 @@ class FakeFontPreflightService:
     def __init__(self) -> None:
         self.replacement_options = [
             {
+                "label": "simplex.shx (AutoCAD SHX)",
+                "value": "simplex.shx",
+                "family": "simplex",
+                "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\simplex.shx",
+                "kind": "shx",
+            },
+            {
+                "label": "romans.shx (AutoCAD SHX)",
+                "value": "romans.shx",
+                "family": "romans",
+                "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\romans.shx",
+                "kind": "shx",
+            },
+            {
                 "label": "SimSun (simsun.ttc)",
                 "value": "simsun.ttc",
                 "family": "SimSun",
                 "path": r"C:\Windows\Fonts\simsun.ttc",
-            },
-            {
-                "label": "Arial (arial.ttf)",
-                "value": "arial.ttf",
-                "family": "Arial",
-                "path": r"C:\Windows\Fonts\arial.ttf",
+                "kind": "ttf",
             },
         ]
         self.inspect_calls: list[dict[str, object]] = []
+        self.list_requests: list[list[str]] = []
 
-    def list_replacement_options(self) -> list[dict[str, str]]:
+    def list_replacement_options(self, *, missing_kinds: list[str] | None = None) -> list[dict[str, str]]:
+        requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
+        self.list_requests.append(requested)
+        if {"shx", "bigfont"} & set(requested):
+            return [item for item in self.replacement_options if item.get("kind") == "shx"]
+        if "ttf" in requested:
+            return [item for item in self.replacement_options if item.get("kind") == "ttf"]
         return list(self.replacement_options)
 
     def validate_replacement_font(self, font_name: str) -> bool:
@@ -594,7 +610,23 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
     assert response.status_code == 200
     payload = response.json()
     assert payload["requires_confirmation"] is True
-    assert payload["replacement_options"] == font_service.replacement_options
+    assert payload["replacement_options"] == [
+        {
+            "label": "simplex.shx (AutoCAD SHX)",
+            "value": "simplex.shx",
+            "family": "simplex",
+            "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\simplex.shx",
+            "kind": "shx",
+        },
+        {
+            "label": "romans.shx (AutoCAD SHX)",
+            "value": "romans.shx",
+            "family": "romans",
+            "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\romans.shx",
+            "kind": "shx",
+        },
+    ]
+    assert font_service.list_requests[-1] == ["shx"]
     assert payload["files"] == [
         {
             "filename": "missing-font.dwg",

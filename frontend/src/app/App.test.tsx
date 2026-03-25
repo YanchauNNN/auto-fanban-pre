@@ -683,7 +683,7 @@ describe("job detail pages", () => {
             detectedStyleCount: 12,
             missingStyleCount: 1,
             replacedStyleCount: 3,
-            replacementFont: "simsun.ttc",
+            replacementFont: "simplex.shx",
             fontReplacementApplied: true,
             errors: [],
           },
@@ -692,7 +692,7 @@ describe("job detail pages", () => {
       },
       missingFontsDetected: true,
       fontReplacementApplied: true,
-      replacementFont: "simsun.ttc",
+      replacementFont: "simplex.shx",
       replacedStyleCount: 3,
     });
 
@@ -700,7 +700,7 @@ describe("job detail pages", () => {
 
     expect(await screen.findByText("字体处理摘要")).toBeInTheDocument();
     expect(screen.getByText("已执行缺失字体替代")).toBeInTheDocument();
-    expect(screen.getByText("simsun.ttc")).toBeInTheDocument();
+    expect(screen.getByText("simplex.shx")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 

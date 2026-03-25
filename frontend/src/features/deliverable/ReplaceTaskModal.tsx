@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { lockBodyScroll } from "../../shared/documentScrollLock";
 import styles from "./ReplaceTaskModal.module.css";
 
 type ReplaceTaskModalProps = {
@@ -22,12 +23,7 @@ export function ReplaceTaskModal({
   onConfirm,
 }: ReplaceTaskModalProps) {
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
+    return lockBodyScroll();
   }, []);
 
   return (

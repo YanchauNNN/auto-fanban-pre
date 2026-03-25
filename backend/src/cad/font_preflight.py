@@ -19,9 +19,14 @@ class FontPreflightService:
         self.bridge = bridge or FontPreflightBridge()
         self._options_cache: list[dict[str, str]] | None = None
 
-    def list_replacement_options(self) -> list[dict[str, str]]:
+    def list_replacement_options(self, *, missing_kinds: list[str] | None = None) -> list[dict[str, str]]:
+        normalized_kinds = {
+            str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()
+        }
+        if normalized_kinds:
+            return list(self.inventory.list_options(preferred_kinds=normalized_kinds))
         if self._options_cache is None:
-            self._options_cache = self.inventory.list_options()
+            self._options_cache = self.inventory.list_options(preferred_kinds=None)
         return list(self._options_cache)
 
     def validate_replacement_font(self, font_name: str) -> bool:

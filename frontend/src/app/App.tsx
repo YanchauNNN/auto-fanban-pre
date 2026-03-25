@@ -300,7 +300,7 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
         detectedStyleCount: 16,
         missingStyleCount: 2,
         fontReplacementApplied: true,
-        replacementFont: "simhei.ttf",
+        replacementFont: "simplex.shx",
         replacedStyleCount: 2,
         errors: [],
       },
@@ -308,7 +308,7 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
   },
   missingFontsDetected: true,
   fontReplacementApplied: true,
-  replacementFont: "simhei.ttf",
+  replacementFont: "simplex.shx",
   replacedStyleCount: 2,
 };
 

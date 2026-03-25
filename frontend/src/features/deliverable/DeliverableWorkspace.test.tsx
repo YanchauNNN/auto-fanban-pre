@@ -500,10 +500,20 @@ describe("DeliverableWorkspace", () => {
       ],
       replacementOptions: [
         {
-          label: "SimSun (TrueType) (simsun.ttc)",
-          value: "simsun.ttc",
-          family: "SimSun",
-          path: "C:\\Windows\\Fonts\\simsun.ttc",
+          label: "simplex.shx (AutoCAD SHX)",
+          value: "simplex.shx",
+          family: "simplex",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+        {
+          label: "Arial (TrueType) (arial.ttf)",
+          value: "arial.ttf",
+          family: "Arial",
+          path: "C:\\Windows\\Fonts\\arial.ttf",
+          kind: "ttf",
+          source: "windows_fonts",
         },
       ],
       requiresConfirmation: true,
@@ -533,16 +543,28 @@ describe("DeliverableWorkspace", () => {
     const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
     expect(within(dialog).getByText("A01.dwg")).toBeInTheDocument();
     expect(within(dialog).getByText("HZTXT")).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("option", { name: "simplex.shx (AutoCAD SHX)" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("option", { name: "Arial (TrueType) (arial.ttf)" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText("对 SHX 缺失，候选会优先来自 AutoCAD Fonts 目录。"),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("当前已优先收敛为 AutoCAD Fonts 目录候选，已隐藏其他 TrueType 回退项。"),
+    ).toBeInTheDocument();
     expect(adapter.createBatch).not.toHaveBeenCalled();
 
-    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simsun.ttc");
+    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simplex.shx");
     await user.click(within(dialog).getByRole("button", { name: "继续提交" }));
 
     await waitFor(() => {
       expect(adapter.createBatch).toHaveBeenCalledWith(
         expect.objectContaining({
           font_replace_policy: "replace_missing",
-          font_replacement_font: "simsun.ttc",
+          font_replacement_font: "simplex.shx",
         }),
         expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
         false,
@@ -796,10 +818,20 @@ describe("DeliverableWorkspace", () => {
       ],
       replacementOptions: [
         {
-          label: "SimSun (TrueType) (simsun.ttc)",
-          value: "simsun.ttc",
-          family: "SimSun",
-          path: "C:\\Windows\\Fonts\\simsun.ttc",
+          label: "simplex.shx (AutoCAD SHX)",
+          value: "simplex.shx",
+          family: "simplex",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+        {
+          label: "Arial (TrueType) (arial.ttf)",
+          value: "arial.ttf",
+          family: "Arial",
+          path: "C:\\Windows\\Fonts\\arial.ttf",
+          kind: "ttf",
+          source: "windows_fonts",
         },
       ],
       requiresConfirmation: true,
@@ -831,7 +863,13 @@ describe("DeliverableWorkspace", () => {
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
     const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
-    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simsun.ttc");
+    expect(
+      within(dialog).getByRole("option", { name: "simplex.shx (AutoCAD SHX)" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole("option", { name: "Arial (TrueType) (arial.ttf)" }),
+    ).not.toBeInTheDocument();
+    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "simplex.shx");
     await user.click(within(dialog).getByRole("button", { name: "继续提交" }));
 
     await waitFor(() => {
@@ -846,7 +884,7 @@ describe("DeliverableWorkspace", () => {
           album_title_cn: "翻版后出图图册",
           subitem_name: "反应堆厂房",
           font_replace_policy: "replace_missing",
-          font_replacement_font: "simsun.ttc",
+          font_replacement_font: "simplex.shx",
         }),
       });
       expect(adapter.createBatch).not.toHaveBeenCalled();
