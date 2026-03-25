@@ -1,0 +1,62 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - link "管理员配置" [ref=e13] [cursor=pointer]:
+      - /url: /account/admin
+    - button "退出登录" [ref=e14]
+  - navigation [ref=e15]:
+    - button "业务模块" [pressed] [ref=e16]
+    - button "账号模块" [ref=e17]
+    - button "工作量模块" [ref=e18]
+  - generic [ref=e19]:
+    - banner [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - img "中核集团标识" [ref=e23]
+          - generic [ref=e24]:
+            - paragraph [ref=e25]: CNPE Structural Drawing Platform
+            - heading "中核工程-河北分公司-建筑结构所出图平台" [level=1] [ref=e26]
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - paragraph [ref=e29]: System Status
+            - button "教程" [ref=e30]
+          - generic [ref=e31]:
+            - generic [ref=e32]:
+              - generic [ref=e33]: 服务
+              - strong [ref=e34]: 就绪
+            - generic [ref=e35]:
+              - generic [ref=e36]: 存储
+              - strong [ref=e37]: 正常
+            - generic [ref=e38]:
+              - generic [ref=e39]: 队列
+              - strong [ref=e40]: 0 项
+            - generic [ref=e41]:
+              - generic [ref=e42]: AutoCAD
+              - strong [ref=e43]: 可用
+            - generic [ref=e44]:
+              - generic [ref=e45]: Office
+              - strong [ref=e46]: 可用
+    - main [ref=e48]:
+      - generic [ref=e49]:
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - paragraph [ref=e54]: Task Entry
+            - heading "新建任务" [level=2] [ref=e55]
+          - generic [ref=e56]:
+            - button "出图" [ref=e57]
+            - button "纠错" [ref=e58]
+            - button "翻版" [ref=e59]
+          - button "选择出图 DWG 文件"
+        - generic [ref=e60]:
+          - generic [ref=e61]:
+            - generic [ref=e62]:
+              - paragraph [ref=e63]: Task Record
+              - heading "任务记录" [level=2] [ref=e64]
+            - button "刷新" [ref=e65]
+          - generic [ref=e66]:
+            - button "全部" [pressed] [ref=e67]
+            - button "排队中" [ref=e68]
+            - button "运行中" [ref=e69]
+            - button "成功" [ref=e70]
+            - button "失败" [ref=e71]
+          - searchbox "搜索任务名称" [ref=e73]
+          - paragraph [ref=e76]: 当前没有任务记录。

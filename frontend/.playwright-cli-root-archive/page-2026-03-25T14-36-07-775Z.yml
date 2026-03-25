@@ -1,0 +1,10 @@
+- main [ref=e3]:
+  - form "登录表单" [ref=e4]:
+    - heading "账号登录" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - text: 账号
+      - textbox "账号" [ref=e7]
+    - generic [ref=e8]:
+      - text: 密码
+      - textbox "密码" [ref=e9]
+    - button "登录" [ref=e10]

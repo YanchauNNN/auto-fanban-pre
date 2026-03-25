@@ -126,6 +126,40 @@ const schema: FormSchema = normalizeFormSchema({
 
 function createAdapter(): ApiAdapter {
   return {
+    login: vi.fn(),
+    logout: vi.fn(),
+    getMe: vi.fn(),
+    changePassword: vi.fn(),
+    normalizePersonnel: vi.fn().mockImplementation(async (fieldName: string, rawValue: string | null) => {
+      const text = String(rawValue ?? "").trim();
+      const [namePart, accountPart] = text.split("@");
+      return {
+        normalized: {
+          fieldName,
+          rawValue: text,
+          normalizedValue: text,
+          matchedAccount: accountPart?.trim() || null,
+          matchedName: namePart?.trim() || null,
+          matchStrategy: text.includes("@") ? "compound" : null,
+          status: text.includes("@") ? "matched" : "invalid",
+          errors: text.includes("@") ? [] : ["unresolved_personnel"],
+        },
+        candidates: [],
+      };
+    }),
+    getWorkloadMe: vi.fn(),
+    getWorkloadOffice: vi.fn(),
+    getWorkloadInstitute: vi.fn(),
+    getWorkloadAdmin: vi.fn(),
+    getWorkflowMonitor: vi.fn(),
+    approveWorkflow: vi.fn(),
+    repairCurrentNode: vi.fn(),
+    listAccounts: vi.fn(),
+    listInvalidAccountRows: vi.fn(),
+    createAccount: vi.fn(),
+    updateAccount: vi.fn(),
+    getAdminConfig: vi.fn(),
+    patchAdminConfig: vi.fn(),
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
     preflightFonts: vi.fn().mockResolvedValue({
@@ -148,6 +182,10 @@ function createAdapter(): ApiAdapter {
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
+    listTaskGroups: vi.fn(),
+    getTaskGroupDetail: vi.fn(),
+    submitTaskGroup: vi.fn(),
+    restartSubmitTaskGroup: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn().mockResolvedValue({
       batchId: "batch-1",

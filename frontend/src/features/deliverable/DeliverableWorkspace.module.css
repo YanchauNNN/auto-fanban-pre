@@ -311,6 +311,38 @@
   font-size: 0.88rem;
 }
 
+.personnelCandidateList {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.personnelCandidateButton {
+  display: grid;
+  justify-items: flex-start;
+  gap: 0.18rem;
+  padding: 0.68rem 0.78rem;
+  border-radius: 12px;
+  border: 1px solid rgba(20, 73, 135, 0.16);
+  background: rgba(20, 73, 135, 0.05);
+  color: #14395e;
+  text-align: left;
+  cursor: pointer;
+}
+
+.personnelCandidateButton strong {
+  font-size: 0.87rem;
+}
+
+.personnelCandidateButton span {
+  font-size: 0.8rem;
+  color: #5a7899;
+}
+
+.personnelCandidateButton:hover {
+  background: rgba(20, 73, 135, 0.1);
+}
+
 .fontNoticeList {
   margin: 0;
   padding-left: 1.2rem;

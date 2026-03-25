@@ -1,5 +1,5 @@
-cd E:\project\auto-fanban-pre
-uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8000
+cd E:\project\auto-fanban-pre\.worktrees\codex-frontend-app-shell\
+uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8080
 
-cd E:\project\auto-fanban-pre\frontend
+cd E:\project\auto-fanban-pre\.worktrees\codex-frontend-app-shell\frontend
 npm run dev -- --host 127.0.0.1 --port 5173

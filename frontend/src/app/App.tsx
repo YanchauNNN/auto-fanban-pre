@@ -23,17 +23,23 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
+  type ReactNode,
 } from "react";
 import {
   BrowserRouter,
   Link,
+  Navigate,
+  Outlet,
   Route,
   Routes,
+  useLocation,
   useNavigate,
   useParams,
 } from "react-router-dom";
 
 import groupLogoUrl from "../assets/group-logo.jpg";
+import loginPlantHeroUrl from "../assets/login-plant-hero.jpg";
 import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import type {
@@ -42,21 +48,29 @@ import type {
   DeliverableOutputs,
   FindingGroup,
   JobDetail,
-  JobList,
   JobSummary,
+  TaskGroupDetail,
+  TaskGroupList,
   TaskKind,
+  TaskGroupSummary,
 } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
+import { SessionProvider, useSession } from "../shared/session/SessionContext";
 import styles from "./App.module.css";
 import {
-  buildJobCardModels,
   getMessageLabel,
   getStageLabel,
   getStatusLabel,
   getTaskKindLabel,
-  type JobCardModel,
 } from "./jobPresentation";
+import {
+  buildTaskGroupCardModels,
+  getArchiveStatusLabel,
+  getCurrentNodeLabel,
+  getWorkflowStatusLabel,
+  type TaskGroupCardModel,
+} from "./taskGroupPresentation";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
@@ -73,6 +87,15 @@ const AuditCheckWorkspace = lazy(async () => ({
 const AuditCheckSummaryModal = lazy(async () => ({
   default: (await import("../features/audit-check/AuditCheckSummaryModal")).AuditCheckSummaryModal,
 }));
+const AccountPage = lazy(async () => ({
+  default: (await import("../features/account/AccountPage")).AccountPage,
+}));
+const AccountAdminPage = lazy(async () => ({
+  default: (await import("../features/account/AccountAdminPage")).AccountAdminPage,
+}));
+const WorkloadPage = lazy(async () => ({
+  default: (await import("../features/workload/WorkloadPage")).WorkloadPage,
+}));
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
@@ -83,9 +106,9 @@ const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
 ];
 
 const MODULE_OPTIONS = [
-  { key: "business", label: "业务模块" },
-  { key: "account", label: "账号模块" },
-  { key: "workload", label: "工作量模块" },
+  { key: "business", label: "业务模块", path: "/business" },
+  { key: "account", label: "账号模块", path: "/account" },
+  { key: "workload", label: "工作量模块", path: "/workload" },
 ] as const;
 
 type HomeModule = (typeof MODULE_OPTIONS)[number]["key"];
@@ -102,6 +125,9 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
 const HERO_PANEL_STYLE = {
   "--hero-photo": `url("${nuclearPlantHeroUrl}")`,
   "--structure-watermark": `url("${structureLogoWatermarkUrl}")`,
+} as CSSProperties;
+const LOGIN_PAGE_STYLE = {
+  "--login-hero": `url("${loginPlantHeroUrl}")`,
 } as CSSProperties;
 
 const TUTORIAL_SAMPLE_FILE = "demo-2026-structural-package.dwg";
@@ -252,21 +278,63 @@ const TUTORIAL_GROUP_SUMMARY: JobSummary = {
   children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
 };
 
-const TUTORIAL_RECORD_CARD: JobCardModel = {
-  kind: "real_group",
-  key: `group:${TUTORIAL_GROUP_JOB_ID}`,
-  jobId: TUTORIAL_GROUP_JOB_ID,
-  title: TUTORIAL_SAMPLE_FILE,
-  status: TUTORIAL_GROUP_SUMMARY.status,
-  percent: TUTORIAL_GROUP_SUMMARY.percent,
-  stageLabel: getStageLabel(TUTORIAL_GROUP_SUMMARY.stage, TUTORIAL_GROUP_SUMMARY),
-  messageLabel: getMessageLabel(TUTORIAL_GROUP_SUMMARY),
-  findingsCount: TUTORIAL_GROUP_SUMMARY.findingsCount,
-  affectedDrawingsCount: TUTORIAL_GROUP_SUMMARY.affectedDrawingsCount,
-  childCount: 2,
-  childJobs: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
-  summary: TUTORIAL_GROUP_SUMMARY,
+const TUTORIAL_TASK_GROUP_SUMMARY: TaskGroupSummary = {
+  groupId: TUTORIAL_GROUP_JOB_ID,
+  batchId: "tutorial-batch",
+  projectNo: TUTORIAL_SAMPLE_PROJECT,
+  status: "succeeded",
+  createdAt: TUTORIAL_CREATED_AT,
+  sourceFilenames: [TUTORIAL_SAMPLE_FILE],
+  ownerSnapshot: {
+    creatorAccount: "tutorial",
+    creatorName: "教程演示",
+    creatorRole: "设计人员",
+    creatorOffice: "河北分公司-建筑结构所",
+    createdByScope: "current_login_user",
+    submittedAt: TUTORIAL_CREATED_AT,
+  },
+  creatorName: "教程演示",
+  creatorAccount: "tutorial",
+  creatorOffice: "河北分公司-建筑结构所",
+  workflowStatus: "archived",
+  currentNodeKey: null,
+  archiveStatus: "succeeded",
+  workload: {
+    initialWorkloadA1: 1.2,
+    finalWorkloadA1: 1.2,
+    oneReviewFactor: 1,
+    twoReviewFactor: 1,
+    threeReviewFactor: 1,
+    settlementStatus: "settled",
+    settledAt: TUTORIAL_FINISHED_AT,
+    contributorEntries: [],
+  },
+  effectiveWorkload: 1.2,
+  canViewDetail: true,
+  canSubmit: false,
+  canApprove: false,
+  isRelatedToCurrentUser: true,
 };
+
+const TUTORIAL_RECORD_CARD: TaskGroupCardModel =
+  buildTaskGroupCardModels([TUTORIAL_TASK_GROUP_SUMMARY])[0] ?? {
+    key: TUTORIAL_GROUP_JOB_ID,
+    groupId: TUTORIAL_GROUP_JOB_ID,
+    title: TUTORIAL_SAMPLE_FILE,
+    searchText: TUTORIAL_SAMPLE_FILE.toLowerCase(),
+    status: "succeeded",
+    createdAt: TUTORIAL_CREATED_AT,
+    creatorLabel: "教程演示",
+    officeLabel: "河北分公司-建筑结构所",
+    workflowLabel: "已归档",
+    currentNodeLabel: "未进入审批",
+    archiveLabel: "已归档",
+    effectiveWorkloadLabel: "1.20",
+    canViewDetail: true,
+    canSubmit: false,
+    canApprove: false,
+    summary: TUTORIAL_TASK_GROUP_SUMMARY,
+  };
 
 const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
   ...TUTORIAL_DELIVERABLE_CHILD_SUMMARY,
@@ -355,6 +423,95 @@ const TUTORIAL_GROUP_DETAIL: JobDetail = {
   children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
 };
 
+const TUTORIAL_TASK_GROUP_DETAIL: TaskGroupDetail = {
+  ...TUTORIAL_TASK_GROUP_SUMMARY,
+  childJobIds: [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_AUDIT_JOB_ID],
+  personnelSnapshot: {
+    members: {
+      ied_prepared_by: {
+        fieldName: "ied_prepared_by",
+        rawValue: "教程演示",
+        normalizedValue: "教程演示@tutorial",
+        matchedAccount: "tutorial",
+        matchedName: "教程演示",
+        matchStrategy: "exact",
+        status: "matched",
+        errors: [],
+      },
+    },
+  },
+  workflow: {
+    status: "archived",
+    initiatedAt: TUTORIAL_CREATED_AT,
+    initiatedByAccount: "tutorial",
+    initiatedByName: "教程演示",
+    duplicatePolicy: null,
+    overwriteArchiveTarget: null,
+    currentNodeKey: null,
+    nodes: [
+      {
+        nodeKey: "one_review",
+        nodeLabel: "一审",
+        assigneeAccount: "reviewer-a",
+        assigneeName: "一审负责人",
+        status: "approved",
+        factor: 1,
+        approvedAt: TUTORIAL_FINISHED_AT,
+        actedByAccount: "reviewer-a",
+        actedByName: "一审负责人",
+      },
+      {
+        nodeKey: "two_review",
+        nodeLabel: "二审",
+        assigneeAccount: "reviewer-b",
+        assigneeName: "二审负责人",
+        status: "approved",
+        factor: 1,
+        approvedAt: TUTORIAL_FINISHED_AT,
+        actedByAccount: "reviewer-b",
+        actedByName: "二审负责人",
+      },
+      {
+        nodeKey: "three_review",
+        nodeLabel: "三审",
+        assigneeAccount: "reviewer-c",
+        assigneeName: "三审负责人",
+        status: "approved",
+        factor: 1,
+        approvedAt: TUTORIAL_FINISHED_AT,
+        actedByAccount: "reviewer-c",
+        actedByName: "三审负责人",
+      },
+    ],
+    archiveStatus: "succeeded",
+    archiveRetryCount: 0,
+    archiveLastError: null,
+    archiveLastAttemptAt: null,
+  },
+  archive: {
+    archiveRootPath: "D:\\Archive",
+    targetDir: "D:\\Archive\\tutorial\\2026",
+    status: "succeeded",
+    overwriteMode: "skip",
+    startedAt: TUTORIAL_CREATED_AT,
+    completedAt: TUTORIAL_FINISHED_AT,
+    lastError: null,
+    retryCount: 0,
+    lastAttemptAt: TUTORIAL_FINISHED_AT,
+    archivedFiles: ["package.zip", "IED.xlsx", "report.xlsx"],
+  },
+  replacement: {
+    albumInternalCode: null,
+    revision: null,
+    replacedGroupId: null,
+    replacedRecordPendingDelete: false,
+  },
+  legacyVisibility: {
+    scope: "owner_only",
+    reason: null,
+  },
+};
+
 const TUTORIAL_DETAIL_LOOKUP = new Map<string, JobDetail>([
   [TUTORIAL_GROUP_JOB_ID, TUTORIAL_GROUP_DETAIL],
   [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_DELIVERABLE_CHILD_DETAIL],
@@ -371,6 +528,189 @@ const TUTORIAL_DELIVERABLE_VALUES = {
 };
 
 const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
+  login: async () => {
+    throw new Error("Tutorial preview does not support login.");
+  },
+  logout: async () => ({ ok: true }),
+  getMe: async () => ({
+    accountId: "tutorial",
+    displayName: "教程演示",
+    role: "设计人员",
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    valid: true,
+    pendingTodoCount: 0,
+  }),
+  changePassword: async () => {
+    throw new Error("Tutorial preview does not support password changes.");
+  },
+  normalizePersonnel: async () => ({
+    normalized: {
+      fieldName: "ied_checked_by",
+      rawValue: "教程演示",
+      normalizedValue: "教程演示@tutorial",
+      matchedAccount: "tutorial",
+      matchedName: "教程演示",
+      matchStrategy: "tutorial",
+      status: "matched",
+      errors: [],
+    },
+    candidates: [],
+  }),
+  getWorkloadMe: async () => ({
+    scope: "me",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    officeName: null,
+    totalWorkloadA1: 2.6,
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_prepared_by",
+        accountId: "tutorial",
+        displayName: "教程演示",
+        workloadA1: 1.4,
+        settledAt: TUTORIAL_FINISHED_AT,
+        groupId: TUTORIAL_GROUP_JOB_ID,
+        settlementStatus: "settled",
+      },
+      {
+        roleKey: "ied_checked_by",
+        accountId: "reviewer-a",
+        displayName: "一审负责人",
+        workloadA1: 1.2,
+        settledAt: TUTORIAL_FINISHED_AT,
+        groupId: TUTORIAL_GROUP_JOB_ID,
+        settlementStatus: "settled",
+      },
+    ],
+  }),
+  getWorkloadOffice: async () => ({
+    scope: "office",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    officeName: "河北分公司-建筑结构所",
+    totalWorkloadA1: 3.8,
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_prepared_by",
+        accountId: "tutorial",
+        displayName: "教程演示",
+        workloadA1: 2.1,
+        settledAt: TUTORIAL_FINISHED_AT,
+        groupId: TUTORIAL_GROUP_JOB_ID,
+        settlementStatus: "settled",
+      },
+    ],
+  }),
+  getWorkloadInstitute: async () => ({
+    scope: "institute",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    officeName: null,
+    totalWorkloadA1: 6.4,
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_checked_by",
+        accountId: "reviewer-a",
+        displayName: "一审负责人",
+        workloadA1: 1.8,
+        settledAt: TUTORIAL_FINISHED_AT,
+        groupId: TUTORIAL_GROUP_JOB_ID,
+        settlementStatus: "settled",
+      },
+    ],
+  }),
+  getWorkloadAdmin: async () => ({
+    scope: "admin",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    officeName: null,
+    totalWorkloadA1: 6.4,
+    totalsByAccount: {
+      tutorial: 2.6,
+      "reviewer-a": 1.8,
+    },
+    entries: [
+      {
+        roleKey: "ied_checked_by",
+        accountId: "reviewer-a",
+        displayName: "一审负责人",
+        workloadA1: 1.8,
+        settledAt: TUTORIAL_FINISHED_AT,
+        groupId: TUTORIAL_GROUP_JOB_ID,
+        settlementStatus: "settled",
+      },
+    ],
+  }),
+  getWorkflowMonitor: async () => ({
+    total: 1,
+    items: [TUTORIAL_TASK_GROUP_SUMMARY],
+  }),
+  approveWorkflow: async () => undefined,
+  repairCurrentNode: async () => undefined,
+  listAccounts: async () => ({
+    items: [
+      {
+        officeCode: "HB-JG",
+        officeName: "河北分公司-建筑结构所",
+        accountId: "tutorial",
+        displayName: "教程演示",
+        role: "设计人员",
+        password: "password",
+        valid: true,
+        rowNumber: 1,
+        errors: [],
+      },
+    ],
+  }),
+  listInvalidAccountRows: async () => ({
+    items: [],
+  }),
+  createAccount: async () => ({
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    accountId: "tutorial-new",
+    displayName: "教程新账号",
+    role: "设计人员",
+    password: "password",
+    valid: true,
+    rowNumber: 2,
+    errors: [],
+  }),
+  updateAccount: async () => ({
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    accountId: "tutorial",
+    displayName: "教程演示",
+    role: "设计人员",
+    password: "password",
+    valid: true,
+    rowNumber: 1,
+    errors: [],
+  }),
+  getAdminConfig: async () => ({
+    archiveRootPath: "D:\\Archive",
+  }),
+  patchAdminConfig: async (payload) => payload,
   getHealth: async () => ({
     status: "ok",
     ready: true,
@@ -398,6 +738,18 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  listTaskGroups: async () => ({
+    total: 1,
+    items: [TUTORIAL_TASK_GROUP_SUMMARY],
+  }),
+  getTaskGroupDetail: async (groupId: string) => {
+    if (groupId !== TUTORIAL_GROUP_JOB_ID) {
+      throw new Error(`Missing tutorial task-group detail for ${groupId}.`);
+    }
+    return TUTORIAL_TASK_GROUP_DETAIL;
+  },
+  submitTaskGroup: async () => TUTORIAL_TASK_GROUP_DETAIL,
+  restartSubmitTaskGroup: async () => TUTORIAL_TASK_GROUP_DETAIL,
   listJobs: async () => ({
     total: 1,
     items: [TUTORIAL_GROUP_SUMMARY],
@@ -437,28 +789,371 @@ function getTutorialTargetSelector(stepId: TutorialStepId): string {
 }
 
 export function App() {
+  const adapter = useApiAdapter();
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter
-        future={{
-          v7_relativeSplatPath: true,
-          v7_startTransition: true,
-        }}
-      >
-        <Routes>
-          <Route element={<WorkspacePage />} path="/" />
-          <Route element={<JobDetailPage />} path="/jobs/:jobId" />
-        </Routes>
-      </BrowserRouter>
+      <SessionProvider adapter={adapter}>
+        <BrowserRouter
+          future={{
+            v7_relativeSplatPath: true,
+            v7_startTransition: true,
+          }}
+        >
+          <AppRoutes />
+        </BrowserRouter>
+      </SessionProvider>
     </QueryClientProvider>
+  );
+}
+
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route element={<LoginPage />} path="/login" />
+      <Route element={<ProtectedAppShell />}>
+        <Route element={<Navigate replace to="/business" />} path="/" />
+        <Route element={<WorkspacePage />} path="/business" />
+        <Route element={<TaskGroupDetailPage />} path="/task-groups/:groupId" />
+        <Route element={<JobDetailPage />} path="/jobs/:jobId" />
+        <Route
+          element={
+            <Suspense fallback={<RoutePlaceholder description="正在加载账号信息..." title="账号模块" />}>
+              <AccountPage />
+            </Suspense>
+          }
+          path="/account"
+        />
+        <Route
+          element={
+            <AdminOnlyRoute>
+              <Suspense
+                fallback={<RoutePlaceholder description="正在加载管理员配置..." title="管理员模块" />}
+              >
+                <AccountAdminPage />
+              </Suspense>
+            </AdminOnlyRoute>
+          }
+          path="/account/admin"
+        />
+        <Route
+          element={
+            <Suspense fallback={<RoutePlaceholder description="正在加载工作量模块..." title="工作量模块" />}>
+              <WorkloadPage />
+            </Suspense>
+          }
+          path="/workload"
+        />
+      </Route>
+    </Routes>
+  );
+}
+
+function ProtectedAppShell() {
+  const { currentAccount, sessionStatus, logout } = useSession();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  if (sessionStatus === "loading") {
+    return (
+      <main className={styles.emptyPanel}>
+        <p>正在恢复登录状态...</p>
+      </main>
+    );
+  }
+
+  if (!currentAccount) {
+    return <Navigate replace to="/login" />;
+  }
+
+  const activeModule = getActiveModule(location.pathname);
+
+  return (
+    <div className={styles.appShell}>
+      <ShellTitleStrip activeModule={activeModule} />
+      <div className={styles.appShellBody}>
+        <div className={styles.shellToolbarRow} data-testid="shell-toolbar-row">
+          <nav className={styles.moduleToolbar} data-testid="module-toolbar">
+            {MODULE_OPTIONS.map((module) => {
+              const active = activeModule === module.key;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={`${styles.moduleToolbarButton} ${
+                    active ? styles.moduleToolbarButtonActive : ""
+                  }`}
+                  key={module.key}
+                  type="button"
+                  onClick={() => navigate(module.path)}
+                >
+                  {module.label}
+                </button>
+              );
+            })}
+          </nav>
+          <header className={styles.sessionToolbar} data-testid="protected-app-nav">
+            {currentAccount.role === "管理员" ? (
+              <Link className={styles.moduleToolbarButton} to="/account/admin">
+                管理员配置
+              </Link>
+            ) : null}
+            <button
+              className={styles.moduleToolbarButton}
+              onClick={() => void logout()}
+              type="button"
+            >
+              退出登录
+            </button>
+          </header>
+        </div>
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
+function ShellTitleStrip({ activeModule }: { activeModule: HomeModule }) {
+  const navigate = useNavigate();
+  const healthQuery = useBackendHealthQuery();
+  const moduleLabel = MODULE_OPTIONS.find((module) => module.key === activeModule)?.label ?? "业务模块";
+  const backendUnavailable = isBackendUnavailable({
+    hasError: healthQuery.isError,
+    health: healthQuery.data,
+  });
+
+  return (
+    <header className={styles.titleStrip} data-testid="title-strip">
+      <div className={styles.titleStripLayout}>
+        <div className={styles.titleStripBrand}>
+          <img alt="中核集团标识" className={styles.titleStripLogo} src={groupLogoUrl} />
+          <div className={styles.titleStripText}>
+            <p className={styles.brandTop}>CNPE Structural Drawing Platform</p>
+            <h1>中核工程-河北分公司-建筑结构所出图平台</h1>
+          </div>
+        </div>
+        <section className={styles.titleStripStatus} data-testid="title-strip-status">
+          <div className={styles.titleStripStatusTop}>
+            <p className={styles.titleStripStatusLabel}>System Status</p>
+            {activeModule === "business" ? (
+              <button
+                className={styles.tutorialEntryButton}
+                type="button"
+                onClick={() => navigate("/business?tutorial=1")}
+              >
+                教程
+              </button>
+            ) : (
+              <span className={styles.titleStripModuleTag}>{moduleLabel}</span>
+            )}
+          </div>
+          {healthQuery.data ? (
+            <div className={styles.titleStripHealthGrid}>
+              <StatRow label="服务" value={healthQuery.data.ready ? "就绪" : "异常"} />
+              <StatRow label="存储" value={healthQuery.data.storageWritable ? "正常" : "异常"} />
+              <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
+              <StatRow label="AutoCAD" value={healthQuery.data.autocadReady ? "可用" : "缺失"} />
+              <StatRow label="Office" value={healthQuery.data.officeReady ? "可用" : "缺失"} />
+            </div>
+          ) : healthQuery.isError ? (
+            <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
+          ) : (
+            <p className={styles.titleStripHealthLoading}>正在读取</p>
+          )}
+        </section>
+      </div>
+      {backendUnavailable ? (
+        <div className={styles.titleStripMaintenanceBanner} role="alert">
+          {BACKEND_MAINTENANCE_MESSAGE}
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+function getActiveModule(pathname: string): HomeModule {
+  if (pathname.startsWith("/workload")) {
+    return "workload";
+  }
+  if (pathname.startsWith("/account")) {
+    return "account";
+  }
+  return "business";
+}
+
+function useBackendHealthQuery({ passive = false }: { passive?: boolean } = {}) {
+  const adapter = useApiAdapter();
+  return useQuery({
+    queryKey: ["health"],
+    queryFn: () => adapter.getHealth(),
+    refetchInterval: passive ? false : 15000,
+    staleTime: passive ? Number.POSITIVE_INFINITY : 0,
+    refetchOnMount: passive ? false : true,
+    refetchOnWindowFocus: passive ? false : true,
+    refetchOnReconnect: passive ? false : true,
+    retry: false,
+  });
+}
+
+export function isBackendUnavailable({
+  hasError,
+  health,
+}: {
+  hasError: boolean;
+  health?: { ready: boolean } | undefined;
+}) {
+  if (health) {
+    return health.ready === false;
+  }
+
+  return hasError;
+}
+
+function LoginPage() {
+  const navigate = useNavigate();
+  const { currentAccount, login, sessionStatus } = useSession();
+  const [accountId, setAccountId] = useState("");
+  const [password, setPassword] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (currentAccount) {
+      navigate("/business", { replace: true });
+    }
+  }, [currentAccount, navigate]);
+
+  if (sessionStatus === "loading") {
+    return (
+      <main className={styles.emptyPanel}>
+        <p>正在恢复登录状态...</p>
+      </main>
+    );
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await login({
+        accountId: accountId.trim(),
+        password,
+      });
+      navigate("/business", { replace: true });
+    } catch (error) {
+      setErrorMessage("账号或密码错误，请重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className={styles.loginPage} style={LOGIN_PAGE_STYLE}>
+      <section className={styles.loginHeroPanel}>
+        <div className={styles.loginHeroContent}>
+          <div className={styles.loginLogoBadge}>
+            <img alt="中核集团标识" className={styles.loginLogo} src={groupLogoUrl} />
+          </div>
+          <p className={styles.loginEyebrow}>CNPE Structural Drawing Platform</p>
+          <h1 className={styles.loginHeroTitle}>中核工程-河北分公司-建筑结构所出图平台</h1>
+          <p className={styles.loginHeroBody}>
+            面向结构出图、翻版、纠错与流程追踪的一体化工程工作台。
+            以稳定的任务链路承接设计交付，把复杂流程收束到更清晰的操作界面里。
+          </p>
+          <div className={styles.loginFeatureList}>
+            <span>统一任务入口</span>
+            <span>任务包与审批联动</span>
+            <span>交付结果集中追踪</span>
+          </div>
+        </div>
+      </section>
+      <section className={styles.loginCardPanel}>
+        <form aria-label="登录表单" className={styles.loginCard} onSubmit={handleSubmit}>
+          <p className={styles.loginCardEyebrow}>Account Access</p>
+          <h2>账号登录</h2>
+          <p className={styles.loginCardBody}>
+            使用单位账号进入平台，继续处理当前的结构出图与流程任务。
+          </p>
+          <label className={styles.loginField}>
+            <span>账号</span>
+            <input
+              autoComplete="username"
+              className={styles.loginInput}
+              name="account_id"
+              onChange={(event) => setAccountId(event.currentTarget.value)}
+              required
+              value={accountId}
+            />
+          </label>
+          <label className={styles.loginField}>
+            <span>密码</span>
+            <input
+              autoComplete="current-password"
+              className={styles.loginInput}
+              name="password"
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          <p className={styles.loginHelper}>默认密码password</p>
+          {errorMessage ? (
+            <p className={styles.loginError} role="alert">
+              {errorMessage}
+            </p>
+          ) : null}
+          <button
+            aria-busy={submitting}
+            className={styles.loginPrimaryButton}
+            disabled={submitting}
+            type="submit"
+          >
+            {submitting ? "登录中..." : "登录"}
+          </button>
+        </form>
+      </section>
+      <div className={styles.loginBackdropGlow} />
+    </main>
+  );
+}
+
+function AdminOnlyRoute({ children }: { children: ReactNode }) {
+  const { currentAccount, sessionStatus } = useSession();
+  if (sessionStatus === "loading") {
+    return (
+      <main className={styles.emptyPanel}>
+        <p>正在恢复登录状态...</p>
+      </main>
+    );
+  }
+  if (currentAccount?.role !== "管理员") {
+    return <Navigate replace to="/business" />;
+  }
+  return <>{children}</>;
+}
+
+function RoutePlaceholder({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <main className={styles.emptyPanel}>
+      <h1>{title}</h1>
+      <p>{description}</p>
+    </main>
   );
 }
 
 function WorkspacePage() {
   const adapter = useApiAdapter();
   const reactQueryClient = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
   const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
   const notifiedAuditJobIdsRef = useRef<Set<string>>(new Set());
@@ -467,8 +1162,13 @@ function WorkspacePage() {
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
-  const [activeModule, setActiveModule] = useState<HomeModule>("business");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
+  const [taskGroupActionError, setTaskGroupActionError] = useState<string | null>(null);
+  const [taskGroupSubmittingId, setTaskGroupSubmittingId] = useState<string | null>(null);
+  const [taskGroupConflict, setTaskGroupConflict] = useState<{
+    groupId: string;
+    kind: "archive" | "duplicate";
+  } | null>(null);
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
@@ -494,12 +1194,7 @@ function WorkspacePage() {
     [],
   );
 
-  const healthQuery = useQuery({
-    queryKey: ["health"],
-    queryFn: () => adapter.getHealth(),
-    refetchInterval: 15000,
-    retry: false,
-  });
+  const healthQuery = useBackendHealthQuery({ passive: true });
 
   const schemaQuery = useQuery({
     queryKey: ["form-schema"],
@@ -507,7 +1202,10 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
-  const backendUnavailable = healthQuery.isError || healthQuery.data?.ready === false;
+  const backendUnavailable = isBackendUnavailable({
+    hasError: healthQuery.isError,
+    health: healthQuery.data,
+  });
   const entryActionsDisabled = !actionsReady || backendUnavailable;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
@@ -516,48 +1214,48 @@ function WorkspacePage() {
       : "纠错"
     : "正在加载配置";
 
-  const jobsQuery = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => adapter.listJobs(),
+  const taskGroupsQuery = useQuery({
+    queryKey: ["task-groups"],
+    queryFn: () => adapter.listTaskGroups(),
     refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
+      const items = (query.state.data as TaskGroupList | undefined)?.items ?? [];
       const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
       return hasActive ? 3000 : 12000;
     },
   });
 
-  const jobCards = useMemo(
-    () => buildJobCardModels(jobsQuery.data?.items ?? []),
-    [jobsQuery.data?.items],
+  const taskGroupCards = useMemo(
+    () => buildTaskGroupCardModels(taskGroupsQuery.data?.items ?? []),
+    [taskGroupsQuery.data?.items],
   );
   const deferredRecentJobsSearch = useDeferredValue(recentJobsSearch);
   const normalizedRecentJobsSearch = deferredRecentJobsSearch.trim().toLowerCase();
-  const statusFilteredJobCards = useMemo(() => {
+  const statusFilteredTaskGroupCards = useMemo(() => {
     if (!jobsStatusFilter) {
-      return jobCards;
+      return taskGroupCards;
     }
 
-    return jobCards.filter((card) => card.status === jobsStatusFilter);
-  }, [jobCards, jobsStatusFilter]);
-  const filteredJobCards = useMemo(() => {
+    return taskGroupCards.filter((card) => card.status === jobsStatusFilter);
+  }, [taskGroupCards, jobsStatusFilter]);
+  const filteredTaskGroupCards = useMemo(() => {
     if (!normalizedRecentJobsSearch) {
-      return statusFilteredJobCards;
+      return statusFilteredTaskGroupCards;
     }
 
-    return statusFilteredJobCards.filter((card) =>
-      card.title.toLowerCase().includes(normalizedRecentJobsSearch),
+    return statusFilteredTaskGroupCards.filter((card) =>
+      card.searchText.includes(normalizedRecentJobsSearch),
     );
-  }, [normalizedRecentJobsSearch, statusFilteredJobCards]);
+  }, [normalizedRecentJobsSearch, statusFilteredTaskGroupCards]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
-  const visibleJobCards = normalizedRecentJobsSearch
-    ? filteredJobCards
-    : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
+    : Math.max(filteredTaskGroupCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
+  const visibleTaskGroupCards = normalizedRecentJobsSearch
+    ? filteredTaskGroupCards
+    : filteredTaskGroupCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
   const tutorialShowsRecordPreview = tutorialStep?.id === "record" || tutorialStep?.id === "detail";
-  const displayedJobCards = tutorialShowsRecordPreview
-    ? [TUTORIAL_RECORD_CARD, ...visibleJobCards]
-    : visibleJobCards;
+  const displayedTaskGroupCards = tutorialShowsRecordPreview
+    ? [TUTORIAL_RECORD_CARD, ...visibleTaskGroupCards]
+    : visibleTaskGroupCards;
 
   useEffect(() => {
     if (normalizedRecentJobsSearch) {
@@ -574,12 +1272,12 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    const items = jobsQuery.data?.items;
+    const items = taskGroupsQuery.data?.items;
     if (!items) {
       return;
     }
 
-    const currentStatuses = new Map(items.map((job) => [job.jobId, job.status]));
+    const currentStatuses = new Map(items.map((group) => [group.groupId, group.status]));
     const previousStatuses = knownJobStatusesRef.current;
     knownJobStatusesRef.current = currentStatuses;
 
@@ -587,36 +1285,22 @@ function WorkspacePage() {
       return;
     }
 
-    const completedAuditJobs = items.filter((job) => {
-      const previousStatus = previousStatuses.get(job.jobId);
+    const completedGroups = items.filter((group) => {
+      const previousStatus = previousStatuses.get(group.groupId);
       return (
-        !job.isGroup &&
-        job.taskKind === "audit_check" &&
         previousStatus !== undefined &&
         ACTIVE_JOB_STATUSES.includes(previousStatus as never) &&
-        job.status === "succeeded" &&
-        !notifiedAuditJobIdsRef.current.has(job.jobId)
+        group.status === "succeeded" &&
+        !notifiedAuditJobIdsRef.current.has(group.groupId)
       );
     });
 
-    const completedAuditGroups = items.filter((job) => {
-      const previousStatus = previousStatuses.get(job.jobId);
-      return (
-        job.isGroup &&
-        job.runAuditCheck &&
-        previousStatus !== undefined &&
-        ACTIVE_JOB_STATUSES.includes(previousStatus as never) &&
-        job.status === "succeeded" &&
-        !notifiedAuditJobIdsRef.current.has(job.jobId)
-      );
-    });
-
-    if (completedAuditJobs.length === 0 && completedAuditGroups.length === 0) {
+    if (completedGroups.length === 0) {
       return;
     }
 
-    [...completedAuditJobs, ...completedAuditGroups].forEach((job) => {
-      notifiedAuditJobIdsRef.current.add(job.jobId);
+    completedGroups.forEach((group) => {
+      notifiedAuditJobIdsRef.current.add(group.groupId);
     });
 
     let active = true;
@@ -625,40 +1309,24 @@ function WorkspacePage() {
       const summaries: JobDetail[] = [];
       const passedWithoutFindings: string[] = [];
 
-      for (const job of completedAuditJobs) {
-        if (job.findingsCount > 0) {
-          try {
-            const detail = await adapter.getJobDetail(job.jobId);
-            if (detail.taskKind === "audit_check") {
-              summaries.push(detail);
-            }
-          } catch {
-            // list polling will continue; the user can still open the detail page manually
+      for (const group of completedGroups) {
+        try {
+          const detail = await adapter.getTaskGroupDetail(group.groupId);
+          const childDetails = await Promise.all(
+            detail.childJobIds.map(async (childJobId) => adapter.getJobDetail(childJobId)),
+          );
+          const auditDetail = childDetails.find((child) => child.taskKind === "audit_check");
+          if (!auditDetail) {
+            continue;
           }
-          continue;
-        }
-
-        passedWithoutFindings.push(job.sourceFilename);
-      }
-
-      for (const group of completedAuditGroups) {
-        if (group.findingsCount > 0) {
-          try {
-            const groupDetail = await adapter.getJobDetail(group.jobId);
-            const auditChild = groupDetail.children?.find((child) => child.taskKind === "audit_check");
-            if (auditChild) {
-              const auditDetail = await adapter.getJobDetail(auditChild.jobId);
-              if (auditDetail.taskKind === "audit_check") {
-                summaries.push(auditDetail);
-              }
-            }
-          } catch {
-            // list polling will continue; the user can still open the detail page manually
+          if (auditDetail.findingsCount > 0) {
+            summaries.push(auditDetail);
+          } else {
+            passedWithoutFindings.push(detail.sourceFilenames[0] ?? detail.groupId);
           }
-          continue;
+        } catch {
+          // list polling will continue; the user can still open the detail page manually
         }
-
-        passedWithoutFindings.push(group.sourceFilename);
       }
 
       if (!active) {
@@ -677,14 +1345,14 @@ function WorkspacePage() {
     return () => {
       active = false;
     };
-  }, [adapter, jobsQuery.data]);
+  }, [adapter, taskGroupsQuery.data]);
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
     setDeliverableConfigOpen(false);
     setReplaceConfigOpen(false);
     setAuditConfigOpen(false);
-    void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    void reactQueryClient.invalidateQueries({ queryKey: ["task-groups"] });
   }
 
   function handleDeliverableUploadClick() {
@@ -704,16 +1372,6 @@ function WorkspacePage() {
     setPendingReplaceConfig(payload.replaceConfig);
     setReplaceConfigOpen(false);
     setDeliverableConfigOpen(true);
-  }
-
-  function handleOpenTutorial() {
-    setActiveModule("business");
-    setDeliverableConfigOpen(false);
-    setReplaceConfigOpen(false);
-    setAuditConfigOpen(false);
-    setPendingReplaceConfig(null);
-    setTutorialStepIndex(0);
-    setAllJobsModalOpen(false);
   }
 
   function handleCloseTutorial() {
@@ -749,7 +1407,7 @@ function WorkspacePage() {
     setJobsRefreshState("refreshing");
 
     try {
-      await jobsQuery.refetch();
+      await taskGroupsQuery.refetch();
       setJobsRefreshState("done");
       jobsRefreshResetTimerRef.current = window.setTimeout(() => {
         setJobsRefreshState("idle");
@@ -758,6 +1416,51 @@ function WorkspacePage() {
     } catch {
       setJobsRefreshState("idle");
     }
+  }
+
+  async function submitTaskGroup(
+    groupId: string,
+    payload: { overwriteArchiveExisting: boolean; cancelExistingInProgress: boolean },
+  ) {
+    setTaskGroupSubmittingId(groupId);
+    setTaskGroupActionError(null);
+    try {
+      const detail = await adapter.submitTaskGroup(groupId, payload);
+      setTaskGroupConflict(null);
+      setHighlightedBatchId(detail.batchId);
+      await reactQueryClient.invalidateQueries({ queryKey: ["task-groups"] });
+    } catch (error) {
+      const apiError = error as { status?: number; detail?: unknown };
+      if (apiError.status === 422 && apiError.detail === "archive_target_exists") {
+        setTaskGroupConflict({ groupId, kind: "archive" });
+      } else if (apiError.status === 422 && apiError.detail === "duplicate_in_progress_exists") {
+        setTaskGroupConflict({ groupId, kind: "duplicate" });
+      } else if (apiError.status === 422 && apiError.detail === "submitter_must_match_creator") {
+        setTaskGroupActionError("仅创建者本人可提交");
+      } else {
+        setTaskGroupActionError("提交失败，请稍后重试。");
+      }
+    } finally {
+      setTaskGroupSubmittingId(null);
+    }
+  }
+
+  function handleTaskGroupSubmit(groupId: string) {
+    void submitTaskGroup(groupId, {
+      overwriteArchiveExisting: false,
+      cancelExistingInProgress: false,
+    });
+  }
+
+  function handleConfirmTaskGroupConflict() {
+    if (!taskGroupConflict) {
+      return;
+    }
+
+    void submitTaskGroup(taskGroupConflict.groupId, {
+      overwriteArchiveExisting: taskGroupConflict.kind === "archive",
+      cancelExistingInProgress: taskGroupConflict.kind === "duplicate",
+    });
   }
 
   function handleDeliverableFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
@@ -773,84 +1476,27 @@ function WorkspacePage() {
     event.currentTarget.value = "";
   }
 
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("tutorial") !== "1") {
+      return;
+    }
+
+    setDeliverableConfigOpen(false);
+    setReplaceConfigOpen(false);
+    setAuditConfigOpen(false);
+    setPendingReplaceConfig(null);
+    setTutorialStepIndex(0);
+    setAllJobsModalOpen(false);
+    navigate("/business", { replace: true });
+  }, [location.search, navigate]);
+
   const activeAuditSummary = auditSummaryQueue[0] ?? null;
 
   return (
     <div className={styles.workspacePage}>
-      <header className={styles.titleStrip} data-testid="title-strip">
-        <div className={styles.titleStripLayout}>
-          <div className={styles.titleStripBrand}>
-            <img alt="中核集团标识" className={styles.titleStripLogo} src={groupLogoUrl} />
-            <div className={styles.titleStripText}>
-              <p className={styles.brandTop}>CNPE Structural Drawing Platform</p>
-              <h1>中核工程-河北分公司-建筑结构所出图平台</h1>
-            </div>
-          </div>
-          <section className={styles.titleStripStatus} data-testid="title-strip-status">
-            <div className={styles.titleStripStatusTop}>
-              <p className={styles.titleStripStatusLabel}>System Status</p>
-              <button
-                className={styles.tutorialEntryButton}
-                type="button"
-                onClick={handleOpenTutorial}
-              >
-                教程
-              </button>
-            </div>
-            {healthQuery.data ? (
-              <div className={styles.titleStripHealthGrid}>
-                <StatRow label="服务" value={healthQuery.data.ready ? "就绪" : "异常"} />
-                <StatRow
-                  label="存储"
-                  value={healthQuery.data.storageWritable ? "正常" : "异常"}
-                />
-                <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
-                <StatRow
-                  label="AutoCAD"
-                  value={healthQuery.data.autocadReady ? "可用" : "缺失"}
-                />
-                <StatRow
-                  label="Office"
-                  value={healthQuery.data.officeReady ? "可用" : "缺失"}
-                />
-              </div>
-            ) : healthQuery.isError ? (
-              <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
-            ) : (
-              <p className={styles.titleStripHealthLoading}>正在读取</p>
-            )}
-          </section>
-        </div>
-        {backendUnavailable ? (
-          <div className={styles.titleStripMaintenanceBanner} role="alert">
-            {BACKEND_MAINTENANCE_MESSAGE}
-          </div>
-        ) : null}
-      </header>
-
-      <nav className={styles.moduleToolbar} data-testid="module-toolbar">
-        {MODULE_OPTIONS.map((module) => {
-          const active = activeModule === module.key;
-          return (
-            <button
-              aria-pressed={active}
-              className={`${styles.moduleToolbarButton} ${
-                active ? styles.moduleToolbarButtonActive : ""
-              }`}
-              key={module.key}
-              type="button"
-              onClick={() => setActiveModule(module.key)}
-            >
-              {module.label}
-            </button>
-          );
-        })}
-      </nav>
-
       <div className={styles.shell}>
         <main className={styles.mainColumn}>
-          {activeModule === "business" ? (
-            <section className={styles.modulePanel} data-testid="module-business-panel">
+          <section className={styles.modulePanel} data-testid="module-business-panel">
               <section
                 className={styles.controlPanel}
                 data-tutorial-active={tutorialStep?.id === "entry" ? "true" : "false"}
@@ -987,19 +1633,26 @@ function WorkspacePage() {
                   ) : null}
                 </div>
 
+                {taskGroupActionError ? (
+                  <p className={styles.jobMessage} role="alert">
+                    {taskGroupActionError}
+                  </p>
+                ) : null}
+
                 <div className={styles.jobsGrid}>
-                  {displayedJobCards.length > 0 ? (
-                    displayedJobCards.map((card) => {
+                  {displayedTaskGroupCards.length > 0 ? (
+                    displayedTaskGroupCards.map((card) => {
                       const isTutorialRecordCard = card.key === TUTORIAL_RECORD_CARD.key;
                       const node = (
-                        <JobCard
-                          adapter={isTutorialRecordCard ? TUTORIAL_PREVIEW_ADAPTER : adapter}
+                        <TaskGroupCard
                           card={card}
                           highlighted={Boolean(
                             !isTutorialRecordCard &&
                               card.summary.batchId &&
                               card.summary.batchId === highlightedBatchId,
                           )}
+                          isSubmitting={!isTutorialRecordCard && taskGroupSubmittingId === card.groupId}
+                          onSubmit={isTutorialRecordCard ? undefined : handleTaskGroupSubmit}
                           key={card.key}
                         />
                       );
@@ -1025,25 +1678,13 @@ function WorkspacePage() {
                   )}
                 </div>
               </section>
-            </section>
-          ) : activeModule === "account" ? (
-            <section className={styles.placeholderPanel} data-testid="module-account-panel">
-              <p className={styles.brandTop}>Account Module</p>
-              <h2>账号模块预留</h2>
-            </section>
-          ) : (
-            <section className={styles.placeholderPanel} data-testid="module-workload-panel">
-              <p className={styles.brandTop}>Workload Module</p>
-              <h2>工作量模块预留</h2>
-            </section>
-          )}
+          </section>
         </main>
       </div>
 
       {allJobsModalOpen ? (
         <JobsBrowserModal
-          adapter={adapter}
-          cards={filteredJobCards}
+          cards={filteredTaskGroupCards}
           filterValue={jobsStatusFilter}
           refreshState={jobsRefreshState}
           searchValue={recentJobsSearch}
@@ -1051,6 +1692,14 @@ function WorkspacePage() {
           onFilterChange={setJobsStatusFilter}
           onRefresh={handleJobsRefresh}
           onSearchChange={setRecentJobsSearch}
+        />
+      ) : null}
+
+      {taskGroupConflict ? (
+        <TaskGroupConflictDialog
+          kind={taskGroupConflict.kind}
+          onClose={() => setTaskGroupConflict(null)}
+          onConfirm={handleConfirmTaskGroupConflict}
         />
       ) : null}
 
@@ -1138,7 +1787,6 @@ function WorkspacePage() {
 }
 
 function JobsBrowserModal({
-  adapter,
   cards,
   filterValue,
   refreshState,
@@ -1148,8 +1796,7 @@ function JobsBrowserModal({
   onRefresh,
   onClose,
 }: {
-  adapter: ApiAdapter;
-  cards: JobCardModel[];
+  cards: TaskGroupCardModel[];
   filterValue?: string;
   refreshState: "idle" | "refreshing" | "done";
   searchValue: string;
@@ -1217,7 +1864,7 @@ function JobsBrowserModal({
         <div className={styles.jobsModalBody}>
           {cards.length > 0 ? (
             cards.map((card) => (
-              <JobCard adapter={adapter} card={card} highlighted={false} key={card.key} />
+              <TaskGroupCard card={card} highlighted={false} isSubmitting={false} key={card.key} />
             ))
           ) : (
             <div className={styles.emptyPanel}>
@@ -1230,28 +1877,17 @@ function JobsBrowserModal({
   );
 }
 
-function JobCard({
-  adapter,
+function TaskGroupCard({
   card,
   highlighted,
+  isSubmitting,
+  onSubmit,
 }: {
-  adapter: ApiAdapter;
-  card: JobCardModel;
+  card: TaskGroupCardModel;
   highlighted: boolean;
+  isSubmitting: boolean;
+  onSubmit?: (groupId: string) => void;
 }) {
-  const groupDetailQuery = useQuery({
-    queryKey: ["job-card-group-detail", card.jobId],
-    queryFn: () => adapter.getJobDetail(card.jobId),
-    enabled: card.kind === "real_group",
-    refetchInterval:
-      card.kind === "real_group" && ACTIVE_JOB_STATUSES.includes(card.status as never)
-        ? 3000
-        : false,
-  });
-
-  const childJobs =
-    card.kind === "real_group" ? (groupDetailQuery.data?.children ?? card.childJobs) : card.childJobs;
-
   return (
     <div
       className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}
@@ -1260,52 +1896,80 @@ function JobCard({
       <div className={styles.jobCardHeader}>
         <strong>{card.title}</strong>
         <div className={styles.jobCardHeaderMeta}>
-          {card.kind !== "single_job" ? (
-            <p className={styles.packageMeta}>包含 {Math.max(childJobs.length, card.childCount)} 个子任务</p>
-          ) : null}
+          <p className={styles.packageMeta}>{card.creatorLabel}</p>
           <StatusPill status={card.status} />
         </div>
       </div>
 
       <div className={styles.jobMetaRow}>
-        {card.kind === "single_job" ? (
-          <>
-            {card.summary.taskKind ? <TaskKindBadge kind={card.summary.taskKind} /> : null}
-            <Link className={styles.subtaskLink} to={`/jobs/${card.jobId}`}>
-              查看任务
-            </Link>
-          </>
-        ) : (
-          <>
-            <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
-            {childJobs.map((child) => (
-              <Link className={styles.subtaskLink} key={child.jobId} to={`/jobs/${child.jobId}`}>
-                {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
-                <span className={styles.subtaskStatus}>{getStatusLabel(child.status)}</span>
-              </Link>
-            ))}
-            {card.kind === "real_group" ? (
-              <Link className={styles.subtaskLink} to={`/jobs/${card.jobId}`}>
-                查看任务包
-              </Link>
-            ) : null}
-          </>
-        )}
-
-        {(card.kind !== "single_job" || card.summary.taskKind === "audit_check") && card.findingsCount > 0 ? (
-          <span className={styles.jobMetric}>错误数 {card.findingsCount}</span>
-        ) : null}
-        {(card.kind !== "single_job" || card.summary.taskKind === "audit_check") &&
-        card.affectedDrawingsCount > 0 ? (
-          <span className={styles.jobMetric}>受影响图纸 {card.affectedDrawingsCount}</span>
-        ) : null}
+        <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
+        <span className={styles.jobMetric}>{card.officeLabel}</span>
+        <span className={styles.jobMetric}>{`工作量 ${card.effectiveWorkloadLabel}`}</span>
       </div>
 
-      <p className={styles.jobStage}>{card.stageLabel}</p>
-      <p className={styles.jobMessage}>{card.messageLabel}</p>
+      <p className={styles.jobStage}>{`流程：${card.workflowLabel}`}</p>
+      <p className={styles.jobMessage}>{`${card.currentNodeLabel} · 归档：${card.archiveLabel}`}</p>
 
-      <div className={styles.progressBar}>
-        <div style={{ width: `${card.percent}%` }} />
+      <div className={styles.jobMetaRow}>
+        {card.canViewDetail ? (
+          <Link className={styles.subtaskLink} to={`/task-groups/${card.groupId}`}>
+            查看任务包
+          </Link>
+        ) : null}
+        {card.canSubmit ? (
+          <button
+            className={styles.subtaskLink}
+            disabled={isSubmitting}
+            type="button"
+            onClick={() => onSubmit?.(card.groupId)}
+          >
+            {isSubmitting ? "提交中..." : "提交"}
+          </button>
+        ) : null}
+        {card.canApprove ? (
+          <Link className={styles.subtaskLink} to="/workload">
+            前往审批
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function TaskGroupConflictDialog({
+  kind,
+  onClose,
+  onConfirm,
+}: {
+  kind: "archive" | "duplicate";
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const title = kind === "archive" ? "归档冲突确认" : "重复流程确认";
+  const description =
+    kind === "archive"
+      ? "归档目标已存在，是否覆盖归档后继续提交？"
+      : "已有同图册流程在执行中，是否取消旧流程并重新提交？";
+  const confirmLabel = kind === "archive" ? "继续提交" : "取消旧流程并重提";
+
+  return (
+    <div className={styles.jobsModalBackdrop}>
+      <div aria-label={title} aria-modal="true" className={styles.jobsModal} role="dialog">
+        <header className={styles.jobsModalHeader}>
+          <div>
+            <p className={styles.brandTop}>Submit Conflict</p>
+            <h2>{title}</h2>
+          </div>
+        </header>
+        <p className={styles.jobMessage}>{description}</p>
+        <div className={styles.jobsModalActions}>
+          <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
+            取消
+          </button>
+          <button className={styles.primaryActionButton} type="button" onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1386,11 +2050,19 @@ function TutorialSpotlight({ stepId }: { stepId: TutorialStepId }) {
 }
 
 function TutorialGroupDetailPreview() {
+  const childDetailsById = new Map<string, JobDetail>([
+    [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_DELIVERABLE_CHILD_DETAIL],
+    [TUTORIAL_AUDIT_JOB_ID, TUTORIAL_AUDIT_CHILD_DETAIL],
+  ]);
+
   return (
     <div className={styles.tutorialScene}>
       <div className={styles.tutorialDetailPreview} data-tutorial-target="detail">
         <div className={styles.detailPage}>
-          <GroupDetailPanel adapter={TUTORIAL_PREVIEW_ADAPTER} detail={TUTORIAL_GROUP_DETAIL} />
+          <TaskGroupDetailPanel
+            childDetailsById={childDetailsById}
+            detail={TUTORIAL_TASK_GROUP_DETAIL}
+          />
         </div>
       </div>
     </div>
@@ -1461,6 +2133,209 @@ function DeliverableTutorialOverlay({
         </div>
       </aside>
     </>
+  );
+}
+
+function TaskGroupDetailPage() {
+  const adapter = useApiAdapter();
+  const navigate = useNavigate();
+  const params = useParams();
+
+  const detailQuery = useQuery({
+    queryKey: ["task-group-detail", params.groupId],
+    queryFn: () => adapter.getTaskGroupDetail(params.groupId ?? ""),
+    enabled: Boolean(params.groupId),
+    refetchInterval: (query) => {
+      const data = query.state.data as TaskGroupDetail | undefined;
+      return data && ACTIVE_JOB_STATUSES.includes(data.status as never) ? 3000 : 12000;
+    },
+  });
+
+  const childJobIds = detailQuery.data?.childJobIds ?? [];
+  const childDetailQueries = useQueries({
+    queries: childJobIds.map((childJobId) => ({
+      queryKey: ["task-group-child-detail", childJobId],
+      queryFn: () => adapter.getJobDetail(childJobId),
+      enabled: Boolean(detailQuery.data),
+    })),
+  });
+  const childDetailsById = useMemo(
+    () =>
+      new Map(
+        childJobIds.flatMap((childJobId, index) => {
+          const detail = childDetailQueries[index]?.data;
+          return detail ? ([[childJobId, detail]] as const) : [];
+        }),
+      ),
+    [childDetailQueries, childJobIds],
+  );
+
+  return (
+    <div className={styles.detailPage}>
+      <button className={styles.backButton} type="button" onClick={() => navigate("/business")}>
+        返回工作台
+      </button>
+
+      {detailQuery.data ? (
+        <TaskGroupDetailPanel childDetailsById={childDetailsById} detail={detailQuery.data} />
+      ) : (
+        <section className={styles.detailPanel}>
+          <p className={styles.muted}>正在加载任务包详情…</p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function TaskGroupDetailPanel({
+  detail,
+  childDetailsById,
+}: {
+  detail: TaskGroupDetail;
+  childDetailsById: Map<string, JobDetail>;
+}) {
+  const childDetails = detail.childJobIds
+    .map((childJobId) => childDetailsById.get(childJobId))
+    .filter((child): child is JobDetail => Boolean(child));
+  const aggregateArtifacts = deriveTaskGroupArtifacts(childDetails);
+  const personnelEntries = Object.values(detail.personnelSnapshot.members);
+  const title = detail.sourceFilenames[0] ?? detail.groupId;
+
+  return (
+    <section className={styles.detailPanel}>
+      <header className={styles.detailHeader}>
+        <div>
+          <p className={styles.brandTop}>Task Group Detail</p>
+          <h1>{title}</h1>
+        </div>
+        <StatusPill status={detail.status} />
+      </header>
+
+      <section className={styles.detailSection}>
+        <h2>任务包概览</h2>
+        <div className={styles.detailGrid}>
+          <InfoBlock label="创建者" value={detail.creatorName ?? "-"} />
+          <InfoBlock label="科室" value={detail.creatorOffice ?? "-"} />
+          <InfoBlock label="流程状态" value={getWorkflowStatusLabel(detail.workflowStatus)} />
+          <InfoBlock label="当前节点" value={getCurrentNodeLabel(detail.currentNodeKey)} />
+          <InfoBlock label="归档状态" value={getArchiveStatusLabel(detail.archiveStatus)} />
+          <InfoBlock label="有效工作量" value={detail.effectiveWorkload.toFixed(2)} />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>流程状态</h2>
+        {detail.workflow.nodes.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {detail.workflow.nodes.map((node) => (
+              <div className={styles.outputCard} key={node.nodeKey}>
+                <strong>{node.nodeLabel}</strong>
+                <span>{`状态：${node.status}`}</span>
+                <ul className={styles.outputMetaList}>
+                  <li>{`处理人：${node.assigneeName ?? "-"}`}</li>
+                  <li>{`系数：${node.factor.toFixed(2)}`}</li>
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>当前尚未进入审批流程。</p>
+        )}
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>归档状态</h2>
+        <div className={styles.detailGrid}>
+          <InfoBlock label="归档目录" value={detail.archive.targetDir ?? "-"} />
+          <InfoBlock label="归档根路径" value={detail.archive.archiveRootPath ?? "-"} />
+          <InfoBlock label="覆盖模式" value={detail.archive.overwriteMode ?? "-"} />
+          <InfoBlock label="最近错误" value={detail.archive.lastError ?? "-"} />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>人员快照</h2>
+        {personnelEntries.length > 0 ? (
+          <div className={styles.outputGrid}>
+            {personnelEntries.map((personnel) => (
+              <div className={styles.outputCard} key={personnel.fieldName}>
+                <strong>{personnel.fieldName}</strong>
+                <span>{personnel.normalizedValue ?? personnel.rawValue ?? "-"}</span>
+                <ul className={styles.outputMetaList}>
+                  <li>{`匹配账号：${personnel.matchedAccount ?? "-"}`}</li>
+                  <li>{`状态：${personnel.status}`}</li>
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>暂无人员快照。</p>
+        )}
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>聚合下载</h2>
+        <div className={styles.downloadGrid}>
+          <ArtifactButton href={aggregateArtifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
+          <ArtifactButton href={aggregateArtifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
+          <ArtifactButton href={aggregateArtifacts.reportDownloadUrl ?? undefined} label="下载 report.xlsx" />
+          <ArtifactButton
+            href={aggregateArtifacts.replacedDwgDownloadUrl ?? undefined}
+            label="下载替换后 DWG"
+          />
+        </div>
+      </section>
+
+      <section className={styles.detailSection}>
+        <h2>子任务</h2>
+        <div className={styles.childTaskList}>
+          {detail.childJobIds.length > 0 ? (
+            detail.childJobIds.map((childJobId) => {
+              const child = childDetailsById.get(childJobId);
+              return (
+                <div className={styles.childTaskCard} key={childJobId}>
+                  <div className={styles.jobCardHeader}>
+                    <div className={styles.childTaskTitle}>
+                      <strong>{child?.sourceFilename ?? childJobId}</strong>
+                      {child?.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+                    </div>
+                    {child ? <StatusPill status={child.status} /> : null}
+                  </div>
+
+                  {child?.taskKind === "deliverable" ? (
+                    <DeliverableResultCard
+                      outputs={child.deliverableOutputs}
+                      sourceFilename={child.sourceFilename}
+                    />
+                  ) : child?.taskKind === "audit_check" ? (
+                    <AuditResultCard
+                      affectedDrawingsCount={child.affectedDrawingsCount}
+                      findingGroups={child.findingGroups}
+                      findingsCount={child.findingsCount}
+                    />
+                  ) : child?.taskKind === "audit_replace" ? (
+                    <ReplaceResultCard
+                      affectedDrawingsCount={child.affectedDrawingsCount}
+                      replaceSummary={child.replaceSummary}
+                    />
+                  ) : (
+                    <p className={styles.muted}>正在整理子任务详情。</p>
+                  )}
+
+                  <div className={styles.childTaskActions}>
+                    <Link className={styles.subtaskLink} to={`/jobs/${childJobId}`}>
+                      查看子任务
+                    </Link>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className={styles.muted}>当前没有子任务。</p>
+          )}
+        </div>
+      </section>
+    </section>
   );
 }
 
@@ -1751,6 +2626,20 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       </section>
     </section>
   );
+}
+
+function deriveTaskGroupArtifacts(childDetails: readonly JobDetail[]) {
+  const deliverableChild = childDetails.find((child) => child.taskKind === "deliverable");
+  const replaceChild = childDetails.find((child) => child.taskKind === "audit_replace");
+  const auditChild = childDetails.find((child) => child.taskKind === "audit_check");
+
+  return {
+    packageDownloadUrl: deliverableChild?.artifacts.packageDownloadUrl ?? null,
+    iedDownloadUrl: deliverableChild?.artifacts.iedDownloadUrl ?? null,
+    reportDownloadUrl:
+      replaceChild?.artifacts.reportDownloadUrl ?? auditChild?.artifacts.reportDownloadUrl ?? null,
+    replacedDwgDownloadUrl: replaceChild?.artifacts.replacedDwgDownloadUrl ?? null,
+  };
 }
 
 function DeliverableResultCard({

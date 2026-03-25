@@ -1,0 +1,68 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - link "业务" [ref=e13] [cursor=pointer]:
+      - /url: /business
+    - link "账号" [ref=e14] [cursor=pointer]:
+      - /url: /account
+    - link "工作量 (0)" [ref=e15] [cursor=pointer]:
+      - /url: /workload
+    - link "管理员配置" [ref=e16] [cursor=pointer]:
+      - /url: /account/admin
+    - button "退出登录" [ref=e17]
+  - generic [ref=e18]:
+    - banner [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]:
+          - img "中核集团标识" [ref=e22]
+          - generic [ref=e23]:
+            - paragraph [ref=e24]: CNPE Structural Drawing Platform
+            - heading "中核工程-河北分公司-建筑结构所出图平台" [level=1] [ref=e25]
+        - generic [ref=e26]:
+          - generic [ref=e27]:
+            - paragraph [ref=e28]: System Status
+            - button "教程" [ref=e29]
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: 服务
+              - strong [ref=e33]: 就绪
+            - generic [ref=e34]:
+              - generic [ref=e35]: 存储
+              - strong [ref=e36]: 正常
+            - generic [ref=e37]:
+              - generic [ref=e38]: 队列
+              - strong [ref=e39]: 0 项
+            - generic [ref=e40]:
+              - generic [ref=e41]: AutoCAD
+              - strong [ref=e42]: 可用
+            - generic [ref=e43]:
+              - generic [ref=e44]: Office
+              - strong [ref=e45]: 可用
+    - navigation [ref=e46]:
+      - button "业务模块" [pressed] [ref=e47]
+      - button "账号模块" [ref=e48]
+      - button "工作量模块" [ref=e49]
+    - main [ref=e51]:
+      - generic [ref=e52]:
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - paragraph [ref=e57]: Task Entry
+            - heading "新建任务" [level=2] [ref=e58]
+          - generic [ref=e59]:
+            - button "出图" [ref=e60]
+            - button "纠错" [ref=e61]
+            - button "翻版" [ref=e62]
+          - button "选择出图 DWG 文件"
+        - generic [ref=e63]:
+          - generic [ref=e64]:
+            - generic [ref=e65]:
+              - paragraph [ref=e66]: Task Record
+              - heading "任务记录" [level=2] [ref=e67]
+            - button "刷新" [ref=e68]
+          - generic [ref=e69]:
+            - button "全部" [pressed] [ref=e70]
+            - button "排队中" [ref=e71]
+            - button "运行中" [ref=e72]
+            - button "成功" [ref=e73]
+            - button "失败" [ref=e74]
+          - searchbox "搜索任务名称" [ref=e76]
+          - paragraph [ref=e79]: 当前没有任务记录。

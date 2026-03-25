@@ -1,0 +1,60 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - link "管理员配置" [ref=e13] [cursor=pointer]:
+      - /url: /account/admin
+    - button "退出登录" [ref=e14]
+  - navigation [ref=e15]:
+    - button "业务模块" [ref=e16]
+    - button "账号模块" [active] [pressed] [ref=e17]
+    - button "工作量模块" [ref=e18]
+  - main [ref=e77]:
+    - generic [ref=e79]:
+      - paragraph [ref=e80]: Account Center
+      - heading "账号模块" [level=1] [ref=e81]
+      - paragraph [ref=e82]: 这里集中展示当前登录账号的信息、密码修改入口，以及已经结算的个人工作量摘要。
+    - generic [ref=e83]:
+      - article [ref=e84]:
+        - generic [ref=e85]: 姓名
+        - strong [ref=e86]: 河北建筑结构所文
+      - article [ref=e87]:
+        - generic [ref=e88]: 账号
+        - strong [ref=e89]: hbjjswd
+      - article [ref=e90]:
+        - generic [ref=e91]: 角色
+        - strong [ref=e92]: 管理员
+      - article [ref=e93]:
+        - generic [ref=e94]: 责任单位
+        - strong [ref=e95]: 建筑结构所
+      - article [ref=e96]:
+        - generic [ref=e97]: 单位编码
+        - strong [ref=e98]: 25C0
+      - article [ref=e99]:
+        - generic [ref=e100]: 待办流程
+        - strong [ref=e101]: "0"
+        - paragraph [ref=e102]: 当前轮到你处理的审批节点数
+    - generic [ref=e103]:
+      - generic [ref=e104]:
+        - generic [ref=e105]:
+          - generic [ref=e106]:
+            - paragraph [ref=e107]: Security
+            - heading "修改密码" [level=2] [ref=e108]
+          - generic [ref=e109]: 只更新当前账号密码
+        - generic [ref=e110]:
+          - generic [ref=e111]: 新密码
+          - textbox "新密码" [ref=e112]
+          - paragraph [ref=e113]: 提交后会立即生效，后续登录请使用新密码。
+          - button "更新密码" [ref=e114] [cursor=pointer]
+      - generic [ref=e115]:
+        - generic [ref=e116]:
+          - generic [ref=e117]:
+            - paragraph [ref=e118]: Personal Workload
+            - heading "个人工作量摘要" [level=2] [ref=e119]
+          - generic [ref=e120]: 已结算记录
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - generic [ref=e123]: 累计工作量 A1
+            - strong [ref=e124]: "0.00"
+          - generic [ref=e125]:
+            - generic [ref=e126]: 0 条已结算记录
+            - generic [ref=e127]: 最近结算：暂无
+        - paragraph [ref=e128]: 当前还没有已结算的个人工作量记录。

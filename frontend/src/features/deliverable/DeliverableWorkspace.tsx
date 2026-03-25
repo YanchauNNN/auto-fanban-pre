@@ -19,6 +19,8 @@ import type {
   FontPreflightResult,
   FormField,
   FormSchema,
+  PersonnelCandidate,
+  PersonnelNormalizationResult,
   TaskConfigDraft,
   TaskConfigPreset,
 } from "../../platform/api/types";
@@ -70,6 +72,14 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_note_text",
 ]);
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
+const PERSONNEL_NORMALIZATION_DEBOUNCE_MS = 300;
+const PERSONNEL_NORMALIZATION_FIELD_KEYS = [
+  "ied_prepared_by",
+  "ied_checked_by",
+  "ied_reviewed_by",
+  "ied_approved_by",
+] as const;
+const PERSONNEL_DUPLICATE_ROLE_FIELD_KEYS = PERSONNEL_NORMALIZATION_FIELD_KEYS;
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
@@ -79,6 +89,16 @@ const PLOT_STYLE_OPTIONS = [
 type FontSubmitConfig = {
   fontReplacePolicy: "none" | "replace_missing";
   fontReplacementFont?: string;
+};
+
+type PersonnelFieldState = {
+  status: "idle" | "loading" | "matched" | "ambiguous" | "invalid";
+  rawValue: string;
+  normalizedValue: string | null;
+  matchedAccount: string | null;
+  matchedName: string | null;
+  candidates: PersonnelCandidate[];
+  message: string | null;
 };
 
 export function DeliverableWorkspace({
@@ -101,16 +121,30 @@ export function DeliverableWorkspace({
   const [fontPreflightResult, setFontPreflightResult] = useState<FontPreflightResult | null>(null);
   const [selectedReplacementFont, setSelectedReplacementFont] = useState("");
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
+  const [personnelFieldStates, setPersonnelFieldStates] = useState<
+    Record<string, PersonnelFieldState>
+  >({});
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
   const [presetError, setPresetError] = useState<string | null>(null);
   const [presetUpdatedNotice, setPresetUpdatedNotice] = useState(false);
   const tutorialPreviewEnabled = Boolean(tutorialPreview);
+  const latestValuesRef = useRef(draft.values);
+  const personnelFieldStatesRef = useRef(personnelFieldStates);
+  const normalizationRequestSeqRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     setDraft((current) => syncTaskConfigDraft(schema, current));
   }, [schema]);
+
+  useEffect(() => {
+    latestValuesRef.current = draft.values;
+  }, [draft.values]);
+
+  useEffect(() => {
+    personnelFieldStatesRef.current = personnelFieldStates;
+  }, [personnelFieldStates]);
 
   useEffect(() => {
     if (incomingFiles.length === 0) {
@@ -118,6 +152,7 @@ export function DeliverableWorkspace({
     }
 
     resetFontPreflightState();
+    setPersonnelFieldStates({});
     setDraft((current) =>
       applyTutorialPreview(
         applyFilesToDraft(syncTaskConfigDraft(schema, current), incomingFiles, pendingReplaceConfig),
@@ -143,6 +178,25 @@ export function DeliverableWorkspace({
     [schema],
   );
   const upgradeEnabled = draft.values.is_upgrade === "true";
+  const watchedPersonnelFields = useMemo(
+    () =>
+      schema.sections
+        .flatMap((section) => section.fields)
+        .map((field) => field.key)
+        .filter((fieldKey): fieldKey is (typeof PERSONNEL_NORMALIZATION_FIELD_KEYS)[number] =>
+          PERSONNEL_NORMALIZATION_FIELD_KEYS.includes(
+            fieldKey as (typeof PERSONNEL_NORMALIZATION_FIELD_KEYS)[number],
+          ),
+        ),
+    [schema],
+  );
+  const watchedPersonnelFieldSet = useMemo(
+    () => new Set<string>(watchedPersonnelFields),
+    [watchedPersonnelFields],
+  );
+  const watchedPersonnelSignature = watchedPersonnelFields
+    .map((fieldKey) => `${fieldKey}:${draft.values[fieldKey] ?? ""}`)
+    .join("|");
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [savedPresets, selectedPresetId],
@@ -211,6 +265,54 @@ export function DeliverableWorkspace({
     onDraftAvailabilityChange(hasTaskConfigDraft(schema, draft));
   }, [draft, onDraftAvailabilityChange, schema]);
 
+  useEffect(() => {
+    if (watchedPersonnelFields.length === 0) {
+      return;
+    }
+
+    const timers: number[] = [];
+    for (const fieldKey of watchedPersonnelFields) {
+      const rawValue = (draft.values[fieldKey] ?? "").trim();
+      const currentState = personnelFieldStatesRef.current[fieldKey];
+
+      if (!rawValue) {
+        if (currentState) {
+          setPersonnelFieldStates((current) => {
+            if (!(fieldKey in current)) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[fieldKey];
+            return next;
+          });
+        }
+        continue;
+      }
+
+      if (currentState?.status === "matched" && currentState.normalizedValue === rawValue) {
+        continue;
+      }
+
+      if (currentState?.status === "ambiguous" && currentState.rawValue === rawValue) {
+        continue;
+      }
+
+      if (currentState?.status === "invalid" && currentState.rawValue === rawValue) {
+        continue;
+      }
+
+      timers.push(
+        window.setTimeout(() => {
+          void requestPersonnelNormalization(fieldKey, rawValue);
+        }, PERSONNEL_NORMALIZATION_DEBOUNCE_MS),
+      );
+    }
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [adapter, watchedPersonnelFields, watchedPersonnelSignature]);
+
   if (!isOpen) {
     return null;
   }
@@ -248,11 +350,160 @@ export function DeliverableWorkspace({
     }).detail;
   }
 
-  async function submitDeliverable(fontConfig: FontSubmitConfig) {
+  function clearPersonnelState(fieldKey: string) {
+    setPersonnelFieldStates((current) => {
+      if (!(fieldKey in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[fieldKey];
+      return next;
+    });
+  }
+
+  function setPersonnelState(
+    fieldKey: string,
+    rawValue: string,
+    result: PersonnelNormalizationResult | null,
+    fallbackMessage?: string,
+  ) {
+    if (!rawValue.trim()) {
+      clearPersonnelState(fieldKey);
+      return;
+    }
+
+    if (!result) {
+      setPersonnelFieldStates((current) => ({
+        ...current,
+        [fieldKey]: {
+          status: "invalid",
+          rawValue,
+          normalizedValue: null,
+          matchedAccount: null,
+          matchedName: null,
+          candidates: [],
+          message: fallbackMessage ?? "人员补全失败，请稍后重试。",
+        },
+      }));
+      return;
+    }
+
+    const normalized = result.normalized;
+    setPersonnelFieldStates((current) => ({
+      ...current,
+      [fieldKey]: {
+        status: normalizePersonnelStatus(normalized.status),
+        rawValue,
+        normalizedValue: normalized.normalizedValue ?? null,
+        matchedAccount: normalized.matchedAccount ?? null,
+        matchedName: normalized.matchedName ?? null,
+        candidates: result.candidates,
+        message: getPersonnelStateMessage(normalized.status, normalized.errors),
+      },
+    }));
+  }
+
+  async function requestPersonnelNormalization(fieldKey: string, rawValue: string) {
+    const trimmedValue = rawValue.trim();
+    if (!trimmedValue) {
+      clearPersonnelState(fieldKey);
+      return null;
+    }
+
+    const requestId = (normalizationRequestSeqRef.current[fieldKey] ?? 0) + 1;
+    normalizationRequestSeqRef.current[fieldKey] = requestId;
+    setPersonnelFieldStates((current) => ({
+      ...current,
+      [fieldKey]: {
+        status: "loading",
+        rawValue: trimmedValue,
+        normalizedValue: null,
+        matchedAccount: null,
+        matchedName: null,
+        candidates: [],
+        message: "正在识别人员账号...",
+      },
+    }));
+
+    try {
+      const result = await adapter.normalizePersonnel(fieldKey, trimmedValue);
+      const latestValue = (latestValuesRef.current[fieldKey] ?? "").trim();
+      const isLatest = normalizationRequestSeqRef.current[fieldKey] === requestId;
+      if (!isLatest || latestValue !== trimmedValue) {
+        return result;
+      }
+
+      setPersonnelState(fieldKey, trimmedValue, result);
+      if (
+        normalizePersonnelStatus(result.normalized.status) === "matched" &&
+        result.normalized.normalizedValue &&
+        latestValue !== result.normalized.normalizedValue
+      ) {
+        setDraft((current) => {
+          if ((current.values[fieldKey] ?? "").trim() !== trimmedValue) {
+            return current;
+          }
+
+          return {
+            ...current,
+            values: {
+              ...current.values,
+              [fieldKey]: result.normalized.normalizedValue ?? trimmedValue,
+            },
+            fieldErrors: {
+              ...current.fieldErrors,
+              [fieldKey]: [],
+            },
+          };
+        });
+      }
+
+      return result;
+    } catch {
+      const latestValue = (latestValuesRef.current[fieldKey] ?? "").trim();
+      const isLatest = normalizationRequestSeqRef.current[fieldKey] === requestId;
+      if (isLatest && latestValue === trimmedValue) {
+        setPersonnelState(fieldKey, trimmedValue, null);
+      }
+      return null;
+    }
+  }
+
+  function handlePersonnelCandidateSelect(fieldKey: string, candidate: PersonnelCandidate) {
+    const normalizedValue = `${candidate.displayName}@${candidate.accountId}`;
+    setDraft((current) => ({
+      ...current,
+      values: {
+        ...current.values,
+        [fieldKey]: normalizedValue,
+      },
+      fieldErrors: {
+        ...current.fieldErrors,
+        [fieldKey]: [],
+      },
+    }));
+    setPersonnelFieldStates((current) => ({
+      ...current,
+      [fieldKey]: {
+        status: "matched",
+        rawValue: normalizedValue,
+        normalizedValue,
+        matchedAccount: candidate.accountId,
+        matchedName: candidate.displayName,
+        candidates: [],
+        message: null,
+      },
+    }));
+  }
+
+  async function submitDeliverable(
+    fontConfig: FontSubmitConfig,
+    draftValues: Record<string, string> = draft.values,
+  ) {
     setIsSubmitting(true);
     setFontReplacementError(null);
 
-    const submissionValues = buildSubmissionValues(draft.values, fontConfig);
+    const submissionValues = buildSubmissionValues(draftValues, fontConfig);
 
     try {
       const payload = pendingReplaceConfig?.runDeliverable
@@ -276,6 +527,7 @@ export function DeliverableWorkspace({
       }
 
       setDraft(createTaskConfigDraft(schema));
+      setPersonnelFieldStates({});
       setShowAdvanced(false);
       resetFontPreflightState();
       onClearPendingReplaceFlow?.();
@@ -322,7 +574,12 @@ export function DeliverableWorkspace({
         nextFieldErrors[field.key] = ["YYYY-MM-DD"];
       }
 
-      if (value && field.type === "nameId" && !NAME_ID_PATTERN.test(value)) {
+      if (
+        value &&
+        field.type === "nameId" &&
+        !watchedPersonnelFieldSet.has(field.key) &&
+        !NAME_ID_PATTERN.test(value)
+      ) {
         nextFieldErrors[field.key] = ["姓名@ID"];
       }
     }
@@ -352,8 +609,136 @@ export function DeliverableWorkspace({
       return;
     }
 
+    const normalizedValues = { ...draft.values };
+    const personnelFieldErrors: Record<string, string[]> = {};
+    const resolvedPersonnelAccounts = new Map<string, string>();
+    const fieldsNeedingNormalization = watchedPersonnelFields.filter((fieldKey) => {
+      const value = normalizedValues[fieldKey]?.trim() ?? "";
+      if (!value) {
+        return false;
+      }
+
+      const currentState = personnelFieldStatesRef.current[fieldKey];
+      if (!currentState || currentState.rawValue !== value) {
+        return true;
+      }
+
+      return currentState.status === "loading" || currentState.status === "idle";
+    });
+
+    const normalizationResults = await Promise.all(
+      fieldsNeedingNormalization.map(async (fieldKey) => {
+        const rawValue = normalizedValues[fieldKey]?.trim() ?? "";
+        try {
+          const result = await adapter.normalizePersonnel(fieldKey, rawValue);
+          return { fieldKey, rawValue, result };
+        } catch {
+          return { fieldKey, rawValue, result: null };
+        }
+      }),
+    );
+
+    for (const { fieldKey, rawValue, result } of normalizationResults) {
+      setPersonnelState(fieldKey, rawValue, result);
+      if (!result) {
+        personnelFieldErrors[fieldKey] = ["人员补全失败，请稍后重试。"];
+        continue;
+      }
+
+      const normalizedStatus = normalizePersonnelStatus(result.normalized.status);
+      if (normalizedStatus === "matched" && result.normalized.normalizedValue) {
+        normalizedValues[fieldKey] = result.normalized.normalizedValue;
+        if (result.normalized.matchedAccount) {
+          resolvedPersonnelAccounts.set(fieldKey, result.normalized.matchedAccount);
+        }
+        continue;
+      }
+
+      personnelFieldErrors[fieldKey] = [
+        getPersonnelStateMessage(result.normalized.status, result.normalized.errors) ??
+          "请检查人员账号。",
+      ];
+    }
+
+    for (const fieldKey of watchedPersonnelFields) {
+      if (personnelFieldErrors[fieldKey]) {
+        continue;
+      }
+
+      const value = normalizedValues[fieldKey]?.trim() ?? "";
+      if (!value) {
+        continue;
+      }
+
+      const currentState = personnelFieldStatesRef.current[fieldKey];
+      if (
+        currentState?.status === "matched" &&
+        currentState.normalizedValue === value &&
+        currentState.matchedAccount
+      ) {
+        resolvedPersonnelAccounts.set(fieldKey, currentState.matchedAccount);
+        continue;
+      }
+
+      if (currentState?.status === "ambiguous" && currentState.rawValue === value) {
+        personnelFieldErrors[fieldKey] = ["请选择候选账号。"];
+        continue;
+      }
+
+      if (currentState?.status === "invalid" && currentState.rawValue === value) {
+        personnelFieldErrors[fieldKey] = [
+          currentState.message ?? "未找到有效账号，请检查输入。",
+        ];
+        continue;
+      }
+
+      const fallbackAccountId = extractAccountId(value);
+      if (fallbackAccountId) {
+        resolvedPersonnelAccounts.set(fieldKey, fallbackAccountId);
+      }
+    }
+
+    const duplicateAccounts = new Set<string>();
+    const seenAccounts = new Map<string, string>();
+    for (const fieldKey of PERSONNEL_DUPLICATE_ROLE_FIELD_KEYS) {
+      const accountId = resolvedPersonnelAccounts.get(fieldKey);
+      if (!accountId) {
+        continue;
+      }
+
+      const existingField = seenAccounts.get(accountId);
+      if (existingField) {
+        duplicateAccounts.add(accountId);
+        personnelFieldErrors[fieldKey] = ["账号不能与其他审批角色重复。"];
+        personnelFieldErrors[existingField] = ["账号不能与其他审批角色重复。"];
+        continue;
+      }
+
+      seenAccounts.set(accountId, fieldKey);
+    }
+
+    if (Object.keys(personnelFieldErrors).length > 0) {
+      setDraft((current) => ({
+        ...current,
+        values: {
+          ...current.values,
+          ...normalizedValues,
+        },
+        fieldErrors: personnelFieldErrors,
+        formErrors:
+          duplicateAccounts.size > 0
+            ? ["审批角色账号不能重复，请检查编制、校核、审核、审定。"]
+            : [],
+      }));
+      return;
+    }
+
     setDraft((current) => ({
       ...current,
+      values: {
+        ...current.values,
+        ...normalizedValues,
+      },
       fieldErrors: {},
       formErrors: [],
     }));
@@ -399,7 +784,7 @@ export function DeliverableWorkspace({
         return;
       }
 
-      await submitDeliverable({ fontReplacePolicy: "none" });
+      await submitDeliverable({ fontReplacePolicy: "none" }, normalizedValues);
     } catch (error) {
       setValidationErrors(extractValidationDetail(error), ["字体预检失败，请稍后重试。"]);
     } finally {
@@ -425,6 +810,9 @@ export function DeliverableWorkspace({
 
   function handleFieldChange(key: string, value: string) {
     setPresetUpdatedNotice(false);
+    if (watchedPersonnelFieldSet.has(key)) {
+      clearPersonnelState(key);
+    }
     setDraft((current) => ({
       ...current,
       values: {
@@ -470,6 +858,7 @@ export function DeliverableWorkspace({
 
     setPresetUpdatedNotice(false);
     resetFontPreflightState();
+    setPersonnelFieldStates({});
     setDraft((current) =>
       applyFilesToDraft(syncTaskConfigDraft(schema, current), files, pendingReplaceConfig),
     );
@@ -478,6 +867,7 @@ export function DeliverableWorkspace({
   function handleClearDraft() {
     setPresetUpdatedNotice(false);
     resetFontPreflightState();
+    setPersonnelFieldStates({});
     setDraft(createTaskConfigDraft(schema));
     setShowAdvanced(false);
     setPresetError(null);
@@ -528,6 +918,7 @@ export function DeliverableWorkspace({
       return;
     }
 
+    setPersonnelFieldStates({});
     setDraft((current) =>
       toDeliverableOnlyDraft(applyTaskPreset(schema, current, selectedPreset)),
     );
@@ -798,6 +1189,8 @@ export function DeliverableWorkspace({
                   coverRevisionField={coverRevisionField}
                   draft={draft}
                   fieldErrors={draft.fieldErrors}
+                  personnelFieldStates={personnelFieldStates}
+                  onCandidateSelect={handlePersonnelCandidateSelect}
                   onFieldChange={handleFieldChange}
                   onUpgradeToggle={handleUpgradeToggle}
                   section={section}
@@ -849,6 +1242,10 @@ export function DeliverableWorkspace({
                               key={field.key}
                               error={draft.fieldErrors[field.key]?.[0]}
                               field={field}
+                              personnelState={personnelFieldStates[field.key]}
+                              onCandidateSelect={(candidate) =>
+                                handlePersonnelCandidateSelect(field.key, candidate)
+                              }
                               onChange={(value) => handleFieldChange(field.key, value)}
                               value={draft.values[field.key] ?? ""}
                               values={draft.values}
@@ -1006,18 +1403,34 @@ function FieldControl({
   value,
   values,
   error,
+  personnelState,
+  onCandidateSelect,
   onChange,
 }: {
   field: FormField;
   value: string;
   values: Record<string, string>;
   error?: string;
+  personnelState?: PersonnelFieldState;
+  onCandidateSelect?: (candidate: PersonnelCandidate) => void;
   onChange: (value: string) => void;
 }) {
   const required = field.required || evaluateRequiredWhen(field.requiredWhen, values);
   const inputId = useId();
   const helperText = field.description.trim();
   const placeholder = getFieldPlaceholder(field);
+  const inlineMessage =
+    error ??
+    (personnelState?.status === "invalid" || personnelState?.status === "ambiguous"
+      ? personnelState.message
+      : null);
+  const statusText =
+    !error &&
+    (personnelState?.status === "loading"
+      ? personnelState.message
+      : personnelState?.status === "matched" && personnelState.normalizedValue
+        ? `已识别为 ${personnelState.normalizedValue}`
+        : null);
 
   return (
     <div className={styles.field}>
@@ -1048,7 +1461,23 @@ function FieldControl({
         />
       )}
       {helperText ? <span className={styles.helperText}>{helperText}</span> : null}
-      {error ? <span className={styles.errorText}>{error}</span> : null}
+      {statusText ? <span className={styles.helperText}>{statusText}</span> : null}
+      {inlineMessage ? <span className={styles.errorText}>{inlineMessage}</span> : null}
+      {personnelState?.status === "ambiguous" && personnelState.candidates.length > 0 && onCandidateSelect ? (
+        <div className={styles.personnelCandidateList}>
+          {personnelState.candidates.map((candidate) => (
+            <button
+              key={`${candidate.accountId}-${candidate.officeCode ?? ""}`}
+              className={styles.personnelCandidateButton}
+              type="button"
+              onClick={() => onCandidateSelect(candidate)}
+            >
+              <strong>{`${candidate.displayName}@${candidate.accountId}`}</strong>
+              <span>{[candidate.role, candidate.officeName].filter(Boolean).join(" · ")}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1057,6 +1486,8 @@ function FragmentWithUpgradeSection({
   section,
   draft,
   fieldErrors,
+  personnelFieldStates,
+  onCandidateSelect,
   onFieldChange,
   onUpgradeToggle,
   upgradeEnabled,
@@ -1066,6 +1497,8 @@ function FragmentWithUpgradeSection({
   section: FormSchema["sections"][number];
   draft: TaskConfigDraft;
   fieldErrors: Record<string, string[]>;
+  personnelFieldStates: Record<string, PersonnelFieldState>;
+  onCandidateSelect: (fieldKey: string, candidate: PersonnelCandidate) => void;
   onFieldChange: (key: string, value: string) => void;
   onUpgradeToggle: () => void;
   upgradeEnabled: boolean;
@@ -1103,6 +1536,8 @@ function FragmentWithUpgradeSection({
               key={field.key}
               error={fieldErrors[field.key]?.[0]}
               field={field}
+              personnelState={personnelFieldStates[field.key]}
+              onCandidateSelect={(candidate) => onCandidateSelect(field.key, candidate)}
               onChange={(value) => onFieldChange(field.key, value)}
               value={draft.values[field.key] ?? ""}
               values={draft.values}
@@ -1377,6 +1812,54 @@ function getFieldPlaceholder(field: FormField) {
   }
 
   return `请输入${field.label}`;
+}
+
+function normalizePersonnelStatus(status: string | null | undefined) {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (
+    normalized === "matched" ||
+    normalized === "ambiguous" ||
+    normalized === "invalid" ||
+    normalized === "loading"
+  ) {
+    return normalized;
+  }
+
+  return "idle";
+}
+
+function getPersonnelStateMessage(
+  status: string | null | undefined,
+  errors: readonly string[] | null | undefined,
+) {
+  const normalizedStatus = normalizePersonnelStatus(status);
+  if (normalizedStatus === "loading") {
+    return "正在识别人员账号...";
+  }
+
+  if (normalizedStatus === "ambiguous") {
+    return "找到多个同名账号，请选择一个。";
+  }
+
+  if (normalizedStatus === "invalid") {
+    if ((errors ?? []).includes("ambiguous_name")) {
+      return "存在多个同名账号，请输入完整账号或从候选中选择。";
+    }
+
+    return "未找到有效账号，请检查输入。";
+  }
+
+  return null;
+}
+
+function extractAccountId(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !trimmed.includes("@")) {
+    return "";
+  }
+
+  const parts = trimmed.split("@");
+  return parts[parts.length - 1]?.trim() ?? "";
 }
 
 function normalizeFontPreflightStatus(status: string) {

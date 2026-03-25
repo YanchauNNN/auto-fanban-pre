@@ -1,0 +1,854 @@
+- generic [ref=e11]:
+  - banner [ref=e12]:
+    - link "管理员配置" [active] [ref=e13] [cursor=pointer]:
+      - /url: /account/admin
+    - button "退出登录" [ref=e14]
+  - navigation [ref=e15]:
+    - button "业务模块" [ref=e16]
+    - button "账号模块" [pressed] [ref=e17]
+    - button "工作量模块" [ref=e18]
+  - main [ref=e174]:
+    - generic [ref=e176]:
+      - paragraph [ref=e177]: Admin Center
+      - heading "管理员配置" [level=1] [ref=e178]
+      - paragraph [ref=e179]: 这里集中处理账号管理、无效账号行检查，以及当前已落地的归档根路径配置。
+    - generic [ref=e180]:
+      - generic [ref=e181]:
+        - generic [ref=e182]:
+          - generic [ref=e183]:
+            - paragraph [ref=e184]: Accounts
+            - heading "现有账号" [level=2] [ref=e185]
+          - button "新建账号" [ref=e186] [cursor=pointer]
+        - generic [ref=e187]:
+          - article [ref=e188]:
+            - generic [ref=e189]:
+              - strong [ref=e190]: 河北建筑结构所文（hbjjswd）
+              - paragraph [ref=e191]: hbjjswd · 管理员
+              - paragraph [ref=e192]: 建筑结构所
+            - button "编辑" [ref=e193] [cursor=pointer]
+          - article [ref=e194]:
+            - generic [ref=e195]:
+              - strong [ref=e196]: l-gengtj（invalid-row-3）
+              - paragraph [ref=e197]: invalid-row-3 · 耿铁军
+              - paragraph [ref=e198]: 结构二室
+            - button "编辑" [ref=e199] [cursor=pointer]
+          - article [ref=e200]:
+            - generic [ref=e201]:
+              - strong [ref=e202]: l-sunyy（invalid-row-4）
+              - paragraph [ref=e203]: invalid-row-4 · 孙媛媛
+              - paragraph [ref=e204]: 结构一室
+            - button "编辑" [ref=e205] [cursor=pointer]
+          - article [ref=e206]:
+            - generic [ref=e207]:
+              - strong [ref=e208]: l-zhouxy（invalid-row-5）
+              - paragraph [ref=e209]: invalid-row-5 · 周祥玉
+              - paragraph [ref=e210]: 结构一室
+            - button "编辑" [ref=e211] [cursor=pointer]
+          - article [ref=e212]:
+            - generic [ref=e213]:
+              - strong [ref=e214]: lipya（invalid-row-6）
+              - paragraph [ref=e215]: invalid-row-6 · 李鹏阳
+              - paragraph [ref=e216]: 结构一室
+            - button "编辑" [ref=e217] [cursor=pointer]
+          - article [ref=e218]:
+            - generic [ref=e219]:
+              - strong [ref=e220]: 王丹丹（wangdd）
+              - paragraph [ref=e221]: wangdd · 管理员
+              - paragraph [ref=e222]: 建筑结构所
+            - button "编辑" [ref=e223] [cursor=pointer]
+          - article [ref=e224]:
+            - generic [ref=e225]:
+              - strong [ref=e226]: 薛晓航（xuexh）
+              - paragraph [ref=e227]: xuexh · 设计人员
+              - paragraph [ref=e228]: 结构一室
+            - button "编辑" [ref=e229] [cursor=pointer]
+          - article [ref=e230]:
+            - generic [ref=e231]:
+              - strong [ref=e232]: 闫伟（yanwei）
+              - paragraph [ref=e233]: yanwei · 所领导
+              - paragraph [ref=e234]: 建筑结构所
+            - button "编辑" [ref=e235] [cursor=pointer]
+          - article [ref=e236]:
+            - generic [ref=e237]:
+              - strong [ref=e238]: 曾添君（zengtj）
+              - paragraph [ref=e239]: zengtj · 设计人员
+              - paragraph [ref=e240]: 建筑结构所
+            - button "编辑" [ref=e241] [cursor=pointer]
+          - article [ref=e242]:
+            - generic [ref=e243]:
+              - strong [ref=e244]: 张静（zhangjinga）
+              - paragraph [ref=e245]: zhangjinga · 所领导
+              - paragraph [ref=e246]: 建筑结构所
+            - button "编辑" [ref=e247] [cursor=pointer]
+          - article [ref=e248]:
+            - generic [ref=e249]:
+              - strong [ref=e250]: 张雄谦（zhangxqb）
+              - paragraph [ref=e251]: zhangxqb · 所领导
+              - paragraph [ref=e252]: 建筑结构所
+            - button "编辑" [ref=e253] [cursor=pointer]
+          - article [ref=e254]:
+            - generic [ref=e255]:
+              - strong [ref=e256]: 王若禹（L-wangrya）
+              - paragraph [ref=e257]: L-wangrya · 设计人员
+              - paragraph [ref=e258]: 结构一室
+            - button "编辑" [ref=e259] [cursor=pointer]
+          - article [ref=e260]:
+            - generic [ref=e261]:
+              - strong [ref=e262]: 白文婷（baiwt）
+              - paragraph [ref=e263]: baiwt · 设计人员
+              - paragraph [ref=e264]: 结构一室
+            - button "编辑" [ref=e265] [cursor=pointer]
+          - article [ref=e266]:
+            - generic [ref=e267]:
+              - strong [ref=e268]: 曹恒恒（caohh）
+              - paragraph [ref=e269]: caohh · 设计人员
+              - paragraph [ref=e270]: 结构一室
+            - button "编辑" [ref=e271] [cursor=pointer]
+          - article [ref=e272]:
+            - generic [ref=e273]:
+              - strong [ref=e274]: 陈恩友（cheney）
+              - paragraph [ref=e275]: cheney · 设计人员
+              - paragraph [ref=e276]: 结构一室
+            - button "编辑" [ref=e277] [cursor=pointer]
+          - article [ref=e278]:
+            - generic [ref=e279]:
+              - strong [ref=e280]: 戴鹏（daipenga）
+              - paragraph [ref=e281]: daipenga · 设计人员
+              - paragraph [ref=e282]: 结构一室
+            - button "编辑" [ref=e283] [cursor=pointer]
+          - article [ref=e284]:
+            - generic [ref=e285]:
+              - strong [ref=e286]: 杜嘉腾（dujt）
+              - paragraph [ref=e287]: dujt · 设计人员
+              - paragraph [ref=e288]: 结构一室
+            - button "编辑" [ref=e289] [cursor=pointer]
+          - article [ref=e290]:
+            - generic [ref=e291]:
+              - strong [ref=e292]: 韩冰（hanbingb）
+              - paragraph [ref=e293]: hanbingb · 设计人员
+              - paragraph [ref=e294]: 结构一室
+            - button "编辑" [ref=e295] [cursor=pointer]
+          - article [ref=e296]:
+            - generic [ref=e297]:
+              - strong [ref=e298]: 侯跃鹏（houypa）
+              - paragraph [ref=e299]: houypa · 设计人员
+              - paragraph [ref=e300]: 结构一室
+            - button "编辑" [ref=e301] [cursor=pointer]
+          - article [ref=e302]:
+            - generic [ref=e303]:
+              - strong [ref=e304]: 姜天华（jiangth）
+              - paragraph [ref=e305]: jiangth · 设计人员
+              - paragraph [ref=e306]: 结构一室
+            - button "编辑" [ref=e307] [cursor=pointer]
+          - article [ref=e308]:
+            - generic [ref=e309]:
+              - strong [ref=e310]: 董佳浩（l-dongjh）
+              - paragraph [ref=e311]: l-dongjh · 设计人员
+              - paragraph [ref=e312]: 结构一室
+            - button "编辑" [ref=e313] [cursor=pointer]
+          - article [ref=e314]:
+            - generic [ref=e315]:
+              - strong [ref=e316]: 杜晓博（l-duxb）
+              - paragraph [ref=e317]: l-duxb · 设计人员
+              - paragraph [ref=e318]: 结构一室
+            - button "编辑" [ref=e319] [cursor=pointer]
+          - article [ref=e320]:
+            - generic [ref=e321]:
+              - strong [ref=e322]: 贾盼盼（l-jiapp）
+              - paragraph [ref=e323]: l-jiapp · 设计人员
+              - paragraph [ref=e324]: 结构一室
+            - button "编辑" [ref=e325] [cursor=pointer]
+          - article [ref=e326]:
+            - generic [ref=e327]:
+              - strong [ref=e328]: 刘伟（l-liuweia）
+              - paragraph [ref=e329]: l-liuweia · 设计人员
+              - paragraph [ref=e330]: 结构一室
+            - button "编辑" [ref=e331] [cursor=pointer]
+          - article [ref=e332]:
+            - generic [ref=e333]:
+              - strong [ref=e334]: 赵洋（l-zhaoyang）
+              - paragraph [ref=e335]: l-zhaoyang · 设计人员
+              - paragraph [ref=e336]: 结构一室
+            - button "编辑" [ref=e337] [cursor=pointer]
+          - article [ref=e338]:
+            - generic [ref=e339]:
+              - strong [ref=e340]: 梁卿达（liangqd）
+              - paragraph [ref=e341]: liangqd · 室主任
+              - paragraph [ref=e342]: 结构一室
+            - button "编辑" [ref=e343] [cursor=pointer]
+          - article [ref=e344]:
+            - generic [ref=e345]:
+              - strong [ref=e346]: 梁文龙（liangwl）
+              - paragraph [ref=e347]: liangwl · 设计人员
+              - paragraph [ref=e348]: 结构一室
+            - button "编辑" [ref=e349] [cursor=pointer]
+          - article [ref=e350]:
+            - generic [ref=e351]:
+              - strong [ref=e352]: 李松林（lislc）
+              - paragraph [ref=e353]: lislc · 设计人员
+              - paragraph [ref=e354]: 结构一室
+            - button "编辑" [ref=e355] [cursor=pointer]
+          - article [ref=e356]:
+            - generic [ref=e357]:
+              - strong [ref=e358]: 李卫松（liwsa）
+              - paragraph [ref=e359]: liwsa · 设计人员
+              - paragraph [ref=e360]: 结构一室
+            - button "编辑" [ref=e361] [cursor=pointer]
+          - article [ref=e362]:
+            - generic [ref=e363]:
+              - strong [ref=e364]: 孟志勇（mengzy）
+              - paragraph [ref=e365]: mengzy · 室主任
+              - paragraph [ref=e366]: 结构一室
+            - button "编辑" [ref=e367] [cursor=pointer]
+          - article [ref=e368]:
+            - generic [ref=e369]:
+              - strong [ref=e370]: 任献坤（renxk）
+              - paragraph [ref=e371]: renxk · 设计人员
+              - paragraph [ref=e372]: 结构一室
+            - button "编辑" [ref=e373] [cursor=pointer]
+          - article [ref=e374]:
+            - generic [ref=e375]:
+              - strong [ref=e376]: 黄晓慧（w-huangxh）
+              - paragraph [ref=e377]: w-huangxh · 设计人员
+              - paragraph [ref=e378]: 结构一室
+            - button "编辑" [ref=e379] [cursor=pointer]
+          - article [ref=e380]:
+            - generic [ref=e381]:
+              - strong [ref=e382]: 王佳欢（w-wangjh）
+              - paragraph [ref=e383]: w-wangjh · 设计人员
+              - paragraph [ref=e384]: 结构一室
+            - button "编辑" [ref=e385] [cursor=pointer]
+          - article [ref=e386]:
+            - generic [ref=e387]:
+              - strong [ref=e388]: 于明珠（w-yumz）
+              - paragraph [ref=e389]: w-yumz · 设计人员
+              - paragraph [ref=e390]: 结构一室
+            - button "编辑" [ref=e391] [cursor=pointer]
+          - article [ref=e392]:
+            - generic [ref=e393]:
+              - strong [ref=e394]: 张文泽（w-zhangwz）
+              - paragraph [ref=e395]: w-zhangwz · 设计人员
+              - paragraph [ref=e396]: 结构一室
+            - button "编辑" [ref=e397] [cursor=pointer]
+          - article [ref=e398]:
+            - generic [ref=e399]:
+              - strong [ref=e400]: 王光琦（wanggqb）
+              - paragraph [ref=e401]: wanggqb · 设计人员
+              - paragraph [ref=e402]: 结构一室
+            - button "编辑" [ref=e403] [cursor=pointer]
+          - article [ref=e404]:
+            - generic [ref=e405]:
+              - strong [ref=e406]: 王景霞（wangjxi）
+              - paragraph [ref=e407]: wangjxi · 设计人员
+              - paragraph [ref=e408]: 结构一室
+            - button "编辑" [ref=e409] [cursor=pointer]
+          - article [ref=e410]:
+            - generic [ref=e411]:
+              - strong [ref=e412]: 王任超（wangrca）
+              - paragraph [ref=e413]: wangrca · 设计人员
+              - paragraph [ref=e414]: 结构一室
+            - button "编辑" [ref=e415] [cursor=pointer]
+          - article [ref=e416]:
+            - generic [ref=e417]:
+              - strong [ref=e418]: 王雪彦（wangxyb）
+              - paragraph [ref=e419]: wangxyb · 设计人员
+              - paragraph [ref=e420]: 结构一室
+            - button "编辑" [ref=e421] [cursor=pointer]
+          - article [ref=e422]:
+            - generic [ref=e423]:
+              - strong [ref=e424]: 王岩（wangyane）
+              - paragraph [ref=e425]: wangyane · 设计人员
+              - paragraph [ref=e426]: 结构一室
+            - button "编辑" [ref=e427] [cursor=pointer]
+          - article [ref=e428]:
+            - generic [ref=e429]:
+              - strong [ref=e430]: 杨涛（yangtaoa）
+              - paragraph [ref=e431]: yangtaoa · 设计人员
+              - paragraph [ref=e432]: 结构一室
+            - button "编辑" [ref=e433] [cursor=pointer]
+          - article [ref=e434]:
+            - generic [ref=e435]:
+              - strong [ref=e436]: 杨熙（yangxi）
+              - paragraph [ref=e437]: yangxi · 所领导
+              - paragraph [ref=e438]: 结构一室
+            - button "编辑" [ref=e439] [cursor=pointer]
+          - article [ref=e440]:
+            - generic [ref=e441]:
+              - strong [ref=e442]: 严鹏南（yanpn）
+              - paragraph [ref=e443]: yanpn · 设计人员
+              - paragraph [ref=e444]: 结构一室
+            - button "编辑" [ref=e445] [cursor=pointer]
+          - article [ref=e446]:
+            - generic [ref=e447]:
+              - strong [ref=e448]: 张秉灿（zhangbca）
+              - paragraph [ref=e449]: zhangbca · 室主任
+              - paragraph [ref=e450]: 结构一室
+            - button "编辑" [ref=e451] [cursor=pointer]
+          - article [ref=e452]:
+            - generic [ref=e453]:
+              - strong [ref=e454]: 张行（zhanghanga）
+              - paragraph [ref=e455]: zhanghanga · 设计人员
+              - paragraph [ref=e456]: 结构一室
+            - button "编辑" [ref=e457] [cursor=pointer]
+          - article [ref=e458]:
+            - generic [ref=e459]:
+              - strong [ref=e460]: 张敬武（zhangjwg）
+              - paragraph [ref=e461]: zhangjwg · 设计人员
+              - paragraph [ref=e462]: 结构一室
+            - button "编辑" [ref=e463] [cursor=pointer]
+          - article [ref=e464]:
+            - generic [ref=e465]:
+              - strong [ref=e466]: 张亮（zhangliangc）
+              - paragraph [ref=e467]: zhangliangc · 设计人员
+              - paragraph [ref=e468]: 结构一室
+            - button "编辑" [ref=e469] [cursor=pointer]
+          - article [ref=e470]:
+            - generic [ref=e471]:
+              - strong [ref=e472]: 张文泽（zhangwza）
+              - paragraph [ref=e473]: zhangwza · 设计人员
+              - paragraph [ref=e474]: 结构一室
+            - button "编辑" [ref=e475] [cursor=pointer]
+          - article [ref=e476]:
+            - generic [ref=e477]:
+              - strong [ref=e478]: 张晓敏（zhangxmd）
+              - paragraph [ref=e479]: zhangxmd · 设计人员
+              - paragraph [ref=e480]: 结构一室
+            - button "编辑" [ref=e481] [cursor=pointer]
+          - article [ref=e482]:
+            - generic [ref=e483]:
+              - strong [ref=e484]: 张翼飞（zhangyfg）
+              - paragraph [ref=e485]: zhangyfg · 设计人员
+              - paragraph [ref=e486]: 结构一室
+            - button "编辑" [ref=e487] [cursor=pointer]
+          - article [ref=e488]:
+            - generic [ref=e489]:
+              - strong [ref=e490]: 张映玲（zhangyla）
+              - paragraph [ref=e491]: zhangyla · 设计人员
+              - paragraph [ref=e492]: 结构一室
+            - button "编辑" [ref=e493] [cursor=pointer]
+          - article [ref=e494]:
+            - generic [ref=e495]:
+              - strong [ref=e496]: 赵越（zhaoyueb）
+              - paragraph [ref=e497]: zhaoyueb · 设计人员
+              - paragraph [ref=e498]: 结构一室
+            - button "编辑" [ref=e499] [cursor=pointer]
+          - article [ref=e500]:
+            - generic [ref=e501]:
+              - strong [ref=e502]: 周立欣（zhoulx）
+              - paragraph [ref=e503]: zhoulx · 设计人员
+              - paragraph [ref=e504]: 结构一室
+            - button "编辑" [ref=e505] [cursor=pointer]
+          - article [ref=e506]:
+            - generic [ref=e507]:
+              - strong [ref=e508]: 陈迪聪（L-chendc）
+              - paragraph [ref=e509]: L-chendc · 设计人员
+              - paragraph [ref=e510]: 结构二室
+            - button "编辑" [ref=e511] [cursor=pointer]
+          - article [ref=e512]:
+            - generic [ref=e513]:
+              - strong [ref=e514]: 刘可宇（L-liukya）
+              - paragraph [ref=e515]: L-liukya · 设计人员
+              - paragraph [ref=e516]: 结构二室
+            - button "编辑" [ref=e517] [cursor=pointer]
+          - article [ref=e518]:
+            - generic [ref=e519]:
+              - strong [ref=e520]: 李子香（L-lizx）
+              - paragraph [ref=e521]: L-lizx · 设计人员
+              - paragraph [ref=e522]: 结构二室
+            - button "编辑" [ref=e523] [cursor=pointer]
+          - article [ref=e524]:
+            - generic [ref=e525]:
+              - strong [ref=e526]: 崔梦飞（cuimf）
+              - paragraph [ref=e527]: cuimf · 设计人员
+              - paragraph [ref=e528]: 结构二室
+            - button "编辑" [ref=e529] [cursor=pointer]
+          - article [ref=e530]:
+            - generic [ref=e531]:
+              - strong [ref=e532]: 董寒朔（donghs）
+              - paragraph [ref=e533]: donghs · 设计人员
+              - paragraph [ref=e534]: 结构二室
+            - button "编辑" [ref=e535] [cursor=pointer]
+          - article [ref=e536]:
+            - generic [ref=e537]:
+              - strong [ref=e538]: 段微微（duanww）
+              - paragraph [ref=e539]: duanww · 设计人员
+              - paragraph [ref=e540]: 结构二室
+            - button "编辑" [ref=e541] [cursor=pointer]
+          - article [ref=e542]:
+            - generic [ref=e543]:
+              - strong [ref=e544]: 高凤欣（gaofx）
+              - paragraph [ref=e545]: gaofx · 设计人员
+              - paragraph [ref=e546]: 结构二室
+            - button "编辑" [ref=e547] [cursor=pointer]
+          - article [ref=e548]:
+            - generic [ref=e549]:
+              - strong [ref=e550]: 黄博翰（huangbh）
+              - paragraph [ref=e551]: huangbh · 设计人员
+              - paragraph [ref=e552]: 结构二室
+            - button "编辑" [ref=e553] [cursor=pointer]
+          - article [ref=e554]:
+            - generic [ref=e555]:
+              - strong [ref=e556]: 何松（l-hesong）
+              - paragraph [ref=e557]: l-hesong · 设计人员
+              - paragraph [ref=e558]: 结构二室
+            - button "编辑" [ref=e559] [cursor=pointer]
+          - article [ref=e560]:
+            - generic [ref=e561]:
+              - strong [ref=e562]: 李连军（l-lilj）
+              - paragraph [ref=e563]: l-lilj · 设计人员
+              - paragraph [ref=e564]: 结构二室
+            - button "编辑" [ref=e565] [cursor=pointer]
+          - article [ref=e566]:
+            - generic [ref=e567]:
+              - strong [ref=e568]: 李少豪（l-lisha）
+              - paragraph [ref=e569]: l-lisha · 设计人员
+              - paragraph [ref=e570]: 结构二室
+            - button "编辑" [ref=e571] [cursor=pointer]
+          - article [ref=e572]:
+            - generic [ref=e573]:
+              - strong [ref=e574]: 刘慧杰（l-liuhj）
+              - paragraph [ref=e575]: l-liuhj · 设计人员
+              - paragraph [ref=e576]: 结构二室
+            - button "编辑" [ref=e577] [cursor=pointer]
+          - article [ref=e578]:
+            - generic [ref=e579]:
+              - strong [ref=e580]: 柳治云（l-liuzye）
+              - paragraph [ref=e581]: l-liuzye · 设计人员
+              - paragraph [ref=e582]: 结构二室
+            - button "编辑" [ref=e583] [cursor=pointer]
+          - article [ref=e584]:
+            - generic [ref=e585]:
+              - strong [ref=e586]: 牛召力（l-niuzl）
+              - paragraph [ref=e587]: l-niuzl · 设计人员
+              - paragraph [ref=e588]: 结构二室
+            - button "编辑" [ref=e589] [cursor=pointer]
+          - article [ref=e590]:
+            - generic [ref=e591]:
+              - strong [ref=e592]: 施红为（l-shihw）
+              - paragraph [ref=e593]: l-shihw · 设计人员
+              - paragraph [ref=e594]: 结构二室
+            - button "编辑" [ref=e595] [cursor=pointer]
+          - article [ref=e596]:
+            - generic [ref=e597]:
+              - strong [ref=e598]: 王俊峰（l-wangjfb）
+              - paragraph [ref=e599]: l-wangjfb · 设计人员
+              - paragraph [ref=e600]: 结构二室
+            - button "编辑" [ref=e601] [cursor=pointer]
+          - article [ref=e602]:
+            - generic [ref=e603]:
+              - strong [ref=e604]: 王旭（l-wangxua）
+              - paragraph [ref=e605]: l-wangxua · 设计人员
+              - paragraph [ref=e606]: 结构二室
+            - button "编辑" [ref=e607] [cursor=pointer]
+          - article [ref=e608]:
+            - generic [ref=e609]:
+              - strong [ref=e610]: 赵琪（l-zhaoqi）
+              - paragraph [ref=e611]: l-zhaoqi · 设计人员
+              - paragraph [ref=e612]: 结构二室
+            - button "编辑" [ref=e613] [cursor=pointer]
+          - article [ref=e614]:
+            - generic [ref=e615]:
+              - strong [ref=e616]: 李宁（liningd）
+              - paragraph [ref=e617]: liningd · 设计人员
+              - paragraph [ref=e618]: 结构二室
+            - button "编辑" [ref=e619] [cursor=pointer]
+          - article [ref=e620]:
+            - generic [ref=e621]:
+              - strong [ref=e622]: 林秀萍（linxp）
+              - paragraph [ref=e623]: linxp · 设计人员
+              - paragraph [ref=e624]: 结构二室
+            - button "编辑" [ref=e625] [cursor=pointer]
+          - article [ref=e626]:
+            - generic [ref=e627]:
+              - strong [ref=e628]: 李帅（lishuaib）
+              - paragraph [ref=e629]: lishuaib · 设计人员
+              - paragraph [ref=e630]: 结构二室
+            - button "编辑" [ref=e631] [cursor=pointer]
+          - article [ref=e632]:
+            - generic [ref=e633]:
+              - strong [ref=e634]: 刘峰（liufenga）
+              - paragraph [ref=e635]: liufenga · 室主任
+              - paragraph [ref=e636]: 结构二室
+            - button "编辑" [ref=e637] [cursor=pointer]
+          - article [ref=e638]:
+            - generic [ref=e639]:
+              - strong [ref=e640]: 刘飞飞（liuff）
+              - paragraph [ref=e641]: liuff · 设计人员
+              - paragraph [ref=e642]: 结构二室
+            - button "编辑" [ref=e643] [cursor=pointer]
+          - article [ref=e644]:
+            - generic [ref=e645]:
+              - strong [ref=e646]: 刘林林（liulld）
+              - paragraph [ref=e647]: liulld · 设计人员
+              - paragraph [ref=e648]: 结构二室
+            - button "编辑" [ref=e649] [cursor=pointer]
+          - article [ref=e650]:
+            - generic [ref=e651]:
+              - strong [ref=e652]: 柳梦轩（liumx）
+              - paragraph [ref=e653]: liumx · 设计人员
+              - paragraph [ref=e654]: 结构二室
+            - button "编辑" [ref=e655] [cursor=pointer]
+          - article [ref=e656]:
+            - generic [ref=e657]:
+              - strong [ref=e658]: 刘义航（liuyhe）
+              - paragraph [ref=e659]: liuyhe · 设计人员
+              - paragraph [ref=e660]: 结构二室
+            - button "编辑" [ref=e661] [cursor=pointer]
+          - article [ref=e662]:
+            - generic [ref=e663]:
+              - strong [ref=e664]: 李玉占（liyzd）
+              - paragraph [ref=e665]: liyzd · 设计人员
+              - paragraph [ref=e666]: 结构二室
+            - button "编辑" [ref=e667] [cursor=pointer]
+          - article [ref=e668]:
+            - generic [ref=e669]:
+              - strong [ref=e670]: 李子香（lizxd）
+              - paragraph [ref=e671]: lizxd · 设计人员
+              - paragraph [ref=e672]: 结构二室
+            - button "编辑" [ref=e673] [cursor=pointer]
+          - article [ref=e674]:
+            - generic [ref=e675]:
+              - strong [ref=e676]: 裴晓波（peixb）
+              - paragraph [ref=e677]: peixb · 设计人员
+              - paragraph [ref=e678]: 结构二室
+            - button "编辑" [ref=e679] [cursor=pointer]
+          - article [ref=e680]:
+            - generic [ref=e681]:
+              - strong [ref=e682]: 申浩（shenhaoa）
+              - paragraph [ref=e683]: shenhaoa · 设计人员
+              - paragraph [ref=e684]: 结构二室
+            - button "编辑" [ref=e685] [cursor=pointer]
+          - article [ref=e686]:
+            - generic [ref=e687]:
+              - strong [ref=e688]: 宋英杰（songyj）
+              - paragraph [ref=e689]: songyj · 设计人员
+              - paragraph [ref=e690]: 结构二室
+            - button "编辑" [ref=e691] [cursor=pointer]
+          - article [ref=e692]:
+            - generic [ref=e693]:
+              - strong [ref=e694]: 苏永涛（suyt）
+              - paragraph [ref=e695]: suyt · 设计人员
+              - paragraph [ref=e696]: 结构二室
+            - button "编辑" [ref=e697] [cursor=pointer]
+          - article [ref=e698]:
+            - generic [ref=e699]:
+              - strong [ref=e700]: 苏志松（suzs）
+              - paragraph [ref=e701]: suzs · 设计人员
+              - paragraph [ref=e702]: 结构二室
+            - button "编辑" [ref=e703] [cursor=pointer]
+          - article [ref=e704]:
+            - generic [ref=e705]:
+              - strong [ref=e706]: 陶立兴（taolx）
+              - paragraph [ref=e707]: taolx · 设计人员
+              - paragraph [ref=e708]: 结构二室
+            - button "编辑" [ref=e709] [cursor=pointer]
+          - article [ref=e710]:
+            - generic [ref=e711]:
+              - strong [ref=e712]: 杜硕（w-dushuo）
+              - paragraph [ref=e713]: w-dushuo · 设计人员
+              - paragraph [ref=e714]: 结构二室
+            - button "编辑" [ref=e715] [cursor=pointer]
+          - article [ref=e716]:
+            - generic [ref=e717]:
+              - strong [ref=e718]: 张日晨（w-zhangrc）
+              - paragraph [ref=e719]: w-zhangrc · 设计人员
+              - paragraph [ref=e720]: 结构二室
+            - button "编辑" [ref=e721] [cursor=pointer]
+          - article [ref=e722]:
+            - generic [ref=e723]:
+              - strong [ref=e724]: 赵若旭（w-zhaorx）
+              - paragraph [ref=e725]: w-zhaorx · 设计人员
+              - paragraph [ref=e726]: 结构二室
+            - button "编辑" [ref=e727] [cursor=pointer]
+          - article [ref=e728]:
+            - generic [ref=e729]:
+              - strong [ref=e730]: 赵亚冲（w-zhaoyc）
+              - paragraph [ref=e731]: w-zhaoyc · 设计人员
+              - paragraph [ref=e732]: 结构二室
+            - button "编辑" [ref=e733] [cursor=pointer]
+          - article [ref=e734]:
+            - generic [ref=e735]:
+              - strong [ref=e736]: 王汉迎（wanghyl）
+              - paragraph [ref=e737]: wanghyl · 设计人员
+              - paragraph [ref=e738]: 结构二室
+            - button "编辑" [ref=e739] [cursor=pointer]
+          - article [ref=e740]:
+            - generic [ref=e741]:
+              - strong [ref=e742]: 王佳璇（wangjxj）
+              - paragraph [ref=e743]: wangjxj · 设计人员
+              - paragraph [ref=e744]: 结构二室
+            - button "编辑" [ref=e745] [cursor=pointer]
+          - article [ref=e746]:
+            - generic [ref=e747]:
+              - strong [ref=e748]: 王萌博（wangmb）
+              - paragraph [ref=e749]: wangmb · 设计人员
+              - paragraph [ref=e750]: 结构二室
+            - button "编辑" [ref=e751] [cursor=pointer]
+          - article [ref=e752]:
+            - generic [ref=e753]:
+              - strong [ref=e754]: 王银平（wangype）
+              - paragraph [ref=e755]: wangype · 室主任
+              - paragraph [ref=e756]: 结构二室
+            - button "编辑" [ref=e757] [cursor=pointer]
+          - article [ref=e758]:
+            - generic [ref=e759]:
+              - strong [ref=e760]: 吴复忠（wufza）
+              - paragraph [ref=e761]: wufza · 室主任
+              - paragraph [ref=e762]: 结构二室
+            - button "编辑" [ref=e763] [cursor=pointer]
+          - article [ref=e764]:
+            - generic [ref=e765]:
+              - strong [ref=e766]: 薛振晓（xuezxa）
+              - paragraph [ref=e767]: xuezxa · 设计人员
+              - paragraph [ref=e768]: 结构二室
+            - button "编辑" [ref=e769] [cursor=pointer]
+          - article [ref=e770]:
+            - generic [ref=e771]:
+              - strong [ref=e772]: 许纪永（xujyb）
+              - paragraph [ref=e773]: xujyb · 设计人员
+              - paragraph [ref=e774]: 结构二室
+            - button "编辑" [ref=e775] [cursor=pointer]
+          - article [ref=e776]:
+            - generic [ref=e777]:
+              - strong [ref=e778]: 许文龙（xuwl）
+              - paragraph [ref=e779]: xuwl · 设计人员
+              - paragraph [ref=e780]: 结构二室
+            - button "编辑" [ref=e781] [cursor=pointer]
+          - article [ref=e782]:
+            - generic [ref=e783]:
+              - strong [ref=e784]: 张美池（zhangmc）
+              - paragraph [ref=e785]: zhangmc · 设计人员
+              - paragraph [ref=e786]: 结构二室
+            - button "编辑" [ref=e787] [cursor=pointer]
+          - article [ref=e788]:
+            - generic [ref=e789]:
+              - strong [ref=e790]: 张乾鹏（zhangqp）
+              - paragraph [ref=e791]: zhangqp · 设计人员
+              - paragraph [ref=e792]: 结构二室
+            - button "编辑" [ref=e793] [cursor=pointer]
+          - article [ref=e794]:
+            - generic [ref=e795]:
+              - strong [ref=e796]: 张晓波（zhangxb）
+              - paragraph [ref=e797]: zhangxb · 设计人员
+              - paragraph [ref=e798]: 结构二室
+            - button "编辑" [ref=e799] [cursor=pointer]
+          - article [ref=e800]:
+            - generic [ref=e801]:
+              - strong [ref=e802]: 张亚涛（zhangyt）
+              - paragraph [ref=e803]: zhangyt · 设计人员
+              - paragraph [ref=e804]: 结构二室
+            - button "编辑" [ref=e805] [cursor=pointer]
+          - article [ref=e806]:
+            - generic [ref=e807]:
+              - strong [ref=e808]: 赵杰（zhaojie）
+              - paragraph [ref=e809]: zhaojie · 设计人员
+              - paragraph [ref=e810]: 结构二室
+            - button "编辑" [ref=e811] [cursor=pointer]
+          - article [ref=e812]:
+            - generic [ref=e813]:
+              - strong [ref=e814]: 周凌海（zhoulhb）
+              - paragraph [ref=e815]: zhoulhb · 设计人员
+              - paragraph [ref=e816]: 结构二室
+            - button "编辑" [ref=e817] [cursor=pointer]
+          - article [ref=e818]:
+            - generic [ref=e819]:
+              - strong [ref=e820]: 周铭海（zhoumh）
+              - paragraph [ref=e821]: zhoumh · 室主任
+              - paragraph [ref=e822]: 结构二室
+            - button "编辑" [ref=e823] [cursor=pointer]
+          - article [ref=e824]:
+            - generic [ref=e825]:
+              - strong [ref=e826]: 陈思思（chenssa）
+              - paragraph [ref=e827]: chenssa · 设计人员
+              - paragraph [ref=e828]: 建筑总图室
+            - button "编辑" [ref=e829] [cursor=pointer]
+          - article [ref=e830]:
+            - generic [ref=e831]:
+              - strong [ref=e832]: 杜娟（dujuan）
+              - paragraph [ref=e833]: dujuan · 设计人员
+              - paragraph [ref=e834]: 建筑总图室
+            - button "编辑" [ref=e835] [cursor=pointer]
+          - article [ref=e836]:
+            - generic [ref=e837]:
+              - strong [ref=e838]: 胡斌（hubina）
+              - paragraph [ref=e839]: hubina · 设计人员
+              - paragraph [ref=e840]: 建筑总图室
+            - button "编辑" [ref=e841] [cursor=pointer]
+          - article [ref=e842]:
+            - generic [ref=e843]:
+              - strong [ref=e844]: 靳鹏（jinpenga）
+              - paragraph [ref=e845]: jinpenga · 室主任
+              - paragraph [ref=e846]: 建筑总图室
+            - button "编辑" [ref=e847] [cursor=pointer]
+          - article [ref=e848]:
+            - generic [ref=e849]:
+              - strong [ref=e850]: 纪雨青（jiyq）
+              - paragraph [ref=e851]: jiyq · 设计人员
+              - paragraph [ref=e852]: 建筑总图室
+            - button "编辑" [ref=e853] [cursor=pointer]
+          - article [ref=e854]:
+            - generic [ref=e855]:
+              - strong [ref=e856]: 李志强（l-lizq）
+              - paragraph [ref=e857]: l-lizq · 设计人员
+              - paragraph [ref=e858]: 建筑总图室
+            - button "编辑" [ref=e859] [cursor=pointer]
+          - article [ref=e860]:
+            - generic [ref=e861]:
+              - strong [ref=e862]: 赵红梅（l-zhaohm）
+              - paragraph [ref=e863]: l-zhaohm · 设计人员
+              - paragraph [ref=e864]: 建筑总图室
+            - button "编辑" [ref=e865] [cursor=pointer]
+          - article [ref=e866]:
+            - generic [ref=e867]:
+              - strong [ref=e868]: 梁浩瀚（lianghh）
+              - paragraph [ref=e869]: lianghh · 设计人员
+              - paragraph [ref=e870]: 建筑总图室
+            - button "编辑" [ref=e871] [cursor=pointer]
+          - article [ref=e872]:
+            - generic [ref=e873]:
+              - strong [ref=e874]: 梁耀龙（liangyl）
+              - paragraph [ref=e875]: liangyl · 室主任
+              - paragraph [ref=e876]: 建筑总图室
+            - button "编辑" [ref=e877] [cursor=pointer]
+          - article [ref=e878]:
+            - generic [ref=e879]:
+              - strong [ref=e880]: 李超（lichaof）
+              - paragraph [ref=e881]: lichaof · 设计人员
+              - paragraph [ref=e882]: 建筑总图室
+            - button "编辑" [ref=e883] [cursor=pointer]
+          - article [ref=e884]:
+            - generic [ref=e885]:
+              - strong [ref=e886]: 李丽（lilib）
+              - paragraph [ref=e887]: lilib · 设计人员
+              - paragraph [ref=e888]: 建筑总图室
+            - button "编辑" [ref=e889] [cursor=pointer]
+          - article [ref=e890]:
+            - generic [ref=e891]:
+              - strong [ref=e892]: 刘朝阳（liuzyc）
+              - paragraph [ref=e893]: liuzyc · 设计人员
+              - paragraph [ref=e894]: 建筑总图室
+            - button "编辑" [ref=e895] [cursor=pointer]
+          - article [ref=e896]:
+            - generic [ref=e897]:
+              - strong [ref=e898]: 李欣（lixinf）
+              - paragraph [ref=e899]: lixinf · 设计人员
+              - paragraph [ref=e900]: 建筑总图室
+            - button "编辑" [ref=e901] [cursor=pointer]
+          - article [ref=e902]:
+            - generic [ref=e903]:
+              - strong [ref=e904]: 李亚冬（liyda）
+              - paragraph [ref=e905]: liyda · 设计人员
+              - paragraph [ref=e906]: 建筑总图室
+            - button "编辑" [ref=e907] [cursor=pointer]
+          - article [ref=e908]:
+            - generic [ref=e909]:
+              - strong [ref=e910]: 马新国（maxga）
+              - paragraph [ref=e911]: maxga · 设计人员
+              - paragraph [ref=e912]: 建筑总图室
+            - button "编辑" [ref=e913] [cursor=pointer]
+          - article [ref=e914]:
+            - generic [ref=e915]:
+              - strong [ref=e916]: 马晓红（maxha）
+              - paragraph [ref=e917]: maxha · 设计人员
+              - paragraph [ref=e918]: 建筑总图室
+            - button "编辑" [ref=e919] [cursor=pointer]
+          - article [ref=e920]:
+            - generic [ref=e921]:
+              - strong [ref=e922]: 孙号锋（sunhf）
+              - paragraph [ref=e923]: sunhf · 设计人员
+              - paragraph [ref=e924]: 建筑总图室
+            - button "编辑" [ref=e925] [cursor=pointer]
+          - article [ref=e926]:
+            - generic [ref=e927]:
+              - strong [ref=e928]: 孙会生（sunhs）
+              - paragraph [ref=e929]: sunhs · 室主任
+              - paragraph [ref=e930]: 建筑总图室
+            - button "编辑" [ref=e931] [cursor=pointer]
+          - article [ref=e932]:
+            - generic [ref=e933]:
+              - strong [ref=e934]: 谢志红（xiezh）
+              - paragraph [ref=e935]: xiezh · 设计人员
+              - paragraph [ref=e936]: 建筑总图室
+            - button "编辑" [ref=e937] [cursor=pointer]
+          - article [ref=e938]:
+            - generic [ref=e939]:
+              - strong [ref=e940]: 辛浩妍（xinhy）
+              - paragraph [ref=e941]: xinhy · 设计人员
+              - paragraph [ref=e942]: 建筑总图室
+            - button "编辑" [ref=e943] [cursor=pointer]
+          - article [ref=e944]:
+            - generic [ref=e945]:
+              - strong [ref=e946]: 杨园园（yangyyc）
+              - paragraph [ref=e947]: yangyyc · 设计人员
+              - paragraph [ref=e948]: 建筑总图室
+            - button "编辑" [ref=e949] [cursor=pointer]
+          - article [ref=e950]:
+            - generic [ref=e951]:
+              - strong [ref=e952]: 张湉（zhangtian）
+              - paragraph [ref=e953]: zhangtian · 设计人员
+              - paragraph [ref=e954]: 建筑总图室
+            - button "编辑" [ref=e955] [cursor=pointer]
+          - article [ref=e956]:
+            - generic [ref=e957]:
+              - strong [ref=e958]: 智博韬（zhibt）
+              - paragraph [ref=e959]: zhibt · 设计人员
+              - paragraph [ref=e960]: 建筑总图室
+            - button "编辑" [ref=e961] [cursor=pointer]
+          - article [ref=e962]:
+            - generic [ref=e963]:
+              - strong [ref=e964]: 李智（lizhi）
+              - paragraph [ref=e965]: lizhi · 室主任
+              - paragraph [ref=e966]: 结构二室
+            - button "编辑" [ref=e967] [cursor=pointer]
+      - generic [ref=e968]:
+        - generic [ref=e970]:
+          - paragraph [ref=e971]: Editor
+          - heading "创建账号" [level=2] [ref=e972]
+        - generic [ref=e973]:
+          - generic [ref=e974]: 账号
+          - textbox "账号" [ref=e975]
+          - generic [ref=e976]: 姓名
+          - textbox "姓名" [ref=e977]
+          - generic [ref=e978]: 科室编码
+          - textbox "科室编码" [ref=e979]
+          - generic [ref=e980]: 科室
+          - textbox "科室" [ref=e981]
+          - generic [ref=e982]: 角色
+          - combobox "角色" [ref=e983]:
+            - option "设计人员" [selected]
+            - option "室主任"
+            - option "所领导"
+            - option "管理员"
+          - generic [ref=e984]: 密码
+          - textbox "密码" [ref=e985]: password
+          - paragraph [ref=e986]: "管理员创建账号时，默认密码固定为 `password`。"
+          - button "创建账号" [ref=e987] [cursor=pointer]
+    - generic [ref=e988]:
+      - generic [ref=e990]:
+        - paragraph [ref=e991]: Invalid Rows
+        - heading "无效账号行" [level=2] [ref=e992]
+      - generic [ref=e993]:
+        - article [ref=e994]:
+          - strong [ref=e995]: 第 3 行
+          - paragraph [ref=e996]: missing_account_id / invalid_role
+          - generic [ref=e997]: "{ \"科室编码\": \"25C2\", \"科室\": \"结构二室\", \"账号\": \"\", \"姓名\": \"l-gengtj\", \"角色\": \"耿铁军\", \"密码\": \"设计人员\", \"\": \"['password']\" }"
+        - article [ref=e998]:
+          - strong [ref=e999]: 第 4 行
+          - paragraph [ref=e1000]: missing_account_id / invalid_role
+          - generic [ref=e1001]: "{ \"科室编码\": \"25C1\", \"科室\": \"结构一室\", \"账号\": \"\", \"姓名\": \"l-sunyy\", \"角色\": \"孙媛媛\", \"密码\": \"设计人员\", \"\": \"['password']\" }"
+        - article [ref=e1002]:
+          - strong [ref=e1003]: 第 5 行
+          - paragraph [ref=e1004]: missing_account_id / invalid_role
+          - generic [ref=e1005]: "{ \"科室编码\": \"25C1\", \"科室\": \"结构一室\", \"账号\": \"\", \"姓名\": \"l-zhouxy\", \"角色\": \"周祥玉\", \"密码\": \"设计人员\", \"\": \"['password']\" }"
+        - article [ref=e1006]:
+          - strong [ref=e1007]: 第 6 行
+          - paragraph [ref=e1008]: missing_account_id / invalid_role
+          - generic [ref=e1009]: "{ \"科室编码\": \"25C1\", \"科室\": \"结构一室\", \"账号\": \"\", \"姓名\": \"lipya\", \"角色\": \"李鹏阳\", \"密码\": \"设计人员\", \"\": \"['password']\" }"
+    - generic [ref=e1010]:
+      - generic [ref=e1012]:
+        - paragraph [ref=e1013]: Archive
+        - heading "归档配置" [level=2] [ref=e1014]
+      - generic [ref=e1015]:
+        - generic [ref=e1016]: 归档根路径
+        - textbox "归档根路径" [ref=e1017]
+        - button "保存归档配置" [ref=e1018] [cursor=pointer]

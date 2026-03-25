@@ -3,6 +3,274 @@ export type TaskIntent = TaskKind;
 
 export type FormFieldType = "text" | "select" | "combobox" | "date" | "nameId";
 
+export type CurrentAccount = {
+  accountId: string;
+  displayName: string;
+  role: string;
+  officeCode: string | null;
+  officeName: string | null;
+  valid: boolean;
+  pendingTodoCount: number;
+};
+
+export type LoginRequest = {
+  accountId: string;
+  password: string;
+};
+
+export type LoginResponse = {
+  token: string;
+  account: CurrentAccount;
+};
+
+export type AccountRecord = {
+  officeCode: string | null;
+  officeName: string | null;
+  accountId: string;
+  displayName: string;
+  role: string;
+  password: string;
+  valid: boolean;
+  rowNumber: number | null;
+  errors: string[];
+};
+
+export type InvalidAccountRow = {
+  rowNumber: number;
+  raw: Record<string, string>;
+  errors: string[];
+};
+
+export type AccountListResponse = {
+  items: AccountRecord[];
+};
+
+export type InvalidAccountRowList = {
+  items: InvalidAccountRow[];
+};
+
+export type AdminConfig = {
+  archiveRootPath: string | null;
+};
+
+export type AccountCreatePayload = {
+  officeCode: string | null;
+  officeName: string | null;
+  accountId: string;
+  displayName: string;
+  role: string;
+  password: string;
+};
+
+export type AccountUpdatePayload = {
+  officeCode?: string | null;
+  officeName?: string | null;
+  accountId?: string;
+  displayName?: string;
+  role?: string;
+  password?: string;
+};
+
+export type PersonnelCandidate = {
+  accountId: string;
+  displayName: string;
+  role: string;
+  officeCode: string | null;
+  officeName: string | null;
+  valid: boolean;
+};
+
+export type PersonnelNormalizationResult = {
+  normalized: NormalizedPersonnel;
+  candidates: PersonnelCandidate[];
+};
+
+export type TaskOwnerSnapshot = {
+  creatorAccount: string;
+  creatorName: string;
+  creatorRole: string;
+  creatorOffice: string | null;
+  createdByScope: string;
+  submittedAt: string | null;
+};
+
+export type NormalizedPersonnel = {
+  fieldName: string;
+  rawValue: string | null;
+  normalizedValue: string | null;
+  matchedAccount: string | null;
+  matchedName: string | null;
+  matchStrategy: string | null;
+  status: string;
+  errors: string[];
+};
+
+export type PersonnelSnapshot = {
+  members: Record<string, NormalizedPersonnel>;
+};
+
+export type WorkflowNodeState = {
+  nodeKey: string;
+  nodeLabel: string;
+  assigneeAccount: string | null;
+  assigneeName: string | null;
+  status: string;
+  factor: number;
+  approvedAt: string | null;
+  actedByAccount: string | null;
+  actedByName: string | null;
+};
+
+export type WorkflowState = {
+  status: string;
+  initiatedAt: string | null;
+  initiatedByAccount: string | null;
+  initiatedByName: string | null;
+  duplicatePolicy: string | null;
+  overwriteArchiveTarget: string | null;
+  currentNodeKey: string | null;
+  nodes: WorkflowNodeState[];
+  archiveStatus: string | null;
+  archiveRetryCount: number;
+  archiveLastError: string | null;
+  archiveLastAttemptAt: string | null;
+};
+
+export type ArchiveState = {
+  archiveRootPath: string | null;
+  targetDir: string | null;
+  status: string;
+  overwriteMode: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  retryCount: number;
+  lastAttemptAt: string | null;
+  archivedFiles: string[];
+};
+
+export type ReplacementState = {
+  albumInternalCode: string | null;
+  revision: string | null;
+  replacedGroupId: string | null;
+  replacedRecordPendingDelete: boolean;
+};
+
+export type LegacyVisibilityState = {
+  scope: string;
+  reason: string | null;
+};
+
+export type WorkloadContributorEntry = {
+  roleKey: string;
+  accountId: string | null;
+  displayName: string | null;
+  workloadA1: number;
+  settledAt: string | null;
+};
+
+export type WorkloadSummary = {
+  initialWorkloadA1: number;
+  finalWorkloadA1: number;
+  oneReviewFactor: number;
+  twoReviewFactor: number;
+  threeReviewFactor: number;
+  settlementStatus: string;
+  settledAt: string | null;
+  contributorEntries: WorkloadContributorEntry[];
+};
+
+export type WorkloadQueryParams = {
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  validOnly?: boolean;
+};
+
+export type WorkloadQueryFilters = {
+  startDate: string | null;
+  endDate: string | null;
+  status: string | null;
+  validOnly: boolean;
+};
+
+export type WorkloadScopeEntry = {
+  roleKey: string;
+  accountId: string | null;
+  displayName: string | null;
+  workloadA1: number;
+  settledAt: string | null;
+  groupId: string;
+  settlementStatus: string;
+};
+
+export type WorkloadScopeResponse = {
+  scope: string;
+  filters: WorkloadQueryFilters;
+  officeName: string | null;
+  totalWorkloadA1: number;
+  totalsByAccount: Record<string, number>;
+  entries: WorkloadScopeEntry[];
+};
+
+export type WorkflowMonitorItem = TaskGroupSummary;
+
+export type WorkflowMonitorList = {
+  total: number;
+  items: WorkflowMonitorItem[];
+};
+
+export type WorkflowApprovePayload = {
+  factor: number;
+  nodeKey?: string | null;
+};
+
+export type WorkflowRepairPayload = {
+  replaceWithAccountId?: string;
+  createAccountPayload?: AccountCreatePayload;
+};
+
+export type TaskGroupSummary = {
+  groupId: string;
+  batchId: string | null;
+  projectNo: string | null;
+  status: string;
+  createdAt: string;
+  sourceFilenames: string[];
+  ownerSnapshot: TaskOwnerSnapshot | null;
+  creatorName: string | null;
+  creatorAccount: string | null;
+  creatorOffice: string | null;
+  workflowStatus: string;
+  currentNodeKey: string | null;
+  archiveStatus: string;
+  workload: WorkloadSummary;
+  effectiveWorkload: number;
+  canViewDetail: boolean;
+  canSubmit: boolean;
+  canApprove: boolean;
+  isRelatedToCurrentUser: boolean;
+};
+
+export type TaskGroupDetail = TaskGroupSummary & {
+  childJobIds: string[];
+  personnelSnapshot: PersonnelSnapshot;
+  workflow: WorkflowState;
+  archive: ArchiveState;
+  replacement: ReplacementState;
+  legacyVisibility: LegacyVisibilityState;
+};
+
+export type TaskGroupList = {
+  total: number;
+  items: TaskGroupSummary[];
+};
+
+export type TaskGroupSubmitPayload = {
+  overwriteArchiveExisting: boolean;
+  cancelExistingInProgress: boolean;
+};
+
 export type UploadLimits = {
   maxFiles: number;
   allowedExts: readonly string[];
@@ -246,6 +514,27 @@ export type ApiError = {
 };
 
 export type ApiAdapter = {
+  login: (payload: LoginRequest) => Promise<LoginResponse>;
+  logout: () => Promise<{ ok: boolean }>;
+  getMe: () => Promise<CurrentAccount>;
+  changePassword: (newPassword: string) => Promise<CurrentAccount>;
+  normalizePersonnel: (
+    fieldName: string,
+    rawValue: string | null,
+  ) => Promise<PersonnelNormalizationResult>;
+  getWorkloadMe: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadOffice: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadInstitute: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadAdmin: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkflowMonitor: () => Promise<WorkflowMonitorList>;
+  approveWorkflow: (groupId: string, payload: WorkflowApprovePayload) => Promise<void>;
+  repairCurrentNode: (groupId: string, payload: WorkflowRepairPayload) => Promise<void>;
+  listAccounts: () => Promise<AccountListResponse>;
+  listInvalidAccountRows: () => Promise<InvalidAccountRowList>;
+  createAccount: (payload: AccountCreatePayload) => Promise<AccountRecord>;
+  updateAccount: (accountId: string, payload: AccountUpdatePayload) => Promise<AccountRecord>;
+  getAdminConfig: () => Promise<AdminConfig>;
+  patchAdminConfig: (payload: AdminConfig) => Promise<AdminConfig>;
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
   preflightFonts: (files: File[]) => Promise<FontPreflightResult>;
@@ -260,6 +549,16 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
+  listTaskGroups: () => Promise<TaskGroupList>;
+  getTaskGroupDetail: (groupId: string) => Promise<TaskGroupDetail>;
+  submitTaskGroup: (
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ) => Promise<TaskGroupDetail>;
+  restartSubmitTaskGroup: (
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ) => Promise<TaskGroupDetail>;
   listJobs: (status?: string) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

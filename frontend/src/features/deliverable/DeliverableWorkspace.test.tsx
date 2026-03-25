@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DeliverableWorkspace } from "./DeliverableWorkspace";
 import type { ApiAdapter, FormSchema } from "../../platform/api/types";
@@ -148,20 +148,169 @@ const schema: FormSchema = {
   auditReplaceProjectOptions: ["2016", "2035"],
 };
 
+const personnelSchema: FormSchema = {
+  schemaVersion: "frontend-form@1",
+  uploadLimits: {
+    maxFiles: 50,
+    allowedExts: [".dwg"],
+    maxTotalMb: 2048,
+  },
+  sections: [
+    {
+      id: "project",
+      title: "project",
+      fields: [
+        {
+          key: "cover_variant",
+          label: "cover_variant",
+          type: "select",
+          required: true,
+          requiredWhen: null,
+          defaultValue: "通用",
+          description: "",
+          options: ["通用"],
+        },
+      ],
+    },
+    {
+      id: "cover",
+      title: "cover",
+      fields: [
+        {
+          key: "album_title_cn",
+          label: "album_title_cn",
+          type: "text",
+          required: true,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+        {
+          key: "subitem_name",
+          label: "subitem_name",
+          type: "text",
+          required: true,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+      ],
+    },
+    {
+      id: "ied",
+      title: "ied",
+      fields: [
+        {
+          key: "ied_prepared_by",
+          label: "ied_prepared_by",
+          type: "nameId",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+        {
+          key: "ied_checked_by",
+          label: "ied_checked_by",
+          type: "nameId",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+        {
+          key: "ied_discipline_leader",
+          label: "ied_discipline_leader",
+          type: "nameId",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+        {
+          key: "ied_reviewed_by",
+          label: "ied_reviewed_by",
+          type: "nameId",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+        {
+          key: "ied_approved_by",
+          label: "ied_approved_by",
+          type: "nameId",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: [],
+        },
+      ],
+    },
+  ],
+};
+
 function createAdapter(): ApiAdapter {
   return {
+    login: vi.fn(),
+    logout: vi.fn(),
+    getMe: vi.fn(),
+    changePassword: vi.fn(),
+    normalizePersonnel: vi.fn(),
+    getWorkloadMe: vi.fn(),
+    getWorkloadOffice: vi.fn(),
+    getWorkloadInstitute: vi.fn(),
+    getWorkloadAdmin: vi.fn(),
+    getWorkflowMonitor: vi.fn(),
+    approveWorkflow: vi.fn(),
+    repairCurrentNode: vi.fn(),
+    listAccounts: vi.fn(),
+    listInvalidAccountRows: vi.fn(),
+    createAccount: vi.fn(),
+    updateAccount: vi.fn(),
+    getAdminConfig: vi.fn(),
+    patchAdminConfig: vi.fn(),
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
     preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
     listJobs: vi.fn(),
+    listTaskGroups: vi.fn(),
+    getTaskGroupDetail: vi.fn(),
+    submitTaskGroup: vi.fn(),
+    restartSubmitTaskGroup: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
   };
 }
 
+function createPersonnelAdapter() {
+  return {
+    ...createAdapter(),
+    normalizePersonnel: vi.fn(),
+  } as ApiAdapter & {
+    normalizePersonnel: ReturnType<typeof vi.fn>;
+  };
+}
+
+async function fillPersonnelBaseFields(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("album_title_cn"), "album");
+  await user.type(screen.getByLabelText("subitem_name"), "subitem");
+}
+
 describe("DeliverableWorkspace", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const albumTitleLabel =
     schema.sections[1].fields.find((field) => field.key === "album_title_cn")?.label ?? "";
   const subitemNameLabel =
@@ -415,6 +564,233 @@ describe("DeliverableWorkspace", () => {
       expect(screen.getByText("only .dwg files are allowed")).toBeInTheDocument();
       expect(screen.getByText("required")).toBeInTheDocument();
     });
+  });
+
+  it("normalizes watched personnel fields after debounce and keeps discipline leader independent", async () => {
+    const user = userEvent.setup();
+    const adapter = createPersonnelAdapter();
+    adapter.normalizePersonnel.mockResolvedValue({
+      normalized: {
+        fieldName: "ied_checked_by",
+        rawValue: "张三",
+        normalizedValue: "张三@zhangsan",
+        matchedAccount: "zhangsan",
+        matchedName: "张三",
+        matchStrategy: "name",
+        status: "matched",
+        errors: [],
+      },
+      candidates: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={personnelSchema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("ied_discipline_leader"), "李四@lisi");
+    await user.type(screen.getByLabelText("ied_checked_by"), "张三");
+
+    await waitFor(() => {
+      expect(adapter.normalizePersonnel).toHaveBeenCalledWith("ied_checked_by", "张三");
+    }, { timeout: 1500 });
+
+    expect(screen.getByLabelText("ied_checked_by")).toHaveValue("张三@zhangsan");
+    expect(screen.getByLabelText("ied_discipline_leader")).toHaveValue("李四@lisi");
+  });
+
+  it("shows candidate choices for ambiguous personnel matches and writes back the selected account", async () => {
+    const user = userEvent.setup();
+    const adapter = createPersonnelAdapter();
+    adapter.normalizePersonnel.mockResolvedValue({
+      normalized: {
+        fieldName: "ied_reviewed_by",
+        rawValue: "重名",
+        normalizedValue: null,
+        matchedAccount: null,
+        matchedName: null,
+        matchStrategy: null,
+        status: "ambiguous",
+        errors: ["duplicate_name_needs_selection"],
+      },
+      candidates: [
+        {
+          accountId: "dup-1",
+          displayName: "重名",
+          role: "设计人员",
+          officeCode: "S01",
+          officeName: "结构一室",
+          valid: true,
+        },
+        {
+          accountId: "dup-2",
+          displayName: "重名",
+          role: "设计人员",
+          officeCode: "S02",
+          officeName: "结构二室",
+          valid: true,
+        },
+      ],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={personnelSchema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("ied_reviewed_by"), "重名");
+
+    expect(await screen.findByRole("button", { name: /dup-1/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /dup-2/ }));
+
+    expect(screen.getByLabelText("ied_reviewed_by")).toHaveValue("重名@dup-2");
+  });
+
+  it("blocks submit when a watched personnel field cannot be normalized", async () => {
+    const user = userEvent.setup();
+    const adapter = createPersonnelAdapter();
+    adapter.normalizePersonnel.mockResolvedValue({
+      normalized: {
+        fieldName: "ied_prepared_by",
+        rawValue: "不存在",
+        normalizedValue: null,
+        matchedAccount: null,
+        matchedName: null,
+        matchStrategy: null,
+        status: "invalid",
+        errors: ["unresolved_personnel"],
+      },
+      candidates: [],
+    });
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={personnelSchema}
+      />,
+    );
+
+    await fillPersonnelBaseFields(user);
+    await user.type(screen.getByLabelText("ied_prepared_by"), "不存在");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.normalizePersonnel).toHaveBeenCalledWith("ied_prepared_by", "不存在");
+    });
+
+    expect(await screen.findByText("未找到有效账号，请检查输入。")).toBeInTheDocument();
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+    expect(adapter.preflightFonts).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit when review-role accounts duplicate each other", async () => {
+    const user = userEvent.setup();
+    const adapter = createPersonnelAdapter();
+    adapter.normalizePersonnel.mockImplementation(async (fieldName: string, rawValue: string | null) => {
+      if (fieldName === "ied_prepared_by") {
+        return {
+          normalized: {
+            fieldName,
+            rawValue,
+            normalizedValue: "张三@zhangsan",
+            matchedAccount: "zhangsan",
+            matchedName: "张三",
+            matchStrategy: "name",
+            status: "matched",
+            errors: [],
+          },
+          candidates: [],
+        };
+      }
+
+      return {
+        normalized: {
+          fieldName,
+          rawValue,
+          normalizedValue: "李四@zhangsan",
+          matchedAccount: "zhangsan",
+          matchedName: "李四",
+          matchStrategy: "account",
+          status: "matched",
+          errors: [],
+        },
+        candidates: [],
+      };
+    });
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacedStyleCount: 0,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      requiresConfirmation: false,
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={personnelSchema}
+      />,
+    );
+
+    await fillPersonnelBaseFields(user);
+    await user.type(screen.getByLabelText("ied_prepared_by"), "张三");
+    await user.type(screen.getByLabelText("ied_checked_by"), "zhangsan");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    expect(await screen.findAllByText("账号不能与其他审批角色重复。")).toHaveLength(2);
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+    expect(adapter.preflightFonts).not.toHaveBeenCalled();
   });
 
   it("preflights fonts before direct deliverable submit and proceeds immediately when all files are ok", async () => {

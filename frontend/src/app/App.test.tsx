@@ -1,26 +1,71 @@
 ﻿import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { App } from "./App";
+import { App, isBackendUnavailable } from "./App";
 
+const mockLogin = vi.fn();
+const mockLogout = vi.fn();
+const mockGetMe = vi.fn();
+const mockChangePassword = vi.fn();
+const mockNormalizePersonnel = vi.fn();
+const mockGetWorkloadMe = vi.fn();
+const mockGetWorkloadOffice = vi.fn();
+const mockGetWorkloadInstitute = vi.fn();
+const mockGetWorkloadAdmin = vi.fn();
+const mockGetWorkflowMonitor = vi.fn();
+const mockApproveWorkflow = vi.fn();
+const mockRepairCurrentNode = vi.fn();
+const mockListAccounts = vi.fn();
+const mockListInvalidAccountRows = vi.fn();
+const mockCreateAccount = vi.fn();
+const mockUpdateAccount = vi.fn();
+const mockGetAdminConfig = vi.fn();
+const mockPatchAdminConfig = vi.fn();
 const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
 const mockPreflightFonts = vi.fn();
 const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
+const mockListTaskGroups = vi.fn();
+const mockGetTaskGroupDetail = vi.fn();
+const mockSubmitTaskGroup = vi.fn();
+const mockRestartSubmitTaskGroup = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobDetail = vi.fn();
 
 vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
+    login: mockLogin,
+    logout: mockLogout,
+    getMe: mockGetMe,
+    changePassword: mockChangePassword,
+    normalizePersonnel: mockNormalizePersonnel,
+    getWorkloadMe: mockGetWorkloadMe,
+    getWorkloadOffice: mockGetWorkloadOffice,
+    getWorkloadInstitute: mockGetWorkloadInstitute,
+    getWorkloadAdmin: mockGetWorkloadAdmin,
+    getWorkflowMonitor: mockGetWorkflowMonitor,
+    approveWorkflow: mockApproveWorkflow,
+    repairCurrentNode: mockRepairCurrentNode,
+    listAccounts: mockListAccounts,
+    listInvalidAccountRows: mockListInvalidAccountRows,
+    createAccount: mockCreateAccount,
+    updateAccount: mockUpdateAccount,
+    getAdminConfig: mockGetAdminConfig,
+    patchAdminConfig: mockPatchAdminConfig,
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
     preflightFonts: mockPreflightFonts,
     createBatch: mockCreateBatch,
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
+    listTaskGroups: mockListTaskGroups,
+    getTaskGroupDetail: mockGetTaskGroupDetail,
+    submitTaskGroup: mockSubmitTaskGroup,
+    restartSubmitTaskGroup: mockRestartSubmitTaskGroup,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
   }),
@@ -28,13 +73,37 @@ vi.mock("../platform/api/useApiAdapter", () => ({
 
 beforeEach(() => {
   window.history.pushState({}, "", "/");
+  window.localStorage.clear();
+  window.localStorage.setItem("auth_token", "persisted-token");
 
+  mockLogin.mockReset();
+  mockLogout.mockReset();
+  mockGetMe.mockReset();
+  mockChangePassword.mockReset();
+  mockNormalizePersonnel.mockReset();
+  mockGetWorkloadMe.mockReset();
+  mockGetWorkloadOffice.mockReset();
+  mockGetWorkloadInstitute.mockReset();
+  mockGetWorkloadAdmin.mockReset();
+  mockGetWorkflowMonitor.mockReset();
+  mockApproveWorkflow.mockReset();
+  mockRepairCurrentNode.mockReset();
+  mockListAccounts.mockReset();
+  mockListInvalidAccountRows.mockReset();
+  mockCreateAccount.mockReset();
+  mockUpdateAccount.mockReset();
+  mockGetAdminConfig.mockReset();
+  mockPatchAdminConfig.mockReset();
   mockGetHealth.mockReset();
   mockGetFormSchema.mockReset();
   mockPreflightFonts.mockReset();
   mockCreateBatch.mockReset();
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
+  mockListTaskGroups.mockReset();
+  mockGetTaskGroupDetail.mockReset();
+  mockSubmitTaskGroup.mockReset();
+  mockRestartSubmitTaskGroup.mockReset();
   mockListJobs.mockReset();
   mockGetJobDetail.mockReset();
 
@@ -47,6 +116,211 @@ beforeEach(() => {
     autocadReady: true,
     officeReady: true,
     serverTime: "2026-03-08T10:20:30+08:00",
+  });
+  mockGetMe.mockResolvedValue({
+    accountId: "zhangsan",
+    displayName: "张三",
+    role: "设计人员",
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    valid: true,
+    pendingTodoCount: 2,
+  });
+  mockLogin.mockResolvedValue({
+    token: "new-login-token",
+    account: {
+      accountId: "zhangsan",
+      displayName: "张三",
+      role: "设计人员",
+      officeCode: "HB-JG",
+      officeName: "河北分公司-建筑结构所",
+      valid: true,
+      pendingTodoCount: 2,
+    },
+  });
+  mockLogout.mockResolvedValue({ ok: true });
+  mockChangePassword.mockResolvedValue({
+    accountId: "zhangsan",
+    displayName: "张三",
+    role: "设计人员",
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    valid: true,
+    pendingTodoCount: 2,
+  });
+  mockGetWorkloadMe.mockResolvedValue({
+    scope: "me",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    totalWorkloadA1: 2.6,
+    officeName: null,
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_prepared_by",
+        accountId: "zhangsan",
+        displayName: "张三",
+        workloadA1: 1.4,
+        settledAt: "2026-03-20T10:20:30+08:00",
+        groupId: "group-1",
+        settlementStatus: "settled",
+      },
+      {
+        roleKey: "ied_checked_by",
+        accountId: "zhangsan",
+        displayName: "张三",
+        workloadA1: 1.2,
+        settledAt: "2026-03-22T10:20:30+08:00",
+        groupId: "group-2",
+        settlementStatus: "settled",
+      },
+    ],
+  });
+  mockGetWorkloadOffice.mockResolvedValue({
+    scope: "office",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    totalWorkloadA1: 5.1,
+    officeName: "河北分公司-建筑结构所",
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_prepared_by",
+        accountId: "lisi",
+        displayName: "李四",
+        workloadA1: 2.5,
+        settledAt: "2026-03-23T10:20:30+08:00",
+        groupId: "group-office-1",
+        settlementStatus: "settled",
+      },
+    ],
+  });
+  mockGetWorkloadInstitute.mockResolvedValue({
+    scope: "institute",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    totalWorkloadA1: 8.8,
+    officeName: null,
+    totalsByAccount: {},
+    entries: [
+      {
+        roleKey: "ied_checked_by",
+        accountId: "wangwu",
+        displayName: "王五",
+        workloadA1: 3.2,
+        settledAt: "2026-03-21T10:20:30+08:00",
+        groupId: "group-inst-1",
+        settlementStatus: "settled",
+      },
+    ],
+  });
+  mockGetWorkloadAdmin.mockResolvedValue({
+    scope: "admin",
+    filters: {
+      startDate: null,
+      endDate: null,
+      status: null,
+      validOnly: false,
+    },
+    totalWorkloadA1: 12.3,
+    officeName: null,
+    totalsByAccount: {
+      zhangsan: 2.6,
+      lisi: 5.1,
+    },
+    entries: [
+      {
+        roleKey: "ied_approved_by",
+        accountId: "zhaoliu",
+        displayName: "赵六",
+        workloadA1: 4.1,
+        settledAt: "2026-03-24T10:20:30+08:00",
+        groupId: "group-admin-1",
+        settlementStatus: "settled",
+      },
+    ],
+  });
+  mockGetWorkflowMonitor.mockResolvedValue({
+    total: 1,
+    items: [
+      {
+        ...makeTaskGroupSummary(99, "20261RS-JGS99.dwg"),
+        workflowStatus: "in_review",
+        currentNodeKey: "one_review",
+        canApprove: true,
+        isRelatedToCurrentUser: true,
+      },
+    ],
+  });
+  mockApproveWorkflow.mockResolvedValue(undefined);
+  mockRepairCurrentNode.mockResolvedValue(undefined);
+  mockListAccounts.mockResolvedValue({
+    items: [
+      {
+        officeCode: "HB-JG",
+        officeName: "河北分公司-建筑结构所",
+        accountId: "existing-user",
+        displayName: "现有账号",
+        role: "设计人员",
+        password: "password",
+        valid: true,
+        rowNumber: 8,
+        errors: [],
+      },
+    ],
+  });
+  mockListInvalidAccountRows.mockResolvedValue({
+    items: [
+      {
+        rowNumber: 18,
+        raw: {
+          account_id: "",
+          display_name: "缺失账号",
+          role: "设计人员",
+        },
+        errors: ["missing_account_id"],
+      },
+    ],
+  });
+  mockCreateAccount.mockResolvedValue({
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    accountId: "new-user",
+    displayName: "新账号",
+    role: "设计人员",
+    password: "password",
+    valid: true,
+    rowNumber: 19,
+    errors: [],
+  });
+  mockUpdateAccount.mockResolvedValue({
+    officeCode: "HB-JG",
+    officeName: "河北分公司-建筑结构所",
+    accountId: "existing-user",
+    displayName: "现有账号-更新",
+    role: "设计人员",
+    password: "new-password",
+    valid: true,
+    rowNumber: 8,
+    errors: [],
+  });
+  mockGetAdminConfig.mockResolvedValue({
+    archiveRootPath: "\\\\fileserver\\archive\\drawings",
+  });
+  mockPatchAdminConfig.mockResolvedValue({
+    archiveRootPath: "\\\\fileserver\\archive\\next",
   });
 
   mockGetFormSchema.mockResolvedValue({
@@ -81,6 +355,10 @@ beforeEach(() => {
     total: 0,
     items: [],
   });
+  mockListTaskGroups.mockResolvedValue({
+    total: 0,
+    items: [],
+  });
   mockPreflightFonts.mockResolvedValue({
     files: [],
     replacementOptions: [],
@@ -90,6 +368,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  window.localStorage.clear();
 });
 
 function makeSingleJob(index: number, sourceFilename: string) {
@@ -127,7 +406,90 @@ function makeSingleJob(index: number, sourceFilename: string) {
   };
 }
 
+function makeTaskGroupSummary(index: number, sourceFilename: string) {
+  return {
+    groupId: `group-${index}`,
+    batchId: `batch-${index}`,
+    projectNo: "2026",
+    status: "succeeded",
+    createdAt: `2026-03-16T11:${String(index).padStart(2, "0")}:30+08:00`,
+    sourceFilenames: [sourceFilename],
+    ownerSnapshot: {
+      creatorAccount: "zhangsan",
+      creatorName: "张三",
+      creatorRole: "设计人员",
+      creatorOffice: "河北分公司-建筑结构所",
+      createdByScope: "current_login_user",
+      submittedAt: null,
+    },
+    creatorName: "张三",
+    creatorAccount: "zhangsan",
+    creatorOffice: "河北分公司-建筑结构所",
+    workflowStatus: "draft",
+    currentNodeKey: null,
+    archiveStatus: "pending",
+    workload: {
+      initialWorkloadA1: 1.2,
+      finalWorkloadA1: 1.2,
+      oneReviewFactor: 1,
+      twoReviewFactor: 1,
+      threeReviewFactor: 1,
+      settlementStatus: "pending",
+      settledAt: null,
+      contributorEntries: [],
+    },
+    effectiveWorkload: 1.2,
+    canViewDetail: true,
+    canSubmit: false,
+    canApprove: false,
+    isRelatedToCurrentUser: true,
+  };
+}
+
 describe("homepage shell", () => {
+  it("renders the login page when there is no persisted session token", async () => {
+    window.localStorage.clear();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "账号登录" })).toBeInTheDocument();
+    expect(screen.getByText("中核工程-河北分公司-建筑结构所出图平台")).toBeInTheDocument();
+    expect(screen.getByText("默认密码password")).toBeInTheDocument();
+    expect(screen.getByLabelText("账号")).toBeInTheDocument();
+    expect(screen.getByLabelText("密码")).toBeInTheDocument();
+    expect(mockGetMe).not.toHaveBeenCalled();
+  });
+
+  it("submits login and transitions into the protected business page", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await user.type(await screen.findByLabelText("账号"), "zhangsan");
+    await user.type(screen.getByLabelText("密码"), "password");
+    await user.click(screen.getByRole("button", { name: "登录" }));
+
+    expect(mockLogin).toHaveBeenCalledWith({
+      accountId: "zhangsan",
+      password: "password",
+    });
+    expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
+    expect(window.localStorage.getItem("auth_token")).toBe("new-login-token");
+  });
+
+  it("clears an invalid persisted session and returns to login", async () => {
+    mockGetMe.mockRejectedValueOnce({
+      status: 401,
+      detail: "authentication required",
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "账号登录" })).toBeInTheDocument();
+    expect(window.localStorage.getItem("auth_token")).toBeNull();
+  });
+
   it("shows a clear loading state before form schema is ready", async () => {
     mockGetFormSchema.mockImplementation(() => new Promise(() => {}));
 
@@ -146,12 +508,12 @@ describe("homepage shell", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）",
+    );
+    within(screen.getByTestId("tutorial-target-entry"))
+      .getAllByRole("button")
+      .forEach((button) => expect(button).toBeDisabled());
   });
 
   it("shows a maintenance warning when backend health is not ready", async () => {
@@ -168,12 +530,37 @@ describe("homepage shell", () => {
 
     render(<App />);
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）",
+    );
+    within(screen.getByTestId("tutorial-target-entry"))
+      .getAllByRole("button")
+      .forEach((button) => expect(button).toBeDisabled());
+  });
+
+  it("does not treat a background refresh error as maintenance when the last health snapshot is ready", () => {
     expect(
-      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+      isBackendUnavailable({
+        hasError: true,
+        health: {
+          ready: true,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isBackendUnavailable({
+        hasError: true,
+        health: undefined,
+      }),
+    ).toBe(true);
+    expect(
+      isBackendUnavailable({
+        hasError: false,
+        health: {
+          ready: false,
+        },
+      }),
+    ).toBe(true);
   });
 
   it("renders the title strip, module toolbar, and primary actions", async () => {
@@ -184,12 +571,25 @@ describe("homepage shell", () => {
     expect(await screen.findAllByTestId("title-strip-status-item")).toHaveLength(5);
     expect(screen.getByText("中核工程-河北分公司-建筑结构所出图平台")).toBeInTheDocument();
     expect(screen.getByTestId("hero-watermark")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("title-strip").compareDocumentPosition(screen.getByTestId("module-toolbar")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
     expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "业务" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "账号" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "工作量 (2)" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "账号模块" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "工作量模块" })).toHaveLength(1);
 
+    const shellToolbarRow = screen.getByTestId("shell-toolbar-row");
     const toolbar = screen.getByTestId("module-toolbar");
+    const sessionToolbar = screen.getByTestId("protected-app-nav");
+    expect(shellToolbarRow).toContainElement(toolbar);
+    expect(shellToolbarRow).toContainElement(sessionToolbar);
     expect(within(toolbar).getByRole("button", { name: "业务模块" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -209,21 +609,28 @@ describe("homepage shell", () => {
     expect(screen.queryByText("工作量模块预留")).not.toBeInTheDocument();
   });
 
-  it("switches visible module panels from the toolbar", async () => {
+  it("navigates between the real module routes from the toolbar", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     const toolbar = await screen.findByTestId("module-toolbar");
     const accountButton = within(toolbar).getByRole("button", { name: "账号模块" });
     const workloadButton = within(toolbar).getByRole("button", { name: "工作量模块" });
+    const businessButton = within(toolbar).getByRole("button", { name: "业务模块" });
 
     await user.click(accountButton);
-    expect(screen.getByTestId("module-account-panel")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/account"));
+    expect(await screen.findByText("2 条已结算记录")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/account");
     expect(screen.queryByTestId("module-business-panel")).not.toBeInTheDocument();
 
     await user.click(workloadButton);
-    expect(screen.getByTestId("module-workload-panel")).toBeInTheDocument();
-    expect(screen.queryByTestId("module-account-panel")).not.toBeInTheDocument();
+    expect(await screen.findByText("当前流程监视")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/workload");
+
+    await user.click(businessButton);
+    expect(await screen.findByTestId("module-business-panel")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/business");
   });
 
   it("shows task record labels and refresh feedback", async () => {
@@ -251,7 +658,7 @@ describe("homepage shell", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "教程" }));
+    await user.click(await screen.findByRole("button", { name: "教程" }));
 
     expect(screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下一步" })).toBeInTheDocument();
@@ -259,14 +666,18 @@ describe("homepage shell", () => {
       "data-tutorial-active",
       "true",
     );
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "entry");
+    expect(
+      (await screen.findByTestId("tutorial-spotlight").catch(() => screen.findByTestId("tutorial-dimmer"))),
+    ).toBeInTheDocument();
     expect(document.body.style.overflow).toBe("hidden");
     expect(document.documentElement.style.scrollbarGutter).toBe("stable");
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
     expect(screen.getByText(/点击“出图”后，浏览器会拉起系统文件选择窗口/)).toBeInTheDocument();
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "picker_select");
+    expect(
+      (await screen.findByTestId("tutorial-spotlight").catch(() => screen.findByTestId("tutorial-dimmer"))),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务配置" })).not.toBeInTheDocument();
@@ -275,20 +686,26 @@ describe("homepage shell", () => {
     expect(
       screen.getByText("上传文件后直接在弹窗内完成配置。关闭不会丢失草稿；只有手动清空或提交成功后才会重置。"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "config");
+    expect(
+      (await screen.findByTestId("tutorial-spotlight").catch(() => screen.findByTestId("tutorial-dimmer"))),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务记录" })).not.toBeInTheDocument();
     expect(screen.getByText("demo-2026-structural-package.dwg")).toBeInTheDocument();
     expect(screen.getByText("查看任务包")).toBeInTheDocument();
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "record");
+    expect(
+      (await screen.findByTestId("tutorial-spotlight").catch(() => screen.findByTestId("tutorial-dimmer"))),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
     expect(screen.getByText("聚合下载")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
+    expect(
+      (await screen.findByTestId("tutorial-spotlight").catch(() => screen.findByTestId("tutorial-dimmer"))),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "退出" }));
@@ -301,27 +718,232 @@ describe("homepage shell", () => {
     expect(document.body.style.overflow).toBe("");
     expect(document.documentElement.style.scrollbarGutter).toBe("");
   });
+
+  it("renders the real account page and supports password changes", async () => {
+    window.history.pushState({}, "", "/account");
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
+    expect(await screen.findByText("2 条已结算记录")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号模块" })).toBeInTheDocument();
+    expect(screen.getAllByText("张三").length).toBeGreaterThan(0);
+    expect(screen.getByText("设计人员")).toBeInTheDocument();
+    expect(screen.getByText("河北分公司-建筑结构所")).toBeInTheDocument();
+    expect(screen.getByText("2.60")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("新密码"), "new-password");
+    await user.click(screen.getByRole("button", { name: "更新密码" }));
+
+    expect(mockChangePassword).toHaveBeenCalledWith("new-password");
+    expect(await screen.findByText("密码已更新，下次登录请使用新密码。")).toBeInTheDocument();
+  });
+
+  it("renders the real workload page instead of the placeholder route", async () => {
+    window.history.pushState({}, "", "/workload");
+
+    render(<App />);
+
+    expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
+    expect(await screen.findByText("当前流程监视")).toBeInTheDocument();
+    expect(screen.getByText("历史与统计")).toBeInTheDocument();
+    expect(screen.queryByText("流程监视、审批与统计将在下一批接入。")).not.toBeInTheDocument();
+  });
+
+  it("shows role-aware workload scopes and lets approvable users submit approvals", async () => {
+    window.history.pushState({}, "", "/workload");
+    mockGetMe.mockResolvedValue({
+      accountId: "admin",
+      displayName: "管理员",
+      role: "管理员",
+      officeCode: "ADMIN",
+      officeName: "平台管理",
+      valid: true,
+      pendingTodoCount: 4,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "个人" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "科室" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全所" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "管理员" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "管理员" }));
+    expect(mockGetWorkloadAdmin).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "审批" }));
+    expect(await screen.findByRole("dialog", { name: "审批当前节点" })).toBeInTheDocument();
+    expect(screen.getByLabelText("审批系数")).toHaveValue("1.00");
+
+    await user.click(screen.getByRole("button", { name: "确认审批" }));
+    expect(mockApproveWorkflow).toHaveBeenCalledWith("group-99", {
+      factor: 1,
+      nodeKey: "one_review",
+    });
+  });
+
+  it("loads repair account options lazily only when the admin opens repair dialog", async () => {
+    window.history.pushState({}, "", "/workload");
+    mockGetMe.mockResolvedValue({
+      accountId: "admin",
+      displayName: "管理员",
+      role: "管理员",
+      officeCode: "ADMIN",
+      officeName: "平台管理",
+      valid: true,
+      pendingTodoCount: 4,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByText("当前流程监视")).toBeInTheDocument();
+    expect(mockListAccounts).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "修复当前节点" }));
+
+    expect(await screen.findByRole("dialog", { name: "修复当前节点" })).toBeInTheDocument();
+    expect(mockListAccounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the real admin account page with account, invalid-row, and archive config sections", async () => {
+    window.history.pushState({}, "", "/account/admin");
+    mockGetMe.mockResolvedValue({
+      accountId: "admin",
+      displayName: "管理员",
+      role: "管理员",
+      officeCode: "ADMIN",
+      officeName: "平台管理",
+      valid: true,
+      pendingTodoCount: 4,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "管理员配置" })).toBeInTheDocument();
+    expect(screen.getByText("现有账号")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看现有账号" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "现有账号列表" })).not.toBeInTheDocument();
+    expect(screen.queryByText("现有账号（existing-user）")).not.toBeInTheDocument();
+    expect(screen.getByText("无效账号行")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("\\\\fileserver\\archive\\drawings")).toBeInTheDocument();
+    expect(screen.queryByText("管理员账号管理与归档配置将在下一批接入。")).not.toBeInTheDocument();
+  });
+
+  it("switches duplicate account creation into edit mode on the admin page", async () => {
+    window.history.pushState({}, "", "/account/admin");
+    mockGetMe.mockResolvedValue({
+      accountId: "admin",
+      displayName: "管理员",
+      role: "管理员",
+      officeCode: "ADMIN",
+      officeName: "平台管理",
+      valid: true,
+      pendingTodoCount: 4,
+    });
+    mockCreateAccount.mockRejectedValue({
+      status: 422,
+      detail: "account_id already exists",
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "管理员配置" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看现有账号" }));
+    expect(await screen.findByRole("dialog", { name: "现有账号列表" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑 existing-user" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+    await user.clear(screen.getByLabelText("账号"));
+    await user.type(screen.getByLabelText("账号"), "existing-user");
+    await user.clear(screen.getByLabelText("姓名"));
+    await user.type(screen.getByLabelText("姓名"), "重复账号");
+    await user.click(screen.getByRole("button", { name: "创建账号" }));
+
+    expect(await screen.findByText("账号已存在，已切换到编辑模式。")).toBeInTheDocument();
+    expect(screen.getByText("编辑账号")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("姓名"));
+    await user.type(screen.getByLabelText("姓名"), "现有账号-更新");
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(mockUpdateAccount).toHaveBeenCalledWith("existing-user", {
+      officeCode: "HB-JG",
+      officeName: "河北分公司-建筑结构所",
+      accountId: "existing-user",
+      displayName: "现有账号-更新",
+      role: "设计人员",
+      password: "password",
+    });
+  });
+
+  it("lets admins repair the current workflow node with a newly created account", async () => {
+    window.history.pushState({}, "", "/workload");
+    mockGetMe.mockResolvedValue({
+      accountId: "admin",
+      displayName: "管理员",
+      role: "管理员",
+      officeCode: "ADMIN",
+      officeName: "平台管理",
+      valid: true,
+      pendingTodoCount: 4,
+    });
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "修复当前节点" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "修复当前节点" }));
+    expect(await screen.findByRole("dialog", { name: "修复当前节点" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "新增账号并修复" }));
+    await user.clear(screen.getByLabelText("新账号"));
+    await user.type(screen.getByLabelText("新账号"), "repair-user");
+    await user.clear(screen.getByLabelText("姓名"));
+    await user.type(screen.getByLabelText("姓名"), "修复账号");
+    await user.clear(screen.getByLabelText("科室编码"));
+    await user.type(screen.getByLabelText("科室编码"), "HB-JG");
+    await user.clear(screen.getByLabelText("科室"));
+    await user.type(screen.getByLabelText("科室"), "河北分公司-建筑结构所");
+    await user.selectOptions(screen.getByLabelText("角色"), "设计人员");
+    await user.click(screen.getByRole("button", { name: "确认修复" }));
+
+    expect(mockRepairCurrentNode).toHaveBeenCalledWith("group-99", {
+      createAccountPayload: {
+        officeCode: "HB-JG",
+        officeName: "河北分公司-建筑结构所",
+        accountId: "repair-user",
+        displayName: "修复账号",
+        role: "设计人员",
+        password: "password",
+      },
+    });
+  });
 });
 
-describe("recent jobs area", () => {
-  it("filters recent jobs locally by status without refetching the list", async () => {
-    mockListJobs.mockResolvedValue({
+describe("recent task groups area", () => {
+  it("filters recent task groups locally by status without refetching the list", async () => {
+    mockListTaskGroups.mockResolvedValue({
       total: 4,
       items: [
         {
-          ...makeSingleJob(1, "queued-job.dwg"),
+          ...makeTaskGroupSummary(1, "queued-job.dwg"),
           status: "queued",
         },
         {
-          ...makeSingleJob(2, "running-job.dwg"),
+          ...makeTaskGroupSummary(2, "running-job.dwg"),
           status: "running",
         },
         {
-          ...makeSingleJob(3, "success-job.dwg"),
+          ...makeTaskGroupSummary(3, "success-job.dwg"),
           status: "succeeded",
         },
         {
-          ...makeSingleJob(4, "failed-job.dwg"),
+          ...makeTaskGroupSummary(4, "failed-job.dwg"),
           status: "failed",
         },
       ],
@@ -331,7 +953,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     expect(await screen.findByText("success-job.dwg")).toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
+    expect(mockListTaskGroups).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "排队中" }));
     expect(screen.getByRole("button", { name: "排队中" })).toHaveAttribute("aria-pressed", "true");
@@ -339,7 +961,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("success-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
+    expect(mockListTaskGroups).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "成功" }));
     expect(screen.getByRole("button", { name: "成功" })).toHaveAttribute("aria-pressed", "true");
@@ -347,14 +969,14 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("queued-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
+    expect(mockListTaskGroups).toHaveBeenCalledTimes(1);
   });
 
-  it("shows eight cards by default and opens the rest in a modal", async () => {
-    mockListJobs.mockResolvedValue({
+  it("shows eight task-group cards by default and opens the rest in a modal", async () => {
+    mockListTaskGroups.mockResolvedValue({
       total: 10,
       items: Array.from({ length: 10 }, (_, index) =>
-        makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
+        makeTaskGroupSummary(index + 1, `sample-${index + 1}.dwg`),
       ),
     });
 
@@ -373,18 +995,18 @@ describe("recent jobs area", () => {
     expect(within(modal).getByText("sample-1.dwg")).toBeInTheDocument();
   });
 
-  it("shows all matching jobs while searching", async () => {
-    mockListJobs.mockResolvedValue({
+  it("shows all matching task groups while searching", async () => {
+    mockListTaskGroups.mockResolvedValue({
       total: 8,
       items: [
-        makeSingleJob(1, "sample-1.dwg"),
-        makeSingleJob(2, "20261RS-JGS65.dwg"),
-        makeSingleJob(3, "sample-3.dwg"),
-        makeSingleJob(4, "18185NE-JGS11.dwg"),
-        makeSingleJob(5, "sample-5.dwg"),
-        makeSingleJob(6, "20261RS-JGS66.dwg"),
-        makeSingleJob(7, "sample-7.dwg"),
-        makeSingleJob(8, "sample-8.dwg"),
+        makeTaskGroupSummary(1, "sample-1.dwg"),
+        makeTaskGroupSummary(2, "20261RS-JGS65.dwg"),
+        makeTaskGroupSummary(3, "sample-3.dwg"),
+        makeTaskGroupSummary(4, "18185NE-JGS11.dwg"),
+        makeTaskGroupSummary(5, "sample-5.dwg"),
+        makeTaskGroupSummary(6, "20261RS-JGS66.dwg"),
+        makeTaskGroupSummary(7, "sample-7.dwg"),
+        makeTaskGroupSummary(8, "sample-8.dwg"),
       ],
     });
 
@@ -401,133 +1023,273 @@ describe("recent jobs area", () => {
   });
 });
 
-describe("job cards", () => {
-  it("renders a task group as one package card with child links", async () => {
-    mockListJobs.mockResolvedValue({
+describe("task group management", () => {
+  it("loads recent task groups from the management endpoint and links to task-group details", async () => {
+    mockListTaskGroups.mockResolvedValue({
       total: 1,
       items: [
         {
-          jobId: "group-1",
-          batchId: "batch-1",
-          groupId: "group-1",
-          isGroup: true,
-          sourceFilename: "18185NE-JGS11.dwg",
-          sourceFilenames: ["18185NE-JGS11.dwg"],
-          taskKind: null,
-          taskRole: null,
-          jobMode: null,
-          projectNo: "1818",
+          ...makeTaskGroupSummary(1, "album-1.dwg"),
           status: "running",
-          stage: "DELIVERABLE_BRANCH",
-          percent: 45,
-          message: "",
-          createdAt: "2026-03-16T10:20:30+08:00",
-          finishedAt: null,
-          runAuditCheck: true,
-          childJobIds: ["deliverable-1", "audit-1"],
-          findingsCount: 0,
-          affectedDrawingsCount: 0,
-          artifacts: {
-            packageAvailable: false,
-            iedAvailable: false,
-            reportAvailable: false,
-            replacedDwgAvailable: false,
-          },
-          retryAvailable: false,
-          sharedRunId: null,
-        },
-      ],
-    });
-
-    mockGetJobDetail.mockResolvedValue({
-      jobId: "group-1",
-      batchId: "batch-1",
-      groupId: "group-1",
-      isGroup: true,
-      sourceFilename: "18185NE-JGS11.dwg",
-      sourceFilenames: ["18185NE-JGS11.dwg"],
-      taskKind: null,
-      taskRole: null,
-      jobMode: null,
-      projectNo: "1818",
-      status: "running",
-      stage: "DELIVERABLE_BRANCH",
-      percent: 45,
-      message: "",
-      createdAt: "2026-03-16T10:20:30+08:00",
-      finishedAt: null,
-      runAuditCheck: true,
-      childJobIds: ["deliverable-1", "audit-1"],
-      findingsCount: 0,
-      affectedDrawingsCount: 0,
-      artifacts: {
-        packageAvailable: false,
-        iedAvailable: false,
-        reportAvailable: false,
-        replacedDwgAvailable: false,
-      },
-      retryAvailable: false,
-      sharedRunId: null,
-      startedAt: "2026-03-16T10:20:32+08:00",
-      currentFile: null,
-      topWrongTexts: [],
-      topInternalCodes: [],
-      flags: [],
-      errors: [],
-      children: [
-        {
-          ...makeSingleJob(1, "18185NE-JGS11.dwg"),
-          jobId: "deliverable-1",
-          batchId: "batch-1",
-          groupId: "group-1",
-          taskKind: "deliverable",
-          taskRole: "deliverable_main",
-          status: "running",
-          stage: "GENERATE_DOCS",
-          percent: 45,
-          finishedAt: null,
-        },
-        {
-          ...makeSingleJob(2, "18185NE-JGS11.dwg"),
-          jobId: "audit-1",
-          batchId: "batch-1",
-          groupId: "group-1",
-          taskKind: "audit_check",
-          taskRole: "audit_check",
-          status: "queued",
-          stage: "AUDIT_CHECK",
-          percent: 0,
-          finishedAt: null,
-          findingsCount: 0,
-          affectedDrawingsCount: 0,
-          artifacts: {
-            packageAvailable: false,
-            iedAvailable: false,
-            reportAvailable: false,
-            replacedDwgAvailable: false,
-          },
+          workflowStatus: "in_review",
+          currentNodeKey: "one_review",
+          canSubmit: true,
         },
       ],
     });
 
     render(<App />);
 
-    expect(await screen.findByText("包含 2 个子任务")).toBeInTheDocument();
-    expect(screen.getByText("任务包")).toBeInTheDocument();
-    expect(screen.getAllByText("交付").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("纠错").length).toBeGreaterThan(0);
+    expect(await screen.findByText("album-1.dwg")).toBeInTheDocument();
+    expect(mockListTaskGroups).toHaveBeenCalledTimes(1);
+    expect(mockListJobs).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "查看任务包" })).toHaveAttribute(
+      "href",
+      "/task-groups/group-1",
+    );
   });
 
-  it("shows a completed single deliverable job with a detail link", async () => {
-    mockListJobs.mockResolvedValue({
+  it("retries submit after confirming archive overwrite conflicts", async () => {
+    mockListTaskGroups.mockResolvedValue({
       total: 1,
-      items: [makeSingleJob(1, "20261RS-JGS65.dwg")],
+      items: [
+        {
+          ...makeTaskGroupSummary(1, "album-1.dwg"),
+          status: "queued",
+          canSubmit: true,
+        },
+      ],
+    });
+    mockSubmitTaskGroup
+      .mockRejectedValueOnce({
+        status: 422,
+        detail: "archive_target_exists",
+      })
+      .mockResolvedValueOnce({
+        ...makeTaskGroupSummary(1, "album-1.dwg"),
+        status: "running",
+        workflowStatus: "submitted",
+        canSubmit: false,
+      });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "提交" }));
+    expect(
+      await screen.findByText("归档目标已存在，是否覆盖归档后继续提交？"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "继续提交" }));
+
+    expect(mockSubmitTaskGroup).toHaveBeenNthCalledWith(1, "group-1", {
+      overwriteArchiveExisting: false,
+      cancelExistingInProgress: false,
+    });
+    expect(mockSubmitTaskGroup).toHaveBeenNthCalledWith(2, "group-1", {
+      overwriteArchiveExisting: true,
+      cancelExistingInProgress: false,
+    });
+  });
+
+  it("retries submit after confirming duplicate workflow cancellation", async () => {
+    mockListTaskGroups.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeTaskGroupSummary(1, "album-1.dwg"),
+          status: "queued",
+          canSubmit: true,
+        },
+      ],
+    });
+    mockSubmitTaskGroup
+      .mockRejectedValueOnce({
+        status: 422,
+        detail: "duplicate_in_progress_exists",
+      })
+      .mockResolvedValueOnce({
+        ...makeTaskGroupSummary(1, "album-1.dwg"),
+        status: "running",
+        workflowStatus: "submitted",
+        canSubmit: false,
+      });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "提交" }));
+    expect(
+      await screen.findByText("已有同图册流程在执行中，是否取消旧流程并重新提交？"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "取消旧流程并重提" }));
+
+    expect(mockSubmitTaskGroup).toHaveBeenNthCalledWith(1, "group-1", {
+      overwriteArchiveExisting: false,
+      cancelExistingInProgress: false,
+    });
+    expect(mockSubmitTaskGroup).toHaveBeenNthCalledWith(2, "group-1", {
+      overwriteArchiveExisting: false,
+      cancelExistingInProgress: true,
+    });
+  });
+
+  it("shows a clear message when a non-creator tries to submit", async () => {
+    mockListTaskGroups.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeTaskGroupSummary(1, "album-1.dwg"),
+          status: "queued",
+          canSubmit: true,
+        },
+      ],
+    });
+    mockSubmitTaskGroup.mockRejectedValueOnce({
+      status: 422,
+      detail: "submitter_must_match_creator",
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "提交" }));
+    expect(await screen.findByText("仅创建者本人可提交")).toBeInTheDocument();
+  });
+
+  it("renders the task-group detail route instead of the placeholder page", async () => {
+    window.history.pushState({}, "", "/task-groups/group-1");
+    mockGetTaskGroupDetail.mockResolvedValue({
+      ...makeTaskGroupSummary(1, "album-1.dwg"),
+      childJobIds: ["deliverable-1", "audit-1"],
+      personnelSnapshot: {
+        members: {
+          ied_prepared_by: {
+            fieldName: "ied_prepared_by",
+            rawValue: "张三",
+            normalizedValue: "张三@zhangsan",
+            matchedAccount: "zhangsan",
+            matchedName: "张三",
+            matchStrategy: "exact",
+            status: "matched",
+            errors: [],
+          },
+        },
+      },
+      workflow: {
+        status: "submitted",
+        initiatedAt: "2026-03-25T10:20:30+08:00",
+        initiatedByAccount: "zhangsan",
+        initiatedByName: "张三",
+        duplicatePolicy: null,
+        overwriteArchiveTarget: null,
+        currentNodeKey: "one_review",
+        nodes: [
+          {
+            nodeKey: "one_review",
+            nodeLabel: "一审",
+            assigneeAccount: "lisi",
+            assigneeName: "李四",
+            status: "current",
+            factor: 1,
+            approvedAt: null,
+            actedByAccount: null,
+            actedByName: null,
+          },
+        ],
+        archiveStatus: null,
+        archiveRetryCount: 0,
+        archiveLastError: null,
+        archiveLastAttemptAt: null,
+      },
+      archive: {
+        archiveRootPath: "D:\\Archive",
+        targetDir: "D:\\Archive\\2026\\album-1",
+        status: "pending",
+        overwriteMode: null,
+        startedAt: null,
+        completedAt: null,
+        lastError: null,
+        retryCount: 0,
+        lastAttemptAt: null,
+        archivedFiles: [],
+      },
+      replacement: {
+        albumInternalCode: null,
+        revision: null,
+        replacedGroupId: null,
+        replacedRecordPendingDelete: false,
+      },
+      legacyVisibility: {
+        scope: "owner_only",
+        reason: null,
+      },
+    });
+    mockGetJobDetail
+      .mockResolvedValueOnce({
+        ...makeSingleJob(1, "album-1.dwg"),
+        jobId: "deliverable-1",
+        groupId: "group-1",
+        taskKind: "deliverable",
+      })
+      .mockResolvedValueOnce({
+        ...makeSingleJob(2, "album-1.dwg"),
+        jobId: "audit-1",
+        groupId: "group-1",
+        taskKind: "audit_check",
+      });
+
+    render(<App />);
+
+    expect(await screen.findByText("任务包概览")).toBeInTheDocument();
+    expect(screen.getAllByText("归档状态").length).toBeGreaterThan(0);
+    expect(screen.getByText("一审")).toBeInTheDocument();
+    expect(mockGetTaskGroupDetail).toHaveBeenCalledWith("group-1");
+  });
+});
+
+describe("task group cards", () => {
+  it("renders submit and detail actions from backend permissions", async () => {
+    mockListTaskGroups.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeTaskGroupSummary(1, "18185NE-JGS11.dwg"),
+          status: "running",
+          workflowStatus: "in_review",
+          currentNodeKey: "one_review",
+          canSubmit: true,
+        },
+      ],
     });
 
     render(<App />);
 
-    expect(await screen.findByText("出图完成")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "查看任务" })).toBeInTheDocument();
+    expect(await screen.findByText("流程：审批中")).toBeInTheDocument();
+    expect(screen.getByText("任务包")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提交" })).toBeInTheDocument();
+  });
+
+  it("renders an approval shortcut when the backend marks a group as approvable", async () => {
+    mockListTaskGroups.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeTaskGroupSummary(1, "20261RS-JGS65.dwg"),
+          status: "running",
+          workflowStatus: "in_review",
+          currentNodeKey: "one_review",
+          canApprove: true,
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("link", { name: "前往审批" })).toHaveAttribute(
+      "href",
+      "/workload",
+    );
   });
 });
 
