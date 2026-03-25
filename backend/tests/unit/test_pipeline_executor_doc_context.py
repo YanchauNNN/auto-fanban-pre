@@ -252,7 +252,21 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     docs_dir.mkdir(parents=True)
     (docs_dir / "cover.docx").write_text("doc", encoding="utf-8")
 
-    PipelineExecutor._stage_package(executor, job, {"frames": [], "sheet_sets": []})
+    stage_timings = [
+        {
+            "stage": "GENERATE_DOCS",
+            "started_at": "2026-03-25T10:00:00",
+            "finished_at": "2026-03-25T10:00:01",
+            "duration_ms": 1000.0,
+            "status": "succeeded",
+        }
+    ]
+
+    PipelineExecutor._stage_package(
+        executor,
+        job,
+        {"frames": [], "sheet_sets": [], "stage_timings": stage_timings},
+    )
 
     assert job.artifacts.package_zip == tmp_path / "package.zip"
     assert job.artifacts.drawings_dir == drawings_dir
@@ -264,6 +278,7 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     assert manifest["artifacts"]["package_zip"] == str(tmp_path / "package.zip")
     assert manifest["artifacts"]["drawings_dir"] == str(drawings_dir)
     assert manifest["artifacts"]["docs_dir"] == str(docs_dir)
+    assert manifest["stage_timings"] == stage_timings
 
     assert job.artifacts.package_zip is not None
     with zipfile.ZipFile(job.artifacts.package_zip) as zf:

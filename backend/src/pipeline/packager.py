@@ -116,6 +116,9 @@ class Packager(IPackager):
                 context=context,
                 docs_dir=Path(docs_dir) if docs_dir else None,
             )
+            stage_timings = context.get("stage_timings")
+            if isinstance(stage_timings, list) and stage_timings:
+                manifest["stage_timings"] = stage_timings
 
         manifest_path = job.work_dir / "manifest.json"
         with open(manifest_path, "w", encoding="utf-8") as f:
