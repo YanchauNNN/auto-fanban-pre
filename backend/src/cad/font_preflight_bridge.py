@@ -7,6 +7,7 @@ from typing import Any
 
 from ..config import get_config
 from .accoreconsole_runner import AcCoreConsoleRunner
+from .dwg_version import detect_dwg_version_code_or_none
 
 
 class FontPreflightBridge:
@@ -66,6 +67,7 @@ class FontPreflightBridge:
             "workflow_stage": "font_replace_missing" if replacement_font else "font_preflight",
             "job_id": job_id,
             "source_dxf": str(source_dwg),
+            "source_dwg_version": detect_dwg_version_code_or_none(source_dwg),
             "output_dir": str(workspace_dir),
             "output_dwg": str(output_dwg),
             "replacement_font": replacement_font,
@@ -93,4 +95,3 @@ class FontPreflightBridge:
             shutil.copy2(output_dwg, source_dwg)
             result["output_dwg"] = str(source_dwg)
         return result
-

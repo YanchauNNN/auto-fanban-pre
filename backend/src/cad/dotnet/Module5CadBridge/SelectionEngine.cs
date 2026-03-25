@@ -42,7 +42,7 @@ internal sealed class SelectionEngine
         {
             flags.Add("CAD_EMPTY_SELECTION");
         }
-        else if (TryWriteWblock(db, selectedIds, outputDwg, out var writeError))
+        else if (TryWriteWblock(db, selectedIds, outputDwg, _task.SourceDwgVersion, out var writeError))
         {
             status = "ok";
             _trace.Log($"[DOTNET][SPLIT] frame={frame.FrameId} selected={selectedIds.Count} dwg={outputDwg}");
@@ -86,7 +86,7 @@ internal sealed class SelectionEngine
                 continue;
             }
 
-            if (TryWriteWblock(db, pageIds, pageDwg, out _))
+            if (TryWriteWblock(db, pageIds, pageDwg, _task.SourceDwgVersion, out _))
             {
                 pageDwgPaths.Add(pageDwg);
             }
@@ -104,7 +104,7 @@ internal sealed class SelectionEngine
         {
             flags.Add("CAD_EMPTY_SELECTION");
         }
-        else if (TryWriteWblock(db, union, unionDwg, out var writeError))
+        else if (TryWriteWblock(db, union, unionDwg, _task.SourceDwgVersion, out var writeError))
         {
             if (pagePartial || pageDwgPaths.Count != sheetSet.Pages.Count)
             {
@@ -186,7 +186,13 @@ internal sealed class SelectionEngine
         return selected;
     }
 
-    private static bool TryWriteWblock(Database sourceDb, IEnumerable<ObjectId> ids, string outputDwg, out string error)
+    private static bool TryWriteWblock(
+        Database sourceDb,
+        IEnumerable<ObjectId> ids,
+        string outputDwg,
+        string sourceDwgVersion,
+        out string error
+    )
     {
         error = string.Empty;
         try
@@ -195,7 +201,11 @@ internal sealed class SelectionEngine
             var idCollection = new ObjectIdCollection(ids.ToArray());
             using var targetDb = new Database(true, true);
             sourceDb.Wblock(targetDb, idCollection, Point3d.Origin, DuplicateRecordCloning.Ignore);
-            targetDb.SaveAs(outputDwg, DwgVersion.Current);
+            var saveVersion = DwgVersionResolver.Resolve(
+                sourceDwgVersion,
+                sourceDb.OriginalFileVersion
+            );
+            targetDb.SaveAs(outputDwg, saveVersion);
             return File.Exists(outputDwg);
         }
         catch (Exception ex)

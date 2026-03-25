@@ -102,7 +102,11 @@ internal sealed class FontPreflightProcessor
                 {
                     Directory.CreateDirectory(outputDir);
                 }
-                db.SaveAs(_task.OutputDwg, DwgVersion.Current);
+                var saveVersion = DwgVersionResolver.Resolve(
+                    _task.SourceDwgVersion,
+                    db.OriginalFileVersion
+                );
+                db.SaveAs(_task.OutputDwg, saveVersion);
             }
         }
 

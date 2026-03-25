@@ -82,7 +82,11 @@ def test_audit_replace_executor_writes_replaced_dwg_reports_and_preserves_source
     executor = AuditReplaceExecutor()
     monkeypatch.setattr(executor.oda, "dwg_to_dxf", lambda src, out_dir: dxf_path)
 
-    def _fake_dxf_to_dwg(src: Path, output_dir: Path) -> Path:
+    def _fake_dxf_to_dwg(
+        src: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / "converted.dwg"
         shutil.copyfile(src, output_path)

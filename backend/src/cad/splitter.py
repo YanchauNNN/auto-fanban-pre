@@ -30,6 +30,7 @@ from ..models import BBox, FrameMeta, SheetSet
 from .autocad_path_resolver import resolve_autocad_paths
 from .autocad_pdf_exporter import AutoCADPdfExporter
 from .cad_dxf_executor import CADDXFExecutor
+from .dwg_version import detect_dwg_version_code_or_none
 from .dxf_pdf_exporter import DxfPdfExporter
 from .oda_converter import ODAConverter
 
@@ -309,7 +310,13 @@ class FrameSplitter(IFrameSplitter):
             paper_size_mm=paper_size_mm,
             name=name,
         )
-        dwg_path = self._convert_to_dwg(split_dxf, output_dir, name)
+        source_version_code = detect_dwg_version_code_or_none(frame.runtime.cad_source_file)
+        dwg_path = self._convert_to_dwg(
+            split_dxf,
+            output_dir,
+            name,
+            target_version_code=source_version_code,
+        )
         frame.runtime.pdf_path = pdf_path
         frame.runtime.dwg_path = dwg_path
         return pdf_path, dwg_path
@@ -330,7 +337,17 @@ class FrameSplitter(IFrameSplitter):
         )
         if is_fallback:
             sheet_set.flags.append("A4多页_PDF兜底为单页大图")
-        dwg_path = self._convert_to_dwg(split_dxf, output_dir, name)
+        source_version_code = None
+        if sheet_set.master_page and sheet_set.master_page.frame_meta:
+            source_version_code = detect_dwg_version_code_or_none(
+                sheet_set.master_page.frame_meta.runtime.cad_source_file
+            )
+        dwg_path = self._convert_to_dwg(
+            split_dxf,
+            output_dir,
+            name,
+            target_version_code=source_version_code,
+        )
         return pdf_path, dwg_path
 
     # ------------------------------------------------------------------
@@ -685,8 +702,18 @@ class FrameSplitter(IFrameSplitter):
             pass
         return None
 
-    def _convert_to_dwg(self, dxf_path: Path, output_dir: Path, target_name: str) -> Path:
-        dwg_path = self.oda.dxf_to_dwg(dxf_path, output_dir)
+    def _convert_to_dwg(
+        self,
+        dxf_path: Path,
+        output_dir: Path,
+        target_name: str,
+        target_version_code: str | None = None,
+    ) -> Path:
+        dwg_path = self.oda.dxf_to_dwg(
+            dxf_path,
+            output_dir,
+            target_version_code=target_version_code,
+        )
         expected = output_dir / f"{target_name}.dwg"
         if dwg_path != expected and dwg_path.exists():
             dwg_path.rename(expected)

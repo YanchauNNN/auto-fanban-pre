@@ -23,6 +23,7 @@ from pathlib import Path
 
 from ..config import get_config
 from ..interfaces import ConversionError, IODAConverter
+from .dwg_version import oda_version_for_dwg_code
 
 
 class ODAConverter(IODAConverter):
@@ -80,7 +81,12 @@ class ODAConverter(IODAConverter):
 
         return output_path
 
-    def dxf_to_dwg(self, dxf_path: Path, output_dir: Path) -> Path:
+    def dxf_to_dwg(
+        self,
+        dxf_path: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
         """DXF 转 DWG"""
         if not dxf_path.exists():
             raise ConversionError(f"DXF文件不存在: {dxf_path}")
@@ -90,11 +96,17 @@ class ODAConverter(IODAConverter):
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{dxf_path.stem}.dwg"
 
+        output_version = (
+            oda_version_for_dwg_code(target_version_code)
+            if target_version_code
+            else "ACAD2018"
+        )
+
         cmd = [
             str(self.exe_path),
             str(dxf_path.parent),
             str(output_dir),
-            "ACAD2018",
+            output_version,
             "DWG",
             "0",
             "1",

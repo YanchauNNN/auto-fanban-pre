@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -56,11 +57,17 @@ class FontPreflightService:
         else:
             normalized_font = None
 
-        workspace = workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")
+        workspace = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
+        workspace.mkdir(parents=True, exist_ok=True)
+        staged_source = workspace / source_dwg.name
+        if staged_source.resolve() != source_dwg.resolve():
+            shutil.copy2(source_dwg, staged_source)
+        else:
+            staged_source = source_dwg
         if policy == "replace_missing":
             raw = self.bridge.replace_missing(
                 job_id=f"font-{source_dwg.stem}",
-                source_dwg=source_dwg,
+                source_dwg=staged_source,
                 replacement_font=normalized_font or "",
                 workspace_dir=workspace,
                 slot_runtime=slot_runtime,
@@ -68,10 +75,12 @@ class FontPreflightService:
         else:
             raw = self.bridge.preflight(
                 job_id=f"font-{source_dwg.stem}",
-                source_dwg=source_dwg,
+                source_dwg=staged_source,
                 workspace_dir=workspace,
                 slot_runtime=slot_runtime,
             )
+        if policy == "replace_missing" and staged_source.resolve() != source_dwg.resolve():
+            shutil.copy2(staged_source, source_dwg)
         return self._normalize_result(
             source_dwg=source_dwg,
             payload=raw,

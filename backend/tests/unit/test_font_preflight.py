@@ -27,9 +27,13 @@ class _FakeInventory:
 class _FakeBridge:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.touch_source_on_preflight = False
+        self.touch_source_on_replace = False
 
     def preflight(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append({"method": "preflight", **kwargs})
+        if self.touch_source_on_preflight:
+            Path(kwargs["source_dwg"]).write_bytes(b"AC1032-mutated")
         return {
             "status": "missing_fonts",
             "missing_fonts": [
@@ -49,6 +53,8 @@ class _FakeBridge:
 
     def replace_missing(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append({"method": "replace_missing", **kwargs})
+        if self.touch_source_on_replace:
+            Path(kwargs["source_dwg"]).write_bytes(b"AC1024-replaced")
         return {
             "status": "missing_fonts",
             "missing_fonts": [
@@ -105,6 +111,62 @@ def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Pa
     assert result["font_replacement_applied"] is True
     assert result["replacement_font"] == "simsun.ttc"
     assert result["replaced_style_count"] == 1
+
+
+def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    bridge.touch_source_on_preflight = True
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([])),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["method"] == "preflight"
+    assert Path(bridge.calls[0]["source_dwg"]).resolve() != source.resolve()
+    assert source.read_bytes().startswith(b"AC1024-original")
+
+
+def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    bridge.touch_source_on_replace = True
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "gbcbig.shx",
+                        "value": "gbcbig.shx",
+                        "family": "gbcbig",
+                        "path": r"D:\AutoCAD\Fonts\gbcbig.shx",
+                        "kind": "shx",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="replace_missing",
+        replacement_font="gbcbig.shx",
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["method"] == "replace_missing"
+    assert Path(bridge.calls[0]["source_dwg"]).resolve() != source.resolve()
+    assert source.read_bytes().startswith(b"AC1024-replaced")
 
 
 def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp_path: Path) -> None:

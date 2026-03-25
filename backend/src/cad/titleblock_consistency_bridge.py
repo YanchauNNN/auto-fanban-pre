@@ -6,6 +6,7 @@ from typing import Any
 
 from ..config import get_config
 from .accoreconsole_runner import AcCoreConsoleRunner
+from .dwg_version import detect_dwg_version_code_or_none
 from .titleblock_consistency import FieldConsistencyPlan
 
 
@@ -33,6 +34,7 @@ class TitleblockConsistencyBridge:
             "workflow_stage": "titleblock_consistency_fix",
             "job_id": job_id,
             "source_dxf": str(source_dwg),
+            "source_dwg_version": detect_dwg_version_code_or_none(source_dwg),
             "output_dir": str(workspace_dir),
             "output_dwg": str(output_dwg),
             "engines": {
