@@ -23,6 +23,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -174,6 +175,7 @@ class PipelineExecutor:
             "sheet_sets": [],
             # Stage 7 (cad_dxf) ??: {source_dxf: result_json_dict}
             "cad_dxf_results": {},
+            "stage_timings": [],
         }
         stages = (
             [
@@ -233,6 +235,8 @@ class PipelineExecutor:
         job.progress.percent = stage.progress_start
         logger.info(f"[{job.job_id}] 开始阶段: {stage.name}")
         self._update_progress(job, message=f"开始阶段: {stage.name}", force=True)
+        started_at = datetime.now().isoformat()
+        stage_start = time.perf_counter()
 
         try:
             handler = {
@@ -255,12 +259,66 @@ class PipelineExecutor:
                 handler(job, context)
 
         except Exception as e:
+            self._record_stage_timing(
+                job,
+                context,
+                stage_name=stage.name,
+                started_at=started_at,
+                duration_ms=(time.perf_counter() - stage_start) * 1000,
+                status="failed",
+                error=str(e),
+            )
             logger.error(f"[{job.job_id}] 阶段失败 {stage.name}: {e}")
             job.add_flag(f"阶段失败:{stage.name}")
             raise
 
+        self._record_stage_timing(
+            job,
+            context,
+            stage_name=stage.name,
+            started_at=started_at,
+            duration_ms=(time.perf_counter() - stage_start) * 1000,
+            status="succeeded",
+        )
         job.progress.percent = stage.progress_end
         self._update_progress(job, message=f"完成阶段: {stage.name}", force=True)
+
+    def _record_stage_timing(
+        self,
+        job: Job,
+        context: dict[str, Any],
+        *,
+        stage_name: str,
+        started_at: str,
+        duration_ms: float,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        stage_timings = context.setdefault("stage_timings", [])
+        if not isinstance(stage_timings, list):
+            stage_timings = []
+            context["stage_timings"] = stage_timings
+
+        entry: dict[str, Any] = {
+            "stage": stage_name,
+            "started_at": started_at,
+            "finished_at": datetime.now().isoformat(),
+            "duration_ms": round(max(duration_ms, 0.0), 2),
+            "status": status,
+        }
+        if error:
+            entry["error"] = error
+        stage_timings.append(entry)
+        job.progress.details["stage_timings"] = list(stage_timings)
+        self._persist_stage_timings(job, stage_timings)
+
+    @staticmethod
+    def _persist_stage_timings(job: Job, stage_timings: list[dict[str, Any]]) -> None:
+        if job.work_dir is None:
+            return
+        timings_path = job.work_dir / "stage_timings.json"
+        with open(timings_path, "w", encoding="utf-8") as f:
+            json.dump(stage_timings, f, ensure_ascii=False, indent=2)
 
     # ==================================================================
     # 阶段 1-6: 不变（ingest / convert / detect / verify / scale / extract / a4）

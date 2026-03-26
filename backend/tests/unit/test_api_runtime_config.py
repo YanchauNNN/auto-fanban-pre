@@ -5,6 +5,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.config import SpecLoader, reload_config
+from src.config.runtime_config import RuntimeConfig
+
+
+def test_runtime_config_defaults_align_with_eight_slot_baseline(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("FANBAN_CAD_RUNTIME__SLOT_COUNT", raising=False)
+    monkeypatch.delenv("FANBAN_CONCURRENCY__MAX_JOBS", raising=False)
+
+    config = RuntimeConfig()
+
+    assert config.cad_runtime.slot_count == 8
+    assert config.concurrency.max_jobs == 8
 
 
 def test_deliverable_api_runtime_uses_configured_cad_slot_count(

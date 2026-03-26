@@ -413,6 +413,22 @@ if ($errors -and $errors.Count -gt 0) {
         assert completed.returncode == 0, f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
 
 
+def test_build_terminal_deploy_package_init_storage_does_not_hardcode_slot_count(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    init_storage = (output_root / "scripts" / "init_storage.ps1").read_text(encoding="utf-8")
+
+    assert 'runtime\\cad-slots"' in init_storage
+    assert "slot-01" not in init_storage
+    assert "slot-04" not in init_storage
+
+
 def test_generated_deep_check_terminal_invokes_probe_with_named_params_in_windows_powershell(
     tmp_path: Path,
 ) -> None:

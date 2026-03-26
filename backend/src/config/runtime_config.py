@@ -22,7 +22,7 @@ class ConcurrencyConfig(BaseModel):
     """并发配置"""
 
     max_workers: int = 2
-    max_jobs: int = 4
+    max_jobs: int = 8
     doc_max_jobs: int = 1
     office_word_max_jobs: int = 1
     office_excel_max_jobs: int = 1
@@ -293,7 +293,7 @@ class DxfPdfExportConfig(BaseModel):
 class CadRuntimeConfig(BaseModel):
     """CAD 运行时资源池配置"""
 
-    slot_count: int = 4
+    slot_count: int = 8
 
 
 class PlotAssetsConfig(BaseModel):

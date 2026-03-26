@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -62,6 +63,55 @@ def test_execute_marks_job_failed_when_cad_export_reports_fatal_errors(tmp_path:
 
     assert job.status == JobStatus.FAILED
     assert any("CAD导出失败" in err for err in job.errors)
+
+
+def test_execute_records_stage_timings_into_job_details_and_artifact(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(get_job_dir=lambda job_id: tmp_path / "storage" / "jobs" / job_id),
+    )
+    executor._last_progress_write = 0.0
+    executor._progress_interval_sec = 0.0
+
+    for attr in (
+        "_stage_ingest",
+        "_stage_font_preflight_and_replace",
+        "_stage_convert",
+        "_stage_detect_frames",
+        "_stage_verify_frames",
+        "_stage_scale_fit",
+        "_stage_extract_fields",
+        "_stage_a4_grouping",
+        "_stage_fix_titleblock_consistency",
+        "_stage_split",
+        "_stage_export",
+    ):
+        setattr(executor, attr, lambda job, context: None)
+
+    executor._aggregate_flags = lambda job, context: None
+    executor._raise_if_fatal_export_errors = lambda job: None
+
+    job = Job(
+        job_id="job-stage-timings",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        options={"split_only": True},
+    )
+
+    PipelineExecutor.execute(executor, job)
+
+    stage_timings = job.progress.details.get("stage_timings")
+    assert isinstance(stage_timings, list)
+    assert len(stage_timings) == 11
+    assert stage_timings[0]["stage"] == StageEnum.INGEST.value
+    assert stage_timings[-1]["stage"] == StageEnum.EXPORT_PDF_AND_DWG.value
+    assert all(item["status"] == "succeeded" for item in stage_timings)
+
+    timings_path = tmp_path / "storage" / "jobs" / job.job_id / "stage_timings.json"
+    assert timings_path.exists()
+    persisted = json.loads(timings_path.read_text(encoding="utf-8"))
+    assert persisted == stage_timings
 
 
 def test_execute_uses_shared_prep_and_skips_early_detection_stages(tmp_path: Path):
