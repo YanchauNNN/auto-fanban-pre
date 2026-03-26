@@ -1403,6 +1403,8 @@ def test_multi_file_batch_keeps_backlog_visible_until_worker_capacity_frees(
     _configure_api_env(monkeypatch, tmp_path)
     monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_FILES", "20")
     monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_TOTAL_MB", "50")
+    monkeypatch.setenv("FANBAN_CAD_RUNTIME__SLOT_COUNT", "4")
+    monkeypatch.setenv("FANBAN_CONCURRENCY__MAX_JOBS", "4")
     SpecLoader.clear_cache()
     reload_config()
 
@@ -1575,6 +1577,8 @@ def test_grouped_batch_keeps_pending_groups_in_external_queue(
     _configure_api_env(monkeypatch, tmp_path)
     monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_FILES", "20")
     monkeypatch.setenv("FANBAN_UPLOAD_LIMITS__MAX_TOTAL_MB", "50")
+    monkeypatch.setenv("FANBAN_CAD_RUNTIME__SLOT_COUNT", "4")
+    monkeypatch.setenv("FANBAN_CONCURRENCY__MAX_JOBS", "4")
     SpecLoader.clear_cache()
     reload_config()
 
