@@ -132,6 +132,8 @@ type RawFontPreflightResult = {
     value?: string | null;
     family?: string | null;
     path?: string | null;
+    kind?: string | null;
+    source?: string | null;
   }> | null;
   requires_confirmation?: boolean | null;
 };
@@ -236,6 +238,8 @@ export class HttpAdapter implements ApiAdapter {
         value: option.value ?? "",
         family: option.family ?? "",
         path: option.path ?? "",
+        kind: option.kind ?? "unknown",
+        source: option.source ?? "unknown",
       })),
       requiresConfirmation: Boolean(payload.requires_confirmation),
     };

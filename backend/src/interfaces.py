@@ -49,13 +49,19 @@ class IODAConverter(ABC):
         ...
 
     @abstractmethod
-    def dxf_to_dwg(self, dxf_path: Path, output_dir: Path) -> Path:
+    def dxf_to_dwg(
+        self,
+        dxf_path: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
         """
         DXF 转 DWG
 
         Args:
             dxf_path: 输入DXF文件路径
             output_dir: 输出目录
+            target_version_code: 目标 DWG 版本代码，如 ``AC1027``
 
         Returns:
             生成的DWG文件路径

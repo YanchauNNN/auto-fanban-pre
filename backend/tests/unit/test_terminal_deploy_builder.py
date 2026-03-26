@@ -11,6 +11,7 @@ from src.deploy.terminal_package import (
     DELTA_MANIFEST,
     DELTA_OVERWRITE_LIST,
     DELTA_USAGE,
+    MANAGED_MONOCHROME_CTB_NAME,
     PACKAGE_MANIFEST,
     build_terminal_deploy_package,
     gather_copy_plan,
@@ -205,6 +206,12 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'python-runtime\\python.exe' in start_backend
     assert 'Push-Location (Join-Path $root "backend-runtime")' in start_backend
     assert "runtime.env.ps1" in start_backend
+    assert 'Join-Path $root "documents\\参数规范.yaml"' in start_backend
+    assert 'Join-Path $root "documents\\参数规范_运行期.yaml"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_SPEC_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
+    assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
+    assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Set-Item -Path 'Env:{0}' -Value '{1}'" in prepare_terminal

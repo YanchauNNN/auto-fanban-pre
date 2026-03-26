@@ -15,6 +15,7 @@ from .a4_multipage import A4MultipageGrouper
 from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import AutoCADPathInfo, resolve_autocad_paths
 from .cad_dxf_executor import CADDXFExecutor
+from .dwg_version import detect_dwg_version_code, detect_dwg_version_code_or_none
 from .dxf_pdf_exporter import DxfPdfExporter
 from .font_preflight import FontPreflightService
 from .frame_detector import FrameDetector
@@ -32,6 +33,8 @@ __all__ = [
     "TitleblockExtractor",
     "A4MultipageGrouper",
     "CADDXFExecutor",
+    "detect_dwg_version_code",
+    "detect_dwg_version_code_or_none",
     "AcCoreConsoleRunner",
     "FrameSplitter",
     "DxfPdfExporter",

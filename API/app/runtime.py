@@ -240,11 +240,28 @@ class DeliverableApiRuntime:
 
         return {
             "files": results,
-            "replacement_options": self.font_preflight_service.list_replacement_options(),
+            "replacement_options": self.font_preflight_service.list_replacement_options(
+                missing_kinds=self._collect_missing_font_kinds(results)
+            ),
             "requires_confirmation": any(
                 str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
             ),
         }
+
+    @staticmethod
+    def _collect_missing_font_kinds(results: list[dict[str, Any]]) -> list[str]:
+        kinds: list[str] = []
+        seen: set[str] = set()
+        for item in results:
+            for missing in item.get("missing_fonts") or []:
+                if not isinstance(missing, dict):
+                    continue
+                kind = str(missing.get("kind") or "").strip().lower()
+                if not kind or kind in seen:
+                    continue
+                seen.add(kind)
+                kinds.append(kind)
+        return kinds
 
     def create_batch(
         self,

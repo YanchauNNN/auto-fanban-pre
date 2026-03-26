@@ -22,6 +22,7 @@ from ..config import RuntimeConfig, get_config, load_spec
 from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
+from .dwg_version import detect_dwg_version_code_or_none
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 
 if TYPE_CHECKING:
@@ -223,11 +224,17 @@ class CADDXFExecutor:
         output_entry = self._build_output_entry()
         if output_override:
             output_entry.update(output_override)
+        source_dwg_version = self._resolve_source_dwg_version_code(
+            source_dxf=source_dxf,
+            frame_entries=frame_entries,
+            sheet_set_entries=sheet_set_entries,
+        )
         payload = {
             "schema_version": "cad-dxf-task@1.0",
             "workflow_stage": workflow_stage,
             "job_id": job_id,
             "source_dxf": str(source_dxf),
+            "source_dwg_version": source_dwg_version,
             "output_dir": str(output_dir),
             "plot": {
                 "pc3_name": plot_cfg.pc3_name,
@@ -267,6 +274,33 @@ class CADDXFExecutor:
         if runtime_context:
             payload["runtime"] = runtime_context
         return payload
+
+    @staticmethod
+    def _resolve_source_dwg_version_code(
+        *,
+        source_dxf: Path,
+        frame_entries: list[dict],
+        sheet_set_entries: list[dict],
+    ) -> str | None:
+        direct = detect_dwg_version_code_or_none(source_dxf)
+        if direct:
+            return direct
+
+        candidate_paths: list[Path] = []
+        for entry in frame_entries:
+            raw_path = entry.get("cad_source_file")
+            if isinstance(raw_path, str) and raw_path:
+                candidate_paths.append(Path(raw_path))
+        for entry in sheet_set_entries:
+            raw_path = entry.get("cad_source_file")
+            if isinstance(raw_path, str) and raw_path:
+                candidate_paths.append(Path(raw_path))
+
+        for candidate in candidate_paths:
+            version_code = detect_dwg_version_code_or_none(candidate)
+            if version_code:
+                return version_code
+        return None
 
     def _resolve_pc3_runtime_context(
         self,
@@ -1310,6 +1344,9 @@ class CADDXFExecutor:
         return {
             "frame_id": frame.frame_id,
             "name": self._name_for_frame(frame),
+            "cad_source_file": (
+                str(frame.runtime.cad_source_file) if frame.runtime.cad_source_file else ""
+            ),
             "bbox": self._bbox_to_dict(frame.runtime.outer_bbox),
             "vertices": self._vertices_for_frame(
                 frame.runtime.outer_bbox, frame.runtime.outer_vertices
@@ -1358,6 +1395,13 @@ class CADDXFExecutor:
         return {
             "cluster_id": sheet_set.cluster_id,
             "name": self._name_for_sheet_set(sheet_set),
+            "cad_source_file": (
+                str(sheet_set.master_page.frame_meta.runtime.cad_source_file)
+                if sheet_set.master_page
+                and sheet_set.master_page.frame_meta
+                and sheet_set.master_page.frame_meta.runtime.cad_source_file
+                else ""
+            ),
             "pages": pages,
         }
 

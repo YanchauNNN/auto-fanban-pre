@@ -244,7 +244,7 @@ describe("homepage shell", () => {
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "翻版" }));
-    expect(screen.getByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
   });
 
   it("opens tutorial mode and walks through the real deliverable flow preview", async () => {
@@ -270,8 +270,8 @@ describe("homepage shell", () => {
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务配置" })).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建交付任务" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "创建交付任务" })).toBeInTheDocument();
     expect(
       screen.getByText("上传文件后直接在弹窗内完成配置。关闭不会丢失草稿；只有手动清空或提交成功后才会重置。"),
     ).toBeInTheDocument();
@@ -683,7 +683,7 @@ describe("job detail pages", () => {
             detectedStyleCount: 12,
             missingStyleCount: 1,
             replacedStyleCount: 3,
-            replacementFont: "simsun.ttc",
+            replacementFont: "simplex.shx",
             fontReplacementApplied: true,
             errors: [],
           },
@@ -692,7 +692,7 @@ describe("job detail pages", () => {
       },
       missingFontsDetected: true,
       fontReplacementApplied: true,
-      replacementFont: "simsun.ttc",
+      replacementFont: "simplex.shx",
       replacedStyleCount: 3,
     });
 
@@ -700,7 +700,7 @@ describe("job detail pages", () => {
 
     expect(await screen.findByText("字体处理摘要")).toBeInTheDocument();
     expect(screen.getByText("已执行缺失字体替代")).toBeInTheDocument();
-    expect(screen.getByText("simsun.ttc")).toBeInTheDocument();
+    expect(screen.getByText("simplex.shx")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 

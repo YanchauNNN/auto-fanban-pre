@@ -21,6 +21,7 @@ DELTA_OVERWRITE_LIST = "覆盖清单.txt"
 DELTA_DELETE_LIST = "删除清单.txt"
 DELTA_USAGE = "使用说明.txt"
 MANAGED_PDF2_PC3_NAME = "打印PDF2.pc3"
+MANAGED_MONOCHROME_CTB_NAME = "fanban_monochrome.ctb"
 
 
 @dataclass(frozen=True)
@@ -351,6 +352,26 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 
 if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
     . $runtimeEnv
+}
+
+$managedSpecPath = Join-Path $root "documents\参数规范.yaml"
+$managedRuntimeSpecPath = Join-Path $root "documents\参数规范_运行期.yaml"
+$managedCtbName = "fanban_monochrome.ctb"
+
+if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
+    if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
+        Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $managedSpecPath
+    }
+}
+
+if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
+    if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
+        Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
+    }
+}
+
+if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
+    Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
 }
 
 Push-Location (Join-Path $root "backend-runtime")

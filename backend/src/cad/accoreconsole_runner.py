@@ -43,14 +43,16 @@ class AcCoreConsoleRunner:
     def __init__(self, config: RuntimeConfig | None = None) -> None:
         self.config = config or get_config()
         runner_cfg = self.config.module5_export.cad_runner
+        self.backend_cwd = Path(__file__).resolve().parents[2]
 
         self.accoreconsole_exe = self._resolve_optional_file_path(
             runner_cfg.accoreconsole_exe,
         )
+        self.autocad_paths = resolve_autocad_paths(
+            configured_install_dir=self.config.autocad.install_dir,
+        )
         if self.accoreconsole_exe is None or not self.accoreconsole_exe.is_file():
-            detected = resolve_autocad_paths(
-                configured_install_dir=self.config.autocad.install_dir,
-            ).accoreconsole_exe
+            detected = self.autocad_paths.accoreconsole_exe
             if detected is not None and detected.is_file():
                 self.accoreconsole_exe = detected.resolve()
                 logger.warning(
@@ -126,6 +128,7 @@ class AcCoreConsoleRunner:
                     errors="ignore",
                     timeout=self.task_timeout_sec,
                     env=runtime_env,
+                    cwd=self.backend_cwd,
                 )
                 elapsed = time.monotonic() - t0
                 result = AcCoreConsoleRunResult(
@@ -288,7 +291,7 @@ class AcCoreConsoleRunner:
         dotnet_bridge: dict[str, Any],
         runtime: Any,
     ) -> list[str]:
-        dll_file = Path(str(dotnet_bridge.get("dll_path", "")))
+        dll_file = self._resolve_runner_path(str(dotnet_bridge.get("dll_path", "")))
         dll_path = self._quote_lisp_path(dll_file)
         command_name = self._escape_lisp_string(
             str(dotnet_bridge.get("command_name", "M5BRIDGE_RUN"))
@@ -454,6 +457,10 @@ class AcCoreConsoleRunner:
 
     def _build_runtime_env(self, task_data: dict[str, Any]) -> dict[str, str]:
         env = dict(os.environ)
+        if self.autocad_paths.install_dir is not None:
+            env.setdefault("FANBAN_AUTOCAD_INSTALL_DIR", str(self.autocad_paths.install_dir))
+        if self.autocad_paths.fonts_dir is not None:
+            env.setdefault("FANBAN_AUTOCAD_FONTS_DIR", str(self.autocad_paths.fonts_dir))
         runtime = task_data.get("runtime", {})
         if not isinstance(runtime, dict):
             return env

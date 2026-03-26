@@ -14,9 +14,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  Suspense,
   useEffect,
   useDeferredValue,
   useLayoutEffect,
+  lazy,
   useMemo,
   useRef,
   useState,
@@ -34,10 +36,6 @@ import {
 import groupLogoUrl from "../assets/group-logo.jpg";
 import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
-import { AuditCheckSummaryModal } from "../features/audit-check/AuditCheckSummaryModal";
-import { AuditCheckWorkspace } from "../features/audit-check/AuditCheckWorkspace";
-import { DeliverableWorkspace } from "../features/deliverable/DeliverableWorkspace";
-import { ReplaceWorkspace } from "../features/replace/ReplaceWorkspace";
 import type {
   ApiAdapter,
   CreateBatchPayload,
@@ -63,6 +61,18 @@ import {
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const BACKEND_MAINTENANCE_MESSAGE = "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）";
+const DeliverableWorkspace = lazy(async () => ({
+  default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
+}));
+const ReplaceWorkspace = lazy(async () => ({
+  default: (await import("../features/replace/ReplaceWorkspace")).ReplaceWorkspace,
+}));
+const AuditCheckWorkspace = lazy(async () => ({
+  default: (await import("../features/audit-check/AuditCheckWorkspace")).AuditCheckWorkspace,
+}));
+const AuditCheckSummaryModal = lazy(async () => ({
+  default: (await import("../features/audit-check/AuditCheckSummaryModal")).AuditCheckSummaryModal,
+}));
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
@@ -300,7 +310,7 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
         detectedStyleCount: 16,
         missingStyleCount: 2,
         fontReplacementApplied: true,
-        replacementFont: "simhei.ttf",
+        replacementFont: "simplex.shx",
         replacedStyleCount: 2,
         errors: [],
       },
@@ -308,7 +318,7 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
   },
   missingFontsDetected: true,
   fontReplacementApplied: true,
-  replacementFont: "simhei.ttf",
+  replacementFont: "simplex.shx",
   replacedStyleCount: 2,
 };
 
@@ -1045,60 +1055,70 @@ function WorkspacePage() {
       ) : null}
 
       {schemaQuery.data ? (
-        <>
-          <DeliverableWorkspace
-            adapter={adapter}
-            incomingFiles={incomingFiles}
-            isOpen={deliverableConfigOpen}
-            onBatchCreated={handleBatchCreated}
-            onClearPendingReplaceFlow={() => setPendingReplaceConfig(null)}
-            onNotice={setAuditNotice}
-            onClose={() => setDeliverableConfigOpen(false)}
-            onDraftAvailabilityChange={setDeliverableDraftAvailable}
-            pendingReplaceConfig={pendingReplaceConfig}
-            schema={schemaQuery.data}
-          />
-          <DeliverableWorkspace
-            adapter={TUTORIAL_PREVIEW_ADAPTER}
-            incomingFiles={tutorialIncomingFiles}
-            isOpen={tutorialStep?.id === "config"}
-            onBatchCreated={() => {}}
-            onClearPendingReplaceFlow={() => {}}
-            onNotice={() => {}}
-            onClose={() => {}}
-            onDraftAvailabilityChange={() => {}}
-            schema={schemaQuery.data}
-            tutorialPreview={{
-              dialogTarget: "config",
-              initialValues: TUTORIAL_DELIVERABLE_VALUES,
-              initialRunAuditCheck: true,
-            }}
-          />
-          <ReplaceWorkspace
-            adapter={adapter}
-            isOpen={replaceConfigOpen}
-            onBatchCreated={handleBatchCreated}
-            onClose={() => setReplaceConfigOpen(false)}
-            onContinueToDeliverable={handleReplaceFlowToDeliverable}
-            onDraftAvailabilityChange={() => {}}
-            schema={schemaQuery.data}
-          />
-          <AuditCheckWorkspace
-            adapter={adapter}
-            isOpen={auditConfigOpen}
-            onBatchCreated={handleBatchCreated}
-            onClose={() => setAuditConfigOpen(false)}
-            onDraftAvailabilityChange={setAuditDraftAvailable}
-            schema={schemaQuery.data}
-          />
-        </>
+        <Suspense fallback={null}>
+          {deliverableConfigOpen ? (
+            <DeliverableWorkspace
+              adapter={adapter}
+              incomingFiles={incomingFiles}
+              isOpen
+              onBatchCreated={handleBatchCreated}
+              onClearPendingReplaceFlow={() => setPendingReplaceConfig(null)}
+              onNotice={setAuditNotice}
+              onClose={() => setDeliverableConfigOpen(false)}
+              onDraftAvailabilityChange={setDeliverableDraftAvailable}
+              pendingReplaceConfig={pendingReplaceConfig}
+              schema={schemaQuery.data}
+            />
+          ) : null}
+          {tutorialStep?.id === "config" ? (
+            <DeliverableWorkspace
+              adapter={TUTORIAL_PREVIEW_ADAPTER}
+              incomingFiles={tutorialIncomingFiles}
+              isOpen
+              onBatchCreated={() => {}}
+              onClearPendingReplaceFlow={() => {}}
+              onNotice={() => {}}
+              onClose={() => {}}
+              onDraftAvailabilityChange={() => {}}
+              schema={schemaQuery.data}
+              tutorialPreview={{
+                dialogTarget: "config",
+                initialValues: TUTORIAL_DELIVERABLE_VALUES,
+                initialRunAuditCheck: true,
+              }}
+            />
+          ) : null}
+          {replaceConfigOpen ? (
+            <ReplaceWorkspace
+              adapter={adapter}
+              isOpen
+              onBatchCreated={handleBatchCreated}
+              onClose={() => setReplaceConfigOpen(false)}
+              onContinueToDeliverable={handleReplaceFlowToDeliverable}
+              onDraftAvailabilityChange={() => {}}
+              schema={schemaQuery.data}
+            />
+          ) : null}
+          {auditConfigOpen ? (
+            <AuditCheckWorkspace
+              adapter={adapter}
+              isOpen
+              onBatchCreated={handleBatchCreated}
+              onClose={() => setAuditConfigOpen(false)}
+              onDraftAvailabilityChange={setAuditDraftAvailable}
+              schema={schemaQuery.data}
+            />
+          ) : null}
+        </Suspense>
       ) : null}
 
       {activeAuditSummary ? (
-        <AuditCheckSummaryModal
-          job={activeAuditSummary}
-          onClose={() => setAuditSummaryQueue((current) => current.slice(1))}
-        />
+        <Suspense fallback={null}>
+          <AuditCheckSummaryModal
+            job={activeAuditSummary}
+            onClose={() => setAuditSummaryQueue((current) => current.slice(1))}
+          />
+        </Suspense>
       ) : null}
 
       {tutorialStep?.id === "detail" ? <TutorialGroupDetailPreview /> : null}

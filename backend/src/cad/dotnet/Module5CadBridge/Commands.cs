@@ -152,6 +152,7 @@ internal sealed class BridgeTask
     public string WorkflowStage { get; private set; } = "split_only";
     public string JobId { get; private set; } = "unknown";
     public string SourceDxf { get; private set; } = string.Empty;
+    public string SourceDwgVersion { get; private set; } = string.Empty;
     public string OutputDir { get; private set; } = string.Empty;
     public string OutputDwg { get; private set; } = string.Empty;
 
@@ -178,6 +179,7 @@ internal sealed class BridgeTask
             WorkflowStage = BridgeValue.GetString(root, "workflow_stage", "split_only"),
             JobId = BridgeValue.GetString(root, "job_id", "unknown"),
             SourceDxf = BridgeValue.GetString(root, "source_dxf", string.Empty),
+            SourceDwgVersion = BridgeValue.GetString(root, "source_dwg_version", string.Empty),
             OutputDir = BridgeValue.GetString(root, "output_dir", string.Empty),
             OutputDwg = BridgeValue.GetString(root, "output_dwg", string.Empty),
             ReplacementFont = BridgeValue.GetString(root, "replacement_font", string.Empty),

@@ -14,8 +14,10 @@ from src.pipeline.executor import PipelineExecutor
 class _FakeInventory:
     def __init__(self, options: list[dict[str, str]]) -> None:
         self._options = options
+        self.requested_kinds: set[str] | None = None
 
-    def list_options(self) -> list[dict[str, str]]:
+    def list_options(self, *, preferred_kinds: set[str] | None = None) -> list[dict[str, str]]:
+        self.requested_kinds = set(preferred_kinds or []) or None
         return list(self._options)
 
     def is_valid_font(self, value: str) -> bool:
@@ -25,9 +27,13 @@ class _FakeInventory:
 class _FakeBridge:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.touch_source_on_preflight = False
+        self.touch_source_on_replace = False
 
     def preflight(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append({"method": "preflight", **kwargs})
+        if self.touch_source_on_preflight:
+            Path(kwargs["source_dwg"]).write_bytes(b"AC1032-mutated")
         return {
             "status": "missing_fonts",
             "missing_fonts": [
@@ -47,6 +53,8 @@ class _FakeBridge:
 
     def replace_missing(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append({"method": "replace_missing", **kwargs})
+        if self.touch_source_on_replace:
+            Path(kwargs["source_dwg"]).write_bytes(b"AC1024-replaced")
         return {
             "status": "missing_fonts",
             "missing_fonts": [
@@ -103,6 +111,92 @@ def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Pa
     assert result["font_replacement_applied"] is True
     assert result["replacement_font"] == "simsun.ttc"
     assert result["replaced_style_count"] == 1
+
+
+def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    bridge.touch_source_on_preflight = True
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([])),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["method"] == "preflight"
+    assert Path(bridge.calls[0]["source_dwg"]).resolve() != source.resolve()
+    assert source.read_bytes().startswith(b"AC1024-original")
+
+
+def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    bridge.touch_source_on_replace = True
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "gbcbig.shx",
+                        "value": "gbcbig.shx",
+                        "family": "gbcbig",
+                        "path": r"D:\AutoCAD\Fonts\gbcbig.shx",
+                        "kind": "shx",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="replace_missing",
+        replacement_font="gbcbig.shx",
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["method"] == "replace_missing"
+    assert Path(bridge.calls[0]["source_dwg"]).resolve() != source.resolve()
+    assert source.read_bytes().startswith(b"AC1024-replaced")
+
+
+def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp_path: Path) -> None:
+    inventory = _FakeInventory(
+        [
+            {
+                "label": "simplex.shx",
+                "value": "simplex.shx",
+                "family": "simplex",
+                "path": r"D:\AutoCAD\Fonts\simplex.shx",
+                "kind": "shx",
+            },
+            {
+                "label": "SimSun (simsun.ttc)",
+                "value": "simsun.ttc",
+                "family": "SimSun",
+                "path": r"C:\Windows\Fonts\simsun.ttc",
+                "kind": "ttf",
+            },
+        ]
+    )
+    service = FontPreflightService(
+        inventory=cast(Any, inventory),
+        bridge=cast(Any, _FakeBridge()),
+    )
+
+    options = service.list_replacement_options(missing_kinds=["shx"])
+
+    assert inventory.requested_kinds == {"shx"}
+    assert options[0]["value"] == "simplex.shx"
 
 
 def test_stage_font_preflight_blocks_when_missing_fonts_are_unconfirmed(tmp_path: Path) -> None:

@@ -53,7 +53,12 @@ from src.models import (
 class MockODAConverter:
     """ODA mock — touch 出 .dwg 文件"""
 
-    def dxf_to_dwg(self, dxf_path: Path, output_dir: Path) -> Path:
+    def dxf_to_dwg(
+        self,
+        dxf_path: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
         out = output_dir / f"{dxf_path.stem}.dwg"
         out.touch()
@@ -102,7 +107,12 @@ class FailingPdfExporter(DxfPdfExporter):
 class FailingODAConverter:
     """总是失败的ODA mock"""
 
-    def dxf_to_dwg(self, dxf_path: Path, output_dir: Path) -> Path:
+    def dxf_to_dwg(
+        self,
+        dxf_path: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
         raise RuntimeError("ODA not available")
 
     def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
