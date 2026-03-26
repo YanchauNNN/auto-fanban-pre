@@ -646,6 +646,13 @@ class AnchorFirstLocator:
 
     def _collect_additional_layers(self, msp) -> list[str]:
         excluded = set(self.global_layers) | set(self.local_only_layers)
+        if hasattr(self.candidate_finder, "list_candidate_layers"):
+            layers = []
+            for layer in self.candidate_finder.list_candidate_layers(msp):
+                if not layer or layer in excluded:
+                    continue
+                layers.append(layer)
+            return layers
         layers: list[str] = []
         seen: set[str] = set()
         for entity in msp:

@@ -370,10 +370,7 @@ $dirs = @(
     "jobs",
     "groups",
     "runtime",
-    "runtime\cad-slots\slot-01",
-    "runtime\cad-slots\slot-02",
-    "runtime\cad-slots\slot-03",
-    "runtime\cad-slots\slot-04"
+    "runtime\cad-slots"
 )
 
 foreach ($dir in $dirs) {
