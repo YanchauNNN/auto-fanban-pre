@@ -1,7 +1,0 @@
-[POST] http://127.0.0.1:4173/api/auth/login => [200] OK
-[GET] http://127.0.0.1:4173/api/system/health => [200] OK
-[GET] http://127.0.0.1:4173/api/meta/form-schema => [200] OK
-[GET] http://127.0.0.1:4173/api/task-groups => [200] OK
-[GET] http://127.0.0.1:4173/api/task-groups => [200] OK
-[GET] http://127.0.0.1:4173/api/system/health => [200] OK
-[GET] http://127.0.0.1:4173/api/task-groups => [200] OK

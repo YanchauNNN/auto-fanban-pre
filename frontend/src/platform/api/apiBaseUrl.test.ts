@@ -17,7 +17,7 @@ describe("resolveApiBaseUrl", () => {
       resolveApiBaseUrl({
         DEV: true,
       }),
-    ).toBe("http://127.0.0.1:8000");
+    ).toBe("http://127.0.0.1:8080");
   });
 
   it("uses same-origin requests in production when no override is provided", () => {

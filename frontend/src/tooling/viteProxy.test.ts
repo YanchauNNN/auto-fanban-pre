@@ -6,10 +6,10 @@ import { apiProxyConfig, apiProxyTarget } from "./viteProxy";
 
 describe("vite proxy", () => {
   it("proxies /api requests to the local FastAPI service in dev and preview", () => {
-    expect(apiProxyTarget).toBe("http://127.0.0.1:8000");
+    expect(apiProxyTarget).toBe("http://127.0.0.1:8080");
     expect(apiProxyConfig).toMatchObject({
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target: "http://127.0.0.1:8080",
         changeOrigin: true,
       },
     });
