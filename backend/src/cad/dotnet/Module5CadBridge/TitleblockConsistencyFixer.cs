@@ -75,7 +75,11 @@ internal sealed class TitleblockConsistencyFixer
             Directory.CreateDirectory(outputDir);
         }
 
-        db.SaveAs(_task.OutputDwg, DwgVersion.Current);
+        var saveVersion = DwgVersionResolver.Resolve(
+            _task.SourceDwgVersion,
+            db.OriginalFileVersion
+        );
+        db.SaveAs(_task.OutputDwg, saveVersion);
         _trace.Log(
             $"[DOTNET][CONSISTENCY] patched={matcher.PatchedCount} unmatched={matcher.UnmatchedCount} output={_task.OutputDwg}"
         );

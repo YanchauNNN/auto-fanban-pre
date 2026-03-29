@@ -162,7 +162,7 @@ class _RunnerSuccessStub:
             for frame in task.get("frames", []):
                 name = frame["name"]
                 dwg_path = stage_output / f"{name}.dwg"
-                dwg_path.write_text("dwg", encoding="utf-8")
+                dwg_path.write_bytes(b"AC1032stub-dwg")
                 frames.append(
                     {
                         "frame_id": frame["frame_id"],
@@ -177,12 +177,12 @@ class _RunnerSuccessStub:
             for sheet_set in task.get("sheet_sets", []):
                 name = sheet_set["name"]
                 dwg_path = stage_output / f"{name}.dwg"
-                dwg_path.write_text("dwg", encoding="utf-8")
+                dwg_path.write_bytes(b"AC1032stub-dwg")
                 page_dwg_paths: list[str] = []
                 for page in sheet_set.get("pages", []):
                     page_index = int(page.get("page_index", 0))
                     page_dwg = stage_output / f"{name}__p{page_index}.dwg"
-                    page_dwg.write_text("dwg", encoding="utf-8")
+                    page_dwg.write_bytes(b"AC1032stub-dwg")
                     page_dwg_paths.append(str(page_dwg))
                 sheet_sets.append(
                     {
@@ -744,8 +744,8 @@ def _make_executor(
 
 
 def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
-    source = tmp_path / "src.dxf"
-    source.write_text("0\nEOF\n", encoding="utf-8")
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
     frame = _make_frame(
         frame_id="f-1",
         source_file=source,
@@ -775,6 +775,7 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert task["engines"]["selection_engine"] == "dotnet"
     assert task["engines"]["plot_engine"] == "dotnet"
     assert task["engines"]["dotnet_bridge"]["enabled"] is True
+    assert task["source_dwg_version"] == "AC1027"
     assert len(task["frames"]) == 1
     assert len(task["sheet_sets"]) == 1
     assert task["frames"][0]["frame_id"] == "f-1"

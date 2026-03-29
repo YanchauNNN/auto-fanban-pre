@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -331,7 +332,96 @@ class TitleblockExtractor(ITitleblockExtractor):
                 idx_raw = m.group(1)
                 idx = 1 if idx_raw.upper() == "X" else int(idx_raw) if idx_raw.isdigit() else None
                 return None, idx
+        fragmented_total, fragmented_index = self._parse_fragmented_page_marker(items)
+        if fragmented_index is not None:
+            return fragmented_total, fragmented_index
         return None, None
+
+    def _parse_fragmented_page_marker(
+        self, items: list[TextItem]
+    ) -> tuple[int | None, int | None]:
+        pairs: list[tuple[int, int]] = []
+        for label in items:
+            if not self._is_page_marker_label(label.text):
+                continue
+            tokens = self._collect_page_marker_tokens(label, items)
+            if len(tokens) < 2:
+                continue
+            idx_raw, total_raw = tokens[0], tokens[1]
+            total = int(total_raw) if total_raw.isdigit() else None
+            idx = 1 if idx_raw.upper() == "X" else int(idx_raw) if idx_raw.isdigit() else None
+            if total is None or idx is None:
+                continue
+            pairs.append((total, idx))
+        if not pairs:
+            return None, None
+        (page_total, page_index), _ = Counter(pairs).most_common(1)[0]
+        return page_total, page_index
+
+    @classmethod
+    def _is_page_marker_label(cls, text: str) -> bool:
+        compact = cls._strip_all_whitespace(text).upper()
+        if not compact:
+            return False
+        if re.fullmatch(r"\u7b2c[0-9Xx]*\u5f20\u5171[0-9Xx]*\u5f20", compact):
+            return True
+        return re.fullmatch(r"PAGE[0-9Xx]*OF[0-9Xx]*", compact) is not None
+
+    def _collect_page_marker_tokens(
+        self, label: TextItem, items: list[TextItem]
+    ) -> list[str]:
+        _, lymin, _, lymax = self._item_span(label)
+        label_height = max(1.0, lymax - lymin)
+        label_anchor_x = label.x
+        candidates: list[tuple[float, float, str]] = []
+        for item in items:
+            if item is label:
+                continue
+            token = self._normalize_page_marker_token(item.text)
+            if token is None:
+                continue
+            ixmin, iymin, ixmax, iymax = self._item_span(item)
+            if ixmin <= label_anchor_x:
+                continue
+            margin = max(6.0, 0.2 * label_height)
+            if iymax < lymin - margin or iymin > lymax + margin:
+                continue
+            x_center = (ixmin + ixmax) / 2.0
+            width = max(1.0, ixmax - ixmin)
+            candidates.append((x_center, width, token))
+        if len(candidates) < 2:
+            return []
+        candidates.sort(key=lambda entry: entry[0])
+        widths = sorted(width for _, width, _ in candidates)
+        width_mid = widths[len(widths) // 2]
+        cluster_tol = max(10.0, min(40.0, width_mid * 1.5))
+        clusters: list[list[tuple[float, str]]] = []
+        for x_center, _, token in candidates:
+            if not clusters or abs(clusters[-1][-1][0] - x_center) > cluster_tol:
+                clusters.append([(x_center, token)])
+            else:
+                clusters[-1].append((x_center, token))
+        collapsed: list[str] = []
+        for cluster in clusters:
+            token_counts = Counter(token for _, token in cluster)
+            collapsed.append(token_counts.most_common(1)[0][0])
+        return collapsed[:2]
+
+    @staticmethod
+    def _normalize_page_marker_token(text: str) -> str | None:
+        compact = TitleblockExtractor._clean_alnum((text or "").upper())
+        if not compact:
+            return None
+        if compact == "X" or compact.isdigit():
+            return compact
+        return None
+
+    @staticmethod
+    def _item_span(item: TextItem) -> tuple[float, float, float, float]:
+        if item.bbox is not None:
+            return item.bbox.xmin, item.bbox.ymin, item.bbox.xmax, item.bbox.ymax
+        height = max(1.0, float(item.text_height or 0.0) or 1.0)
+        return item.x, item.y, item.x, item.y + height
 
     def _parse_a4_marker_identity(
         self, items: list[TextItem]

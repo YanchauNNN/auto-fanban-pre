@@ -169,3 +169,86 @@ def test_effective_layer_from_insert_is_preserved_for_layer_queries() -> None:
 
     assert len(bboxes) == 1
     assert abs(bboxes[0].width - 200.0) < 1e-6
+
+
+def test_highly_fragmented_global_line_rebuild_uses_component_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc = ezdxf.new()
+    doc.layers.new("TK")
+    msp = doc.modelspace()
+
+    for idx in range(40):
+        left = float(idx * 300)
+        add_rect_lines(msp, "TK", left, 0.0, left + 200.0, 100.0)
+
+    finder = CandidateFinder(
+        layer_order=["TK"],
+        entity_order=["LINE"],
+        min_dim=10.0,
+    )
+    calls: list[tuple[str, str | None]] = []
+    original_component = finder._rebuild_from_segment_components
+    original_global = finder._rebuild_from_segments
+
+    def wrapped_component(segments, *, layer):
+        calls.append(("component", layer))
+        return original_component(segments, layer=layer)
+
+    def wrapped_global(segments, *, context=None):
+        calls.append(("global", context))
+        return original_global(segments, context=context)
+
+    monkeypatch.setattr(finder, "_rebuild_from_segment_components", wrapped_component)
+    monkeypatch.setattr(finder, "_rebuild_from_segments", wrapped_global)
+
+    bboxes = finder.find_rectangles_in_layers(msp, ["TK"])
+
+    assert len(bboxes) == 40
+    assert ("component", "TK") in calls
+    assert ("global", "layer=TK") not in calls
+
+
+def test_layer_entity_queries_cache_insert_expansion_across_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doc = ezdxf.new()
+    doc.layers.new("TK")
+    block = doc.blocks.new(name="FRAME")
+    add_rect_lines(block, "0", 0.0, 0.0, 200.0, 100.0)
+    msp = doc.modelspace()
+    msp.add_blockref("FRAME", (0, 0), dxfattribs={"layer": "TK"})
+
+    finder = CandidateFinder(
+        layer_order=["TK"],
+        entity_order=["LINE"],
+        min_dim=10.0,
+    )
+
+    insert = next(iter(msp.query("INSERT")))
+    original_virtual_entities = insert.virtual_entities
+    virtual_entity_call_count = 0
+
+    def wrapped_virtual_entities():
+        nonlocal virtual_entity_call_count
+        virtual_entity_call_count += 1
+        return original_virtual_entities()
+
+    monkeypatch.setattr(insert, "virtual_entities", wrapped_virtual_entities)
+
+    first = finder.find_rectangles_in_layers(
+        msp,
+        ["TK"],
+        window=BBox(xmin=-10.0, ymin=-10.0, xmax=250.0, ymax=150.0),
+        localize_line_rebuild=True,
+    )
+    second = finder.find_rectangles_in_layers(
+        msp,
+        ["TK"],
+        window=BBox(xmin=-20.0, ymin=-20.0, xmax=260.0, ymax=160.0),
+        localize_line_rebuild=True,
+    )
+
+    assert len(first) == 1
+    assert len(second) == 1
+    assert virtual_entity_call_count == 1

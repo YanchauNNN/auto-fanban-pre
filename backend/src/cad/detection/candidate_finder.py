@@ -25,6 +25,10 @@ class _SegmentCluster(TypedDict):
 class CandidateFinder:
     """候选图框查找器"""
 
+    _component_rebuild_segment_threshold = 128
+    _component_rebuild_component_threshold = 32
+    _component_rebuild_max_component_size = 8
+
     def __init__(
         self,
         min_dim: float = 100.0,
@@ -52,6 +56,9 @@ class CandidateFinder:
             int(limits["max_coord_pairs"]) if limits.get("max_coord_pairs") else None
         )
         self._bbox_scale_validator = bbox_scale_validator
+        self._cached_msp_id: int | None = None
+        self._cached_layer_entities: dict[str, dict[str, list[object]]] = {}
+        self._cached_candidate_layers: list[str] = []
         self.logger = logging.getLogger(__name__)
 
     def find_rectangles(self, msp) -> list[BBox]:
@@ -167,7 +174,10 @@ class CandidateFinder:
                     poly_candidates.extend(layer_poly_candidates)
             if allow_line_rebuild and (layer_poly_segments or layer_line_segments):
                 combined_segments = layer_poly_segments + layer_line_segments
-                if localize_line_rebuild and window is not None:
+                use_component_rebuild = (
+                    localize_line_rebuild and window is not None
+                ) or self._should_use_component_line_rebuild(combined_segments)
+                if use_component_rebuild:
                     valid_line_rects = [
                         bbox
                         for bbox in self._rebuild_from_segment_components(
@@ -209,6 +219,18 @@ class CandidateFinder:
                         line_candidates.extend(valid_line_rects)
 
         return self._finalize_candidates(poly_candidates + line_candidates)
+
+    def _should_use_component_line_rebuild(
+        self,
+        segments: list[tuple[tuple[float, float], tuple[float, float]]],
+    ) -> bool:
+        if len(segments) < self._component_rebuild_segment_threshold:
+            return False
+        components = self._split_segments_into_components(segments)
+        if len(components) < self._component_rebuild_component_threshold:
+            return False
+        largest_component = max((len(component) for component in components), default=0)
+        return largest_component <= self._component_rebuild_max_component_size
 
     def _extract_bbox(self, entity) -> BBox | None:
         """从polyline提取外接矩形"""
@@ -275,74 +297,110 @@ class CandidateFinder:
         finalized.sort(key=lambda b: b.width * b.height, reverse=True)
         return finalized
 
-    def _iter_layer_entities(self, msp, layer: str, entity_type: str):
-        query = f'{entity_type}[layer=="{layer}"]'
-        try:
-            for entity in msp.query(query):
-                yield entity
-        except Exception:
-            for entity in msp.query(entity_type):
-                try:
-                    if entity.dxf.layer == layer:
-                        yield entity
-                except Exception:
-                    continue
+    def list_candidate_layers(self, msp) -> list[str]:
+        self._ensure_layer_entity_cache(msp)
+        return list(self._cached_candidate_layers)
 
-        try:
-            inserts = list(msp.query("INSERT"))
-        except Exception:
-            inserts = list(msp.query("INSERT"))
+    def _iter_layer_entities(self, msp, layer: str, entity_type: str):
+        self._ensure_layer_entity_cache(msp)
+        yield from self._cached_layer_entities.get(entity_type, {}).get(layer, [])
+
+    def _ensure_layer_entity_cache(self, msp) -> None:
+        msp_id = id(msp)
+        if self._cached_msp_id == msp_id:
+            return
+
+        target_types = {"LWPOLYLINE", "POLYLINE", "LINE"}
+        layer_entities: dict[str, dict[str, list[object]]] = {
+            entity_type: {} for entity_type in target_types
+        }
+        candidate_layers: list[str] = []
+        seen_layers: set[str] = set()
+        inserts: list[object] = []
+
+        for entity in msp:
+            entity_type = entity.dxftype()
+            try:
+                layer = str(getattr(entity.dxf, "layer", "") or "")
+            except Exception:
+                layer = ""
+            if entity_type in target_types and layer:
+                layer_entities[entity_type].setdefault(layer, []).append(entity)
+                if layer not in seen_layers:
+                    seen_layers.add(layer)
+                    candidate_layers.append(layer)
+            if entity_type == "INSERT":
+                inserts.append(entity)
+                if layer and layer not in seen_layers:
+                    seen_layers.add(layer)
+                    candidate_layers.append(layer)
 
         for insert in inserts:
-            insert_layer = getattr(insert.dxf, "layer", "0")
-            yield from self._iter_insert_entities(
+            insert_layer = getattr(insert.dxf, "layer", "0") or "0"
+            self._index_insert_entities(
                 insert,
-                entity_type=entity_type,
-                target_layer=layer,
-                parent_layer=insert_layer,
+                parent_layer=str(insert_layer),
                 depth=0,
+                target_types=target_types,
+                layer_entities=layer_entities,
+                candidate_layers=candidate_layers,
+                seen_layers=seen_layers,
             )
 
-    def _iter_insert_entities(
+        self._cached_msp_id = msp_id
+        self._cached_layer_entities = layer_entities
+        self._cached_candidate_layers = candidate_layers
+
+    def _index_insert_entities(
         self,
         insert,
         *,
-        entity_type: str,
-        target_layer: str,
         parent_layer: str,
         depth: int,
+        target_types: set[str],
+        layer_entities: dict[str, dict[str, list[object]]],
+        candidate_layers: list[str],
+        seen_layers: set[str],
         max_depth: int = 8,
-    ):
+    ) -> None:
         if depth > max_depth:
             return
+
         insert_layer = getattr(insert.dxf, "layer", "0") or "0"
-        effective_insert_layer = parent_layer if insert_layer == "0" else insert_layer
+        effective_insert_layer = parent_layer if insert_layer == "0" else str(insert_layer)
         try:
             virtuals = list(insert.virtual_entities())
         except Exception:
             return
-        for ve in virtuals:
-            tp = ve.dxftype()
-            if tp == "INSERT":
-                yield from self._iter_insert_entities(
-                    ve,
-                    entity_type=entity_type,
-                    target_layer=target_layer,
+
+        for virtual_entity in virtuals:
+            entity_type = virtual_entity.dxftype()
+            if entity_type == "INSERT":
+                if effective_insert_layer not in seen_layers:
+                    seen_layers.add(effective_insert_layer)
+                    candidate_layers.append(effective_insert_layer)
+                self._index_insert_entities(
+                    virtual_entity,
                     parent_layer=effective_insert_layer,
                     depth=depth + 1,
+                    target_types=target_types,
+                    layer_entities=layer_entities,
+                    candidate_layers=candidate_layers,
+                    seen_layers=seen_layers,
                     max_depth=max_depth,
                 )
                 continue
-            if tp != entity_type:
+            if entity_type not in target_types:
                 continue
             try:
-                ve_layer = ve.dxf.layer
+                virtual_layer = str(getattr(virtual_entity.dxf, "layer", "0") or "0")
             except Exception:
-                ve_layer = "0"
-            effective_layer = effective_insert_layer if ve_layer == "0" else ve_layer
-            if effective_layer != target_layer:
-                continue
-            yield ve
+                virtual_layer = "0"
+            effective_layer = effective_insert_layer if virtual_layer == "0" else virtual_layer
+            layer_entities[entity_type].setdefault(effective_layer, []).append(virtual_entity)
+            if effective_layer not in seen_layers:
+                seen_layers.add(effective_layer)
+                candidate_layers.append(effective_layer)
 
     def _polyline_vertices(self, entity, tp: str) -> list[tuple[float, float]]:
         vertices: list[tuple[float, float]] = []

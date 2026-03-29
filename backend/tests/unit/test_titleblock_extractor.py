@@ -12,13 +12,20 @@ from src.cad.titleblock_extractor import TextItem, TitleblockExtractor
 from src.models import BBox, FrameMeta, FrameRuntime
 
 
-def _item(text: str, x: float = 0.0, y: float = 0.0) -> TextItem:
+def _item(
+    text: str,
+    x: float = 0.0,
+    y: float = 0.0,
+    *,
+    bbox: BBox | None = None,
+    height: float = 2.5,
+) -> TextItem:
     return TextItem(
         x=x,
         y=y,
         text=text,
-        bbox=None,
-        text_height=2.5,
+        bbox=bbox,
+        text_height=height,
         source="test",
     )
 
@@ -186,3 +193,70 @@ def test_extract_fields_reuses_loaded_text_items_for_same_dxf(
     extractor.extract_fields(dxf_path, frame2)
 
     assert calls["count"] == 1
+
+
+def test_parse_a4_page_marker_from_fragmented_coordinate_tokens() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item(
+            "18185NY-JGS07-001",
+            x=120.0,
+            y=120.0,
+            bbox=BBox(xmin=120.0, ymin=120.0, xmax=220.0, ymax=150.0),
+            height=30.0,
+        ),
+        _item(
+            "(A)",
+            x=230.0,
+            y=120.0,
+            bbox=BBox(xmin=230.0, ymin=120.0, xmax=250.0, ymax=150.0),
+            height=30.0,
+        ),
+        _item(
+            "第     张 共     张",
+            x=140.0,
+            y=100.0,
+            bbox=BBox(xmin=140.0, ymin=100.0, xmax=240.0, ymax=130.0),
+            height=30.0,
+        ),
+        _item(
+            "7",
+            x=190.0,
+            y=98.0,
+            bbox=BBox(xmin=190.0, ymin=98.0, xmax=198.0, ymax=128.0),
+            height=30.0,
+        ),
+        _item(
+            "10",
+            x=220.0,
+            y=98.0,
+            bbox=BBox(xmin=220.0, ymin=98.0, xmax=236.0, ymax=128.0),
+            height=30.0,
+        ),
+        _item(
+            "Page       of",
+            x=140.0,
+            y=80.0,
+            bbox=BBox(xmin=140.0, ymin=80.0, xmax=220.0, ymax=110.0),
+            height=30.0,
+        ),
+        _item(
+            "7",
+            x=194.0,
+            y=78.0,
+            bbox=BBox(xmin=194.0, ymin=78.0, xmax=202.0, ymax=108.0),
+            height=30.0,
+        ),
+        _item(
+            "10",
+            x=224.0,
+            y=78.0,
+            bbox=BBox(xmin=224.0, ymin=78.0, xmax=240.0, ymax=108.0),
+            height=30.0,
+        ),
+    ]
+
+    page_total, page_index = extractor._parse_page_marker_from_text(items)
+
+    assert page_total == 10
+    assert page_index == 7

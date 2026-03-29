@@ -281,3 +281,40 @@ def test_locate_frames_falls_back_to_non_priority_insert_layer_for_unresolved_an
     frames = locator.locate_frames(msp, Path("dummy.dxf"))
 
     assert len(frames) == 1
+
+
+def test_collect_additional_layers_prefers_candidate_geometry_layers() -> None:
+    spec = _layered_anchor_spec()
+    finder = CandidateFinder(
+        min_dim=1.0,
+        coord_tol=0.5,
+        layer_order=["HIGH", "LOW"],
+        entity_order=["LWPOLYLINE", "POLYLINE", "LINE"],
+    )
+    locator = AnchorFirstLocator(spec, finder, DummyFitter())
+
+    doc = ezdxf.new()
+    doc.layers.new("TEXT_ONLY")
+    doc.layers.new("GEOM")
+    doc.layers.new("INS")
+    msp = doc.modelspace()
+    msp.add_text("ANCHOR", dxfattribs={"insert": (10, 10), "height": 2.5, "layer": "TEXT_ONLY"})
+    msp.add_lwpolyline(
+        [(0, 0), (100, 0), (100, 50), (0, 50)],
+        close=True,
+        dxfattribs={"layer": "GEOM"},
+    )
+
+    block = doc.blocks.new(name="FRAME_IN_BLOCK")
+    block.add_lwpolyline(
+        [(0, 0), (100, 0), (100, 50), (0, 50)],
+        close=True,
+        dxfattribs={"layer": "0"},
+    )
+    msp.add_blockref("FRAME_IN_BLOCK", (0, 0), dxfattribs={"layer": "INS"})
+
+    layers = locator._collect_additional_layers(msp)
+
+    assert "TEXT_ONLY" not in layers
+    assert "GEOM" in layers
+    assert "INS" in layers
