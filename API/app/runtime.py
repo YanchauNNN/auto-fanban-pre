@@ -238,11 +238,13 @@ class DeliverableApiRuntime:
                     }
                 )
 
+        replacement_options = self.font_preflight_service.list_replacement_options(
+            missing_kinds=self._collect_missing_font_kinds(results)
+        )
         return {
             "files": results,
-            "replacement_options": self.font_preflight_service.list_replacement_options(
-                missing_kinds=self._collect_missing_font_kinds(results)
-            ),
+            "replacement_options": replacement_options,
+            "default_replacement_font": replacement_options[0]["value"] if replacement_options else None,
             "requires_confirmation": any(
                 str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
             ),

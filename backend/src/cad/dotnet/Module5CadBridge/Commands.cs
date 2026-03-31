@@ -111,6 +111,7 @@ public class Commands
         TrySetSystemVar("CMDDIA", 0, trace);
         TrySetSystemVar("BACKGROUNDPLOT", 0, trace);
         TrySetSystemVar("TILEMODE", 1, trace);
+        TrySetSystemVar("REPORTERROR", 0, trace);
     }
 
     private static void TrySetSystemVar(string name, object value, BridgeTraceLogger trace)

@@ -363,7 +363,7 @@ class PipelineExecutor:
                 source_dwg=dwg_file,
                 replacement_policy=policy,
                 replacement_font=replacement_font,
-                workspace_dir=input_dir / ".font-preflight" / dwg_file.stem,
+                workspace_dir=input_dir / ".font-preflight",
                 slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
             )
             results.append(result)

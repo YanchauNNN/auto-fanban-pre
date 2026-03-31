@@ -32,20 +32,7 @@ class InstalledFontInventory:
         self.autocad_fonts_dirs = self._resolve_autocad_fonts_dirs(autocad_fonts_dirs)
 
     def list_options(self, *, preferred_kinds: set[str] | None = None) -> list[dict[str, str]]:
-        preferred = {str(kind or "").strip().lower() for kind in (preferred_kinds or set()) if str(kind or "").strip()}
-        shx_options = self._list_autocad_shx_options()
-        ttf_options = self._list_windows_ttf_options()
-
-        include_shx = not preferred or bool(preferred & {"shx", "bigfont", "unknown"})
-        include_ttf = not preferred or "ttf" in preferred
-
-        selected: list[dict[str, str]] = []
-        if include_shx:
-            selected.extend(shx_options)
-        if include_ttf and (not preferred or "ttf" in preferred or not selected):
-            selected.extend(ttf_options)
-
-        return self._dedupe(selected)
+        return self._dedupe(self._list_autocad_shx_options())
 
     def is_valid_font(self, value: str) -> bool:
         normalized = str(value or "").strip().lower()

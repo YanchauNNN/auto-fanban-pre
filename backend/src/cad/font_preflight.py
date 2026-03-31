@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -57,9 +58,10 @@ class FontPreflightService:
         else:
             normalized_font = None
 
-        workspace = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
+        workspace_root = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
+        workspace = (workspace_root / _safe_bridge_token(source_dwg.stem)).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
-        staged_source = workspace / source_dwg.name
+        staged_source = workspace / _safe_bridge_filename(source_dwg)
         if staged_source.resolve() != source_dwg.resolve():
             shutil.copy2(source_dwg, staged_source)
         else:
@@ -116,3 +118,17 @@ class FontPreflightService:
         if errors:
             result["errors"] = errors
         return result
+
+
+_SAFE_BRIDGE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_bridge_token(value: str) -> str:
+    normalized = _SAFE_BRIDGE_TOKEN_RE.sub("-", str(value or "").strip()).strip("-.")
+    if not normalized:
+        normalized = "dwg"
+    return f"{normalized}-{uuid4().hex[:8]}"
+
+
+def _safe_bridge_filename(source_dwg: Path) -> str:
+    return f"{_safe_bridge_token(source_dwg.stem)}{source_dwg.suffix.lower()}"

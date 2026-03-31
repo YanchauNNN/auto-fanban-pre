@@ -14,6 +14,7 @@ internal sealed class FontPreflightProcessor
     private readonly HashSet<string> _installedFontFiles;
     private readonly HashSet<string> _installedFamilies;
     private readonly List<string> _autocadFontDirs;
+    private int _skippedInvalidObjectCount;
 
     public FontPreflightProcessor(BridgeTask task, BridgeTraceLogger trace)
     {
@@ -121,8 +122,9 @@ internal sealed class FontPreflightProcessor
             ? string.Empty
             : _task.ReplacementFont;
         result.AdditionalData["replaced_style_count"] = replacedStyleCount;
+        result.AdditionalData["skipped_invalid_object_count"] = _skippedInvalidObjectCount;
         _trace.Log(
-            $"[DOTNET][FONT] status={result.AdditionalData["status"]} detected={detectedStyleCount} missing={missingFonts.Count} replaced={replacedStyleCount}"
+            $"[DOTNET][FONT] status={result.AdditionalData["status"]} detected={detectedStyleCount} missing={missingFonts.Count} replaced={replacedStyleCount} skipped_invalid={_skippedInvalidObjectCount}"
         );
     }
 
@@ -132,14 +134,19 @@ internal sealed class FontPreflightProcessor
         var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
         foreach (ObjectId recordId in blockTable)
         {
-            if (!(tr.GetObject(recordId, OpenMode.ForRead) is BlockTableRecord record) || !record.IsLayout)
+            if (!TryGetObject(tr, recordId, OpenMode.ForRead, out BlockTableRecord record, "layout_record"))
+            {
+                continue;
+            }
+
+            if (!TryRead(() => record.IsLayout, "layout_record.IsLayout", out var isLayout) || !isLayout)
             {
                 continue;
             }
 
             foreach (ObjectId entityId in record)
             {
-                if (!(tr.GetObject(entityId, OpenMode.ForRead, false) is Entity entity))
+                if (!TryGetObject(tr, entityId, OpenMode.ForRead, out Entity entity, "layout_entity"))
                 {
                     continue;
                 }
@@ -162,16 +169,16 @@ internal sealed class FontPreflightProcessor
         switch (entity)
         {
             case AttributeDefinition attributeDefinition:
-                MarkUsage(usageByStyle, attributeDefinition.TextStyleId, true, true);
+                TryMarkUsage(usageByStyle, () => attributeDefinition.TextStyleId, true, true, "attribute_definition.TextStyleId");
                 return;
             case AttributeReference attributeReference:
-                MarkUsage(usageByStyle, attributeReference.TextStyleId, true, true);
+                TryMarkUsage(usageByStyle, () => attributeReference.TextStyleId, true, true, "attribute_reference.TextStyleId");
                 return;
             case DBText dbText:
-                MarkUsage(usageByStyle, dbText.TextStyleId, usedInBlock, usedInAttribute);
+                TryMarkUsage(usageByStyle, () => dbText.TextStyleId, usedInBlock, usedInAttribute, "dbtext.TextStyleId");
                 return;
             case MText mText:
-                MarkUsage(usageByStyle, mText.TextStyleId, usedInBlock, usedInAttribute);
+                TryMarkUsage(usageByStyle, () => mText.TextStyleId, usedInBlock, usedInAttribute, "mtext.TextStyleId");
                 return;
             case BlockReference blockReference:
                 ScanBlockReferenceUsage(tr, blockReference, usageByStyle, usedInBlock: true);
@@ -188,25 +195,36 @@ internal sealed class FontPreflightProcessor
         bool usedInBlock
     )
     {
-        foreach (ObjectId attributeId in blockReference.AttributeCollection)
+        List<ObjectId> attributeIds;
+        try
         {
-            if (attributeId.IsNull || attributeId.IsErased)
-            {
-                continue;
-            }
+            attributeIds = blockReference.AttributeCollection.Cast<ObjectId>().ToList();
+        }
+        catch (Exception ex)
+        {
+            RegisterSkippedObject("block_reference.AttributeCollection", ex);
+            return;
+        }
 
-            if (tr.GetObject(attributeId, OpenMode.ForRead, false) is AttributeReference attributeReference)
+        foreach (ObjectId attributeId in attributeIds)
+        {
+            if (TryGetObject(tr, attributeId, OpenMode.ForRead, out AttributeReference attributeReference, "block_attribute"))
             {
-                MarkUsage(usageByStyle, attributeReference.TextStyleId, true, true);
+                TryMarkUsage(usageByStyle, () => attributeReference.TextStyleId, true, true, "block_attribute.TextStyleId");
             }
         }
 
-        if (!(tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead) is BlockTableRecord record))
+        if (!TryRead(() => blockReference.BlockTableRecord, "block_reference.BlockTableRecord", out var blockRecordId))
         {
             return;
         }
 
-        if (record.IsFromExternalReference)
+        if (!TryGetObject(tr, blockRecordId, OpenMode.ForRead, out BlockTableRecord record, "block_definition"))
+        {
+            return;
+        }
+
+        if (TryRead(() => record.IsFromExternalReference, "block_definition.IsFromExternalReference", out var isXref) && isXref)
         {
             _trace.Log($"[DOTNET][FONT][INFO] skip xref block={record.Name}");
             return;
@@ -214,7 +232,7 @@ internal sealed class FontPreflightProcessor
 
         foreach (ObjectId nestedId in record)
         {
-            if (!(tr.GetObject(nestedId, OpenMode.ForRead, false) is Entity nested))
+            if (!TryGetObject(tr, nestedId, OpenMode.ForRead, out Entity nested, "nested_block_entity"))
             {
                 continue;
             }
@@ -244,6 +262,22 @@ internal sealed class FontPreflightProcessor
         usage.IsUsed = true;
         usage.UsedInBlock |= usedInBlock;
         usage.UsedInAttribute |= usedInAttribute;
+    }
+
+    private void TryMarkUsage(
+        Dictionary<ObjectId, FontStyleUsage> usageByStyle,
+        Func<ObjectId> styleIdAccessor,
+        bool usedInBlock,
+        bool usedInAttribute,
+        string context
+    )
+    {
+        if (!TryRead(styleIdAccessor, context, out var styleId))
+        {
+            return;
+        }
+
+        MarkUsage(usageByStyle, styleId, usedInBlock, usedInAttribute);
     }
 
     private bool IsStyleMissing(TextStyleTableRecord styleRecord, Database db)
@@ -481,5 +515,66 @@ internal sealed class FontPreflightProcessor
         public bool IsUsed { get; set; }
         public bool UsedInBlock { get; set; }
         public bool UsedInAttribute { get; set; }
+    }
+
+    private bool TryGetObject<T>(
+        Transaction tr,
+        ObjectId objectId,
+        OpenMode openMode,
+        out T obj,
+        string context
+    ) where T : DBObject
+    {
+        obj = null!;
+        if (!IsUsableObjectId(objectId))
+        {
+            RegisterSkippedObject(context, null);
+            return false;
+        }
+
+        try
+        {
+            var dbObject = tr.GetObject(objectId, openMode, false) as T;
+            if (dbObject == null)
+            {
+                RegisterSkippedObject(context, null);
+                return false;
+            }
+
+            obj = dbObject;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            RegisterSkippedObject(context, ex);
+            return false;
+        }
+    }
+
+    private bool TryRead<T>(Func<T> reader, string context, out T value)
+    {
+        value = default!;
+        try
+        {
+            value = reader();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            RegisterSkippedObject(context, ex);
+            return false;
+        }
+    }
+
+    private void RegisterSkippedObject(string context, Exception? ex)
+    {
+        _skippedInvalidObjectCount += 1;
+        var detail = ex == null ? "invalid_or_missing" : ex.Message;
+        _trace.Log($"[DOTNET][FONT][WARN] skip {context}: {detail}");
+    }
+
+    private static bool IsUsableObjectId(ObjectId objectId)
+    {
+        return !objectId.IsNull && objectId.IsValid && !objectId.IsErased;
     }
 }

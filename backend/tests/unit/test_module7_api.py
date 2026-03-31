@@ -6,6 +6,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
@@ -32,13 +33,6 @@ class FakeFontPreflightService:
                 "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\romans.shx",
                 "kind": "shx",
             },
-            {
-                "label": "SimSun (simsun.ttc)",
-                "value": "simsun.ttc",
-                "family": "SimSun",
-                "path": r"C:\Windows\Fonts\simsun.ttc",
-                "kind": "ttf",
-            },
         ]
         self.inspect_calls: list[dict[str, object]] = []
         self.list_requests: list[list[str]] = []
@@ -46,10 +40,6 @@ class FakeFontPreflightService:
     def list_replacement_options(self, *, missing_kinds: list[str] | None = None) -> list[dict[str, str]]:
         requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
         self.list_requests.append(requested)
-        if {"shx", "bigfont"} & set(requested):
-            return [item for item in self.replacement_options if item.get("kind") == "shx"]
-        if "ttf" in requested:
-            return [item for item in self.replacement_options if item.get("kind") == "ttf"]
         return list(self.replacement_options)
 
     def validate_replacement_font(self, font_name: str) -> bool:
@@ -314,7 +304,7 @@ def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=Non
 
     app = create_app(
         job_processor=processor or FakeJobProcessor(),
-        font_preflight_service=font_service,
+        font_preflight_service=cast(Any, font_service),
     )
     return TestClient(app)
 
@@ -627,6 +617,7 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
         },
     ]
     assert font_service.list_requests[-1] == ["shx"]
+    assert payload["default_replacement_font"] == "simplex.shx"
     assert payload["files"] == [
         {
             "filename": "missing-font.dwg",
@@ -1417,7 +1408,7 @@ def test_multi_file_batch_keeps_backlog_visible_until_worker_capacity_frees(
     with TestClient(
         create_app(
             job_processor=processor,
-            font_preflight_service=FakeFontPreflightService(),
+            font_preflight_service=cast(Any, FakeFontPreflightService()),
         )
     ) as client:
         response = client.post(
@@ -1592,7 +1583,7 @@ def test_grouped_batch_keeps_pending_groups_in_external_queue(
         create_app(
             job_processor=processor,
             shared_prep_service=FakeSharedPrepService(),
-            font_preflight_service=FakeFontPreflightService(),
+            font_preflight_service=cast(Any, FakeFontPreflightService()),
         )
     ) as client:
         params = _deliverable_params()

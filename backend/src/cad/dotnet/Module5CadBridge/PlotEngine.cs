@@ -487,10 +487,68 @@ internal sealed class PlotEngine
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
-            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-            var model = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-            var layout = (Layout)tr.GetObject(model.LayoutId, OpenMode.ForRead);
-            var settings = new PlotSettings(layout.ModelType);
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    db.BlockTableId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.block_table",
+                    out BlockTable? bt
+                ))
+            {
+                error = "PLOT_BLOCK_TABLE_UNAVAILABLE";
+                return false;
+            }
+
+            if (!SafeCadAccess.TryRead(
+                    () => bt![BlockTableRecord.ModelSpace],
+                    _trace,
+                    "plot.model_space_id",
+                    out ObjectId modelSpaceId
+                ))
+            {
+                error = "PLOT_MODEL_SPACE_UNAVAILABLE";
+                return false;
+            }
+
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    modelSpaceId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.model_space",
+                    out BlockTableRecord? model
+                ))
+            {
+                error = "PLOT_MODEL_SPACE_UNAVAILABLE";
+                return false;
+            }
+
+            if (!SafeCadAccess.TryRead(
+                    () => model!.LayoutId,
+                    _trace,
+                    "plot.layout_id",
+                    out ObjectId layoutId
+                ))
+            {
+                error = "PLOT_LAYOUT_UNAVAILABLE";
+                return false;
+            }
+
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    layoutId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.layout",
+                    out Layout? layout
+                ))
+            {
+                error = "PLOT_LAYOUT_UNAVAILABLE";
+                return false;
+            }
+
+            var settings = new PlotSettings(layout!.ModelType);
             settings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;
@@ -1139,10 +1197,63 @@ internal sealed class PlotEngine
         try
         {
             using var tr = db.TransactionManager.StartTransaction();
-            var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-            var model = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-            var layout = (Layout)tr.GetObject(model.LayoutId, OpenMode.ForRead);
-            var settings = new PlotSettings(layout.ModelType);
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    db.BlockTableId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.media.block_table",
+                    out BlockTable? bt
+                ))
+            {
+                return mediaNames;
+            }
+
+            if (!SafeCadAccess.TryRead(
+                    () => bt![BlockTableRecord.ModelSpace],
+                    _trace,
+                    "plot.media.model_space_id",
+                    out ObjectId modelSpaceId
+                ))
+            {
+                return mediaNames;
+            }
+
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    modelSpaceId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.media.model_space",
+                    out BlockTableRecord? model
+                ))
+            {
+                return mediaNames;
+            }
+
+            if (!SafeCadAccess.TryRead(
+                    () => model!.LayoutId,
+                    _trace,
+                    "plot.media.layout_id",
+                    out ObjectId layoutId
+                ))
+            {
+                return mediaNames;
+            }
+
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    layoutId,
+                    OpenMode.ForRead,
+                    _trace,
+                    "plot.media.layout",
+                    out Layout? layout
+                ))
+            {
+                return mediaNames;
+            }
+
+            var settings = new PlotSettings(layout!.ModelType);
             settings.CopyFrom(layout);
 
             var validator = PlotSettingsValidator.Current;

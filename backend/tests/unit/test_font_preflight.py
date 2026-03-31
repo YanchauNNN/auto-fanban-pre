@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src.cad.font_inventory import InstalledFontInventory
 from src.cad.font_preflight import FontPreflightService
 from src.models import Job, JobType
 from src.pipeline.executor import PipelineExecutor
@@ -76,7 +77,20 @@ class _FakeBridge:
 
 def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) -> None:
     service = FontPreflightService(
-        inventory=cast(Any, _FakeInventory([{"label": "SimSun", "value": "simsun.ttc", "family": "SimSun", "path": "C:/Windows/Fonts/simsun.ttc"}])),
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "simplex.shx",
+                        "value": "simplex.shx",
+                        "family": "simplex",
+                        "path": r"D:\AutoCAD\Fonts\simplex.shx",
+                        "kind": "shx",
+                    }
+                ]
+            ),
+        ),
         bridge=cast(Any, _FakeBridge()),
     )
     source = tmp_path / "sample.dwg"
@@ -94,7 +108,20 @@ def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) 
 def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Path) -> None:
     bridge = _FakeBridge()
     service = FontPreflightService(
-        inventory=cast(Any, _FakeInventory([{"label": "SimSun", "value": "simsun.ttc", "family": "SimSun", "path": "C:/Windows/Fonts/simsun.ttc"}])),
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "simplex.shx",
+                        "value": "simplex.shx",
+                        "family": "simplex",
+                        "path": r"D:\AutoCAD\Fonts\simplex.shx",
+                        "kind": "shx",
+                    }
+                ]
+            ),
+        ),
         bridge=cast(Any, bridge),
     )
     source = tmp_path / "sample.dwg"
@@ -103,13 +130,13 @@ def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Pa
     result = service.inspect_dwg(
         source_dwg=source,
         replacement_policy="replace_missing",
-        replacement_font="simsun.ttc",
+        replacement_font="simplex.shx",
         workspace_dir=tmp_path / "work",
     )
 
     assert bridge.calls[0]["method"] == "replace_missing"
     assert result["font_replacement_applied"] is True
-    assert result["replacement_font"] == "simsun.ttc"
+    assert result["replacement_font"] == "simplex.shx"
     assert result["replaced_style_count"] == 1
 
 
@@ -132,6 +159,29 @@ def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -
     assert bridge.calls[0]["method"] == "preflight"
     assert Path(bridge.calls[0]["source_dwg"]).resolve() != source.resolve()
     assert source.read_bytes().startswith(b"AC1024-original")
+
+
+def test_font_preflight_service_stages_unicode_filename_into_safe_workspace(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([])),
+        bridge=cast(Any, bridge),
+    )
+    source = tmp_path / "20162PR-JGS01 汇总B版.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        workspace_dir=tmp_path / "work",
+    )
+
+    staged = Path(bridge.calls[0]["source_dwg"])
+    assert staged.resolve() != source.resolve()
+    assert staged.parent.resolve().parent == (tmp_path / "work").resolve()
+    assert staged.name != source.name
+    assert staged.suffix.lower() == ".dwg"
+    assert all(ord(ch) < 128 for ch in staged.name)
 
 
 def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path: Path) -> None:
@@ -179,13 +229,6 @@ def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp
                 "path": r"D:\AutoCAD\Fonts\simplex.shx",
                 "kind": "shx",
             },
-            {
-                "label": "SimSun (simsun.ttc)",
-                "value": "simsun.ttc",
-                "family": "SimSun",
-                "path": r"C:\Windows\Fonts\simsun.ttc",
-                "kind": "ttf",
-            },
         ]
     )
     service = FontPreflightService(
@@ -197,6 +240,69 @@ def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp
 
     assert inventory.requested_kinds == {"shx"}
     assert options[0]["value"] == "simplex.shx"
+
+
+def test_font_preflight_service_never_returns_windows_ttf_replacements(tmp_path: Path) -> None:
+    inventory = _FakeInventory(
+        [
+            {
+                "label": "simplex.shx",
+                "value": "simplex.shx",
+                "family": "simplex",
+                "path": r"D:\AutoCAD\Fonts\simplex.shx",
+                "kind": "shx",
+            }
+        ]
+    )
+    service = FontPreflightService(
+        inventory=cast(Any, inventory),
+        bridge=cast(Any, _FakeBridge()),
+    )
+
+    options = service.list_replacement_options(missing_kinds=["ttf"])
+
+    assert inventory.requested_kinds == {"ttf"}
+    assert options == [
+        {
+            "label": "simplex.shx",
+            "value": "simplex.shx",
+            "family": "simplex",
+            "path": r"D:\AutoCAD\Fonts\simplex.shx",
+            "kind": "shx",
+        }
+    ]
+    assert service.validate_replacement_font("simsun.ttc") is False
+
+
+def test_installed_font_inventory_only_returns_autocad_fonts(tmp_path: Path) -> None:
+    autocad_fonts_dir = tmp_path / "Fonts"
+    autocad_fonts_dir.mkdir()
+    (autocad_fonts_dir / "simplex.shx").write_text("", encoding="utf-8")
+    windows_fonts_dir = tmp_path / "WindowsFonts"
+    windows_fonts_dir.mkdir()
+    (windows_fonts_dir / "simsun.ttc").write_text("", encoding="utf-8")
+
+    inventory = InstalledFontInventory(
+        autocad_fonts_dirs=[autocad_fonts_dir],
+        windows_fonts_dir=windows_fonts_dir,
+        include_registry=False,
+        include_windows_fonts=True,
+    )
+
+    options = inventory.list_options(preferred_kinds={"ttf"})
+
+    assert options == [
+        {
+            "label": "simplex.shx (AutoCAD SHX)",
+            "value": "simplex.shx",
+            "family": "simplex",
+            "path": str(autocad_fonts_dir / "simplex.shx"),
+            "kind": "shx",
+            "source": "autocad_fonts",
+        }
+    ]
+    assert inventory.is_valid_font("simplex.shx") is True
+    assert inventory.is_valid_font("simsun.ttc") is False
 
 
 def test_stage_font_preflight_blocks_when_missing_fonts_are_unconfirmed(tmp_path: Path) -> None:
@@ -245,7 +351,7 @@ def test_stage_font_preflight_updates_job_summary_after_replacement(tmp_path: Pa
         "detected_style_count": 2,
         "missing_style_count": 1,
         "font_replacement_applied": True,
-        "replacement_font": "simsun.ttc",
+        "replacement_font": "simplex.shx",
         "replaced_style_count": 1,
     }
 
@@ -258,7 +364,7 @@ def test_stage_font_preflight_updates_job_summary_after_replacement(tmp_path: Pa
         job_type=JobType.DELIVERABLE,
         project_no="2016",
         work_dir=tmp_path,
-        params={"font_replace_policy": "replace_missing", "font_replacement_font": "simsun.ttc"},
+        params={"font_replace_policy": "replace_missing", "font_replacement_font": "simplex.shx"},
     )
 
     PipelineExecutor._stage_font_preflight_and_replace(executor, job, {})
@@ -266,5 +372,5 @@ def test_stage_font_preflight_updates_job_summary_after_replacement(tmp_path: Pa
     assert job.font_preflight_summary["policy"] == "replace_missing"
     assert job.missing_fonts_detected is True
     assert job.font_replacement_applied is True
-    assert job.replacement_font == "simsun.ttc"
+    assert job.replacement_font == "simplex.shx"
     assert job.replaced_style_count == 1

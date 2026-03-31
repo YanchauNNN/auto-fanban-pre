@@ -160,16 +160,55 @@ internal sealed class SelectionEngine
         );
 
         using var tr = db.TransactionManager.StartTransaction();
-        var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-        var modelSpace = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
-        foreach (ObjectId id in modelSpace)
+        if (!SafeCadAccess.TryGetObject(
+                tr,
+                db.BlockTableId,
+                OpenMode.ForRead,
+                _trace,
+                "selection.block_table",
+                out BlockTable? bt
+            ))
         {
-            if (!(tr.GetObject(id, OpenMode.ForRead, false) is Entity ent))
+            return selected;
+        }
+
+        if (!SafeCadAccess.TryRead(
+                () => bt![BlockTableRecord.ModelSpace],
+                _trace,
+                "selection.model_space_id",
+                out ObjectId modelSpaceId
+            ))
+        {
+            return selected;
+        }
+
+        if (!SafeCadAccess.TryGetObject(
+                tr,
+                modelSpaceId,
+                OpenMode.ForRead,
+                _trace,
+                "selection.model_space",
+                out BlockTableRecord? modelSpace
+            ))
+        {
+            return selected;
+        }
+
+        foreach (ObjectId id in modelSpace!)
+        {
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    id,
+                    OpenMode.ForRead,
+                    _trace,
+                    "selection.entity",
+                    out Entity? ent
+                ))
             {
                 continue;
             }
 
-            if (TryGetEntityExtents(ent, out var extents))
+            if (TryGetEntityExtents(ent!, out var extents))
             {
                 if (Intersects(extents, bbox))
                 {
