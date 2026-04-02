@@ -165,7 +165,9 @@ class CandidateFinder:
                     layer_line_segments.extend(self._line_segments(msp, layer, window=window))
 
             if layer_poly_candidates:
-                if self._bbox_scale_validator:
+                if self._bbox_scale_validator and not (
+                    localize_line_rebuild and window is not None
+                ):
                     valid = [
                         bbox for bbox in layer_poly_candidates if self._bbox_scale_validator(bbox)
                     ]

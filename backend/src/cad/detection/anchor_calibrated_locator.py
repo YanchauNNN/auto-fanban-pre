@@ -30,6 +30,7 @@ class CandidateFrame:
     roi_profile_id: str
     fit_error: float
     layer: str
+    localized_fallback: bool = False
 
     @property
     def area(self) -> float:
@@ -156,6 +157,43 @@ class AnchorCalibratedLocator:
         local_window_hits_by_layer: dict[str, int] = {}
         used_local_only_layers: list[str] = []
         used_dynamic_layers: list[str] = []
+
+        if unresolved_ids and self.global_layers:
+            self.logger.info(
+                "?????????: dxf=%s unresolved=%d windows=%d layers=%s",
+                dxf_path.name,
+                len(unresolved_ids),
+                len(local_windows),
+                ",".join(self.global_layers),
+            )
+            for layer in self.global_layers:
+                layer_hits = 0
+                for window_info in local_windows:
+                    layer_candidates = self._build_candidates_for_layers(
+                        msp,
+                        [layer],
+                        window=window_info["window"],
+                        localize_line_rebuild=True,
+                    )
+                    if not layer_candidates:
+                        continue
+                    self._merge_candidates(candidates, layer_candidates, seen_candidates)
+                    before = len(selected_by_anchor)
+                    self._resolve_anchor_matches(
+                        anchor_items,
+                        candidates,
+                        selected_by_anchor,
+                        anchor_ids=window_info["anchor_ids"],
+                    )
+                    layer_hits += len(selected_by_anchor) - before
+                    if len(selected_by_anchor) >= len(anchor_items):
+                        break
+                if layer_hits:
+                    local_window_hits_by_layer[layer] = (
+                        local_window_hits_by_layer.get(layer, 0) + layer_hits
+                    )
+                if len(selected_by_anchor) >= len(anchor_items):
+                    break
 
         if unresolved_ids and self.local_only_layers:
             self.logger.info(
@@ -700,7 +738,13 @@ class AnchorCalibratedLocator:
         return self._fit_bbox_candidates(bbox, scale, profile_id, layer)
 
     def _fit_bbox_candidates(
-        self, bbox: BBox, scale: float, profile_id: str, layer: str
+        self,
+        bbox: BBox,
+        scale: float,
+        profile_id: str,
+        layer: str,
+        *,
+        relax_scale_candidate_gate: bool = False,
     ) -> list[CandidateFrame]:
         matches: list[CandidateFrame] = []
         for paper_id, sx, sy, fit_profile_id, error in self.paper_fitter.fit_all(
@@ -710,7 +754,7 @@ class AnchorCalibratedLocator:
                 continue
             # 强制校验：比例必须接近 scale_candidates 中的某个整数值
             cand_scale = (sx + sy) / 2.0
-            if not self._scale_matches_candidate(cand_scale):
+            if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
                 continue
             cand = CandidateFrame(
                 bbox=bbox,
@@ -720,6 +764,7 @@ class AnchorCalibratedLocator:
                 roi_profile_id=fit_profile_id,
                 fit_error=error,
                 layer=layer,
+                localized_fallback=relax_scale_candidate_gate,
             )
             if not self._scale_close(cand, scale):
                 continue
@@ -737,7 +782,7 @@ class AnchorCalibratedLocator:
                     continue
                 # 强制校验：比例必须接近 scale_candidates 中的某个整数值
                 cand_scale = (sx + sy) / 2.0
-                if not self._scale_matches_candidate(cand_scale):
+                if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
                     continue
                 candidates.append(
                     CandidateFrame(
@@ -826,21 +871,15 @@ class AnchorCalibratedLocator:
             )
         else:
             bboxes = self.candidate_finder.find_rectangles(msp)
+        relax_scale_candidate_gate = localize_line_rebuild and window is not None
         for bbox in bboxes:
-            for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
-                bbox, self.paper_variants
-            ):
-                candidates.append(
-                    CandidateFrame(
-                        bbox=bbox,
-                        paper_variant_id=paper_id,
-                        sx=sx,
-                        sy=sy,
-                        roi_profile_id=profile_id,
-                        fit_error=error,
-                        layer=layers[0] if len(layers) == 1 else "*",
-                    )
+            candidates.extend(
+                self._build_candidates_for_bbox(
+                    bbox,
+                    layers[0] if len(layers) == 1 else "*",
+                    relax_scale_candidate_gate=relax_scale_candidate_gate,
                 )
+            )
 
         candidates.sort(key=lambda c: c.area, reverse=True)
         if self.max_candidates:
@@ -851,6 +890,34 @@ class AnchorCalibratedLocator:
                 ]
             }
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
+        return candidates
+
+    def _build_candidates_for_bbox(
+        self,
+        bbox: BBox,
+        layer: str,
+        *,
+        relax_scale_candidate_gate: bool = False,
+    ) -> list[CandidateFrame]:
+        candidates: list[CandidateFrame] = []
+        for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
+            bbox, self.paper_variants
+        ):
+            cand_scale = (sx + sy) / 2.0
+            if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
+                continue
+            candidates.append(
+                CandidateFrame(
+                    bbox=bbox,
+                    paper_variant_id=paper_id,
+                    sx=sx,
+                    sy=sy,
+                    roi_profile_id=profile_id,
+                    fit_error=error,
+                    layer=layer,
+                    localized_fallback=relax_scale_candidate_gate,
+                )
+            )
         return candidates
 
     def _locate_without_anchors(self, msp, dxf_path: Path) -> list[FrameMeta]:
@@ -920,6 +987,8 @@ class AnchorCalibratedLocator:
             if not matches:
                 continue
             selected, _score = min(matches, key=lambda item: (item[1], item[0].area))
+            if selected.localized_fallback:
+                selected = self._refine_localized_candidate(anchor_item, selected)
             selected_by_anchor[idx] = selected
             self.logger.info(
                 "锚点直推->外框: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",
@@ -991,6 +1060,47 @@ class AnchorCalibratedLocator:
                     )
                     predicted.append(self._expand_search_window(bbox))
         return predicted
+
+    def _refine_localized_candidate(
+        self,
+        anchor_item: TextItem,
+        candidate: CandidateFrame,
+    ) -> CandidateFrame:
+        calib = self.calibration.get(candidate.roi_profile_id)
+        if not isinstance(calib, dict):
+            return candidate
+        paper_variant = self.paper_variants.get(candidate.paper_variant_id)
+        if not paper_variant:
+            return candidate
+        overrides = calib.get("anchor_roi_rb_offset_1to1_by_project", {})
+        use_project_override = bool(
+            self.project_no
+            and isinstance(overrides, dict)
+            and overrides.get(self.project_no) is not None
+        )
+        scale = (candidate.sx + candidate.sy) / 2.0
+        outer_xmax, outer_ymin = self._outer_rb_from_anchor(
+            anchor_item,
+            scale,
+            calib,
+            use_project_override,
+        )
+        refined_bbox = BBox(
+            xmin=outer_xmax - paper_variant.W * scale,
+            ymin=outer_ymin,
+            xmax=outer_xmax,
+            ymax=outer_ymin + paper_variant.H * scale,
+        )
+        return CandidateFrame(
+            bbox=refined_bbox,
+            paper_variant_id=candidate.paper_variant_id,
+            sx=candidate.sx,
+            sy=candidate.sy,
+            roi_profile_id=candidate.roi_profile_id,
+            fit_error=candidate.fit_error,
+            layer=candidate.layer,
+            localized_fallback=candidate.localized_fallback,
+        )
 
     def _expand_search_window(self, bbox: BBox) -> BBox:
         dx = max(bbox.width * self.spec.titleblock_extract.get("tolerances", {}).get("roi_margin_percent", 0.0), 2 * self.coord_tol)

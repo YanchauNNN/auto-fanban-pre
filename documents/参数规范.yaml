@@ -124,6 +124,23 @@ doc_generation:
     module5_output_pdf_validation_min_size_bytes: { type: int, default: 1024, desc: "PDF 最小体积门禁（字节）" }
     module5_output_pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }
 
+  font_preflight_contract:
+    font_replace_policy:
+      type: str
+      source: frontend_contract
+      default: "none"
+      desc: "字体预检替代策略：none/replace_missing"
+    font_replacement_font:
+      type: str
+      source: frontend_contract
+      required: false
+      desc: "单一替代字体（兼容旧前端）；仅适合单一缺失类型场景"
+    font_replacement_fonts:
+      type: object
+      source: frontend_contract
+      required: false
+      desc: "按缺失类型传入替代字体映射，例如 {ttf, shx, bigfont}；优先于 font_replacement_font"
+
   # --------------------------------------------------------------------------
   # 2.2 全局参数定义
   # --------------------------------------------------------------------------

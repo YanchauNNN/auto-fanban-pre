@@ -6,8 +6,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ..config import get_config
 from .font_inventory import InstalledFontInventory
 from .font_preflight_bridge import FontPreflightBridge
+from .font_replacement_plan import (
+    normalize_kind,
+    normalize_missing_kinds,
+    normalize_replacement_map,
+)
 
 
 class FontPreflightService:
@@ -17,25 +23,92 @@ class FontPreflightService:
         inventory: InstalledFontInventory | None = None,
         bridge: FontPreflightBridge | None = None,
     ) -> None:
+        self.config = get_config()
         self.inventory = inventory or InstalledFontInventory()
         self.bridge = bridge or FontPreflightBridge()
         self._options_cache: list[dict[str, str]] | None = None
 
     def list_replacement_options(self, *, missing_kinds: list[str] | None = None) -> list[dict[str, str]]:
-        normalized_kinds = {
-            str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()
-        }
+        normalized_kinds = normalize_missing_kinds(missing_kinds)
         if normalized_kinds:
-            return list(self.inventory.list_options(preferred_kinds=normalized_kinds))
+            options: list[dict[str, str]] = []
+            seen_values: set[str] = set()
+            for kind in normalized_kinds:
+                for option in self.inventory.list_options(preferred_kinds={kind}):
+                    value_key = str(option.get("value") or "").strip().lower()
+                    if not value_key or value_key in seen_values:
+                        continue
+                    seen_values.add(value_key)
+                    options.append(option)
+            return options
         if self._options_cache is None:
             self._options_cache = self.inventory.list_options(preferred_kinds=None)
         return list(self._options_cache)
 
-    def validate_replacement_font(self, font_name: str) -> bool:
+    def list_replacement_options_by_kind(
+        self,
+        *,
+        missing_kinds: list[str] | None = None,
+    ) -> dict[str, list[dict[str, str]]]:
+        return {
+            kind: self.inventory.list_options(preferred_kinds={kind})
+            for kind in normalize_missing_kinds(missing_kinds)
+        }
+
+    def default_replacement_fonts(self, *, missing_kinds: list[str] | None = None) -> dict[str, str]:
+        options_by_kind = self.list_replacement_options_by_kind(missing_kinds=missing_kinds)
+        defaults: dict[str, str] = {}
+        for kind, options in options_by_kind.items():
+            preferred = self._preferred_replacements_for_kind(kind)
+            selected = self._select_default_option(options, preferred)
+            if selected:
+                defaults[kind] = selected["value"]
+        return defaults
+
+    def validate_replacement_font(self, font_name: str, *, kind: str | None = None) -> bool:
         normalized = str(font_name or "").strip().lower()
         if not normalized:
             return False
+        normalized_kind = normalize_kind(kind)
+        if normalized_kind != "unknown" or str(kind or "").strip():
+            return self.inventory.is_valid_font(font_name, kind=normalized_kind)
         return any(option["value"].lower() == normalized for option in self.list_replacement_options())
+
+    def resolve_replacement_fonts(
+        self,
+        *,
+        missing_kinds: list[str],
+        replacement_font: str | None = None,
+        replacement_fonts: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        normalized_kinds = normalize_missing_kinds(missing_kinds)
+        resolved = normalize_replacement_map(replacement_fonts)
+        for kind, value in list(resolved.items()):
+            if not self.validate_replacement_font(value, kind=kind):
+                raise ValueError(f"font_replacement_fonts[{kind}] is unavailable: {value}")
+
+        normalized_font = str(replacement_font or "").strip()
+        if normalized_font:
+            matched = [
+                kind
+                for kind in normalized_kinds
+                if self.validate_replacement_font(normalized_font, kind=kind)
+            ]
+            if not matched:
+                raise ValueError(f"font_replacement_font is unavailable: {normalized_font}")
+            for kind in matched:
+                resolved.setdefault(kind, normalized_font)
+
+        defaults = self.default_replacement_fonts(missing_kinds=normalized_kinds)
+        for kind in normalized_kinds:
+            resolved.setdefault(kind, defaults.get(kind, ""))
+
+        missing_required = [kind for kind in normalized_kinds if not str(resolved.get(kind) or "").strip()]
+        if missing_required:
+            raise ValueError(
+                "font replacement is required for kinds: " + ", ".join(missing_required),
+            )
+        return {kind: value for kind, value in resolved.items() if kind in normalized_kinds and value}
 
     def inspect_dwg(
         self,
@@ -43,20 +116,15 @@ class FontPreflightService:
         source_dwg: Path,
         replacement_policy: str = "none",
         replacement_font: str | None = None,
+        replacement_fonts: dict[str, str] | None = None,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         policy = str(replacement_policy or "none").strip().lower() or "none"
         if policy not in {"none", "replace_missing"}:
             raise ValueError(f"unsupported font_replace_policy: {replacement_policy}")
-        if policy == "replace_missing":
-            normalized_font = str(replacement_font or "").strip()
-            if not normalized_font:
-                raise ValueError("font_replacement_font is required")
-            if not self.validate_replacement_font(normalized_font):
-                raise ValueError(f"font_replacement_font is unavailable: {normalized_font}")
-        else:
-            normalized_font = None
+        normalized_font = str(replacement_font or "").strip() or None
+        normalized_font_map = normalize_replacement_map(replacement_fonts)
 
         workspace_root = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
         workspace = (workspace_root / _safe_bridge_token(source_dwg.stem)).resolve()
@@ -66,27 +134,47 @@ class FontPreflightService:
             shutil.copy2(source_dwg, staged_source)
         else:
             staged_source = source_dwg
-        if policy == "replace_missing":
+        preflight_raw = self.bridge.preflight(
+            job_id=f"font-{source_dwg.stem}",
+            source_dwg=staged_source,
+            workspace_dir=workspace,
+            slot_runtime=slot_runtime,
+        )
+        preflight_result = self._normalize_result(
+            source_dwg=source_dwg,
+            payload=preflight_raw,
+            replacement_font=None,
+            replacement_fonts=None,
+        )
+        if policy == "replace_missing" and list(preflight_result.get("missing_fonts") or []):
+            effective_replacements = self.resolve_replacement_fonts(
+                missing_kinds=self._collect_missing_kinds(preflight_result.get("missing_fonts")),
+                replacement_font=normalized_font,
+                replacement_fonts=normalized_font_map,
+            )
+            replacement_targets = self._normalize_replacement_targets(
+                preflight_result.get("missing_fonts"),
+            )
             raw = self.bridge.replace_missing(
                 job_id=f"font-{source_dwg.stem}",
                 source_dwg=staged_source,
-                replacement_font=normalized_font or "",
+                replacement_font=self._legacy_replacement_font(effective_replacements),
+                replacement_fonts=effective_replacements,
+                replacement_targets=replacement_targets,
                 workspace_dir=workspace,
                 slot_runtime=slot_runtime,
             )
         else:
-            raw = self.bridge.preflight(
-                job_id=f"font-{source_dwg.stem}",
-                source_dwg=staged_source,
-                workspace_dir=workspace,
-                slot_runtime=slot_runtime,
-            )
-        if policy == "replace_missing" and staged_source.resolve() != source_dwg.resolve():
+            raw = preflight_raw
+            effective_replacements = {}
+
+        if policy == "replace_missing" and staged_source.resolve() != source_dwg.resolve() and list(preflight_result.get("missing_fonts") or []):
             shutil.copy2(staged_source, source_dwg)
         return self._normalize_result(
             source_dwg=source_dwg,
             payload=raw,
             replacement_font=normalized_font,
+            replacement_fonts=effective_replacements if policy == "replace_missing" else normalized_font_map,
         )
 
     @staticmethod
@@ -95,6 +183,7 @@ class FontPreflightService:
         source_dwg: Path,
         payload: dict[str, Any],
         replacement_font: str | None,
+        replacement_fonts: dict[str, str] | None,
     ) -> dict[str, Any]:
         missing_fonts = payload.get("missing_fonts")
         if not isinstance(missing_fonts, list):
@@ -105,6 +194,9 @@ class FontPreflightService:
         status = str(payload.get("status", "") or "").strip().lower()
         if not status:
             status = "failed" if errors else ("missing_fonts" if missing_fonts else "ok")
+        normalized_font_map = normalize_replacement_map(
+            payload.get("replacement_fonts") or replacement_fonts,
+        )
         result = {
             "filename": str(payload.get("filename") or source_dwg.name),
             "status": status,
@@ -112,12 +204,99 @@ class FontPreflightService:
             "detected_style_count": int(payload.get("detected_style_count", 0) or 0),
             "missing_style_count": int(payload.get("missing_style_count", len(missing_fonts)) or 0),
             "font_replacement_applied": bool(payload.get("font_replacement_applied", False)),
-            "replacement_font": payload.get("replacement_font") or replacement_font,
+            "replacement_font": payload.get("replacement_font")
+            or replacement_font
+            or FontPreflightService._legacy_replacement_font(normalized_font_map),
+            "replacement_fonts": normalized_font_map,
             "replaced_style_count": int(payload.get("replaced_style_count", 0) or 0),
         }
         if errors:
             result["errors"] = errors
         return result
+
+    def _preferred_replacements_for_kind(self, kind: str) -> list[str]:
+        normalized = normalize_kind(kind)
+        if normalized == "ttf":
+            return list(self.config.font_preflight.default_ttf_families)
+        if normalized == "bigfont":
+            return list(self.config.font_preflight.default_bigfont_fonts)
+        if normalized == "shx":
+            return list(self.config.font_preflight.default_shx_fonts)
+        return []
+
+    @staticmethod
+    def _select_default_option(
+        options: list[dict[str, str]],
+        preferred_values: list[str],
+    ) -> dict[str, str] | None:
+        if not options:
+            return None
+        lookup = {
+            str(option.get("value") or "").strip().lower(): option
+            for option in options
+        }
+        family_lookup = {
+            str(option.get("family") or "").strip().lower(): option
+            for option in options
+        }
+        for preferred in preferred_values:
+            normalized = str(preferred or "").strip().lower()
+            if not normalized:
+                continue
+            if normalized in lookup:
+                return lookup[normalized]
+            if normalized in family_lookup:
+                return family_lookup[normalized]
+            stem = normalized.rsplit(".", 1)[0]
+            if stem in family_lookup:
+                return family_lookup[stem]
+        return options[0]
+
+    @staticmethod
+    def _collect_missing_kinds(missing_fonts: object) -> list[str]:
+        if not isinstance(missing_fonts, list):
+            return []
+        return normalize_missing_kinds(
+            str(item.get("kind") or "")
+            for item in missing_fonts
+            if isinstance(item, dict)
+        )
+
+    @staticmethod
+    def _legacy_replacement_font(replacement_fonts: dict[str, str] | None) -> str | None:
+        if not replacement_fonts:
+            return None
+        unique_values = []
+        for value in replacement_fonts.values():
+            normalized = str(value or "").strip()
+            if normalized and normalized not in unique_values:
+                unique_values.append(normalized)
+        if len(unique_values) == 1:
+            return unique_values[0]
+        return None
+
+    @staticmethod
+    def _normalize_replacement_targets(missing_fonts: object) -> list[dict[str, Any]]:
+        if not isinstance(missing_fonts, list):
+            return []
+        normalized_targets: list[dict[str, Any]] = []
+        for item in missing_fonts:
+            if not isinstance(item, dict):
+                continue
+            style_name = str(item.get("style_name") or "").strip()
+            kind = normalize_kind(item.get("kind"))
+            if not style_name or not kind or kind == "unknown":
+                continue
+            normalized_targets.append(
+                {
+                    "style_name": style_name,
+                    "font_name": str(item.get("font_name") or "").strip(),
+                    "bigfont_name": str(item.get("bigfont_name") or "").strip(),
+                    "kind": kind,
+                    "used_in_block": bool(item.get("used_in_block", False)),
+                }
+            )
+        return normalized_targets
 
 
 _SAFE_BRIDGE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")

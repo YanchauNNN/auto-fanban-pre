@@ -33,6 +33,7 @@ from ..cad import (
     FontPreflightService,
     FrameDetector,
     ODAConverter,
+    SameCodeMultipageGrouper,
     TitleblockConsistencyBridge,
     TitleblockConsistencyService,
     TitleblockExtractor,
@@ -78,6 +79,7 @@ class PipelineExecutor:
         self.font_preflight_service = font_preflight_service or FontPreflightService()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
+        self.same_code_multipage_grouper = SameCodeMultipageGrouper()
         self.titleblock_consistency = TitleblockConsistencyService()
         self.titleblock_consistency_bridge = TitleblockConsistencyBridge()
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
@@ -150,6 +152,7 @@ class PipelineExecutor:
                 },
                 "frames": prep.frames,
                 "sheet_sets": prep.sheet_sets,
+                "same_code_multipage_families": [],
                 "cad_dxf_results": {},
                 "shared_prep_dir": str(prep.shared_dir),
             }
@@ -173,6 +176,7 @@ class PipelineExecutor:
             "dxf_to_dwg": {},
             "frames": [],
             "sheet_sets": [],
+            "same_code_multipage_families": [],
             # Stage 7 (cad_dxf) ??: {source_dxf: result_json_dict}
             "cad_dxf_results": {},
             "stage_timings": [],
@@ -345,12 +349,19 @@ class PipelineExecutor:
         dwg_files = sorted(input_dir.glob("*.dwg"))
         policy = str(job.params.get("font_replace_policy") or "none").strip().lower() or "none"
         replacement_font = str(job.params.get("font_replacement_font") or "").strip() or None
+        replacement_fonts_raw = job.params.get("font_replacement_fonts")
+        replacement_fonts = (
+            dict(replacement_fonts_raw)
+            if isinstance(replacement_fonts_raw, dict)
+            else None
+        )
         slot_runtime = job.params.get("cad_slot_runtime")
-        if policy == "replace_missing":
-            if replacement_font is None:
-                raise RuntimeError("missing fonts detected but font_replacement_font is missing")
-            if not self.font_preflight_service.validate_replacement_font(replacement_font):
-                raise RuntimeError(f"font_replacement_font unavailable: {replacement_font}")
+        if (
+            policy == "replace_missing"
+            and replacement_font is not None
+            and not self.font_preflight_service.validate_replacement_font(replacement_font)
+        ):
+            raise RuntimeError(f"font_replacement_font unavailable: {replacement_font}")
 
         results: list[dict[str, Any]] = []
         for dwg_file in dwg_files:
@@ -363,6 +374,7 @@ class PipelineExecutor:
                 source_dwg=dwg_file,
                 replacement_policy=policy,
                 replacement_font=replacement_font,
+                replacement_fonts=replacement_fonts,
                 workspace_dir=input_dir / ".font-preflight",
                 slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
             )
@@ -385,6 +397,17 @@ class PipelineExecutor:
         job.missing_fonts_detected = missing_detected
         job.font_replacement_applied = replacement_applied
         job.replacement_font = replacement_font
+        replacement_fonts_summary: dict[str, str] = {}
+        for item in results:
+            if isinstance(item.get("replacement_fonts"), dict):
+                replacement_fonts_summary.update(
+                    {
+                        str(key): str(value)
+                        for key, value in dict(item["replacement_fonts"]).items()
+                        if str(value or "").strip()
+                    }
+                )
+        job.replacement_fonts = replacement_fonts_summary
         job.replaced_style_count = replaced_style_count
         job.progress.details["font_missing_style_count"] = sum(
             int(item.get("missing_style_count", 0) or 0) for item in results
@@ -485,6 +508,9 @@ class PipelineExecutor:
         remaining, sheet_sets = self.a4_grouper.group_a4_pages(context["frames"])
         context["frames"] = remaining
         context["sheet_sets"] = sheet_sets
+        context["same_code_multipage_families"] = self.same_code_multipage_grouper.group_frames(
+            remaining,
+        )
 
     def _stage_fix_titleblock_consistency(self, job: Job, context: dict) -> None:
         cfg = self.config.deliverable_consistency_fix

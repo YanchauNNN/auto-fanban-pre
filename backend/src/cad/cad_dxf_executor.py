@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
 from .dwg_version import detect_dwg_version_code_or_none
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
+from .same_code_multipage import get_same_code_multipage_meta, get_same_code_output_suffix
 
 if TYPE_CHECKING:
     from ..config.spec_loader import BusinessSpec
@@ -1582,22 +1584,27 @@ class CADDXFExecutor:
         if policy != "error":
             return
 
-        seen_internal: set[str] = set()
-        seen_external: set[str] = set()
-        dup_internal: set[str] = set()
-        dup_external: set[str] = set()
+        internal_groups: dict[str, list[FrameMeta]] = defaultdict(list)
+        external_groups: dict[str, list[FrameMeta]] = defaultdict(list)
 
         for frame in frames:
             internal = (frame.titleblock.internal_code or "").strip()
             external = (frame.titleblock.external_code or "").strip()
             if internal:
-                if internal in seen_internal:
-                    dup_internal.add(internal)
-                seen_internal.add(internal)
+                internal_groups[internal].append(frame)
             if external:
-                if external in seen_external:
-                    dup_external.add(external)
-                seen_external.add(external)
+                external_groups[external].append(frame)
+
+        dup_internal = {
+            code
+            for code, group in internal_groups.items()
+            if len(group) > 1 and not self._duplicate_group_allowed(group)
+        }
+        dup_external = {
+            code
+            for code, group in external_groups.items()
+            if len(group) > 1 and not self._duplicate_group_allowed(group)
+        }
 
         if dup_internal or dup_external:
             raise ValueError(
@@ -1605,18 +1612,32 @@ class CADDXFExecutor:
             )
 
     @staticmethod
+    def _duplicate_group_allowed(group: list[FrameMeta]) -> bool:
+        family_ids: set[str] = set()
+        for frame in group:
+            meta = get_same_code_multipage_meta(frame)
+            if not meta:
+                return False
+            family_id = str(meta.get("family_id", "")).strip()
+            if not family_id:
+                return False
+            family_ids.add(family_id)
+        return len(family_ids) == 1
+
+    @staticmethod
     def _name_for_frame(frame: FrameMeta) -> str:
         external = frame.titleblock.external_code
         revision = frame.titleblock.revision
         status = frame.titleblock.status
         internal = frame.titleblock.internal_code
-        return CADDXFExecutor._make_output_name(
+        base_name = CADDXFExecutor._make_output_name(
             external_code=external,
             revision=revision,
             status=status,
             internal_code=internal,
             fallback_id=frame.frame_id[:8],
         )
+        return f"{base_name}{get_same_code_output_suffix(frame)}"
 
     @staticmethod
     def _name_for_sheet_set(sheet_set: SheetSet) -> str:

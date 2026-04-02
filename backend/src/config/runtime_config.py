@@ -290,6 +290,20 @@ class DxfPdfExportConfig(BaseModel):
     )
 
 
+class FontPreflightRuntimeConfig(BaseModel):
+    """DWG 字体预检与替代默认策略"""
+
+    default_ttf_families: list[str] = Field(
+        default_factory=lambda: ["SimSun", "Microsoft YaHei", "SimHei"],
+    )
+    default_shx_fonts: list[str] = Field(
+        default_factory=lambda: ["simplex.shx", "romans.shx", "txt.shx"],
+    )
+    default_bigfont_fonts: list[str] = Field(
+        default_factory=lambda: ["gbcbig.shx", "hztxt.shx", "txt.shx"],
+    )
+
+
 class CadRuntimeConfig(BaseModel):
     """CAD 运行时资源池配置"""
 
@@ -351,6 +365,7 @@ class RuntimeConfig(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
     dxf_pdf_export: DxfPdfExportConfig = Field(default_factory=DxfPdfExportConfig)
+    font_preflight: FontPreflightRuntimeConfig = Field(default_factory=FontPreflightRuntimeConfig)
     cad_runtime: CadRuntimeConfig = Field(default_factory=CadRuntimeConfig)
     plot_assets: PlotAssetsConfig = Field(default_factory=PlotAssetsConfig)
     management: ManagementRuntimeConfig = Field(default_factory=ManagementRuntimeConfig)
@@ -396,6 +411,9 @@ class RuntimeConfig(BaseSettings):
             ),
             "dxf_pdf_export": DxfPdfExportConfig(
                 **cls._extract(runtime_opts, "dxf_pdf_export"),
+            ),
+            "font_preflight": FontPreflightRuntimeConfig(
+                **cls._extract(runtime_opts, "font_preflight"),
             ),
             "cad_runtime": CadRuntimeConfig(**cls._extract(runtime_opts, "cad_runtime")),
             "plot_assets": PlotAssetsConfig(**cls._extract(runtime_opts, "plot_assets")),

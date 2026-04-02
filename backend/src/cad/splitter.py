@@ -33,6 +33,7 @@ from .cad_dxf_executor import CADDXFExecutor
 from .dwg_version import detect_dwg_version_code_or_none
 from .dxf_pdf_exporter import DxfPdfExporter
 from .oda_converter import ODAConverter
+from .same_code_multipage import get_same_code_output_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,14 @@ def make_output_name(
 
 def output_name_for_frame(frame: FrameMeta) -> str:
     tb = frame.titleblock
-    return make_output_name(
+    base_name = make_output_name(
         external_code=tb.external_code,
         revision=tb.revision,
         status=tb.status,
         internal_code=tb.internal_code,
         fallback_id=frame.frame_id[:8],
     )
+    return f"{base_name}{get_same_code_output_suffix(frame)}"
 
 
 def output_name_for_sheet_set(sheet_set: SheetSet) -> str:

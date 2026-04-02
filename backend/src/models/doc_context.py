@@ -254,7 +254,15 @@ class DocContext(BaseModel):
 
         for frame in self.frames:
             internal_code = frame.titleblock.internal_code or frame.runtime.frame_id
-            frames_by_code[internal_code] = frame
+            existing = frames_by_code.get(internal_code)
+            if existing is None:
+                frames_by_code[internal_code] = frame
+                continue
+
+            existing_page_index = self._same_code_page_index(existing)
+            candidate_page_index = self._same_code_page_index(frame)
+            if candidate_page_index == 1 and existing_page_index != 1:
+                frames_by_code[internal_code] = frame
 
         for sheet_set in self.sheet_sets:
             master_page = sheet_set.master_page
@@ -288,7 +296,36 @@ class DocContext(BaseModel):
                 if sheet_set.page_total > 0:
                     return sheet_set.page_total
 
+        same_code_total = self._same_code_page_total(frame)
+        if same_code_total > 1:
+            return same_code_total
+
         return frame.titleblock.page_total or 1
+
+    @staticmethod
+    def _same_code_meta(frame: FrameMeta) -> dict[str, Any] | None:
+        raw = frame.raw_extracts.get("same_code_multipage")
+        if isinstance(raw, dict):
+            return raw
+        return None
+
+    def _same_code_page_index(self, frame: FrameMeta) -> int:
+        meta = self._same_code_meta(frame)
+        if meta is None:
+            return 0
+        try:
+            return int(meta.get("page_index", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _same_code_page_total(self, frame: FrameMeta) -> int:
+        meta = self._same_code_meta(frame)
+        if meta is None:
+            return 0
+        try:
+            return int(meta.get("page_total", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def get_document_revision(self) -> str:
         """返回图纸链路文档应使用的统一版次。"""

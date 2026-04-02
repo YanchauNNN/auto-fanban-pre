@@ -32,13 +32,29 @@ class InstalledFontInventory:
         self.autocad_fonts_dirs = self._resolve_autocad_fonts_dirs(autocad_fonts_dirs)
 
     def list_options(self, *, preferred_kinds: set[str] | None = None) -> list[dict[str, str]]:
-        return self._dedupe(self._list_autocad_shx_options())
+        kinds = {str(kind or "").strip().lower() for kind in (preferred_kinds or set()) if str(kind or "").strip()}
+        if not kinds:
+            kinds = {"ttf", "shx", "bigfont"}
 
-    def is_valid_font(self, value: str) -> bool:
+        entries: list[dict[str, str]] = []
+        if "ttf" in kinds:
+            entries.extend(self._list_windows_ttf_options())
+        if "shx" in kinds:
+            entries.extend(self._list_autocad_shx_options(kind="shx"))
+        if "bigfont" in kinds:
+            entries.extend(self._list_autocad_shx_options(kind="bigfont"))
+        if "unknown" in kinds:
+            entries.extend(self._list_windows_ttf_options())
+            entries.extend(self._list_autocad_shx_options(kind="shx"))
+            entries.extend(self._list_autocad_shx_options(kind="bigfont"))
+        return self._dedupe(entries)
+
+    def is_valid_font(self, value: str, *, kind: str | None = None) -> bool:
         normalized = str(value or "").strip().lower()
         if not normalized:
             return False
-        return any(option["value"].lower() == normalized for option in self.list_options())
+        preferred_kinds = {str(kind or "").strip().lower()} if str(kind or "").strip() else None
+        return any(option["value"].lower() == normalized for option in self.list_options(preferred_kinds=preferred_kinds))
 
     def _resolve_autocad_fonts_dirs(self, configured_dirs: Iterable[str | Path] | None) -> list[Path]:
         if configured_dirs is not None:
@@ -72,19 +88,20 @@ class InstalledFontInventory:
             results.append(path)
         return results
 
-    def _list_autocad_shx_options(self) -> list[dict[str, str]]:
+    def _list_autocad_shx_options(self, *, kind: str) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
         for fonts_dir in self.autocad_fonts_dirs:
             for path in sorted(fonts_dir.iterdir(), key=lambda item: item.name.lower()):
                 if not path.is_file() or path.suffix.lower() not in _SHX_EXTENSIONS:
                     continue
+                suffix = "AutoCAD BigFont" if kind == "bigfont" else "AutoCAD SHX"
                 entries.append(
                     {
-                        "label": f"{path.name} (AutoCAD SHX)",
+                        "label": f"{path.name} ({suffix})",
                         "value": path.name,
                         "family": path.stem,
                         "path": str(path),
-                        "kind": "shx",
+                        "kind": kind,
                         "source": "autocad_fonts",
                     }
                 )
@@ -161,7 +178,12 @@ class InstalledFontInventory:
     def _dedupe(options: list[dict[str, str]]) -> list[dict[str, str]]:
         seen: dict[str, dict[str, str]] = {}
         for option in options:
-            key = str(option.get("value") or "").strip().lower()
+            key = "|".join(
+                [
+                    str(option.get("kind") or "").strip().lower(),
+                    str(option.get("value") or "").strip().lower(),
+                ]
+            )
             if not key:
                 continue
             seen.setdefault(key, option)

@@ -36,6 +36,7 @@ internal sealed class FontPreflightProcessor
         var replacedStyleCount = 0;
         var detectedStyleCount = 0;
         var replaceMissing = _task.WorkflowStage.Equals("font_replace_missing", StringComparison.OrdinalIgnoreCase);
+        var targetByStyleName = BuildReplacementTargetMap(_task.ReplacementTargets);
 
         using (var tr = db.TransactionManager.StartTransaction())
         {
@@ -54,36 +55,49 @@ internal sealed class FontPreflightProcessor
                     continue;
                 }
 
-                if (!IsStyleMissing(styleRecord, db))
+                var styleName = styleRecord.Name ?? string.Empty;
+                var hasExplicitTarget = targetByStyleName.TryGetValue(styleName, out var explicitTarget);
+                if (!hasExplicitTarget && !IsStyleMissing(styleRecord, db))
                 {
                     continue;
                 }
 
-                missingFonts.Add(BuildMissingFontPayload(styleRecord, usage));
                 if (!replaceMissing)
                 {
+                    missingFonts.Add(BuildMissingFontPayload(styleRecord, usage));
                     continue;
                 }
 
                 if (string.IsNullOrWhiteSpace(_task.ReplacementFont))
                 {
-                    result.Errors.Add("FONT_REPLACEMENT_FONT_MISSING");
-                    continue;
+                    // legacy single-font flow may still be empty; kind-specific mapping is preferred
                 }
 
                 EnsureWriteEnabled(styleRecord);
-                var replacementKind = DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
+                var replacementKind = hasExplicitTarget
+                    ? explicitTarget.Kind
+                    : DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
+                var replacementFont = ResolveReplacementFont(replacementKind);
+                if (string.IsNullOrWhiteSpace(replacementFont))
+                {
+                    result.Errors.Add($"FONT_REPLACEMENT_FONT_MISSING:{replacementKind}");
+                    continue;
+                }
                 if (replacementKind.Equals("bigfont", StringComparison.OrdinalIgnoreCase))
                 {
-                    styleRecord.BigFontFileName = _task.ReplacementFont;
+                    styleRecord.BigFontFileName = replacementFont;
                 }
                 else
                 {
-                    styleRecord.FileName = _task.ReplacementFont;
+                    styleRecord.FileName = replacementFont;
+                    if (replacementKind.Equals("ttf", StringComparison.OrdinalIgnoreCase))
+                    {
+                        styleRecord.BigFontFileName = string.Empty;
+                    }
                 }
                 replacedStyleCount += 1;
                 _trace.Log(
-                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} kind={replacementKind} replacement={_task.ReplacementFont}"
+                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} kind={replacementKind} replacement={replacementFont} explicitTarget={hasExplicitTarget}"
                 );
             }
 
@@ -121,6 +135,7 @@ internal sealed class FontPreflightProcessor
         result.AdditionalData["replacement_font"] = string.IsNullOrWhiteSpace(_task.ReplacementFont)
             ? string.Empty
             : _task.ReplacementFont;
+        result.AdditionalData["replacement_fonts"] = new Dictionary<string, string>(_task.ReplacementFonts);
         result.AdditionalData["replaced_style_count"] = replacedStyleCount;
         result.AdditionalData["skipped_invalid_object_count"] = _skippedInvalidObjectCount;
         _trace.Log(
@@ -409,6 +424,25 @@ internal sealed class FontPreflightProcessor
         return "unknown";
     }
 
+    private static Dictionary<string, BridgeReplacementTarget> BuildReplacementTargetMap(
+        IEnumerable<BridgeReplacementTarget> targets
+    )
+    {
+        var result = new Dictionary<string, BridgeReplacementTarget>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in targets)
+        {
+            var styleName = (target.StyleName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(styleName))
+            {
+                continue;
+            }
+
+            result[styleName] = target;
+        }
+
+        return result;
+    }
+
     private static IEnumerable<string> BuildShxCandidateNames(string normalizedFontName)
     {
         if (string.IsNullOrWhiteSpace(normalizedFontName))
@@ -421,6 +455,22 @@ internal sealed class FontPreflightProcessor
         {
             yield return normalizedFontName + ".shx";
         }
+    }
+
+    private string ResolveReplacementFont(string kind)
+    {
+        var normalized = (kind ?? string.Empty).Trim().ToLowerInvariant();
+        if (_task.ReplacementFonts.TryGetValue(normalized, out var mapped) && !string.IsNullOrWhiteSpace(mapped))
+        {
+            return mapped.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_task.ReplacementFont))
+        {
+            return _task.ReplacementFont.Trim();
+        }
+
+        return string.Empty;
     }
 
     private static void EnsureWriteEnabled(DBObject obj)

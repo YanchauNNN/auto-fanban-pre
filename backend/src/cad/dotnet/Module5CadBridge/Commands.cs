@@ -163,7 +163,10 @@ internal sealed class BridgeTask
     public List<BridgeFrameTask> Frames { get; private set; } = new();
     public List<BridgeSheetSetTask> SheetSets { get; private set; } = new();
     public List<BridgeConsistencyAction> ConsistencyActions { get; private set; } = new();
+    public List<BridgeReplacementTarget> ReplacementTargets { get; private set; } = new();
     public string ReplacementFont { get; private set; } = string.Empty;
+    public Dictionary<string, string> ReplacementFonts { get; private set; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     public static BridgeTask Load(string taskPath)
     {
@@ -184,6 +187,9 @@ internal sealed class BridgeTask
             OutputDir = BridgeValue.GetString(root, "output_dir", string.Empty),
             OutputDwg = BridgeValue.GetString(root, "output_dwg", string.Empty),
             ReplacementFont = BridgeValue.GetString(root, "replacement_font", string.Empty),
+            ReplacementFonts = BridgeValue.GetStringMap(
+                root.TryGetValue("replacement_fonts", out var replacementFontsObj) ? replacementFontsObj : null
+            ),
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),
             Output = BridgeOutputConfig.FromObject(root.TryGetValue("output", out var outputObj) ? outputObj : null),
@@ -213,6 +219,15 @@ internal sealed class BridgeTask
             if (actionDict != null)
             {
                 task.ConsistencyActions.Add(BridgeConsistencyAction.FromDictionary(actionDict));
+            }
+        }
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(root.TryGetValue("replacement_targets", out var targetsObj) ? targetsObj : null))
+        {
+            var targetDict = BridgeValue.AsDictionary(item);
+            if (targetDict != null)
+            {
+                task.ReplacementTargets.Add(BridgeReplacementTarget.FromDictionary(targetDict));
             }
         }
 
@@ -366,6 +381,27 @@ internal sealed class BridgeConsistencyTarget
             NewText = BridgeValue.GetString(data, "new_text", string.Empty),
             X = BridgeValue.GetDouble(data, "x", 0.0),
             Y = BridgeValue.GetDouble(data, "y", 0.0),
+        };
+    }
+}
+
+internal sealed class BridgeReplacementTarget
+{
+    public string StyleName { get; private set; } = string.Empty;
+    public string FontName { get; private set; } = string.Empty;
+    public string BigFontName { get; private set; } = string.Empty;
+    public string Kind { get; private set; } = string.Empty;
+    public bool UsedInBlock { get; private set; }
+
+    public static BridgeReplacementTarget FromDictionary(Dictionary<string, object> data)
+    {
+        return new BridgeReplacementTarget
+        {
+            StyleName = BridgeValue.GetString(data, "style_name", string.Empty),
+            FontName = BridgeValue.GetString(data, "font_name", string.Empty),
+            BigFontName = BridgeValue.GetString(data, "bigfont_name", string.Empty),
+            Kind = BridgeValue.GetString(data, "kind", string.Empty),
+            UsedInBlock = BridgeValue.GetBool(data, "used_in_block", false),
         };
     }
 }
@@ -665,6 +701,30 @@ internal static class BridgeValue
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? defaultValue;
+    }
+
+    public static Dictionary<string, string> GetStringMap(object? value)
+    {
+        var dict = AsDictionary(value);
+        if (dict == null)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var results = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in dict)
+        {
+            var key = (pair.Key ?? string.Empty).Trim();
+            var text = Convert.ToString(pair.Value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            results[key] = text;
+        }
+
+        return results;
     }
 
     public static double GetDouble(Dictionary<string, object>? dict, string key, double defaultValue)

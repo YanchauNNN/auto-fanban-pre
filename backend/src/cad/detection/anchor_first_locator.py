@@ -38,6 +38,7 @@ class CandidateFrame:
     roi_profile_id: str
     anchor_roi: BBox
     fit_error: float
+    localized_fallback: bool = False
 
     @property
     def area(self) -> float:
@@ -162,6 +163,43 @@ class AnchorFirstLocator:
         local_window_hits_by_layer: dict[str, int] = {}
         used_local_only_layers: list[str] = []
         used_dynamic_layers: list[str] = []
+
+        if unresolved_ids and self.global_layers:
+            self.logger.info(
+                "?????????: dxf=%s unresolved=%d windows=%d layers=%s",
+                dxf_path.name,
+                len(unresolved_ids),
+                len(local_windows),
+                ",".join(self.global_layers),
+            )
+            for layer in self.global_layers:
+                layer_hits = 0
+                for window_info in local_windows:
+                    layer_candidates = self._build_candidates_for_layers(
+                        msp,
+                        [layer],
+                        window=window_info["window"],
+                        localize_line_rebuild=True,
+                    )
+                    if not layer_candidates:
+                        continue
+                    self._merge_candidates(candidates, layer_candidates, seen_candidates)
+                    before = len(selected_by_anchor)
+                    self._resolve_anchor_matches(
+                        anchor_items,
+                        candidates,
+                        selected_by_anchor,
+                        anchor_ids=window_info["anchor_ids"],
+                    )
+                    layer_hits += len(selected_by_anchor) - before
+                    if len(selected_by_anchor) >= len(anchor_items):
+                        break
+                if layer_hits:
+                    local_window_hits_by_layer[layer] = (
+                        local_window_hits_by_layer.get(layer, 0) + layer_hits
+                    )
+                if len(selected_by_anchor) >= len(anchor_items):
+                    break
 
         if unresolved_ids and self.local_only_layers:
             self.logger.info(
@@ -437,8 +475,15 @@ class AnchorFirstLocator:
             )
         else:
             bboxes = self.candidate_finder.find_rectangles(msp)
+        relax_scale_candidate_gate = localize_line_rebuild and window is not None
         for bbox in bboxes:
-            candidates.extend(self._build_candidates_for_bbox(bbox, use_scale_filter=False))
+            candidates.extend(
+                self._build_candidates_for_bbox(
+                    bbox,
+                    use_scale_filter=False,
+                    relax_scale_candidate_gate=relax_scale_candidate_gate,
+                )
+            )
 
         candidates.sort(key=lambda c: c.area, reverse=True)
         if self.max_candidates:
@@ -450,6 +495,49 @@ class AnchorFirstLocator:
             }
             candidates = [c for c in candidates if self._candidate_key(c) in top_keys]
         return candidates
+
+    def _refine_localized_candidate(
+        self,
+        anchor_item: TextItem,
+        candidate: CandidateFrame,
+    ) -> CandidateFrame:
+        profile = self.spec.get_roi_profile(candidate.roi_profile_id)
+        if not profile:
+            return candidate
+        rb_offset = self._get_anchor_rb_offset(candidate.roi_profile_id, profile)
+        if not rb_offset:
+            return candidate
+        paper_variant = self.paper_variants.get(candidate.paper_variant_id)
+        if not paper_variant:
+            return candidate
+        scale = (candidate.sx + candidate.sy) / 2.0
+        ref_x, ref_y = self._anchor_ref_point(anchor_item)
+        calib = self.anchor_calibration.get(candidate.roi_profile_id, {})
+        ref_cfg = calib.get("text_ref_in_anchor_roi_1to1", {}) if isinstance(calib, dict) else {}
+        dx_right = float(ref_cfg.get("dx_right", 0.0))
+        dy_bottom = float(ref_cfg.get("dy_bottom", 0.0))
+        roi_xmax = ref_x + dx_right * scale
+        roi_ymin = ref_y - dy_bottom * scale
+        outer_xmax = roi_xmax + float(rb_offset[0]) * scale
+        outer_ymin = roi_ymin - float(rb_offset[2]) * scale
+        refined_bbox = BBox(
+            xmin=outer_xmax - paper_variant.W * scale,
+            ymin=outer_ymin,
+            xmax=outer_xmax,
+            ymax=outer_ymin + paper_variant.H * scale,
+        )
+        refined_anchor_roi = self._restore_roi(refined_bbox, rb_offset, candidate.sx, candidate.sy)
+        refined_anchor_roi = self._expand_roi(refined_anchor_roi, self.roi_margin_percent)
+        return CandidateFrame(
+            bbox=refined_bbox,
+            paper_variant_id=candidate.paper_variant_id,
+            sx=candidate.sx,
+            sy=candidate.sy,
+            roi_profile_id=candidate.roi_profile_id,
+            anchor_roi=refined_anchor_roi,
+            fit_error=candidate.fit_error,
+            localized_fallback=candidate.localized_fallback,
+        )
 
     def _scale_matches_candidate(self, scale: float) -> bool:
         """检查 geom_scale_factor 是否为有效的整数比例候选。
@@ -473,7 +561,11 @@ class AnchorFirstLocator:
         return rel_err <= self.scale_candidate_match_tol
 
     def _build_candidates_for_bbox(
-        self, bbox: BBox, *, use_scale_filter: bool = True
+        self,
+        bbox: BBox,
+        *,
+        use_scale_filter: bool = True,
+        relax_scale_candidate_gate: bool = False,
     ) -> list[CandidateFrame]:
         candidates: list[CandidateFrame] = []
         for paper_id, sx, sy, profile_id, error in self.paper_fitter.fit_all(
@@ -481,7 +573,7 @@ class AnchorFirstLocator:
         ):
             scale = (sx + sy) / 2.0
             # ① 强制校验：比例必须接近 scale_candidates 中的某个整数值
-            if not self._scale_matches_candidate(scale):
+            if not relax_scale_candidate_gate and not self._scale_matches_candidate(scale):
                 self.logger.debug(
                     "候选矩形比例 %.3f 不在 scale_candidates 中，跳过 paper=%s",
                     scale,
@@ -515,6 +607,7 @@ class AnchorFirstLocator:
                     roi_profile_id=profile_id,
                     anchor_roi=anchor_roi,
                     fit_error=error,
+                    localized_fallback=relax_scale_candidate_gate,
                 )
             )
         return candidates
@@ -610,6 +703,8 @@ class AnchorFirstLocator:
             if not matches:
                 continue
             selected = min(matches, key=lambda c: (c.fit_error, c.area))
+            if selected.localized_fallback:
+                selected = self._refine_localized_candidate(anchor_item, selected)
             selected_by_anchor[idx] = selected
             self.logger.info(
                 "锚点->外框: index=%d variant=%s sx=%.4f sy=%.4f profile=%s bbox=(%.3f,%.3f,%.3f,%.3f)",

@@ -21,6 +21,7 @@ from .font_preflight import FontPreflightService
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
+from .same_code_multipage import SameCodeMultipageGrouper
 from .slot_pool import CADSlot, CADSlotPool
 from .splitter import FrameSplitter
 from .titleblock_extractor import TitleblockExtractor
@@ -43,6 +44,7 @@ __all__ = [
     "resolve_autocad_paths",
     "PlotResourceContext",
     "ensure_plot_resources",
+    "SameCodeMultipageGrouper",
     "CADSlot",
     "CADSlotPool",
     "TitleblockConsistencyService",

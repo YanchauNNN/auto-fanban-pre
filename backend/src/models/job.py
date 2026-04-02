@@ -75,6 +75,7 @@ class Job(BaseModel):
     missing_fonts_detected: bool = False
     font_replacement_applied: bool = False
     replacement_font: str | None = None
+    replacement_fonts: dict[str, str] = Field(default_factory=dict)
     replaced_style_count: int = 0
 
     # 输入

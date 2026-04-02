@@ -10,6 +10,7 @@ from ..cad import (
     FontPreflightService,
     FrameDetector,
     ODAConverter,
+    SameCodeMultipageGrouper,
     TitleblockExtractor,
 )
 from ..models import FrameMeta, SheetSet
@@ -31,6 +32,7 @@ class SharedPrepService:
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
         self.a4_grouper = A4MultipageGrouper()
+        self.same_code_multipage_grouper = SameCodeMultipageGrouper()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
 
     def prepare(
@@ -41,6 +43,7 @@ class SharedPrepService:
         shared_dir: Path,
         font_replace_policy: str = "none",
         font_replacement_font: str | None = None,
+        font_replacement_fonts: dict[str, str] | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> SharedPrepArtifacts:
         source_dwg = source_dwg.resolve()
@@ -54,18 +57,20 @@ class SharedPrepService:
             staged_source = source_dwg
 
         policy = str(font_replace_policy or "none").strip().lower() or "none"
-        if policy == "replace_missing":
-            if not font_replacement_font:
-                raise RuntimeError("missing fonts detected but font_replacement_font is missing")
-            if not self.font_preflight_service.validate_replacement_font(font_replacement_font):
-                raise RuntimeError(
-                    f"font_replacement_font unavailable: {font_replacement_font}"
-                )
+        if (
+            policy == "replace_missing"
+            and font_replacement_font
+            and not self.font_preflight_service.validate_replacement_font(font_replacement_font)
+        ):
+            raise RuntimeError(
+                f"font_replacement_font unavailable: {font_replacement_font}"
+            )
 
         font_preflight_summary = self.font_preflight_service.inspect_dwg(
             source_dwg=staged_source,
             replacement_policy=policy,
             replacement_font=font_replacement_font,
+            replacement_fonts=font_replacement_fonts,
             workspace_dir=shared_dir / "font_preflight",
             slot_runtime=slot_runtime,
         )
@@ -84,6 +89,7 @@ class SharedPrepService:
             frame.runtime.cad_source_file = staged_source
             self.titleblock_extractor.extract_fields(dxf_path, frame)
         frames, sheet_sets = self.a4_grouper.group_a4_pages(frames)
+        self.same_code_multipage_grouper.group_frames(frames)
 
         self._write_json(shared_dir / "frames.json", [frame.model_dump(mode="json") for frame in frames])
         self._write_json(

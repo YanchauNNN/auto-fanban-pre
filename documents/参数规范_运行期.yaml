@@ -344,6 +344,20 @@ runtime_options:
     font_dirs:                 { type: "list[str]", default: ["fronts/Fonts", "Fonts"], desc: "字体搜索目录（追加到 ezdxf.options.support_dirs）" }
     fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
 
+  font_preflight:
+    default_ttf_families:
+      type: "list[str]"
+      default: ["SimSun", "Microsoft YaHei", "SimHei"]
+      desc: "缺失 TTF 字体时的优先替代字体族顺序；按 family/file stem 依次匹配"
+    default_shx_fonts:
+      type: "list[str]"
+      default: ["simplex.shx", "romans.shx", "txt.shx"]
+      desc: "缺失 SHX 字体时的优先替代字体文件顺序"
+    default_bigfont_fonts:
+      type: "list[str]"
+      default: ["gbcbig.shx", "hztxt.shx", "txt.shx"]
+      desc: "缺失 bigfont 时的优先替代字体文件顺序"
+
   # --------------------------------------------------------------------------
   # 12) 管理业务线运行期配置
   # --------------------------------------------------------------------------

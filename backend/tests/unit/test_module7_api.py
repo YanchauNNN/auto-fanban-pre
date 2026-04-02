@@ -20,6 +20,13 @@ class FakeFontPreflightService:
     def __init__(self) -> None:
         self.replacement_options = [
             {
+                "label": "SimSun (simsun.ttc)",
+                "value": "simsun.ttc",
+                "family": "SimSun",
+                "path": r"C:\Windows\Fonts\simsun.ttc",
+                "kind": "ttf",
+            },
+            {
                 "label": "simplex.shx (AutoCAD SHX)",
                 "value": "simplex.shx",
                 "family": "simplex",
@@ -40,10 +47,48 @@ class FakeFontPreflightService:
     def list_replacement_options(self, *, missing_kinds: list[str] | None = None) -> list[dict[str, str]]:
         requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
         self.list_requests.append(requested)
-        return list(self.replacement_options)
+        if not requested:
+            return list(self.replacement_options)
+        return [
+            option
+            for option in self.replacement_options
+            if str(option.get("kind") or "").strip().lower() in requested
+        ]
 
-    def validate_replacement_font(self, font_name: str) -> bool:
-        return any(option["value"] == font_name for option in self.replacement_options)
+    def list_replacement_options_by_kind(
+        self,
+        *,
+        missing_kinds: list[str] | None = None,
+    ) -> dict[str, list[dict[str, str]]]:
+        requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
+        return {
+            kind: [
+                option
+                for option in self.replacement_options
+                if str(option.get("kind") or "").strip().lower() == kind
+            ]
+            for kind in requested
+        }
+
+    def default_replacement_fonts(self, *, missing_kinds: list[str] | None = None) -> dict[str, str]:
+        requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
+        defaults = {
+            "ttf": "simsun.ttc",
+            "shx": "simplex.shx",
+            "bigfont": "romans.shx",
+        }
+        return {kind: defaults[kind] for kind in requested if kind in defaults}
+
+    def validate_replacement_font(self, font_name: str, *, kind: str | None = None) -> bool:
+        normalized_kind = str(kind or "").strip().lower()
+        return any(
+            option["value"] == font_name
+            and (
+                not normalized_kind
+                or str(option.get("kind") or "").strip().lower() == normalized_kind
+            )
+            for option in self.replacement_options
+        )
 
     def inspect_dwg(
         self,
@@ -51,6 +96,7 @@ class FakeFontPreflightService:
         source_dwg: Path,
         replacement_policy: str = "none",
         replacement_font: str | None = None,
+        replacement_fonts: dict[str, str] | None = None,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -59,6 +105,7 @@ class FakeFontPreflightService:
                 "source_dwg": source_dwg,
                 "replacement_policy": replacement_policy,
                 "replacement_font": replacement_font,
+                "replacement_fonts": replacement_fonts,
                 "workspace_dir": workspace_dir,
                 "slot_runtime": slot_runtime,
             }
@@ -81,6 +128,7 @@ class FakeFontPreflightService:
                 "missing_style_count": 1,
                 "font_replacement_applied": replacement_policy == "replace_missing",
                 "replacement_font": replacement_font,
+                "replacement_fonts": replacement_fonts or {},
                 "replaced_style_count": 1 if replacement_policy == "replace_missing" else 0,
             }
 
@@ -616,6 +664,25 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
             "kind": "shx",
         },
     ]
+    assert payload["replacement_options_by_kind"] == {
+        "shx": [
+            {
+                "label": "simplex.shx (AutoCAD SHX)",
+                "value": "simplex.shx",
+                "family": "simplex",
+                "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\simplex.shx",
+                "kind": "shx",
+            },
+            {
+                "label": "romans.shx (AutoCAD SHX)",
+                "value": "romans.shx",
+                "family": "romans",
+                "path": r"D:\Program Files\AUTOCAD\AutoCAD 2022\Fonts\romans.shx",
+                "kind": "shx",
+            },
+        ]
+    }
+    assert payload["default_replacement_fonts"] == {"shx": "simplex.shx"}
     assert font_service.list_requests[-1] == ["shx"]
     assert payload["default_replacement_font"] == "simplex.shx"
     assert payload["files"] == [
@@ -635,6 +702,7 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
             "missing_style_count": 1,
             "font_replacement_applied": False,
             "replacement_font": None,
+            "replacement_fonts": {},
             "replaced_style_count": 0,
         },
         {
@@ -722,6 +790,29 @@ def test_create_batch_rejects_replace_missing_without_replacement_font(
     assert payload["detail"]["param_errors"]["font_replacement_font"] == [
         "required_when_font_replace_policy_is_replace_missing"
     ]
+
+
+def test_create_batch_accepts_kind_specific_font_replacements(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path, font_service=FakeFontPreflightService()) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **_deliverable_params(),
+                        "font_replace_policy": "replace_missing",
+                        "font_replacement_fonts": {"ttf": "simsun.ttc"},
+                    },
+                    ensure_ascii=False,
+                )
+            },
+            files=[("files[]", ("missing-font.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
 
 
 def test_create_batch_rejects_missing_required_param(monkeypatch, tmp_path: Path) -> None:
@@ -1188,6 +1279,7 @@ class FakeSharedPrepService(SharedPrepService):
         shared_dir: Path,
         font_replace_policy: str = "none",
         font_replacement_font: str | None = None,
+        font_replacement_fonts: dict[str, str] | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> SharedPrepArtifacts:
         shared_dir.mkdir(parents=True, exist_ok=True)
@@ -1223,6 +1315,7 @@ class FakeSharedPrepService(SharedPrepService):
                 "missing_style_count": 0,
                 "font_replacement_applied": font_replace_policy == "replace_missing",
                 "replacement_font": font_replacement_font,
+                "replacement_fonts": font_replacement_fonts or {},
                 "replaced_style_count": 0,
             },
             frames=[],

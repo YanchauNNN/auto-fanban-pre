@@ -24,6 +24,7 @@ from src.audit_replace.executor import AuditReplaceExecutor
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
+from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
@@ -219,6 +220,7 @@ class DeliverableApiRuntime:
                     source_dwg=source_path,
                     replacement_policy="none",
                     replacement_font=None,
+                    replacement_fonts=None,
                     workspace_dir=workspace_dir,
                 )
                 result["filename"] = original_filename
@@ -233,18 +235,28 @@ class DeliverableApiRuntime:
                         "missing_style_count": 0,
                         "font_replacement_applied": False,
                         "replacement_font": None,
+                        "replacement_fonts": {},
                         "replaced_style_count": 0,
                         "errors": [str(exc)],
                     }
                 )
 
+        missing_kinds = self._collect_missing_font_kinds(results)
         replacement_options = self.font_preflight_service.list_replacement_options(
-            missing_kinds=self._collect_missing_font_kinds(results)
+            missing_kinds=missing_kinds
+        )
+        replacement_options_by_kind = self.font_preflight_service.list_replacement_options_by_kind(
+            missing_kinds=missing_kinds,
+        )
+        default_replacement_fonts = self.font_preflight_service.default_replacement_fonts(
+            missing_kinds=missing_kinds,
         )
         return {
             "files": results,
             "replacement_options": replacement_options,
             "default_replacement_font": replacement_options[0]["value"] if replacement_options else None,
+            "replacement_options_by_kind": replacement_options_by_kind,
+            "default_replacement_fonts": default_replacement_fonts,
             "requires_confirmation": any(
                 str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
             ),
@@ -458,6 +470,7 @@ class DeliverableApiRuntime:
         errors: dict[str, list[str]] = {}
         policy = str(raw_params.get("font_replace_policy") or "none").strip().lower() or "none"
         replacement_font = str(raw_params.get("font_replacement_font") or "").strip()
+        replacement_fonts = normalize_replacement_map(raw_params.get("font_replacement_fonts"))
 
         if policy not in {"none", "replace_missing"}:
             errors.setdefault("font_replace_policy", []).append("unsupported_font_replace_policy")
@@ -466,14 +479,19 @@ class DeliverableApiRuntime:
         if policy != "replace_missing":
             return errors
 
-        if not replacement_font:
+        if not replacement_font and not replacement_fonts:
             errors.setdefault("font_replacement_font", []).append(
                 "required_when_font_replace_policy_is_replace_missing"
             )
             return errors
 
-        if not self.font_preflight_service.validate_replacement_font(replacement_font):
+        if replacement_font and not self.font_preflight_service.validate_replacement_font(replacement_font):
             errors.setdefault("font_replacement_font", []).append("unavailable_font_replacement_font")
+        for kind, font_name in replacement_fonts.items():
+            if not self.font_preflight_service.validate_replacement_font(font_name, kind=kind):
+                errors.setdefault("font_replacement_fonts", []).append(
+                    f"unavailable_font_replacement_fonts[{kind}]"
+                )
         return errors
     def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
         groups = [
@@ -691,6 +709,7 @@ class DeliverableApiRuntime:
                 shared_dir=shared_dir,
                 font_replace_policy=str(font_params.get("font_replace_policy") or "none"),
                 font_replacement_font=str(font_params.get("font_replacement_font") or "").strip() or None,
+                font_replacement_fonts=normalize_replacement_map(font_params.get("font_replacement_fonts")),
             )
             group.shared_dir = prep.shared_dir
             group.progress.percent = 35
@@ -707,6 +726,9 @@ class DeliverableApiRuntime:
                 child.missing_fonts_detected = str(prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"
                 child.font_replacement_applied = bool(prep.font_preflight_summary.get("font_replacement_applied", False))
                 child.replacement_font = str(prep.font_preflight_summary.get("replacement_font") or "").strip() or None
+                child.replacement_fonts = normalize_replacement_map(
+                    prep.font_preflight_summary.get("replacement_fonts")
+                )
                 child.replaced_style_count = _summary_int(prep.font_preflight_summary, "replaced_style_count")
                 self.job_manager.update_job(child)
 
@@ -767,6 +789,9 @@ class DeliverableApiRuntime:
             shared_dir=deliverable_shared_dir,
             font_replace_policy=str(deliverable_job.params.get("font_replace_policy") or "none"),
             font_replacement_font=str(deliverable_job.params.get("font_replacement_font") or "").strip() or None,
+            font_replacement_fonts=normalize_replacement_map(
+                deliverable_job.params.get("font_replacement_fonts")
+            ),
         )
 
         deliverable_job.input_files = [replaced_dwg]
@@ -785,6 +810,9 @@ class DeliverableApiRuntime:
         )
         deliverable_job.replacement_font = (
             str(deliverable_prep.font_preflight_summary.get("replacement_font") or "").strip() or None
+        )
+        deliverable_job.replacement_fonts = normalize_replacement_map(
+            deliverable_prep.font_preflight_summary.get("replacement_fonts")
         )
         deliverable_job.replaced_style_count = _summary_int(
             deliverable_prep.font_preflight_summary,
@@ -1069,6 +1097,7 @@ class DeliverableApiRuntime:
             'missing_fonts_detected': job.missing_fonts_detected,
             'font_replacement_applied': job.font_replacement_applied,
             'replacement_font': job.replacement_font,
+            'replacement_fonts': job.replacement_fonts,
             'replaced_style_count': job.replaced_style_count,
             'is_group': False,
             'source_filename': job.source_filename,
@@ -1105,6 +1134,7 @@ class DeliverableApiRuntime:
             'missing_fonts_detected': job.missing_fonts_detected,
             'font_replacement_applied': job.font_replacement_applied,
             'replacement_font': job.replacement_font,
+            'replacement_fonts': job.replacement_fonts,
             'replaced_style_count': job.replaced_style_count,
         })
         if job.job_type == JobType.DELIVERABLE:

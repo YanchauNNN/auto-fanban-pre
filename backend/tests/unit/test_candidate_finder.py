@@ -152,6 +152,32 @@ def test_find_rectangles_in_layers_filters_by_window() -> None:
     assert len(bboxes) == 1
 
 
+def test_find_rectangles_in_layers_localized_window_bypasses_bbox_scale_validator() -> None:
+    doc = ezdxf.new()
+    doc.layers.new("LOW")
+    msp = doc.modelspace()
+
+    add_rect_polyline(msp, "LOW", 0, 0, 200, 100)
+
+    finder = CandidateFinder(
+        layer_order=["LOW"],
+        entity_order=["LWPOLYLINE"],
+        min_dim=10.0,
+        bbox_scale_validator=lambda _bbox: False,
+    )
+
+    localized = finder.find_rectangles_in_layers(
+        msp,
+        ["LOW"],
+        window=BBox(xmin=-10, ymin=-10, xmax=250, ymax=150),
+        localize_line_rebuild=True,
+    )
+    non_localized = finder.find_rectangles_in_layers(msp, ["LOW"])
+
+    assert len(non_localized) == 0
+    assert len(localized) == 1
+
+
 def test_effective_layer_from_insert_is_preserved_for_layer_queries() -> None:
     doc = ezdxf.new()
     doc.layers.new("TK")
