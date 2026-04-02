@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from ..config import get_config
 from .font_inventory import InstalledFontInventory
+from .font_mapping_runtime import build_font_runtime_plan
 from .font_preflight_bridge import FontPreflightBridge
 from .font_replacement_plan import (
     normalize_kind,
@@ -155,6 +156,15 @@ class FontPreflightService:
             replacement_targets = self._normalize_replacement_targets(
                 preflight_result.get("missing_fonts"),
             )
+            font_runtime_plan = build_font_runtime_plan(
+                workspace_dir=workspace,
+                missing_fonts=list(preflight_result.get("missing_fonts") or []),
+                replacement_fonts=effective_replacements,
+                enable_fontmap=bool(self.config.font_preflight.enable_fontmap),
+                default_fontalt_by_kind=dict(self.config.font_preflight.default_fontalt_by_kind),
+            )
+            replace_runtime = dict(slot_runtime or {})
+            replace_runtime.update(font_runtime_plan.runtime_overrides)
             raw = self.bridge.replace_missing(
                 job_id=f"font-{source_dwg.stem}",
                 source_dwg=staged_source,
@@ -162,20 +172,57 @@ class FontPreflightService:
                 replacement_fonts=effective_replacements,
                 replacement_targets=replacement_targets,
                 workspace_dir=workspace,
-                slot_runtime=slot_runtime,
+                slot_runtime=replace_runtime or None,
             )
         else:
             raw = preflight_raw
             effective_replacements = {}
+            font_runtime_plan = None
 
         if policy == "replace_missing" and staged_source.resolve() != source_dwg.resolve() and list(preflight_result.get("missing_fonts") or []):
             shutil.copy2(staged_source, source_dwg)
-        return self._normalize_result(
+        normalized_result = self._normalize_result(
             source_dwg=source_dwg,
             payload=raw,
             replacement_font=normalized_font,
             replacement_fonts=effective_replacements if policy == "replace_missing" else normalized_font_map,
         )
+        if font_runtime_plan is not None:
+            if font_runtime_plan.font_map_path is not None:
+                normalized_result["font_map_path"] = str(font_runtime_plan.font_map_path)
+            if font_runtime_plan.font_alt:
+                normalized_result["font_alt"] = font_runtime_plan.font_alt
+        if (
+            policy == "replace_missing"
+            and bool(normalized_result.get("font_replacement_applied"))
+            and bool(self.config.font_preflight.verify_after_replace)
+        ):
+            verify_runtime = dict(slot_runtime or {})
+            if font_runtime_plan is not None:
+                verify_runtime.update(font_runtime_plan.runtime_overrides)
+            verify_raw = self.bridge.preflight(
+                job_id=f"font-{source_dwg.stem}-verify",
+                source_dwg=staged_source,
+                workspace_dir=workspace / "verify",
+                slot_runtime=verify_runtime or None,
+            )
+            verify_result = self._normalize_result(
+                source_dwg=source_dwg,
+                payload=verify_raw,
+                replacement_font=normalized_font,
+                replacement_fonts=effective_replacements,
+            )
+            normalized_result["verify_after_replace"] = {
+                "status": verify_result.get("status"),
+                "missing_style_count": verify_result.get("missing_style_count", 0),
+                "missing_fonts": verify_result.get("missing_fonts", []),
+            }
+            if int(verify_result.get("missing_style_count", 0) or 0) > 0:
+                normalized_result["font_replacement_incomplete"] = True
+                flags = normalized_result.setdefault("flags", [])
+                if isinstance(flags, list) and "FONT_REPLACEMENT_INCOMPLETE" not in flags:
+                    flags.append("FONT_REPLACEMENT_INCOMPLETE")
+        return normalized_result
 
     @staticmethod
     def _normalize_result(

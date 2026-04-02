@@ -106,6 +106,9 @@ class Module5PlotConfig(BaseModel):
         default_factory=lambda: {"x": 0.0, "y": 0.0},
     )
     plot_window_top_right_expand_ratio: float = 0.0001
+    use_selection_extents_when_mismatch: bool = True
+    selection_extents_mismatch_trigger_mm: float = 2.0
+    selection_extents_mismatch_trigger_ratio: float = 0.01
     scale_mode: str = "manual_integer_from_geometry"
     scale_integer_rounding: str = "round"
     margins_mm: dict[str, float] = Field(
@@ -301,6 +304,15 @@ class FontPreflightRuntimeConfig(BaseModel):
     )
     default_bigfont_fonts: list[str] = Field(
         default_factory=lambda: ["gbcbig.shx", "hztxt.shx", "txt.shx"],
+    )
+    enable_fontmap: bool = True
+    verify_after_replace: bool = True
+    default_fontalt_by_kind: dict[str, str] = Field(
+        default_factory=lambda: {
+            "ttf": "simsun.ttc",
+            "shx": "simplex.shx",
+            "bigfont": "gbcbig.shx",
+        },
     )
 
 

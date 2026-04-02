@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from uuid import uuid4
 
+from ..config import BusinessSpec, load_spec
 from ..models import FrameMeta
 
 _META_KEY = "same_code_multipage"
@@ -42,7 +43,23 @@ def get_same_code_output_suffix(frame: FrameMeta) -> str:
     page_total = int(meta.get("page_total", 0) or 0)
     if page_index <= 0 or page_total <= 1:
         return ""
-    return f"-p{page_index}of{page_total}"
+    spec = _load_default_spec()
+    pattern = (
+        spec.get_same_code_multipage_suffix_pattern()
+        if spec is not None
+        else "{page_index}@{page_total}"
+    )
+    try:
+        return pattern.format(page_index=page_index, page_total=page_total)
+    except Exception:
+        return f"{page_index}@{page_total}"
+
+
+def _load_default_spec() -> BusinessSpec | None:
+    try:
+        return load_spec()
+    except FileNotFoundError:
+        return None
 
 
 class SameCodeMultipageGrouper:

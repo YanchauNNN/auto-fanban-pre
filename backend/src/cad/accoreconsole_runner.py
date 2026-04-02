@@ -476,7 +476,9 @@ class AcCoreConsoleRunner:
         pmp_dir = self._escape_lisp_string(str(runtime.get("pmp_dir", "")))
         plot_styles_dir = self._escape_lisp_string(str(runtime.get("plot_styles_dir", "")))
         spool_dir = self._escape_lisp_string(str(runtime.get("spool_dir", "")))
-        if not any((plotters_dir, pmp_dir, plot_styles_dir, spool_dir)):
+        font_map_path = self._escape_lisp_string(str(runtime.get("font_map_path", "")))
+        font_alt = self._escape_lisp_string(str(runtime.get("font_alt", "")))
+        if not any((plotters_dir, pmp_dir, plot_styles_dir, spool_dir, font_map_path, font_alt)):
             return []
 
         content = [
@@ -491,6 +493,10 @@ class AcCoreConsoleRunner:
             content.append(f'(vla-put-PrinterStyleSheetPath _m5prefs "{plot_styles_dir}")')
         if spool_dir:
             content.append(f'(vla-put-PrintSpoolerPath _m5prefs "{spool_dir}")')
+        if font_map_path:
+            content.append(f'(setvar "FONTMAP" "{font_map_path}")')
+        if font_alt:
+            content.append(f'(setvar "FONTALT" "{font_alt}")')
         return content
 
     @staticmethod

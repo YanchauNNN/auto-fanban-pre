@@ -449,6 +449,7 @@ doc_generation:
       ied_person_qual_category: "一般核安全物项-民用"
       system_code: "NA"
       system_name: "NA"
+    same_code_multipage_suffix_pattern: "{page_index}@{page_total}"
     # 目录排序规则
     catalog_sort:
       method: "by_internal_code"

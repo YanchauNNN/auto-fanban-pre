@@ -25,6 +25,7 @@ from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
 from .dwg_version import detect_dwg_version_code_or_none
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
+from .plot_window_strategy import bbox_from_mapping, bbox_to_mapping, resolve_plot_window_bbox
 from .same_code_multipage import get_same_code_multipage_meta, get_same_code_output_suffix
 
 if TYPE_CHECKING:
@@ -532,6 +533,7 @@ class CADDXFExecutor:
                     source_dxf=source_dxf,
                     runtime_task_dir=runtime_task_dir,
                     staged_output_dir=staged_output_dir,
+                    split_result=split_result,
                     frames=frames,
                     sheet_sets=sheet_sets,
                     plot_resource_context=plot_resource_context,
@@ -646,12 +648,27 @@ class CADDXFExecutor:
         source_dxf: Path,
         runtime_task_dir: Path,
         staged_output_dir: Path,
+        split_result: dict,
         frames: list[FrameMeta],
         sheet_sets: list[SheetSet],
         plot_resource_context: PlotResourceContext,
         runtime_context: dict[str, str],
     ) -> dict:
-        frame_entries: list[dict] = [self._build_frame_entry(frame) for frame in frames]
+        split_frames_by_id = {
+            str(item.get("frame_id", "")): item
+            for item in split_result.get("frames", [])
+            if isinstance(item, dict) and str(item.get("frame_id", ""))
+        }
+        plot_window_flags_by_frame_id: dict[str, list[str]] = {}
+        frame_entries: list[dict] = []
+        for frame in frames:
+            frame_entry, flags = self._build_window_plot_frame_entry(
+                frame=frame,
+                split_item=split_frames_by_id.get(frame.frame_id),
+            )
+            frame_entries.append(frame_entry)
+            if flags:
+                plot_window_flags_by_frame_id[frame.frame_id] = flags
         sheet_set_entries: list[dict] = [
             self._build_sheet_set_entry(sheet_set) for sheet_set in sheet_sets
         ]
@@ -676,11 +693,26 @@ class CADDXFExecutor:
             plot_resource_context=plot_resource_context,
             runtime_context=runtime_context,
         )
-        return self._run_plot_task_from_dwg(
+        result = self._run_plot_task_from_dwg(
             source_dwg=source_dxf,
             runtime_task_dir=runtime_task_dir,
             task_data=plot_task,
         )
+        for item in result.get("frames", []):
+            if not isinstance(item, dict):
+                continue
+            frame_id = str(item.get("frame_id", ""))
+            if not frame_id:
+                continue
+            extra_flags = plot_window_flags_by_frame_id.get(frame_id, [])
+            if not extra_flags:
+                continue
+            flags = item.setdefault("flags", [])
+            if isinstance(flags, list):
+                for flag in extra_flags:
+                    if flag not in flags:
+                        flags.append(flag)
+        return result
 
     def _finalize_frame_with_window_then_fallback(
         self,
@@ -1363,6 +1395,38 @@ class CADDXFExecutor:
             "kind": "single",
         }
 
+    def _build_window_plot_frame_entry(
+        self,
+        *,
+        frame: FrameMeta,
+        split_item: dict | None,
+    ) -> tuple[dict, list[str]]:
+        frame_entry = self._build_frame_entry(frame)
+        if not isinstance(split_item, dict):
+            return frame_entry, []
+
+        selection_extents = bbox_from_mapping(split_item.get("selection_extents"))
+        plot_cfg = self.config.module5_export.plot
+        resolution = resolve_plot_window_bbox(
+            frame_bbox=frame.runtime.outer_bbox,
+            selection_extents=selection_extents,
+            enabled=bool(getattr(plot_cfg, "use_selection_extents_when_mismatch", True)),
+            mismatch_trigger_mm=float(
+                getattr(plot_cfg, "selection_extents_mismatch_trigger_mm", 2.0),
+            ),
+            mismatch_trigger_ratio=float(
+                getattr(plot_cfg, "selection_extents_mismatch_trigger_ratio", 0.01),
+            ),
+        )
+        if not resolution.use_selection_extents:
+            return frame_entry, []
+
+        frame_entry["plot_window_bbox"] = bbox_to_mapping(resolution.plot_window_bbox)
+        return frame_entry, [
+            "PLOT_WINDOW_SELECTION_EXTENTS_USED",
+            f"PLOT_WINDOW_MISMATCH_SWITCHED:{resolution.reason}",
+        ]
+
     def _build_sheet_set_entry(self, sheet_set: SheetSet) -> dict:
         pages = [
             {
@@ -1635,9 +1699,10 @@ class CADDXFExecutor:
             revision=revision,
             status=status,
             internal_code=internal,
+            same_code_suffix=get_same_code_output_suffix(frame),
             fallback_id=frame.frame_id[:8],
         )
-        return f"{base_name}{get_same_code_output_suffix(frame)}"
+        return base_name
 
     @staticmethod
     def _name_for_sheet_set(sheet_set: SheetSet) -> str:
@@ -1659,6 +1724,7 @@ class CADDXFExecutor:
         revision: str | None,
         status: str | None,
         internal_code: str | None,
+        same_code_suffix: str = "",
         fallback_id: str,
     ) -> str:
         external = (external_code or "").strip()
@@ -1668,6 +1734,8 @@ class CADDXFExecutor:
 
         if external and internal:
             prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
+            if same_code_suffix:
+                prefix = f"{prefix}{same_code_suffix}"
             return f"{prefix} ({internal})"
         if internal:
             return internal

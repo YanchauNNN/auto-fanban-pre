@@ -149,6 +149,9 @@ runtime_options:
         default: { x: 0.0, y: 0.0 }
         desc: "打印偏移（毫米）；模块5 CAD 路径固定为 0,0"
       plot_window_top_right_expand_ratio: { type: float, default: 0.0001, desc: "仅打印窗口右上角比例外扩；xmax += width*ratio，ymax += height*ratio；用于缓解上边/右边压边，默认万分之一" }
+      use_selection_extents_when_mismatch: { type: bool, default: true, desc: "当 source-window 的 frame.bbox 与真实选中范围明显失配时，是否切换到 selection_extents 作为打印窗口" }
+      selection_extents_mismatch_trigger_mm: { type: float, default: 2.0, desc: "selection_extents 任一边超出 frame.bbox 的毫米阈值；超过即切换到 selection_extents" }
+      selection_extents_mismatch_trigger_ratio: { type: float, default: 0.01, desc: "selection_extents 相对 frame.bbox 的宽/高放大比例阈值；超过即切换到 selection_extents" }
       scale_mode: { type: enum, default: "manual_integer_from_geometry", desc: "比例策略：manual_integer_from_geometry/scale_to_fit，默认按几何实测比例取整手动输入" }
       scale_integer_rounding: { type: enum, default: "round", desc: "manual_integer_from_geometry 的整数化方式：floor/round/ceil；先按小数点后1位四舍五入，再执行整数化，默认 round" }
       margins_mm:
@@ -357,6 +360,18 @@ runtime_options:
       type: "list[str]"
       default: ["gbcbig.shx", "hztxt.shx", "txt.shx"]
       desc: "缺失 bigfont 时的优先替代字体文件顺序"
+    enable_fontmap:
+      type: bool
+      default: true
+      desc: "是否为每次字体替代任务生成 FONTMAP 文件并注入运行时"
+    verify_after_replace:
+      type: bool
+      default: true
+      desc: "字体替代后是否重新做一次最小预检验证；若仍存在缺失则标记为 FONT_REPLACEMENT_INCOMPLETE"
+    default_fontalt_by_kind:
+      type: object
+      default: { ttf: "simsun.ttc", shx: "simplex.shx", bigfont: "gbcbig.shx" }
+      desc: "FONTALT 的 kind 级默认兜底字体映射"
 
   # --------------------------------------------------------------------------
   # 12) 管理业务线运行期配置

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Drawing.Text;
 using System.IO;
 using System.Linq;
+using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.GraphicsInterface;
 
 namespace Module5CadBridge;
 
@@ -13,6 +15,7 @@ internal sealed class FontPreflightProcessor
     private readonly BridgeTraceLogger _trace;
     private readonly HashSet<string> _installedFontFiles;
     private readonly HashSet<string> _installedFamilies;
+    private readonly Dictionary<string, string> _installedFamilyMap;
     private readonly List<string> _autocadFontDirs;
     private int _skippedInvalidObjectCount;
 
@@ -22,6 +25,7 @@ internal sealed class FontPreflightProcessor
         _trace = trace;
         _installedFontFiles = LoadInstalledFontFiles();
         _installedFamilies = LoadInstalledFontFamilies();
+        _installedFamilyMap = LoadInstalledFamilyMap();
         _autocadFontDirs = LoadAutoCADFontDirs();
     }
 
@@ -93,6 +97,7 @@ internal sealed class FontPreflightProcessor
                     if (replacementKind.Equals("ttf", StringComparison.OrdinalIgnoreCase))
                     {
                         styleRecord.BigFontFileName = string.Empty;
+                        TryUpdateTextStyleFontDescriptor(styleRecord, replacementFont);
                     }
                 }
                 replacedStyleCount += 1;
@@ -106,6 +111,7 @@ internal sealed class FontPreflightProcessor
 
         if (replaceMissing)
         {
+            TryRegenActiveDocument();
             if (string.IsNullOrWhiteSpace(_task.OutputDwg))
             {
                 result.Errors.Add("FONT_REPLACEMENT_OUTPUT_DWG_MISSING");
@@ -524,6 +530,28 @@ internal sealed class FontPreflightProcessor
         return results;
     }
 
+    private static Dictionary<string, string> LoadInstalledFamilyMap()
+    {
+        var results = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var collection = new InstalledFontCollection();
+            foreach (var family in collection.Families)
+            {
+                if (!string.IsNullOrWhiteSpace(family.Name))
+                {
+                    results[family.Name] = family.Name;
+                }
+            }
+        }
+        catch
+        {
+            // ignore; file-name based lookup still works
+        }
+
+        return results;
+    }
+
     private static List<string> LoadAutoCADFontDirs()
     {
         var results = new List<string>();
@@ -621,6 +649,65 @@ internal sealed class FontPreflightProcessor
         _skippedInvalidObjectCount += 1;
         var detail = ex == null ? "invalid_or_missing" : ex.Message;
         _trace.Log($"[DOTNET][FONT][WARN] skip {context}: {detail}");
+    }
+
+    private void TryUpdateTextStyleFontDescriptor(
+        TextStyleTableRecord styleRecord,
+        string replacementFont
+    )
+    {
+        try
+        {
+            var typeFace = ResolveTypeFaceName(replacementFont);
+            if (string.IsNullOrWhiteSpace(typeFace))
+            {
+                return;
+            }
+
+            var existing = styleRecord.Font;
+            styleRecord.Font = new FontDescriptor(
+                typeFace,
+                existing.Bold,
+                existing.Italic,
+                existing.CharacterSet,
+                existing.PitchAndFamily
+            );
+            _trace.Log($"[DOTNET][FONT][TYPEFACE] style={styleRecord.Name} typeface={typeFace}");
+        }
+        catch (Exception ex)
+        {
+            _trace.Log($"[DOTNET][FONT][WARN] update typeface failed style={styleRecord.Name} err={ex.Message}");
+        }
+    }
+
+    private string ResolveTypeFaceName(string replacementFont)
+    {
+        var stem = Path.GetFileNameWithoutExtension((replacementFont ?? string.Empty).Trim());
+        if (string.IsNullOrWhiteSpace(stem))
+        {
+            return string.Empty;
+        }
+
+        if (_installedFamilyMap.TryGetValue(stem, out var family))
+        {
+            return family;
+        }
+
+        return stem;
+    }
+
+    private void TryRegenActiveDocument()
+    {
+        try
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            doc?.Editor?.Regen();
+            _trace.Log("[DOTNET][FONT][REGEN] active document regenerated");
+        }
+        catch (Exception ex)
+        {
+            _trace.Log($"[DOTNET][FONT][WARN] regen failed: {ex.Message}");
+        }
     }
 
     private static bool IsUsableObjectId(ObjectId objectId)

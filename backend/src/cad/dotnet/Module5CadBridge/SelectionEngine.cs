@@ -37,6 +37,7 @@ internal sealed class SelectionEngine
         var outputDwg = Path.Combine(_task.OutputDir, $"{frame.Name}.dwg");
         var flags = new List<string>();
         var status = "failed";
+        var hasSelectionExtents = TryGetSelectionExtents(db, selectedIds, out var selectionExtents);
 
         if (selectedIds.Count <= 0)
         {
@@ -60,6 +61,7 @@ internal sealed class SelectionEngine
             ["dwg_path"] = outputDwg,
             ["selection_count"] = selectedIds.Count,
             ["flags"] = flags,
+            ["selection_extents"] = hasSelectionExtents ? selectionExtents!.ToDictionary() : null!,
         };
     }
 
@@ -280,6 +282,65 @@ internal sealed class SelectionEngine
 
         extents = default;
         return false;
+    }
+
+    private bool TryGetSelectionExtents(
+        Database db,
+        IEnumerable<ObjectId> ids,
+        out BridgeBBox? bbox
+    )
+    {
+        bbox = null;
+        var hasExtents = false;
+        double xmin = 0.0;
+        double ymin = 0.0;
+        double xmax = 0.0;
+        double ymax = 0.0;
+
+        using var tr = db.TransactionManager.StartTransaction();
+        foreach (var id in ids)
+        {
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    id,
+                    OpenMode.ForRead,
+                    _trace,
+                    "selection.extents.entity",
+                    out Entity? ent
+                ))
+            {
+                continue;
+            }
+
+            if (!TryGetEntityExtents(ent!, out var extents))
+            {
+                continue;
+            }
+
+            if (!hasExtents)
+            {
+                xmin = extents.MinPoint.X;
+                ymin = extents.MinPoint.Y;
+                xmax = extents.MaxPoint.X;
+                ymax = extents.MaxPoint.Y;
+                hasExtents = true;
+                continue;
+            }
+
+            xmin = Math.Min(xmin, extents.MinPoint.X);
+            ymin = Math.Min(ymin, extents.MinPoint.Y);
+            xmax = Math.Max(xmax, extents.MaxPoint.X);
+            ymax = Math.Max(ymax, extents.MaxPoint.Y);
+        }
+
+        tr.Commit();
+        if (!hasExtents)
+        {
+            return false;
+        }
+
+        bbox = new BridgeBBox(xmin, ymin, xmax, ymax);
+        return true;
     }
 
     private static bool Intersects(Extents3d extents, BridgeBBox bbox)

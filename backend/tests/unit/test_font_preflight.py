@@ -115,6 +115,7 @@ def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) 
         ),
         bridge=cast(Any, _FakeBridge()),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "sample.dwg"
     source.write_text("dwg", encoding="utf-8")
 
@@ -146,6 +147,7 @@ def test_font_preflight_service_uses_replace_missing_when_requested(tmp_path: Pa
         ),
         bridge=cast(Any, bridge),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "sample.dwg"
     source.write_text("dwg", encoding="utf-8")
 
@@ -181,6 +183,7 @@ def test_font_preflight_service_passes_missing_targets_into_replace_pass(tmp_pat
         ),
         bridge=cast(Any, bridge),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "sample.dwg"
     source.write_text("dwg", encoding="utf-8")
 
@@ -210,6 +213,7 @@ def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -
         inventory=cast(Any, _FakeInventory([])),
         bridge=cast(Any, bridge),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "sample.dwg"
     source.write_bytes(b"AC1024-original")
 
@@ -230,6 +234,7 @@ def test_font_preflight_service_stages_unicode_filename_into_safe_workspace(tmp_
         inventory=cast(Any, _FakeInventory([])),
         bridge=cast(Any, bridge),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "20162PR-JGS01 汇总B版.dwg"
     source.write_bytes(b"AC1024-original")
 
@@ -267,6 +272,7 @@ def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path
         ),
         bridge=cast(Any, bridge),
     )
+    service.config.font_preflight.verify_after_replace = False
     source = tmp_path / "sample.dwg"
     source.write_bytes(b"AC1024-original")
 
@@ -305,6 +311,7 @@ def test_font_preflight_service_filters_replacement_options_by_missing_kinds(tmp
         inventory=cast(Any, inventory),
         bridge=cast(Any, _FakeBridge()),
     )
+    service.config.font_preflight.verify_after_replace = False
 
     options = service.list_replacement_options(missing_kinds=["shx"])
 
@@ -335,6 +342,7 @@ def test_font_preflight_service_returns_ttf_replacements_for_ttf_missing_kind(tm
         inventory=cast(Any, inventory),
         bridge=cast(Any, _FakeBridge()),
     )
+    service.config.font_preflight.verify_after_replace = False
 
     options = service.list_replacement_options(missing_kinds=["ttf"])
 

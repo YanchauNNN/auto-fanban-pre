@@ -1,13 +1,13 @@
-"""
-规范加载器 - 读取 documents/参数规范.yaml
+﻿"""
+瑙勮寖鍔犺浇鍣?- 璇诲彇 documents/鍙傛暟瑙勮寖.yaml
 
-职责：
-- 解析YAML并提供类型安全访问
-- 提供派生规则、映射表、模板落点等配置
-- 缓存加载结果（避免重复解析）
+鑱岃矗锛?
+- 瑙ｆ瀽YAML骞舵彁渚涚被鍨嬪畨鍏ㄨ闂?
+- 鎻愪緵娲剧敓瑙勫垯銆佹槧灏勮〃銆佹ā鏉胯惤鐐圭瓑閰嶇疆
+- 缂撳瓨鍔犺浇缁撴灉锛堥伩鍏嶉噸澶嶈В鏋愶級
 
-使用方式：
-    spec = SpecLoader.load("documents/参数规范.yaml")
+浣跨敤鏂瑰紡锛?
+    spec = SpecLoader.load("documents/鍙傛暟瑙勮寖.yaml")
     roi_profile = spec.get_roi_profile("BASE10")
     cover_bindings = spec.get_cover_bindings("1818")
 """
@@ -22,19 +22,19 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, PrivateAttr
 
-DEFAULT_SPEC_PATH = Path("documents/参数规范.yaml")
+DEFAULT_SPEC_PATH = Path("documents") / "参数规范.yaml"
 SPEC_PATH_ENV_VAR = "FANBAN_SPEC_PATH"
 
 
 class PaperVariant(BaseModel):
-    """标准图幅尺寸"""
+    """鏍囧噯鍥惧箙灏哄"""
     W: float
     H: float
     profile: str
 
 
 class ROIProfile(BaseModel):
-    """ROI配置"""
+    """ROI閰嶇疆"""
     description: str
     tolerance: float
     outer_frame: list[float]
@@ -42,13 +42,13 @@ class ROIProfile(BaseModel):
 
 
 class FieldDefinition(BaseModel):
-    """字段解析定义"""
+    """瀛楁瑙ｆ瀽瀹氫箟"""
     roi: str
     parse: dict[str, Any]
 
 
 class CoverBinding(BaseModel):
-    """封面落点配置"""
+    """灏侀潰钀界偣閰嶇疆"""
     cell: str
     label: str | None = None
     desc: str | None = None
@@ -59,46 +59,46 @@ class CoverBinding(BaseModel):
 
 
 class BusinessSpec(BaseModel):
-    """业务规范（参数规范.yaml 的结构化表示）"""
+    """Business spec loaded from ????.yaml."""
     schema_version: str
     _source_path: Path | None = PrivateAttr(default=None)
 
-    # 枚举定义
+    # 鏋氫妇瀹氫箟
     enums: dict[str, Any] = Field(default_factory=dict)
 
-    # 文档生成模块配置
+    # 鏂囨。鐢熸垚妯″潡閰嶇疆
     doc_generation: dict[str, Any] = Field(default_factory=dict)
 
-    # 图签提取模块配置
+    # 鍥剧鎻愬彇妯″潡閰嶇疆
     titleblock_extract: dict[str, Any] = Field(default_factory=dict)
 
-    # A4多页规则
+    # A4澶氶〉瑙勫垯
     a4_multipage: dict[str, Any] = Field(default_factory=dict)
 
-    # 管理业务线事实源
+    # 绠＄悊涓氬姟绾夸簨瀹炴簮
     management_features: dict[str, Any] = Field(default_factory=dict)
 
-    # === 便捷访问方法 ===
+    # === 渚挎嵎璁块棶鏂规硶 ===
 
     def get_paper_variants(self) -> dict[str, PaperVariant]:
-        """获取标准图幅配置"""
+        """鑾峰彇鏍囧噯鍥惧箙閰嶇疆"""
         raw = self.titleblock_extract.get("paper_variants", {})
         return {k: PaperVariant(**v) for k, v in raw.items()}
 
     def get_roi_profile(self, profile_id: str) -> ROIProfile | None:
-        """获取ROI配置"""
+        """鑾峰彇ROI閰嶇疆"""
         profiles = self.titleblock_extract.get("roi_profiles", {})
         if profile_id in profiles:
             return ROIProfile(**profiles[profile_id])
         return None
 
     def get_field_definitions(self) -> dict[str, FieldDefinition]:
-        """获取字段解析定义"""
+        """鑾峰彇瀛楁瑙ｆ瀽瀹氫箟"""
         raw = self.titleblock_extract.get("field_definitions", {})
         return {k: FieldDefinition(**v) for k, v in raw.items()}
 
     def get_cover_bindings(self, project_no: str) -> dict[str, CoverBinding]:
-        """获取封面落点配置"""
+        """鑾峰彇灏侀潰钀界偣閰嶇疆"""
         bindings = self.doc_generation.get("templates", {}).get("cover_bindings", {})
         key = "1818" if project_no == "1818" else "common"
         raw = bindings.get(key, {})
@@ -106,31 +106,37 @@ class BusinessSpec(BaseModel):
                 for k, v in raw.items() if not k.startswith("split_")}
 
     def get_catalog_bindings(self) -> dict[str, Any]:
-        """获取目录落点配置"""
+        """鑾峰彇鐩綍钀界偣閰嶇疆"""
         return self.doc_generation.get("templates", {}).get("catalog_bindings", {})
 
     def get_design_bindings(self) -> dict[str, Any]:
-        """获取设计文件落点配置"""
+        """鑾峰彇璁捐鏂囦欢钀界偣閰嶇疆"""
         return self.doc_generation.get("templates", {}).get("design_bindings", {})
 
     def get_ied_bindings(self) -> dict[str, Any]:
-        """获取IED计划落点配置"""
+        """鑾峰彇IED璁″垝钀界偣閰嶇疆"""
         return self.doc_generation.get("templates", {}).get("ied_bindings", {})
 
     def get_derivation_rules(self) -> dict[str, Any]:
-        """获取派生规则"""
+        """鑾峰彇娲剧敓瑙勫垯"""
         return self.doc_generation.get("derivations", {})
 
     def get_mappings(self) -> dict[str, dict[str, str]]:
-        """获取映射表"""
+        """Get field mappings."""
         return self.doc_generation.get("rules", {}).get("mappings", {})
 
     def get_defaults(self) -> dict[str, Any]:
-        """获取默认值"""
+        """Get default values."""
         return self.doc_generation.get("rules", {}).get("defaults", {})
+    def get_same_code_multipage_suffix_pattern(self) -> str:
+        """普通图纸同编码多页输出后缀模板。"""
+        rules = self.doc_generation.get("rules", {})
+        pattern = str(rules.get("same_code_multipage_suffix_pattern") or "").strip()
+        return pattern or "{page_index}@{page_total}"
+
 
     def get_template_path(self, doc_type: str, project_no: str, variant: str = "") -> str:
-        """获取模板路径"""
+        """鑾峰彇妯℃澘璺緞"""
         selection = self.doc_generation.get("templates", {}).get("selection", {})
 
         if doc_type == "cover":
@@ -157,7 +163,7 @@ class BusinessSpec(BaseModel):
         return str(self.resolve_repo_path(selection.get(doc_type, "")))
 
     def get_project_name(self, project_no: str) -> str | None:
-        """根据项目号返回枚举中配置的项目名称。"""
+        """Return the configured project name for a project number."""
         for item in self.enums.get("project_no", []):
             if not isinstance(item, dict):
                 continue
@@ -182,7 +188,7 @@ class BusinessSpec(BaseModel):
 
 
 class SpecLoader:
-    """规范加载器（单例模式+缓存）"""
+    """Business spec loader with cached file reads."""
 
     _instance: SpecLoader | None = None
     _spec: BusinessSpec | None = None
@@ -195,10 +201,10 @@ class SpecLoader:
     @classmethod
     @lru_cache(maxsize=8)
     def _load_cached(cls, resolved_path: str) -> BusinessSpec:
-        """按解析后的真实路径缓存规范，避免默认参数缓存污染环境覆盖场景。"""
+        """Load and cache the resolved spec file path."""
         path = Path(resolved_path)
         if not path.exists():
-            raise FileNotFoundError(f"规范文件不存在: {path}")
+            raise FileNotFoundError(f"瑙勮寖鏂囦欢涓嶅瓨鍦? {path}")
 
         with open(path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -209,25 +215,25 @@ class SpecLoader:
 
     @classmethod
     def load(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
-        """加载并缓存规范"""
+        """Load the business spec."""
         path = _resolve_spec_path(spec_path)
         return cls._load_cached(_cache_key(path))
 
     @classmethod
     def reload(cls, spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
-        """强制重新加载（清除缓存）"""
+        """寮哄埗閲嶆柊鍔犺浇锛堟竻闄ょ紦瀛橈級"""
         cls.clear_cache()
         return cls.load(spec_path)
 
     @classmethod
     def clear_cache(cls) -> None:
-        """清空内部缓存。"""
+        """Clear the internal spec cache."""
         cls._load_cached.cache_clear()
 
 
-# 便捷函数
+# 渚挎嵎鍑芥暟
 def load_spec(spec_path: str | Path = DEFAULT_SPEC_PATH) -> BusinessSpec:
-    """加载业务规范"""
+    """鍔犺浇涓氬姟瑙勮寖"""
     return SpecLoader.load(spec_path)
 
 

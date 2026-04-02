@@ -65,6 +65,7 @@ def make_output_name(
     revision: str | None = None,
     status: str | None = None,
     internal_code: str | None = None,
+    same_code_suffix: str = "",
     fallback_id: str = "unknown",
 ) -> str:
     external = (external_code or "").strip()
@@ -74,6 +75,8 @@ def make_output_name(
 
     if external and internal:
         prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
+        if same_code_suffix:
+            prefix = f"{prefix}{same_code_suffix}"
         return f"{prefix} ({internal})"
     if internal:
         return internal
@@ -89,9 +92,10 @@ def output_name_for_frame(frame: FrameMeta) -> str:
         revision=tb.revision,
         status=tb.status,
         internal_code=tb.internal_code,
+        same_code_suffix=get_same_code_output_suffix(frame),
         fallback_id=frame.frame_id[:8],
     )
-    return f"{base_name}{get_same_code_output_suffix(frame)}"
+    return base_name
 
 
 def output_name_for_sheet_set(sheet_set: SheetSet) -> str:

@@ -231,7 +231,7 @@ internal sealed class PlotEngine
     {
         error = string.Empty;
         Directory.CreateDirectory(Path.GetDirectoryName(pdfPath) ?? ".");
-        var frameWindow = BuildWindowBBox(frame.Vertices, frame.BBox);
+        var frameWindow = frame.HasPlotWindowBBox ? frame.PlotWindowBBox : BuildWindowBBox(frame.Vertices, frame.BBox);
         var targetLandscape = frameWindow.Width > frameWindow.Height;
         var mediaCandidates = GetStrictMediaCandidates(
             db,
@@ -255,6 +255,7 @@ internal sealed class PlotEngine
                     db,
                     frame.BBox,
                     frame.Vertices,
+                    frame.HasPlotWindowBBox ? frame.PlotWindowBBox : null,
                     frame.Sx,
                     frame.Sy,
                     frame.PaperVariantId,
@@ -327,6 +328,7 @@ internal sealed class PlotEngine
                         db,
                         page.BBox,
                         page.Vertices,
+                        null,
                         page.Sx,
                         page.Sy,
                         page.PaperVariantId,
@@ -402,6 +404,7 @@ internal sealed class PlotEngine
         Database db,
         BridgeBBox bbox,
         List<BridgePoint> vertices,
+        BridgeBBox? explicitWindowBBox,
         double sx,
         double sy,
         string paperVariantId,
@@ -418,6 +421,7 @@ internal sealed class PlotEngine
                 db,
                 bbox,
                 vertices,
+                explicitWindowBBox,
                 sx,
                 sy,
                 paperVariantId,
@@ -468,6 +472,7 @@ internal sealed class PlotEngine
         Database db,
         BridgeBBox bbox,
         List<BridgePoint> vertices,
+        BridgeBBox? explicitWindowBBox,
         double sx,
         double sy,
         string paperVariantId,
@@ -568,8 +573,15 @@ internal sealed class PlotEngine
             validator.SetPlotCentered(settings, _task.Plot.CenterPlot);
             TrySetPlotOffset(validator, settings, _task.Plot.PlotOffsetXmm, _task.Plot.PlotOffsetYmm);
             validator.SetPlotType(settings, Autodesk.AutoCAD.DatabaseServices.PlotType.Extents);
-            var rawWindowBBox = BuildWindowBBox(vertices, bbox);
-            var windowBBox = rawWindowBBox.ExpandTopRight(_task.Plot.PlotWindowTopRightExpandRatio);
+            var rawWindowBBox = explicitWindowBBox ?? BuildWindowBBox(vertices, bbox);
+            var windowBBox = explicitWindowBBox != null
+                ? rawWindowBBox.ExpandMm(
+                    _task.Plot.MarginLeftMm,
+                    _task.Plot.MarginBottomMm,
+                    _task.Plot.MarginRightMm,
+                    _task.Plot.MarginTopMm
+                )
+                : rawWindowBBox.ExpandTopRight(_task.Plot.PlotWindowTopRightExpandRatio);
             var targetLandscape = rawWindowBBox.Width > rawWindowBBox.Height;
             var useRotatedOrientation = false;
             bool? mediaLandscape = null;
@@ -607,7 +619,7 @@ internal sealed class PlotEngine
                 ? (mediaLandscape.Value ? "landscape" : "portrait")
                 : "unknown";
             _trace.Log(
-                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} target_orientation={targetOrientation} media_orientation={mediaOrientation} rotate={(useRotatedOrientation ? 90 : 0)} expand_tr_ratio={_task.Plot.PlotWindowTopRightExpandRatio:F6} bbox_raw={rawWindowBBox.Width:F3}x{rawWindowBBox.Height:F3} bbox_raw_wcs={rawWindowBBox.Xmin:F3},{rawWindowBBox.Ymin:F3},{rawWindowBBox.Xmax:F3},{rawWindowBBox.Ymax:F3} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} bbox_wcs={windowBBox.Xmin:F3},{windowBBox.Ymin:F3},{windowBBox.Xmax:F3},{windowBBox.Ymax:F3} bbox_dcs={(windowDcs.HasValue ? $"{windowDcs.Value.MinPoint.X:F3},{windowDcs.Value.MinPoint.Y:F3},{windowDcs.Value.MaxPoint.X:F3},{windowDcs.Value.MaxPoint.Y:F3}" : "-")} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
+                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} target_orientation={targetOrientation} media_orientation={mediaOrientation} rotate={(useRotatedOrientation ? 90 : 0)} window_source={(explicitWindowBBox != null ? "selection_extents" : "frame_bbox")} expand_tr_ratio={_task.Plot.PlotWindowTopRightExpandRatio:F6} margins_mm={_task.Plot.MarginLeftMm:F3},{_task.Plot.MarginBottomMm:F3},{_task.Plot.MarginRightMm:F3},{_task.Plot.MarginTopMm:F3} bbox_raw={rawWindowBBox.Width:F3}x{rawWindowBBox.Height:F3} bbox_raw_wcs={rawWindowBBox.Xmin:F3},{rawWindowBBox.Ymin:F3},{rawWindowBBox.Xmax:F3},{rawWindowBBox.Ymax:F3} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} bbox_wcs={windowBBox.Xmin:F3},{windowBBox.Ymin:F3},{windowBBox.Xmax:F3},{windowBBox.Ymax:F3} bbox_dcs={(windowDcs.HasValue ? $"{windowDcs.Value.MinPoint.X:F3},{windowDcs.Value.MinPoint.Y:F3},{windowDcs.Value.MaxPoint.X:F3},{windowDcs.Value.MaxPoint.Y:F3}" : "-")} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
             );
 
             plotInfo = new PlotInfo

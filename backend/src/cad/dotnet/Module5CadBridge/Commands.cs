@@ -277,6 +277,8 @@ internal sealed class BridgeFrameTask
     public string FrameId { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public bool HasPlotWindowBBox { get; private set; }
+    public BridgeBBox PlotWindowBBox { get; private set; } = BridgeBBox.Empty;
     public List<BridgePoint> Vertices { get; private set; } = new();
     public string PaperVariantId { get; private set; } = string.Empty;
     public string PaperMediaName { get; private set; } = string.Empty;
@@ -292,6 +294,10 @@ internal sealed class BridgeFrameTask
             FrameId = BridgeValue.GetString(data, "frame_id", string.Empty),
             Name = BridgeValue.GetString(data, "name", string.Empty),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            PlotWindowBBox = BridgeBBox.FromObject(
+                data.TryGetValue("plot_window_bbox", out var plotWindowObj) ? plotWindowObj : null
+            ),
+            HasPlotWindowBBox = data.TryGetValue("plot_window_bbox", out var _),
             Vertices = BridgePoint.FromObjectList(data.TryGetValue("vertices", out var verticesObj) ? verticesObj : null),
             PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
             PaperMediaName = BridgeValue.GetString(data, "paper_media_name", string.Empty),
@@ -575,6 +581,27 @@ internal sealed class BridgeBBox
         var dx = Width * ratio;
         var dy = Height * ratio;
         return new BridgeBBox(Xmin, Ymin, Xmax + dx, Ymax + dy);
+    }
+
+    public BridgeBBox ExpandMm(double left, double bottom, double right, double top)
+    {
+        return new BridgeBBox(
+            Xmin - Math.Max(0.0, left),
+            Ymin - Math.Max(0.0, bottom),
+            Xmax + Math.Max(0.0, right),
+            Ymax + Math.Max(0.0, top)
+        );
+    }
+
+    public Dictionary<string, object> ToDictionary()
+    {
+        return new Dictionary<string, object>
+        {
+            ["xmin"] = Xmin,
+            ["ymin"] = Ymin,
+            ["xmax"] = Xmax,
+            ["ymax"] = Ymax,
+        };
     }
 
     public static BridgeBBox FromObject(object? obj)
