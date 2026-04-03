@@ -108,6 +108,14 @@ export type FontReplacementOption = {
   source: string;
 };
 
+export type FontReplacementMap = Record<string, string>;
+
+export type FontVerifyAfterReplaceResult = {
+  status: string;
+  missingStyleCount: number;
+  missingFonts: MissingFontEntry[];
+};
+
 export type FontPreflightFileResult = {
   filename: string;
   status: string;
@@ -116,27 +124,38 @@ export type FontPreflightFileResult = {
   missingStyleCount: number;
   fontReplacementApplied: boolean;
   replacementFont: string | null;
+  replacementFonts: FontReplacementMap;
   replacedStyleCount: number;
+  verifyAfterReplace: FontVerifyAfterReplaceResult | null;
+  fontReplacementIncomplete: boolean;
   errors: string[];
 };
 
 export type FontPreflightResult = {
   files: FontPreflightFileResult[];
   replacementOptions: FontReplacementOption[];
+  replacementOptionsByKind: Record<string, FontReplacementOption[]>;
+  defaultReplacementFont: string | null;
+  defaultReplacementFonts: FontReplacementMap;
   requiresConfirmation: boolean;
 };
 
 export type FontPreflightSummary = {
   files: FontPreflightFileResult[];
   policy: string;
+  replacementFonts: FontReplacementMap;
+  fontMapPath: string | null;
+  fontAlt: string | null;
 };
+
+export type SubmissionParams = Record<string, unknown>;
 
 export type CreateAuditReplaceParams = {
   sourceProjectNo: string;
   targetProjectNo: string;
   files: File[];
   runDeliverable: boolean;
-  deliverableParams?: Record<string, string>;
+  deliverableParams?: SubmissionParams;
 };
 
 export type JobSummary = {
@@ -176,6 +195,7 @@ export type JobSummary = {
   missingFontsDetected?: boolean;
   fontReplacementApplied?: boolean;
   replacementFont?: string | null;
+  replacementFonts?: FontReplacementMap;
   replacedStyleCount?: number;
   children?: JobSummary[];
 };
@@ -250,7 +270,7 @@ export type ApiAdapter = {
   getFormSchema: () => Promise<FormSchema>;
   preflightFonts: (files: File[]) => Promise<FontPreflightResult>;
   createBatch: (
-    params: Record<string, string>,
+    params: SubmissionParams,
     files: File[],
     runAuditCheck?: boolean,
   ) => Promise<CreateBatchPayload>;

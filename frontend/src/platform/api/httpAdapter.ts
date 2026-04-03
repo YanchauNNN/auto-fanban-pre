@@ -5,6 +5,8 @@ import type {
   CreateAuditReplaceParams,
   CreateBatchPayload,
   DeliverableOutputs,
+  FontReplacementMap,
+  FontReplacementOption,
   FontPreflightSummary,
   FontPreflightResult,
   FindingGroup,
@@ -13,6 +15,7 @@ import type {
   JobDetail,
   JobList,
   JobSummary,
+  SubmissionParams,
 } from "./types";
 
 type RawArtifacts = {
@@ -60,10 +63,14 @@ type RawJobSummary = {
   font_preflight_summary?: {
     files?: RawFontPreflightResult["files"];
     policy?: string | null;
+    replacement_fonts?: Record<string, string | null> | null;
+    font_map_path?: string | null;
+    font_alt?: string | null;
   } | null;
   missing_fonts_detected?: boolean | null;
   font_replacement_applied?: boolean | null;
   replacement_font?: string | null;
+  replacement_fonts?: Record<string, string | null> | null;
   replaced_style_count?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
@@ -124,7 +131,20 @@ type RawFontPreflightResult = {
     missing_style_count?: number | null;
     font_replacement_applied?: boolean | null;
     replacement_font?: string | null;
+    replacement_fonts?: Record<string, string | null> | null;
     replaced_style_count?: number | null;
+    verify_after_replace?: {
+      status?: string | null;
+      missing_style_count?: number | null;
+      missing_fonts?: Array<{
+        style_name?: string | null;
+        font_name?: string | null;
+        bigfont_name?: string | null;
+        kind?: string | null;
+        used_in_block?: boolean | null;
+      }> | null;
+    } | null;
+    font_replacement_incomplete?: boolean | null;
     errors?: string[] | null;
   }> | null;
   replacement_options?: Array<{
@@ -135,6 +155,19 @@ type RawFontPreflightResult = {
     kind?: string | null;
     source?: string | null;
   }> | null;
+  replacement_options_by_kind?: Record<
+    string,
+    Array<{
+      label?: string | null;
+      value?: string | null;
+      family?: string | null;
+      path?: string | null;
+      kind?: string | null;
+      source?: string | null;
+    }> | null
+  > | null;
+  default_replacement_font?: string | null;
+  default_replacement_fonts?: Record<string, string | null> | null;
   requires_confirmation?: boolean | null;
 };
 
@@ -215,38 +248,25 @@ export class HttpAdapter implements ApiAdapter {
       body: formData,
     });
 
+    const replacementOptions = this.normalizeFontReplacementOptions(payload.replacement_options);
+    const replacementOptionsByKind = this.normalizeFontReplacementOptionsByKind(
+      payload.replacement_options_by_kind,
+      replacementOptions,
+    );
+    const defaultReplacementFonts = this.normalizeFontReplacementMap(payload.default_replacement_fonts);
+
     return {
-      files: (payload.files ?? []).map((file) => ({
-        filename: file.filename ?? "",
-        status: file.status ?? "",
-        missingFonts: (file.missing_fonts ?? []).map((font) => ({
-          styleName: font.style_name ?? "",
-          fontName: font.font_name ?? "",
-          bigfontName: font.bigfont_name ?? "",
-          kind: font.kind ?? "unknown",
-          usedInBlock: Boolean(font.used_in_block),
-        })),
-        detectedStyleCount: file.detected_style_count ?? 0,
-        missingStyleCount: file.missing_style_count ?? 0,
-        fontReplacementApplied: Boolean(file.font_replacement_applied),
-        replacementFont: file.replacement_font ?? null,
-        replacedStyleCount: file.replaced_style_count ?? 0,
-        errors: file.errors ?? [],
-      })),
-      replacementOptions: (payload.replacement_options ?? []).map((option) => ({
-        label: option.label ?? "",
-        value: option.value ?? "",
-        family: option.family ?? "",
-        path: option.path ?? "",
-        kind: option.kind ?? "unknown",
-        source: option.source ?? "unknown",
-      })),
+      files: (payload.files ?? []).map((file) => this.normalizeFontPreflightFile(file)),
+      replacementOptions,
+      replacementOptionsByKind,
+      defaultReplacementFont: payload.default_replacement_font ?? null,
+      defaultReplacementFonts,
       requiresConfirmation: Boolean(payload.requires_confirmation),
     };
   }
 
   async createBatch(
-    params: Record<string, string>,
+    params: SubmissionParams,
     files: File[],
     runAuditCheck = false,
   ): Promise<CreateBatchPayload> {
@@ -424,6 +444,7 @@ export class HttpAdapter implements ApiAdapter {
       missingFontsDetected: payload.missing_fonts_detected ?? false,
       fontReplacementApplied: payload.font_replacement_applied ?? false,
       replacementFont: payload.replacement_font ?? null,
+      replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       replacedStyleCount: payload.replaced_style_count ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
     };
@@ -522,24 +543,92 @@ export class HttpAdapter implements ApiAdapter {
     }
 
     return {
-      files: (payload.files ?? []).map((file) => ({
-        filename: file.filename ?? "",
-        status: file.status ?? "",
-        missingFonts: (file.missing_fonts ?? []).map((font) => ({
-          styleName: font.style_name ?? "",
-          fontName: font.font_name ?? "",
-          bigfontName: font.bigfont_name ?? "",
-          kind: font.kind ?? "unknown",
-          usedInBlock: Boolean(font.used_in_block),
-        })),
-        detectedStyleCount: file.detected_style_count ?? 0,
-        missingStyleCount: file.missing_style_count ?? 0,
-        fontReplacementApplied: Boolean(file.font_replacement_applied),
-        replacementFont: file.replacement_font ?? null,
-        replacedStyleCount: file.replaced_style_count ?? 0,
-        errors: file.errors ?? [],
-      })),
+      files: (payload.files ?? []).map((file) => this.normalizeFontPreflightFile(file)),
       policy: payload.policy ?? "none",
+      replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
+      fontMapPath: payload.font_map_path ?? null,
+      fontAlt: payload.font_alt ?? null,
     };
+  }
+
+  private normalizeFontPreflightFile(
+    file: NonNullable<RawFontPreflightResult["files"]>[number],
+  ): FontPreflightResult["files"][number] {
+    return {
+      filename: file.filename ?? "",
+      status: file.status ?? "",
+      missingFonts: (file.missing_fonts ?? []).map((font) => ({
+        styleName: font.style_name ?? "",
+        fontName: font.font_name ?? "",
+        bigfontName: font.bigfont_name ?? "",
+        kind: font.kind ?? "unknown",
+        usedInBlock: Boolean(font.used_in_block),
+      })),
+      detectedStyleCount: file.detected_style_count ?? 0,
+      missingStyleCount: file.missing_style_count ?? 0,
+      fontReplacementApplied: Boolean(file.font_replacement_applied),
+      replacementFont: file.replacement_font ?? null,
+      replacementFonts: this.normalizeFontReplacementMap(file.replacement_fonts),
+      replacedStyleCount: file.replaced_style_count ?? 0,
+      verifyAfterReplace: file.verify_after_replace
+        ? {
+            status: file.verify_after_replace.status ?? "",
+            missingStyleCount: file.verify_after_replace.missing_style_count ?? 0,
+            missingFonts: (file.verify_after_replace.missing_fonts ?? []).map((font) => ({
+              styleName: font.style_name ?? "",
+              fontName: font.font_name ?? "",
+              bigfontName: font.bigfont_name ?? "",
+              kind: font.kind ?? "unknown",
+              usedInBlock: Boolean(font.used_in_block),
+            })),
+          }
+        : null,
+      fontReplacementIncomplete: Boolean(file.font_replacement_incomplete),
+      errors: file.errors ?? [],
+    };
+  }
+
+  private normalizeFontReplacementOptions(
+    options: RawFontPreflightResult["replacement_options"],
+  ): FontReplacementOption[] {
+    return (options ?? []).map((option) => ({
+      label: option.label ?? "",
+      value: option.value ?? "",
+      family: option.family ?? "",
+      path: option.path ?? "",
+      kind: option.kind ?? "unknown",
+      source: option.source ?? "unknown",
+    }));
+  }
+
+  private normalizeFontReplacementOptionsByKind(
+    optionsByKind: RawFontPreflightResult["replacement_options_by_kind"],
+    fallbackOptions: FontReplacementOption[],
+  ): Record<string, FontReplacementOption[]> {
+    if (optionsByKind && Object.keys(optionsByKind).length > 0) {
+      return Object.fromEntries(
+        Object.entries(optionsByKind).map(([kind, options]) => [
+          kind,
+          this.normalizeFontReplacementOptions(options ?? []),
+        ]),
+      );
+    }
+
+    const grouped = new Map<string, FontReplacementOption[]>();
+    for (const option of fallbackOptions) {
+      const kind = option.kind.trim().toLowerCase() || "unknown";
+      grouped.set(kind, [...(grouped.get(kind) ?? []), option]);
+    }
+    return Object.fromEntries(grouped.entries());
+  }
+
+  private normalizeFontReplacementMap(
+    value: Record<string, string | null> | null | undefined,
+  ): FontReplacementMap {
+    return Object.fromEntries(
+      Object.entries(value ?? {})
+        .map(([kind, fontName]) => [kind.trim().toLowerCase(), fontName?.trim() ?? ""])
+        .filter(([kind, fontName]) => kind && fontName),
+    );
   }
 }

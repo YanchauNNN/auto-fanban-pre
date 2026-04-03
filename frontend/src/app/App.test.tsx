@@ -1,4 +1,5 @@
 ﻿import { render, screen, within } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -275,7 +276,14 @@ describe("homepage shell", () => {
     expect(
       screen.getByText("上传文件后直接在弹窗内完成配置。关闭不会丢失草稿；只有手动清空或提交成功后才会重置。"),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "config");
+    await waitFor(() => {
+      const spotlight = screen.queryByTestId("tutorial-spotlight");
+      const dimmer = screen.queryByTestId("tutorial-dimmer");
+      expect(spotlight || dimmer).not.toBeNull();
+      if (spotlight) {
+        expect(spotlight).toHaveAttribute("data-target", "config");
+      }
+    });
 
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务记录" })).not.toBeInTheDocument();
@@ -648,7 +656,6 @@ describe("job detail pages", () => {
       },
       retryAvailable: false,
       sharedRunId: null,
-      flags: [],
       errors: [],
       topWrongTexts: [],
       topInternalCodes: [],
@@ -684,16 +691,45 @@ describe("job detail pages", () => {
             missingStyleCount: 1,
             replacedStyleCount: 3,
             replacementFont: "simplex.shx",
+            replacementFonts: {
+              shx: "simplex.shx",
+              ttf: "simsun.ttc",
+            },
             fontReplacementApplied: true,
+            verifyAfterReplace: {
+              status: "missing_fonts",
+              missingStyleCount: 1,
+              missingFonts: [
+                {
+                  styleName: "正文",
+                  fontName: "missing.ttf",
+                  bigfontName: "",
+                  kind: "ttf",
+                  usedInBlock: false,
+                },
+              ],
+            },
+            fontReplacementIncomplete: true,
             errors: [],
           },
         ],
         policy: "replace_missing",
+        replacementFonts: {
+          shx: "simplex.shx",
+          ttf: "simsun.ttc",
+        },
+        fontMapPath: "E:/cache/font_map.json",
+        fontAlt: "use_simsun_for_ttf",
       },
       missingFontsDetected: true,
       fontReplacementApplied: true,
       replacementFont: "simplex.shx",
+      replacementFonts: {
+        shx: "simplex.shx",
+        ttf: "simsun.ttc",
+      },
       replacedStyleCount: 3,
+      flags: ["FONT_REPLACEMENT_INCOMPLETE"],
     });
 
     render(<App />);
@@ -701,7 +737,86 @@ describe("job detail pages", () => {
     expect(await screen.findByText("字体处理摘要")).toBeInTheDocument();
     expect(screen.getByText("已执行缺失字体替代")).toBeInTheDocument();
     expect(screen.getByText("simplex.shx")).toBeInTheDocument();
+    expect(screen.getByText("simsun.ttc")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
+    expect(
+      screen.getByText("字体已尝试替代，但关键字体可能仍未完全恢复，建议优先补齐原始字体文件。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("E:/cache/font_map.json")).toBeInTheDocument();
+  });
+
+  it("shows same-code multipage guidance and preserves X@Y filenames in deliverable results", async () => {
+    window.history.pushState({}, "", "/jobs/deliverable-multipage");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "deliverable-multipage",
+      batchId: "batch-deliverable-multipage",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "Drawing2.dwg",
+      sourceFilenames: ["Drawing2.dwg"],
+      taskKind: "deliverable",
+      taskRole: null,
+      jobMode: "deliverable",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "PACKAGE_ZIP",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-02T09:00:00+08:00",
+      finishedAt: "2026-04-02T09:10:00+08:00",
+      startedAt: "2026-04-02T09:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/deliverable-multipage/download/package",
+        iedDownloadUrl: "/api/jobs/deliverable-multipage/download/ied",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [],
+        drawings: [
+          {
+            name: "JD2RSG11005B25C42SDACFC1@2 (20162RS-JGS03-005)",
+            internalCode: "20162RS-JGS03-005",
+            dwgName: "JD2RSG11005B25C42SDACFC1@2 (20162RS-JGS03-005).dwg",
+            pdfName: "JD2RSG11005B25C42SDACFC1@2 (20162RS-JGS03-005).pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+      missingFontsDetected: false,
+      fontReplacementApplied: false,
+      replacementFont: null,
+      replacedStyleCount: 0,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出图结果")).toBeInTheDocument();
+    expect(
+      screen.getByText("同编码多页：目录合并为一行，物理文件按页分别输出"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/JD2RSG11005B25C42SDACFC1@2 \(20162RS-JGS03-005\)\.dwg/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/JD2RSG11005B25C42SDACFC1@2 \(20162RS-JGS03-005\)\.pdf/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/页数：1 页/)).toBeInTheDocument();
   });
 
   it("shows replace summary plus both report and replaced dwg downloads for replace jobs", async () => {

@@ -40,6 +40,7 @@ import type {
   ApiAdapter,
   CreateBatchPayload,
   DeliverableOutputs,
+  FontReplacementMap,
   FindingGroup,
   JobDetail,
   JobList,
@@ -302,6 +303,11 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
   },
   fontPreflightSummary: {
     policy: "replace_missing",
+    replacementFonts: {
+      shx: "simplex.shx",
+    },
+    fontMapPath: null,
+    fontAlt: null,
     files: [
       {
         filename: TUTORIAL_SAMPLE_FILE,
@@ -311,7 +317,12 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
         missingStyleCount: 2,
         fontReplacementApplied: true,
         replacementFont: "simplex.shx",
+        replacementFonts: {
+          shx: "simplex.shx",
+        },
         replacedStyleCount: 2,
+        verifyAfterReplace: null,
+        fontReplacementIncomplete: false,
         errors: [],
       },
     ],
@@ -319,6 +330,9 @@ const TUTORIAL_DELIVERABLE_CHILD_DETAIL: JobDetail = {
   missingFontsDetected: true,
   fontReplacementApplied: true,
   replacementFont: "simplex.shx",
+  replacementFonts: {
+    shx: "simplex.shx",
+  },
   replacedStyleCount: 2,
 };
 
@@ -387,6 +401,9 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   preflightFonts: async () => ({
     files: [],
     replacementOptions: [],
+    replacementOptionsByKind: {},
+    defaultReplacementFont: null,
+    defaultReplacementFonts: {},
     requiresConfirmation: false,
   }),
   createBatch: async () => {
@@ -1772,6 +1789,13 @@ function DeliverableResultCard({
         <InfoBlock label="文档数量" value={String(outputs.documents.length)} />
       </div>
 
+      {hasSameCodeMultiPageOutputs(outputs) ? (
+        <div className={styles.noticeBanner}>
+          <strong>同编码多页：目录合并为一行，物理文件按页分别输出</strong>
+          <span>物理文件命名会保留后端返回的 X@Y 页码后缀。</span>
+        </div>
+      ) : null}
+
       <div className={styles.resultSectionBlock}>
         <h3>拆图结果</h3>
         {outputs.drawings.length > 0 ? (
@@ -1815,6 +1839,12 @@ function DeliverableResultCard({
 function FontPreflightCard({ detail }: { detail: JobDetail }) {
   const summary = detail.fontPreflightSummary;
   const files = summary?.files ?? [];
+  const replacementFonts = collectEffectiveReplacementFonts(detail);
+  const replacementFontEntries = Object.entries(replacementFonts);
+  const replacementWarning = getFontReplacementWarning(detail);
+  const replacedStyleCount =
+    detail.replacedStyleCount ??
+    files.reduce((count, file) => count + Math.max(file.replacedStyleCount ?? 0, 0), 0);
   const statusText = detail.fontReplacementApplied
     ? "已执行缺失字体替代"
     : detail.missingFontsDetected
@@ -1826,25 +1856,75 @@ function FontPreflightCard({ detail }: { detail: JobDetail }) {
       <div className={styles.resultSummaryGrid}>
         <InfoBlock label="处理结果" value={statusText} />
         <InfoBlock label="替代策略" value={summary?.policy || "none"} />
-        <InfoBlock label="替代字体" value={detail.replacementFont ?? "-"} />
-        <InfoBlock label="替换样式数" value={String(detail.replacedStyleCount ?? 0)} />
+        <InfoBlock label="缺失字体" value={detail.missingFontsDetected ? "已检测到" : "未检测到"} />
+        <InfoBlock label="替换样式数" value={String(replacedStyleCount)} />
       </div>
+
+      {replacementFontEntries.length > 0 ? (
+        <div className={styles.resultSectionBlock}>
+          <h3>最终替代字体</h3>
+          <div className={styles.outputGrid}>
+            {replacementFontEntries.map(([kind, fontName]) => (
+              <div className={styles.outputCard} key={`${kind}:${fontName}`}>
+                <strong>{getFontReplacementKindDisplayLabel(kind)}</strong>
+                <span>{fontName}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : detail.replacementFont ? (
+        <div className={styles.resultSectionBlock}>
+          <h3>最终替代字体</h3>
+          <div className={styles.resultSummaryGrid}>
+            <InfoBlock label="统一替代字体" value={detail.replacementFont} />
+          </div>
+        </div>
+      ) : null}
+
+      {replacementWarning ? (
+        <section className={styles.warningBanner}>
+          <strong>字体已尝试替代，但关键字体可能仍未完全恢复，建议优先补齐原始字体文件。</strong>
+          <span>{replacementWarning}</span>
+        </section>
+      ) : null}
+
+      {summary?.fontMapPath || summary?.fontAlt ? (
+        <div className={styles.resultSectionBlock}>
+          <h3>字体映射信息</h3>
+          <div className={styles.resultSummaryGrid}>
+            <InfoBlock label="font_map_path" value={summary?.fontMapPath ?? "-"} />
+            <InfoBlock label="font_alt" value={summary?.fontAlt ?? "-"} />
+          </div>
+        </div>
+      ) : null}
 
       {files.length > 0 ? (
         <div className={styles.resultSectionBlock}>
           <h3>文件级结果</h3>
           <div className={styles.outputGrid}>
-            {files.map((file) => (
-              <div className={styles.outputCard} key={`${file.filename}-${file.status}`}>
-                <strong>{file.filename}</strong>
-                <span>{getFontPreflightStatusLabel(file.status)}</span>
-                <ul className={styles.outputMetaList}>
-                  <li>{`检测样式数：${file.detectedStyleCount}`}</li>
-                  <li>{`缺失样式数：${file.missingStyleCount}`}</li>
-                  <li>{`替换样式数：${file.replacedStyleCount}`}</li>
-                </ul>
-              </div>
-            ))}
+            {files.map((file) => {
+              const fileReplacementFonts = normalizeFontReplacementMap(file.replacementFonts);
+
+              return (
+                <div className={styles.outputCard} key={`${file.filename}-${file.status}`}>
+                  <strong>{file.filename}</strong>
+                  <span>{getFontPreflightStatusLabel(file.status)}</span>
+                  <ul className={styles.outputMetaList}>
+                    <li>{`检测样式数：${file.detectedStyleCount}`}</li>
+                    <li>{`缺失样式数：${file.missingStyleCount}`}</li>
+                    <li>{`替换样式数：${file.replacedStyleCount}`}</li>
+                    {Object.keys(fileReplacementFonts).length > 0 ? (
+                      <li>{`替代字体：${formatReplacementFontEntrySummary(fileReplacementFonts)}`}</li>
+                    ) : file.replacementFont ? (
+                      <li>{`替代字体：${file.replacementFont}`}</li>
+                    ) : null}
+                    {file.verifyAfterReplace ? (
+                      <li>{`二次校验：${getFontVerifyStatusLabel(file.verifyAfterReplace.status)}`}</li>
+                    ) : null}
+                  </ul>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -2135,6 +2215,13 @@ function formatPageTotal(pageTotal: number) {
   return `${pageTotal} 页`;
 }
 
+function hasSameCodeMultiPageOutputs(outputs: DeliverableOutputs) {
+  return outputs.drawings.some((drawing) => {
+    const names = [drawing.name, drawing.dwgName, drawing.pdfName].filter(Boolean);
+    return names.some((name) => /\d+@\d+/.test(name ?? ""));
+  });
+}
+
 function getFontPreflightStatusLabel(status: string) {
   switch (status.trim().toLowerCase()) {
     case "ok":
@@ -2146,5 +2233,107 @@ function getFontPreflightStatusLabel(status: string) {
     default:
       return status || "-";
   }
+}
+
+function getFontVerifyStatusLabel(status: string) {
+  switch (status.trim().toLowerCase()) {
+    case "ok":
+      return "已恢复正常";
+    case "missing_fonts":
+      return "仍有缺失字体";
+    case "failed":
+      return "二次校验失败";
+    default:
+      return status || "-";
+  }
+}
+
+function collectEffectiveReplacementFonts(detail: JobDetail): FontReplacementMap {
+  const summaryFonts = normalizeFontReplacementMap(detail.fontPreflightSummary?.replacementFonts);
+  if (Object.keys(summaryFonts).length > 0) {
+    return summaryFonts;
+  }
+
+  const detailFonts = normalizeFontReplacementMap(detail.replacementFonts);
+  if (Object.keys(detailFonts).length > 0) {
+    return detailFonts;
+  }
+
+  const fileFonts = normalizeFontReplacementMap(
+    Object.assign({}, ...(detail.fontPreflightSummary?.files ?? []).map((file) => file.replacementFonts)),
+  );
+  if (Object.keys(fileFonts).length > 0) {
+    return fileFonts;
+  }
+
+  const fallbackFont =
+    detail.replacementFont?.trim() ||
+    (detail.fontPreflightSummary?.files ?? [])
+      .map((file) => file.replacementFont?.trim() ?? "")
+      .find(Boolean) ||
+    "";
+  return fallbackFont ? { unified: fallbackFont } : {};
+}
+
+function normalizeFontReplacementMap(
+  input: Record<string, string> | null | undefined,
+): FontReplacementMap {
+  if (!input) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([kind, value]) => [kind.trim().toLowerCase(), value.trim()])
+      .filter(([kind, value]) => Boolean(kind && value)),
+  );
+}
+
+function getFontReplacementKindDisplayLabel(kind: string) {
+  switch (kind.trim().toLowerCase()) {
+    case "shx":
+      return "SHX";
+    case "ttf":
+      return "TrueType";
+    case "bigfont":
+      return "大字体";
+    case "unified":
+      return "统一替代字体";
+    default:
+      return kind || "未知类型";
+  }
+}
+
+function formatReplacementFontEntrySummary(replacementFonts: FontReplacementMap) {
+  const entries = Object.entries(normalizeFontReplacementMap(replacementFonts));
+  if (entries.length === 0) {
+    return "-";
+  }
+  return entries
+    .map(([kind, value]) => `${getFontReplacementKindDisplayLabel(kind)}=${value}`)
+    .join("；");
+}
+
+function getFontReplacementWarning(detail: JobDetail) {
+  const files = detail.fontPreflightSummary?.files ?? [];
+  const verifyWarnings = files.filter((file) => {
+    const status = file.verifyAfterReplace?.status.trim().toLowerCase() ?? "";
+    return Boolean(status && status !== "ok");
+  }).length;
+  const incompleteFiles = files.filter((file) => file.fontReplacementIncomplete).length;
+  const hasIncompleteFlag = detail.flags.some((flag) => flag.includes("FONT_REPLACEMENT_INCOMPLETE"));
+  const parts: string[] = [];
+
+  if (verifyWarnings > 0) {
+    parts.push(`${verifyWarnings} 个文件二次校验未完全通过`);
+  }
+  if (incompleteFiles > 0) {
+    parts.push(`${incompleteFiles} 个文件仍标记为未完全恢复`);
+  }
+  if (hasIncompleteFlag) {
+    parts.push("命中 FONT_REPLACEMENT_INCOMPLETE");
+  }
+
+  return parts.length > 0 ? parts.join(" / ") : null;
 }
 

@@ -355,6 +355,22 @@ describe("HttpAdapter", () => {
               source: "autocad_fonts",
             },
           ],
+          replacement_options_by_kind: {
+            shx: [
+              {
+                label: "simplex.shx (AutoCAD SHX)",
+                value: "simplex.shx",
+                family: "simplex",
+                path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+                kind: "shx",
+                source: "autocad_fonts",
+              },
+            ],
+          },
+          default_replacement_font: "simplex.shx",
+          default_replacement_fonts: {
+            shx: "simplex.shx",
+          },
           requires_confirmation: true,
         }),
     });
@@ -388,6 +404,22 @@ describe("HttpAdapter", () => {
         source: "autocad_fonts",
       },
     ]);
+    expect(result.replacementOptionsByKind).toEqual({
+      shx: [
+        {
+          label: "simplex.shx (AutoCAD SHX)",
+          value: "simplex.shx",
+          family: "simplex",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+      ],
+    });
+    expect(result.defaultReplacementFont).toBe("simplex.shx");
+    expect(result.defaultReplacementFonts).toEqual({
+      shx: "simplex.shx",
+    });
     expect(result.files[0]).toEqual({
       filename: "19163RC-JGS04-WD.dwg",
       status: "missing_fonts",
@@ -404,7 +436,10 @@ describe("HttpAdapter", () => {
       missingStyleCount: 1,
       fontReplacementApplied: false,
       replacementFont: null,
+      replacementFonts: {},
       replacedStyleCount: 0,
+      verifyAfterReplace: null,
+      fontReplacementIncomplete: false,
       errors: [],
     });
   });
