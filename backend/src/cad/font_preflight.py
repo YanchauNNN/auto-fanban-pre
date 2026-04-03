@@ -8,7 +8,11 @@ from uuid import uuid4
 
 from ..config import get_config
 from .font_inventory import InstalledFontInventory
-from .font_mapping_runtime import build_font_runtime_plan
+from .font_mapping_runtime import (
+    build_font_runtime_plan,
+    build_font_search_runtime_overrides,
+    materialize_font_library_files,
+)
 from .font_preflight_bridge import FontPreflightBridge
 from .font_replacement_plan import (
     normalize_kind,
@@ -56,11 +60,16 @@ class FontPreflightService:
             for kind in normalize_missing_kinds(missing_kinds)
         }
 
-    def default_replacement_fonts(self, *, missing_kinds: list[str] | None = None) -> dict[str, str]:
+    def default_replacement_fonts(
+        self,
+        *,
+        missing_kinds: list[str] | None = None,
+        missing_fonts: list[dict[str, Any]] | None = None,
+    ) -> dict[str, str]:
         options_by_kind = self.list_replacement_options_by_kind(missing_kinds=missing_kinds)
         defaults: dict[str, str] = {}
         for kind, options in options_by_kind.items():
-            preferred = self._preferred_replacements_for_kind(kind)
+            preferred = self._preferred_replacements_for_kind(kind, missing_fonts=missing_fonts)
             selected = self._select_default_option(options, preferred)
             if selected:
                 defaults[kind] = selected["value"]
@@ -79,6 +88,7 @@ class FontPreflightService:
         self,
         *,
         missing_kinds: list[str],
+        missing_fonts: list[dict[str, Any]] | None = None,
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
     ) -> dict[str, str]:
@@ -100,7 +110,10 @@ class FontPreflightService:
             for kind in matched:
                 resolved.setdefault(kind, normalized_font)
 
-        defaults = self.default_replacement_fonts(missing_kinds=normalized_kinds)
+        defaults = self.default_replacement_fonts(
+            missing_kinds=normalized_kinds,
+            missing_fonts=missing_fonts,
+        )
         for kind in normalized_kinds:
             resolved.setdefault(kind, defaults.get(kind, ""))
 
@@ -126,6 +139,13 @@ class FontPreflightService:
             raise ValueError(f"unsupported font_replace_policy: {replacement_policy}")
         normalized_font = str(replacement_font or "").strip() or None
         normalized_font_map = normalize_replacement_map(replacement_fonts)
+        base_runtime = dict(slot_runtime or {})
+        base_runtime.update(
+            build_font_search_runtime_overrides(
+                font_library_dirs=self.config.font_preflight.font_library_dirs,
+                existing_support_path=str(base_runtime.get("support_path") or ""),
+            ),
+        )
 
         workspace_root = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
         workspace = (workspace_root / _safe_bridge_token(source_dwg.stem)).resolve()
@@ -135,11 +155,15 @@ class FontPreflightService:
             shutil.copy2(source_dwg, staged_source)
         else:
             staged_source = source_dwg
+        materialize_font_library_files(
+            workspace_dir=workspace,
+            font_library_dirs=self.config.font_preflight.font_library_dirs,
+        )
         preflight_raw = self.bridge.preflight(
             job_id=f"font-{source_dwg.stem}",
             source_dwg=staged_source,
             workspace_dir=workspace,
-            slot_runtime=slot_runtime,
+            slot_runtime=base_runtime or None,
         )
         preflight_result = self._normalize_result(
             source_dwg=source_dwg,
@@ -150,6 +174,7 @@ class FontPreflightService:
         if policy == "replace_missing" and list(preflight_result.get("missing_fonts") or []):
             effective_replacements = self.resolve_replacement_fonts(
                 missing_kinds=self._collect_missing_kinds(preflight_result.get("missing_fonts")),
+                missing_fonts=list(preflight_result.get("missing_fonts") or []),
                 replacement_font=normalized_font,
                 replacement_fonts=normalized_font_map,
             )
@@ -162,8 +187,9 @@ class FontPreflightService:
                 replacement_fonts=effective_replacements,
                 enable_fontmap=bool(self.config.font_preflight.enable_fontmap),
                 default_fontalt_by_kind=dict(self.config.font_preflight.default_fontalt_by_kind),
+                font_library_dirs=self.config.font_preflight.font_library_dirs,
             )
-            replace_runtime = dict(slot_runtime or {})
+            replace_runtime = dict(base_runtime)
             replace_runtime.update(font_runtime_plan.runtime_overrides)
             raw = self.bridge.replace_missing(
                 job_id=f"font-{source_dwg.stem}",
@@ -198,6 +224,7 @@ class FontPreflightService:
             and bool(self.config.font_preflight.verify_after_replace)
         ):
             verify_runtime = dict(slot_runtime or {})
+            verify_runtime = dict(base_runtime)
             if font_runtime_plan is not None:
                 verify_runtime.update(font_runtime_plan.runtime_overrides)
             verify_raw = self.bridge.preflight(
@@ -261,15 +288,53 @@ class FontPreflightService:
             result["errors"] = errors
         return result
 
-    def _preferred_replacements_for_kind(self, kind: str) -> list[str]:
+    def _preferred_replacements_for_kind(
+        self,
+        kind: str,
+        *,
+        missing_fonts: list[dict[str, Any]] | None = None,
+    ) -> list[str]:
         normalized = normalize_kind(kind)
+        preferred: list[str] = []
+        configured_by_missing_font = {
+            str(key or "").strip().lower(): str(value or "").strip()
+            for key, value in self.config.font_preflight.preferred_replacements_by_missing_font.items()
+            if str(key or "").strip() and str(value or "").strip()
+        }
+        for item in missing_fonts or []:
+            if not isinstance(item, dict):
+                continue
+            item_kind = normalize_kind(str(item.get("kind") or ""))
+            if item_kind != normalized:
+                continue
+            raw_font_name = str(item.get("font_name") or "").strip()
+            raw_bigfont_name = str(item.get("bigfont_name") or "").strip()
+            lookup_name = raw_bigfont_name if normalized == "bigfont" and raw_bigfont_name else raw_font_name
+            mapped = configured_by_missing_font.get(lookup_name.lower())
+            if mapped and mapped not in preferred:
+                preferred.append(mapped)
         if normalized == "ttf":
-            return list(self.config.font_preflight.default_ttf_families)
+            preferred.extend(
+                value
+                for value in self.config.font_preflight.default_ttf_families
+                if value not in preferred
+            )
+            return preferred
         if normalized == "bigfont":
-            return list(self.config.font_preflight.default_bigfont_fonts)
+            preferred.extend(
+                value
+                for value in self.config.font_preflight.default_bigfont_fonts
+                if value not in preferred
+            )
+            return preferred
         if normalized == "shx":
-            return list(self.config.font_preflight.default_shx_fonts)
-        return []
+            preferred.extend(
+                value
+                for value in self.config.font_preflight.default_shx_fonts
+                if value not in preferred
+            )
+            return preferred
+        return preferred
 
     @staticmethod
     def _select_default_option(

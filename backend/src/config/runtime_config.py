@@ -296,6 +296,12 @@ class DxfPdfExportConfig(BaseModel):
 class FontPreflightRuntimeConfig(BaseModel):
     """DWG 字体预检与替代默认策略"""
 
+    font_library_dirs: list[Path] = Field(default_factory=list)
+    preferred_replacements_by_missing_font: dict[str, str] = Field(
+        default_factory=lambda: {
+            "MENU2.TTF": "simsun.ttc",
+        },
+    )
     default_ttf_families: list[str] = Field(
         default_factory=lambda: ["SimSun", "Microsoft YaHei", "SimHei"],
     )

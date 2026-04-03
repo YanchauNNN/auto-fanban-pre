@@ -348,6 +348,14 @@ runtime_options:
     fallback_font_family:      { type: "list[str]", default: ["SimSun", "Microsoft YaHei", "SimHei"], desc: "matplotlib 兜底字体顺序" }
 
   font_preflight:
+    font_library_dirs:
+      type: "list[str]"
+      default: []
+      desc: "补充字体库目录列表；预检/替代前会追加到 AutoCAD Support Path，优先让 AutoCAD 直接命中原字体文件"
+    preferred_replacements_by_missing_font:
+      type: object
+      default: { "MENU2.TTF": "simsun.ttc" }
+      desc: "按缺失字体文件名精确命中的优先替代映射；命中后优先于 kind 级默认顺序，适合沉淀已验证有效的通用对应关系"
     default_ttf_families:
       type: "list[str]"
       default: ["SimSun", "Microsoft YaHei", "SimHei"]

@@ -26,6 +26,7 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 import ezdxf
@@ -778,7 +779,8 @@ class TitleblockExtractor(ITitleblockExtractor):
 
     @staticmethod
     def _normalize_spaces(text: str) -> str:
-        return re.sub(r"\s+", " ", (text or "").strip())
+        normalized = TitleblockExtractor._decode_cad_control_codes(text or "")
+        return re.sub(r"\s+", " ", normalized.strip())
 
     @staticmethod
     def _strip_all_whitespace(text: str) -> str:
@@ -819,6 +821,23 @@ class TitleblockExtractor(ITitleblockExtractor):
         return "".join(ch for ch in text if ("A" <= ch <= "Z") or ("0" <= ch <= "9"))
 
     @staticmethod
+    def _decode_cad_control_codes(text: str) -> str:
+        if not text:
+            return ""
+        decoded = text
+        replacements = {
+            "%%D": "°",
+            "%%d": "°",
+            "%%P": "±",
+            "%%p": "±",
+            "%%C": "⌀",
+            "%%c": "⌀",
+        }
+        for raw, replacement in replacements.items():
+            decoded = decoded.replace(raw, replacement)
+        return decoded
+
+    @staticmethod
     def _page_info_two_tokens(items: list[TextItem]) -> tuple[str | None, str | None]:
         tokens: list[tuple[float, str]] = []
         for it in items:
@@ -854,8 +873,37 @@ class TitleblockExtractor(ITitleblockExtractor):
         tokens.sort(key=lambda t: t[0])
         if len(tokens) < fixed_len:
             return None
-        selected = tokens if len(tokens) == fixed_len else tokens[-fixed_len:]
+        selected = self._pick_best_single_char_window(tokens, fixed_len)
         return "".join(t[2] for t in selected)
+
+    @staticmethod
+    def _pick_best_single_char_window(
+        tokens: list[tuple[float, float, str]],
+        fixed_len: int,
+    ) -> list[tuple[float, float, str]]:
+        if len(tokens) <= fixed_len:
+            return tokens
+
+        best_window = tokens[-fixed_len:]
+        best_score = float("inf")
+        for start in range(0, len(tokens) - fixed_len + 1):
+            window = tokens[start : start + fixed_len]
+            xs = [token[0] for token in window]
+            gaps = [right - left for left, right in zip(xs, xs[1:], strict=False)]
+            positive_gaps = [gap for gap in gaps if gap > 1e-6]
+            if not positive_gaps:
+                continue
+            typical_gap = median(positive_gaps)
+            if typical_gap <= 1e-6:
+                continue
+            max_gap_ratio = max(positive_gaps) / typical_gap
+            jitter = sum(abs(gap - typical_gap) for gap in positive_gaps) / typical_gap
+            span_ratio = (xs[-1] - xs[0]) / max(typical_gap * (fixed_len - 1), 1e-6)
+            score = max_gap_ratio * 10.0 + jitter + abs(span_ratio - 1.0)
+            if score < best_score:
+                best_score = score
+                best_window = window
+        return best_window
 
     @staticmethod
     def _text_item_to_dict(item: TextItem) -> dict[str, Any]:

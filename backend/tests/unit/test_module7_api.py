@@ -70,7 +70,12 @@ class FakeFontPreflightService:
             for kind in requested
         }
 
-    def default_replacement_fonts(self, *, missing_kinds: list[str] | None = None) -> dict[str, str]:
+    def default_replacement_fonts(
+        self,
+        *,
+        missing_kinds: list[str] | None = None,
+        missing_fonts: list[dict[str, object]] | None = None,
+    ) -> dict[str, str]:
         requested = [str(kind or "").strip().lower() for kind in (missing_kinds or []) if str(kind or "").strip()]
         defaults = {
             "ttf": "simsun.ttc",

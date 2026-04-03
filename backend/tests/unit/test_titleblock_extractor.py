@@ -75,6 +75,36 @@ def test_parse_external_code_fixed19() -> None:
     assert code == "JD1NHT11T01B25C42SD"
 
 
+def test_parse_external_code_ignores_isolated_right_side_digit_noise() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "JD2RSH12024B25C42SD"
+    items = [_item("DOC.NO", x=0.0, y=0.0, bbox=BBox(xmin=0.0, ymin=0.0, xmax=8.0, ymax=2.0))]
+    for idx, char in enumerate(expected):
+        x = 12.0 + idx * 10.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=0.0,
+                bbox=BBox(xmin=x, ymin=0.0, xmax=x + 2.0, ymax=2.0),
+            )
+        )
+    # stray neighbor digit on the right should not be absorbed into the 19-char code
+    items.append(
+        _item(
+            "8",
+            x=400.0,
+            y=0.0,
+            bbox=BBox(xmin=400.0, ymin=0.0, xmax=402.0, ymax=2.0),
+        )
+    )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
 def test_parse_title_bilingual() -> None:
     extractor = TitleblockExtractor()
     items = [
@@ -133,6 +163,19 @@ def test_pick_top_by_y() -> None:
     extractor = TitleblockExtractor()
     items = [_item("A", y=10.0), _item("B", y=5.0)]
     assert extractor._pick_top_by_y(items) == "A"
+
+
+def test_parse_text_decodes_autocad_control_codes() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("180.000%%D", x=10.0, y=10.0),
+        _item("10.000%%P", x=10.0, y=5.0),
+        _item("%%C25", x=10.0, y=0.0),
+    ]
+
+    value = extractor._parse_text(items)
+
+    assert value == "180.000°\n10.000±\n⌀25"
 
 
 def test_scale_mismatch_flag() -> None:

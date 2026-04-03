@@ -360,6 +360,51 @@ def test_font_preflight_service_returns_ttf_replacements_for_ttf_missing_kind(tm
     assert service.validate_replacement_font("simplex.shx", kind="ttf") is False
 
 
+def test_default_replacement_fonts_prefers_missing_font_specific_mapping(tmp_path: Path) -> None:
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "SimSun (simsun.ttc)",
+                        "value": "simsun.ttc",
+                        "family": "SimSun",
+                        "path": r"C:\Windows\Fonts\simsun.ttc",
+                        "kind": "ttf",
+                    },
+                    {
+                        "label": "SimHei (simhei.ttf)",
+                        "value": "simhei.ttf",
+                        "family": "SimHei",
+                        "path": r"C:\Windows\Fonts\simhei.ttf",
+                        "kind": "ttf",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, _FakeBridge()),
+    )
+    service.config.font_preflight.preferred_replacements_by_missing_font = {
+        "MENU2.TTF": "simsun.ttc",
+    }
+    service.config.font_preflight.default_ttf_families = ["SimHei"]
+
+    defaults = service.default_replacement_fonts(
+        missing_kinds=["ttf"],
+        missing_fonts=[
+            {
+                "style_name": "宋体",
+                "font_name": "MENU2.TTF",
+                "bigfont_name": "",
+                "kind": "ttf",
+            }
+        ],
+    )
+
+    assert defaults == {"ttf": "simsun.ttc"}
+
+
 def test_installed_font_inventory_returns_kind_specific_options(tmp_path: Path) -> None:
     autocad_fonts_dir = tmp_path / "Fonts"
     autocad_fonts_dir.mkdir()

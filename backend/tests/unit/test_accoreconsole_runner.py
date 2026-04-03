@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -176,10 +177,7 @@ def test_write_runtime_script_uses_absolute_dotnet_dll_path(tmp_path: Path):
     )
     backend_dll.parent.mkdir(parents=True, exist_ok=True)
     backend_dll.write_text("stub", encoding="utf-8")
-    monkeypatch = None
     try:
-        import os
-
         os.chdir(workspace)
         runtime_scr = tmp_path / "runtime.scr"
         lsp_path = tmp_path / "module5_cad_executor.lsp"
@@ -561,6 +559,16 @@ def test_run_sets_autocad_font_env_and_backend_cwd(tmp_path: Path, monkeypatch):
     assert env["FANBAN_AUTOCAD_INSTALL_DIR"] == str(fonts_dir.parent)
     assert env["FANBAN_AUTOCAD_FONTS_DIR"] == str(fonts_dir)
     assert captured["cwd"] == runner.backend_cwd
+
+
+def test_runtime_preferences_content_writes_support_path(tmp_path: Path) -> None:
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+
+    content = runner._build_runtime_preferences_content(
+        {"support_path": str(tmp_path / "font-lib")},
+    )
+
+    assert any("SupportPath" in line for line in content)
 
 
 def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):

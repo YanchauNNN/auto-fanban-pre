@@ -242,6 +242,7 @@ class DeliverableApiRuntime:
                 )
 
         missing_kinds = self._collect_missing_font_kinds(results)
+        missing_fonts = self._collect_missing_fonts(results)
         replacement_options = self.font_preflight_service.list_replacement_options(
             missing_kinds=missing_kinds
         )
@@ -250,6 +251,7 @@ class DeliverableApiRuntime:
         )
         default_replacement_fonts = self.font_preflight_service.default_replacement_fonts(
             missing_kinds=missing_kinds,
+            missing_fonts=missing_fonts,
         )
         return {
             "files": results,
@@ -276,6 +278,15 @@ class DeliverableApiRuntime:
                 seen.add(kind)
                 kinds.append(kind)
         return kinds
+
+    @staticmethod
+    def _collect_missing_fonts(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        missing_fonts: list[dict[str, Any]] = []
+        for item in results:
+            for missing in item.get("missing_fonts") or []:
+                if isinstance(missing, dict):
+                    missing_fonts.append(dict(missing))
+        return missing_fonts
 
     def create_batch(
         self,
