@@ -855,6 +855,34 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.listBlock {
+  min-width: 0;
+  padding: 1rem 1.05rem;
+  border-radius: 20px;
+  border: 1px solid rgba(20, 70, 128, 0.08);
+  background: rgba(241, 246, 252, 0.72);
+}
+
+.listBlock h3 {
+  margin: 0 0 0.7rem;
+  color: #163f6d;
+}
+
+.listBlock ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #355b82;
+  word-break: break-word;
+}
+
+.listBlock li + li {
+  margin-top: 0.55rem;
+}
+
+.listBlock p {
+  margin: 0;
+}
+
 .infoBlock {
   padding: 1rem;
   border-radius: 18px;

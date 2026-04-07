@@ -1,7 +1,14 @@
+.summaryDialog {
+  width: min(980px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+}
+
 .panel {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  padding: clamp(1.25rem, 2vw, 1.9rem);
+  box-sizing: border-box;
 }
 
 .header {
@@ -61,9 +68,10 @@
 }
 
 .listSection ul {
-  margin: 0;
+  margin: 0.75rem 0 0;
   padding-left: 1.2rem;
   color: #355b82;
+  word-break: break-word;
 }
 
 .actions {
@@ -96,6 +104,15 @@
 }
 
 @media (max-width: 800px) {
+  .summaryDialog {
+    width: min(100%, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+  }
+
+  .panel {
+    padding: 1rem;
+  }
+
   .summaryGrid {
     grid-template-columns: 1fr;
   }

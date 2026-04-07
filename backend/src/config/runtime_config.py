@@ -296,7 +296,12 @@ class DxfPdfExportConfig(BaseModel):
 class FontPreflightRuntimeConfig(BaseModel):
     """DWG 字体预检与替代默认策略"""
 
-    font_library_dirs: list[Path] = Field(default_factory=list)
+    font_library_dirs: list[Path] = Field(
+        default_factory=lambda: [
+            Path("documents_bin/font-library/ttf"),
+            Path("documents_bin/font-library/shx"),
+        ]
+    )
     preferred_replacements_by_missing_font: dict[str, str] = Field(
         default_factory=lambda: {
             "MENU2.TTF": "simsun.ttc",
@@ -562,6 +567,10 @@ class RuntimeConfig(BaseSettings):
         self.plot_assets.asset_roots = [
             root if root.is_absolute() else (self.base_dir / root).resolve()
             for root in self.plot_assets.asset_roots
+        ]
+        self.font_preflight.font_library_dirs = [
+            path if path.is_absolute() else (self.base_dir / path).resolve()
+            for path in self.font_preflight.font_library_dirs
         ]
 
     def _normalize_root_paths(self, base_dir: Path) -> None:

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import styles from "./App.module.css";
 
 const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
@@ -817,6 +818,55 @@ describe("job detail pages", () => {
       screen.getByText(/JD2RSG11005B25C42SDACFC1@2 \(20162RS-JGS03-005\)\.pdf/),
     ).toBeInTheDocument();
     expect(screen.getByText(/页数：1 页/)).toBeInTheDocument();
+  });
+
+  it("renders flags and errors inside padded list blocks on detail pages", async () => {
+    window.history.pushState({}, "", "/jobs/audit-flags-layout");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "audit-flags-layout",
+      batchId: "batch-audit-flags-layout",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "19076RS-JGS01.dwg",
+      sourceFilenames: ["19076RS-JGS01.dwg"],
+      taskKind: "audit_check",
+      taskRole: "audit_check",
+      jobMode: "audit_check",
+      projectNo: "1907",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-07T10:00:00+08:00",
+      finishedAt: "2026-04-07T10:05:00+08:00",
+      startedAt: "2026-04-07T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: true,
+      childJobIds: [],
+      findingsCount: 3,
+      affectedDrawingsCount: 2,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: true,
+        replacedDwgAvailable: false,
+        reportDownloadUrl: "/api/jobs/audit-flags-layout/download/report",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: ["[DRAW001] PAPER_SIZE_AUTO_FIXED", "[DRAW001] PLOT_MULTIPAGE_USED"],
+      errors: ["暂无实际错误，仅用于布局验证"],
+      topWrongTexts: [],
+      topInternalCodes: [],
+    });
+
+    render(<App />);
+
+    const flagsHeading = await screen.findByRole("heading", { level: 3, name: "Flags" });
+    const errorsHeading = screen.getByRole("heading", { level: 3, name: "Errors" });
+
+    expect(flagsHeading.parentElement).toHaveClass(styles.listBlock);
+    expect(errorsHeading.parentElement).toHaveClass(styles.listBlock);
   });
 
   it("shows replace summary plus both report and replaced dwg downloads for replace jobs", async () => {

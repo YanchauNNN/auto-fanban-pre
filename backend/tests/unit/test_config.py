@@ -98,6 +98,10 @@ class TestRuntimeConfig:
         assert runtime_config.timeouts.oda_convert_sec == 600
         assert runtime_config.pdf_engine.preferred == "office_com"
         assert runtime_config.pdf_engine.fallback == "disabled"
+        assert runtime_config.font_preflight.font_library_dirs == [
+            Path("documents_bin/font-library/ttf"),
+            Path("documents_bin/font-library/shx"),
+        ]
 
     def test_get_job_dir(self, runtime_config: RuntimeConfig):
         """测试获取任务目录"""
@@ -304,4 +308,29 @@ runtime_options:
         assert config.plot_assets.pmp_name == "custom.pmp"
         assert config.plot_assets.managed_ctb_names == ["custom.ctb", "review.ctb"]
         assert config.plot_assets.min_valid_ctb_bytes == 4096
+
+    def test_runtime_config_reads_default_font_library_dirs(
+        self,
+        tmp_path: Path,
+    ):
+        """运行期规范应将字体库默认目录解析为仓库根下的绝对路径。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    font_library_dirs:
+      type: "list[str]"
+      default: ["documents_bin/font-library/ttf", "documents_bin/font-library/shx"]
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.font_library_dirs == [
+            (tmp_path / "documents_bin" / "font-library" / "ttf").resolve(),
+            (tmp_path / "documents_bin" / "font-library" / "shx").resolve(),
+        ]
 

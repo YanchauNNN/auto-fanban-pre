@@ -350,8 +350,10 @@ runtime_options:
   font_preflight:
     font_library_dirs:
       type: "list[str]"
-      default: []
-      desc: "补充字体库目录列表；预检/替代前会追加到 AutoCAD Support Path，优先让 AutoCAD 直接命中原字体文件"
+      default:
+        - "documents_bin/font-library/ttf"
+        - "documents_bin/font-library/shx"
+      desc: "团队字体库默认目录列表；预检/替代前会追加到 AutoCAD Support Path，并复制字体到任务工作目录，优先让 AutoCAD 直接命中原字体文件"
     preferred_replacements_by_missing_font:
       type: object
       default: { "MENU2.TTF": "simsun.ttc" }

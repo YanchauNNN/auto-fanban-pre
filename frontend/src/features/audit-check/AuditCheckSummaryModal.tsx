@@ -9,7 +9,7 @@ type AuditCheckSummaryModalProps = {
 
 export function AuditCheckSummaryModal({ job, onClose }: AuditCheckSummaryModalProps) {
   return (
-    <TaskConfigModal title="纠错结果摘要">
+    <TaskConfigModal dialogClassName={styles.summaryDialog} title="纠错结果摘要">
       <div className={styles.panel}>
         <header className={styles.header}>
           <div>

@@ -2082,7 +2082,7 @@ function ListBlock({
   emptyText: string;
 }) {
   return (
-    <div>
+    <div className={styles.listBlock}>
       <h3>{title}</h3>
       {items.length > 0 ? (
         <ul>
