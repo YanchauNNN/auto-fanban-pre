@@ -78,6 +78,9 @@ class BusinessSpec(BaseModel):
     # 绠＄悊涓氬姟绾夸簨瀹炴簮
     management_features: dict[str, Any] = Field(default_factory=dict)
 
+    # 任务提交契约（上传接口 form-data / params_json 结构）
+    submission_contracts: dict[str, Any] = Field(default_factory=dict)
+
     # === 渚挎嵎璁块棶鏂规硶 ===
 
     def get_paper_variants(self) -> dict[str, PaperVariant]:
@@ -174,6 +177,9 @@ class BusinessSpec(BaseModel):
 
     def get_management_features(self) -> dict[str, Any]:
         return self.management_features
+
+    def get_submission_contracts(self) -> dict[str, Any]:
+        return self.submission_contracts
 
     def resolve_repo_path(self, path_value: str | Path) -> Path:
         path = Path(path_value)

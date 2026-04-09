@@ -1,14 +1,16 @@
 ﻿# ============================================================================
 # CNPE 图纸处理系统 - 参数规范 v2.0
 # ============================================================================
-# 本文件包含两个独立模块的参数规范：
-#   1. doc_generation    - 文档生成模块（封面/目录/设计文件/IED计划）
-#   2. titleblock_extract - 图签提取模块（DXF 解析/ROI 识别/字段解析）
+# 本文件包含业务规范、管理事实源与任务提交契约：
+#   1. doc_generation      - 文档生成模块（封面/目录/设计文件/IED计划）
+#   2. titleblock_extract  - 图签提取模块（DXF 解析/ROI 识别/字段解析）
+#   3. management_features - 账号/流程/工作量/归档规则
+#   4. submission_contracts - 上传接口与任务提交协议
 # 运行期参数（并发/超时/路径/清理策略）见：documents/参数规范_运行期.yaml
 # ============================================================================
 
 schema_version: "2.0"
-last_updated: "2026-03-13"
+last_updated: "2026-04-08"
 
 # ============================================================================
 # 一、通用枚举定义
@@ -174,13 +176,6 @@ doc_generation:
         source: frontend
         default: "非密"
         desc: "密级，写入封面/设计文件/IED"
-      
-      approved_by:
-        type: str
-        required: false
-        source: frontend
-        deprecated: true
-        desc: "封面批准人：已确认取消，不读取也不编辑（保留字段仅为兼容旧表单）"
 
     # ========== 图签提取的全局聚合值（来自001图纸） ==========
     from_titleblock:
@@ -565,7 +560,7 @@ doc_generation:
       header:
         engineering_no:        { cell: "C1", label: "A1" }
         album_title_cn:        { cell: "D1:E1", desc: "目录主标题，写入图册名称（中文）" }
-        album_title_en:        { cell: "D2:E2", when: "project_no == '1818'", desc: "1818项目目录副标题，写入图册名称（英文）" }
+        album_title_en:        { cell: "D2:E3", when: "project_no == '1818'", font_sizes: [12, 9, 7, 6, 5], shrink_to_fit_fallback: true, desc: "1818项目目录副标题，写入图册名称（英文）" }
         album_code_title:      { cell: "D3:E3", cell_1818: "D4:E4", template: "第{album_code}图册图纸(文件)目录" }
         catalog_internal_code: { cell: "H1", merge: "H1:I2(仅1818)" }
         catalog_external_code: { cell: "H3", merge: "H3:I4(仅1818)" }
@@ -1302,5 +1297,94 @@ management_features:
     overwrite_mode: "clear_target_then_archive"
     level_pattern: "{engineering_no}/{subitem_no}/{album_internal_code}/{revision}"
 
+# ============================================================================
+# 六、任务提交契约 (submission_contracts)
+# ============================================================================
+submission_contracts:
+  deliverable_batch:
+    endpoint: "POST /api/jobs/batch"
+    desc: "创建交付任务；可选直接联动纠错并返回 TaskGroup 摘要"
+    transport:
+      content_type: "multipart/form-data"
+      files_field: "files[]"
+      params_field: "params_json"
+      optional_form_fields:
+        run_audit_check:
+          type: bool
+          default: false
+          desc: "true 时创建 TaskGroup，并生成 deliverable_main + audit_check 两个子任务"
+    params_json:
+      extends:
+        - "doc_generation.params 中 source=frontend 的字段"
+        - "doc_generation.font_preflight_contract"
+      extra_fields:
+        plot_style_key:
+          type: str
+          required: false
+          default: "red_wider"
+          allowed_values: ["red_wider", "same_width", "review_white"]
+          desc: "本次出图打印样式 key；空值时回退 runtime_options.module5_export.plot.default_plot_style_key"
+    response:
+      batch_id: "批次号"
+      jobs: "JobSummary 列表；run_audit_check=true 时返回 group summary"
+
+  audit_replace:
+    endpoint: "POST /api/jobs/audit-replace"
+    desc: "创建纠错检查或翻版任务；mode=replace 可串联交付主链"
+    transport:
+      content_type: "multipart/form-data"
+      files_field: "files[]"
+      mode_field: "mode"
+      params_field: "params_json"
+    modes:
+      check:
+        mode_value: "check"
+        params_json:
+          required_fields:
+            project_no:
+              type: str
+              required: true
+              desc: "纠错任务项目号；为空时后端会返回 required_for_audit_check"
+          optional_fields:
+            batch_id:
+              type: str
+              required: false
+              desc: "仅用于兼容旧链路的显式批次号"
+      replace:
+        mode_value: "replace"
+        params_json:
+          required_fields:
+            source_project_no:
+              type: str
+              required: true
+              desc: "源项目号，决定替换词库命中列"
+            target_project_no:
+              type: str
+              required: true
+              desc: "目标项目号，决定替换输出列；必须与 source_project_no 不同"
+            run_deliverable:
+              type: bool
+              required: true
+              default: false
+              desc: "true 时翻版完成后继续走交付主链，并返回 TaskGroup 摘要"
+          optional_fields:
+            deliverable_params:
+              type: object
+              required_when: "run_deliverable == true"
+              extends:
+                - "doc_generation.params 中 source=frontend 的字段"
+                - "doc_generation.font_preflight_contract"
+              extra_fields:
+                plot_style_key:
+                  type: str
+                  required: false
+                  default: "red_wider"
+                  allowed_values: ["red_wider", "same_width", "review_white"]
+                  desc: "翻版后交付阶段使用的打印样式 key"
+              normalization:
+                - "后端会将 deliverable_params.project_no 强制改写为 target_project_no"
+    response:
+      batch_id: "批次号"
+      jobs: "JobSummary 列表；run_deliverable=true 时返回 group summary，否则返回 audit_replace 任务"
 
 

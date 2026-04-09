@@ -7,7 +7,7 @@ import {
 } from "./schema";
 
 describe("normalizeFormSchema", () => {
-  it("maps section titles, field labels, helper copy, and hides deprecated approved_by", () => {
+  it("maps section titles, field labels, helper copy, and hides legacy frontend-only fields", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",
       upload_limits: {
@@ -56,18 +56,6 @@ describe("normalizeFormSchema", () => {
                 format: null,
                 desc: "密级，写入封面/设计文件/IED",
                 options: ["非密", "秘密"],
-              },
-              {
-                key: "approved_by",
-                label: "approved_by",
-                type: "text",
-                required: false,
-                required_when: null,
-                source: "frontend",
-                default: null,
-                format: null,
-                desc: "deprecated",
-                options: [],
               },
             ],
           },

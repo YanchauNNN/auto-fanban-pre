@@ -307,3 +307,79 @@ def test_catalog_excel_com_paths_use_pdf_exporter_retry_helpers() -> None:
     assert "PDFExporter._open_excel_workbook(" in source_text
     assert "PDFExporter._retry_excel_com_call(" in source_text
 
+
+def test_catalog_preserves_1818_english_header_merge_and_default_font() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    bindings = gen.spec.get_catalog_bindings()
+    output_dir = Path(__file__).resolve().parents[3] / "tmp" / f"catalog-test-{uuid4().hex}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_xlsx = output_dir / "catalog-1818-merge.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/1818图册目录模板.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+
+    merged_ranges = {str(rng) for rng in ws.merged_cells.ranges}
+    assert "D2:E3" in merged_ranges
+    assert "D2:E2" not in merged_ranges
+    assert "D3:E3" not in merged_ranges
+    assert ws["D2"].value == "Test Album"
+    assert ws["D2"].font.sz == 12
+
+
+def test_catalog_shrinks_1818_english_header_font_for_long_title() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    ctx.params.album_title_en = (
+        "Secondary steel shop drawings at elevation -8.800m and associated "
+        "embedded parts for turbine building area with supplementary structural "
+        "interfaces and platform support details for construction release"
+    )
+    bindings = gen.spec.get_catalog_bindings()
+    output_dir = Path(__file__).resolve().parents[3] / "tmp" / f"catalog-test-{uuid4().hex}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_xlsx = output_dir / "catalog-1818-long-title.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/1818图册目录模板.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+
+    assert ws["D2"].value == ctx.params.album_title_en
+    assert ws["D2"].font.sz in {9, 7, 6, 5}
+
+
+def test_catalog_enables_shrink_to_fit_when_1818_header_still_overflows() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    ctx.params.album_title_en = " ".join(["SUPPLEMENTARY"] * 48)
+    bindings = gen.spec.get_catalog_bindings()
+    output_dir = Path(__file__).resolve().parents[3] / "tmp" / f"catalog-test-{uuid4().hex}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_xlsx = output_dir / "catalog-1818-shrink-to-fit.xlsx"
+
+    gen._write_catalog(
+        template_path="documents_bin/1818图册目录模板.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+
+    assert ws["D2"].font.sz == 5
+    assert ws["D2"].alignment.shrinkToFit is True
+

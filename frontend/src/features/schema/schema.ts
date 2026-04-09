@@ -171,7 +171,6 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
         title: SECTION_TITLES[section.id] ?? humanizeKey(section.id),
         fields: section.fields
           .filter((field) => (field.source ?? "frontend") === "frontend")
-          .filter((field) => field.key !== "approved_by")
           .filter((field) => !HIDDEN_FRONTEND_FIELDS.has(field.key))
           .map((field) => normalizeField(field)),
       }))

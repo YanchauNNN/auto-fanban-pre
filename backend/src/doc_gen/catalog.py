@@ -25,6 +25,7 @@ import contextlib
 import gc
 import math
 import os
+import re
 import shutil
 from copy import copy
 from pathlib import Path
@@ -32,6 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.utils.cell import get_column_letter, range_boundaries
 
 from ..config import load_spec
 from ..interfaces import GenerationError, ICatalogGenerator, IPDFExporter
@@ -56,6 +58,9 @@ class CatalogGenerator(ICatalogGenerator):
     THREE_LINE_HEIGHT = 50
     FOUR_LINE_HEIGHT = 60
     EXTRA_LINE_STEP = 12
+    DEFAULT_1818_HEADER_FONT_SIZES = (12, 9, 7, 6, 5)
+    HEADER_WIDTH_PADDING_RATIO = 0.96
+    HEADER_LINE_HEIGHT_RATIO = 1.18
 
     def __init__(
         self,
@@ -149,9 +154,6 @@ class CatalogGenerator(ICatalogGenerator):
         derived = ctx.derived
         params = ctx.params
 
-        if ctx.is_1818:
-            self._normalize_1818_title_merges(ws)
-
         # engineering_no → C1
         if "engineering_no" in header:
             cell = self._resolve_writable_cell(ws, header["engineering_no"].get("cell", "C1"))
@@ -166,8 +168,11 @@ class CatalogGenerator(ICatalogGenerator):
             and "album_title_en" in header
             and params.album_title_en
         ):
-            cell = self._resolve_writable_cell(ws, header["album_title_en"].get("cell", "D2:E2"))
+            title_binding = header["album_title_en"]
+            cell_ref = title_binding.get("cell", "D2:E3")
+            cell = self._resolve_writable_cell(ws, cell_ref)
             ws[cell] = params.album_title_en
+            self._fit_1818_english_header_title(ws, title_binding, params.album_title_en)
 
         # catalog_internal_code → H1
         if "catalog_internal_code" in header:
@@ -212,33 +217,150 @@ class CatalogGenerator(ICatalogGenerator):
                 return merged_range.start_cell.coordinate
         return anchor
 
-    def _normalize_1818_title_merges(self, ws) -> None:
-        merged_ranges = {str(rng) for rng in ws.merged_cells.ranges}
-        if "D2:E3" not in merged_ranges:
-            return
+    def _fit_1818_english_header_title(
+        self,
+        ws,
+        binding: dict[str, Any],
+        text: str,
+    ) -> None:
+        cell_ref = binding.get("cell", "D2:E3")
+        cell = ws[self._resolve_writable_cell(ws, cell_ref)]
+        font_sizes = self._resolve_header_font_sizes(binding.get("font_sizes"))
+        shrink_to_fit_fallback = bool(binding.get("shrink_to_fit_fallback", False))
 
-        source = ws["D2"]
-        source_style = copy(source._style)
-        source_alignment = copy(source.alignment)
-        source_font = copy(source.font)
-        source_fill = copy(source.fill)
-        source_border = copy(source.border)
-        source_number_format = source.number_format
-        source_protection = copy(source.protection)
+        chosen_size = font_sizes[-1]
+        fits_in_range = False
+        for font_size in font_sizes:
+            if self._merged_text_fits(ws, cell_ref, text, font_size):
+                chosen_size = font_size
+                fits_in_range = True
+                break
 
-        ws.unmerge_cells("D2:E3")
-        ws.merge_cells("D2:E2")
-        ws.merge_cells("D3:E3")
+        font = copy(cell.font)
+        font.sz = chosen_size
+        cell.font = font
 
-        for cell_ref in ("D2", "E2", "D3", "E3"):
-            cell = ws[cell_ref]
-            cell._style = copy(source_style)
-            cell.alignment = copy(source_alignment)
-            cell.font = copy(source_font)
-            cell.fill = copy(source_fill)
-            cell.border = copy(source_border)
-            cell.number_format = source_number_format
-            cell.protection = copy(source_protection)
+        alignment = copy(cell.alignment)
+        alignment.wrapText = True
+        alignment.shrinkToFit = shrink_to_fit_fallback and not fits_in_range
+        cell.alignment = alignment
+
+    def _resolve_header_font_sizes(self, raw_sizes: Any) -> tuple[int, ...]:
+        if isinstance(raw_sizes, (list, tuple)):
+            parsed = []
+            for size in raw_sizes:
+                with contextlib.suppress(TypeError, ValueError):
+                    parsed.append(int(size))
+            if parsed:
+                return tuple(parsed)
+        return self.DEFAULT_1818_HEADER_FONT_SIZES
+
+    def _merged_text_fits(self, ws, cell_ref: str, text: str, font_size: float) -> bool:
+        available_width_points = self._merged_range_width_points(ws, cell_ref)
+        available_height_points = self._merged_range_height_points(ws, cell_ref)
+        if available_width_points <= 0 or available_height_points <= 0:
+            return True
+
+        line_count = self._estimate_wrapped_line_count_points(
+            text=text,
+            available_width_points=available_width_points * self.HEADER_WIDTH_PADDING_RATIO,
+            font_size=font_size,
+        )
+        available_lines = max(
+            1,
+            math.floor(available_height_points / (font_size * self.HEADER_LINE_HEIGHT_RATIO)),
+        )
+        return line_count <= available_lines
+
+    def _merged_range_width_points(self, ws, cell_ref: str) -> float:
+        min_col, _, max_col, _ = range_boundaries(cell_ref if ":" in cell_ref else f"{cell_ref}:{cell_ref}")
+        default_width = ws.sheet_format.defaultColWidth or 8.43
+        total_width = 0.0
+        for column_idx in range(min_col, max_col + 1):
+            column_letter = get_column_letter(column_idx)
+            column_dimension = ws.column_dimensions[column_letter]
+            column_width = column_dimension.width if column_dimension.width is not None else default_width
+            total_width += self._column_width_to_points(column_width)
+        return total_width
+
+    def _merged_range_height_points(self, ws, cell_ref: str) -> float:
+        _, min_row, _, max_row = range_boundaries(cell_ref if ":" in cell_ref else f"{cell_ref}:{cell_ref}")
+        default_height = ws.sheet_format.defaultRowHeight or 15
+        total_height = 0.0
+        for row_idx in range(min_row, max_row + 1):
+            row_dimension = ws.row_dimensions[row_idx]
+            total_height += row_dimension.height if row_dimension.height is not None else default_height
+        return total_height
+
+    def _column_width_to_points(self, column_width: float) -> float:
+        return max(column_width, 0.0) * 5.3
+
+    def _estimate_wrapped_line_count_points(
+        self,
+        text: str,
+        available_width_points: float,
+        font_size: float,
+    ) -> int:
+        paragraphs = text.splitlines() or [text]
+        return sum(
+            self._wrap_word_line_count(
+                text=paragraph if paragraph.strip() else " ",
+                available_width_points=available_width_points,
+                font_size=font_size,
+            )
+            for paragraph in paragraphs
+        )
+
+    def _wrap_word_line_count(
+        self,
+        text: str,
+        available_width_points: float,
+        font_size: float,
+    ) -> int:
+        stripped = text.strip()
+        if not stripped:
+            return 1
+        if available_width_points <= 0:
+            return len(stripped)
+
+        words = re.findall(r"\S+", stripped)
+        if not words:
+            return 1
+
+        space_width = self._char_display_width_points(" ", font_size)
+        line_count = 1
+        line_width = 0.0
+
+        for word in words:
+            word_width = sum(self._char_display_width_points(char, font_size) for char in word)
+            if line_width == 0:
+                extra_lines = max(1, math.ceil(word_width / available_width_points))
+                line_count += extra_lines - 1
+                line_width = word_width - ((extra_lines - 1) * available_width_points)
+                continue
+
+            projected_width = line_width + space_width + word_width
+            if projected_width <= available_width_points:
+                line_width = projected_width
+                continue
+
+            line_count += 1
+            extra_lines = max(1, math.ceil(word_width / available_width_points))
+            line_count += extra_lines - 1
+            line_width = word_width - ((extra_lines - 1) * available_width_points)
+
+        return line_count
+
+    def _char_display_width_points(self, char: str, font_size: float) -> float:
+        if char.isspace():
+            return font_size * 0.28
+        if "\u4e00" <= char <= "\u9fff":
+            return font_size
+        if char.isascii() and char.isalnum():
+            return font_size * 0.58
+        if char.isascii():
+            return font_size * 0.38
+        return font_size * 0.9
 
     def _build_detail_rows(self, ctx: DocContext) -> list[dict]:
         """构建明细行数据"""
