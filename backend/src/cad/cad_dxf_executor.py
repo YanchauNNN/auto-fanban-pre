@@ -25,7 +25,6 @@ from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
 from .dwg_version import detect_dwg_version_code_or_none
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
-from .plot_window_strategy import bbox_from_mapping, bbox_to_mapping, resolve_plot_window_bbox
 from .same_code_multipage import get_same_code_multipage_meta, get_same_code_output_suffix
 
 if TYPE_CHECKING:
@@ -248,6 +247,9 @@ class CADDXFExecutor:
                 "use_monochrome": bool(plot_cfg.use_monochrome),
                 "center_plot": bool(getattr(plot_cfg, "center_plot", False)),
                 "plot_offset_mm": dict(getattr(plot_cfg, "plot_offset_mm", {"x": 0.0, "y": 0.0})),
+                "plot_window_bottom_left_expand_ratio": float(
+                    getattr(plot_cfg, "plot_window_bottom_left_expand_ratio", 0.0),
+                ),
                 "plot_window_top_right_expand_ratio": float(
                     getattr(plot_cfg, "plot_window_top_right_expand_ratio", 0.0),
                 ),
@@ -1401,31 +1403,8 @@ class CADDXFExecutor:
         frame: FrameMeta,
         split_item: dict | None,
     ) -> tuple[dict, list[str]]:
-        frame_entry = self._build_frame_entry(frame)
-        if not isinstance(split_item, dict):
-            return frame_entry, []
-
-        selection_extents = bbox_from_mapping(split_item.get("selection_extents"))
-        plot_cfg = self.config.module5_export.plot
-        resolution = resolve_plot_window_bbox(
-            frame_bbox=frame.runtime.outer_bbox,
-            selection_extents=selection_extents,
-            enabled=bool(getattr(plot_cfg, "use_selection_extents_when_mismatch", True)),
-            mismatch_trigger_mm=float(
-                getattr(plot_cfg, "selection_extents_mismatch_trigger_mm", 2.0),
-            ),
-            mismatch_trigger_ratio=float(
-                getattr(plot_cfg, "selection_extents_mismatch_trigger_ratio", 0.01),
-            ),
-        )
-        if not resolution.use_selection_extents:
-            return frame_entry, []
-
-        frame_entry["plot_window_bbox"] = bbox_to_mapping(resolution.plot_window_bbox)
-        return frame_entry, [
-            "PLOT_WINDOW_SELECTION_EXTENTS_USED",
-            f"PLOT_WINDOW_MISMATCH_SWITCHED:{resolution.reason}",
-        ]
+        _ = split_item
+        return self._build_frame_entry(frame), []
 
     def _build_sheet_set_entry(self, sheet_set: SheetSet) -> dict:
         pages = [

@@ -449,6 +449,7 @@ class PipelineExecutor:
 
     def _stage_detect_frames(self, job: Job, context: dict) -> None:
         dxf_files = list(context["dxf_files"])
+        self.frame_detector.set_project_no(job.project_no)
         job.progress.details.update(
             {"dxf_total": len(dxf_files), "dxf_processed": 0, "frames_total": 0}
         )

@@ -130,6 +130,36 @@ def test_parse_title_bilingual_ignores_page_placeholder_line() -> None:
     assert title_en == "5NE 8.450 and Above 8.450 Prefabricated Stairs\nFormwork"
 
 
+def test_parse_title_bilingual_keeps_english_subtitle_with_cjk_index() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("5NE 8.450及 8.450至12.950m间预制楼梯", x=10.0, y=120.0),
+        _item("配筋图(一)", x=10.0, y=110.0),
+        _item("5NE 8.450 and 8.450~12.950m Prefabricated Stairs", x=10.0, y=100.0),
+        _item("Reinforcement(一)", x=10.0, y=90.0),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "5NE 8.450及 8.450至12.950m间预制楼梯\n配筋图(一)"
+    assert title_en == "5NE 8.450 and 8.450~12.950m Prefabricated Stairs\nReinforcement(一)"
+
+
+def test_parse_title_bilingual_keeps_english_bill_of_material_with_cjk_index() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("5NE 8.450及 8.450至12.950m间预制楼梯", x=10.0, y=120.0),
+        _item("钢筋表（一）", x=10.0, y=110.0),
+        _item("5NE 8.450 and 8.450~12.950m Prefabricated Stairs", x=10.0, y=100.0),
+        _item("Bill of Material（一）", x=10.0, y=90.0),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "5NE 8.450及 8.450至12.950m间预制楼梯\n钢筋表（一）"
+    assert title_en == "5NE 8.450 and 8.450~12.950m Prefabricated Stairs\nBill of Material（一）"
+
+
 def test_parse_page_info_with_x() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse

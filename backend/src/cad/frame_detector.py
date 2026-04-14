@@ -46,6 +46,8 @@ class FrameDetector(IFrameDetector):
         frame_detect_mode: str | None = None,
     ):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
+        normalized_project_no = str(project_no).strip() if project_no is not None else ""
+        self.project_no = normalized_project_no or None
         self.paper_variants = self.spec.get_paper_variants()
         principles = self.spec.titleblock_extract.get("principles", {})
         self.frame_detect_mode = str(
@@ -121,15 +123,21 @@ class FrameDetector(IFrameDetector):
             self.candidate_finder,
             self.paper_fitter,
             max_candidates=self.max_candidates,
-            project_no=project_no,
+            project_no=self.project_no,
         )
         self.anchor_calibrated_locator = AnchorCalibratedLocator(
             self.spec,
             self.candidate_finder,
             self.paper_fitter,
             max_candidates=self.max_candidates,
-            project_no=project_no,
+            project_no=self.project_no,
         )
+
+    def set_project_no(self, project_no: str | None) -> None:
+        normalized_project_no = str(project_no).strip() if project_no is not None else ""
+        self.project_no = normalized_project_no or None
+        self.anchor_locator.project_no = self.project_no
+        self.anchor_calibrated_locator.project_no = self.project_no
 
     def detect_frames(self, dxf_path: Path) -> list[FrameMeta]:
         """检测DXF中的所有图框"""

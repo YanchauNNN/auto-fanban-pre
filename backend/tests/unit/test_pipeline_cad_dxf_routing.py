@@ -201,3 +201,30 @@ def test_stage_order_includes_font_preflight_before_convert() -> None:
     assert stage_names.index(StageEnum.FONT_PREFLIGHT_AND_REPLACE.value) < stage_names.index(
         StageEnum.CONVERT_DWG_TO_DXF.value
     )
+
+
+def test_stage_detect_frames_sets_project_no_before_detection(tmp_path: Path) -> None:
+    class _RecordingFrameDetector:
+        def __init__(self) -> None:
+            self.project_no: str | None = None
+            self.detect_calls: list[tuple[Path, str | None]] = []
+
+        def set_project_no(self, project_no: str | None) -> None:
+            self.project_no = project_no
+
+        def detect_frames(self, dxf_path: Path) -> list[Any]:
+            self.detect_calls.append((dxf_path, self.project_no))
+            return []
+
+    executor = object.__new__(PipelineExecutor)
+    executor.frame_detector = _RecordingFrameDetector()
+    executor._update_progress = MagicMock()
+
+    dxf_path = tmp_path / "sample.dxf"
+    dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+    job = Job(job_id="job-detect-project-no", job_type=JobType.DELIVERABLE, project_no="1818")
+    context = {"dxf_files": [dxf_path], "frames": [], "dxf_to_dwg": {}}
+
+    PipelineExecutor._stage_detect_frames(executor, job, context)
+
+    assert executor.frame_detector.detect_calls == [(dxf_path, "1818")]

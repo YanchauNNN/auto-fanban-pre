@@ -771,6 +771,37 @@ def test_create_batch_preserves_source_filename_but_stores_ascii_upload_copy(
     assert all(ord(ch) < 128 for ch in stored_files[0].name)
 
 
+def test_create_batch_preserves_cjk_params_in_job_payload(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        job_id = payload["jobs"][0]["job_id"]
+        _poll_job(client, job_id)
+
+    job_payload = json.loads(
+        (tmp_path / "storage" / "jobs" / job_id / "job.json").read_text(encoding="utf-8")
+    )
+
+    assert job_payload["params"]["classification"] == params["classification"]
+    assert job_payload["params"]["subitem_name"] == params["subitem_name"]
+    assert job_payload["params"]["album_title_cn"] == params["album_title_cn"]
+    assert job_payload["params"]["file_category"] == params["file_category"]
+    assert job_payload["params"]["ied_status"] == params["ied_status"]
+    assert job_payload["params"]["ied_doc_type"] == params["ied_doc_type"]
+    assert job_payload["params"]["cover_variant"] == params["cover_variant"]
+
+
 def test_create_batch_rejects_replace_missing_without_replacement_font(
     monkeypatch,
     tmp_path: Path,
@@ -1280,6 +1311,7 @@ class FakeSharedPrepService(SharedPrepService):
         self,
         *,
         group_id: str,
+        project_no: str | None = None,
         source_dwg: Path,
         shared_dir: Path,
         font_replace_policy: str = "none",

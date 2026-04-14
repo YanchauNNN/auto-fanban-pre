@@ -675,10 +675,13 @@ class TitleblockExtractor(ITitleblockExtractor):
         cn_lines: list[str] = []
         en_lines: list[str] = []
         for line in lines:
-            if self._has_cjk(line):
-                cn_lines.append(self._normalize_spaces(line))
+            normalized = self._normalize_spaces(line)
+            if self._looks_like_english_title_line(normalized):
+                en_lines.append(normalized)
+            elif self._has_cjk(normalized):
+                cn_lines.append(normalized)
             else:
-                en_lines.append(self._normalize_spaces(line))
+                en_lines.append(normalized)
         title_cn = self.line_join.join([ln for ln in cn_lines if ln]).strip()
         title_en = self.line_join.join([ln for ln in en_lines if ln]).strip()
         return (title_cn or None), (title_en or None)
@@ -776,6 +779,21 @@ class TitleblockExtractor(ITitleblockExtractor):
     @staticmethod
     def _has_cjk(text: str) -> bool:
         return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+    @classmethod
+    def _looks_like_english_title_line(cls, text: str) -> bool:
+        if not text:
+            return False
+        if not any(char.isascii() and char.isalpha() for char in text):
+            return False
+        if not cls._has_cjk(text):
+            return True
+        stripped = re.sub(
+            r"[\(\uff08]\s*[\u4e00-\u9fff0-9IVXivx]+\s*[\)\uff09]",
+            "",
+            text,
+        )
+        return not cls._has_cjk(stripped)
 
     @staticmethod
     def _normalize_spaces(text: str) -> str:

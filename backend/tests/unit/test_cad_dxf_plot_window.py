@@ -45,31 +45,16 @@ def _make_frame() -> FrameMeta:
     )
 
 
-def test_build_window_plot_frame_entry_keeps_bbox_when_mismatch_small() -> None:
+def test_build_window_plot_frame_entry_ignores_selection_extents() -> None:
     cfg = RuntimeConfig()
     executor = CADDXFExecutor(config=cfg, runner=cast(Any, MagicMock()), spec=_SpecStub())
 
     entry, flags = executor._build_window_plot_frame_entry(
         frame=_make_frame(),
         split_item={
-            "selection_extents": {"xmin": -0.5, "ymin": 0.0, "xmax": 100.4, "ymax": 50.4},
+            "selection_extents": {"xmin": -3.0, "ymin": -1.0, "xmax": 150.0, "ymax": 80.0},
         },
     )
 
     assert "plot_window_bbox" not in entry
     assert flags == []
-
-
-def test_build_window_plot_frame_entry_switches_when_mismatch_large() -> None:
-    cfg = RuntimeConfig()
-    executor = CADDXFExecutor(config=cfg, runner=cast(Any, MagicMock()), spec=_SpecStub())
-
-    entry, flags = executor._build_window_plot_frame_entry(
-        frame=_make_frame(),
-        split_item={
-            "selection_extents": {"xmin": -3.0, "ymin": -1.0, "xmax": 100.0, "ymax": 50.0},
-        },
-    )
-
-    assert entry["plot_window_bbox"] == {"xmin": -3.0, "ymin": -1.0, "xmax": 100.0, "ymax": 50.0}
-    assert "PLOT_WINDOW_SELECTION_EXTENTS_USED" in flags

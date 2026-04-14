@@ -452,6 +452,7 @@ internal sealed class BridgePlotConfig
     public bool CenterPlot { get; private set; } = false;
     public double PlotOffsetXmm { get; private set; } = 0.0;
     public double PlotOffsetYmm { get; private set; } = 0.0;
+    public double PlotWindowBottomLeftExpandRatio { get; private set; } = 0.0001;
     public double PlotWindowTopRightExpandRatio { get; private set; } = 0.0001;
     public string ScaleMode { get; private set; } = "manual_integer_from_geometry";
     public string ScaleIntegerRounding { get; private set; } = "round";
@@ -485,6 +486,10 @@ internal sealed class BridgePlotConfig
             CenterPlot = BridgeValue.GetBool(data, "center_plot", false),
             PlotOffsetXmm = BridgeValue.GetDouble(offsets, "x", 0.0),
             PlotOffsetYmm = BridgeValue.GetDouble(offsets, "y", 0.0),
+            PlotWindowBottomLeftExpandRatio = Math.Max(
+                0.0,
+                BridgeValue.GetDouble(data, "plot_window_bottom_left_expand_ratio", 0.0001)
+            ),
             PlotWindowTopRightExpandRatio = Math.Max(
                 0.0,
                 BridgeValue.GetDouble(data, "plot_window_top_right_expand_ratio", 0.0001)
@@ -581,6 +586,20 @@ internal sealed class BridgeBBox
         var dx = Width * ratio;
         var dy = Height * ratio;
         return new BridgeBBox(Xmin, Ymin, Xmax + dx, Ymax + dy);
+    }
+
+    public BridgeBBox ExpandBottomLeftTopRight(double bottomLeftRatio, double topRightRatio)
+    {
+        if (bottomLeftRatio <= 0.0 && topRightRatio <= 0.0)
+        {
+            return this;
+        }
+
+        var leftDx = Width * Math.Max(0.0, bottomLeftRatio);
+        var bottomDy = Height * Math.Max(0.0, bottomLeftRatio);
+        var rightDx = Width * Math.Max(0.0, topRightRatio);
+        var topDy = Height * Math.Max(0.0, topRightRatio);
+        return new BridgeBBox(Xmin - leftDx, Ymin - bottomDy, Xmax + rightDx, Ymax + topDy);
     }
 
     public BridgeBBox ExpandMm(double left, double bottom, double right, double top)

@@ -581,7 +581,10 @@ internal sealed class PlotEngine
                     _task.Plot.MarginRightMm,
                     _task.Plot.MarginTopMm
                 )
-                : rawWindowBBox.ExpandTopRight(_task.Plot.PlotWindowTopRightExpandRatio);
+                : rawWindowBBox.ExpandBottomLeftTopRight(
+                    _task.Plot.PlotWindowBottomLeftExpandRatio,
+                    _task.Plot.PlotWindowTopRightExpandRatio
+                );
             var targetLandscape = rawWindowBBox.Width > rawWindowBBox.Height;
             var useRotatedOrientation = false;
             bool? mediaLandscape = null;
@@ -619,7 +622,7 @@ internal sealed class PlotEngine
                 ? (mediaLandscape.Value ? "landscape" : "portrait")
                 : "unknown";
             _trace.Log(
-                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} target_orientation={targetOrientation} media_orientation={mediaOrientation} rotate={(useRotatedOrientation ? 90 : 0)} window_source={(explicitWindowBBox != null ? "selection_extents" : "frame_bbox")} expand_tr_ratio={_task.Plot.PlotWindowTopRightExpandRatio:F6} margins_mm={_task.Plot.MarginLeftMm:F3},{_task.Plot.MarginBottomMm:F3},{_task.Plot.MarginRightMm:F3},{_task.Plot.MarginTopMm:F3} bbox_raw={rawWindowBBox.Width:F3}x{rawWindowBBox.Height:F3} bbox_raw_wcs={rawWindowBBox.Xmin:F3},{rawWindowBBox.Ymin:F3},{rawWindowBBox.Xmax:F3},{rawWindowBBox.Ymax:F3} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} bbox_wcs={windowBBox.Xmin:F3},{windowBBox.Ymin:F3},{windowBBox.Xmax:F3},{windowBBox.Ymax:F3} bbox_dcs={(windowDcs.HasValue ? $"{windowDcs.Value.MinPoint.X:F3},{windowDcs.Value.MinPoint.Y:F3},{windowDcs.Value.MaxPoint.X:F3},{windowDcs.Value.MaxPoint.Y:F3}" : "-")} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
+                $"[DOTNET][PLOT][BUILD] variant={paperVariantId} media={mediaName} area={areaMode} target_orientation={targetOrientation} media_orientation={mediaOrientation} rotate={(useRotatedOrientation ? 90 : 0)} window_source={(explicitWindowBBox != null ? "selection_extents" : "frame_bbox")} expand_bl_ratio={_task.Plot.PlotWindowBottomLeftExpandRatio:F6} expand_tr_ratio={_task.Plot.PlotWindowTopRightExpandRatio:F6} margins_mm={_task.Plot.MarginLeftMm:F3},{_task.Plot.MarginBottomMm:F3},{_task.Plot.MarginRightMm:F3},{_task.Plot.MarginTopMm:F3} bbox_raw={rawWindowBBox.Width:F3}x{rawWindowBBox.Height:F3} bbox_raw_wcs={rawWindowBBox.Xmin:F3},{rawWindowBBox.Ymin:F3},{rawWindowBBox.Xmax:F3},{rawWindowBBox.Ymax:F3} bbox={windowBBox.Width:F3}x{windowBBox.Height:F3} bbox_wcs={windowBBox.Xmin:F3},{windowBBox.Ymin:F3},{windowBBox.Xmax:F3},{windowBBox.Ymax:F3} bbox_dcs={(windowDcs.HasValue ? $"{windowDcs.Value.MinPoint.X:F3},{windowDcs.Value.MinPoint.Y:F3},{windowDcs.Value.MaxPoint.X:F3},{windowDcs.Value.MaxPoint.Y:F3}" : "-")} paper={paperWidthMm:F3}x{paperHeightMm:F3} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} scale_mode={_task.Plot.ScaleMode}"
             );
 
             plotInfo = new PlotInfo

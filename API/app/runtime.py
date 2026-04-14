@@ -714,8 +714,17 @@ class DeliverableApiRuntime:
                 (child.params for child in child_jobs if child.task_role == 'deliverable_main'),
                 child_jobs[0].params if child_jobs else {},
             )
+            shared_prep_project_no = next(
+                (
+                    str(child.params.get("source_project_no") or child.project_no or "").strip()
+                    for child in child_jobs
+                    if str(child.params.get("source_project_no") or child.project_no or "").strip()
+                ),
+                "",
+            )
             prep = self.shared_prep_service.prepare(
                 group_id=group.group_id,
+                project_no=shared_prep_project_no or None,
                 source_dwg=source_input,
                 shared_dir=shared_dir,
                 font_replace_policy=str(font_params.get("font_replace_policy") or "none"),
@@ -796,6 +805,7 @@ class DeliverableApiRuntime:
         )
         deliverable_prep = self.shared_prep_service.prepare(
             group_id=f'{group.group_id}-deliverable',
+            project_no=str(deliverable_job.project_no or "").strip() or None,
             source_dwg=replaced_dwg,
             shared_dir=deliverable_shared_dir,
             font_replace_policy=str(deliverable_job.params.get("font_replace_policy") or "none"),

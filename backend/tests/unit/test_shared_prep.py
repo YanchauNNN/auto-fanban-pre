@@ -27,6 +27,12 @@ class _FakeODA:
 
 
 class _FakeFrameDetector:
+    def __init__(self) -> None:
+        self.project_no: str | None = None
+
+    def set_project_no(self, project_no: str | None) -> None:
+        self.project_no = project_no
+
     def detect_frames(self, dxf_path: Path) -> list[Any]:
         return []
 
@@ -93,3 +99,28 @@ def test_shared_prep_allows_replace_missing_and_records_summary(tmp_path: Path) 
 
     assert prep.font_preflight_summary["replacement_font"] == "simsun.ttc"
     assert prep.font_preflight_summary["font_replacement_applied"] is True
+
+
+def test_shared_prep_sets_project_no_before_detection(tmp_path: Path) -> None:
+    service = _make_service(
+        {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 0,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        }
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    service.prepare(
+        group_id="g1",
+        project_no="1818",
+        source_dwg=source,
+        shared_dir=tmp_path / "shared",
+    )
+
+    assert service.frame_detector.project_no == "1818"

@@ -39,6 +39,7 @@ class SharedPrepService:
         self,
         *,
         group_id: str,
+        project_no: str | None = None,
         source_dwg: Path,
         shared_dir: Path,
         font_replace_policy: str = "none",
@@ -84,6 +85,7 @@ class SharedPrepService:
             raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
 
         dxf_path = self.oda.dwg_to_dxf(staged_source, shared_dir)
+        self.frame_detector.set_project_no(project_no)
         frames = self.frame_detector.detect_frames(dxf_path)
         for frame in frames:
             frame.runtime.cad_source_file = staged_source

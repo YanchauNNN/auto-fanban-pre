@@ -1,7 +1,3 @@
-"""
-FrameDetector 路由逻辑单元测试（模块2）
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,7 +23,6 @@ def test_detect_frames_routing(
     expected_attr: str,
     blocked_attr: str,
 ) -> None:
-    """验证 frame_detect_mode 正确路由到对应定位器"""
     detector = FrameDetector(frame_detect_mode=mode)
     called = {"hit": False}
 
@@ -38,23 +33,17 @@ def test_detect_frames_routing(
     def fake_blocked(_msp, _path):
         raise AssertionError(f"{blocked_attr} should not be called in {mode} mode")
 
-    monkeypatch.setattr(
-        getattr(detector, expected_attr),
-        "locate_frames",
-        fake_expected,
-    )
-    monkeypatch.setattr(
-        getattr(detector, blocked_attr),
-        "locate_frames",
-        fake_blocked,
-    )
+    monkeypatch.setattr(getattr(detector, expected_attr), "locate_frames", fake_expected)
+    monkeypatch.setattr(getattr(detector, blocked_attr), "locate_frames", fake_blocked)
 
     detector.detect_frames(sample_dxf_path)
+
     assert called["hit"]
 
 
 def test_detect_frames_missing_file_raises() -> None:
     detector = FrameDetector()
+
     with pytest.raises(DetectionError):
         detector.detect_frames(Path("missing-file.dxf"))
 
@@ -73,3 +62,13 @@ def test_frame_detector_uses_two_stage_layer_priority_groups() -> None:
 
     assert detector.anchor_locator.global_layers[:3] == ["_TSZ_PLOT_MARK", "_TSZ-PLOT_MARK", "TK"]
     assert detector.anchor_locator.local_only_layers[:2] == ["图框", "ttkk"]
+
+
+def test_frame_detector_set_project_no_propagates_to_locators() -> None:
+    detector = FrameDetector()
+
+    detector.set_project_no("1818")
+
+    assert detector.project_no == "1818"
+    assert detector.anchor_locator.project_no == "1818"
+    assert detector.anchor_calibrated_locator.project_no == "1818"
