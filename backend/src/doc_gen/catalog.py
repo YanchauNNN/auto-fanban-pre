@@ -143,6 +143,7 @@ class CatalogGenerator(ICatalogGenerator):
         last_row = max(start_row, current_row - 1)
         ws.print_area = f"$A$1:$I${last_row}"
         self._apply_detail_layout(ws, start_row, last_row)
+        self._repair_detail_grid_border_holes(ws, start_row, last_row)
 
         # 保存
         wb.save(output_path)
@@ -486,6 +487,46 @@ class CatalogGenerator(ICatalogGenerator):
             text = str(ws[f"E{row}"].value or "")
             line_count = self._estimate_wrapped_line_count(text, column_width)
             ws.row_dimensions[row].height = self._bucket_row_height_for_line_count(line_count)
+
+    def _repair_detail_grid_border_holes(self, ws, start_row: int, last_row: int) -> None:
+        if last_row <= start_row:
+            return
+
+        for row in range(start_row + 1, last_row + 1):
+            if row + 1 > ws.max_row:
+                continue
+            for column in range(1, 10):
+                cell = ws.cell(row=row, column=column)
+                if isinstance(cell, MergedCell):
+                    continue
+                if not self._border_is_empty(cell.border):
+                    continue
+
+                prev_cell = ws.cell(row=row - 1, column=column)
+                next_cell = ws.cell(row=row + 1, column=column)
+                if isinstance(prev_cell, MergedCell) or isinstance(next_cell, MergedCell):
+                    continue
+                if self._border_is_empty(prev_cell.border) or self._border_is_empty(next_cell.border):
+                    continue
+                if self._border_signature(prev_cell.border) != self._border_signature(next_cell.border):
+                    continue
+                cell.border = copy(prev_cell.border)
+
+    @staticmethod
+    def _border_is_empty(border) -> bool:
+        return all(
+            side.style is None
+            for side in (border.left, border.right, border.top, border.bottom)
+        )
+
+    @staticmethod
+    def _border_signature(border) -> tuple[str | None, str | None, str | None, str | None]:
+        return (
+            border.left.style,
+            border.right.style,
+            border.top.style,
+            border.bottom.style,
+        )
 
     def _refine_detail_layout_via_com(
         self,

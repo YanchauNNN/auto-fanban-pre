@@ -109,6 +109,7 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         raw_extracts: dict[str, Any] = {}
         fields = TitleblockFields()
+        claimed_item_ids: set[int] = set()
 
         for field_key, field_def in self.field_defs.items():
             roi_name = field_def.roi
@@ -126,8 +127,7 @@ class TitleblockExtractor(ITitleblockExtractor):
             )
             margin = 0.0 if field_key in self.point_only_fields else self.roi_margin_percent
             roi = self._expand_roi(roi, margin)
-            point_only = field_key in self.point_only_fields
-            roi_items = [t for t in text_items if self._item_in_roi(t, roi, use_bbox=not point_only)]
+            roi_items = self._claim_items_in_roi(text_items, roi, claimed_item_ids)
 
             if roi_name not in raw_extracts:
                 raw_extracts[roi_name] = [self._text_item_to_dict(t) for t in roi_items]
@@ -256,13 +256,16 @@ class TitleblockExtractor(ITitleblockExtractor):
         tol_base = float(getattr(profile, "tolerance", 0.5))
         margin_tol = min(roi.width, roi.height) * self.roi_margin_percent
         tol = max(tol_base * scale, margin_tol, 1.0)
+        roi_items = [item for item in items if self._item_in_roi(item, roi)]
         best_dist = None
         for item in items:
             if not self._match_any_text(item.text, self.anchor_texts):
                 continue
             dist = self._point_to_bbox_distance(item.x, item.y, roi)
             best_dist = dist if best_dist is None else min(best_dist, dist)
-        return best_dist is not None and best_dist <= tol
+        if best_dist is not None and best_dist <= tol:
+            return True
+        return self._match_joined_anchor_text(roi_items)
 
     @staticmethod
     def _point_to_bbox_distance(x: float, y: float, bbox: BBox) -> float:
@@ -287,7 +290,7 @@ class TitleblockExtractor(ITitleblockExtractor):
             frame.runtime.sx or 1.0,
             frame.runtime.sy or 1.0,
         )
-        roi_items = [t for t in items if self._item_in_roi(t, roi, use_bbox=True)]
+        roi_items = [t for t in items if self._item_in_roi(t, roi)]
         frame.raw_extracts = {
             "A4_page_marker": [self._text_item_to_dict(t) for t in roi_items]
         }
@@ -304,6 +307,31 @@ class TitleblockExtractor(ITitleblockExtractor):
                 "internal_code": marker_internal_code,
                 "revision": marker_revision,
             }
+
+    def _match_joined_anchor_text(self, items: list[TextItem]) -> bool:
+        if len(items) < 2 or not self.anchor_texts:
+            return False
+        candidates: list[str] = []
+        joined = self._join_text(items)
+        if joined:
+            candidates.append(joined)
+        lines = self._extract_title_lines(items)
+        if lines:
+            candidates.append(self.line_join.join(lines))
+            candidates.append(" ".join(lines))
+            candidates.append("".join(lines))
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = self._normalize_spaces(candidate)
+            if not normalized:
+                continue
+            dedupe_key = self._normalize_anchor(normalized)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            if self._match_any_text(normalized, self.anchor_texts):
+                return True
+        return False
 
     def _parse_page_marker_from_text(
         self, items: list[TextItem]
@@ -531,12 +559,35 @@ class TitleblockExtractor(ITitleblockExtractor):
         )
 
     @staticmethod
-    def _item_in_roi(item: TextItem, roi: BBox, *, use_bbox: bool) -> bool:
-        if roi.xmin <= item.x <= roi.xmax and roi.ymin <= item.y <= roi.ymax:
-            return True
-        if use_bbox and item.bbox:
-            return roi.intersects(item.bbox)
-        return False
+    def _item_reference_point(item: TextItem) -> tuple[float, float]:
+        if item.bbox is not None:
+            return (
+                (item.bbox.xmin + item.bbox.xmax) / 2.0,
+                (item.bbox.ymin + item.bbox.ymax) / 2.0,
+            )
+        return item.x, item.y
+
+    @classmethod
+    def _item_in_roi(cls, item: TextItem, roi: BBox) -> bool:
+        px, py = cls._item_reference_point(item)
+        return roi.xmin <= px <= roi.xmax and roi.ymin <= py <= roi.ymax
+
+    @classmethod
+    def _claim_items_in_roi(
+        cls,
+        items: list[TextItem],
+        roi: BBox,
+        claimed_item_ids: set[int],
+    ) -> list[TextItem]:
+        selected: list[TextItem] = []
+        for item in items:
+            item_id = id(item)
+            if item_id in claimed_item_ids:
+                continue
+            if cls._item_in_roi(item, roi):
+                selected.append(item)
+        claimed_item_ids.update(id(item) for item in selected)
+        return selected
 
     def _parse_internal_code(
         self, items: list[TextItem], parse_cfg: dict[str, Any]
@@ -588,25 +639,62 @@ class TitleblockExtractor(ITitleblockExtractor):
         fixed_len = int(parse_cfg.get("length", parse_cfg.get("fixed_len", 19)))
         header_hint = str(parse_cfg.get("header", "DOC.NO"))
 
-        # 优先尝试单字符重建（真实外部编码通常逐字符存储）
+        best_match = None
+        best_score = None
+        for candidate in self._external_code_candidates(items, header_hint):
+            for i in range(max(0, len(candidate) - fixed_len + 1)):
+                sub = candidate[i : i + fixed_len]
+                if len(sub) != fixed_len or not self._is_valid_external_code(sub):
+                    continue
+                score = (0 if sub[:1].isalpha() else 1, i, len(candidate) - fixed_len)
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_match = sub
+        if best_match:
+            return best_match
+
         rebuilt = self._rebuild_fixed19_from_single_chars(items, fixed_len, header_hint)
         if rebuilt and self._is_valid_external_code(rebuilt):
             return rebuilt
 
-        # 回退：从拼接文本中提取
-        joined = self._join_text(items)
-        cleaned = self._clean_alnum(joined.upper())
-        header_clean = self._clean_alnum(header_hint.upper())
-        if header_clean and cleaned.startswith(header_clean):
-            cleaned = cleaned[len(header_clean):]
-        if len(cleaned) == fixed_len and self._is_valid_external_code(cleaned):
-            return cleaned
-        for i in range(max(0, len(cleaned) - fixed_len + 1)):
-            sub = cleaned[i : i + fixed_len]
-            if len(sub) == fixed_len and self._is_valid_external_code(sub):
-                return sub
-
         return None
+
+    def _external_code_candidates(self, items: list[TextItem], header_hint: str) -> list[str]:
+        candidates: list[str] = []
+
+        ordered_items = sorted(items, key=lambda t: (t.x, t.y))
+        joined_all = "".join((t.text or "") for t in ordered_items)
+        normalized_all = self._normalize_external_candidate(joined_all, header_hint)
+        if normalized_all:
+            candidates.append(normalized_all)
+
+        for line in self._cluster_by_y(items, self.y_cluster_abs):
+            ordered = sorted(line, key=lambda t: t.x)
+            joined = "".join((t.text or "") for t in ordered)
+            normalized = self._normalize_external_candidate(joined, header_hint)
+            if normalized:
+                candidates.append(normalized)
+
+        for candidate in self._candidate_strings(items):
+            normalized = self._normalize_external_candidate(candidate, header_hint)
+            if normalized:
+                candidates.append(normalized)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            deduped.append(candidate)
+        return deduped
+
+    def _normalize_external_candidate(self, text: str, header_hint: str) -> str:
+        cleaned = self._clean_alnum(self._normalize_spaces(text).upper())
+        header_clean = self._clean_alnum(header_hint.upper())
+        if header_clean:
+            cleaned = cleaned.replace(header_clean, "", 1)
+        return cleaned
 
     @classmethod
     def _is_valid_external_code(cls, code: str) -> bool:
@@ -872,21 +960,10 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _rebuild_fixed19_from_single_chars(
         self, items: list[TextItem], fixed_len: int, header_hint: str
     ) -> str | None:
-        header_clean = self._clean_alnum(header_hint.upper())
-        header_xmax = None
-        if header_clean:
-            for it in items:
-                it_clean = self._clean_alnum((it.text or "").upper())
-                if header_clean and header_clean in it_clean:
-                    xmax = it.bbox.xmax if it.bbox is not None else it.x
-                    header_xmax = xmax if header_xmax is None else max(header_xmax, xmax)
-
         tokens: list[tuple[float, float, str]] = []
         for it in items:
-            s = self._clean_alnum((it.text or "").upper())
+            s = self._normalize_external_candidate(it.text or "", header_hint)
             if len(s) == 1:
-                if header_xmax is not None and it.x <= header_xmax + 1e-3:
-                    continue
                 tokens.append((it.x, it.y, s))
         tokens.sort(key=lambda t: t[0])
         if len(tokens) < fixed_len:

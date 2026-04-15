@@ -318,14 +318,14 @@ doc_generation:
       ied_fu_flag:       { type: str, required: false, source: frontend, default: "N",  desc: "FU标记(R列)" }
       ied_internal_tag:  { type: str, required: false, source: frontend, default: "否", desc: "内部标识(U列)" }
       
-      # --- 编审链（发布状态必填，格式: 姓名@ID / YYYY-MM-DD） ---
+      # --- 编审链（除工种负责人及其审核日期外，发布状态必填，格式: 姓名@ID / YYYY-MM-DD） ---
       ied_prepared_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
       ied_prepared_by_2:         { type: str,  required: false,                       source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
       ied_prepared_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
       ied_checked_by:            { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
       ied_checked_date:          { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
-      ied_discipline_leader:     { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
-      ied_discipline_leader_date: { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
+      ied_discipline_leader:     { type: str,  required: false,                       source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
+      ied_discipline_leader_date: { type: str,  required: false,                       source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
       ied_reviewed_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }
       ied_reviewed_date:         { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "YYYY-MM-DD", desc: "点击“当日”自动填入今天日期" }
       ied_approved_by:           { type: str,  required_when: "ied_status == '发布'", source: frontend, format: "姓名@ID",    desc: "例如：王任超@wangrca" }

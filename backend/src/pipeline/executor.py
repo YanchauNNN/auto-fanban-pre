@@ -54,6 +54,7 @@ from ..models import (
     normalize_discipline_label,
     normalize_global_doc_params,
 )
+from .frame_filtering import split_anchor_valid_frames
 from .packager import Packager
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
@@ -145,16 +146,18 @@ class PipelineExecutor:
         shared_prep_dir = str(job.params.get("shared_prep_dir") or "").strip()
         if shared_prep_dir:
             prep = SharedPrepService.load(Path(shared_prep_dir))
+            frames, excluded_frames = split_anchor_valid_frames(prep.frames)
             context: dict[str, Any] = {
                 "dxf_files": [prep.source_converted_dxf],
                 "dxf_to_dwg": {
                     str(prep.source_converted_dxf.resolve()): prep.source_input_dwg.resolve(),
                 },
-                "frames": prep.frames,
+                "frames": frames,
                 "sheet_sets": prep.sheet_sets,
                 "same_code_multipage_families": [],
                 "cad_dxf_results": {},
                 "shared_prep_dir": str(prep.shared_dir),
+                "excluded_frames": excluded_frames,
             }
             allowed = {
                 StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
@@ -504,6 +507,14 @@ class PipelineExecutor:
             except Exception as e:
                 logger.warning(f"字段提取失败: {frame.frame_id}: {e}")
                 frame.add_flag("提取失败")
+
+        effective_frames, excluded_frames = split_anchor_valid_frames(context["frames"])
+        context["frames"] = effective_frames
+        existing_excluded = context.setdefault("excluded_frames", [])
+        if isinstance(existing_excluded, list):
+            existing_excluded.extend(excluded_frames)
+        job.progress.details["frames_total"] = len(effective_frames)
+        job.progress.details["frames_anchor_invalid_filtered"] = len(excluded_frames)
 
     def _stage_a4_grouping(self, job: Job, context: dict) -> None:
         remaining, sheet_sets = self.a4_grouper.group_a4_pages(context["frames"])

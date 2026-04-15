@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.models import Job, JobStatus, JobType
+from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.stages import DELIVERABLE_STAGES, StageEnum
 
@@ -228,3 +228,38 @@ def test_stage_detect_frames_sets_project_no_before_detection(tmp_path: Path) ->
     PipelineExecutor._stage_detect_frames(executor, job, context)
 
     assert executor.frame_detector.detect_calls == [(dxf_path, "1818")]
+
+
+def test_stage_extract_fields_drops_frames_with_anchor_validation_failure(tmp_path: Path) -> None:
+    class _FlaggingExtractor:
+        def extract_fields(self, dxf_path: Path, frame: FrameMeta) -> None:
+            if frame.frame_id == "invalid-frame":
+                frame.add_flag("未命中锚点文本")
+
+    executor = object.__new__(PipelineExecutor)
+    executor.titleblock_extractor = _FlaggingExtractor()
+    executor._update_progress = MagicMock()
+
+    dxf_path = tmp_path / "sample.dxf"
+    dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+    valid_frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="valid-frame",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+        ),
+    )
+    invalid_frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="invalid-frame",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+        ),
+    )
+    job = Job(job_id="job-filter-invalid-frames", job_type=JobType.DELIVERABLE, project_no="1818")
+    context = {"frames": [valid_frame, invalid_frame]}
+
+    PipelineExecutor._stage_extract_fields(executor, job, context)
+
+    assert [frame.frame_id for frame in context["frames"]] == ["valid-frame"]
+    assert job.progress.details["frames_anchor_invalid_filtered"] == 1

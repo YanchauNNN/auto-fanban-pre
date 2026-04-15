@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 
+from src.models import BBox, FrameMeta, FrameRuntime
 from src.pipeline.shared_prep import SharedPrepService
 
 
@@ -27,14 +28,15 @@ class _FakeODA:
 
 
 class _FakeFrameDetector:
-    def __init__(self) -> None:
+    def __init__(self, frames: list[Any] | None = None) -> None:
         self.project_no: str | None = None
+        self.frames = list(frames or [])
 
     def set_project_no(self, project_no: str | None) -> None:
         self.project_no = project_no
 
     def detect_frames(self, dxf_path: Path) -> list[Any]:
-        return []
+        return list(self.frames)
 
 
 class _FakeTitleblockExtractor:
@@ -54,6 +56,16 @@ def _make_service(summary: dict[str, Any]) -> SharedPrepService:
     service.titleblock_extractor = cast(Any, _FakeTitleblockExtractor())
     service.a4_grouper = cast(Any, _FakeA4Grouper())
     return service
+
+
+def _make_frame(frame_id: str) -> FrameMeta:
+    return FrameMeta(
+        runtime=FrameRuntime(
+            frame_id=frame_id,
+            source_file=Path("sample.dxf"),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+        ),
+    )
 
 
 def test_shared_prep_blocks_when_missing_fonts_are_unconfirmed(tmp_path: Path) -> None:
@@ -124,3 +136,40 @@ def test_shared_prep_sets_project_no_before_detection(tmp_path: Path) -> None:
     )
 
     assert service.frame_detector.project_no == "1818"
+
+
+def test_shared_prep_filters_out_frames_that_failed_anchor_validation(tmp_path: Path) -> None:
+    service = _make_service(
+        {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 0,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        }
+    )
+    valid_frame = _make_frame("valid-frame")
+    invalid_frame = _make_frame("invalid-frame")
+    service.frame_detector = cast(Any, _FakeFrameDetector([valid_frame, invalid_frame]))
+
+    class _FlaggingExtractor(_FakeTitleblockExtractor):
+        def extract_fields(self, dxf_path: Path, frame: Any) -> None:
+            if frame.frame_id == "invalid-frame":
+                frame.add_flag("未命中锚点文本")
+
+    service.titleblock_extractor = cast(Any, _FlaggingExtractor())
+
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    prep = service.prepare(
+        group_id="g1",
+        project_no="1818",
+        source_dwg=source,
+        shared_dir=tmp_path / "shared",
+    )
+
+    assert [frame.frame_id for frame in prep.frames] == ["valid-frame"]
+    assert (prep.shared_dir / "excluded_frames.json").exists()

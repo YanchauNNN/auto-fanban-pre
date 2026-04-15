@@ -14,6 +14,7 @@ from ..cad import (
     TitleblockExtractor,
 )
 from ..models import FrameMeta, SheetSet
+from .frame_filtering import split_anchor_valid_frames
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,7 @@ class SharedPrepService:
         for frame in frames:
             frame.runtime.cad_source_file = staged_source
             self.titleblock_extractor.extract_fields(dxf_path, frame)
+        frames, excluded_frames = split_anchor_valid_frames(frames)
         frames, sheet_sets = self.a4_grouper.group_a4_pages(frames)
         self.same_code_multipage_grouper.group_frames(frames)
 
@@ -110,10 +112,15 @@ class SharedPrepService:
             ],
         )
         self._write_json(
+            shared_dir / "excluded_frames.json",
+            [frame.model_dump(mode="json") for frame in excluded_frames],
+        )
+        self._write_json(
             shared_dir / "audit_roi_context.json",
             {
                 "group_id": group_id,
                 "frames_total": len(frames),
+                "excluded_frames_total": len(excluded_frames),
                 "sheet_sets_total": len(sheet_sets),
                 "source_input_dwg": str(staged_source),
                 "source_converted_dxf": str(dxf_path),
@@ -127,6 +134,7 @@ class SharedPrepService:
                 "source_converted_dxf": str(dxf_path),
                 "font_preflight_summary": font_preflight_summary,
                 "frames_total": len(frames),
+                "excluded_frames_total": len(excluded_frames),
                 "sheet_sets_total": len(sheet_sets),
             },
         )

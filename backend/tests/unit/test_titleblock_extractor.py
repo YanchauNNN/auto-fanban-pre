@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import ezdxf
 
@@ -97,6 +98,78 @@ def test_parse_external_code_ignores_isolated_right_side_digit_noise() -> None:
             x=400.0,
             y=0.0,
             bbox=BBox(xmin=400.0, ymin=0.0, xmax=402.0, ymax=2.0),
+        )
+    )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
+def test_parse_external_code_keeps_leading_letter_close_to_docno_header() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "JD2RSH12024B25C42SD"
+    items = [_item("DOC.NO", x=0.0, y=0.0, bbox=BBox(xmin=0.0, ymin=0.0, xmax=8.0, ymax=2.0))]
+    for idx, char in enumerate(expected):
+        # first letter intentionally hugs the DOC.NO bbox boundary
+        x = 8.0005 + idx * 10.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=0.0,
+                bbox=BBox(xmin=x, ymin=0.0, xmax=x + 2.0, ymax=2.0),
+            )
+        )
+    items.append(
+        _item(
+            "8",
+            x=400.0,
+            y=0.0,
+            bbox=BBox(xmin=400.0, ymin=0.0, xmax=402.0, ymax=2.0),
+        )
+    )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
+def test_parse_external_code_prefers_x_order_when_characters_have_y_jitter() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "PC5NBT40001B25C42SD"
+    items = [
+        _item(
+            "DOC.NO",
+            x=0.0,
+            y=0.0,
+            bbox=BBox(xmin=0.0, ymin=0.0, xmax=12.0, ymax=2.0),
+        )
+    ]
+    for idx, char in enumerate(expected):
+        x = 12.0005 + idx * 8.0
+        if idx == 0:
+            y = 7.1
+        elif idx == 15:
+            y = 21.0
+        else:
+            y = 0.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=y,
+                bbox=BBox(xmin=x, ymin=y, xmax=x + 2.0, ymax=y + 2.0),
+            )
+        )
+    items.append(
+        _item(
+            "8",
+            x=200.0,
+            y=0.0,
+            bbox=BBox(xmin=200.0, ymin=0.0, xmax=202.0, ymax=2.0),
         )
     )
 
@@ -225,6 +298,63 @@ def test_scale_mismatch_flag() -> None:
     assert extractor.scale_mismatch_flag in frame.runtime.flags
 
 
+def test_item_in_roi_uses_bbox_center_instead_of_bbox_overlap() -> None:
+    extractor = TitleblockExtractor()
+    roi = BBox(xmin=0.0, ymin=0.0, xmax=10.0, ymax=10.0)
+    item = _item(
+        "Page",
+        x=12.0,
+        y=5.0,
+        bbox=BBox(xmin=8.0, ymin=4.0, xmax=16.0, ymax=6.0),
+    )
+
+    assert extractor._item_in_roi(item, roi) is False
+
+
+def test_claim_items_in_roi_is_exclusive_across_overlapping_fields() -> None:
+    extractor = TitleblockExtractor()
+    item = _item(
+        "OVERLAP",
+        x=50.0,
+        y=50.0,
+        bbox=BBox(xmin=45.0, ymin=45.0, xmax=55.0, ymax=55.0),
+    )
+    claimed: set[int] = set()
+
+    first = extractor._claim_items_in_roi([item], BBox(xmin=0.0, ymin=0.0, xmax=100.0, ymax=100.0), claimed)
+    second = extractor._claim_items_in_roi([item], BBox(xmin=40.0, ymin=40.0, xmax=60.0, ymax=60.0), claimed)
+
+    assert first == [item]
+    assert second == []
+
+
+def test_frame_has_anchor_text_matches_joined_fragments_in_anchor_roi() -> None:
+    extractor = TitleblockExtractor()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f-anchor",
+            source_file=Path("sample.dxf"),
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=100.0, ymax=50.0),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        )
+    )
+    profile = SimpleNamespace(
+        fields={"锚点": [0.0, 40.0, 10.0, 30.0]},
+        tolerance=0.5,
+    )
+    items = [
+        _item("本文件产权属中国核电工程有限公司（", x=61.0, y=20.0),
+        _item("CNPE", x=78.0, y=20.0),
+        _item("）所有，未经书面许可，不得以任何方式复制、传播、发表和外传。", x=83.0, y=20.0),
+    ]
+
+    matched = extractor._frame_has_anchor_text(items, frame, profile, "BASE10")
+
+    assert matched is True
+
+
 def test_extract_fields_reuses_loaded_text_items_for_same_dxf(
     tmp_path, monkeypatch
 ) -> None:
@@ -266,6 +396,65 @@ def test_extract_fields_reuses_loaded_text_items_for_same_dxf(
     extractor.extract_fields(dxf_path, frame2)
 
     assert calls["count"] == 1
+
+
+def test_extract_fields_keeps_page_fragments_out_of_title_roi(tmp_path, monkeypatch) -> None:
+    dxf_path = tmp_path / "sample.dxf"
+    ezdxf.new("R2018").saveas(dxf_path)
+
+    extractor = TitleblockExtractor()
+    extractor.anchor_texts = []
+
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f-title",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=150.0),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        )
+    )
+
+    items = [
+        _item(
+            "16.50m 标高门标识平面图",
+            x=80.0,
+            y=35.0,
+            bbox=BBox(xmin=80.0, ymin=34.0, xmax=120.0, ymax=38.0),
+        ),
+        _item(
+            "NB level 16.50m Doors Numbering Plan",
+            x=80.0,
+            y=24.0,
+            bbox=BBox(xmin=80.0, ymin=22.0, xmax=150.0, ymax=26.0),
+        ),
+        _item(
+            "Page",
+            x=165.0,
+            y=12.0,
+            bbox=BBox(xmin=160.0, ymin=11.0, xmax=170.0, ymax=13.0),
+        ),
+        _item(
+            "第",
+            x=165.0,
+            y=16.0,
+            bbox=BBox(xmin=160.0, ymin=15.0, xmax=170.0, ymax=17.0),
+        ),
+    ]
+
+    monkeypatch.setattr(extractor, "_load_text_items", lambda _path: items)
+
+    extractor.extract_fields(dxf_path, frame)
+
+    title_items = frame.raw_extracts["图纸标题"]
+    page_items = frame.raw_extracts["张数"]
+
+    assert [item["text"] for item in title_items] == [
+        "16.50m 标高门标识平面图",
+        "NB level 16.50m Doors Numbering Plan",
+    ]
+    assert [item["text"] for item in page_items] == ["Page", "第"]
 
 
 def test_parse_a4_page_marker_from_fragmented_coordinate_tokens() -> None:

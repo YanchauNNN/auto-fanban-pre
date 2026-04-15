@@ -383,3 +383,26 @@ def test_catalog_enables_shrink_to_fit_when_1818_header_still_overflows() -> Non
     assert ws["D2"].font.sz == 5
     assert ws["D2"].alignment.shrinkToFit is True
 
+
+def test_catalog_repairs_missing_detail_grid_borders_from_template_holes(tmp_path: Path) -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    ctx.frames = [_make_frame(seq) for seq in (5, 1, 3, 2, 4)]
+    bindings = gen.spec.get_catalog_bindings()
+    template_path = next((Path(__file__).resolve().parents[3] / "documents_bin").glob("*1818*目录*.xlsx"))
+    output_xlsx = tmp_path / "catalog-1818-border-repair.xlsx"
+
+    gen._write_catalog(
+        template_path=str(template_path),
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["A15"].border.left.style == "thin"
+    assert ws["A15"].border.right.style == "thin"
+    assert ws["A15"].border.top.style == "thin"
+    assert ws["A15"].border.bottom.style == "thin"
+
