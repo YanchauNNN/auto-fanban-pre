@@ -229,6 +229,40 @@ def test_stage_generate_docs_raises_on_doc_param_validation_errors(tmp_path: Pat
     assert job.artifacts.ied_xlsx is None
 
 
+def test_stage_generate_docs_skips_ied_when_disabled(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.doc_param_validator = cast(Any, SimpleNamespace(validate=lambda ctx: []))
+    executor.derivation = cast(Any, SimpleNamespace(compute=lambda ctx: ctx.derived))
+    executor.cover_gen = MagicMock()
+    executor.catalog_gen = MagicMock()
+    executor.design_gen = MagicMock()
+    executor.ied_gen = MagicMock()
+    executor._build_doc_context = MagicMock(
+        return_value=DocContext(
+            params=GlobalDocParams(project_no="2026", include_ied_plan=False),
+            frames=[],
+            sheet_sets=[],
+        )
+    )
+
+    job = Job(
+        job_id="job-doc-no-ied",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+        params={"include_ied_plan": False},
+    )
+
+    PipelineExecutor._stage_generate_docs(executor, job, {"frames": [], "sheet_sets": []})
+
+    executor.cover_gen.generate.assert_called_once()
+    executor.catalog_gen.generate.assert_called_once()
+    executor.design_gen.generate.assert_called_once()
+    executor.ied_gen.generate.assert_not_called()
+    assert job.artifacts.ied_xlsx is None
+
+
 def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path: Path) -> None:
     executor = object.__new__(PipelineExecutor)
     executor._update_progress = MagicMock()

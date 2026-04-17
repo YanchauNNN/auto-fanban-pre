@@ -233,6 +233,19 @@ def test_parse_title_bilingual_keeps_english_bill_of_material_with_cjk_index() -
     assert title_en == "5NE 8.450 and 8.450~12.950m Prefabricated Stairs\nBill of Material（一）"
 
 
+def test_parse_title_bilingual_treats_compact_alnum_prefix_as_chinese_title() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("2KA", x=10.0, y=120.0),
+        _item("\u6a21\u677f\u56fe", x=10.0, y=110.0),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "2KA\n\u6a21\u677f\u56fe"
+    assert title_en is None
+
+
 def test_parse_page_info_with_x() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse

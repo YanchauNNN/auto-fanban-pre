@@ -111,6 +111,7 @@ class GlobalDocParams(BaseModel):
     qa_required: str = "否"
     qa_engineer: str | None = None
     work_hours: str = "100"
+    include_ied_plan: bool = True
 
     # === IED参数（部分） ===
     ied_status: str = "发布"

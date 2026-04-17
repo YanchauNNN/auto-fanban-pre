@@ -245,6 +245,14 @@ doc_generation:
         required: true
         source: frontend
         desc: "WBS编码，全图册共用"
+      include_ied_plan:
+        type: bool
+        required: false
+        source: frontend
+        default: true
+        desc: "是否生成IED计划并开放下载，默认包含"
+        ui:
+          widget: checkbox
       
       system_code:       { type: str, required: false, source: frontend, default: "NA", desc: "系统代码" }
       system_name:       { type: str, required: false, source: frontend, default: "NA", desc: "系统名称" }

@@ -1712,9 +1712,12 @@ class CADDXFExecutor:
         internal = (internal_code or "").strip()
 
         if external and internal:
-            prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
-            if same_code_suffix:
-                prefix = f"{prefix}{same_code_suffix}"
+            prefix = external
+            if rev and doc_status:
+                prefix = f"{prefix}{rev}"
+                if same_code_suffix:
+                    prefix = f"{prefix}{same_code_suffix}"
+                prefix = f"{prefix}{doc_status}"
             return f"{prefix} ({internal})"
         if internal:
             return internal

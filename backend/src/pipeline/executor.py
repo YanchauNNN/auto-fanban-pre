@@ -789,9 +789,6 @@ class PipelineExecutor:
         work_dir = self._require_work_dir(job)
         docs_dir = work_dir / "output" / "docs"
         docs_dir.mkdir(parents=True, exist_ok=True)
-        ied_dir = work_dir / "ied"
-        ied_dir.mkdir(parents=True, exist_ok=True)
-
         doc_ctx = self._build_doc_context(job, context)
         validation_errors = self.doc_param_validator.validate(doc_ctx)
         if validation_errors:
@@ -831,8 +828,14 @@ class PipelineExecutor:
 
         try:
             self._update_progress(job, message="生成IED中")
-            ied_xlsx = self.ied_gen.generate(doc_ctx, ied_dir)
-            job.artifacts.ied_xlsx = ied_xlsx
+            if not doc_ctx.params.include_ied_plan:
+                job.artifacts.ied_xlsx = None
+            else:
+                ied_dir = work_dir / "ied"
+                ied_dir.mkdir(parents=True, exist_ok=True)
+                ied_xlsx = self.ied_gen.generate(doc_ctx, ied_dir)
+            if doc_ctx.params.include_ied_plan:
+                job.artifacts.ied_xlsx = ied_xlsx
         except Exception as e:
             logger.error(f"IED生成失败: {e}")
             job.add_flag("IED生成失败")

@@ -764,7 +764,9 @@ class TitleblockExtractor(ITitleblockExtractor):
         en_lines: list[str] = []
         for line in lines:
             normalized = self._normalize_spaces(line)
-            if self._looks_like_english_title_line(normalized):
+            if self._looks_like_compact_cn_title_token(normalized):
+                cn_lines.append(normalized)
+            elif self._looks_like_english_title_line(normalized):
                 en_lines.append(normalized)
             elif self._has_cjk(normalized):
                 cn_lines.append(normalized)
@@ -882,6 +884,11 @@ class TitleblockExtractor(ITitleblockExtractor):
             text,
         )
         return not cls._has_cjk(stripped)
+
+    @staticmethod
+    def _looks_like_compact_cn_title_token(text: str) -> bool:
+        normalized = text.strip().upper()
+        return re.fullmatch(r"[0-9]{1,2}[A-Z]{1,4}", normalized) is not None
 
     @staticmethod
     def _normalize_spaces(text: str) -> str:

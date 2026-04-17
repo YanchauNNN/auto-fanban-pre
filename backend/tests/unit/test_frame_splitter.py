@@ -310,6 +310,22 @@ class TestOutputNaming:
         )
         assert output_name_for_frame(frame) == "EXT19CHARS0000001XXBCFC (AAA-BBB-001)"
 
+    def test_output_name_for_frame_places_same_code_suffix_before_status(self):
+        frame = _make_frame(
+            internal_code="AAA-BBB-001",
+            external_code="EXT19CHARS0000001XX",
+            revision="B",
+            status="CFC",
+        )
+        frame.titleblock.page_index = 1
+        frame.titleblock.page_total = 2
+        frame.raw_extracts["same_code_multipage"] = {
+            "family_id": "family-001",
+            "page_index": 1,
+            "page_total": 2,
+        }
+        assert output_name_for_frame(frame) == "EXT19CHARS0000001XXB1@2CFC (AAA-BBB-001)"
+
     def test_output_name_for_sheet_set(self):
         ss = _make_sheet_set(
             master_internal="AAA-BBB-001",

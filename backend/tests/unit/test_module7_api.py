@@ -249,11 +249,13 @@ class FakeJobProcessor:
         ied_xlsx = job.work_dir / "ied" / "IED计划.xlsx"
         drawings_dir = job.work_dir / "output" / "drawings"
         docs_dir = job.work_dir / "output" / "docs"
-        ied_xlsx.parent.mkdir(parents=True, exist_ok=True)
         drawings_dir.mkdir(parents=True, exist_ok=True)
         docs_dir.mkdir(parents=True, exist_ok=True)
         package_zip.write_bytes(b"PK\x03\x04test")
-        ied_xlsx.write_bytes(b"ied")
+        include_ied_plan = job.params.get("include_ied_plan", True)
+        if bool(include_ied_plan):
+            ied_xlsx.parent.mkdir(parents=True, exist_ok=True)
+            ied_xlsx.write_bytes(b"ied")
         (drawings_dir / "drawing-001.dwg").write_bytes(b"dwg")
         (drawings_dir / "drawing-001.pdf").write_bytes(b"pdf")
         (drawings_dir / "drawing-002.pdf").write_bytes(b"pdf")
@@ -321,7 +323,7 @@ class FakeJobProcessor:
         )
 
         job.artifacts.package_zip = package_zip
-        job.artifacts.ied_xlsx = ied_xlsx
+        job.artifacts.ied_xlsx = ied_xlsx if bool(include_ied_plan) else None
         job.artifacts.drawings_dir = drawings_dir
         job.artifacts.docs_dir = docs_dir
         job.flags = [
@@ -568,6 +570,12 @@ def test_form_schema_returns_deliverable_fields_and_options(
         for field in section["fields"]
         if field["key"] == "ied_person_qual_category"
     )
+    include_ied_plan = next(
+        field
+        for section in payload["deliverable"]["sections"]
+        for field in section["fields"]
+        if field["key"] == "include_ied_plan"
+    )
 
     assert "2016" in project_no["options"]
     assert project_no["required"] is False
@@ -599,6 +607,8 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "核安全承压机械设备-民用-甲级",
         "核安全承压机械设备-民用-乙级",
     ]
+    assert include_ied_plan["type"] == "checkbox"
+    assert include_ied_plan["default"] is True
 
 
 def test_create_batch_requires_ied_publish_fields_when_status_is_publish(
@@ -1304,6 +1314,31 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         ied_download = client.get(f"/api/jobs/{job_id}/download/ied")
         assert ied_download.status_code == 200
         assert ied_download.content == b"ied"
+
+
+def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    params = _deliverable_params()
+    params["include_ied_plan"] = False
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+            files=[("files[]", ("A01.dwg", b"dwg-a", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["jobs"][0]["job_id"]
+        final_detail = _poll_job(client, job_id)
+        assert final_detail["status"] == "succeeded"
+        assert final_detail["artifacts"]["ied_available"] is False
+        assert final_detail["artifacts"]["ied_download_url"] is None
+
+        ied_download = client.get(f"/api/jobs/{job_id}/download/ied")
+        assert ied_download.status_code == 404
 
 
 class FakeSharedPrepService(SharedPrepService):

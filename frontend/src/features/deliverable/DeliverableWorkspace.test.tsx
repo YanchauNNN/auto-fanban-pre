@@ -148,6 +148,30 @@ const schema: FormSchema = {
   auditReplaceProjectOptions: ["2016", "2035"],
 };
 
+const schemaWithIedPlan: FormSchema = {
+  ...schema,
+  sections: schema.sections.map((section) =>
+    section.id === "ied"
+      ? {
+          ...section,
+          fields: [
+            {
+              key: "include_ied_plan",
+              label: "包含 IED 计划",
+              type: "checkbox",
+              required: false,
+              requiredWhen: null,
+              defaultValue: "true",
+              description: "勾选后生成 IED 计划并提供下载。",
+              options: [],
+            },
+            ...section.fields,
+          ],
+        }
+      : section,
+  ),
+};
+
 function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
@@ -612,6 +636,134 @@ describe("DeliverableWorkspace", () => {
     expect(
       vi.mocked(adapter.preflightFonts).mock.invocationCallOrder[0],
     ).toBeLessThan(vi.mocked(adapter.createBatch).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
+  });
+
+  it("renders the IED plan toggle as checked by default and submits a boolean true", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacementFonts: {},
+          replacedStyleCount: 0,
+          verifyAfterReplace: null,
+          fontReplacementIncomplete: false,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      replacementOptionsByKind: {},
+      defaultReplacementFont: null,
+      defaultReplacementFonts: {},
+      requiresConfirmation: false,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-ied-default",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithIedPlan}
+      />,
+    );
+
+    expect(await screen.findByLabelText("包含 IED 计划")).toBeChecked();
+    await user.type(screen.getByLabelText(albumTitleLabel), "ied-plan-default");
+    await user.type(screen.getByLabelText(subitemNameLabel), "ied-plan-default-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_ied_plan: true,
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+
+    const submittedValues = vi.mocked(adapter.createBatch).mock.calls[0]?.[0] ?? {};
+    expect(submittedValues.include_ied_plan).toBe(true);
+  });
+
+  it("submits a boolean false when the IED plan toggle is unchecked", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacementFonts: {},
+          replacedStyleCount: 0,
+          verifyAfterReplace: null,
+          fontReplacementIncomplete: false,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      replacementOptionsByKind: {},
+      defaultReplacementFont: null,
+      defaultReplacementFonts: {},
+      requiresConfirmation: false,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-ied-off",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithIedPlan}
+      />,
+    );
+
+    const includeIedPlan = await screen.findByLabelText("包含 IED 计划");
+    expect(includeIedPlan).toBeChecked();
+    await user.click(includeIedPlan);
+    expect(includeIedPlan).not.toBeChecked();
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "ied-plan-off");
+    await user.type(screen.getByLabelText(subitemNameLabel), "ied-plan-off-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_ied_plan: false,
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+
+    const submittedValues = vi.mocked(adapter.createBatch).mock.calls[0]?.[0] ?? {};
+    expect(submittedValues.include_ied_plan).toBe(false);
   });
 
   it("opens a missing-font confirmation dialog and submits with the chosen replacement font", async () => {

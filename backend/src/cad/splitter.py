@@ -11,7 +11,7 @@
   3. 无法判定 → 保守保留（硬约束：图框范围内图素零误删）
 
 命名规则（强约束）:
-  输出 pdf/dwg 文件名 = external_code+revision+status (internal_code)
+  输出 pdf/dwg 文件名 = external_code+revision+same_code_suffix+status (internal_code)
 """
 
 from __future__ import annotations
@@ -74,9 +74,12 @@ def make_output_name(
     internal = (internal_code or "").strip()
 
     if external and internal:
-        prefix = f"{external}{rev}{doc_status}" if rev and doc_status else external
-        if same_code_suffix:
-            prefix = f"{prefix}{same_code_suffix}"
+        prefix = external
+        if rev and doc_status:
+            prefix = f"{prefix}{rev}"
+            if same_code_suffix:
+                prefix = f"{prefix}{same_code_suffix}"
+            prefix = f"{prefix}{doc_status}"
         return f"{prefix} ({internal})"
     if internal:
         return internal

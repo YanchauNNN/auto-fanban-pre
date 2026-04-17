@@ -1693,7 +1693,9 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <h2>聚合下载</h2>
         <div className={styles.downloadGrid}>
           <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
-          <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
+          {detail.artifacts.iedAvailable ? (
+            <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
+          ) : null}
           <ArtifactButton
             href={detail.artifacts.reportDownloadUrl ?? undefined}
             label="下载 report.xlsx"
@@ -2155,11 +2157,15 @@ function renderArtifactButtons(job: JobSummary, scope: "default" | "child" = "de
         key="package"
         label={labels.package}
       />,
-      <ArtifactButton
-        href={job.artifacts.iedDownloadUrl ?? undefined}
-        key="ied"
-        label={labels.ied}
-      />,
+      ...(job.artifacts.iedAvailable
+        ? [
+            <ArtifactButton
+              href={job.artifacts.iedDownloadUrl ?? undefined}
+              key="ied"
+              label={labels.ied}
+            />,
+          ]
+        : []),
     ];
   }
 

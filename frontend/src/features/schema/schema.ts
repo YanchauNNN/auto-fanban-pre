@@ -7,7 +7,7 @@ type RawField = {
   required: boolean;
   required_when: string | null;
   source?: string | null;
-  default: string | null;
+  default: string | boolean | null;
   format: string | null;
   desc: string;
   options: readonly string[];
@@ -227,13 +227,23 @@ export function buildRecommendedProjectNos(
 }
 
 function normalizeField(field: RawField): FormField {
+  const type = resolveFieldType(field);
   return {
     key: field.key,
     label: FIELD_LABELS[field.key] ?? humanizeKey(field.label),
-    type: resolveFieldType(field),
+    type,
     required: field.required,
     requiredWhen: field.required_when,
-    defaultValue: field.default ?? "",
+    defaultValue:
+      type === "checkbox"
+        ? field.default === true
+          ? "true"
+          : "false"
+        : typeof field.default === "string"
+          ? field.default
+          : field.default == null
+            ? ""
+            : String(field.default),
     description: FIELD_DESCRIPTION_OVERRIDES[field.key] ?? field.desc,
     options: normalizeFieldOptions(field.key, field.options),
   };
@@ -267,6 +277,9 @@ function normalizeFieldOptions(fieldKey: string, options: readonly string[]) {
 }
 
 function resolveFieldType(field: RawField): FormFieldType {
+  if (field.type === "checkbox") {
+    return "checkbox";
+  }
   if (field.type === "combobox") {
     return "combobox";
   }

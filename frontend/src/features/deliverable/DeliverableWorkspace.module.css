@@ -339,6 +339,43 @@
   min-width: 0;
 }
 
+.checkboxField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0.68rem 0.82rem;
+  border: 1px solid rgba(33, 74, 126, 0.16);
+  border-radius: 12px;
+  background: rgba(251, 253, 255, 0.96);
+  color: #14395e;
+  cursor: pointer;
+}
+
+.checkboxInput {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #236bb9;
+  flex: none;
+}
+
+.checkboxLabelText {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+}
+
+.checkboxRequired {
+  flex: none;
+  font-style: normal;
+  font-size: 0.72rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(194, 107, 37, 0.14);
+  color: #8a4714;
+}
+
 .fieldHeader {
   display: flex;
   align-items: center;

@@ -62,7 +62,9 @@ class FormMetadataService:
         options = self._resolve_options(field_key, rule)
         field_type = "text"
         ui = rule.get("ui") if isinstance(rule.get("ui"), dict) else {}
-        if ui.get("widget") == "combobox":
+        if ui.get("widget") == "checkbox" or rule.get("type") == "bool" or isinstance(rule.get("default"), bool):
+            field_type = "checkbox"
+        elif ui.get("widget") == "combobox":
             field_type = "combobox"
         elif options:
             field_type = "select"

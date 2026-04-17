@@ -217,6 +217,48 @@ describe("normalizeFormSchema", () => {
     ]);
   });
 
+  it("keeps checkbox fields from form-schema and normalizes boolean defaults for the frontend draft", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [
+          {
+            id: "ied",
+            title: "ied",
+            fields: [
+              {
+                key: "include_ied_plan",
+                label: "include_ied_plan",
+                type: "checkbox",
+                required: false,
+                required_when: null,
+                source: "frontend",
+                default: true,
+                format: null,
+                desc: "是否生成IED计划并开放下载，默认包含",
+                options: [],
+              },
+            ],
+          },
+        ],
+      },
+      audit_replace: {
+        project_options: ["2016", "1818"],
+      },
+    });
+
+    expect(normalized.sections[0].fields[0]).toMatchObject({
+      key: "include_ied_plan",
+      type: "checkbox",
+      defaultValue: "true",
+    });
+  });
+
   it("prioritizes 河北分公司-建筑结构所 responsible units while keeping combobox metadata", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",

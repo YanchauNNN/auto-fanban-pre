@@ -820,6 +820,73 @@ describe("job detail pages", () => {
     expect(screen.getByText(/页数：1 页/)).toBeInTheDocument();
   });
 
+  it("hides IED download actions entirely when the backend marks IED as unavailable", async () => {
+    window.history.pushState({}, "", "/jobs/deliverable-no-ied");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "deliverable-no-ied",
+      batchId: "batch-deliverable-no-ied",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "deliverable",
+      taskRole: null,
+      jobMode: "deliverable",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "PACKAGE_ZIP",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-16T10:00:00+08:00",
+      finishedAt: "2026-04-16T10:05:00+08:00",
+      startedAt: "2026-04-16T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/deliverable-no-ied/download/package",
+        iedDownloadUrl: null,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [],
+        drawings: [
+          {
+            name: "A01",
+            internalCode: "20161RS-JGS01-001",
+            dwgName: "A01.dwg",
+            pdfName: "A01.pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+      missingFontsDetected: false,
+      fontReplacementApplied: false,
+      replacementFont: null,
+      replacedStyleCount: 0,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("出图结果")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
+  });
+
   it("renders flags and errors inside padded list blocks on detail pages", async () => {
     window.history.pushState({}, "", "/jobs/audit-flags-layout");
     mockGetJobDetail.mockResolvedValue({

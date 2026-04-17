@@ -272,7 +272,7 @@ export function DeliverableWorkspace({
     setIsSubmitting(true);
     setFontReplacementError(null);
 
-    const submissionValues = buildSubmissionValues(draft.values, fontConfig);
+    const submissionValues = buildSubmissionValues(schema, draft.values, fontConfig);
 
     try {
       const payload = pendingReplaceConfig?.runDeliverable
@@ -1178,6 +1178,28 @@ function FieldControl({
   const helperText = field.description.trim();
   const placeholder = getFieldPlaceholder(field);
 
+  if (field.type === "checkbox") {
+    return (
+      <div className={styles.field}>
+        <label className={styles.checkboxField} htmlFor={inputId}>
+          <input
+            aria-label={field.label}
+            checked={value === "true"}
+            className={styles.checkboxInput}
+            id={inputId}
+            name={field.key}
+            type="checkbox"
+            onChange={(event) => onChange(event.target.checked ? "true" : "false")}
+          />
+          <span className={styles.checkboxLabelText}>{field.label}</span>
+          {required ? <em className={styles.checkboxRequired}>必填</em> : null}
+        </label>
+        {helperText ? <span className={styles.helperText}>{helperText}</span> : null}
+        {error ? <span className={styles.errorText}>{error}</span> : null}
+      </div>
+    );
+  }
+
   return (
     <div className={styles.field}>
       <div className={styles.fieldHeader}>
@@ -1531,7 +1553,7 @@ function getFieldPlaceholder(field: FormField) {
     return `输入或选择${field.label}`;
   }
 
-  if (field.type === "date") {
+  if (field.type === "date" || field.type === "checkbox") {
     return "";
   }
 
@@ -1777,10 +1799,22 @@ function pickSelectedReplacementFonts(
 }
 
 function buildSubmissionValues(
+  schema: FormSchema,
   values: Record<string, string>,
   fontConfig: FontSubmitConfig = { fontReplacePolicy: "none" },
 ) {
   const sanitized: Record<string, unknown> = { ...values };
+  const checkboxFieldKeys = new Set(
+    schema.sections.flatMap((section) =>
+      section.fields
+        .filter((field) => field.type === "checkbox")
+        .map((field) => field.key),
+    ),
+  );
+
+  for (const fieldKey of checkboxFieldKeys) {
+    sanitized[fieldKey] = sanitized[fieldKey] === "true";
+  }
 
   delete sanitized.upgrade_start_seq;
   delete sanitized.upgrade_end_seq;

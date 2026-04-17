@@ -453,7 +453,7 @@ internal sealed class BridgePlotConfig
     public double PlotOffsetXmm { get; private set; } = 0.0;
     public double PlotOffsetYmm { get; private set; } = 0.0;
     public double PlotWindowBottomLeftExpandRatio { get; private set; } = 0.0001;
-    public double PlotWindowTopRightExpandRatio { get; private set; } = 0.0001;
+    public double PlotWindowTopRightExpandRatio { get; private set; } = 0.0002;
     public string ScaleMode { get; private set; } = "manual_integer_from_geometry";
     public string ScaleIntegerRounding { get; private set; } = "round";
     public double MarginTopMm { get; private set; } = 0.0;
@@ -492,7 +492,7 @@ internal sealed class BridgePlotConfig
             ),
             PlotWindowTopRightExpandRatio = Math.Max(
                 0.0,
-                BridgeValue.GetDouble(data, "plot_window_top_right_expand_ratio", 0.0001)
+                BridgeValue.GetDouble(data, "plot_window_top_right_expand_ratio", 0.0002)
             ),
             ScaleMode = BridgeValue.GetString(data, "scale_mode", "manual_integer_from_geometry"),
             ScaleIntegerRounding = BridgeValue.GetString(data, "scale_integer_rounding", "round"),

@@ -148,10 +148,10 @@ def test_cad_executor_allows_same_code_family_and_suffixes_names() -> None:
 
     executor._validate_duplicate_codes([page1, page2])
 
-    assert CADDXFExecutor._name_for_frame(page1) == "JD2RSG11005B25C42SDACFC1@2 (20162RS-JGS03-005)"
-    assert CADDXFExecutor._name_for_frame(page2) == "JD2RSG11005B25C42SDACFC2@2 (20162RS-JGS03-005)"
-    assert output_name_for_frame(page1) == "JD2RSG11005B25C42SDACFC1@2 (20162RS-JGS03-005)"
-    assert output_name_for_frame(page2) == "JD2RSG11005B25C42SDACFC2@2 (20162RS-JGS03-005)"
+    assert CADDXFExecutor._name_for_frame(page1) == "JD2RSG11005B25C42SDA1@2CFC (20162RS-JGS03-005)"
+    assert CADDXFExecutor._name_for_frame(page2) == "JD2RSG11005B25C42SDA2@2CFC (20162RS-JGS03-005)"
+    assert output_name_for_frame(page1) == "JD2RSG11005B25C42SDA1@2CFC (20162RS-JGS03-005)"
+    assert output_name_for_frame(page2) == "JD2RSG11005B25C42SDA2@2CFC (20162RS-JGS03-005)"
 
 
 def test_cad_executor_keeps_duplicate_code_error_for_unmarked_frames() -> None:
