@@ -20,6 +20,7 @@ tmp/
 /dist/
 output/
 plot.log
+.run-logs/
 
 # Local dependency mirrors (do not commit)
 Dependency Library/
