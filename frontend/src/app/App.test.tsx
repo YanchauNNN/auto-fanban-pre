@@ -18,6 +18,7 @@ const mockGetJobDetail = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
+const mockPdfDocument = vi.fn();
 
 vi.mock("react-pdf", () => ({
   pdfjs: {
@@ -27,15 +28,18 @@ vi.mock("react-pdf", () => ({
   },
   Document: ({
     children,
+    file,
     onLoadSuccess,
   }: {
     children: ReactNode;
+    file?: unknown;
     onLoadSuccess?: (document: { numPages: number }) => void;
   }) => {
     useEffect(() => {
       onLoadSuccess?.({ numPages: 2 });
     }, [onLoadSuccess]);
 
+    mockPdfDocument(file);
     return <div data-testid="pdf-document">{children}</div>;
   },
   Page: ({ pageNumber }: { pageNumber: number }) => (
@@ -120,11 +124,12 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
     ok: true,
-    blob: () => Promise.resolve(new Blob(["pdf-data"], { type: "application/pdf" })),
+    arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
   });
   mockCreateObjectURL.mockReset();
   mockCreateObjectURL.mockReturnValue("blob:preview");
   mockRevokeObjectURL.mockReset();
+  mockPdfDocument.mockReset();
   vi.stubGlobal("fetch", mockFetch);
   URL.createObjectURL = mockCreateObjectURL;
   URL.revokeObjectURL = mockRevokeObjectURL;
@@ -845,6 +850,11 @@ describe("job detail pages", () => {
     expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
     expect(mockFetch).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview", expect.any(Object));
     expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
+    expect(mockPdfDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.any(Uint8Array),
+      }),
+    );
     expect(screen.getByText("共 2 页")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-page-1")).toBeInTheDocument();
     expect(screen.queryByTitle("预览 PDF（纠错标注）")).not.toBeInTheDocument();

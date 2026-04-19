@@ -2066,12 +2066,13 @@ function PreviewPdfModal({
   url: string;
   onClose: () => void;
 }) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageWidth, setPageWidth] = useState(960);
   const previewPagesRef = useRef<HTMLDivElement | null>(null);
+  const previewFile = useMemo(() => (pdfData ? { data: pdfData } : null), [pdfData]);
   const previewStatusText = loadError
     ? "预览加载失败"
     : isLoading
@@ -2082,9 +2083,8 @@ function PreviewPdfModal({
 
   useEffect(() => {
     const controller = new AbortController();
-    let currentObjectUrl: string | null = null;
 
-    setObjectUrl(null);
+    setPdfData(null);
     setPageCount(0);
     setIsLoading(true);
     setLoadError(null);
@@ -2097,9 +2097,8 @@ function PreviewPdfModal({
           throw new Error(`preview request failed with status ${response.status}`);
         }
 
-        const blob = await response.blob();
-        currentObjectUrl = URL.createObjectURL(blob);
-        setObjectUrl(currentObjectUrl);
+        const buffer = await response.arrayBuffer();
+        setPdfData(new Uint8Array(buffer));
         setIsLoading(false);
       })
       .catch((error: unknown) => {
@@ -2113,9 +2112,6 @@ function PreviewPdfModal({
 
     return () => {
       controller.abort();
-      if (currentObjectUrl) {
-        URL.revokeObjectURL(currentObjectUrl);
-      }
     };
   }, [url]);
 
@@ -2176,9 +2172,9 @@ function PreviewPdfModal({
                 <strong>预览暂时不可用</strong>
                 <p>{loadError}</p>
               </div>
-            ) : objectUrl ? (
+            ) : previewFile ? (
               <Document
-                file={objectUrl}
+                file={previewFile}
                 loading={
                   <div className={styles.previewLoading} role="status">
                     正在渲染 PDF 页面...
@@ -2193,7 +2189,7 @@ function PreviewPdfModal({
                 }}
               >
                 {Array.from({ length: Math.max(pageCount, 1) }, (_, index) => (
-                  <div className={styles.previewPageCard} key={`${objectUrl}-${index + 1}`}>
+                  <div className={styles.previewPageCard} key={`${url}-${index + 1}`}>
                     <Page
                       pageNumber={index + 1}
                       renderAnnotationLayer={false}
