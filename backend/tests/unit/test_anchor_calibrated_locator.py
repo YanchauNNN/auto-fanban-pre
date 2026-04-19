@@ -9,8 +9,8 @@ from pathlib import Path
 import ezdxf
 
 from src.cad.detection import AnchorCalibratedLocator, CandidateFinder, PaperFitter
-from src.models import BBox
 from src.config import BusinessSpec
+from src.models import BBox
 from tests.conftest import add_rect_polyline
 
 
@@ -169,7 +169,7 @@ def test_calibrated_locator_retries_global_layers_with_localized_line_rebuild_fo
     )
 
 
-def test_calibrated_localized_candidate_build_relaxes_integer_scale_gate() -> None:
+def test_calibrated_localized_candidate_build_keeps_integer_scale_gate() -> None:
     locator = AnchorCalibratedLocator(
         _calibrated_spec(),
         CandidateFinder(min_dim=1.0),
@@ -185,4 +185,4 @@ def test_calibrated_localized_candidate_build_relaxes_integer_scale_gate() -> No
         relax_scale_candidate_gate=True,
     )
 
-    assert len(localized) == 1
+    assert localized == []

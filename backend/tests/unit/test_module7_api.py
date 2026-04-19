@@ -232,9 +232,15 @@ class FakeJobProcessor:
                 ),
                 encoding="utf-8",
             )
+            preview_dir = job.work_dir / "output" / "preview"
+            preview_dir.mkdir(parents=True, exist_ok=True)
+            preview_pdf = preview_dir / "preview-annotated.pdf"
+            preview_pdf.write_bytes(b"%PDF-annotated")
             job.artifacts.reports_dir = reports_dir
             job.artifacts.report_xlsx = report_xlsx
             job.artifacts.report_json = report_json
+            job.artifacts.preview_pdf = preview_pdf
+            job.artifacts.preview_mode = "annotated"
             job.progress.details["findings_count"] = 2
             job.progress.details["affected_drawings_count"] = 1
             job.progress.details["top_wrong_texts"] = ["2016", "JD"]
@@ -258,7 +264,12 @@ class FakeJobProcessor:
             ied_xlsx.write_bytes(b"ied")
         (drawings_dir / "drawing-001.dwg").write_bytes(b"dwg")
         (drawings_dir / "drawing-001.pdf").write_bytes(b"pdf")
+        (drawings_dir / "drawing-002.dwg").write_bytes(b"dwg")
         (drawings_dir / "drawing-002.pdf").write_bytes(b"pdf")
+        preview_dir = job.work_dir / "output" / "preview"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        preview_pdf = preview_dir / "preview-plain.pdf"
+        preview_pdf.write_bytes(b"%PDF-plain")
         (docs_dir / "cover.docx").write_text("cover", encoding="utf-8")
         (docs_dir / "cover.pdf").write_text("cover-pdf", encoding="utf-8")
         (docs_dir / "design.xlsx").write_text("design", encoding="utf-8")
@@ -326,6 +337,8 @@ class FakeJobProcessor:
         job.artifacts.ied_xlsx = ied_xlsx if bool(include_ied_plan) else None
         job.artifacts.drawings_dir = drawings_dir
         job.artifacts.docs_dir = docs_dir
+        job.artifacts.preview_pdf = preview_pdf
+        job.artifacts.preview_mode = "plain"
         job.flags = [
             "[DRAW001 (20261RS-JGS65-001)] PLOT_WINDOW_USED",
             "[DRAW001 (20261RS-JGS65-001)] PLOT_FROM_SOURCE_WINDOW",
@@ -981,6 +994,9 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["status"] == "succeeded"
         assert detail["artifacts"]["report_available"] is True
         assert detail["artifacts"]["package_available"] is False
+        assert detail["artifacts"]["preview_available"] is True
+        assert detail["artifacts"]["preview_mode"] == "annotated"
+        assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{job_id}/download/preview"
         assert detail["findings_count"] == 2
         assert detail["affected_drawings_count"] == 1
         assert detail["top_wrong_texts"] == ["2016", "JD"]
@@ -1006,6 +1022,10 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert report_download.status_code == 200
         workbook = load_workbook(filename=BytesIO(report_download.content))
         assert workbook.sheetnames[0] == "Summary"
+
+        preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
+        assert preview_download.status_code == 200
+        assert preview_download.content == b"%PDF-annotated"
 
 
 def test_create_audit_check_reuses_explicit_batch_id_when_provided(
@@ -1268,6 +1288,9 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         assert final_detail["status"] == "succeeded"
         assert final_detail["artifacts"]["package_available"] is True
         assert final_detail["artifacts"]["ied_available"] is True
+        assert final_detail["artifacts"]["preview_available"] is True
+        assert final_detail["artifacts"]["preview_mode"] == "plain"
+        assert final_detail["artifacts"]["preview_download_url"] == f"/api/jobs/{job_id}/download/preview"
         assert final_detail["deliverable_outputs"] == {
             "dwg_count": 2,
             "pdf_count": 2,
@@ -1314,6 +1337,10 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         ied_download = client.get(f"/api/jobs/{job_id}/download/ied")
         assert ied_download.status_code == 200
         assert ied_download.content == b"ied"
+
+        preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
+        assert preview_download.status_code == 200
+        assert preview_download.content == b"%PDF-plain"
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(
@@ -1432,6 +1459,9 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         assert detail["is_group"] is True
         assert detail["run_audit_check"] is True
         assert detail["flags"] == ["[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED"]
+        assert detail["artifacts"]["preview_available"] is True
+        assert detail["artifacts"]["preview_mode"] == "annotated"
+        assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{group_summary['job_id']}/download/preview"
         assert len(detail["children"]) == 2
         assert {child["task_role"] for child in detail["children"]} == {
             "deliverable_main",
@@ -1443,6 +1473,15 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         }
         assert all(child["slot_id"] is not None for child in detail["children"])
         assert all(child["ctb_path"] for child in detail["children"])
+        children = {child["task_role"]: child for child in detail["children"]}
+        assert children["deliverable_main"]["artifacts"]["preview_available"] is True
+        assert children["deliverable_main"]["artifacts"]["preview_mode"] == "plain"
+        assert children["audit_check"]["artifacts"]["preview_available"] is True
+        assert children["audit_check"]["artifacts"]["preview_mode"] == "annotated"
+
+        preview_download = client.get(f"/api/jobs/{group_summary['job_id']}/download/preview")
+        assert preview_download.status_code == 200
+        assert preview_download.content == b"%PDF-annotated"
 
         listing = client.get("/api/jobs")
         assert listing.status_code == 200

@@ -172,6 +172,41 @@ const schemaWithIedPlan: FormSchema = {
   ),
 };
 
+const schemaWithIedPlanInDesignSection: FormSchema = {
+  ...schema,
+  sections: [
+    schema.sections[0],
+    schema.sections[1],
+    {
+      id: "design",
+      title: "设计文件",
+      fields: [
+        {
+          key: "wbs_code",
+          label: "WBS 编码",
+          type: "text",
+          required: true,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "WBS编码，全图册共用",
+          options: [],
+        },
+        {
+          key: "include_ied_plan",
+          label: "是否生成IED",
+          type: "checkbox",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "true",
+          description: "勾选后生成IED计划并提供下载。",
+          options: [],
+        },
+      ],
+    },
+    schema.sections[2],
+  ],
+};
+
 function createAdapter(): ApiAdapter {
   return {
     getHealth: vi.fn(),
@@ -698,6 +733,31 @@ describe("DeliverableWorkspace", () => {
 
     const submittedValues = vi.mocked(adapter.createBatch).mock.calls[0]?.[0] ?? {};
     expect(submittedValues.include_ied_plan).toBe(true);
+  });
+
+  it("renders the IED plan toggle next to the IED section instead of the design file grid", async () => {
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithIedPlanInDesignSection}
+      />,
+    );
+
+    const toggle = await screen.findByLabelText("是否生成IED");
+    const designSection = screen.getByRole("heading", { name: "设计文件" }).closest("section");
+    const iedSection = screen.getByRole("heading", { name: "IED 基础信息" }).closest("section");
+
+    expect(designSection).not.toBeNull();
+    expect(iedSection).not.toBeNull();
+    expect(within(designSection as HTMLElement).queryByLabelText("是否生成IED")).not.toBeInTheDocument();
+    expect(within(iedSection as HTMLElement).getByLabelText("是否生成IED")).toBe(toggle);
   });
 
   it("submits a boolean false when the IED plan toggle is unchecked", async () => {

@@ -541,6 +541,7 @@ class DeliverableApiRuntime:
         path = {
             'package': job.artifacts.package_zip,
             'ied': job.artifacts.ied_xlsx,
+            'preview': job.artifacts.preview_pdf,
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
         }.get(artifact)
@@ -1181,9 +1182,12 @@ class DeliverableApiRuntime:
         ied_available = bool(job.artifacts.ied_xlsx and Path(job.artifacts.ied_xlsx).exists())
         report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
+        preview_available = bool(job.artifacts.preview_pdf and Path(job.artifacts.preview_pdf).exists())
         payload: dict[str, Any] = {
             'package_available': package_available,
             'ied_available': ied_available,
+            'preview_available': preview_available,
+            'preview_mode': job.artifacts.preview_mode if preview_available else None,
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
         }
@@ -1191,6 +1195,7 @@ class DeliverableApiRuntime:
             payload.update({
                 'package_download_url': f'/api/jobs/{job_id}/download/package' if package_available else None,
                 'ied_download_url': f'/api/jobs/{job_id}/download/ied' if ied_available else None,
+                'preview_download_url': f'/api/jobs/{job_id}/download/preview' if preview_available else None,
                 'report_download_url': f'/api/jobs/{job_id}/download/report' if report_available else None,
                 'replaced_dwg_download_url': f'/api/jobs/{job_id}/download/replaced' if replaced_dwg_available else None,
             })
@@ -1245,13 +1250,17 @@ class DeliverableApiRuntime:
         ied_available = bool(artifacts.ied_xlsx and Path(artifacts.ied_xlsx).exists())
         report_available = bool(artifacts.report_xlsx and Path(artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(artifacts.replaced_dwg and Path(artifacts.replaced_dwg).exists())
+        preview_available = bool(artifacts.preview_pdf and Path(artifacts.preview_pdf).exists())
         return {
             'package_available': package_available,
             'ied_available': ied_available,
+            'preview_available': preview_available,
+            'preview_mode': artifacts.preview_mode if preview_available else None,
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
             'package_download_url': f'/api/jobs/{group.group_id}/download/package' if package_available else None,
             'ied_download_url': f'/api/jobs/{group.group_id}/download/ied' if ied_available else None,
+            'preview_download_url': f'/api/jobs/{group.group_id}/download/preview' if preview_available else None,
             'report_download_url': f'/api/jobs/{group.group_id}/download/report' if report_available else None,
             'replaced_dwg_download_url': (
                 f'/api/jobs/{group.group_id}/download/replaced' if replaced_dwg_available else None
@@ -1260,6 +1269,15 @@ class DeliverableApiRuntime:
 
     def _resolve_group_artifact_owner(self, group: TaskGroup, artifact: str) -> Job | None:
         for child in self._iter_group_children(group):
+            if artifact == 'package' and child.artifacts.package_zip:
+                return child
+            if artifact == 'ied' and child.artifacts.ied_xlsx:
+                return child
+            if artifact == 'preview' and child.artifacts.preview_pdf and child.artifacts.preview_mode == 'annotated':
+                return child
+        for child in self._iter_group_children(group):
+            if artifact == 'preview' and child.artifacts.preview_pdf:
+                return child
             if artifact == 'package' and child.artifacts.package_zip:
                 return child
             if artifact == 'ied' and child.artifacts.ied_xlsx:
@@ -1291,6 +1309,10 @@ class DeliverableApiRuntime:
                 merged.drawings_dir = child.artifacts.drawings_dir
             if merged.docs_dir is None and child.artifacts.docs_dir:
                 merged.docs_dir = child.artifacts.docs_dir
+            if child.artifacts.preview_pdf:
+                if merged.preview_pdf is None or child.artifacts.preview_mode == 'annotated':
+                    merged.preview_pdf = child.artifacts.preview_pdf
+                    merged.preview_mode = child.artifacts.preview_mode
             if merged.reports_dir is None and child.artifacts.reports_dir:
                 merged.reports_dir = child.artifacts.reports_dir
             if merged.report_xlsx is None and child.artifacts.report_xlsx:

@@ -13,6 +13,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import pdfPreviewWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
+import { Document, Page, pdfjs } from "react-pdf";
 import {
   Suspense,
   useEffect,
@@ -48,8 +50,12 @@ import type {
   TaskKind,
 } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
+import {
+  ensurePromiseWithResolvers,
+} from "../shared/pdfPreviewCompat";
 import "../shared/global.css";
 import styles from "./App.module.css";
+import { TaskConfigModal } from "../features/deliverable/TaskConfigModal";
 import {
   buildJobCardModels,
   getMessageLabel,
@@ -75,6 +81,10 @@ const AuditCheckSummaryModal = lazy(async () => ({
   default: (await import("../features/audit-check/AuditCheckSummaryModal")).AuditCheckSummaryModal,
 }));
 
+ensurePromiseWithResolvers();
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfPreviewWorkerUrl;
+
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
   { label: "排队中", value: "queued" },
@@ -90,6 +100,10 @@ const MODULE_OPTIONS = [
 ] as const;
 
 type HomeModule = (typeof MODULE_OPTIONS)[number]["key"];
+type PreviewRequest = {
+  title: string;
+  url: string;
+};
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   queued: { label: "排队中", tone: "queued" },
@@ -170,10 +184,13 @@ const TUTORIAL_DELIVERABLE_CHILD_SUMMARY: JobSummary = {
   artifacts: {
     packageAvailable: true,
     iedAvailable: true,
+    previewAvailable: true,
+    previewMode: "plain",
     reportAvailable: false,
     replacedDwgAvailable: false,
     packageDownloadUrl: "/tutorial/download/package.zip",
     iedDownloadUrl: "/tutorial/download/ied.xlsx",
+    previewDownloadUrl: "/tutorial/download/preview.pdf",
     reportDownloadUrl: null,
     replacedDwgDownloadUrl: null,
   },
@@ -205,10 +222,13 @@ const TUTORIAL_AUDIT_CHILD_SUMMARY: JobSummary = {
   artifacts: {
     packageAvailable: false,
     iedAvailable: false,
+    previewAvailable: true,
+    previewMode: "annotated",
     reportAvailable: true,
     replacedDwgAvailable: false,
     packageDownloadUrl: null,
     iedDownloadUrl: null,
+    previewDownloadUrl: "/tutorial/download/preview-annotated.pdf",
     reportDownloadUrl: "/tutorial/download/audit-report.xlsx",
     replacedDwgDownloadUrl: null,
   },
@@ -240,10 +260,13 @@ const TUTORIAL_GROUP_SUMMARY: JobSummary = {
   artifacts: {
     packageAvailable: true,
     iedAvailable: true,
+    previewAvailable: true,
+    previewMode: "annotated",
     reportAvailable: true,
     replacedDwgAvailable: false,
     packageDownloadUrl: "/tutorial/download/package.zip",
     iedDownloadUrl: "/tutorial/download/ied.xlsx",
+    previewDownloadUrl: "/tutorial/download/preview-annotated.pdf",
     reportDownloadUrl: "/tutorial/download/report.xlsx",
     replacedDwgDownloadUrl: null,
   },
@@ -1527,6 +1550,7 @@ function SingleJobDetailPanel({
   detail: JobDetail;
   hasWarnings: boolean;
 }) {
+  const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
 
@@ -1621,7 +1645,9 @@ function SingleJobDetailPanel({
 
       <section className={styles.detailSection}>
         <h2>下载</h2>
-        <div className={styles.downloadGrid}>{renderArtifactButtons(detail)}</div>
+        <div className={styles.downloadGrid}>
+          {renderArtifactButtons(detail, "default", setPreviewRequest)}
+        </div>
       </section>
 
       <section className={styles.detailSection}>
@@ -1635,11 +1661,20 @@ function SingleJobDetailPanel({
           </button>
         </div>
       </section>
+
+      {previewRequest ? (
+        <PreviewPdfModal
+          title={previewRequest.title}
+          url={previewRequest.url}
+          onClose={() => setPreviewRequest(null)}
+        />
+      ) : null}
     </section>
   );
 }
 
 function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: JobDetail }) {
+  const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
@@ -1692,18 +1727,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       <section className={styles.detailSection}>
         <h2>聚合下载</h2>
         <div className={styles.downloadGrid}>
-          <ArtifactButton href={detail.artifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
-          {detail.artifacts.iedAvailable ? (
-            <ArtifactButton href={detail.artifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
-          ) : null}
-          <ArtifactButton
-            href={detail.artifacts.reportDownloadUrl ?? undefined}
-            label="下载 report.xlsx"
-          />
-          <ArtifactButton
-            href={detail.artifacts.replacedDwgDownloadUrl ?? undefined}
-            label="下载替换后 DWG"
-          />
+          {renderArtifactButtons(detail, "default", setPreviewRequest)}
         </div>
       </section>
 
@@ -1753,7 +1777,11 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
                   查看子任务 {child.taskRole ?? child.jobId}
                 </Link>
                 <div className={styles.childTaskDownloads}>
-                  {renderArtifactButtons(child, "child")}
+                  {renderArtifactButtons(
+                    childDetailsById.get(child.jobId) ?? child,
+                    "child",
+                    setPreviewRequest,
+                  )}
                 </div>
               </div>
             </div>
@@ -1768,6 +1796,14 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
           <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
         </div>
       </section>
+
+      {previewRequest ? (
+        <PreviewPdfModal
+          title={previewRequest.title}
+          url={previewRequest.url}
+          onClose={() => setPreviewRequest(null)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2007,6 +2043,179 @@ function ArtifactButton({ href, label }: { href?: string; label: string }) {
   );
 }
 
+function PreviewButton({
+  label,
+  onOpen,
+}: {
+  label: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button className={styles.downloadButton} onClick={onOpen} type="button">
+      {label}
+    </button>
+  );
+}
+
+function PreviewPdfModal({
+  title,
+  url,
+  onClose,
+}: {
+  title: string;
+  url: string;
+  onClose: () => void;
+}) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [pageCount, setPageCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pageWidth, setPageWidth] = useState(960);
+  const previewPagesRef = useRef<HTMLDivElement | null>(null);
+  const previewStatusText = loadError
+    ? "预览加载失败"
+    : isLoading
+      ? "正在加载 PDF..."
+      : pageCount > 0
+        ? `共 ${pageCount} 页`
+        : "正在解析 PDF...";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let currentObjectUrl: string | null = null;
+
+    setObjectUrl(null);
+    setPageCount(0);
+    setIsLoading(true);
+    setLoadError(null);
+
+    void fetch(url, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`preview request failed with status ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        currentObjectUrl = URL.createObjectURL(blob);
+        setObjectUrl(currentObjectUrl);
+        setIsLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error("Failed to load PDF preview", error);
+        setLoadError("PDF 预览加载失败，请使用新窗口打开查看。");
+        setIsLoading(false);
+      });
+
+    return () => {
+      controller.abort();
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+      }
+    };
+  }, [url]);
+
+  useLayoutEffect(() => {
+    const node = previewPagesRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updatePageWidth = () => {
+      setPageWidth(Math.max(320, Math.floor(node.clientWidth - 48)));
+    };
+
+    updatePageWidth();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      updatePageWidth();
+    });
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <TaskConfigModal dialogClassName={styles.previewDialog} title={title}>
+      <div className={styles.previewModalContent}>
+        <div className={styles.previewModalHeader}>
+          <div>
+            <p className={styles.brandTop}>Preview PDF</p>
+            <h2>{title}</h2>
+          </div>
+          <div className={styles.previewModalActions}>
+            <a
+              className={styles.downloadButton}
+              href={url}
+              rel="noreferrer"
+              target="_blank"
+            >
+              新窗口打开
+            </a>
+            <button className={styles.secondaryActionButton} onClick={onClose} type="button">
+              关闭
+            </button>
+          </div>
+        </div>
+        <div className={styles.previewViewerShell}>
+          <div className={styles.previewViewerStatusRow}>
+            <span className={styles.previewStatusText}>{previewStatusText}</span>
+          </div>
+          <div className={styles.previewPages} ref={previewPagesRef}>
+            {loadError ? (
+              <div className={styles.previewFallback} role="status">
+                <strong>预览暂时不可用</strong>
+                <p>{loadError}</p>
+              </div>
+            ) : objectUrl ? (
+              <Document
+                file={objectUrl}
+                loading={
+                  <div className={styles.previewLoading} role="status">
+                    正在渲染 PDF 页面...
+                  </div>
+                }
+                onLoadError={(error) => {
+                  console.error("Failed to parse PDF preview", error);
+                  setLoadError("PDF 预览加载失败，请使用新窗口打开查看。");
+                }}
+                onLoadSuccess={({ numPages }) => {
+                  setPageCount(numPages);
+                }}
+              >
+                {Array.from({ length: Math.max(pageCount, 1) }, (_, index) => (
+                  <div className={styles.previewPageCard} key={`${objectUrl}-${index + 1}`}>
+                    <Page
+                      pageNumber={index + 1}
+                      renderAnnotationLayer={false}
+                      renderTextLayer={false}
+                      width={pageWidth}
+                    />
+                    <span className={styles.previewPageNumber}>第 {index + 1} 页</span>
+                  </div>
+                ))}
+              </Document>
+            ) : (
+              <div className={styles.previewLoading} role="status">
+                正在加载 PDF...
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </TaskConfigModal>
+  );
+}
+
 function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className={styles.infoBlock}>
@@ -2134,24 +2343,88 @@ function kindToneClass(kind: TaskKind) {
   return styles.kindDeliverable;
 }
 
-function renderArtifactButtons(job: JobSummary, scope: "default" | "child" = "default") {
+function renderArtifactButtons(
+  job: JobSummary,
+  scope: "default" | "child" = "default",
+  onOpenPreview?: (request: PreviewRequest) => void,
+) {
   const labels =
     scope === "child"
       ? {
           package: "下载子任务 package.zip",
           ied: "下载子任务 IED计划.xlsx",
+          preview: "预览子任务 PDF",
+          previewAnnotated: "预览子任务 PDF（纠错标注）",
           report: "下载子任务 report.xlsx",
           replacedDwg: "下载子任务替换后 DWG",
         }
       : {
           package: "下载 package.zip",
           ied: "下载 IED计划.xlsx",
+          preview: "预览 PDF",
+          previewAnnotated: "预览 PDF（纠错标注）",
           report: "下载 report.xlsx",
           replacedDwg: "下载替换后 DWG",
         };
 
+  const previewButton =
+    job.artifacts.previewAvailable &&
+    job.artifacts.previewDownloadUrl &&
+    onOpenPreview
+      ? [
+          <PreviewButton
+            key="preview"
+            label={
+              job.artifacts.previewMode === "annotated"
+                ? labels.previewAnnotated
+                : labels.preview
+            }
+            onOpen={() =>
+              onOpenPreview({
+                title:
+                  job.artifacts.previewMode === "annotated"
+                    ? labels.previewAnnotated
+                    : labels.preview,
+                url: job.artifacts.previewDownloadUrl ?? "",
+              })
+            }
+          />,
+        ]
+      : [];
+
+  if (job.isGroup) {
+    return [
+      ...previewButton,
+      <ArtifactButton
+        href={job.artifacts.packageDownloadUrl ?? undefined}
+        key="package"
+        label="下载任务包"
+      />,
+      ...(job.artifacts.iedAvailable
+        ? [
+            <ArtifactButton
+              href={job.artifacts.iedDownloadUrl ?? undefined}
+              key="ied"
+              label="下载 IED"
+            />,
+          ]
+        : []),
+      <ArtifactButton
+        href={job.artifacts.reportDownloadUrl ?? undefined}
+        key="report"
+        label="下载 report.xlsx"
+      />,
+      <ArtifactButton
+        href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
+        key="replaced-dwg"
+        label="下载替换后 DWG"
+      />,
+    ];
+  }
+
   if (job.taskKind === "deliverable") {
     return [
+      ...previewButton,
       <ArtifactButton
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
@@ -2171,6 +2444,7 @@ function renderArtifactButtons(job: JobSummary, scope: "default" | "child" = "de
 
   if (job.taskKind === "audit_check") {
     return [
+      ...previewButton,
       <ArtifactButton
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
@@ -2184,6 +2458,7 @@ function renderArtifactButtons(job: JobSummary, scope: "default" | "child" = "de
   }
 
   return [
+    ...previewButton,
     <ArtifactButton
       href={job.artifacts.reportDownloadUrl ?? undefined}
       key="report"

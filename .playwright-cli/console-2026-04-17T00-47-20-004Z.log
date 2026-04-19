@@ -29,3 +29,12 @@
 [  623945ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
 [  626971ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
 [  630198ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-JRY3IGQD.js?v=d3319710:21548
+[20975961ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=28592f2c:21548
+[24481712ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:559
+[24482645ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=91280931:21548
+[24579694ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:559
+[24581724ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[24584765ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[24587817ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[24591335ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=5a89007c:21548
+[173184084ms] [ERROR] Failed to load resource: net::ERR_NO_BUFFER_SPACE @ http://127.0.0.1:8000/api/jobs?limit=100:0

@@ -1,6 +1,7 @@
 ﻿import { render, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -14,6 +15,33 @@ const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobDetail = vi.fn();
+const mockFetch = vi.fn();
+const mockCreateObjectURL = vi.fn();
+const mockRevokeObjectURL = vi.fn();
+
+vi.mock("react-pdf", () => ({
+  pdfjs: {
+    GlobalWorkerOptions: {
+      workerSrc: "",
+    },
+  },
+  Document: ({
+    children,
+    onLoadSuccess,
+  }: {
+    children: ReactNode;
+    onLoadSuccess?: (document: { numPages: number }) => void;
+  }) => {
+    useEffect(() => {
+      onLoadSuccess?.({ numPages: 2 });
+    }, [onLoadSuccess]);
+
+    return <div data-testid="pdf-document">{children}</div>;
+  },
+  Page: ({ pageNumber }: { pageNumber: number }) => (
+    <div data-testid={`pdf-page-${pageNumber}`}>PDF Page {pageNumber}</div>
+  ),
+}));
 
 vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
@@ -88,10 +116,23 @@ beforeEach(() => {
     replacementOptions: [],
     requiresConfirmation: false,
   });
+
+  mockFetch.mockReset();
+  mockFetch.mockResolvedValue({
+    ok: true,
+    blob: () => Promise.resolve(new Blob(["pdf-data"], { type: "application/pdf" })),
+  });
+  mockCreateObjectURL.mockReset();
+  mockCreateObjectURL.mockReturnValue("blob:preview");
+  mockRevokeObjectURL.mockReset();
+  vi.stubGlobal("fetch", mockFetch);
+  URL.createObjectURL = mockCreateObjectURL;
+  URL.revokeObjectURL = mockRevokeObjectURL;
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 function makeSingleJob(index: number, sourceFilename: string) {
@@ -744,6 +785,139 @@ describe("job detail pages", () => {
       screen.getByText("字体已尝试替代，但关键字体可能仍未完全恢复，建议优先补齐原始字体文件。"),
     ).toBeInTheDocument();
     expect(screen.getByText("E:/cache/font_map.json")).toBeInTheDocument();
+  });
+
+  it("opens an in-page preview modal when preview pdf is available", async () => {
+    window.history.pushState({}, "", "/jobs/audit-preview");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "audit-preview",
+      batchId: "batch-audit-preview",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "audit_check",
+      taskRole: null,
+      jobMode: "check",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-17T10:00:00+08:00",
+      finishedAt: "2026-04-17T10:03:00+08:00",
+      startedAt: "2026-04-17T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 2,
+      affectedDrawingsCount: 1,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: true,
+        previewMode: "annotated",
+        previewDownloadUrl: "/api/jobs/audit-preview/download/preview",
+        reportAvailable: true,
+        replacedDwgAvailable: false,
+        reportDownloadUrl: "/api/jobs/audit-preview/download/report",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: ["JD"],
+      topInternalCodes: ["20261RS-JGS65-001"],
+      findingGroups: [
+        {
+          matchedText: "JD",
+          count: 2,
+          internalCodes: ["20261RS-JGS65-001"],
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
+
+    expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
+    expect(mockFetch).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview", expect.any(Object));
+    expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
+    expect(screen.getByText("共 2 页")).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-page-1")).toBeInTheDocument();
+    expect(screen.queryByTitle("预览 PDF（纠错标注）")).not.toBeInTheDocument();
+  });
+
+  it("shows an explicit fallback message when the preview PDF cannot be loaded", async () => {
+    window.history.pushState({}, "", "/jobs/audit-preview");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "audit-preview",
+      batchId: "batch-audit-preview",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "Drawing2.dwg",
+      sourceFilenames: ["Drawing2.dwg"],
+      taskKind: "audit_check",
+      taskRole: null,
+      jobMode: "check",
+      projectNo: "2026",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-08T09:00:00+08:00",
+      finishedAt: "2026-04-08T09:02:00+08:00",
+      startedAt: "2026-04-08T09:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 2,
+      affectedDrawingsCount: 1,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: true,
+        previewMode: "annotated",
+        previewDownloadUrl: "/api/jobs/audit-preview/download/preview",
+        reportAvailable: true,
+        replacedDwgAvailable: false,
+        reportDownloadUrl: "/api/jobs/audit-preview/download/report",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: ["JD"],
+      topInternalCodes: ["20261RS-JGS65-001"],
+      findingGroups: [
+        {
+          matchedText: "JD",
+          count: 2,
+          internalCodes: ["20261RS-JGS65-001"],
+        },
+      ],
+    });
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      blob: () => Promise.resolve(new Blob()),
+    });
+
+    const user = userEvent.setup();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      render(<App />);
+
+      await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
+
+      expect(await screen.findByText("预览加载失败")).toBeInTheDocument();
+      expect(await screen.findByText("PDF 预览加载失败，请使用新窗口打开查看。")).toBeInTheDocument();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("shows same-code multipage guidance and preserves X@Y filenames in deliverable results", async () => {

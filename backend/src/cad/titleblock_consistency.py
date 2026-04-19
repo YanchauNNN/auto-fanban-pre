@@ -71,6 +71,16 @@ class TitleblockConsistencyService:
     def __init__(self) -> None:
         self.spec = load_spec()
         self.config = get_config()
+        anchor_cfg = self.spec.titleblock_extract.get("anchor", {})
+        scale_candidates = anchor_cfg.get("scale_candidates")
+        if isinstance(scale_candidates, list) and scale_candidates:
+            self.scale_candidates = [float(v) for v in scale_candidates]
+        else:
+            self.scale_candidates = [1.0, 2.0, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0, 200.0]
+        scale_fit_cfg = self.spec.titleblock_extract.get("scale_fit", {})
+        self.scale_candidate_match_tol = float(
+            scale_fit_cfg.get("scale_candidate_match_tol", 0.015)
+        )
 
     def paper_text_from_variant(self, variant_id: str | None) -> str:
         raw = str(variant_id or "").strip().upper()
@@ -96,11 +106,45 @@ class TitleblockConsistencyService:
             return variant_text
         return self._compact_text(frame.titleblock.paper_size_text)
 
-    @staticmethod
-    def scale_text_from_factor(geom_scale_factor: float | None) -> str:
+    def scale_candidate_from_factor(self, geom_scale_factor: float | None) -> float | None:
         if geom_scale_factor is None or geom_scale_factor <= 0:
+            return None
+        if not self.scale_candidates:
+            return None
+        nearest = min(
+            self.scale_candidates,
+            key=lambda candidate: (
+                abs(float(geom_scale_factor) - candidate) / max(candidate, 1e-9),
+                abs(float(geom_scale_factor) - candidate),
+            ),
+        )
+        rel_err = abs(float(geom_scale_factor) - nearest) / max(nearest, 1e-9)
+        if rel_err > self.scale_candidate_match_tol:
+            return None
+        return nearest
+
+    def scale_text_from_factor(self, geom_scale_factor: float | None) -> str:
+        candidate = self.scale_candidate_from_factor(geom_scale_factor)
+        if candidate is None:
             return ""
-        return f"1:{int(round(float(geom_scale_factor)))}"
+        rounded = int(round(candidate))
+        if abs(candidate - rounded) <= 1e-9:
+            return f"1:{rounded}"
+        return f"1:{candidate:g}"
+
+    def scale_denominator_from_factor(self, geom_scale_factor: float | None) -> float | None:
+        candidate = self.scale_candidate_from_factor(geom_scale_factor)
+        if candidate is None:
+            return None
+        rounded = int(round(candidate))
+        if abs(candidate - rounded) <= 1e-9:
+            return float(rounded)
+        return float(candidate)
+
+    def is_scale_candidate_out_of_range(self, geom_scale_factor: float | None) -> bool:
+        if geom_scale_factor is None or geom_scale_factor <= 0:
+            return False
+        return self.scale_candidate_from_factor(geom_scale_factor) is None
 
     def collect_document_frames(
         self,
@@ -218,9 +262,10 @@ class TitleblockConsistencyService:
             frame.titleblock.paper_size_text = paper_text
 
         scale_text = self.scale_text_from_factor(frame.runtime.geom_scale_factor)
-        if scale_text:
+        scale_denominator = self.scale_denominator_from_factor(frame.runtime.geom_scale_factor)
+        if scale_text and scale_denominator is not None:
             frame.titleblock.scale_text = scale_text
-            frame.titleblock.scale_denominator = float(int(round(frame.runtime.geom_scale_factor or 0)))
+            frame.titleblock.scale_denominator = scale_denominator
 
     def _build_plan(
         self,

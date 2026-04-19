@@ -386,6 +386,67 @@ def test_stage_fix_titleblock_consistency_updates_working_source_and_flags(
     assert report_path.exists()
 
 
+def test_stage_fix_titleblock_consistency_marks_out_of_range_scale_without_autofix(
+    tmp_path: Path,
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(
+            deliverable_consistency_fix=SimpleNamespace(enabled=True),
+        ),
+    )
+    executor._update_progress = MagicMock()
+
+    frame = FrameMeta.model_validate_json(sample_frame.model_dump_json())
+    frame.runtime.source_file = tmp_path / "source.dwg"
+    frame.runtime.source_file.write_text("dwg", encoding="utf-8")
+    frame.runtime.cad_source_file = frame.runtime.source_file
+    frame.runtime.paper_variant_id = "CNPE_A1"
+    frame.runtime.geom_scale_factor = 48.81569160211338
+    frame.runtime.sx = 48.81569160211338
+    frame.runtime.sy = 48.81569160211338
+    frame.titleblock.paper_size_text = "A1"
+    frame.titleblock.scale_text = "1:50"
+    frame.titleblock.scale_denominator = 50
+    frame.raw_extracts = {
+        "图幅": [
+            {"text": "A", "x": 10.0, "y": 0.0},
+            {"text": "1", "x": 20.0, "y": 0.0},
+        ],
+        "比例": [
+            {"text": "1", "x": 10.0, "y": 0.0},
+            {"text": ":", "x": 15.0, "y": 0.0},
+            {"text": "50", "x": 20.0, "y": 0.0},
+        ],
+    }
+
+    executor.titleblock_consistency = TitleblockConsistencyService()
+    executor.titleblock_consistency_bridge = cast(
+        Any,
+        SimpleNamespace(
+            apply=MagicMock(),
+        ),
+    )
+
+    job = Job(
+        job_id="job-consistency-scale-out-of-range",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+    )
+
+    PipelineExecutor._stage_fix_titleblock_consistency(executor, job, {"frames": [frame], "sheet_sets": []})
+
+    assert frame.titleblock.scale_text == "1:50"
+    assert frame.titleblock.scale_denominator == 50
+    assert "SCALE_MISMATCH" in frame.runtime.flags
+    assert "SCALE_FIX_SKIPPED" in frame.runtime.flags
+    assert "SCALE_CANDIDATE_OUT_OF_RANGE" in frame.runtime.flags
+    executor.titleblock_consistency_bridge.apply.assert_not_called()
+
+
 def test_stage_fix_titleblock_consistency_autofixes_a4_marker_revision(
     tmp_path: Path,
 ) -> None:

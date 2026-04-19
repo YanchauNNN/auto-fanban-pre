@@ -1,5 +1,6 @@
 export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
 export type TaskIntent = TaskKind;
+export type PreviewMode = "plain" | "annotated";
 
 export type FormFieldType = "text" | "select" | "combobox" | "date" | "nameId" | "checkbox";
 
@@ -47,10 +48,13 @@ export type HealthStatus = {
 export type JobArtifacts = {
   packageAvailable: boolean;
   iedAvailable: boolean;
+  previewAvailable?: boolean;
+  previewMode?: PreviewMode | null;
   reportAvailable: boolean;
   replacedDwgAvailable: boolean;
   packageDownloadUrl?: string | null;
   iedDownloadUrl?: string | null;
+  previewDownloadUrl?: string | null;
   reportDownloadUrl?: string | null;
   replacedDwgDownloadUrl?: string | null;
 };

@@ -247,6 +247,35 @@
   margin-bottom: 0.72rem;
 }
 
+.sectionHeaderTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.sectionHeaderCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.48rem 0.82rem;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 73, 135, 0.16);
+  background: rgba(20, 73, 135, 0.05);
+  color: #174781;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sectionHeaderCheckboxInput {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: #2467b1;
+  cursor: pointer;
+}
+
 .sectionNote,
 .intentHelp,
 .replaceSummary {

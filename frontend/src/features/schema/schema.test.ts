@@ -254,6 +254,7 @@ describe("normalizeFormSchema", () => {
 
     expect(normalized.sections[0].fields[0]).toMatchObject({
       key: "include_ied_plan",
+      label: "是否生成IED",
       type: "checkbox",
       defaultValue: "true",
     });

@@ -2,3 +2,13 @@
 [     132ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5174/favicon.ico:0
 [  253830ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-JRY3IGQD.js?v=d3319710:21548
 [  255373ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-JRY3IGQD.js?v=d3319710:21548
+[20311760ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=28592f2c:21548
+[23817511ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:559
+[23818445ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=91280931:21548
+[23915493ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5174/@vite/client:559
+[23917523ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[23920563ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[23923601ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:5174/:0
+[23927130ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5174/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=5a89007c:21548
+[117454374ms] [ERROR] Failed to load resource: net::ERR_NO_BUFFER_SPACE @ http://127.0.0.1:8000/api/jobs/8a5eb2b3-9f6e-40f5-aa6d-a197497c89c4:0
+[163834778ms] [ERROR] Failed to load resource: net::ERR_NO_BUFFER_SPACE @ http://127.0.0.1:8000/api/jobs/8a5eb2b3-9f6e-40f5-aa6d-a197497c89c4:0

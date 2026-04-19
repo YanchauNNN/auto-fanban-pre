@@ -35,6 +35,8 @@ class JobArtifacts(BaseModel):
     ied_xlsx: Path | None = None
     drawings_dir: Path | None = None
     docs_dir: Path | None = None
+    preview_pdf: Path | None = None
+    preview_mode: str | None = None
     reports_dir: Path | None = None
     report_xlsx: Path | None = None
     report_json: Path | None = None

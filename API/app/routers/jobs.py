@@ -145,6 +145,16 @@ def download_ied(request: Request, job_id: str) -> FileResponse:
     )
 
 
+@router.get("/{job_id}/download/preview")
+def download_preview(request: Request, job_id: str) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "preview")
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="application/pdf",
+    )
+
+
 @router.get("/{job_id}/download/report")
 def download_report(request: Request, job_id: str) -> FileResponse:
     path = request.app.state.runtime.get_artifact_path(job_id, "report")

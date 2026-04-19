@@ -494,6 +494,114 @@
   cursor: not-allowed;
 }
 
+.previewDialog {
+  width: min(1480px, calc(100vw - 24px));
+}
+
+.previewModalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: min(88vh, 980px);
+  padding: 1.1rem;
+}
+
+.previewModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.previewModalHeader h2 {
+  margin: 0.15rem 0 0;
+  color: #153c66;
+}
+
+.previewModalActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.previewViewerShell {
+  display: flex;
+  flex: 1;
+  min-height: 75vh;
+  flex-direction: column;
+  gap: 0.85rem;
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(242, 247, 255, 0.96), rgba(232, 240, 252, 0.92)),
+    rgba(255, 255, 255, 0.94);
+  padding: 1rem;
+}
+
+.previewViewerStatusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.previewStatusText {
+  color: #315f91;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.previewPages {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  border-radius: 18px;
+  padding: 0.4rem 0.6rem 1rem;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.previewLoading,
+.previewFallback {
+  min-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  color: #315f91;
+}
+
+.previewFallback strong {
+  font-size: 1.05rem;
+  color: #153c66;
+}
+
+.previewFallback p {
+  margin: 0;
+}
+
+.previewPageCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 auto 1rem;
+}
+
+.previewPageCard :global(canvas) {
+  max-width: 100%;
+  height: auto !important;
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(18, 57, 103, 0.14);
+  background: #fff;
+}
+
+.previewPageNumber {
+  color: #4a6788;
+  font-size: 0.9rem;
+}
+
 .filterRow {
   display: flex;
   flex-wrap: wrap;

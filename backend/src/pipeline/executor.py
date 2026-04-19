@@ -56,6 +56,7 @@ from ..models import (
 )
 from .frame_filtering import split_anchor_valid_frames
 from .packager import Packager
+from .preview_pdf_service import PreviewPdfService
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
 
@@ -91,6 +92,7 @@ class PipelineExecutor:
         self.design_gen = DesignFileGenerator()
         self.ied_gen = IEDGenerator()
         self.packager = Packager()
+        self.preview_pdf_service = PreviewPdfService()
 
     def execute(self, job: Job) -> None:
         """?????"""
@@ -537,11 +539,26 @@ class PipelineExecutor:
         frame_by_id = {frame.frame_id: frame for frame in all_frames}
         source_to_all_frames: dict[Path, list[Any]] = {}
         source_to_plans: dict[Path, list[Any]] = {}
+        source_to_scale_out_of_range: dict[Path, list[dict[str, Any]]] = {}
         report: dict[str, Any] = {"sources": []}
 
         for frame in all_frames:
             source_path = Path(frame.runtime.cad_source_file or frame.runtime.source_file)
             source_to_all_frames.setdefault(source_path, []).append(frame)
+            if self.titleblock_consistency.is_scale_candidate_out_of_range(
+                frame.runtime.geom_scale_factor
+            ):
+                self._mark_consistency_flag(frame, "scale_text", "MISMATCH")
+                self._mark_consistency_flag(frame, "scale_text", "FIX_SKIPPED")
+                frame.add_flag("SCALE_CANDIDATE_OUT_OF_RANGE")
+                source_to_scale_out_of_range.setdefault(source_path, []).append(
+                    {
+                        "frame_id": frame.frame_id,
+                        "internal_code": frame.titleblock.internal_code,
+                        "current_text": frame.titleblock.scale_text,
+                        "geom_scale_factor": frame.runtime.geom_scale_factor,
+                    }
+                )
             plans = self.titleblock_consistency.build_frame_plans(frame)
             if plans:
                 source_to_plans.setdefault(source_path, []).extend(plans)
@@ -555,7 +572,7 @@ class PipelineExecutor:
                 source_to_all_frames.setdefault(source_path, []).append(frame)
                 source_to_plans.setdefault(source_path, []).append(plan)
 
-        if not source_to_plans:
+        if not source_to_plans and not source_to_scale_out_of_range:
             self._update_progress(job, message="图签图幅/比例一致性已通过", force=True)
             return
 
@@ -565,13 +582,20 @@ class PipelineExecutor:
         report_path = consistency_dir / "consistency_report.json"
         slot_runtime = job.params.get("cad_slot_runtime")
 
-        for source_path, plans in source_to_plans.items():
+        for source_path in sorted(
+            set(source_to_plans.keys()) | set(source_to_scale_out_of_range.keys()),
+            key=lambda path: str(path),
+        ):
+            plans = source_to_plans.get(source_path, [])
+            out_of_range_scales = source_to_scale_out_of_range.get(source_path, [])
             safe_plans = [plan for plan in plans if plan.replacements]
             skipped_plans = [plan for plan in plans if not plan.replacements]
             source_report = {
                 "source_dwg": str(source_path),
                 "safe_plan_count": len(safe_plans),
                 "skipped_plan_count": len(skipped_plans),
+                "out_of_range_scale_count": len(out_of_range_scales),
+                "out_of_range_scales": out_of_range_scales,
                 "output_dwg": None,
                 "errors": [],
                 "plans": [
@@ -912,6 +936,24 @@ class PipelineExecutor:
         self.packager.generate_manifest(job, context=context)
         zip_path = self.packager.package(job)
         job.artifacts.package_zip = zip_path
+        self._generate_preview_pdf(job, context)
+
+    def _generate_preview_pdf(self, job: Job, context: dict) -> None:
+        try:
+            preview_result = self.preview_pdf_service.build_preview(
+                job_id=job.job_id,
+                output_dir=self._require_work_dir(job) / "output" / "preview",
+                frames=context.get("frames", []),
+                sheet_sets=context.get("sheet_sets", []),
+                findings=[],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("preview pdf generation failed for %s: %s", job.job_id, exc)
+            job.add_flag("PREVIEW_PDF_GENERATE_FAILED")
+            return
+
+        job.artifacts.preview_pdf = preview_result.pdf_path
+        job.artifacts.preview_mode = preview_result.mode
 
     # ==================================================================
     # Flags 聚合

@@ -362,7 +362,7 @@ def test_collect_additional_layers_prefers_candidate_geometry_layers() -> None:
     assert "INS" in layers
 
 
-def test_localized_candidate_build_relaxes_integer_scale_gate() -> None:
+def test_localized_candidate_build_keeps_integer_scale_gate() -> None:
     spec = _layered_anchor_spec()
     locator = AnchorFirstLocator(spec, DummyFinder([]), FixedScaleFitter())
     bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=50)
@@ -375,7 +375,7 @@ def test_localized_candidate_build_relaxes_integer_scale_gate() -> None:
         relax_scale_candidate_gate=True,
     )
 
-    assert len(localized) == 1
+    assert localized == []
 
 
 def test_locate_frames_retries_global_layers_with_localized_line_rebuild_for_unresolved_anchor() -> None:

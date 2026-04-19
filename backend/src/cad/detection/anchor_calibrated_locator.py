@@ -754,7 +754,7 @@ class AnchorCalibratedLocator:
                 continue
             # 强制校验：比例必须接近 scale_candidates 中的某个整数值
             cand_scale = (sx + sy) / 2.0
-            if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
+            if not self._scale_matches_candidate(cand_scale):
                 continue
             cand = CandidateFrame(
                 bbox=bbox,
@@ -782,7 +782,7 @@ class AnchorCalibratedLocator:
                     continue
                 # 强制校验：比例必须接近 scale_candidates 中的某个整数值
                 cand_scale = (sx + sy) / 2.0
-                if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
+                if not self._scale_matches_candidate(cand_scale):
                     continue
                 candidates.append(
                     CandidateFrame(
@@ -904,7 +904,7 @@ class AnchorCalibratedLocator:
             bbox, self.paper_variants
         ):
             cand_scale = (sx + sy) / 2.0
-            if not relax_scale_candidate_gate and not self._scale_matches_candidate(cand_scale):
+            if not self._scale_matches_candidate(cand_scale):
                 continue
             candidates.append(
                 CandidateFrame(

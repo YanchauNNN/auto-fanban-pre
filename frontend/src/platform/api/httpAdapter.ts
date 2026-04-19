@@ -21,10 +21,13 @@ import type {
 type RawArtifacts = {
   package_available: boolean;
   ied_available: boolean;
+  preview_available?: boolean | null;
+  preview_mode?: "plain" | "annotated" | null;
   report_available: boolean;
   replaced_dwg_available: boolean;
   package_download_url?: string | null;
   ied_download_url?: string | null;
+  preview_download_url?: string | null;
   report_download_url?: string | null;
   replaced_dwg_download_url?: string | null;
 };
@@ -421,10 +424,13 @@ export class HttpAdapter implements ApiAdapter {
       artifacts: {
         packageAvailable: payload.artifacts.package_available,
         iedAvailable: payload.artifacts.ied_available,
+        previewAvailable: payload.artifacts.preview_available ?? false,
+        previewMode: payload.artifacts.preview_mode ?? null,
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
         packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
         iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
+        previewDownloadUrl: this.resolveUrl(payload.artifacts.preview_download_url),
         reportDownloadUrl: this.resolveUrl(payload.artifacts.report_download_url),
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
       },

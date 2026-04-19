@@ -51,10 +51,13 @@ describe("HttpAdapter", () => {
           artifacts: {
             package_available: true,
             ied_available: true,
+            preview_available: true,
+            preview_mode: "annotated",
             report_available: false,
             replaced_dwg_available: false,
             package_download_url: "/api/jobs/job-1/download/package",
             ied_download_url: "/api/jobs/job-1/download/ied",
+            preview_download_url: "/api/jobs/job-1/download/preview",
             report_download_url: null,
             replaced_dwg_download_url: null,
           },
@@ -75,6 +78,10 @@ describe("HttpAdapter", () => {
     expect(detail.artifacts.iedDownloadUrl).toBe(
       "http://127.0.0.1:8000/api/jobs/job-1/download/ied",
     );
+    expect(detail.artifacts.previewDownloadUrl).toBe(
+      "http://127.0.0.1:8000/api/jobs/job-1/download/preview",
+    );
+    expect(detail.artifacts.previewMode).toBe("annotated");
     expect(detail.deliverableOutputs?.drawings[0]).toMatchObject({
       internalCode: "20261RS-JGS65-001",
       dwgName: "A01.dwg",

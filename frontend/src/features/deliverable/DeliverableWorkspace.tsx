@@ -71,6 +71,7 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_revision",
   "upgrade_note_text",
 ]);
+const MANUALLY_POSITIONED_FIELDS = new Set(["include_ied_plan"]);
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
 const LAST_FONT_REPLACEMENTS_STORAGE_KEY = "auto-fanban.last-font-replacements";
 const PLOT_STYLE_OPTIONS = [
@@ -156,6 +157,10 @@ export function DeliverableWorkspace({
   );
   const upgradeSheetCodesField = useMemo(
     () => findSchemaField(schema, "upgrade_sheet_codes"),
+    [schema],
+  );
+  const iedPlanField = useMemo(
+    () => findSchemaField(schema, "include_ied_plan"),
     [schema],
   );
   const upgradeEnabled = draft.values.is_upgrade === "true";
@@ -820,6 +825,7 @@ export function DeliverableWorkspace({
                   coverRevisionField={coverRevisionField}
                   draft={draft}
                   fieldErrors={draft.fieldErrors}
+                  iedPlanField={iedPlanField}
                   onFieldChange={handleFieldChange}
                   onUpgradeToggle={handleUpgradeToggle}
                   section={section}
@@ -1238,6 +1244,7 @@ function FragmentWithUpgradeSection({
   section,
   draft,
   fieldErrors,
+  iedPlanField,
   onFieldChange,
   onUpgradeToggle,
   upgradeEnabled,
@@ -1247,17 +1254,29 @@ function FragmentWithUpgradeSection({
   section: FormSchema["sections"][number];
   draft: TaskConfigDraft;
   fieldErrors: Record<string, string[]>;
+  iedPlanField: FormField | undefined;
   onFieldChange: (key: string, value: string) => void;
   onUpgradeToggle: () => void;
   upgradeEnabled: boolean;
   coverRevisionField: FormField | undefined;
   upgradeSheetCodesField: FormField | undefined;
 }) {
+  const showIedPlanToggle = section.id === "ied" && iedPlanField;
+
   return (
     <>
       <section className={styles.section}>
         <header className={styles.sectionHeader}>
-          <h3>{section.title}</h3>
+          <div className={styles.sectionHeaderTop}>
+            <h3>{section.title}</h3>
+            {showIedPlanToggle ? (
+              <SectionHeaderCheckbox
+                checked={(draft.values[iedPlanField.key] ?? iedPlanField.defaultValue) === "true"}
+                field={iedPlanField}
+                onChange={(value) => onFieldChange(iedPlanField.key, value)}
+              />
+            ) : null}
+          </div>
           {section.id === "project" ? (
             <div
               className={`${styles.sectionNote} ${
@@ -1335,6 +1354,33 @@ function FragmentWithUpgradeSection({
         </section>
       ) : null}
     </>
+  );
+}
+
+function SectionHeaderCheckbox({
+  field,
+  checked,
+  onChange,
+}: {
+  field: FormField;
+  checked: boolean;
+  onChange: (value: string) => void;
+}) {
+  const inputId = useId();
+
+  return (
+    <label className={styles.sectionHeaderCheckbox} htmlFor={inputId}>
+      <input
+        aria-label={field.label}
+        checked={checked}
+        className={styles.sectionHeaderCheckboxInput}
+        id={inputId}
+        name={field.key}
+        type="checkbox"
+        onChange={(event) => onChange(event.target.checked ? "true" : "false")}
+      />
+      <span>{field.label}</span>
+    </label>
   );
 }
 
@@ -1444,6 +1490,10 @@ function filterSections(
       ...section,
       fields: section.fields.filter((field) => {
         if (LEGACY_UPGRADE_KEYS.has(field.key)) {
+          return false;
+        }
+
+        if (MANUALLY_POSITIONED_FIELDS.has(field.key)) {
           return false;
         }
 

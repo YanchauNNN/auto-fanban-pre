@@ -183,6 +183,51 @@ def test_build_frame_plans_ignores_cjk_noise_in_paper_size_roi() -> None:
     assert [plan.field_name for plan in plans] == []
 
 
+def test_scale_text_from_factor_snaps_to_nearest_yaml_candidate_within_tolerance() -> None:
+    service = TitleblockConsistencyService()
+
+    assert service.scale_text_from_factor(49.3) == "1:50"
+
+
+def test_scale_text_from_factor_returns_empty_when_out_of_tolerance() -> None:
+    service = TitleblockConsistencyService()
+
+    assert service.scale_text_from_factor(48.81569160211338) == ""
+
+
+def test_build_frame_plans_skips_scale_autofix_when_geom_scale_is_out_of_tolerance() -> None:
+    service = TitleblockConsistencyService()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-scale-out-of-range",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            paper_variant_id="CNPE_A1+1/2",
+            geom_scale_factor=48.81569160211338,
+            sx=48.81569160211338,
+            sy=48.81569160211338,
+            roi_profile_id="BASE10",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="18185NE-JGS11-003",
+            paper_size_text="A1+1/2",
+            scale_text="1:50",
+            scale_denominator=50,
+        ),
+        raw_extracts={
+            "比例": [
+                {"text": "1", "x": 10.0, "y": 0.0},
+                {"text": ":", "x": 15.0, "y": 0.0},
+                {"text": "50", "x": 20.0, "y": 0.0},
+            ]
+        },
+    )
+
+    plans = service.build_frame_plans(frame)
+
+    assert [plan.field_name for plan in plans] == []
+
+
 def test_build_sheet_set_plans_creates_a4_marker_revision_fix_plan() -> None:
     service = TitleblockConsistencyService()
     source_file = Path(__file__)

@@ -573,7 +573,7 @@ class AnchorFirstLocator:
         ):
             scale = (sx + sy) / 2.0
             # ① 强制校验：比例必须接近 scale_candidates 中的某个整数值
-            if not relax_scale_candidate_gate and not self._scale_matches_candidate(scale):
+            if not self._scale_matches_candidate(scale):
                 self.logger.debug(
                     "候选矩形比例 %.3f 不在 scale_candidates 中，跳过 paper=%s",
                     scale,

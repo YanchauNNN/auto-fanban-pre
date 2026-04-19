@@ -62,6 +62,7 @@ const FIELD_LABELS: Record<string, string> = {
   discipline_office: "专业室",
   file_category: "文件类别",
   attachment_name: "附件名称",
+  include_ied_plan: "是否生成IED",
   qa_required: "是否质保核查",
   qa_engineer: "质保核查工程师",
   work_hours: "工时数",

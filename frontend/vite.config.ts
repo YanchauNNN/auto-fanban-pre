@@ -10,6 +10,14 @@ export default defineConfig({
       targets: ["defaults", "not IE 11"],
     }),
   ],
+  resolve: {
+    alias: [
+      {
+        find: /^pdfjs-dist$/,
+        replacement: "pdfjs-dist/legacy/build/pdf.mjs",
+      },
+    ],
+  },
   build: {
     cssTarget: "chrome61",
   },
