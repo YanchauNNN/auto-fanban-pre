@@ -83,7 +83,7 @@ const AuditCheckSummaryModal = lazy(async () => ({
 
 ensurePromiseWithResolvers();
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfPreviewWorkerUrl;
+pdfjs.GlobalWorkerOptions.workerSrc = `${pdfPreviewWorkerUrl}?react-pdf-compat=5.4.296`;
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
@@ -1553,6 +1553,7 @@ function SingleJobDetailPanel({
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
+  const artifactButtons = renderArtifactButtons(detail, "default", setPreviewRequest);
 
   return (
     <section className={styles.detailPanel}>
@@ -1574,6 +1575,13 @@ function SingleJobDetailPanel({
           <span>
             flags {detail.flags.length} 项 / errors {detail.errors.length} 项
           </span>
+        </section>
+      ) : null}
+
+      {artifactButtons.length > 0 ? (
+        <section className={styles.quickDownloadSection}>
+          <h2>快捷下载</h2>
+          <div className={styles.downloadGrid}>{artifactButtons}</div>
         </section>
       ) : null}
 
@@ -1644,13 +1652,6 @@ function SingleJobDetailPanel({
       </section>
 
       <section className={styles.detailSection}>
-        <h2>下载</h2>
-        <div className={styles.downloadGrid}>
-          {renderArtifactButtons(detail, "default", setPreviewRequest)}
-        </div>
-      </section>
-
-      <section className={styles.detailSection}>
         <h2>后续动作</h2>
         <div className={styles.downloadGrid}>
           <button className={styles.disabledAction} disabled type="button">
@@ -1678,6 +1679,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
+  const artifactButtons = renderArtifactButtons(detail, "default", setPreviewRequest);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -1703,6 +1705,13 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <StatusPill status={detail.status} />
       </header>
 
+      {artifactButtons.length > 0 ? (
+        <section className={styles.quickDownloadSection}>
+          <h2>快捷下载</h2>
+          <div className={styles.downloadGrid}>{artifactButtons}</div>
+        </section>
+      ) : null}
+
       <section className={styles.detailSection}>
         <h2>任务包概览</h2>
         <div className={styles.detailGrid}>
@@ -1721,13 +1730,6 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         </div>
         <div className={styles.progressBarLarge}>
           <div style={{ width: `${detail.percent}%` }} />
-        </div>
-      </section>
-
-      <section className={styles.detailSection}>
-        <h2>聚合下载</h2>
-        <div className={styles.downloadGrid}>
-          {renderArtifactButtons(detail, "default", setPreviewRequest)}
         </div>
       </section>
 

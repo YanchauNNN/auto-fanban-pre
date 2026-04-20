@@ -22,6 +22,6 @@ describe("vite browser compatibility", () => {
     expect(configSource).toContain("find: /^pdfjs-dist$/");
     expect(configSource).toContain('replacement: "pdfjs-dist/legacy/build/pdf.mjs"');
     expect(appSource).toContain('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
-    expect(appSource).toContain("pdfjs.GlobalWorkerOptions.workerSrc = pdfPreviewWorkerUrl");
+    expect(appSource).toContain('pdfjs.GlobalWorkerOptions.workerSrc = `${pdfPreviewWorkerUrl}?react-pdf-compat=5.4.296`');
   });
 });

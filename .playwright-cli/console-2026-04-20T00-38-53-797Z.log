@@ -1,0 +1,14 @@
+[      84ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=5a89007c:21548
+[     144ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/favicon.ico:0
+[   53721ms] [ERROR] Warning: UnknownErrorException: The API version "5.4.296" does not match the Worker version "5.6.205". @ http://127.0.0.1:5173/node_modules/.vite/deps/react-pdf.js?v=5a89007c:35
+[   53721ms] [ERROR] Failed to parse PDF preview UnknownErrorException @ http://127.0.0.1:5173/src/app/App.tsx:3310
+[  232183ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=5a89007c:21548
+[  290005ms] [ERROR] Warning: UnknownErrorException: The API version "5.4.296" does not match the Worker version "5.6.205". @ http://127.0.0.1:5173/node_modules/.vite/deps/react-pdf.js?v=5a89007c:35
+[  290006ms] [ERROR] Failed to parse PDF preview UnknownErrorException @ http://127.0.0.1:5173/src/app/App.tsx:3310
+[  405206ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-RW5CEPFJ.js?v=5a89007c:21548
+[  541589ms] [ERROR] Warning: File prop passed to <Document /> changed, but it's equal to previous one. This might result in unnecessary reloads. Consider memoizing the value passed to "file" prop. @ http://127.0.0.1:5173/node_modules/.vite/deps/react-pdf.js?v=5a89007c:35
+[ 4290938ms] [ERROR] Warning: File prop passed to <Document /> changed, but it's equal to previous one. This might result in unnecessary reloads. Consider memoizing the value passed to "file" prop. @ http://127.0.0.1:5173/node_modules/.vite/deps/react-pdf.js?v=5a89007c:35
+[ 4465999ms] [ERROR] Warning: File prop passed to <Document /> changed, but it's equal to previous one. This might result in unnecessary reloads. Consider memoizing the value passed to "file" prop. @ http://127.0.0.1:5173/node_modules/.vite/deps/react-pdf.js?v=5a89007c:35
+[ 7231476ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8000/api/jobs/ee7370be-d2d1-449c-829d-94063d5ee38f:0
+[ 7234529ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8000/api/jobs/ee7370be-d2d1-449c-829d-94063d5ee38f:0
+[ 7238571ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8000/api/jobs/ee7370be-d2d1-449c-829d-94063d5ee38f:0

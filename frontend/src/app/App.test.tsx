@@ -341,7 +341,7 @@ describe("homepage shell", () => {
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
-    expect(screen.getByText("聚合下载")).toBeInTheDocument();
+    expect(screen.getByText("快捷下载")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
@@ -1065,7 +1065,10 @@ describe("job detail pages", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("出图结果")).toBeInTheDocument();
+    const quickDownloadHeading = await screen.findByRole("heading", { level: 2, name: "快捷下载" });
+    const resultHeading = await screen.findByRole("heading", { level: 2, name: "出图结果" });
+
+    expect(quickDownloadHeading.compareDocumentPosition(resultHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();

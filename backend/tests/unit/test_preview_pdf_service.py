@@ -98,6 +98,65 @@ def test_build_preview_merges_outputs_in_user_visible_order(monkeypatch, tmp_pat
     assert "sheet-002" in (reader.pages[2].extract_text() or "")
 
 
+def test_build_preview_interleaves_sheet_sets_with_frames_by_internal_code(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    frame_002_pdf = tmp_path / "frame-002.pdf"
+    frame_003_pdf = tmp_path / "frame-003.pdf"
+    sheet_001_pdf = tmp_path / "sheet-001.pdf"
+    _write_pdf(frame_002_pdf, ["frame-002"])
+    _write_pdf(frame_003_pdf, ["frame-003"])
+    _write_pdf(sheet_001_pdf, ["sheet-001-page-1", "sheet-001-page-2"])
+
+    frame_002 = _make_frame(
+        pdf_path=frame_002_pdf,
+        internal_code="20261RS-JGS65-002",
+        seq="002",
+    )
+    frame_003 = _make_frame(
+        pdf_path=frame_003_pdf,
+        internal_code="20261RS-JGS65-003",
+        seq="003",
+    )
+    master_001 = _make_frame(
+        pdf_path=sheet_001_pdf,
+        internal_code="20261RS-JGS65-001",
+        seq="001",
+    )
+    sheet_set = SheetSet(
+        cluster_id="cluster-001",
+        page_total=2,
+        generated_page_count=2,
+        pdf_path=sheet_001_pdf,
+        pages=[
+            PageInfo(page_index=1, outer_bbox=BBox(xmin=0, ymin=0, xmax=500, ymax=700), frame_meta=master_001),
+            PageInfo(page_index=2, outer_bbox=BBox(xmin=500, ymin=0, xmax=1000, ymax=700)),
+        ],
+        master_page=PageInfo(
+            page_index=1,
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=500, ymax=700),
+            frame_meta=master_001,
+        ),
+    )
+
+    result = PreviewPdfService().build_preview(
+        job_id="job-preview-interleaved",
+        output_dir=tmp_path / "preview",
+        frames=[frame_002, frame_003],
+        sheet_sets=[sheet_set],
+        findings=[],
+    )
+
+    reader = PdfReader(str(result.pdf_path))
+    assert len(reader.pages) == 4
+    assert "sheet-001-page-1" in (reader.pages[0].extract_text() or "")
+    assert "sheet-001-page-2" in (reader.pages[1].extract_text() or "")
+    assert "frame-002" in (reader.pages[2].extract_text() or "")
+    assert "frame-003" in (reader.pages[3].extract_text() or "")
+
+
 def test_build_preview_draws_red_boxes_for_positioned_findings(monkeypatch, tmp_path: Path) -> None:
     _configure_env(monkeypatch, tmp_path)
     frame_pdf = tmp_path / "frame.pdf"

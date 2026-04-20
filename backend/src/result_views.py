@@ -74,26 +74,27 @@ def build_deliverable_outputs(
 
 def _build_drawing_outputs(context: Mapping[str, Any]) -> list[dict[str, Any]]:
     drawings: list[dict[str, Any]] = []
-    for frame in _sorted_frames(context.get("frames", [])):
-        drawings.append(
-            {
-                "name": output_name_for_frame(frame),
-                "internal_code": frame.titleblock.internal_code,
-                "dwg_name": frame.runtime.dwg_path.name if frame.runtime.dwg_path else None,
-                "pdf_name": frame.runtime.pdf_path.name if frame.runtime.pdf_path else None,
-                "page_total": 1,
-            }
-        )
+    for item in _sorted_drawing_items(context.get("frames", []), context.get("sheet_sets", [])):
+        if isinstance(item, FrameMeta):
+            drawings.append(
+                {
+                    "name": output_name_for_frame(item),
+                    "internal_code": item.titleblock.internal_code,
+                    "dwg_name": item.runtime.dwg_path.name if item.runtime.dwg_path else None,
+                    "pdf_name": item.runtime.pdf_path.name if item.runtime.pdf_path else None,
+                    "page_total": 1,
+                }
+            )
+            continue
 
-    for sheet_set in _sorted_sheet_sets(context.get("sheet_sets", [])):
-        titleblock = sheet_set.get_inherited_titleblock()
+        titleblock = item.get_inherited_titleblock()
         drawings.append(
             {
-                "name": output_name_for_sheet_set(sheet_set),
+                "name": output_name_for_sheet_set(item),
                 "internal_code": titleblock.get("internal_code"),
-                "dwg_name": sheet_set.dwg_path.name if sheet_set.dwg_path else None,
-                "pdf_name": sheet_set.pdf_path.name if sheet_set.pdf_path else None,
-                "page_total": sheet_set.generated_page_count or sheet_set.page_total,
+                "dwg_name": item.dwg_path.name if item.dwg_path else None,
+                "pdf_name": item.pdf_path.name if item.pdf_path else None,
+                "page_total": item.generated_page_count or item.page_total,
             }
         )
     return drawings
@@ -122,6 +123,16 @@ def _sorted_sheet_sets(sheet_sets: Iterable[Any]) -> list[SheetSet]:
     return sorted(validated, key=_sheet_set_sort_key)
 
 
+def _sorted_drawing_items(
+    frames: Iterable[Any],
+    sheet_sets: Iterable[Any],
+) -> list[FrameMeta | SheetSet]:
+    items: list[FrameMeta | SheetSet] = []
+    items.extend(_sorted_frames(frames))
+    items.extend(_sorted_sheet_sets(sheet_sets))
+    return sorted(items, key=_drawing_item_sort_key)
+
+
 def _frame_sort_key(frame: FrameMeta) -> tuple[int, str]:
     seq = frame.titleblock.get_seq_no()
     internal_code = frame.titleblock.internal_code or ""
@@ -134,6 +145,14 @@ def _sheet_set_sort_key(sheet_set: SheetSet) -> tuple[int, str]:
     suffix = internal_code.rsplit("-", 1)[-1] if "-" in internal_code else ""
     seq = int(suffix) if suffix.isdigit() else 9999
     return (seq, internal_code)
+
+
+def _drawing_item_sort_key(item: FrameMeta | SheetSet) -> tuple[int, str, int]:
+    if isinstance(item, FrameMeta):
+        seq, internal_code = _frame_sort_key(item)
+        return (seq, internal_code, 0)
+    seq, internal_code = _sheet_set_sort_key(item)
+    return (seq, internal_code, 1)
 
 
 def _flag_identity(flag: str) -> str:

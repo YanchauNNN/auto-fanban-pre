@@ -1155,6 +1155,20 @@
   font-size: 0.85rem;
 }
 
+.quickDownloadSection {
+  margin-top: 1.1rem;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 70, 128, 0.08);
+  background: linear-gradient(135deg, rgba(242, 247, 253, 0.96), rgba(233, 241, 251, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.quickDownloadSection h2 {
+  margin: 0 0 0.8rem;
+  color: #163f6d;
+}
+
 .jobsModalBackdrop {
   position: fixed;
   inset: 0;

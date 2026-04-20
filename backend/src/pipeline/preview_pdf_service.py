@@ -11,7 +11,7 @@ from pypdf import PdfReader, PdfWriter
 from ..audit_check.models import AuditFinding
 from ..config import load_spec
 from ..models import BBox, FrameMeta, SheetSet
-from ..result_views import _sorted_frames, _sorted_sheet_sets
+from ..result_views import _sorted_drawing_items
 
 PreviewMode = Literal["plain", "annotated"]
 
@@ -97,32 +97,33 @@ class PreviewPdfService:
         writer = PdfWriter()
         page_regions: list[_PreviewPageRegion] = []
 
-        for frame in _sorted_frames(frames):
-            pdf_path = frame.runtime.pdf_path
-            if pdf_path is None or not pdf_path.exists():
-                continue
-            reader = PdfReader(str(pdf_path))
-            for page in reader.pages:
-                writer.add_page(page)
-                page_regions.append(
-                    _PreviewPageRegion(
-                        preview_page_index=len(page_regions),
-                        bbox=frame.runtime.outer_bbox,
-                        internal_code=frame.titleblock.internal_code,
-                        frame=frame,
+        for item in _sorted_drawing_items(frames, sheet_sets):
+            if isinstance(item, FrameMeta):
+                pdf_path = item.runtime.pdf_path
+                if pdf_path is None or not pdf_path.exists():
+                    continue
+                reader = PdfReader(str(pdf_path))
+                for page in reader.pages:
+                    writer.add_page(page)
+                    page_regions.append(
+                        _PreviewPageRegion(
+                            preview_page_index=len(page_regions),
+                            bbox=item.runtime.outer_bbox,
+                            internal_code=item.titleblock.internal_code,
+                            frame=item,
+                        )
                     )
-                )
+                continue
 
-        for sheet_set in _sorted_sheet_sets(sheet_sets):
-            pdf_path = sheet_set.pdf_path
+            pdf_path = item.pdf_path
             if pdf_path is None or not pdf_path.exists():
                 continue
             reader = PdfReader(str(pdf_path))
-            inherited = sheet_set.get_inherited_titleblock()
+            inherited = item.get_inherited_titleblock()
             for page_index, page in enumerate(reader.pages):
                 writer.add_page(page)
-                page_bbox = self._sheet_page_bbox(sheet_set, page_index)
-                page_frame = self._sheet_page_frame(sheet_set, page_index)
+                page_bbox = self._sheet_page_bbox(item, page_index)
+                page_frame = self._sheet_page_frame(item, page_index)
                 page_regions.append(
                     _PreviewPageRegion(
                         preview_page_index=len(page_regions),
