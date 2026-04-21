@@ -151,6 +151,8 @@ class _FakeExcelApp:
         self.UserControl = True
         self.Interactive = True
         self.AutomationSecurity = 1
+        self.Workbooks = _FakeWorkbookCollection()
+        self.Ready = True
 
 
 class _FakeRejectedComError(RuntimeError):
@@ -191,6 +193,28 @@ class _FakeExcelWithBusyWorkbooks:
                 hresult=-2147418111,
             )
         return self.collection
+
+
+class _FakeExcelNeedingWarmup:
+    def __init__(self, *, busy_attempts: int = 2) -> None:
+        self._busy_attempts_remaining = busy_attempts
+        self.workbooks = _FakeWorkbookCollection()
+        self.ready_checks = 0
+
+    @property
+    def Workbooks(self) -> _FakeWorkbookCollection:  # noqa: N802
+        if self._busy_attempts_remaining > 0:
+            self._busy_attempts_remaining -= 1
+            raise _FakeRejectedComError(
+                "call was rejected by callee",
+                hresult=-2147418111,
+            )
+        return self.workbooks
+
+    @property
+    def Ready(self) -> bool:  # noqa: N802
+        self.ready_checks += 1
+        return self._busy_attempts_remaining <= 0
 
 
 class _FakeBrokenExcelComClient:
@@ -307,6 +331,16 @@ def test_open_excel_workbook_retries_when_call_is_rejected(monkeypatch, temp_dir
     assert excel.workbook_access_attempts == 2
     assert excel.collection.open_attempts == 2
     shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+
+def test_wait_for_excel_application_ready_retries_until_workbooks_accessible() -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    excel = _FakeExcelNeedingWarmup(busy_attempts=3)
+
+    workbooks = exporter._wait_for_excel_application_ready(excel)
+
+    assert workbooks is excel.workbooks
+    assert excel.ready_checks >= 1
 
 
 def test_create_excel_application_falls_back_to_excel_executable_candidates(

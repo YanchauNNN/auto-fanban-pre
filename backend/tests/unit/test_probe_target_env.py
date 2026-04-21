@@ -61,6 +61,17 @@ def test_probe_target_env_python_import_uses_temp_script_not_dash_c() -> None:
     assert 'Arguments @("-c"' not in script_text
 
 
+def test_probe_target_env_python_commands_disable_user_site_and_pythonpath() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in script_text
+    assert '[Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")' in script_text
+    assert '[Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")' in script_text
+
+
 def test_probe_target_env_deep_pdf_export_uses_backend_pdf_exporter() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
@@ -115,11 +126,14 @@ def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:
         encoding="utf-8",
     )
 
+    assert "function Get-ExcelWorkbooksWithRetry" in script_text
+    assert "function Wait-ExcelApplicationReady" in script_text
     assert "function Invoke-ExcelOpenWithRetry" in script_text
+    assert "function Set-ExcelHeadlessState" in script_text
     assert 'fanban_excel_' in script_text
     assert "Unblock-File -LiteralPath $workingCopy" in script_text
-    assert '$app.AskToUpdateLinks = $false' in script_text
-    assert '$app.EnableEvents = $false' in script_text
+    assert 'Name = "AskToUpdateLinks"; Value = $false' in script_text
+    assert 'Name = "EnableEvents"; Value = $false' in script_text
     assert "GetFileName($TemplatePath)" not in script_text
 
 

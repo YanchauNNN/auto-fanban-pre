@@ -121,7 +121,14 @@ function Invoke-ExternalCommand {
         [string[]]$Arguments
     )
 
+    $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
+    $previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+    $previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+
     try {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
         $output = & $FilePath @Arguments 2>&1
         $exitCode = $LASTEXITCODE
         if ($null -eq $exitCode) {
@@ -140,6 +147,10 @@ function Invoke-ExternalCommand {
             stdout = ""
             error = $_.Exception.Message
         }
+    } finally {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
     }
 }
 
@@ -1432,6 +1443,7 @@ function Get-ExcelComObjectWithBootstrap {
     $lastError = $null
     try {
         $app = New-Object -ComObject Excel.Application
+        Wait-ExcelApplicationReady -ExcelApp $app | Out-Null
         return [ordered]@{
             app = $app
             bootstrap_mode = "com"
@@ -1453,6 +1465,7 @@ function Get-ExcelComObjectWithBootstrap {
         try {
             $proc = Start-ExcelAutomationCandidate -ExecutablePath $candidate
             $app = Wait-ExcelActiveObject
+            Wait-ExcelApplicationReady -ExcelApp $app | Out-Null
             return [ordered]@{
                 app = $app
                 bootstrap_mode = "candidate"
@@ -1518,8 +1531,7 @@ function Test-ExcelCom {
     try {
         $bootstrap = Get-ExcelComObjectWithBootstrap
         $app = $bootstrap.app
-        $app.Visible = $false
-        $app.DisplayAlerts = $false
+        Set-ExcelHeadlessState -ExcelApp $app
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             prog_id = "Excel.Application"
             version = [string]$app.Version
@@ -1547,6 +1559,35 @@ function Test-ExcelCom {
             Remove-ComObjectReference -ComObject $app
             [GC]::Collect()
             [GC]::WaitForPendingFinalizers()
+        }
+    }
+}
+
+function Set-ExcelHeadlessState {
+    param($ExcelApp)
+
+    if ($null -eq $ExcelApp) {
+        return
+    }
+
+    $updates = @(
+        @{ Name = "Visible"; Value = $false; Required = $true },
+        @{ Name = "DisplayAlerts"; Value = $false; Required = $true },
+        @{ Name = "AskToUpdateLinks"; Value = $false; Required = $false },
+        @{ Name = "EnableEvents"; Value = $false; Required = $false },
+        @{ Name = "ScreenUpdating"; Value = $false; Required = $false },
+        @{ Name = "AutomationSecurity"; Value = 3; Required = $false }
+    )
+
+    foreach ($update in $updates) {
+        try {
+            Invoke-ExcelComCallWithRetry -Operation {
+                $ExcelApp.($update.Name) = $update.Value
+            } -Description ("Excel." + $update.Name + "=set") -Retries 12 | Out-Null
+        } catch {
+            if ($update.Required) {
+                throw
+            }
         }
     }
 }
@@ -1846,6 +1887,74 @@ function Test-IsCallRejected {
     return ($Message -like "*拒绝接收呼叫*" -or $Message -like "*call was rejected by callee*")
 }
 
+function Invoke-ExcelComCallWithRetry {
+    param(
+        [scriptblock]$Operation,
+        [string]$Description,
+        [int]$Retries = 10
+    )
+
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
+        try {
+            return & $Operation
+        } catch {
+            $lastError = $_
+            $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
+            $delayMs = if (Test-IsCallRejected -Message $message) { 800 } else { 300 }
+            Start-Sleep -Milliseconds $delayMs
+        }
+    }
+
+    if ($null -ne $lastError -and $null -ne $lastError.Exception) {
+        throw $lastError.Exception
+    }
+    throw "Excel COM call failed: $Description"
+}
+
+function Get-ExcelWorkbooksWithRetry {
+    param(
+        [object]$ExcelApp,
+        [int]$Retries = 12
+    )
+
+    return Invoke-ExcelComCallWithRetry -Operation {
+        $ExcelApp.Workbooks
+    } -Description "Excel.Workbooks" -Retries $Retries
+}
+
+function Wait-ExcelApplicationReady {
+    param(
+        [object]$ExcelApp,
+        [int]$Retries = 18
+    )
+
+    $lastError = $null
+    for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
+        try {
+            $workbooks = Get-ExcelWorkbooksWithRetry -ExcelApp $ExcelApp -Retries 1
+            $isReady = $true
+            try {
+                $isReady = [bool]$ExcelApp.Ready
+            } catch {
+            }
+            if ($isReady) {
+                return $workbooks
+            }
+        } catch {
+            $lastError = $_
+        }
+        $message = if ($null -ne $lastError -and $null -ne $lastError.Exception) { [string]$lastError.Exception.Message } else { "" }
+        $delayMs = if (Test-IsCallRejected -Message $message) { 800 } else { 300 }
+        Start-Sleep -Milliseconds $delayMs
+    }
+
+    if ($null -ne $lastError -and $null -ne $lastError.Exception) {
+        throw $lastError.Exception
+    }
+    throw "Excel.Application ready state unavailable"
+}
+
 function Invoke-ExcelOpenWithRetry {
     param(
         [object]$ExcelApp,
@@ -1857,7 +1966,8 @@ function Invoke-ExcelOpenWithRetry {
     $lastError = $null
     for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
         try {
-            return $ExcelApp.Workbooks.Open($WorkbookPath, 0, $ReadOnly)
+            $workbooks = Wait-ExcelApplicationReady -ExcelApp $ExcelApp
+            return $workbooks.Open($WorkbookPath, 0, $ReadOnly)
         } catch {
             $lastError = $_
             $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
@@ -1898,12 +2008,7 @@ function Invoke-ExcelTemplateOpenCore {
         try { Unblock-File -LiteralPath $workingCopy -ErrorAction Stop } catch {}
         $bootstrap = Get-ExcelComObjectWithBootstrap
         $app = $bootstrap.app
-        $app.Visible = $false
-        $app.DisplayAlerts = $false
-        try { $app.AskToUpdateLinks = $false } catch {}
-        try { $app.EnableEvents = $false } catch {}
-        try { $app.ScreenUpdating = $false } catch {}
-        try { $app.AutomationSecurity = 3 } catch {}
+        Set-ExcelHeadlessState -ExcelApp $app
         $workbook = Invoke-ExcelOpenWithRetry -ExcelApp $app -WorkbookPath $workingCopy -ReadOnly $true
 
         return New-CheckResult -Status "pass" -Details ([ordered]@{

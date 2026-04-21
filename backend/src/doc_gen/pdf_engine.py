@@ -157,22 +157,27 @@ class PDFExporter(IPDFExporter):
     @staticmethod
     def _prepare_excel_for_headless_run(excel: object) -> None:
         excel_app = cast(Any, excel)
-        excel_app.Visible = False
-        excel_app.DisplayAlerts = False
-        with contextlib.suppress(Exception):
-            excel_app.AskToUpdateLinks = False
-        with contextlib.suppress(Exception):
-            excel_app.EnableEvents = False
-        with contextlib.suppress(Exception):
-            excel_app.ScreenUpdating = False
-        with contextlib.suppress(Exception):
-            excel_app.DisplayStatusBar = False
-        with contextlib.suppress(Exception):
-            excel_app.UserControl = False
-        with contextlib.suppress(Exception):
-            excel_app.Interactive = False
-        with contextlib.suppress(Exception):
-            excel_app.AutomationSecurity = 3
+        property_updates: list[tuple[str, object, bool]] = [
+            ("Visible", False, True),
+            ("DisplayAlerts", False, True),
+            ("AskToUpdateLinks", False, False),
+            ("EnableEvents", False, False),
+            ("ScreenUpdating", False, False),
+            ("DisplayStatusBar", False, False),
+            ("UserControl", False, False),
+            ("Interactive", False, False),
+            ("AutomationSecurity", 3, False),
+        ]
+        for attr_name, attr_value, required in property_updates:
+            try:
+                PDFExporter._retry_excel_com_call(
+                    lambda attr_name=attr_name, attr_value=attr_value: setattr(excel_app, attr_name, attr_value),
+                    f"Excel.{attr_name}=set",
+                    retries=12,
+                )
+            except Exception:
+                if required:
+                    raise
 
     @staticmethod
     def _clear_windows_zone_identifier(path: Path) -> None:
@@ -335,7 +340,9 @@ class PDFExporter(IPDFExporter):
     @classmethod
     def _create_excel_application(cls, win32com_module: Any) -> tuple[object, bool]:
         try:
-            return win32com_module.client.DispatchEx("Excel.Application"), True
+            excel = win32com_module.client.DispatchEx("Excel.Application")
+            cls._wait_for_excel_application_ready(excel)
+            return excel, True
         except Exception as dispatch_exc:
             if not cls._is_missing_excel_server_registration(dispatch_exc):
                 raise
@@ -352,6 +359,7 @@ class PDFExporter(IPDFExporter):
                             process.terminate()
                             process.wait(timeout=5)
                     continue
+                cls._wait_for_excel_application_ready(excel)
                 return excel, True
             except Exception as exc:
                 last_exc = exc
@@ -381,6 +389,32 @@ class PDFExporter(IPDFExporter):
         raise RuntimeError(f"Excel COM 调用失败 {desc}: {last_exc}") from last_exc
 
     @classmethod
+    def _wait_for_excel_application_ready(
+        cls,
+        excel: object,
+        *,
+        retries: int = 18,
+    ) -> object:
+        excel_app = cast(Any, excel)
+        last_exc: Exception | None = None
+        for _ in range(retries):
+            try:
+                workbooks = excel_app.Workbooks
+                ready = True
+                with contextlib.suppress(Exception):
+                    ready = bool(excel_app.Ready)
+                if ready:
+                    return workbooks
+            except Exception as exc:
+                last_exc = exc
+                time.sleep(0.8 if cls._is_call_rejected(exc) else 0.3)
+                continue
+            time.sleep(0.3)
+        if last_exc is not None:
+            raise RuntimeError(f"Excel COM 就绪等待失败: {last_exc}") from last_exc
+        raise RuntimeError("Excel COM 就绪等待失败: Excel.Workbooks unavailable")
+
+    @classmethod
     def _prepare_excel_path_for_com(cls, xlsx_path: Path, *, label: str) -> tuple[Path, Path]:
         temp_dir = Path(tempfile.mkdtemp(prefix="fanban_excel_com_"))
         working_copy = temp_dir / f"{cls._sanitize_excel_label(label)}{xlsx_path.suffix.lower()}"
@@ -390,11 +424,7 @@ class PDFExporter(IPDFExporter):
 
     @classmethod
     def _open_excel_workbook(cls, excel: object, workbook_path: Path, *, read_only: bool) -> object:
-        excel_app = cast(Any, excel)
-        workbooks = cls._retry_excel_com_call(
-            lambda: excel_app.Workbooks,
-            "Excel.Workbooks",
-        )
+        workbooks = cls._wait_for_excel_application_ready(excel)
         return cls._retry_excel_com_call(
             lambda: cast(Any, workbooks).Open(str(workbook_path.absolute()), 0, read_only),
             f"Excel.Workbooks.Open({workbook_path.name})",

@@ -13,7 +13,11 @@ RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
-STALE_RUNTIME_PTH_FILES = ("_auto_fanban.pth", "a1_coverage.pth")
+STALE_RUNTIME_PTH_FILES = (
+    "_auto_fanban.pth",
+    "_editable_impl_auto_fanban.pth",
+    "a1_coverage.pth",
+)
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
 DELTA_MANIFEST = "delta-manifest.json"
@@ -120,6 +124,17 @@ def _sanitize_python_packages(output_root: Path) -> None:
         target = site_packages_root / filename
         if target.exists():
             target.unlink()
+
+
+def _prune_development_artifacts(output_root: Path) -> None:
+    backend_src_root = output_root / "backend-runtime" / "backend" / "src"
+    removable_dirs = (
+        backend_src_root / "cad" / "dotnet" / "Module5CadBridge" / "obj",
+        backend_src_root / "cad" / "dotnet" / "Module5CadBridge" / "bin" / "x64",
+    )
+    for target in removable_dirs:
+        if target.exists():
+            shutil.rmtree(target)
 
 
 def _find_local_managed_pdf2_pc3() -> Path | None:
@@ -374,10 +389,20 @@ if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_E
     Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
 }
 
+$previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
+$previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+$previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+
 Push-Location (Join-Path $root "backend-runtime")
 try {
+    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
     & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $ListenHost --port $Port
 } finally {
+    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
     Pop-Location
 }
 '''
@@ -491,33 +516,162 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
     _write_text(output_root / "scripts" / "deep_check_terminal.ps1", deep_check_terminal)
 
     check_health = r'''param(
-    [string]$Url = "http://127.0.0.1:8000/api/system/health"
+    [string]$Url = "http://127.0.0.1:8000/api/system/health",
+    [ValidateSet("full", "quick")]
+    [string]$Mode = "full"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$probeJson = Join-Path $root "logs\probe_target_env.json"
 $probeScript = Join-Path $PSScriptRoot "probe_target_env.ps1"
 $iisProxyScript = Join-Path $root "install\check_iis_proxy_prereqs.ps1"
+$logsDir = Join-Path $root "logs"
+$quickProbeJson = Join-Path $logsDir "probe_target_env.json"
+$deepProbeJson = Join-Path $logsDir "probe_target_env.deep.json"
+$summaryJson = Join-Path $logsDir "check_health.summary.json"
+$fullJson = Join-Path $logsDir "check_health.full.json"
+
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+
+$quickProbe = $null
+$deepProbe = $null
+$selectedProbe = $null
+$proxyOutput = ""
+$proxyStatus = "skip"
+$proxyError = ""
+$apiStatus = "fail"
+$apiError = ""
+$apiResponse = $null
+$taskStatus = "skip"
+$taskDetails = [ordered]@{}
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
-    & $probeScript -OutJson $probeJson -RepoRoot $root -OfficeProbeMode quick
-    Write-Host "==== Local Probe ===="
-    Get-Content -LiteralPath $probeJson
+    & $probeScript -OutJson $quickProbeJson -RepoRoot $root -OfficeProbeMode quick
+    $quickProbe = Get-Content -LiteralPath $quickProbeJson -Raw | ConvertFrom-Json
+
+    if ($Mode -eq "full") {
+        & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep -ReuseQuickProbeJson $quickProbeJson
+        $deepProbe = Get-Content -LiteralPath $deepProbeJson -Raw | ConvertFrom-Json
+        $selectedProbe = $deepProbe
+    } else {
+        $selectedProbe = $quickProbe
+    }
 }
 
 if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
-    Write-Host "==== IIS Proxy Prereqs ===="
-    & $iisProxyScript
+    try {
+        $proxyOutput = (& $iisProxyScript 2>&1 | Out-String).Trim()
+        if ($proxyOutput -match '"missing"' -or $proxyOutput -match '未检测到') {
+            $proxyStatus = "warn"
+        } else {
+            $proxyStatus = "pass"
+        }
+    } catch {
+        $proxyStatus = "fail"
+        $proxyError = $_.Exception.Message
+    }
 }
 
 try {
-    $resp = Invoke-RestMethod -Uri $Url -Method Get
-    Write-Host "==== API Health ===="
-    $resp | ConvertTo-Json -Depth 8
+    $task = Get-ScheduledTask -TaskName "FanBanBackend" -ErrorAction Stop
+    $taskInfo = Get-ScheduledTaskInfo -TaskName "FanBanBackend" -ErrorAction Stop
+    $taskStatus = "pass"
+    $taskDetails = [ordered]@{
+        state = [string]$task.State
+        last_run_time = if ($taskInfo.LastRunTime) { [string]$taskInfo.LastRunTime } else { "" }
+        last_task_result = [int]$taskInfo.LastTaskResult
+        next_run_time = if ($taskInfo.NextRunTime) { [string]$taskInfo.NextRunTime } else { "" }
+    }
 } catch {
-    Write-Warning ("API health unavailable: " + $_.Exception.Message)
+    $taskStatus = "fail"
+    $taskDetails = [ordered]@{
+        error = $_.Exception.Message
+    }
 }
+
+try {
+    $apiResponse = Invoke-RestMethod -Uri $Url -Method Get
+    $apiStatus = "pass"
+} catch {
+    $apiStatus = "fail"
+    $apiError = $_.Exception.Message
+}
+
+$blockingIssues = @()
+$warnings = @()
+if ($null -ne $selectedProbe) {
+    $blockingIssues = @($selectedProbe.blocking_issues)
+    $warnings = @($selectedProbe.warnings)
+}
+
+$overallStatus = "pass"
+if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiStatus -ne "pass" -or $taskStatus -ne "pass") {
+    $overallStatus = "fail"
+} elseif ($proxyStatus -eq "warn") {
+    $overallStatus = "warn"
+}
+
+$summary = [ordered]@{
+    generated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    mode = $Mode
+    overall_status = $overallStatus
+    selected_probe_json = if ($Mode -eq "full") { $deepProbeJson } else { $quickProbeJson }
+    blocking_issue_count = $blockingIssues.Count
+    warning_count = $warnings.Count
+    api_status = $apiStatus
+    api_url = $Url
+    task_status = $taskStatus
+    proxy_status = $proxyStatus
+    summary_json = $summaryJson
+    full_json = $fullJson
+}
+
+$fullReport = [ordered]@{
+    summary = $summary
+    probe = [ordered]@{
+        quick_json = $quickProbeJson
+        deep_json = if ($Mode -eq "full") { $deepProbeJson } else { "" }
+        selected = $selectedProbe
+    }
+    scheduled_task = $taskDetails
+    api = [ordered]@{
+        status = $apiStatus
+        url = $Url
+        error = $apiError
+        response = $apiResponse
+    }
+    iis_proxy = [ordered]@{
+        status = $proxyStatus
+        error = $proxyError
+        output = $proxyOutput
+    }
+}
+
+$summary | ConvertTo-Json -Depth 8 | Out-File -LiteralPath $summaryJson -Encoding utf8
+$fullReport | ConvertTo-Json -Depth 12 | Out-File -LiteralPath $fullJson -Encoding utf8
+
+Write-Host "==== FanBan Health Summary ===="
+Write-Host ("Mode: " + $Mode)
+Write-Host ("Overall status: " + $overallStatus)
+Write-Host ("Blocking issues: " + $blockingIssues.Count)
+Write-Host ("Warnings: " + $warnings.Count)
+Write-Host ("Scheduled task: " + $taskStatus)
+Write-Host ("API health: " + $apiStatus)
+Write-Host ("IIS proxy prereqs: " + $proxyStatus)
+if ($blockingIssues.Count -gt 0) {
+    Write-Host "Top blocking issues:"
+    foreach ($issue in $blockingIssues) {
+        $section = if ($null -ne $issue.section) { [string]$issue.section } else { "unknown" }
+        $code = if ($null -ne $issue.code) { [string]$issue.code } else { "-" }
+        $message = if ($null -ne $issue.message) { [string]$issue.message } else { "" }
+        Write-Host ("- [{0}/{1}] {2}" -f $section, $code, $message)
+    }
+}
+if ($apiStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiError)) {
+    Write-Host ("API detail: " + $apiError)
+}
+Write-Host ("Summary JSON: " + $summaryJson)
+Write-Host ("Full JSON: " + $fullJson)
 '''
     _write_text(output_root / "scripts" / "check_health.ps1", check_health)
 
@@ -654,7 +808,7 @@ function Sync-PythonSitePackages {
         Copy-Item -LiteralPath $item.FullName -Destination $targetRoot -Recurse -Force
     }
 
-    foreach ($stalePth in @("_auto_fanban.pth", "a1_coverage.pth")) {
+    foreach ($stalePth in @("_auto_fanban.pth", "_editable_impl_auto_fanban.pth", "a1_coverage.pth")) {
         Remove-Item -LiteralPath (Join-Path $targetRoot $stalePth) -Force -ErrorAction SilentlyContinue
     }
 
@@ -1207,6 +1361,7 @@ def build_terminal_deploy_package(
         _copy_entry(entry, output_root)
 
     _sanitize_python_packages(output_root)
+    _prune_development_artifacts(output_root)
     _overlay_local_managed_plotter_assets(output_root)
 
     _write_support_files(
@@ -1233,6 +1388,9 @@ def publish_terminal_deploy_artifacts(
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> DeployArtifacts:
+    def _display_path(path: Path) -> str:
+        return Path(os.path.relpath(path, repo_root)).as_posix()
+
     baseline_root = output_root if output_root.exists() else None
     resolved_delta_root = delta_root or output_root.parent / f"{output_root.name}-delta"
     output_root.parent.mkdir(parents=True, exist_ok=True)
@@ -1254,8 +1412,8 @@ def publish_terminal_deploy_artifacts(
             baseline_root=baseline_root,
             target_root=staging_root,
             delta_root=resolved_delta_root,
-            baseline_label=str(output_root),
-            target_label=str(output_root),
+            baseline_label=_display_path(output_root),
+            target_label=_display_path(output_root),
         )
 
         if output_root.exists():

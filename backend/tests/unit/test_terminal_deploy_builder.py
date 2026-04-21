@@ -48,7 +48,37 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "demo_pkg" / "__init__.py")
     _write_file(repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "pywin32.pth", "import pywin32_bootstrap")
     _write_file(repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "_auto_fanban.pth", str(repo_root / "backend"))
+    _write_file(
+        repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "_editable_impl_auto_fanban.pth",
+        str(repo_root / "backend"),
+    )
     _write_file(repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "a1_coverage.pth", "import coverage")
+    _write_file(
+        repo_root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "obj"
+        / "Release"
+        / "net48"
+        / "Module5CadBridge.csproj.FileListAbsolute.txt",
+        "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll",
+    )
+    _write_file(
+        repo_root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "x64"
+        / "Debug"
+        / "net48"
+        / "debug-only.txt",
+    )
     _write_file(
         repo_root
         / "backend"
@@ -104,7 +134,31 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "terminal_package.cpython-313.pyc"
     ).exists()
     assert not (output_root / "python-packages" / "Lib" / "site-packages" / "_auto_fanban.pth").exists()
+    assert not (
+        output_root / "python-packages" / "Lib" / "site-packages" / "_editable_impl_auto_fanban.pth"
+    ).exists()
     assert not (output_root / "python-packages" / "Lib" / "site-packages" / "a1_coverage.pth").exists()
+    assert not (
+        output_root
+        / "backend-runtime"
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "obj"
+    ).exists()
+    assert not (
+        output_root
+        / "backend-runtime"
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "x64"
+    ).exists()
     assert (
         output_root
         / "backend-runtime"
@@ -212,6 +266,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
     assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
     assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
+    assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in start_backend
+    assert '[Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")' in start_backend
+    assert '[Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")' in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Set-Item -Path 'Env:{0}' -Value '{1}'" in prepare_terminal
@@ -224,7 +281,13 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Invoke-RestMethod" in check_health
     assert "check_iis_proxy_prereqs.ps1" in check_health
     assert "probe_target_env.ps1" in check_health
-    assert "-OfficeProbeMode quick" in check_health
+    assert '-OfficeProbeMode quick' in check_health
+    assert '-OfficeProbeMode deep -ReuseQuickProbeJson $quickProbeJson' in check_health
+    assert 'ValidateSet("full", "quick")' in check_health
+    assert "check_health.summary.json" in check_health
+    assert "check_health.full.json" in check_health
+    assert "==== FanBan Health Summary ====" in check_health
+    assert 'Get-Content -LiteralPath $probeJson' not in check_health
     assert 'OfficeProbeMode = "deep"' in deep_check
     assert "ForceFullProbe" in deep_check
     assert "ReuseQuickProbeJson" in deep_check
@@ -241,6 +304,7 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "python-packages\\Lib\\site-packages" in install_runtime
     assert "NSSM" not in install_runtime
     assert "fanban_backend_runtime.pth" in install_runtime
+    assert "_editable_impl_auto_fanban.pth" in install_runtime
     assert ".NET Framework 4.8" in install_runtime
     assert "New-Website" in configure_iis or "Set-ItemProperty" in configure_iis
     assert "HostName" in configure_iis
@@ -311,6 +375,8 @@ def test_publish_terminal_deploy_artifacts_writes_delta_for_added_modified_and_d
 
     delta_manifest = json.loads((delta_root / DELTA_DIR_NAME / DELTA_MANIFEST).read_text(encoding="utf-8"))
     assert delta_manifest["baseline_exists"] is True
+    assert delta_manifest["baseline_package_root"] == "../build/fanban-terminal-deploy"
+    assert delta_manifest["target_package_root"] == "../build/fanban-terminal-deploy"
     assert "scripts/probe_target_env.ps1" in delta_manifest["modified_files"]
     assert "documents_bin/delta_only.json" in delta_manifest["added_files"]
     assert "documents/Resources/fanban_monochrome.ctb" in delta_manifest["deleted_files"]
