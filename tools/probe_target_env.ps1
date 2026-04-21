@@ -513,6 +513,85 @@ function Select-BestPlotterDir {
     return $null
 }
 
+function Find-FileInDirectories {
+    param(
+        [string[]]$Directories,
+        [string[]]$LeafNames,
+        [switch]$Recurse
+    )
+
+    foreach ($dir in @($Directories | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+            continue
+        }
+        foreach ($leafName in @($LeafNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+            $directPath = Join-Path $dir $leafName
+            if (Test-Path -LiteralPath $directPath -PathType Leaf) {
+                return (Resolve-FullPathOrRaw $directPath)
+            }
+        }
+        if (-not $Recurse) {
+            continue
+        }
+        foreach ($leafName in @($LeafNames | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
+            try {
+                $match = Get-ChildItem -LiteralPath $dir -Filter $leafName -File -Recurse -ErrorAction Stop | Select-Object -First 1
+                if ($null -ne $match) {
+                    return (Resolve-FullPathOrRaw $match.FullName)
+                }
+            } catch {
+            }
+        }
+    }
+
+    return ""
+}
+
+function Get-RequiredAutoCADFontFacts {
+    param([object[]]$InstallFacts)
+
+    $autocadFontDirs = New-Object System.Collections.Generic.List[string]
+    foreach ($install in @($InstallFacts)) {
+        if ($install.fonts_dir_exists) {
+            Add-UniquePath -List $autocadFontDirs -Candidate ([string]$install.fonts_dir)
+        }
+    }
+
+    $windowsFontsDir = Join-Path $env:WINDIR "Fonts"
+    $fontSpecs = @(
+        [ordered]@{ key = "tssdeng.shx"; aliases = @("tssdeng.shx"); search_roots = $autocadFontDirs.ToArray(); recurse = $true },
+        [ordered]@{ key = "tssdchn.shx"; aliases = @("tssdchn.shx"); search_roots = $autocadFontDirs.ToArray(); recurse = $true },
+        [ordered]@{ key = "hztxt.shx"; aliases = @("hztxt.shx"); search_roots = $autocadFontDirs.ToArray(); recurse = $true },
+        [ordered]@{ key = "tssdeng2.shx"; aliases = @("tssdeng2.shx"); search_roots = $autocadFontDirs.ToArray(); recurse = $true },
+        [ordered]@{ key = "simsun"; aliases = @("simsun.ttc", "simsun.ttf"); search_roots = @($windowsFontsDir) + $autocadFontDirs.ToArray(); recurse = $false }
+    )
+
+    $checks = [ordered]@{}
+    $missing = New-Object System.Collections.Generic.List[string]
+
+    foreach ($spec in $fontSpecs) {
+        $foundPath = Find-FileInDirectories -Directories $spec.search_roots -LeafNames $spec.aliases -Recurse:([bool]$spec.recurse)
+        $status = if ([string]::IsNullOrWhiteSpace($foundPath)) { "fail" } else { "pass" }
+        if ($status -ne "pass") {
+            $missing.Add([string]$spec.key)
+        }
+        $checks[[string]$spec.key] = [ordered]@{
+            status = $status
+            aliases = @($spec.aliases)
+            found_path = $foundPath
+            search_roots = @($spec.search_roots)
+        }
+    }
+
+    return [ordered]@{
+        status = if ($missing.Count -eq 0) { "pass" } else { "fail" }
+        autocad_font_dirs = $autocadFontDirs.ToArray()
+        windows_fonts_dir = (Resolve-FullPathOrRaw $windowsFontsDir)
+        checks = $checks
+        missing = $missing.ToArray()
+    }
+}
+
 function Test-PortAvailability {
     param([int]$TargetPort)
 
@@ -1197,10 +1276,12 @@ function Get-AutoCADFacts {
     }
 
     $hasFontsDir = (@($installFacts | Where-Object { $_.fonts_dir_exists }).Count -gt 0)
+    $requiredFontFacts = Get-RequiredAutoCADFontFacts -InstallFacts $installFacts
     $status = if (
         -not [string]::IsNullOrWhiteSpace($bestAccore) -and
         -not [string]::IsNullOrWhiteSpace($recommendedPc3) -and
-        -not [string]::IsNullOrWhiteSpace($recommendedCtb)
+        -not [string]::IsNullOrWhiteSpace($recommendedCtb) -and
+        $requiredFontFacts.status -eq "pass"
     ) { "pass" } else { "fail" }
 
     return [ordered]@{
@@ -1223,7 +1304,10 @@ function Get-AutoCADFacts {
             managed_pdf2_pc3_path = $managedPdf2Pc3Path
             managed_pdf2_pc3_exists = $managedPdf2Pc3Exists
             has_fonts_dir = $hasFontsDir
+            has_required_fonts = ($requiredFontFacts.status -eq "pass")
+            missing_required_fonts = $requiredFontFacts.missing
         }
+        required_fonts = $requiredFontFacts
     }
 }
 
@@ -1891,13 +1975,18 @@ function Invoke-ExcelComCallWithRetry {
     param(
         [scriptblock]$Operation,
         [string]$Description,
-        [int]$Retries = 10
+        [int]$Retries = 10,
+        [switch]$TreatNullAsFailure
     )
 
     $lastError = $null
     for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
         try {
-            return & $Operation
+            $result = & $Operation
+            if ($TreatNullAsFailure -and $null -eq $result) {
+                throw ("Excel COM returned null: " + $Description)
+            }
+            return $result
         } catch {
             $lastError = $_
             $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
@@ -1920,7 +2009,7 @@ function Get-ExcelWorkbooksWithRetry {
 
     return Invoke-ExcelComCallWithRetry -Operation {
         $ExcelApp.Workbooks
-    } -Description "Excel.Workbooks" -Retries $Retries
+    } -Description "Excel.Workbooks" -Retries $Retries -TreatNullAsFailure
 }
 
 function Wait-ExcelApplicationReady {
@@ -1933,6 +2022,9 @@ function Wait-ExcelApplicationReady {
     for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
         try {
             $workbooks = Get-ExcelWorkbooksWithRetry -ExcelApp $ExcelApp -Retries 1
+            if ($null -eq $workbooks) {
+                throw "Excel.Workbooks unavailable"
+            }
             $isReady = $true
             try {
                 $isReady = [bool]$ExcelApp.Ready
@@ -1967,6 +2059,9 @@ function Invoke-ExcelOpenWithRetry {
     for ($attempt = 0; $attempt -lt $Retries; $attempt++) {
         try {
             $workbooks = Wait-ExcelApplicationReady -ExcelApp $ExcelApp
+            if ($null -eq $workbooks) {
+                throw "Excel.Workbooks unavailable"
+            }
             return $workbooks.Open($WorkbookPath, 0, $ReadOnly)
         } catch {
             $lastError = $_
@@ -2477,6 +2572,18 @@ if (-not [bool]$autocadFacts.best_guess.has_fonts_dir) {
         section = "autocad"
         code = "fonts_dir"
         message = "no AutoCAD Fonts directory was detected from install candidates"
+    }
+}
+if (-not [bool]$autocadFacts.best_guess.has_required_fonts) {
+    $missingRequiredFonts = @($autocadFacts.best_guess.missing_required_fonts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $blockingIssues += [ordered]@{
+        section = "autocad"
+        code = "required_fonts"
+        message = if ($missingRequiredFonts.Count -gt 0) {
+            "required CAD fonts are missing: " + ($missingRequiredFonts -join ", ")
+        } else {
+            "required CAD fonts are missing"
+        }
     }
 }
 

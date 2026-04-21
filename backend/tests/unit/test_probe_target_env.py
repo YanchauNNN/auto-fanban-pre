@@ -135,6 +135,10 @@ def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:
     assert 'Name = "AskToUpdateLinks"; Value = $false' in script_text
     assert 'Name = "EnableEvents"; Value = $false' in script_text
     assert "GetFileName($TemplatePath)" not in script_text
+    assert "[switch]$TreatNullAsFailure" in script_text
+    assert '-Description "Excel.Workbooks" -Retries $Retries -TreatNullAsFailure' in script_text
+    assert 'if ($null -eq $workbooks) {' in script_text
+    assert 'throw "Excel.Workbooks unavailable"' in script_text
 
 
 def test_probe_target_env_collects_office_com_registration_diagnostics() -> None:
@@ -183,3 +187,21 @@ def test_probe_target_env_prefers_managed_ctb_when_packaged_asset_exists() -> No
 
     assert 'recommendedCtb = "fanban_monochrome.ctb"' in script_text
     assert "documents\\Resources\\fanban_monochrome.ctb" in script_text
+
+
+def test_probe_target_env_checks_required_cad_fonts() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Get-RequiredAutoCADFontFacts" in script_text
+    assert "tssdeng.shx" in script_text
+    assert "tssdchn.shx" in script_text
+    assert "hztxt.shx" in script_text
+    assert "tssdeng2.shx" in script_text
+    assert "simsun.ttc" in script_text
+    assert "simsun.ttf" in script_text
+    assert "windows_fonts_dir" in script_text
+    assert "missing_required_fonts" in script_text
+    assert 'code = "required_fonts"' in script_text
