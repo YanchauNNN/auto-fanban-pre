@@ -206,6 +206,18 @@ class PDFExporter(IPDFExporter):
         message = str(exc).lower()
         return ("系统找不到指定的文件" in str(exc)) or ("cannot find the file" in message)
 
+    @classmethod
+    def _is_recoverable_excel_bootstrap_error(cls, exc: Exception) -> bool:
+        if cls._is_missing_excel_server_registration(exc) or cls._is_call_rejected(exc):
+            return True
+        message = str(exc).lower()
+        return (
+            "excel.workbooks unavailable" in message
+            or "excel com returned null" in message
+            or "ready state unavailable" in message
+            or "active object unavailable" in message
+        )
+
     @staticmethod
     def _get_executable_path_from_command_text(command_text: str | None) -> Path | None:
         text = str(command_text or "").strip()
@@ -344,7 +356,7 @@ class PDFExporter(IPDFExporter):
             cls._wait_for_excel_application_ready(excel)
             return excel, True
         except Exception as dispatch_exc:
-            if not cls._is_missing_excel_server_registration(dispatch_exc):
+            if not cls._is_recoverable_excel_bootstrap_error(dispatch_exc):
                 raise
             last_exc: Exception = dispatch_exc
 
@@ -400,6 +412,8 @@ class PDFExporter(IPDFExporter):
         for _ in range(retries):
             try:
                 workbooks = excel_app.Workbooks
+                if workbooks is None:
+                    raise RuntimeError("Excel.Workbooks unavailable")
                 ready = True
                 with contextlib.suppress(Exception):
                     ready = bool(excel_app.Ready)

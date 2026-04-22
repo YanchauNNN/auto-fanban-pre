@@ -164,8 +164,10 @@ def test_probe_target_env_can_bootstrap_excel_from_executable_candidates() -> No
     assert "function Get-ExcelExecutableCandidates" in script_text
     assert "function Start-ExcelAutomationCandidate" in script_text
     assert "function Get-ExcelComObjectWithBootstrap" in script_text
+    assert "function Test-IsRecoverableExcelBootstrapError" in script_text
     assert 'GetActiveObject("Excel.Application")' in script_text
     assert "/automation" in script_text
+    assert "Test-IsRecoverableExcelBootstrapError -Message $message -HResult $hresult" in script_text
 
 
 def test_probe_target_env_requires_managed_pdf2_pc3_and_does_not_use_dwg_fallback() -> None:
@@ -205,3 +207,15 @@ def test_probe_target_env_checks_required_cad_fonts() -> None:
     assert "windows_fonts_dir" in script_text
     assert "missing_required_fonts" in script_text
     assert 'code = "required_fonts"' in script_text
+
+
+def test_probe_target_env_uses_openpyxl_for_excel_template_validation() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "excel_template_probe.py" in script_text
+    assert "from openpyxl import load_workbook" in script_text
+    assert 'validation_mode = "python_openpyxl"' in script_text
+    assert "traceback_path = $tracebackPath" in script_text

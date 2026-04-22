@@ -1423,6 +1423,29 @@ function Test-IsMissingExcelServerRegistration {
     )
 }
 
+function Test-IsRecoverableExcelBootstrapError {
+    param(
+        [string]$Message,
+        [string]$HResult = ""
+    )
+
+    if (Test-IsMissingExcelServerRegistration -Message $Message -HResult $HResult) {
+        return $true
+    }
+
+    if (Test-IsCallRejected -Message $Message) {
+        return $true
+    }
+
+    $normalized = $Message.ToLowerInvariant()
+    return (
+        $normalized -like "*excel.workbooks unavailable*" -or
+        $normalized -like "*excel com returned null*" -or
+        $normalized -like "*ready state unavailable*" -or
+        $normalized -like "*active object unavailable*"
+    )
+}
+
 function Add-UniqueExecutableCandidate {
     param(
         [string]$PathText,
@@ -1537,7 +1560,7 @@ function Get-ExcelComObjectWithBootstrap {
         $lastError = $_
         $message = if ($null -ne $_.Exception) { [string]$_.Exception.Message } else { "" }
         $hresult = if ($null -ne $_.Exception) { Format-HResultHex -HResult $_.Exception.HResult } else { "" }
-        if (-not (Test-IsMissingExcelServerRegistration -Message $message -HResult $hresult)) {
+        if (-not (Test-IsRecoverableExcelBootstrapError -Message $message -HResult $hresult)) {
             throw
         }
     }
@@ -2093,26 +2116,63 @@ function Invoke-ExcelTemplateOpenCore {
     $tempDir = New-TempDirectory -Prefix "fanban_excel_template"
     $workingCopy = Join-Path $tempDir (Get-SafeAsciiLeafName -Prefix "fanban_excel_" -Label $TemplateLabel -Extension ([System.IO.Path]::GetExtension($TemplatePath)))
     $failureNotePath = Join-Path $tempDir "excel_probe_failure.txt"
-    $app = $null
-    $bootstrap = $null
-    $workbook = $null
+    $tracebackPath = Join-Path $tempDir "python_traceback.txt"
     $preserveEvidence = $false
 
     try {
         Copy-Item -LiteralPath $TemplatePath -Destination $workingCopy -Force
         try { Unblock-File -LiteralPath $workingCopy -ErrorAction Stop } catch {}
-        $bootstrap = Get-ExcelComObjectWithBootstrap
-        $app = $bootstrap.app
-        Set-ExcelHeadlessState -ExcelApp $app
-        $workbook = Invoke-ExcelOpenWithRetry -ExcelApp $app -WorkbookPath $workingCopy -ReadOnly $true
+        $actualRepoRoot = Resolve-RepoRoot -RepoRootArg $RepoRoot
+        $pythonExe = Resolve-BackendPythonForOfficeProbe -ActualRepoRoot $actualRepoRoot
+        if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "backend python executable is unavailable"
+        }
+
+        $helperPath = Join-Path $tempDir "excel_template_probe.py"
+        $helperCode = @'
+from pathlib import Path
+import sys
+import traceback
+
+from openpyxl import load_workbook
+
+workbook_path = Path(sys.argv[1])
+traceback_path = Path(sys.argv[2])
+
+try:
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    workbook.close()
+    print("ok")
+except Exception:
+    traceback_path.write_text(traceback.format_exc(), encoding="utf-8")
+    raise
+'@
+        $helperCode | Out-File -LiteralPath $helperPath -Encoding utf8
+        $invoke = Invoke-ExternalCommand -FilePath $pythonExe -Arguments @(
+            "-X",
+            "utf8",
+            $helperPath,
+            $workingCopy,
+            $tracebackPath
+        )
+        if (-not $invoke.success) {
+            $pythonError = if (-not [string]::IsNullOrWhiteSpace($invoke.error)) { [string]$invoke.error } else { [string]$invoke.stdout }
+            if ([string]::IsNullOrWhiteSpace($pythonError) -and (Test-Path -LiteralPath $tracebackPath -PathType Leaf)) {
+                $pythonError = Get-Content -LiteralPath $tracebackPath -Raw -ErrorAction SilentlyContinue
+            }
+            if ([string]::IsNullOrWhiteSpace($pythonError)) {
+                $pythonError = "openpyxl template validation failed"
+            }
+            throw $pythonError
+        }
 
         return New-CheckResult -Status "pass" -Details ([ordered]@{
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
             opened_copy = $workingCopy
-            excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
-            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
-            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
+            validation_mode = "python_openpyxl"
+            python_exe = $pythonExe
+            traceback_path = $tracebackPath
         })
     } catch {
         $preserveEvidence = $true
@@ -2123,9 +2183,8 @@ function Invoke-ExcelTemplateOpenCore {
             ("template=" + $TemplateLabel),
             ("template_path=" + (Resolve-FullPathOrRaw $TemplatePath)),
             ("opened_copy=" + $workingCopy),
-            ("excel_version=" + $(if ($null -ne $app) { [string]$app.Version } else { "" })),
-            ("bootstrap_mode=" + $(if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" })),
-            ("bootstrap_candidate=" + $(if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" })),
+            ("validation_mode=python_openpyxl"),
+            ("traceback_path=" + $tracebackPath),
             ("exception_type=" + $exceptionType),
             ("exception_hresult=" + $exceptionHResult),
             ("message=" + $_.Exception.Message),
@@ -2140,22 +2199,13 @@ function Invoke-ExcelTemplateOpenCore {
             opened_copy = $workingCopy
             preserved_temp_dir = $tempDir
             diagnostics_path = $failureNotePath
-            excel_version = if ($null -ne $app) { [string]$app.Version } else { "" }
-            bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
-            bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
+            validation_mode = "python_openpyxl"
+            traceback_path = $tracebackPath
             exception_type = $exceptionType
             exception_hresult = $exceptionHResult
             script_stack = $scriptStack
         }) -Error $_.Exception.Message
     } finally {
-        if ($null -ne $workbook) {
-            try { $workbook.Close($false) } catch {}
-            Remove-ComObjectReference -ComObject $workbook
-        }
-        if ($null -ne $app) {
-            try { $app.Quit() } catch {}
-            Remove-ComObjectReference -ComObject $app
-        }
         [GC]::Collect()
         [GC]::WaitForPendingFinalizers()
         if (-not $preserveEvidence) {

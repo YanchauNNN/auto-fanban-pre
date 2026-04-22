@@ -217,6 +217,16 @@ class _FakeExcelNeedingWarmup:
         return self._busy_attempts_remaining <= 0
 
 
+class _FakeExcelWithMissingWorkbooks:
+    @property
+    def Workbooks(self) -> None:  # noqa: N802
+        return None
+
+    @property
+    def Ready(self) -> bool:  # noqa: N802
+        return True
+
+
 class _FakeBrokenExcelComClient:
     def __init__(self) -> None:
         self.active_object: object | None = None
@@ -405,4 +415,63 @@ def test_create_excel_application_uses_dispatchex_when_available() -> None:
 
     assert acquired is excel
     assert owned is True
+    assert client.dispatch_calls == 1
+
+
+def test_create_excel_application_falls_back_when_dispatchex_returns_unready_excel(
+    monkeypatch,
+) -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    direct_excel = _FakeExcelWithMissingWorkbooks()
+    fallback_excel = _FakeExcelApp()
+    launched: list[Path] = []
+
+    class _Client:
+        def __init__(self) -> None:
+            self.dispatch_calls = 0
+            self.active_object: object | None = None
+
+        def DispatchEx(self, prog_id: str) -> object:  # noqa: N802, ARG002
+            self.dispatch_calls += 1
+            return direct_excel
+
+        def GetActiveObject(self, prog_id: str) -> object:  # noqa: N802, ARG002
+            if self.active_object is None:
+                raise RuntimeError("active object unavailable")
+            return self.active_object
+
+    client = _Client()
+
+    monkeypatch.setattr(
+        PDFExporter,
+        "_iter_excel_executable_candidates",
+        classmethod(lambda cls: [Path("C:/Office16/EXCEL.EXE")]),
+    )
+
+    def fake_launch(cls, candidate: Path):  # noqa: ANN001
+        launched.append(candidate)
+        client.active_object = fallback_excel
+        return _FakeProcess(4242)
+
+    monkeypatch.setattr(
+        PDFExporter,
+        "_launch_excel_candidate_for_automation",
+        classmethod(fake_launch),
+    )
+    monkeypatch.setattr(
+        PDFExporter,
+        "_wait_for_excel_active_object",
+        classmethod(lambda cls, module: module.client.GetActiveObject("Excel.Application")),
+    )
+    monkeypatch.setattr(
+        PDFExporter,
+        "_excel_app_matches_pid",
+        classmethod(lambda cls, excel, pid: pid == 4242),
+    )
+
+    acquired, owned = exporter._create_excel_application(SimpleNamespace(client=client))
+
+    assert acquired is fallback_excel
+    assert owned is True
+    assert launched == [Path("C:/Office16/EXCEL.EXE")]
     assert client.dispatch_calls == 1
