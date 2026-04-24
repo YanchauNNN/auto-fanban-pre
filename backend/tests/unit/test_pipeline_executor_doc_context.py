@@ -119,6 +119,129 @@ def test_build_doc_context_inherits_required_titleblock_fields_from_sheet_set_ma
     assert doc_ctx.params.doc_status == "CFC"
 
 
+def test_build_doc_context_accepts_same_code_multipage_page1_as_primary_doc_frame(
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.spec = cast(Any, SimpleNamespace(
+        doc_generation={"rules": {}},
+        get_mappings=lambda: {},
+    ))
+
+    page1 = deepcopy(sample_frame)
+    page1.titleblock.internal_code = "18185BE-JGS01"
+    page1.titleblock.external_code = "PC5BE011001B25C42SD"
+    page1.titleblock.engineering_no = "1818"
+    page1.titleblock.subitem_no = "BE"
+    page1.titleblock.discipline = "结构"
+    page1.titleblock.revision = "A"
+    page1.titleblock.status = "CFC"
+    page1.titleblock.page_index = 1
+    page1.titleblock.page_total = 2
+    page1.raw_extracts["same_code_multipage"] = {
+        "family_id": "family-001",
+        "page_index": 1,
+        "page_total": 2,
+    }
+
+    page2 = deepcopy(sample_frame)
+    page2.titleblock.internal_code = "18185BE-JGS01"
+    page2.titleblock.external_code = "PC5BE011001B25C42SD"
+    page2.titleblock.page_index = 2
+    page2.titleblock.page_total = 2
+    page2.raw_extracts["same_code_multipage"] = {
+        "family_id": "family-001",
+        "page_index": 2,
+        "page_total": 2,
+    }
+
+    job = Job(
+        job_id="job-doc-context-same-code-page1",
+        job_type=JobType.DELIVERABLE,
+        project_no="1818",
+        params={
+            "project_no": "1818",
+            "cover_variant": "通用",
+            "classification": "非密",
+            "subitem_name": "应急指挥中心",
+            "album_title_cn": "测试图册",
+            "wbs_code": "WBS-001",
+            "file_category": "图纸",
+            "ied_status": "编制",
+            "ied_doc_type": "图册",
+        },
+    )
+
+    doc_ctx = PipelineExecutor._build_doc_context(
+        executor,
+        job,
+        {"frames": [page1, page2], "sheet_sets": []},
+    )
+
+    assert doc_ctx.params.engineering_no == "1818"
+    assert doc_ctx.params.subitem_no == "BE"
+    assert doc_ctx.params.discipline == "结构"
+    assert doc_ctx.params.revision == "A"
+    assert doc_ctx.params.doc_status == "CFC"
+
+
+def test_build_doc_context_falls_forward_to_first_readable_sequential_frame(
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.spec = cast(Any, SimpleNamespace(
+        doc_generation={"rules": {}},
+        get_mappings=lambda: {},
+    ))
+
+    frame_002 = deepcopy(sample_frame)
+    frame_002.runtime.frame_id = "frame-002"
+    frame_002.titleblock.internal_code = "20261RS-JGS65-002"
+    frame_002.titleblock.engineering_no = "2026"
+    frame_002.titleblock.subitem_no = "RS"
+    frame_002.titleblock.discipline = "结构"
+    frame_002.titleblock.revision = "B"
+    frame_002.titleblock.status = "CFC"
+
+    frame_003 = deepcopy(sample_frame)
+    frame_003.runtime.frame_id = "frame-003"
+    frame_003.titleblock.internal_code = "20261RS-JGS65-003"
+    frame_003.titleblock.engineering_no = "2026"
+    frame_003.titleblock.subitem_no = "RS"
+    frame_003.titleblock.discipline = "结构"
+    frame_003.titleblock.revision = "C"
+    frame_003.titleblock.status = "APVD"
+
+    job = Job(
+        job_id="job-doc-context-fall-forward",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        params={
+            "project_no": "2026",
+            "cover_variant": "通用",
+            "classification": "非密",
+            "subitem_name": "反应堆厂房",
+            "album_title_cn": "测试图册",
+            "wbs_code": "WBS-001",
+            "file_category": "图纸",
+            "ied_status": "编制",
+            "ied_doc_type": "图册",
+        },
+    )
+
+    doc_ctx = PipelineExecutor._build_doc_context(
+        executor,
+        job,
+        {"frames": [frame_003, frame_002], "sheet_sets": []},
+    )
+
+    assert doc_ctx.params.engineering_no == "2026"
+    assert doc_ctx.params.subitem_no == "RS"
+    assert doc_ctx.params.discipline == "结构"
+    assert doc_ctx.params.revision == "B"
+    assert doc_ctx.params.doc_status == "CFC"
+
+
 def test_build_doc_context_normalizes_discipline_from_1818_titleblock_hint(
     sample_frame: FrameMeta,
 ) -> None:

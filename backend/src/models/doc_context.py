@@ -220,21 +220,35 @@ class DocContext(BaseModel):
 
     def get_frame_001(self) -> FrameMeta | None:
         """获取001图纸"""
-        for frame in self.frames:
-            if frame.titleblock.internal_code and frame.titleblock.internal_code.endswith("-001"):
-                return frame
+        candidates = self._primary_doc_frame_candidates()
 
-        for sheet_set in self.sheet_sets:
-            master_page = sheet_set.master_page
-            master_frame = master_page.frame_meta if master_page else None
-            if (
-                master_frame
-                and master_frame.titleblock.internal_code
-                and master_frame.titleblock.internal_code.endswith("-001")
-            ):
-                return master_frame
+        exact_001 = [
+            frame for frame in candidates
+            if self._is_exact_001_frame(frame)
+        ]
+        frame = self._first_readable_frame(exact_001)
+        if frame is not None:
+            return frame
 
-        return None
+        same_code_primary = [
+            frame for frame in candidates
+            if self._same_code_page_index(frame) == 1
+        ]
+        frame = self._first_readable_frame(same_code_primary)
+        if frame is not None:
+            return frame
+
+        sequenced = sorted(
+            (
+                frame for frame in candidates
+                if frame.titleblock.get_seq_no() is not None
+            ),
+            key=lambda frame: (
+                frame.titleblock.get_seq_no() or 9999,
+                frame.titleblock.internal_code or "",
+            ),
+        )
+        return self._first_readable_frame(sequenced)
 
     def get_sorted_frames(self) -> list[FrameMeta]:
         """按internal_code尾号排序"""
@@ -327,6 +341,53 @@ class DocContext(BaseModel):
             return int(meta.get("page_total", 0) or 0)
         except (TypeError, ValueError):
             return 0
+
+    def _primary_doc_frame_candidates(self) -> list[FrameMeta]:
+        candidates: list[FrameMeta] = []
+        seen_ids: set[str] = set()
+
+        for frame in self.frames:
+            frame_id = frame.runtime.frame_id
+            if frame_id in seen_ids:
+                continue
+            seen_ids.add(frame_id)
+            candidates.append(frame)
+
+        for sheet_set in self.sheet_sets:
+            master_page = sheet_set.master_page
+            master_frame = master_page.frame_meta if master_page else None
+            if not master_frame:
+                continue
+            frame_id = master_frame.runtime.frame_id
+            if frame_id in seen_ids:
+                continue
+            seen_ids.add(frame_id)
+            candidates.append(master_frame)
+
+        return candidates
+
+    @staticmethod
+    def _is_exact_001_frame(frame: FrameMeta) -> bool:
+        internal_code = frame.titleblock.internal_code or ""
+        return internal_code.endswith("-001")
+
+    @staticmethod
+    def _has_required_doc_fields(frame: FrameMeta) -> bool:
+        tb = frame.titleblock
+        required = [
+            tb.engineering_no,
+            tb.subitem_no,
+            tb.discipline,
+            tb.revision,
+            tb.status,
+        ]
+        return all(str(value or "").strip() for value in required)
+
+    def _first_readable_frame(self, frames: list[FrameMeta]) -> FrameMeta | None:
+        for frame in frames:
+            if self._has_required_doc_fields(frame):
+                return frame
+        return None
 
     def get_document_revision(self) -> str:
         """返回图纸链路文档应使用的统一版次。"""

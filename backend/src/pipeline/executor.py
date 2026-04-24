@@ -901,18 +901,94 @@ class PipelineExecutor:
 
     @staticmethod
     def _find_frame_001(frames: list[Any], sheet_sets: list[Any]) -> Any | None:
+        candidates = PipelineExecutor._primary_doc_frame_candidates(frames, sheet_sets)
+
+        exact_001 = [frame for frame in candidates if PipelineExecutor._is_exact_001_frame(frame)]
+        frame = PipelineExecutor._first_readable_frame(exact_001)
+        if frame is not None:
+            return frame
+
+        same_code_primary = [
+            frame for frame in candidates
+            if PipelineExecutor._same_code_page_index(frame) == 1
+        ]
+        frame = PipelineExecutor._first_readable_frame(same_code_primary)
+        if frame is not None:
+            return frame
+
+        sequenced = sorted(
+            (
+                frame for frame in candidates
+                if getattr(getattr(frame, "titleblock", None), "get_seq_no", None)
+                and frame.titleblock.get_seq_no() is not None
+            ),
+            key=lambda frame: (
+                frame.titleblock.get_seq_no() or 9999,
+                frame.titleblock.internal_code or "",
+            ),
+        )
+        return PipelineExecutor._first_readable_frame(sequenced)
+
+    @staticmethod
+    def _primary_doc_frame_candidates(frames: list[Any], sheet_sets: list[Any]) -> list[Any]:
+        candidates: list[Any] = []
+        seen_ids: set[str] = set()
+
         for frame in frames:
-            internal_code = frame.titleblock.internal_code
-            if internal_code and internal_code.endswith("-001"):
-                return frame
+            frame_id = getattr(getattr(frame, "runtime", None), "frame_id", None)
+            if not frame_id or frame_id in seen_ids:
+                continue
+            seen_ids.add(frame_id)
+            candidates.append(frame)
 
         for sheet_set in sheet_sets:
             master_page = getattr(sheet_set, "master_page", None)
             master_frame = getattr(master_page, "frame_meta", None)
-            internal_code = getattr(getattr(master_frame, "titleblock", None), "internal_code", None)
-            if internal_code and internal_code.endswith("-001"):
-                return master_frame
+            frame_id = getattr(getattr(master_frame, "runtime", None), "frame_id", None)
+            if not frame_id or frame_id in seen_ids:
+                continue
+            seen_ids.add(frame_id)
+            candidates.append(master_frame)
 
+        return candidates
+
+    @staticmethod
+    def _is_exact_001_frame(frame: Any) -> bool:
+        internal_code = getattr(getattr(frame, "titleblock", None), "internal_code", None) or ""
+        return internal_code.endswith("-001")
+
+    @staticmethod
+    def _same_code_page_index(frame: Any) -> int:
+        raw_extracts = getattr(frame, "raw_extracts", None)
+        if not isinstance(raw_extracts, dict):
+            return 0
+        meta = raw_extracts.get("same_code_multipage")
+        if not isinstance(meta, dict):
+            return 0
+        try:
+            return int(meta.get("page_index", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _has_required_doc_fields(frame: Any) -> bool:
+        tb = getattr(frame, "titleblock", None)
+        if tb is None:
+            return False
+        required = [
+            getattr(tb, "engineering_no", None),
+            getattr(tb, "subitem_no", None),
+            getattr(tb, "discipline", None),
+            getattr(tb, "revision", None),
+            getattr(tb, "status", None),
+        ]
+        return all(str(value or "").strip() for value in required)
+
+    @staticmethod
+    def _first_readable_frame(frames: list[Any]) -> Any | None:
+        for frame in frames:
+            if PipelineExecutor._has_required_doc_fields(frame):
+                return frame
         return None
 
     @staticmethod

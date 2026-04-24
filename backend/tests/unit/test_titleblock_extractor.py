@@ -535,3 +535,36 @@ def test_parse_a4_page_marker_from_fragmented_coordinate_tokens() -> None:
 
     assert page_total == 10
     assert page_index == 7
+
+
+def test_parse_page_info_prefers_primary_row_and_reads_index_total_from_same_row() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("第     张 共     张", x=10.0, y=100.0),
+        _item("1", x=36.0, y=100.0),
+        _item("2", x=86.0, y=100.0),
+        _item("Page       of", x=10.0, y=92.0),
+        _item("1", x=36.0, y=92.0),
+        _item("2", x=86.0, y=92.0),
+    ]
+
+    total, idx = extractor._parse_page_info(items, parse_cfg)
+
+    assert total == 2
+    assert idx == 1
+
+
+def test_parse_page_info_supports_english_row_when_primary_row_missing() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("Page       of", x=10.0, y=92.0),
+        _item("1", x=36.0, y=92.0),
+        _item("2", x=86.0, y=92.0),
+    ]
+
+    total, idx = extractor._parse_page_info(items, parse_cfg)
+
+    assert total == 2
+    assert idx == 1

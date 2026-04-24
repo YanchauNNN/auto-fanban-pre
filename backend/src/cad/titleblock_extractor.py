@@ -950,19 +950,63 @@ class TitleblockExtractor(ITitleblockExtractor):
             decoded = decoded.replace(raw, replacement)
         return decoded
 
-    @staticmethod
-    def _page_info_two_tokens(items: list[TextItem]) -> tuple[str | None, str | None]:
+    def _page_info_two_tokens(self, items: list[TextItem]) -> tuple[str | None, str | None]:
+        best_line_tokens: list[tuple[float, str]] = []
+        best_line_score: tuple[int, float] | None = None
+
+        for line in self._cluster_by_y(items, self.y_cluster_abs):
+            ordered = sorted(line, key=lambda it: it.x)
+            tokens: list[tuple[float, str]] = []
+            line_parts: list[str] = []
+            for it in ordered:
+                text = self._normalize_spaces(it.text or "")
+                if text:
+                    line_parts.append(text)
+                token = self._page_info_numeric_token(it.text or "")
+                if token is not None:
+                    tokens.append((it.x, token))
+            if len(tokens) < 2:
+                continue
+
+            line_text = self._normalize_spaces(" ".join(line_parts))
+            score = (self._page_info_line_priority(line_text), max((it.y for it in ordered), default=0.0))
+            if best_line_score is None or score > best_line_score:
+                best_line_score = score
+                best_line_tokens = tokens
+
+        if len(best_line_tokens) >= 2:
+            best_line_tokens.sort(key=lambda t: t[0])
+            return best_line_tokens[-1][1], best_line_tokens[0][1]
+
         tokens: list[tuple[float, str]] = []
         for it in items:
-            s = TitleblockExtractor._clean_alnum((it.text or "").upper())
-            if not s:
-                continue
-            if len(s) <= 4:
-                tokens.append((it.x, s))
+            token = self._page_info_numeric_token(it.text or "")
+            if token is not None:
+                tokens.append((it.x, token))
         tokens.sort(key=lambda t: t[0])
         if len(tokens) < 2:
             return None, None
-        return tokens[0][1], tokens[1][1]
+        return tokens[-1][1], tokens[0][1]
+
+    @classmethod
+    def _page_info_line_priority(cls, text: str) -> int:
+        compact = cls._strip_all_whitespace(text).upper()
+        if "第" in text or "共" in text:
+            return 3
+        if "PAGE" in compact or "OF" in compact:
+            return 2
+        if cls._has_cjk(text):
+            return 1
+        return 0
+
+    @staticmethod
+    def _page_info_numeric_token(text: str) -> str | None:
+        cleaned = TitleblockExtractor._clean_alnum((text or "").upper())
+        if not cleaned:
+            return None
+        if cleaned == "X" or cleaned.isdigit():
+            return cleaned
+        return None
 
     def _rebuild_fixed19_from_single_chars(
         self, items: list[TextItem], fixed_len: int, header_hint: str
