@@ -29,12 +29,12 @@ def _build_catalog_title_parts(ctx, spec) -> tuple[list[str], list[str]]:
     if album_title_cn:
         cn_parts.append(album_title_cn)
 
-    album_code = str(ctx.derived.album_code or "").strip()
     header = spec.get_catalog_bindings().get("header", {})
     title_binding = header.get("album_code_title", {})
-    template = title_binding.get("template", "?{album_code}????(??)??")
-    if album_code:
-        cn_parts.append(str(template).format(album_code=album_code).strip())
+    template = title_binding.get("template", "图纸(文件)目录")
+    rendered_title = str(template).format(album_code=str(ctx.derived.album_code or "").strip()).strip()
+    if rendered_title:
+        cn_parts.append(rendered_title)
 
     if ctx.is_1818:
         album_title_en = str(ctx.params.album_title_en or "").strip()

@@ -133,7 +133,7 @@ def test_design_write_rows_with_bindings(temp_dir: Path) -> None:
     # 第3行：目录
     assert ws["D3"].value == "JD1NHT11T01B25C42SD"
     assert ws["E3"].value == "1234567-JG001-TM"
-    assert ws["G3"].value == "测试图册第01图册图纸(文件)目录"
+    assert ws["G3"].value == "测试图册图纸(文件)目录"
     assert ws["H3"].value in ("", None)
     assert ws["T3"].value == 3
     assert ws["U3"].value == "图纸"
@@ -230,7 +230,7 @@ def test_design_column_o_maps_discipline_code_from_1818_structure_hint(temp_dir:
 def test_design_non_1818_catalog_row_title_uses_single_line_cn_only(temp_dir: Path) -> None:
     gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
     ctx = _build_context()
-    expected_cn = f"{ctx.params.album_title_cn}第{ctx.derived.album_code}图册图纸(文件)目录"
+    expected_cn = f"{ctx.params.album_title_cn}图纸(文件)目录"
 
     output_xlsx = temp_dir / "design-2016.xlsx"
     gen._write_design(
@@ -250,7 +250,7 @@ def test_design_catalog_row_title_matches_catalog_e10_for_1818(temp_dir: Path) -
     gen = DesignFileGenerator(pdf_exporter=DummyPDFExporter())
     ctx = _build_context()
     ctx.params.project_no = "1818"
-    expected_cn = f"{ctx.params.album_title_cn}第{ctx.derived.album_code}图册图纸(文件)目录"
+    expected_cn = f"{ctx.params.album_title_cn}图纸(文件)目录"
 
     output_xlsx = temp_dir / "design-1818.xlsx"
     gen._write_design(

@@ -195,7 +195,7 @@ class CatalogGenerator(ICatalogGenerator):
             cell = self._resolve_writable_cell(ws, header["catalog_revision"].get("cell", "H5"))
             ws[cell] = derived.catalog_revision
 
-        if "album_code_title" in header and derived.album_code:
+        if "album_code_title" in header:
             title_binding = header["album_code_title"]
             cell_ref = (
                 title_binding.get("cell_1818")
@@ -205,9 +205,9 @@ class CatalogGenerator(ICatalogGenerator):
             cell = self._resolve_writable_cell(ws, cell_ref)
             template = header["album_code_title"].get(
                 "template",
-                "第{album_code}图册图纸(文件)目录",
+                "图纸(文件)目录",
             )
-            ws[cell] = template.format(album_code=derived.album_code)
+            ws[cell] = str(template).format(album_code=str(derived.album_code or "").strip())
 
     def _resolve_writable_cell(self, ws, cell_ref: str) -> str:
         anchor = cell_ref.split(":")[0]

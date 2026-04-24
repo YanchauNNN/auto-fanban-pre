@@ -107,6 +107,6 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_001(
     ws = load_workbook(output_xlsx).active
     assert ws is not None
 
-    assert ws["D3"].value == "第01图册图纸(文件)目录"
+    assert ws["D3"].value == "图纸(文件)目录"
     assert ws["B11"].value == "1234567-JG001-001"
     assert ws["D11"].value == "JD1NHT11001B25C42SD"

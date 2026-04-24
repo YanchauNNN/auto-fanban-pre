@@ -233,7 +233,7 @@ def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set
     ws = load_workbook(output_xlsx).active
     assert ws is not None
 
-    assert ws["D3"].value == "第01图册图纸(文件)目录"
+    assert ws["D3"].value == "图纸(文件)目录"
     assert ws["B11"].value == "1234567-JG001-001"
     assert ws["D11"].value == "JD1NHT11001B25C42SD"
     assert ws["D1"].value == "测试图册"
@@ -258,7 +258,7 @@ def test_catalog_writes_1818_album_titles_into_header_cells(temp_dir: Path) -> N
 
     assert ws["D1"].value == "测试图册"
     assert ws["D2"].value == "Test Album"
-    assert ws["D4"].value == "第01图册图纸(文件)目录"
+    assert ws["D4"].value == "图纸(文件)目录"
 
 
 def test_catalog_writes_non_1818_catalog_row_title_from_header_segments(temp_dir: Path) -> None:
@@ -276,7 +276,7 @@ def test_catalog_writes_non_1818_catalog_row_title_from_header_segments(temp_dir
 
     ws = load_workbook(output_xlsx).active
     assert ws is not None
-    assert ws["E10"].value == "测试图册\n第01图册图纸(文件)目录"
+    assert ws["E10"].value == "测试图册\n图纸(文件)目录"
 
 
 def test_catalog_writes_1818_catalog_row_title_from_header_segments(temp_dir: Path) -> None:
@@ -294,7 +294,7 @@ def test_catalog_writes_1818_catalog_row_title_from_header_segments(temp_dir: Pa
 
     ws = load_workbook(output_xlsx).active
     assert ws is not None
-    assert ws["E10"].value == "测试图册\n第01图册图纸(文件)目录\nTest Album\nDOCUMENT CONTENTS"
+    assert ws["E10"].value == "测试图册\n图纸(文件)目录\nTest Album\nDOCUMENT CONTENTS"
 
 
 def test_catalog_excel_com_paths_use_pdf_exporter_retry_helpers() -> None:

@@ -148,7 +148,7 @@ def test_ied_catalog_row_title_matches_catalog_e10_for_1818(temp_dir: Path) -> N
     ctx = _build_context()
     ctx.params.project_no = "1818"
     bindings = gen.spec.get_ied_bindings()
-    expected_cn = f"{ctx.params.album_title_cn}第{ctx.derived.album_code}图册图纸(文件)目录"
+    expected_cn = f"{ctx.params.album_title_cn}图纸(文件)目录"
     output_xlsx = temp_dir / "ied-1818.xlsx"
 
     gen._write_ied(
@@ -169,7 +169,7 @@ def test_ied_non_1818_catalog_row_title_uses_single_line_cn_only(temp_dir: Path)
     gen = IEDGenerator()
     ctx = _build_context()
     bindings = gen.spec.get_ied_bindings()
-    expected_cn = f"{ctx.params.album_title_cn}第{ctx.derived.album_code}图册图纸(文件)目录"
+    expected_cn = f"{ctx.params.album_title_cn}图纸(文件)目录"
     output_xlsx = temp_dir / "ied-2016.xlsx"
 
     gen._write_ied(
