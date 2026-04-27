@@ -5,6 +5,15 @@ import type {
   CreateAuditReplaceParams,
   CreateBatchPayload,
   DeliverableOutputs,
+  FontSyncApplyResult,
+  FontSyncDependency,
+  FontSyncEnvironment,
+  FontSyncExportResult,
+  FontSyncInstallation,
+  FontSyncPreviewResult,
+  FontSyncSourceScanResult,
+  FontSyncStyle,
+  FontSyncTargetScanResult,
   FontReplacementMap,
   FontReplacementOption,
   FontPreflightSummary,
@@ -204,11 +213,117 @@ type RawFormSchema = {
   };
 };
 
+type RawFontSyncInstallation = {
+  label?: string | null;
+  install_dir?: string | null;
+  acad_exe?: string | null;
+  accoreconsole_exe?: string | null;
+  fonts_dir?: string | null;
+};
+
+type RawFontSyncEnvironment = {
+  autocad_ready?: boolean | null;
+  supported?: boolean | null;
+  active_profile?: string | null;
+  support_path?: string | null;
+  font_file_map?: string | null;
+  alt_font_file?: string | null;
+  windows_fonts_dir?: string | null;
+  font_search_roots?: string[] | null;
+  installations?: RawFontSyncInstallation[] | null;
+  selected_installation?: RawFontSyncInstallation | null;
+  errors?: string[] | null;
+};
+
+type RawFontSyncStyle = {
+  style_name?: string | null;
+  font_name?: string | null;
+  bigfont_name?: string | null;
+  kind?: string | null;
+};
+
+type RawFontSyncDependency = {
+  dependency_id?: string | null;
+  style_name?: string | null;
+  role?: string | null;
+  font_name?: string | null;
+  kind?: string | null;
+  used_in_block?: boolean | null;
+  absolute_path_reference?: boolean | null;
+  resolved?: boolean | null;
+  resolved_path?: string | null;
+  copy_status?: string | null;
+  bundle_font_name?: string | null;
+  bundle_font_path?: string | null;
+};
+
+type RawFontSyncSourceScanResult = {
+  source_id?: string | null;
+  source_path?: string | null;
+  bundle_mode?: "guaranteed" | "best_effort" | null;
+  drawing?: Record<string, unknown> | null;
+  environment?: RawFontSyncEnvironment | null;
+  styles?: RawFontSyncStyle[] | null;
+  font_dependencies?: RawFontSyncDependency[] | null;
+};
+
+type RawFontSyncExportResult = RawFontSyncSourceScanResult & {
+  bundle_id?: string | null;
+  bundle_path?: string | null;
+  profile_backup_path?: string | null;
+  checksums_path?: string | null;
+  bundle_download_url?: string | null;
+};
+
+type RawFontSyncTargetScanResult = {
+  environment?: RawFontSyncEnvironment | null;
+  supported?: boolean | null;
+  autocad_ready?: boolean | null;
+};
+
+type RawFontSyncPreviewResult = {
+  import_id?: string | null;
+  bundle_id?: string | null;
+  bundle_filename?: string | null;
+  bundle_mode?: "guaranteed" | "best_effort" | null;
+  current_environment?: RawFontSyncEnvironment | null;
+  planned_changes?: {
+    managed_root?: string | null;
+    managed_fonts_dir?: string | null;
+    support_path?: string | null;
+    font_file_map?: string | null;
+    alt_font_file?: string | null;
+  } | null;
+  diff?: {
+    support_path_changed?: boolean | null;
+    font_file_map_changed?: boolean | null;
+    alt_font_file_changed?: boolean | null;
+  } | null;
+  manifest?: Record<string, unknown> | null;
+};
+
+type RawFontSyncApplyResult = {
+  import_id?: string | null;
+  bundle_id?: string | null;
+  bundle_mode?: "guaranteed" | "best_effort" | null;
+  status?: "matched" | "partial" | "failed" | null;
+  profile_backup_path?: string | null;
+  managed_root?: string | null;
+  managed_fonts_dir?: string | null;
+  font_file_map?: string | null;
+  environment?: RawFontSyncEnvironment | null;
+};
+
 export class HttpAdapter implements ApiAdapter {
   private readonly normalizedBaseUrl: string;
 
   constructor(private readonly baseUrl = "") {
     this.normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+    this.scanFontSyncSource = this.scanFontSyncSource.bind(this);
+    this.exportFontSyncBundle = this.exportFontSyncBundle.bind(this);
+    this.scanFontSyncTarget = this.scanFontSyncTarget.bind(this);
+    this.previewFontSyncBundle = this.previewFontSyncBundle.bind(this);
+    this.applyFontSyncBundle = this.applyFontSyncBundle.bind(this);
   }
 
   async getHealth(): Promise<HealthStatus> {
@@ -399,6 +514,56 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async scanFontSyncSource(file: File): Promise<FontSyncSourceScanResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const payload = await this.fetchJson<RawFontSyncSourceScanResult>("/api/font-sync/source-scan", {
+      method: "POST",
+      body: formData,
+    });
+    return this.normalizeFontSyncSourceScan(payload);
+  }
+
+  async exportFontSyncBundle(file: File): Promise<FontSyncExportResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const payload = await this.fetchJson<RawFontSyncExportResult>("/api/font-sync/export", {
+      method: "POST",
+      body: formData,
+    });
+    return this.normalizeFontSyncExportResult(payload);
+  }
+
+  async scanFontSyncTarget(): Promise<FontSyncTargetScanResult> {
+    const payload = await this.fetchJson<RawFontSyncTargetScanResult>("/api/font-sync/target-scan", {
+      method: "POST",
+    });
+    return {
+      environment: this.normalizeFontSyncEnvironment(payload.environment),
+      supported: Boolean(payload.supported),
+      autocadReady: Boolean(payload.autocad_ready),
+    };
+  }
+
+  async previewFontSyncBundle(bundle: File): Promise<FontSyncPreviewResult> {
+    const formData = new FormData();
+    formData.append("bundle", bundle);
+    const payload = await this.fetchJson<RawFontSyncPreviewResult>("/api/font-sync/import-preview", {
+      method: "POST",
+      body: formData,
+    });
+    return this.normalizeFontSyncPreviewResult(payload);
+  }
+
+  async applyFontSyncBundle(importId: string): Promise<FontSyncApplyResult> {
+    const search = new URLSearchParams({ import_id: importId });
+    const payload = await this.fetchJson<RawFontSyncApplyResult>(
+      `/api/font-sync/apply?${search.toString()}`,
+      { method: "POST" },
+    );
+    return this.normalizeFontSyncApplyResult(payload);
+  }
+
   private normalizeSummary(payload: RawJobSummary): JobSummary {
     const sourceFilename = payload.source_filename ?? payload.source_filenames?.[0] ?? payload.job_id;
     return {
@@ -453,6 +618,134 @@ export class HttpAdapter implements ApiAdapter {
       replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       replacedStyleCount: payload.replaced_style_count ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
+    };
+  }
+
+  private normalizeFontSyncInstallation(
+    payload: RawFontSyncInstallation | null | undefined,
+  ): FontSyncInstallation {
+    return {
+      label: payload?.label ?? "",
+      installDir: payload?.install_dir ?? "",
+      acadExe: payload?.acad_exe ?? null,
+      accoreconsoleExe: payload?.accoreconsole_exe ?? null,
+      fontsDir: payload?.fonts_dir ?? null,
+    };
+  }
+
+  private normalizeFontSyncEnvironment(
+    payload: RawFontSyncEnvironment | null | undefined,
+  ): FontSyncEnvironment {
+    return {
+      autocadReady: Boolean(payload?.autocad_ready),
+      supported: Boolean(payload?.supported),
+      activeProfile: payload?.active_profile ?? "",
+      supportPath: payload?.support_path ?? "",
+      fontFileMap: payload?.font_file_map ?? null,
+      altFontFile: payload?.alt_font_file ?? null,
+      windowsFontsDir: payload?.windows_fonts_dir ?? null,
+      fontSearchRoots: payload?.font_search_roots ?? [],
+      installations: (payload?.installations ?? []).map((item) =>
+        this.normalizeFontSyncInstallation(item),
+      ),
+      selectedInstallation: payload?.selected_installation
+        ? this.normalizeFontSyncInstallation(payload.selected_installation)
+        : null,
+      errors: payload?.errors ?? [],
+    };
+  }
+
+  private normalizeFontSyncStyle(payload: RawFontSyncStyle): FontSyncStyle {
+    return {
+      styleName: payload.style_name ?? "",
+      fontName: payload.font_name ?? "",
+      bigfontName: payload.bigfont_name ?? "",
+      kind: payload.kind ?? "unknown",
+    };
+  }
+
+  private normalizeFontSyncDependency(payload: RawFontSyncDependency): FontSyncDependency {
+    return {
+      dependencyId: payload.dependency_id ?? "",
+      styleName: payload.style_name ?? "",
+      role: payload.role ?? "",
+      fontName: payload.font_name ?? "",
+      kind: payload.kind ?? "unknown",
+      usedInBlock: Boolean(payload.used_in_block),
+      absolutePathReference: Boolean(payload.absolute_path_reference),
+      resolved: Boolean(payload.resolved),
+      resolvedPath: payload.resolved_path ?? null,
+      copyStatus: payload.copy_status ?? "unknown",
+      bundleFontName: payload.bundle_font_name ?? "",
+      bundleFontPath: payload.bundle_font_path ?? null,
+    };
+  }
+
+  private normalizeFontSyncSourceScan(
+    payload: RawFontSyncSourceScanResult,
+  ): FontSyncSourceScanResult {
+    return {
+      sourceId: payload.source_id ?? "",
+      sourcePath: payload.source_path ?? "",
+      bundleMode: payload.bundle_mode ?? "best_effort",
+      drawing: payload.drawing ?? {},
+      environment: this.normalizeFontSyncEnvironment(payload.environment),
+      styles: (payload.styles ?? []).map((item) => this.normalizeFontSyncStyle(item)),
+      fontDependencies: (payload.font_dependencies ?? []).map((item) =>
+        this.normalizeFontSyncDependency(item),
+      ),
+    };
+  }
+
+  private normalizeFontSyncExportResult(
+    payload: RawFontSyncExportResult,
+  ): FontSyncExportResult {
+    return {
+      ...this.normalizeFontSyncSourceScan(payload),
+      bundleId: payload.bundle_id ?? "",
+      bundlePath: payload.bundle_path ?? "",
+      profileBackupPath: payload.profile_backup_path ?? "",
+      checksumsPath: payload.checksums_path ?? "",
+      bundleDownloadUrl: this.resolveUrl(payload.bundle_download_url) ?? null,
+    };
+  }
+
+  private normalizeFontSyncPreviewResult(
+    payload: RawFontSyncPreviewResult,
+  ): FontSyncPreviewResult {
+    return {
+      importId: payload.import_id ?? "",
+      bundleId: payload.bundle_id ?? "",
+      bundleFilename: payload.bundle_filename ?? "",
+      bundleMode: payload.bundle_mode ?? "best_effort",
+      currentEnvironment: this.normalizeFontSyncEnvironment(payload.current_environment),
+      plannedChanges: {
+        managedRoot: payload.planned_changes?.managed_root ?? "",
+        managedFontsDir: payload.planned_changes?.managed_fonts_dir ?? "",
+        supportPath: payload.planned_changes?.support_path ?? "",
+        fontFileMap: payload.planned_changes?.font_file_map ?? "",
+        altFontFile: payload.planned_changes?.alt_font_file ?? null,
+      },
+      diff: {
+        supportPathChanged: Boolean(payload.diff?.support_path_changed),
+        fontFileMapChanged: Boolean(payload.diff?.font_file_map_changed),
+        altFontFileChanged: Boolean(payload.diff?.alt_font_file_changed),
+      },
+      manifest: payload.manifest ?? {},
+    };
+  }
+
+  private normalizeFontSyncApplyResult(payload: RawFontSyncApplyResult): FontSyncApplyResult {
+    return {
+      importId: payload.import_id ?? "",
+      bundleId: payload.bundle_id ?? "",
+      bundleMode: payload.bundle_mode ?? "best_effort",
+      status: payload.status ?? "failed",
+      profileBackupPath: payload.profile_backup_path ?? "",
+      managedRoot: payload.managed_root ?? "",
+      managedFontsDir: payload.managed_fonts_dir ?? "",
+      fontFileMap: payload.font_file_map ?? "",
+      environment: this.normalizeFontSyncEnvironment(payload.environment),
     };
   }
 

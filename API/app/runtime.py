@@ -24,6 +24,7 @@ from src.audit_replace.executor import AuditReplaceExecutor
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
+from src.cad.font_sync_service import FontSyncService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config
 from src.doc_gen.param_validator import DocParamValidator
@@ -89,6 +90,7 @@ class DeliverableApiRuntime:
         job_processor: Callable[[Job], None] | None = None,
         shared_prep_service: SharedPrepService | None = None,
         font_preflight_service: FontPreflightService | None = None,
+        font_sync_service: FontSyncService | None = None,
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
@@ -97,6 +99,9 @@ class DeliverableApiRuntime:
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
+        self.font_sync_service = font_sync_service or FontSyncService(
+            font_preflight_service=self.font_preflight_service
+        )
         self.job_processor = job_processor or PipelineJobProcessor(
             font_preflight_service=self.font_preflight_service
         )
@@ -287,6 +292,77 @@ class DeliverableApiRuntime:
                 if isinstance(missing, dict):
                     missing_fonts.append(dict(missing))
         return missing_fonts
+
+    def scan_font_sync_source(self, *, file: UploadedFilePayload) -> dict[str, Any]:
+        self._validate_font_sync_source_upload(file)
+        source_id = f"fontsync-source-{uuid.uuid4().hex[:8]}"
+        source_path = self._store_font_sync_upload(
+            upload=file,
+            upload_id=source_id,
+            fallback_stem="fontsync_source",
+            allowed_suffixes={".dwg"},
+        )
+        result = self.font_sync_service.scan_source_dwg(source_dwg=source_path)
+        return {
+            **result,
+            "source_id": source_id,
+            "source_path": str(source_path),
+        }
+
+    def export_font_sync_bundle(self, *, file: UploadedFilePayload) -> dict[str, Any]:
+        self._validate_font_sync_source_upload(file)
+        source_id = f"fontsync-export-{uuid.uuid4().hex[:8]}"
+        source_path = self._store_font_sync_upload(
+            upload=file,
+            upload_id=source_id,
+            fallback_stem="fontsync_export",
+            allowed_suffixes={".dwg"},
+        )
+        result = self.font_sync_service.export_bundle(source_dwg=source_path)
+        bundle_id = str(result.get("bundle_id") or "")
+        return {
+            **result,
+            "source_id": source_id,
+            "bundle_download_url": f"/api/font-sync/download/{bundle_id}" if bundle_id else None,
+        }
+
+    def scan_font_sync_target(self) -> dict[str, Any]:
+        environment = self.font_sync_service.scan_target_environment()
+        return {
+            "environment": environment,
+            "supported": bool(environment.get("supported")),
+            "autocad_ready": bool(environment.get("autocad_ready")),
+        }
+
+    def preview_font_sync_bundle(self, *, file: UploadedFilePayload) -> dict[str, Any]:
+        self._validate_font_sync_bundle_upload(file)
+        import_id = f"fontsync-import-{uuid.uuid4().hex[:8]}"
+        bundle_path = self._store_font_sync_upload(
+            upload=file,
+            upload_id=import_id,
+            fallback_stem="fontsync_bundle",
+            allowed_suffixes={".fanfontsync"},
+        )
+        preview = self.font_sync_service.preview_bundle(bundle_path=bundle_path)
+        return {
+            **preview,
+            "import_id": import_id,
+            "bundle_filename": Path(file.filename).name or "bundle.fanfontsync",
+        }
+
+    def apply_font_sync_bundle(self, *, import_id: str) -> dict[str, Any]:
+        bundle_path = self._resolve_font_sync_import_bundle(import_id)
+        result = self.font_sync_service.apply_bundle(bundle_path=bundle_path)
+        return {
+            **result,
+            "import_id": import_id,
+        }
+
+    def get_font_sync_bundle_path(self, bundle_id: str) -> Path:
+        path = self.font_sync_service.bundle_path_for_id(bundle_id)
+        if not path.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="font sync bundle not found")
+        return path
 
     def create_batch(
         self,
@@ -1026,6 +1102,66 @@ class DeliverableApiRuntime:
         if sum(len(upload.content) for upload in files) > max_total_bytes:
             errors.setdefault('files', []).append(f'total upload exceeds {limits.max_total_mb} MB')
         return errors
+
+    def _validate_font_sync_source_upload(self, upload: UploadedFilePayload) -> None:
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix != ".dwg":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": {"file": ["only .dwg files are allowed"]}, "param_errors": {}},
+            )
+
+    def _validate_font_sync_bundle_upload(self, upload: UploadedFilePayload) -> None:
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix != ".fanfontsync":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {"bundle": ["only .fanfontsync files are allowed"]},
+                    "param_errors": {},
+                },
+            )
+
+    def _store_font_sync_upload(
+        self,
+        *,
+        upload: UploadedFilePayload,
+        upload_id: str,
+        fallback_stem: str,
+        allowed_suffixes: set[str],
+    ) -> Path:
+        suffix = Path(upload.filename or "").suffix.lower()
+        if suffix not in allowed_suffixes:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": {"file": ["unsupported file type"]}, "param_errors": {}},
+            )
+        upload_root = self.config.storage_dir / "font-sync" / "uploads" / upload_id
+        upload_root.mkdir(parents=True, exist_ok=True)
+        upload_path = upload_root / self._safe_storage_filename(
+            upload.filename,
+            fallback_stem=fallback_stem,
+            seed=upload_id,
+        )
+        if suffix and upload_path.suffix.lower() != suffix:
+            upload_path = upload_path.with_suffix(suffix)
+        upload_path.write_bytes(upload.content)
+        return upload_path.resolve()
+
+    def _resolve_font_sync_import_bundle(self, import_id: str) -> Path:
+        upload_root = self.config.storage_dir / "font-sync" / "uploads" / import_id
+        if not upload_root.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="font sync import session not found",
+            )
+        bundles = sorted(upload_root.glob("*.fanfontsync"))
+        if not bundles:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="font sync bundle not found",
+            )
+        return bundles[0]
 
     def _store_job_upload(self, job: Job, upload: UploadedFilePayload) -> None:
         job_dir = self.config.get_job_dir(job.job_id)

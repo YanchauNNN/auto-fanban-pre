@@ -152,6 +152,107 @@ export type FontPreflightSummary = {
   fontAlt: string | null;
 };
 
+export type FontSyncInstallation = {
+  label: string;
+  installDir: string;
+  acadExe: string | null;
+  accoreconsoleExe: string | null;
+  fontsDir: string | null;
+};
+
+export type FontSyncEnvironment = {
+  autocadReady: boolean;
+  supported: boolean;
+  activeProfile: string;
+  supportPath: string;
+  fontFileMap: string | null;
+  altFontFile: string | null;
+  windowsFontsDir: string | null;
+  fontSearchRoots: string[];
+  installations: FontSyncInstallation[];
+  selectedInstallation: FontSyncInstallation | null;
+  errors?: string[];
+};
+
+export type FontSyncStyle = {
+  styleName: string;
+  fontName: string;
+  bigfontName: string;
+  kind: string;
+};
+
+export type FontSyncDependency = {
+  dependencyId: string;
+  styleName: string;
+  role: string;
+  fontName: string;
+  kind: string;
+  usedInBlock: boolean;
+  absolutePathReference: boolean;
+  resolved: boolean;
+  resolvedPath: string | null;
+  copyStatus: string;
+  bundleFontName: string;
+  bundleFontPath?: string | null;
+};
+
+export type FontSyncSourceScanResult = {
+  sourceId: string;
+  sourcePath: string;
+  bundleMode: "guaranteed" | "best_effort";
+  drawing: Record<string, unknown>;
+  environment: FontSyncEnvironment;
+  styles: FontSyncStyle[];
+  fontDependencies: FontSyncDependency[];
+};
+
+export type FontSyncExportResult = FontSyncSourceScanResult & {
+  bundleId: string;
+  bundlePath: string;
+  profileBackupPath: string;
+  checksumsPath: string;
+  bundleDownloadUrl: string | null;
+};
+
+export type FontSyncTargetScanResult = {
+  environment: FontSyncEnvironment;
+  supported: boolean;
+  autocadReady: boolean;
+};
+
+export type FontSyncPreviewResult = {
+  importId: string;
+  bundleId: string;
+  bundleFilename: string;
+  bundleMode: "guaranteed" | "best_effort";
+  currentEnvironment: FontSyncEnvironment;
+  plannedChanges: {
+    managedRoot: string;
+    managedFontsDir: string;
+    supportPath: string;
+    fontFileMap: string;
+    altFontFile: string | null;
+  };
+  diff: {
+    supportPathChanged: boolean;
+    fontFileMapChanged: boolean;
+    altFontFileChanged: boolean;
+  };
+  manifest: Record<string, unknown>;
+};
+
+export type FontSyncApplyResult = {
+  importId: string;
+  bundleId: string;
+  bundleMode: "guaranteed" | "best_effort";
+  status: "matched" | "partial" | "failed";
+  profileBackupPath: string;
+  managedRoot: string;
+  managedFontsDir: string;
+  fontFileMap: string;
+  environment: FontSyncEnvironment;
+};
+
 export type SubmissionParams = Record<string, unknown>;
 
 export type CreateAuditReplaceParams = {
@@ -286,4 +387,9 @@ export type ApiAdapter = {
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
   listJobs: (status?: string) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
+  scanFontSyncSource?: (file: File) => Promise<FontSyncSourceScanResult>;
+  exportFontSyncBundle?: (file: File) => Promise<FontSyncExportResult>;
+  scanFontSyncTarget?: () => Promise<FontSyncTargetScanResult>;
+  previewFontSyncBundle?: (bundle: File) => Promise<FontSyncPreviewResult>;
+  applyFontSyncBundle?: (importId: string) => Promise<FontSyncApplyResult>;
 };

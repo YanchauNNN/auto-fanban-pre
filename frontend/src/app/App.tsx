@@ -74,6 +74,9 @@ const DeliverableWorkspace = lazy(async () => ({
 const ReplaceWorkspace = lazy(async () => ({
   default: (await import("../features/replace/ReplaceWorkspace")).ReplaceWorkspace,
 }));
+const FontSyncWorkspace = lazy(async () => ({
+  default: (await import("../features/font-sync/FontSyncWorkspace")).FontSyncWorkspace,
+}));
 const AuditCheckWorkspace = lazy(async () => ({
   default: (await import("../features/audit-check/AuditCheckWorkspace")).AuditCheckWorkspace,
 }));
@@ -95,6 +98,7 @@ const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
 
 const MODULE_OPTIONS = [
   { key: "business", label: "业务模块" },
+  { key: "font_sync", label: "字体同步" },
   { key: "account", label: "账号模块" },
   { key: "workload", label: "工作量模块" },
 ] as const;
@@ -1065,6 +1069,12 @@ function WorkspacePage() {
                   )}
                 </div>
               </section>
+            </section>
+          ) : activeModule === "font_sync" ? (
+            <section className={styles.modulePanel} data-testid="module-font-sync-panel">
+              <Suspense fallback={<p className={styles.muted}>正在加载字体同步工作区...</p>}>
+                <FontSyncWorkspace adapter={adapter} />
+              </Suspense>
             </section>
           ) : activeModule === "account" ? (
             <section className={styles.placeholderPanel} data-testid="module-account-panel">

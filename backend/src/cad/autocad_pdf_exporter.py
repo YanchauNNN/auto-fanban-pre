@@ -370,11 +370,25 @@ def _dispatch_autocad(win32com_module, prog_id_candidates: list[str]):
             last_exc = exc
             logger.debug("AutoCAD COM ProgID=%s 失败: %s", prog_id, exc)
 
-    # 新建失败时，再尝试复用已有实例
+    # 新建失败时，优先尝试复用具体 ProgID 对应的已运行实例
+    for prog_id in prog_id_candidates:
+        with contextlib.suppress(Exception):
+            app = win32com_module.client.GetActiveObject(prog_id)
+            logger.debug("回退复用已运行 AutoCAD ProgID=%s ver=%s", prog_id, app.Version)
+            return app
+
+    # 再尝试通用 AutoCAD.Application 的已运行实例
     with contextlib.suppress(Exception):
         app = win32com_module.client.GetActiveObject("AutoCAD.Application")
-        logger.debug("回退复用已运行 AutoCAD ver=%s", app.Version)
+        logger.debug("回退复用通用 AutoCAD.Application ver=%s", app.Version)
         return app
+
+    # 最后退回普通 Dispatch，让 COM 自行决定是否连接现有实例或拉起服务
+    for prog_id in prog_id_candidates:
+        with contextlib.suppress(Exception):
+            app = win32com_module.client.Dispatch(prog_id)
+            logger.debug("回退普通 Dispatch ProgID=%s ver=%s", prog_id, app.Version)
+            return app
 
     raise RuntimeError(f"AutoCAD COM 无法连接，已尝试: {prog_id_candidates}") from last_exc
 

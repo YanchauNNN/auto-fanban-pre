@@ -42,6 +42,10 @@ dev = [
     "mypy>=1.13.0",
     "pyright>=1.1.403",
 ]
+desktop = [
+    "pyinstaller>=6.16.0",
+    "pywebview>=5.4",
+]
 
 [build-system]
 requires = ["hatchling"]

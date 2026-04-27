@@ -18,15 +18,16 @@ from .cad_dxf_executor import CADDXFExecutor
 from .dwg_version import detect_dwg_version_code, detect_dwg_version_code_or_none
 from .dxf_pdf_exporter import DxfPdfExporter
 from .font_preflight import FontPreflightService
+from .font_sync_service import AutoCADFontSyncAdapter, FontSyncService, merge_support_path
 from .frame_detector import FrameDetector
 from .oda_converter import ODAConverter
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 from .same_code_multipage import SameCodeMultipageGrouper
 from .slot_pool import CADSlot, CADSlotPool
 from .splitter import FrameSplitter
-from .titleblock_extractor import TitleblockExtractor
 from .titleblock_consistency import TitleblockConsistencyService
 from .titleblock_consistency_bridge import TitleblockConsistencyBridge
+from .titleblock_extractor import TitleblockExtractor
 
 __all__ = [
     "ODAConverter",
@@ -40,6 +41,9 @@ __all__ = [
     "FrameSplitter",
     "DxfPdfExporter",
     "FontPreflightService",
+    "FontSyncService",
+    "AutoCADFontSyncAdapter",
+    "merge_support_path",
     "AutoCADPathInfo",
     "resolve_autocad_paths",
     "PlotResourceContext",

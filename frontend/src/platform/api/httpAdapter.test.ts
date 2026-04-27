@@ -508,4 +508,95 @@ describe("HttpAdapter", () => {
       sourceFilenames: ["18185NE-JGS11.dwg"],
     });
   });
+
+  it("keeps font sync methods callable when consumed as detached callbacks", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          source_id: "source-1",
+          source_path: "E:\\project\\sample-smoke.dwg",
+          bundle_mode: "best_effort",
+          drawing: {
+            filename: "sample-smoke.dwg",
+          },
+          environment: {
+            autocad_ready: true,
+            supported: true,
+            active_profile: "<<未命名配置>>",
+            support_path: "D:\\Fonts",
+            font_file_map: "E:\\fontmap.fmp",
+            alt_font_file: "simplex.shx",
+            windows_fonts_dir: "C:\\Windows\\Fonts",
+            font_search_roots: ["D:\\Fonts"],
+            installations: [
+              {
+                label: "AutoCAD 2022",
+                install_dir: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022",
+                acad_exe: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\acad.exe",
+                accoreconsole_exe:
+                  "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\accoreconsole.exe",
+                fonts_dir: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts",
+              },
+            ],
+            selected_installation: {
+              label: "AutoCAD 2022",
+              install_dir: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022",
+              acad_exe: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\acad.exe",
+              accoreconsole_exe:
+                "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\accoreconsole.exe",
+              fonts_dir: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts",
+            },
+          },
+          styles: [
+            {
+              style_name: "STANDARD",
+              font_name: "simplex.shx",
+              bigfont_name: "",
+              kind: "shx",
+            },
+          ],
+          font_dependencies: [
+            {
+              dependency_id: "dep-1",
+              style_name: "STANDARD",
+              role: "font",
+              font_name: "simplex.shx",
+              kind: "shx",
+              used_in_block: false,
+              absolute_path_reference: false,
+              resolved: true,
+              resolved_path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+              copy_status: "copied",
+              bundle_font_name: "simplex.shx",
+              bundle_font_path: "fonts\\simplex.shx",
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const runDetachedScan = adapter.scanFontSyncSource;
+    const file = new File(["dwg"], "sample-smoke.dwg", {
+      type: "application/acad",
+    });
+
+    const result = await runDetachedScan(file);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/font-sync/source-scan",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      }),
+    );
+    expect(result.bundleMode).toBe("best_effort");
+    expect(result.environment.selectedInstallation?.label).toBe("AutoCAD 2022");
+    expect(result.fontDependencies[0]).toMatchObject({
+      dependencyId: "dep-1",
+      resolved: true,
+      copyStatus: "copied",
+    });
+  });
 });
