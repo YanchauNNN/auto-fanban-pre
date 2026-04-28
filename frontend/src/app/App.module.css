@@ -1232,6 +1232,12 @@
   border-radius: 999px;
 }
 
+.jobsModalFooter {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.2rem;
+}
+
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .titleStrip {
     background: rgba(243, 247, 252, 0.98);

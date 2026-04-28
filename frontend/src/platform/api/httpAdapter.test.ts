@@ -187,6 +187,28 @@ describe("HttpAdapter", () => {
     expect(jobs.items[0]?.affectedDrawingsCount).toBe(4);
   });
 
+  it("passes status, offset, and limit to listJobs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 12,
+          items: [],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const jobs = await adapter.listJobs("running", 100, 50);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs?status=running&offset=100&limit=50",
+      undefined,
+    );
+    expect(jobs.total).toBe(12);
+    expect(jobs.items).toHaveLength(0);
+  });
+
   it("creates replace-only jobs with mode=replace and run_deliverable=false", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

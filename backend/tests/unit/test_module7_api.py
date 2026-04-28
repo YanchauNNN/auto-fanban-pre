@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -1366,6 +1367,42 @@ def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(
 
         ied_download = client.get(f"/api/jobs/{job_id}/download/ied")
         assert ied_download.status_code == 404
+
+
+def test_list_jobs_supports_offset_limit_and_status_filtered_total(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        base_time = datetime(2026, 4, 27, 9, 0, 0)
+        created_ids: list[str] = []
+
+        for index in range(5):
+            job = runtime.job_manager.create_job(
+                job_type=JobType.DELIVERABLE.value,
+                project_no="2016",
+                source_filename=f"job-{index + 1}.dwg",
+            )
+            job.created_at = base_time + timedelta(minutes=index)
+            job.status = JobStatus.SUCCEEDED if index < 3 else JobStatus.FAILED
+            runtime.job_manager.update_job(job)
+            created_ids.append(job.job_id)
+
+        paged = client.get("/api/jobs", params={"offset": 1, "limit": 2})
+        assert paged.status_code == 200
+        paged_payload = paged.json()
+        assert paged_payload["total"] == 5
+        assert [item["source_filename"] for item in paged_payload["items"]] == [
+            "job-4.dwg",
+            "job-3.dwg",
+        ]
+
+        filtered = client.get("/api/jobs", params={"status": "succeeded", "offset": 1, "limit": 1})
+        assert filtered.status_code == 200
+        filtered_payload = filtered.json()
+        assert filtered_payload["total"] == 3
+        assert [item["source_filename"] for item in filtered_payload["items"]] == ["job-2.dwg"]
 
 
 class FakeSharedPrepService(SharedPrepService):

@@ -495,6 +495,7 @@ class PipelineExecutor:
 
     def _stage_extract_fields(self, job: Job, context: dict) -> None:
         total = len(context["frames"])
+        self.titleblock_extractor.set_project_no(job.project_no)
         job.progress.details.update({"frames_field_total": total, "frames_field_done": 0})
         for i, frame in enumerate(context["frames"]):
             dxf_path = frame.runtime.source_file

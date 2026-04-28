@@ -359,59 +359,63 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
-  it("filters recent jobs locally by status without refetching the list", async () => {
-    mockListJobs.mockResolvedValue({
-      total: 4,
-      items: [
-        {
-          ...makeSingleJob(1, "queued-job.dwg"),
-          status: "queued",
-        },
-        {
-          ...makeSingleJob(2, "running-job.dwg"),
-          status: "running",
-        },
-        {
-          ...makeSingleJob(3, "success-job.dwg"),
-          status: "succeeded",
-        },
-        {
-          ...makeSingleJob(4, "failed-job.dwg"),
-          status: "failed",
-        },
-      ],
+  it("filters recent jobs by status and refreshes totals from the backend", async () => {
+    const allJobs = [
+      {
+        ...makeSingleJob(1, "queued-job.dwg"),
+        status: "queued" as const,
+      },
+      {
+        ...makeSingleJob(2, "running-job.dwg"),
+        status: "running" as const,
+      },
+      {
+        ...makeSingleJob(3, "success-job.dwg"),
+        status: "succeeded" as const,
+      },
+      {
+        ...makeSingleJob(4, "failed-job.dwg"),
+        status: "failed" as const,
+      },
+    ];
+    mockListJobs.mockImplementation(async (status?: string) => {
+      const items = status ? allJobs.filter((job) => job.status === status) : allJobs;
+      return {
+        total: items.length,
+        items,
+      };
     });
 
     const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByText("success-job.dwg")).toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "排队中" }));
     expect(screen.getByRole("button", { name: "排队中" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("queued-job.dwg")).toBeInTheDocument();
+    expect(await screen.findByText("queued-job.dwg")).toBeInTheDocument();
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("success-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
+    expect(mockListJobs).toHaveBeenCalledWith("queued", 0, 100);
 
     await user.click(screen.getByRole("button", { name: "成功" }));
     expect(screen.getByRole("button", { name: "成功" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("success-job.dwg")).toBeInTheDocument();
+    expect(await screen.findByText("success-job.dwg")).toBeInTheDocument();
     expect(screen.queryByText("queued-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledTimes(1);
+    expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100);
   });
 
   it("shows eight cards by default and opens the rest in a modal", async () => {
-    mockListJobs.mockResolvedValue({
-      total: 10,
-      items: Array.from({ length: 10 }, (_, index) =>
-        makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
-      ),
-    });
+    const jobs = Array.from({ length: 10 }, (_, index) =>
+      makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
+    );
+    mockListJobs.mockImplementation(async (_status?: string, offset = 0, limit = 100) => ({
+      total: jobs.length,
+      items: jobs.slice(offset, offset + limit),
+    }));
 
     const user = userEvent.setup();
     render(<App />);
@@ -426,6 +430,47 @@ describe("recent jobs area", () => {
     const modal = await screen.findByRole("dialog");
     expect(within(modal).getByText("sample-2.dwg")).toBeInTheDocument();
     expect(within(modal).getByText("sample-1.dwg")).toBeInTheDocument();
+  });
+
+  it("uses total instead of fetched item count for the expand button", async () => {
+    const jobs = Array.from({ length: 100 }, (_, index) =>
+      makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
+    );
+    mockListJobs.mockImplementation(async (_status?: string, offset = 0, limit = 100) => ({
+      total: 369,
+      items: jobs.slice(offset, offset + limit),
+    }));
+
+    render(<App />);
+
+    expect(await screen.findAllByTestId("recent-job-card")).toHaveLength(8);
+    expect(screen.getByRole("button", { name: "展开其余 361 个" })).toBeInTheDocument();
+  });
+
+  it("loads more jobs inside the modal so records after the first 100 are reachable", async () => {
+    const jobs = Array.from({ length: 120 }, (_, index) =>
+      makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
+    );
+    mockListJobs.mockImplementation(async (_status?: string, offset = 0, limit = 100) => ({
+      total: jobs.length,
+      items: jobs.slice(offset, offset + limit),
+    }));
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findAllByTestId("recent-job-card");
+    await user.click(screen.getByRole("button", { name: "展开其余 112 个" }));
+
+    const modal = await screen.findByRole("dialog");
+    expect(within(modal).queryByText("sample-120.dwg")).not.toBeInTheDocument();
+
+    await user.click(within(modal).getByRole("button", { name: "加载更多（剩余 70 条）" }));
+    await user.click(await within(modal).findByRole("button", { name: "加载更多（剩余 20 条）" }));
+
+    await waitFor(() => {
+      expect(within(modal).getByText("sample-120.dwg")).toBeInTheDocument();
+    });
   });
 
   it("shows all matching jobs while searching", async () => {

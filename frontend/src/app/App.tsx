@@ -9,6 +9,7 @@ import "@fontsource/rajdhani/700.css";
 import {
   QueryClient,
   QueryClientProvider,
+  useInfiniteQuery,
   useQueries,
   useQuery,
   useQueryClient,
@@ -67,6 +68,7 @@ import {
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
+const JOBS_MODAL_PAGE_SIZE = 50;
 const BACKEND_MAINTENANCE_MESSAGE = "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）";
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
@@ -557,8 +559,19 @@ function WorkspacePage() {
     : "正在加载配置";
 
   const jobsQuery = useQuery({
-    queryKey: ["jobs"],
-    queryFn: () => adapter.listJobs(),
+    queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
+    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
+    placeholderData: (previous) => previous,
+    refetchInterval: (query) => {
+      const items = (query.state.data as JobList | undefined)?.items ?? [];
+      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
+      return hasActive ? 3000 : 12000;
+    },
+  });
+  const jobsActivityQuery = useQuery({
+    queryKey: ["jobs-activity"],
+    queryFn: () => adapter.listJobs(undefined, 0, 100),
+    placeholderData: (previous) => previous,
     refetchInterval: (query) => {
       const items = (query.state.data as JobList | undefined)?.items ?? [];
       const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
@@ -572,25 +585,18 @@ function WorkspacePage() {
   );
   const deferredRecentJobsSearch = useDeferredValue(recentJobsSearch);
   const normalizedRecentJobsSearch = deferredRecentJobsSearch.trim().toLowerCase();
-  const statusFilteredJobCards = useMemo(() => {
-    if (!jobsStatusFilter) {
+  const filteredJobCards = useMemo(() => {
+    if (!normalizedRecentJobsSearch) {
       return jobCards;
     }
 
-    return jobCards.filter((card) => card.status === jobsStatusFilter);
-  }, [jobCards, jobsStatusFilter]);
-  const filteredJobCards = useMemo(() => {
-    if (!normalizedRecentJobsSearch) {
-      return statusFilteredJobCards;
-    }
-
-    return statusFilteredJobCards.filter((card) =>
+    return jobCards.filter((card) =>
       card.title.toLowerCase().includes(normalizedRecentJobsSearch),
     );
-  }, [normalizedRecentJobsSearch, statusFilteredJobCards]);
+  }, [jobCards, normalizedRecentJobsSearch]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
+    : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
@@ -614,7 +620,7 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    const items = jobsQuery.data?.items;
+    const items = jobsActivityQuery.data?.items;
     if (!items) {
       return;
     }
@@ -717,7 +723,7 @@ function WorkspacePage() {
     return () => {
       active = false;
     };
-  }, [adapter, jobsQuery.data]);
+  }, [adapter, jobsActivityQuery.data]);
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
@@ -725,6 +731,7 @@ function WorkspacePage() {
     setReplaceConfigOpen(false);
     setAuditConfigOpen(false);
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    void reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
   }
 
   function handleDeliverableUploadClick() {
@@ -789,7 +796,7 @@ function WorkspacePage() {
     setJobsRefreshState("refreshing");
 
     try {
-      await jobsQuery.refetch();
+      await Promise.all([jobsQuery.refetch(), jobsActivityQuery.refetch()]);
       setJobsRefreshState("done");
       jobsRefreshResetTimerRef.current = window.setTimeout(() => {
         setJobsRefreshState("idle");
@@ -1083,13 +1090,10 @@ function WorkspacePage() {
       {allJobsModalOpen ? (
         <JobsBrowserModal
           adapter={adapter}
-          cards={filteredJobCards}
           filterValue={jobsStatusFilter}
-          refreshState={jobsRefreshState}
           searchValue={recentJobsSearch}
           onClose={() => setAllJobsModalOpen(false)}
           onFilterChange={setJobsStatusFilter}
-          onRefresh={handleJobsRefresh}
           onSearchChange={setRecentJobsSearch}
         />
       ) : null}
@@ -1179,25 +1183,47 @@ function WorkspacePage() {
 
 function JobsBrowserModal({
   adapter,
-  cards,
   filterValue,
-  refreshState,
   searchValue,
   onFilterChange,
   onSearchChange,
-  onRefresh,
   onClose,
 }: {
   adapter: ApiAdapter;
-  cards: JobCardModel[];
   filterValue?: string;
-  refreshState: "idle" | "refreshing" | "done";
   searchValue: string;
   onFilterChange: (value?: string) => void;
   onSearchChange: (value: string) => void;
-  onRefresh: () => Promise<void>;
   onClose: () => void;
 }) {
+  const modalJobsQuery = useInfiniteQuery({
+    queryKey: ["jobs-browser", filterValue ?? "__all__"],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      adapter.listJobs(filterValue ?? undefined, Number(pageParam), JOBS_MODAL_PAGE_SIZE),
+    getNextPageParam: (lastPage, allPages) => {
+      const loadedCount = allPages.reduce((sum, page) => sum + page.items.length, 0);
+      return loadedCount < lastPage.total ? loadedCount : undefined;
+    },
+  });
+  const loadedJobs = useMemo(
+    () => modalJobsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [modalJobsQuery.data?.pages],
+  );
+  const loadedCards = useMemo(() => buildJobCardModels(loadedJobs), [loadedJobs]);
+  const normalizedSearchValue = searchValue.trim().toLowerCase();
+  const visibleCards = useMemo(() => {
+    if (!normalizedSearchValue) {
+      return loadedCards;
+    }
+
+    return loadedCards.filter((card) =>
+      card.title.toLowerCase().includes(normalizedSearchValue),
+    );
+  }, [loadedCards, normalizedSearchValue]);
+  const totalJobs = modalJobsQuery.data?.pages[0]?.total ?? 0;
+  const remainingJobs = Math.max(totalJobs - loadedJobs.length, 0);
+
   return (
     <div className={styles.jobsModalBackdrop}>
       <div
@@ -1212,12 +1238,12 @@ function JobsBrowserModal({
             <h2>全部任务记录</h2>
           </div>
           <div className={styles.jobsModalActions}>
-            <button className={styles.subtleButton} type="button" onClick={() => void onRefresh()}>
-              {refreshState === "refreshing"
-                ? "刷新中"
-                : refreshState === "done"
-                  ? "已刷新"
-                  : "刷新"}
+            <button
+              className={styles.subtleButton}
+              type="button"
+              onClick={() => void modalJobsQuery.refetch()}
+            >
+              {modalJobsQuery.isRefetching ? "刷新中" : "刷新"}
             </button>
             <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
               关闭
@@ -1255,16 +1281,36 @@ function JobsBrowserModal({
         </div>
 
         <div className={styles.jobsModalBody}>
-          {cards.length > 0 ? (
-            cards.map((card) => (
+          {visibleCards.length > 0 ? (
+            visibleCards.map((card) => (
               <JobCard adapter={adapter} card={card} highlighted={false} key={card.key} />
             ))
+          ) : modalJobsQuery.isLoading ? (
+            <div className={styles.emptyPanel}>
+              <p>正在加载任务记录。</p>
+            </div>
           ) : (
             <div className={styles.emptyPanel}>
               <p>没有匹配的任务。</p>
             </div>
           )}
         </div>
+        {modalJobsQuery.hasNextPage ? (
+          <footer className={styles.jobsModalFooter}>
+            <button
+              className={styles.secondaryActionButton}
+              disabled={modalJobsQuery.isFetchingNextPage}
+              type="button"
+              onClick={() => void modalJobsQuery.fetchNextPage()}
+            >
+              {modalJobsQuery.isFetchingNextPage
+                ? "加载中"
+                : remainingJobs > 0
+                  ? `加载更多（剩余 ${remainingJobs} 条）`
+                  : "加载更多"}
+            </button>
+          </footer>
+        ) : null}
       </div>
     </div>
   );

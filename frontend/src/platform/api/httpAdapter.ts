@@ -364,12 +364,13 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  async listJobs(status?: string): Promise<JobList> {
+  async listJobs(status?: string, offset = 0, limit = 100): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
       search.set("status", status);
     }
-    search.set("limit", "100");
+    search.set("offset", String(offset));
+    search.set("limit", String(limit));
 
     const payload = await this.fetchJson<{
       total: number;

@@ -68,6 +68,24 @@ def test_parse_internal_code_recombines_fragmented_lines() -> None:
     assert album == "51"
 
 
+def test_parse_internal_code_rebuilds_suffix_from_discrete_tokens_by_x_order() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["internal_code"].parse
+
+    code, album = extractor._parse_internal_code(
+        [
+            _item("20261DA-JGS01-", x=10.0, y=10.0),
+            _item("0", x=80.0, y=12.0),
+            _item("0", x=92.0, y=8.0),
+            _item("2", x=104.0, y=11.0),
+        ],
+        parse_cfg,
+    )
+
+    assert code == "20261DA-JGS01-002"
+    assert album == "01"
+
+
 def test_parse_external_code_fixed19() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse
@@ -568,3 +586,18 @@ def test_parse_page_info_supports_english_row_when_primary_row_missing() -> None
 
     assert total == 2
     assert idx == 1
+
+
+def test_parse_title_bilingual_non_1818_forces_all_title_lines_into_cn() -> None:
+    extractor = TitleblockExtractor()
+    extractor.project_no = "2026"
+    items = [
+        _item("应急柴油发电机厂房A列1DA", x=10.0, y=120.0),
+        _item("-9.800m，-9.300m", x=10.0, y=110.0),
+        _item("筏板模板图", x=10.0, y=100.0),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "应急柴油发电机厂房A列1DA\n-9.800m，-9.300m\n筏板模板图"
+    assert title_en is None

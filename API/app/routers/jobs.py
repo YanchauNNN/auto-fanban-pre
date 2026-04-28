@@ -120,8 +120,13 @@ async def create_audit_batch(
 
 
 @router.get("")
-def list_jobs(request: Request, status: str | None = None, limit: int = 100) -> dict:
-    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit)
+def list_jobs(
+    request: Request,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset)
 
 
 @router.get("/{job_id}")

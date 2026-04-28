@@ -40,6 +40,12 @@ class _FakeFrameDetector:
 
 
 class _FakeTitleblockExtractor:
+    def __init__(self) -> None:
+        self.project_no: str | None = None
+
+    def set_project_no(self, project_no: str | None) -> None:
+        self.project_no = project_no
+
     def extract_fields(self, dxf_path: Path, frame: Any) -> None:
         return None
 
@@ -136,6 +142,31 @@ def test_shared_prep_sets_project_no_before_detection(tmp_path: Path) -> None:
     )
 
     assert service.frame_detector.project_no == "1818"
+
+
+def test_shared_prep_sets_project_no_on_titleblock_extractor(tmp_path: Path) -> None:
+    service = _make_service(
+        {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 0,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replacement_font": None,
+            "replaced_style_count": 0,
+        }
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    service.prepare(
+        group_id="g1",
+        project_no="1818",
+        source_dwg=source,
+        shared_dir=tmp_path / "shared",
+    )
+
+    assert service.titleblock_extractor.project_no == "1818"
 
 
 def test_shared_prep_filters_out_frames_that_failed_anchor_validation(tmp_path: Path) -> None:

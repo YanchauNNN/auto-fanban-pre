@@ -232,6 +232,9 @@ def test_stage_detect_frames_sets_project_no_before_detection(tmp_path: Path) ->
 
 def test_stage_extract_fields_drops_frames_with_anchor_validation_failure(tmp_path: Path) -> None:
     class _FlaggingExtractor:
+        def set_project_no(self, project_no: str | None) -> None:
+            self.project_no = project_no
+
         def extract_fields(self, dxf_path: Path, frame: FrameMeta) -> None:
             if frame.frame_id == "invalid-frame":
                 frame.add_flag("未命中锚点文本")

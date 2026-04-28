@@ -504,7 +504,13 @@ class DeliverableApiRuntime:
                     f"unavailable_font_replacement_fonts[{kind}]"
                 )
         return errors
-    def list_jobs(self, *, status_filter: str | None = None, limit: int = 100) -> dict[str, Any]:
+    def list_jobs(
+        self,
+        *,
+        status_filter: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
@@ -515,8 +521,11 @@ class DeliverableApiRuntime:
             for job in self.job_manager.load_all_jobs()
             if job.group_id is None and (status_filter is None or job.status.value == status_filter)
         ]
-        items = sorted([*groups, *standalone_jobs], key=lambda item: item['created_at'], reverse=True)[:limit]
-        return {'items': items, 'total': len(groups) + len(standalone_jobs)}
+        all_items = sorted([*groups, *standalone_jobs], key=lambda item: item['created_at'], reverse=True)
+        normalized_limit = max(limit, 0)
+        normalized_offset = max(offset, 0)
+        items = all_items[normalized_offset:normalized_offset + normalized_limit]
+        return {'items': items, 'total': len(all_items)}
 
     def get_job_detail(self, job_id: str) -> dict[str, Any]:
         group = self.group_manager.get_group(job_id)

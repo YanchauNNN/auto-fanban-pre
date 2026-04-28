@@ -284,6 +284,6 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
-  listJobs: (status?: string) => Promise<JobList>;
+  listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

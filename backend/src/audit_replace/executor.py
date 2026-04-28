@@ -58,6 +58,7 @@ class AuditReplaceExecutor:
             dxf_dir.mkdir(parents=True, exist_ok=True)
             source_dxf = self.oda.dwg_to_dxf(source_dwg, dxf_dir)
             self.frame_detector.set_project_no(source_project_no)
+            self.titleblock_extractor.set_project_no(source_project_no)
             frames = self.frame_detector.detect_frames(source_dxf)
             for frame in frames:
                 frame.runtime.cad_source_file = source_dwg

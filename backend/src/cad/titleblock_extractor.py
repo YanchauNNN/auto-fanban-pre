@@ -79,6 +79,11 @@ class TitleblockExtractor(ITitleblockExtractor):
         self.scale_mismatch_flag = str(scale_mismatch.get("flag_name", "比例不一致"))
         self.point_only_fields = {"revision", "status", "date", "page_info"}
         self._text_item_cache: dict[tuple[str, int, int], list[TextItem]] = {}
+        self.project_no: str | None = None
+
+    def set_project_no(self, project_no: str | None) -> None:
+        normalized = str(project_no).strip() if project_no is not None else ""
+        self.project_no = normalized or None
 
     def extract_fields(self, dxf_path: Path, frame: FrameMeta) -> FrameMeta:
         """提取单个图框的图签字段"""
@@ -628,6 +633,19 @@ class TitleblockExtractor(ITitleblockExtractor):
                 elif len(mid) >= 2:
                     album_code = mid[-2:]
             return internal_code, album_code
+        rebuilt = self._rebuild_internal_code_from_segments(items, re_full, re_short)
+        if rebuilt:
+            m = re_full.match(rebuilt)
+            if m:
+                album_code = None
+                mid = m.groupdict().get("mid")
+                if mid:
+                    mm = re_mid_album.match(mid)
+                    if mm:
+                        album_code = mm.group("album")
+                    elif len(mid) >= 2:
+                        album_code = mid[-2:]
+                return rebuilt, album_code
         return None, None
 
     # 外部编码中至少包含的数字个数（过滤模板占位文字）
@@ -760,6 +778,11 @@ class TitleblockExtractor(ITitleblockExtractor):
         ]
         if not lines:
             return None, None
+        if self.project_no and self.project_no != "1818":
+            title_cn = self.line_join.join(
+                [self._normalize_spaces(line) for line in lines if line]
+            ).strip()
+            return (title_cn or None), None
         cn_lines: list[str] = []
         en_lines: list[str] = []
         for line in lines:
@@ -902,6 +925,54 @@ class TitleblockExtractor(ITitleblockExtractor):
     @staticmethod
     def _normalize_anchor(text: str) -> str:
         return "".join(ch for ch in (text or "") if not ch.isspace())
+
+    def _rebuild_internal_code_from_segments(
+        self,
+        items: list[TextItem],
+        re_full: re.Pattern[str],
+        re_short: re.Pattern[str],
+    ) -> str | None:
+        prefix_candidates: list[tuple[TextItem, str]] = []
+        for item in sorted(items, key=lambda t: (-t.y, t.x)):
+            text = self._strip_all_whitespace((item.text or "").upper())
+            if not text:
+                continue
+            if re_full.match(text):
+                return text
+            base = text[:-1] if text.endswith("-") else text
+            if re_short.match(base):
+                prefix_candidates.append((item, base))
+
+        for prefix_item, prefix in prefix_candidates:
+            prefix_right = self._text_item_right_edge(prefix_item)
+            y_tol = max(self.y_cluster_abs * 3.0, (prefix_item.text_height or 0.0) * 0.25, 3.0)
+            suffix_tokens: list[tuple[float, str]] = []
+            for item in items:
+                text = self._strip_all_whitespace((item.text or "").upper())
+                if len(text) != 1 or not text.isdigit():
+                    continue
+                if item.x <= prefix_right:
+                    continue
+                if abs(item.y - prefix_item.y) > y_tol:
+                    continue
+                suffix_tokens.append((item.x, text))
+            suffix_tokens.sort(key=lambda t: t[0])
+            suffix = "".join(token for _, token in suffix_tokens[:3])
+            candidate = f"{prefix}-{suffix}"
+            if len(suffix) == 3 and re_full.match(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _text_item_right_edge(item: TextItem) -> float:
+        if item.bbox is not None:
+            return item.bbox.xmax
+        text = (item.text or "").strip()
+        if not text:
+            return item.x
+        height = item.text_height or 0.0
+        approx_width = max(len(text) * max(height, 1.0) * 0.6, 1.0)
+        return item.x + approx_width
 
     @classmethod
     def _looks_like_page_info_line(cls, text: str) -> bool:

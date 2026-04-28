@@ -61,6 +61,7 @@ class AuditCheckExecutor:
             dxf_path = self.oda.dwg_to_dxf(source_dwg, dxf_dir)
 
             self.frame_detector.set_project_no(project_no)
+            self.titleblock_extractor.set_project_no(project_no)
             frames = self.frame_detector.detect_frames(dxf_path)
             for frame in frames:
                 frame.runtime.cad_source_file = source_dwg

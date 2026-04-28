@@ -87,6 +87,7 @@ class SharedPrepService:
 
         dxf_path = self.oda.dwg_to_dxf(staged_source, shared_dir)
         self.frame_detector.set_project_no(project_no)
+        self.titleblock_extractor.set_project_no(project_no)
         frames = self.frame_detector.detect_frames(dxf_path)
         for frame in frames:
             frame.runtime.cad_source_file = staged_source
