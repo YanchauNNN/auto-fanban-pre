@@ -54,6 +54,10 @@ def _make_fake_repo(repo_root: Path) -> None:
     )
     _write_file(repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "a1_coverage.pth", "import coverage")
     _write_file(
+        repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "auto_fanban-0.1.0.dist-info" / "direct_url.json",
+        '{"url":"file:///E:/project/auto-fanban-pre/backend","dir_info":{"editable":true}}',
+    )
+    _write_file(
         repo_root
         / "backend"
         / "src"
@@ -138,6 +142,14 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         output_root / "python-packages" / "Lib" / "site-packages" / "_editable_impl_auto_fanban.pth"
     ).exists()
     assert not (output_root / "python-packages" / "Lib" / "site-packages" / "a1_coverage.pth").exists()
+    assert not (
+        output_root
+        / "python-packages"
+        / "Lib"
+        / "site-packages"
+        / "auto_fanban-0.1.0.dist-info"
+        / "direct_url.json"
+    ).exists()
     assert not (
         output_root
         / "backend-runtime"

@@ -124,6 +124,10 @@ def _sanitize_python_packages(output_root: Path) -> None:
         target = site_packages_root / filename
         if target.exists():
             target.unlink()
+    for dist_info in site_packages_root.glob("auto_fanban-*.dist-info"):
+        direct_url = dist_info / "direct_url.json"
+        if direct_url.exists():
+            direct_url.unlink()
 
 
 def _prune_development_artifacts(output_root: Path) -> None:
