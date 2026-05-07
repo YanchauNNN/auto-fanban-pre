@@ -19,6 +19,10 @@ def normalize_text(value: str) -> str:
     return text.strip().upper()
 
 
+def normalize_text_without_spaces(value: str) -> str:
+    return _SPACE_RE.sub("", normalize_text(value))
+
+
 class AuditLexiconLoader:
     def __init__(self) -> None:
         audit_cfg = get_config().audit_check

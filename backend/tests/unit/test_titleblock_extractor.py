@@ -273,6 +273,24 @@ def test_parse_page_info_with_x() -> None:
     assert idx == 1
 
 
+def test_parse_page_info_001_homepage_reads_total_then_index_tokens() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("4", x=10.0, y=100.0),
+        _item("1", x=80.0, y=100.0),
+    ]
+
+    total, idx = extractor._parse_page_info(
+        items,
+        parse_cfg,
+        total_then_index_tokens=True,
+    )
+
+    assert total == 4
+    assert idx == 1
+
+
 def test_parse_a4_page_marker_identity_with_parenthesized_revision() -> None:
     extractor = TitleblockExtractor()
     items = [_item("18185NE-JGS11-001(A)", x=10.0, y=100.0)]

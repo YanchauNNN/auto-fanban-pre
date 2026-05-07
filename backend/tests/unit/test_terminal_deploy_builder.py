@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from src.deploy.prereq_installers import ensure_prereq_installers
 from src.deploy.terminal_package import (
     DELTA_DELETE_LIST,
@@ -38,6 +40,7 @@ def _relative_files(root: Path) -> set[str]:
 
 def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "frontend" / "dist" / "index.html", "<html></html>")
+    _write_file(repo_root / "frontend" / "dist" / "assets" / "pdf.worker.min-test.mjs", "worker")
     _write_file(repo_root / "API" / "app" / "main.py", "app = None")
     _write_file(repo_root / "backend" / "pyproject.toml", "[project]\nname = 'demo'\n")
     _write_file(repo_root / "backend" / "src" / "config" / "runtime_config.py", "CONFIG = 1")
@@ -56,6 +59,12 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(
         repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "auto_fanban-0.1.0.dist-info" / "direct_url.json",
         '{"url":"file:///E:/project/auto-fanban-pre/backend","dir_info":{"editable":true}}',
+    )
+    _write_file(
+        repo_root / "backend" / ".venv" / "Lib" / "site-packages" / "auto_fanban-0.1.0.dist-info" / "RECORD",
+        "_editable_impl_auto_fanban.pth,sha256=stale,34\n"
+        "auto_fanban-0.1.0.dist-info/direct_url.json,sha256=stale,81\n"
+        "auto_fanban-0.1.0.dist-info/METADATA,,\n",
     )
     _write_file(
         repo_root
@@ -126,6 +135,11 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
     assert (output_root / "frontend-dist" / "index.html").exists()
+    frontend_web_config = (output_root / "frontend-dist" / "web.config").read_text(encoding="utf-8")
+    assert '<mimeMap fileExtension=".mjs" mimeType="text/javascript" />' in frontend_web_config
+    assert '<mimeMap fileExtension=".wasm" mimeType="application/wasm" />' in frontend_web_config
+    assert 'url="http://127.0.0.1:8000/api/{R:1}"' in frontend_web_config
+    assert 'url="/index.html"' in frontend_web_config
     assert (output_root / "backend-runtime" / "API" / "app" / "main.py").exists()
     assert (output_root / "python-packages" / "Lib" / "site-packages" / "demo_pkg" / "__init__.py").exists()
     assert not (
@@ -150,6 +164,17 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "auto_fanban-0.1.0.dist-info"
         / "direct_url.json"
     ).exists()
+    record = (
+        output_root
+        / "python-packages"
+        / "Lib"
+        / "site-packages"
+        / "auto_fanban-0.1.0.dist-info"
+        / "RECORD"
+    ).read_text(encoding="utf-8")
+    assert "_editable_impl_auto_fanban.pth" not in record
+    assert "direct_url.json" not in record
+    assert "METADATA" in record
     assert not (
         output_root
         / "backend-runtime"
@@ -203,6 +228,16 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert ".NET Framework 4.8" in text
     assert "VC++ 2015-2022 x64" in text
     assert "NSSM" not in text
+
+
+def test_build_terminal_deploy_package_requires_pdf_preview_worker_asset(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    (repo_root / "frontend" / "dist" / "assets" / "pdf.worker.min-test.mjs").unlink()
+
+    with pytest.raises(FileNotFoundError, match="PDF 预览 worker"):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
 
 def test_build_terminal_deploy_package_prefers_local_autocad_pdf2_pc3_when_available(
@@ -322,6 +357,10 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "HostName" in configure_iis
     assert "system.webServer/proxy" in configure_iis
     assert "ARR" in configure_iis
+    assert '<remove fileExtension=".mjs" />' in configure_iis
+    assert '<mimeMap fileExtension=".mjs" mimeType="text/javascript" />' in configure_iis
+    assert '<remove fileExtension=".wasm" />' in configure_iis
+    assert '<mimeMap fileExtension=".wasm" mimeType="application/wasm" />' in configure_iis
     assert "Get-ConflictingHttpBindingSiteName" in configure_iis
     assert "IIS 绑定冲突" in configure_iis
     assert "Default Web Site" in configure_iis
@@ -410,10 +449,12 @@ def test_publish_terminal_deploy_artifacts_without_baseline_writes_metadata_only
     )
 
     assert (output_root / "frontend-dist" / "index.html").exists()
+    assert (output_root / "frontend-dist" / "web.config").exists()
     delta_files = _relative_files(delta_root)
     assert PACKAGE_MANIFEST in delta_files
     assert f"{DELTA_DIR_NAME}/{DELTA_MANIFEST}" in delta_files
     assert "frontend-dist/index.html" not in delta_files
+    assert "frontend-dist/web.config" not in delta_files
 
     delta_manifest = json.loads((delta_root / DELTA_DIR_NAME / DELTA_MANIFEST).read_text(encoding="utf-8"))
     assert delta_manifest["baseline_exists"] is False
@@ -423,6 +464,28 @@ def test_publish_terminal_deploy_artifacts_without_baseline_writes_metadata_only
 
     usage = (delta_root / DELTA_DIR_NAME / DELTA_USAGE).read_text(encoding="utf-8")
     assert "请优先使用 full 包" in usage
+
+
+def test_publish_terminal_deploy_artifacts_adds_web_config_for_legacy_baseline(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    (output_root / "frontend-dist" / "web.config").unlink()
+
+    publish_terminal_deploy_artifacts(
+        repo_root=repo_root,
+        output_root=output_root,
+        delta_root=delta_root,
+    )
+
+    assert (output_root / "frontend-dist" / "web.config").exists()
+    assert (delta_root / "frontend-dist" / "web.config").exists()
+
+    delta_manifest = json.loads((delta_root / DELTA_DIR_NAME / DELTA_MANIFEST).read_text(encoding="utf-8"))
+    assert "frontend-dist/web.config" in delta_manifest["added_files"]
 
 
 def test_ensure_prereq_installers_downloads_missing_files(tmp_path: Path) -> None:

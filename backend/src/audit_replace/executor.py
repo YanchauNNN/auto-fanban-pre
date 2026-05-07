@@ -262,4 +262,12 @@ class AuditReplaceExecutor:
     @staticmethod
     def _replace_token(text: str, source: str, target: str) -> str:
         pattern = re.compile(re.escape(source), re.IGNORECASE)
-        return pattern.sub(target, text)
+        replaced = pattern.sub(target, text)
+        if replaced != text or not re.search(r"\s", source):
+            return replaced
+
+        compact_pattern = re.compile(
+            r"\s*".join(re.escape(char) for char in source if not char.isspace()),
+            re.IGNORECASE,
+        )
+        return compact_pattern.sub(target, text)

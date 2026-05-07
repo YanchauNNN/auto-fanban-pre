@@ -53,6 +53,11 @@ class AuditDotNetScanner:
             workspace_dir=task_dir,
         )
         payload = json.loads(result_json.read_text(encoding="utf-8-sig"))
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            raise RuntimeError(
+                "audit scan failed: " + "; ".join(str(error) for error in errors)
+            )
         items: list[ScanTextItem] = []
         for row in payload.get("texts", []):
             if not isinstance(row, dict):

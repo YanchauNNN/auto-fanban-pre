@@ -159,3 +159,13 @@ def test_audit_replace_executor_writes_replaced_dwg_reports_and_preserves_source
     assert report_payload["skipped_count"] == 2
     assert job.progress.details["replacement_count"] == 3
     assert job.progress.details["affected_drawings_count"] == 1
+
+
+def test_replace_token_ignores_spaces_in_source_project_name() -> None:
+    updated = AuditReplaceExecutor._replace_token(
+        "3.根据浙江金七门核电厂1、2号机组2016-J01ZHC04《厂址设计参数》",
+        "浙江金七门核电厂 1、2 号 机 组",
+        "江苏徐圩核能供热发电厂一期工程",
+    )
+
+    assert updated == "3.根据江苏徐圩核能供热发电厂一期工程2016-J01ZHC04《厂址设计参数》"

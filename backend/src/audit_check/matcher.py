@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from ..config import get_config
-from .lexicon import normalize_text
+from .lexicon import normalize_text, normalize_text_without_spaces
 from .models import AuditFinding, AuditLexicon, ScanTextItem
 
 
@@ -111,9 +111,22 @@ class AuditMatchEngine:
 
     @staticmethod
     def _contains_token(token: str, text: str) -> bool:
+        if AuditMatchEngine._contains_token_exact(token, text):
+            return True
+
+        if normalize_text_without_spaces(token) == token:
+            return False
+
+        return AuditMatchEngine._contains_token_exact(
+            normalize_text_without_spaces(token),
+            normalize_text_without_spaces(text),
+        )
+
+    @staticmethod
+    def _contains_token_exact(token: str, text: str) -> bool:
         if token not in text:
             return False
-        if not token.isalpha():
+        if not (token.isascii() and token.isalpha()):
             return True
 
         start = 0

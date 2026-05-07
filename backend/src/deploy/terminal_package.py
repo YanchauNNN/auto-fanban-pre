@@ -26,6 +26,7 @@ DELTA_DELETE_LIST = "删除清单.txt"
 DELTA_USAGE = "使用说明.txt"
 MANAGED_PDF2_PC3_NAME = "打印PDF2.pc3"
 MANAGED_MONOCHROME_CTB_NAME = "fanban_monochrome.ctb"
+DEFAULT_FRONTEND_API_PORT = 8000
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,56 @@ def _ensure_exists(copy_plan: list[CopyPlanEntry]) -> None:
         raise FileNotFoundError(f"离线部署包缺少必要源文件/目录:\n{joined}")
 
 
+def _validate_frontend_preview_assets(repo_root: Path) -> None:
+    assets_dir = repo_root / "frontend" / "dist" / "assets"
+    if not assets_dir.exists():
+        raise FileNotFoundError("frontend/dist/assets 不存在，请先执行 frontend 构建。")
+    if not any(assets_dir.glob("pdf.worker*.mjs")):
+        raise FileNotFoundError(
+            "frontend/dist 缺少 PDF 预览 worker（pdf.worker*.mjs），"
+            "请先执行 `npm run build`，不要使用旧的 dist 打包。"
+        )
+
+
+def _build_frontend_web_config(api_port: int = DEFAULT_FRONTEND_API_PORT) -> str:
+    return f'''<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <staticContent>
+      <remove fileExtension=".mjs" />
+      <mimeMap fileExtension=".mjs" mimeType="text/javascript" />
+      <remove fileExtension=".wasm" />
+      <mimeMap fileExtension=".wasm" mimeType="application/wasm" />
+    </staticContent>
+    <rewrite>
+      <rules>
+        <rule name="API Proxy" stopProcessing="true">
+          <match url="^api/(.*)" />
+          <action type="Rewrite" url="http://127.0.0.1:{api_port}/api/{{R:1}}" />
+        </rule>
+        <rule name="SPA Fallback" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAll">
+            <add input="{{REQUEST_FILENAME}}" matchType="IsFile" negate="true" />
+            <add input="{{REQUEST_FILENAME}}" matchType="IsDirectory" negate="true" />
+            <add input="{{REQUEST_URI}}" pattern="^/api/" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
+'''
+
+
+def _write_frontend_web_config(output_root: Path) -> None:
+    frontend_root = output_root / "frontend-dist"
+    if not frontend_root.exists():
+        raise FileNotFoundError(f"前端静态目录不存在: {frontend_root}")
+    _write_text(frontend_root / "web.config", _build_frontend_web_config())
+
+
 def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
     target = output_root / entry.destination
     if entry.source.is_dir():
@@ -128,6 +179,15 @@ def _sanitize_python_packages(output_root: Path) -> None:
         direct_url = dist_info / "direct_url.json"
         if direct_url.exists():
             direct_url.unlink()
+        record = dist_info / "RECORD"
+        if record.exists():
+            stale_fragments = (*STALE_RUNTIME_PTH_FILES, "direct_url.json")
+            lines = [
+                line
+                for line in record.read_text(encoding="utf-8").splitlines()
+                if not any(fragment in line for fragment in stale_fragments)
+            ]
+            record.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _prune_development_artifacts(output_root: Path) -> None:
@@ -1059,6 +1119,14 @@ Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $AppPoolNam
 
 $webConfig = Join-Path $PhysicalPath "web.config"
 $proxyWarning = $null
+$staticContentConfig = @"
+    <staticContent>
+      <remove fileExtension=".mjs" />
+      <mimeMap fileExtension=".mjs" mimeType="text/javascript" />
+      <remove fileExtension=".wasm" />
+      <mimeMap fileExtension=".wasm" mimeType="application/wasm" />
+    </staticContent>
+"@
 if ($EnableReverseProxy) {
     $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
     $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
@@ -1076,6 +1144,7 @@ if ($EnableReverseProxy) {
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
+$staticContentConfig
     <rewrite>
       <rules>
         <rule name="SPA Fallback" stopProcessing="true">
@@ -1100,6 +1169,7 @@ if ($EnableReverseProxy) {
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
+$staticContentConfig
     <rewrite>
       <rules>
         <rule name="API Proxy" stopProcessing="true">
@@ -1126,6 +1196,7 @@ if ($EnableReverseProxy) {
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
+$staticContentConfig
     <rewrite>
       <rules>
         <rule name="SPA Fallback" stopProcessing="true">
@@ -1356,6 +1427,7 @@ def build_terminal_deploy_package(
 ) -> Path:
     copy_plan = gather_copy_plan(repo_root)
     _ensure_exists(copy_plan)
+    _validate_frontend_preview_assets(repo_root)
 
     if output_root.exists():
         shutil.rmtree(output_root)
@@ -1364,6 +1436,7 @@ def build_terminal_deploy_package(
     for entry in copy_plan:
         _copy_entry(entry, output_root)
 
+    _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)
     _overlay_local_managed_plotter_assets(output_root)

@@ -149,7 +149,14 @@ class TitleblockExtractor(ITitleblockExtractor):
                 continue
 
             if parse_type == "page_info_auto" or field_key == "page_info":
-                page_total, page_index = self._parse_page_info(roi_items, parse_cfg)
+                page_total, page_index = self._parse_page_info(
+                    roi_items,
+                    parse_cfg,
+                    total_then_index_tokens=self._uses_001_homepage_page_info_order(
+                        frame,
+                        fields,
+                    ),
+                )
                 if page_total is not None:
                     fields.page_total = page_total
                 if page_index is not None:
@@ -747,7 +754,11 @@ class TitleblockExtractor(ITitleblockExtractor):
         return None, extras
 
     def _parse_page_info(
-        self, items: list[TextItem], parse_cfg: dict[str, Any]
+        self,
+        items: list[TextItem],
+        parse_cfg: dict[str, Any],
+        *,
+        total_then_index_tokens: bool = False,
     ) -> tuple[int | None, int | None]:
         pattern = parse_cfg.get("pattern")
         if pattern:
@@ -761,7 +772,10 @@ class TitleblockExtractor(ITitleblockExtractor):
                     idx = 1 if idx_raw.upper() == "X" else int(idx_raw) if idx_raw.isdigit() else None
                     return total, idx
 
-        total_s, idx_s = self._page_info_two_tokens(items)
+        total_s, idx_s = self._page_info_two_tokens(
+            items,
+            total_then_index_tokens=total_then_index_tokens,
+        )
         if total_s is None or idx_s is None:
             return None, None
         total = int(total_s) if total_s.isdigit() else None
@@ -1021,7 +1035,22 @@ class TitleblockExtractor(ITitleblockExtractor):
             decoded = decoded.replace(raw, replacement)
         return decoded
 
-    def _page_info_two_tokens(self, items: list[TextItem]) -> tuple[str | None, str | None]:
+    @staticmethod
+    def _uses_001_homepage_page_info_order(
+        frame: FrameMeta,
+        fields: TitleblockFields,
+    ) -> bool:
+        code = (fields.internal_code or frame.titleblock.internal_code or "").strip().upper()
+        if not code.endswith("-001"):
+            return False
+        return TitleblockExtractor._is_a4_frame(frame)
+
+    def _page_info_two_tokens(
+        self,
+        items: list[TextItem],
+        *,
+        total_then_index_tokens: bool = False,
+    ) -> tuple[str | None, str | None]:
         best_line_tokens: list[tuple[float, str]] = []
         best_line_score: tuple[int, float] | None = None
 
@@ -1047,6 +1076,8 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         if len(best_line_tokens) >= 2:
             best_line_tokens.sort(key=lambda t: t[0])
+            if total_then_index_tokens:
+                return best_line_tokens[0][1], best_line_tokens[-1][1]
             return best_line_tokens[-1][1], best_line_tokens[0][1]
 
         tokens: list[tuple[float, str]] = []
@@ -1057,6 +1088,8 @@ class TitleblockExtractor(ITitleblockExtractor):
         tokens.sort(key=lambda t: t[0])
         if len(tokens) < 2:
             return None, None
+        if total_then_index_tokens:
+            return tokens[0][1], tokens[-1][1]
         return tokens[-1][1], tokens[0][1]
 
     @classmethod

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from src.audit_check.bridge import AuditDotNetScanner
 from src.config import SpecLoader, reload_config
 
@@ -117,3 +119,27 @@ def test_audit_dotnet_scanner_writes_slot_runtime_into_task_payload(
     assert isinstance(task, dict)
     assert task["runtime"]["plotters_dir"] == slot_runtime["plotters_dir"]
     assert task["runtime"]["temp_dir"] == slot_runtime["temp_dir"]
+
+
+def test_audit_dotnet_scanner_raises_when_bridge_reports_errors(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    scanner = AuditDotNetScanner()
+    source_dwg = tmp_path / "2026-A01.dwg"
+    source_dwg.write_bytes(b"dwg")
+    workspace_dir = tmp_path / "work"
+
+    def fake_run(*, result_json: Path, **_: object) -> None:
+        payload = {
+            "texts": [],
+            "errors": ["DOTNET_BRIDGE_EXCEPTION:eNullObjectId"],
+        }
+        result_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8-sig")
+
+    monkeypatch.setattr(scanner.runner, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="audit scan failed"):
+        scanner.scan(job_id="job-audit-error", source_dwg=source_dwg, workspace_dir=workspace_dir)

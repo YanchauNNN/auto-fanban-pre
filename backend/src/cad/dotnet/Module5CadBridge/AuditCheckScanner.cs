@@ -188,7 +188,39 @@ internal sealed class AuditCheckScanner
             }
         }
 
-        if (!(tr.GetObject(blockReference.BlockTableRecord, OpenMode.ForRead) is BlockTableRecord record))
+        var blockHandle = blockReference.Handle.ToString();
+        var blockName = ResolveBlockReferenceName(blockReference);
+        if (!SafeCadAccess.TryRead(
+                () => blockReference.BlockTableRecord,
+                _trace,
+                $"audit_block_reference.BlockTableRecord handle={blockHandle} name={blockName}",
+                out var blockRecordId
+            ))
+        {
+            return;
+        }
+
+        if (!SafeCadAccess.IsUsableObjectId(blockRecordId))
+        {
+            _trace.Log(
+                $"[DOTNET][AUDIT][WARN] skip block_reference handle={blockHandle} name={blockName}: invalid_block_table_record"
+            );
+            return;
+        }
+
+        if (!SafeCadAccess.TryGetObject(
+                tr,
+                blockRecordId,
+                OpenMode.ForRead,
+                _trace,
+                $"audit_block_definition block_handle={blockHandle} block_name={blockName}",
+                out BlockTableRecord? record
+            ))
+        {
+            return;
+        }
+
+        if (record is null)
         {
             return;
         }
@@ -315,6 +347,18 @@ internal sealed class AuditCheckScanner
         }
 
         return record.Name;
+    }
+
+    private static string ResolveBlockReferenceName(BlockReference blockReference)
+    {
+        try
+        {
+            return blockReference.Name ?? string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private static Point3d TransformPoint(Point3d point, Matrix3d transform)

@@ -23,6 +23,17 @@ def _build_lexicon_workbook(path: Path) -> Path:
     return path
 
 
+def _build_project_name_lexicon_workbook(path: Path) -> Path:
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Sheet1"
+    ws.append(["project", "2016", "2026"])
+    ws.append(["lexicon", "浙江金七门核电厂 1、2 号 机 组", "江苏徐圩核能供热发电厂一期工程"])
+    wb.save(path)
+    return path
+
+
 def test_lexicon_loader_includes_row1_and_row2_and_ignores_note_columns(tmp_path: Path) -> None:
     workbook = _build_lexicon_workbook(tmp_path / "lexicon.xlsx")
 
@@ -138,3 +149,25 @@ def test_match_engine_only_whitelists_exact_three_letters_plus_project_no_plus_o
     assert all(item.raw_text != "ABC2016X" for item in findings)
     assert any(item.raw_text == "ABCD2016X" and item.matched_text == "2016" for item in findings)
     assert any(item.raw_text == "12ABC2016X" and item.matched_text == "2016" for item in findings)
+
+
+def test_match_engine_ignores_spaces_when_matching_project_name(tmp_path: Path) -> None:
+    workbook = _build_project_name_lexicon_workbook(tmp_path / "project-name-lexicon.xlsx")
+    lexicon = AuditLexiconLoader().load(workbook)
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="2026",
+        items=[
+            ScanTextItem(
+                raw_text="3.根据浙江金七门核电厂1、2号机组2016-J01ZHC04《厂址设计参数》",
+                entity_type="TEXT",
+            ),
+        ],
+    )
+
+    assert any(
+        item.matched_text == "浙江金七门核电厂 1、2 号 机 组"
+        and item.raw_text.startswith("3.根据浙江金七门核电厂1、2号机组")
+        for item in findings
+    )
