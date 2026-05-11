@@ -58,6 +58,11 @@ public class Commands
                 var fixer = new TitleblockConsistencyFixer(task, trace);
                 fixer.Execute(result);
             }
+            else if (task.WorkflowStage.Equals("factory_index_map_replace", StringComparison.OrdinalIgnoreCase))
+            {
+                var replacer = new FactoryIndexMapReplacer(task, trace);
+                replacer.Execute(result);
+            }
             else if (
                 task.WorkflowStage.Equals("plot_window_only", StringComparison.OrdinalIgnoreCase)
                 || task.WorkflowStage.Equals("plot_from_split_dwg", StringComparison.OrdinalIgnoreCase)
@@ -163,6 +168,7 @@ internal sealed class BridgeTask
     public List<BridgeFrameTask> Frames { get; private set; } = new();
     public List<BridgeSheetSetTask> SheetSets { get; private set; } = new();
     public List<BridgeConsistencyAction> ConsistencyActions { get; private set; } = new();
+    public BridgeFactoryIndexMapConfig FactoryIndexMap { get; private set; } = new();
     public List<BridgeReplacementTarget> ReplacementTargets { get; private set; } = new();
     public string ReplacementFont { get; private set; } = string.Empty;
     public Dictionary<string, string> ReplacementFonts { get; private set; } =
@@ -193,6 +199,9 @@ internal sealed class BridgeTask
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),
             Output = BridgeOutputConfig.FromObject(root.TryGetValue("output", out var outputObj) ? outputObj : null),
+            FactoryIndexMap = BridgeFactoryIndexMapConfig.FromObject(
+                root.TryGetValue("factory_index_map", out var factoryIndexMapObj) ? factoryIndexMapObj : null
+            ),
         };
 
         foreach (var item in BridgeValue.AsObjectEnumerable(root.TryGetValue("frames", out var framesObj) ? framesObj : null))
@@ -568,6 +577,7 @@ internal sealed class BridgeBBox
     public double Ymax { get; }
     public double Width => Xmax - Xmin;
     public double Height => Ymax - Ymin;
+    public BridgePoint Center => new((Xmin + Xmax) / 2.0, (Ymin + Ymax) / 2.0);
 
     public BridgeBBox Expand(double ratio)
     {

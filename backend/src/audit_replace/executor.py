@@ -17,6 +17,7 @@ from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExt
 from ..config import get_config
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
+from .factory_index_bridge import FactoryIndexMapReplacementService
 from .mapping import ReplaceMapping, ReplaceMappingBuilder
 from .reporting import write_replace_report_json, write_replace_report_xlsx
 
@@ -31,6 +32,7 @@ class AuditReplaceExecutor:
         self.lexicon_loader = AuditLexiconLoader()
         self.dotnet_scanner = AuditDotNetScanner()
         self.mapping_builder = ReplaceMappingBuilder()
+        self.factory_index_maps = FactoryIndexMapReplacementService()
 
     def execute(self, job: Job) -> None:
         if not job.input_files:
@@ -97,9 +99,20 @@ class AuditReplaceExecutor:
 
         converted_dir = replace_dir / "converted"
         converted_dwg = self.oda.dxf_to_dwg(replaced_dxf, converted_dir)
+        factory_result = self.factory_index_maps.replace_if_configured(
+            job_id=job.job_id,
+            source_project_no=source_project_no,
+            target_project_no=target_project_no,
+            source_dxf=replaced_dxf,
+            source_dwg=converted_dwg,
+            output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
+            workspace_dir=replace_dir / "factory_index",
+            slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
+        )
+        final_dwg = factory_result.output_dwg if factory_result.applied else converted_dwg
         replaced_dwg = job.work_dir / "replaced.dwg"
         replaced_dwg.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(converted_dwg, replaced_dwg)
+        shutil.copyfile(final_dwg, replaced_dwg)
 
         reports_dir = job.work_dir / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +147,7 @@ class AuditReplaceExecutor:
         job.progress.details["affected_drawings_count"] = int(summary["affected_drawings_count"])
         job.progress.details["top_replaced_texts"] = list(summary["top_replaced_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
+        job.progress.details["factory_index_map"] = factory_result.to_progress_dict()
         job.mark_succeeded()
 
     @staticmethod
