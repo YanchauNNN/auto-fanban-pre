@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 class _FakeRunner:
     def __init__(self) -> None:
@@ -23,21 +25,29 @@ class _FakeRunner:
         )
 
 
+def _first_dxf(folder: Path, pattern: str = "*.dxf") -> Path:
+    matches = sorted(folder.glob(pattern))
+    if not matches:
+        pytest.skip(f"factory index map fixture missing: {folder}")
+    return matches[0]
+
+
 def test_bridge_writes_factory_index_map_replace_task(tmp_path: Path) -> None:
     from src.audit_replace.factory_index_bridge import FactoryIndexMapBridge
     from src.audit_replace.factory_index_maps import build_factory_index_replacement_plan
 
     repo_root = Path(__file__).resolve().parents[3]
-    source_dxf = next(
-        (
-            repo_root
-            / "test"
-            / "block_replace_validation"
-            / "20162PR-JGS01-B"
-            / "dxf"
-        ).glob("*.dxf")
+    source_dxf = _first_dxf(
+        repo_root
+        / "test"
+        / "block_replace_validation"
+        / "20162PR-JGS01-B"
+        / "dxf"
     )
-    target_dxf = next((repo_root / "test" / "\u5382\u623f\u7d22\u5f15\u56fe-20260508" / "dxf").glob("2026*.dxf"))
+    target_dxf = _first_dxf(
+        repo_root / "test" / "\u5382\u623f\u7d22\u5f15\u56fe-20260508" / "dxf",
+        "2026*.dxf",
+    )
     plan = build_factory_index_replacement_plan(
         source_project_no="2016",
         target_project_no="2026",
