@@ -257,6 +257,7 @@ class AcCoreConsoleRunner:
             or workflow_stage == "font_preflight"
             or workflow_stage == "font_replace_missing"
             or workflow_stage == "titleblock_consistency_fix"
+            or workflow_stage == "factory_index_map_replace"
             or (
                 workflow_stage in {"plot_window_only", "plot_from_split_dwg"}
                 and plot_engine == "dotnet"
