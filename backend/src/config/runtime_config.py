@@ -226,6 +226,35 @@ class AuditCheckConfig(BaseModel):
     )
 
 
+class FactoryIndexMapsConfig(BaseModel):
+    """翻版厂房索引图模板配置"""
+
+    enabled: bool = True
+    template_dir: Path = Path("documents_bin/factory_index_maps")
+    templates: dict[str, str] = Field(
+        default_factory=lambda: {
+            "1818": "1818项目厂房索引图.dwg",
+            "1907": "1907项目厂房索引图.dwg",
+            "2026": "2026项目厂房索引图.dwg",
+        },
+    )
+    island_templates: dict[str, dict[str, str]] = Field(
+        default_factory=lambda: {
+            "1916": {
+                "3": "1916项目3号岛厂房索引图.dwg",
+                "4": "1916项目4号岛厂房索引图.dwg",
+            },
+            "2016": {
+                "1": "2016项目1号岛厂房索引图.dwg",
+                "2": "2016项目2号岛厂房索引图.dwg",
+            },
+        },
+    )
+    variant_param_names: list[str] = Field(
+        default_factory=lambda: ["factory_index_map_variant", "target_island_no", "island_no"],
+    )
+
+
 class DeliverableConsistencyPaperSizeConfig(BaseModel):
     """交付图签一致性修正 - 图幅配置"""
 
@@ -378,6 +407,7 @@ class RuntimeConfig(BaseSettings):
     autocad: AutoCADConfig = Field(default_factory=AutoCADConfig)
     pdf_engine: PDFEngineConfig = Field(default_factory=PDFEngineConfig)
     audit_check: AuditCheckConfig = Field(default_factory=AuditCheckConfig)
+    factory_index_maps: FactoryIndexMapsConfig = Field(default_factory=FactoryIndexMapsConfig)
     deliverable_consistency_fix: DeliverableConsistencyFixConfig = Field(
         default_factory=DeliverableConsistencyFixConfig,
     )
@@ -421,6 +451,9 @@ class RuntimeConfig(BaseSettings):
             "autocad": AutoCADConfig(**cls._extract(runtime_opts, "autocad")),
             "pdf_engine": PDFEngineConfig(**cls._extract(runtime_opts, "pdf_engine")),
             "audit_check": AuditCheckConfig(**cls._extract(runtime_opts, "audit_check")),
+            "factory_index_maps": FactoryIndexMapsConfig(
+                **cls._extract(runtime_opts, "factory_index_maps"),
+            ),
             "deliverable_consistency_fix": DeliverableConsistencyFixConfig(
                 **cls._extract(runtime_opts, "deliverable_consistency_fix"),
             ),
@@ -562,6 +595,12 @@ class RuntimeConfig(BaseSettings):
             lexicon_path = Path(self.audit_check.lexicon_path)
             if not lexicon_path.is_absolute():
                 self.audit_check.lexicon_path = str((self.base_dir / lexicon_path).resolve())
+        if self.factory_index_maps.template_dir:
+            template_dir = Path(self.factory_index_maps.template_dir)
+            if not template_dir.is_absolute():
+                self.factory_index_maps.template_dir = (
+                    self.base_dir / template_dir
+                ).resolve()
         self.plot_assets.asset_roots = [
             root if root.is_absolute() else (self.base_dir / root).resolve()
             for root in self.plot_assets.asset_roots

@@ -103,6 +103,8 @@ class AuditReplaceExecutor:
             job_id=job.job_id,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
+            source_filename=source_dwg.name,
+            target_variant=self._factory_index_variant(job.params),
             source_dxf=replaced_dxf,
             source_dwg=converted_dwg,
             output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
@@ -149,6 +151,13 @@ class AuditReplaceExecutor:
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
         job.progress.details["factory_index_map"] = factory_result.to_progress_dict()
         job.mark_succeeded()
+
+    def _factory_index_variant(self, params: dict[str, Any]) -> str | None:
+        for name in self.config.factory_index_maps.variant_param_names:
+            value = params.get(name)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        return None
 
     @staticmethod
     def _build_replace_entries(findings: list[Any], mapping: ReplaceMapping) -> list[dict[str, Any]]:

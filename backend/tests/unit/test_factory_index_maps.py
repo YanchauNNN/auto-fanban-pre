@@ -34,6 +34,14 @@ def _template_2026_dxf() -> Path:
     return matches[0]
 
 
+def _template_dxf(pattern: str) -> Path:
+    folder = _repo_root() / "test" / "\u5382\u623f\u7d22\u5f15\u56fe-20260508" / "dxf"
+    matches = sorted(folder.glob(pattern))
+    if not matches:
+        pytest.skip(f"factory index map template fixture missing: {folder}/{pattern}")
+    return matches[0]
+
+
 def test_detector_finds_two_2016_factory_index_maps() -> None:
     from src.audit_replace.factory_index_maps import FactoryIndexMapDetector
 
@@ -61,6 +69,19 @@ def test_template_reader_identifies_2026_anchor_angle_and_compass() -> None:
     assert round(template.compass.radius, 3) == 498.137
     assert round(template.bounds.width, 3) == 6382.629
     assert round(template.bounds.height, 3) == 2627.611
+
+
+def test_template_reader_accepts_1818_compass_without_angle() -> None:
+    from src.audit_replace.factory_index_maps import FactoryIndexMapTemplate
+
+    template = FactoryIndexMapTemplate.from_dxf(_template_dxf("1818*.dxf"), project_no="1818")
+
+    assert template.project_no == "1818"
+    assert template.angle_key is None
+    assert template.angle_text is None
+    assert round(template.compass.radius, 3) == 582.24
+    assert template.bounds.width > 0
+    assert template.bounds.height > 0
 
 
 def test_replacement_plan_maps_each_source_candidate_to_2026_template() -> None:

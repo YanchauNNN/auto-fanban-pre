@@ -233,7 +233,35 @@ runtime_options:
       suppress_project_no_in_dimension_like: { type: bool, default: true, desc: "尺寸语义中抑制项目号命中" }
 
   # --------------------------------------------------------------------------
-  # 5) 交付图签一致性修正
+  # 5) 翻版厂房索引图模板映射
+  # --------------------------------------------------------------------------
+  factory_index_maps:
+    enabled: { type: bool, default: true, desc: "翻版任务中是否启用厂房索引图模板替换；仅在识别到源图索引图块候选时执行" }
+    template_dir: { type: str, default: "documents_bin\\factory_index_maps", desc: "正式厂房索引图模板目录；相对 base_dir 解析" }
+    templates:
+      type: object
+      default:
+        "1818": "1818项目厂房索引图.dwg"
+        "1907": "1907项目厂房索引图.dwg"
+        "2026": "2026项目厂房索引图.dwg"
+      desc: "无需岛号区分的目标项目模板映射：target_project_no -> 模板文件名"
+    island_templates:
+      type: object
+      default:
+        "1916":
+          "3": "1916项目3号岛厂房索引图.dwg"
+          "4": "1916项目4号岛厂房索引图.dwg"
+        "2016":
+          "1": "2016项目1号岛厂房索引图.dwg"
+          "2": "2016项目2号岛厂房索引图.dwg"
+      desc: "需要岛号区分的目标项目模板映射：target_project_no -> 岛号 -> 模板文件名"
+    variant_param_names:
+      type: "list[str]"
+      default: ["factory_index_map_variant", "target_island_no", "island_no"]
+      desc: "后端接受的岛号显式参数名；前端后续接入时任选其一传入 1/2/3/4 或 3号岛/4号岛"
+
+  # --------------------------------------------------------------------------
+  # 6) 交付图签一致性修正
   # --------------------------------------------------------------------------
   deliverable_consistency_fix:
     enabled: { type: bool, default: true, desc: "是否启用图签图幅/比例一致性修正" }

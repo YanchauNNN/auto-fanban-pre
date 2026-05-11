@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,13 @@ class FactoryIndexReplacementResult:
             "report_json": str(self.report_json) if self.report_json else None,
             "message": self.message,
         }
+
+
+@dataclass(frozen=True)
+class FactoryIndexTemplateSelection:
+    project_no: str
+    variant: str | None
+    path: Path
 
 
 class FactoryIndexMapBridge:
@@ -108,20 +116,41 @@ class FactoryIndexMapReplacementService:
         job_id: str,
         source_project_no: str,
         target_project_no: str,
+        source_filename: str = "",
+        target_variant: str | None = None,
         source_dxf: Path,
         source_dwg: Path,
         output_dwg: Path,
         workspace_dir: Path,
         slot_runtime: dict[str, str] | None = None,
     ) -> FactoryIndexReplacementResult:
-        if source_project_no != "2016" or target_project_no != "2026":
+        if not self.config.factory_index_maps.enabled:
             return FactoryIndexReplacementResult(
                 applied=False,
                 output_dwg=source_dwg,
-                message="factory_index_map_pair_not_configured",
+                message="factory_index_map_disabled",
+            )
+        if source_project_no == target_project_no:
+            return FactoryIndexReplacementResult(
+                applied=False,
+                output_dwg=source_dwg,
+                message="factory_index_map_same_project",
             )
 
-        template_dwg = self._template_dwg_for_project(target_project_no)
+        selection = self.select_template(
+            source_project_no=source_project_no,
+            target_project_no=target_project_no,
+            source_filename=source_filename,
+            target_variant=target_variant,
+        )
+        if selection is None:
+            return FactoryIndexReplacementResult(
+                applied=False,
+                output_dwg=source_dwg,
+                message=f"factory_index_map_template_not_configured:{target_project_no}",
+            )
+
+        template_dwg = selection.path
         if not template_dwg.exists():
             return FactoryIndexReplacementResult(
                 applied=False,
@@ -146,7 +175,7 @@ class FactoryIndexMapReplacementService:
                 output_dwg=source_dwg,
                 action_count=0,
                 report_json=report_json,
-                message="factory_index_map_no_candidates",
+            message="factory_index_map_no_candidates",
             )
 
         bridge_payload = self.bridge.apply(
@@ -178,6 +207,72 @@ class FactoryIndexMapReplacementService:
             report_json=report_json,
         )
 
-    def _template_dwg_for_project(self, project_no: str) -> Path:
-        template_name = f"{project_no}\u9879\u76ee\u5382\u623f\u7d22\u5f15\u56fe.dwg"
-        return Path(self.config.base_dir) / "documents_bin" / "factory_index_maps" / template_name
+    def select_template(
+        self,
+        *,
+        source_project_no: str,
+        target_project_no: str,
+        source_filename: str = "",
+        target_variant: str | None = None,
+    ) -> FactoryIndexTemplateSelection | None:
+        config = self.config.factory_index_maps
+        target_project_no = str(target_project_no or "").strip()
+        source_project_no = str(source_project_no or "").strip()
+        if not config.enabled or not target_project_no or source_project_no == target_project_no:
+            return None
+
+        variant_templates = config.island_templates.get(target_project_no)
+        if variant_templates:
+            variant = self._normalize_variant(target_variant) or self._infer_variant(
+                source_filename=source_filename,
+                source_project_no=source_project_no,
+                target_project_no=target_project_no,
+            )
+            if not variant or variant not in variant_templates:
+                return None
+            return FactoryIndexTemplateSelection(
+                project_no=target_project_no,
+                variant=variant,
+                path=self._template_path(variant_templates[variant]),
+            )
+
+        template_name = config.templates.get(target_project_no)
+        if not template_name:
+            return None
+        return FactoryIndexTemplateSelection(
+            project_no=target_project_no,
+            variant=None,
+            path=self._template_path(template_name),
+        )
+
+    def _template_path(self, template_name: str) -> Path:
+        template_dir = Path(self.config.factory_index_maps.template_dir)
+        if not template_dir.is_absolute():
+            template_dir = Path(self.config.base_dir) / template_dir
+        return template_dir / template_name
+
+    @staticmethod
+    def _normalize_variant(value: str | None) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        match = re.search(r"[1-9]", text)
+        return match.group(0) if match else None
+
+    @classmethod
+    def _infer_variant(
+        cls,
+        *,
+        source_filename: str,
+        source_project_no: str,
+        target_project_no: str,
+    ) -> str | None:
+        text = str(source_filename or "")
+        for project_no in (target_project_no, source_project_no):
+            if not project_no:
+                continue
+            match = re.search(rf"(?<!\d){re.escape(project_no)}([1-9])", text)
+            if match:
+                return match.group(1)
+        match = re.search(r"(?<!\d)\d{4}([1-9])", text)
+        return match.group(1) if match else None

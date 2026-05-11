@@ -123,24 +123,23 @@ class FactoryIndexCandidate:
 class FactoryIndexMapTemplate:
     project_no: str
     template_dxf: Path
-    angle_text: str
-    angle_key: str
+    angle_text: str | None
+    angle_key: str | None
     compass: CircleFeature
     bounds: BBox2D
 
     @classmethod
     def from_dxf(cls, template_dxf: Path, *, project_no: str) -> FactoryIndexMapTemplate:
         doc = ezdxf.readfile(str(template_dxf))
-        candidates = FactoryIndexMapDetector().detect(template_dxf)
-        if not candidates:
+        anchor = _template_anchor_from_dxf(template_dxf)
+        if anchor is None:
             raise ValueError(f"factory index map template has no anchor: {template_dxf}")
-        candidate = candidates[0]
         return cls(
             project_no=project_no,
             template_dxf=Path(template_dxf),
-            angle_text=candidate.angle_text,
-            angle_key=candidate.angle_key,
-            compass=candidate.compass,
+            angle_text=anchor.angle_text,
+            angle_key=anchor.angle_key,
+            compass=anchor.compass,
             bounds=_modelspace_bounds(doc),
         )
 
@@ -250,6 +249,10 @@ class FactoryIndexReplacementPlan:
 
 class FactoryIndexMapDetector:
     def detect(self, dxf_path: Path) -> list[FactoryIndexCandidate]:
+        texts, circles = self.collect_features(dxf_path)
+        return _build_candidates(texts, circles)
+
+    def collect_features(self, dxf_path: Path) -> tuple[list[TextFeature], list[CircleFeature]]:
         doc = ezdxf.readfile(str(dxf_path))
         texts: list[TextFeature] = []
         circles: list[CircleFeature] = []
@@ -268,7 +271,7 @@ class FactoryIndexMapDetector:
                     source="entity",
                     depth=0,
                 )
-        return _build_candidates(texts, circles)
+        return texts, circles
 
     def _collect_entity(
         self,
@@ -460,6 +463,63 @@ def _replacement_ready_candidates(
         key=lambda item: (item.score, item.compass.center.y, item.compass.center.x),
         reverse=True,
     )
+
+
+@dataclass(frozen=True)
+class _TemplateAnchor:
+    angle_text: str | None
+    angle_key: str | None
+    compass: CircleFeature
+
+
+def _template_anchor_from_dxf(template_dxf: Path) -> _TemplateAnchor | None:
+    detector = FactoryIndexMapDetector()
+    candidates = detector.detect(template_dxf)
+    if candidates:
+        candidate = candidates[0]
+        return _TemplateAnchor(
+            angle_text=candidate.angle_text,
+            angle_key=candidate.angle_key,
+            compass=candidate.compass,
+        )
+
+    texts, circles = detector.collect_features(template_dxf)
+    compass = _best_compass_from_direction_labels(texts, circles)
+    if compass is None:
+        return None
+    return _TemplateAnchor(angle_text=None, angle_key=None, compass=compass)
+
+
+def _best_compass_from_direction_labels(
+    texts: list[TextFeature],
+    circles: list[CircleFeature],
+) -> CircleFeature | None:
+    direction_points = [
+        text
+        for text in texts
+        if text.point is not None and normalize_text(text.text).upper() in {"A", "B", "N"}
+    ]
+    if not direction_points:
+        return None
+
+    best: tuple[float, CircleFeature] | None = None
+    for circle in circles:
+        if circle.radius <= 0:
+            continue
+        nearby = 0
+        distance_sum = 0.0
+        for text in direction_points:
+            assert text.point is not None
+            distance = math.hypot(circle.center.x - text.point.x, circle.center.y - text.point.y)
+            if distance <= max(circle.radius * 4.0, 500.0):
+                nearby += 1
+                distance_sum += distance / circle.radius
+        if nearby < 2:
+            continue
+        score = nearby * 10.0 - distance_sum
+        if best is None or score > best[0]:
+            best = (score, circle)
+    return best[1] if best else None
 
 
 def normalize_text(value: str) -> str:
