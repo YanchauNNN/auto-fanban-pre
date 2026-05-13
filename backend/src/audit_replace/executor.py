@@ -121,7 +121,8 @@ class AuditReplaceExecutor:
             source_project_no=source_project_no,
             target_project_no=target_project_no,
             source_filename=source_dwg.name,
-            target_variant=self._factory_index_variant(job.params),
+            source_variant=self._factory_index_source_variant(job.params),
+            target_variant=self._factory_index_target_variant(job.params),
             source_dxf=replaced_dxf,
             source_dwg=converted_dwg,
             output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
@@ -173,11 +174,28 @@ class AuditReplaceExecutor:
         job.progress.details["factory_index_map"] = factory_result.to_progress_dict()
         job.mark_succeeded()
 
-    def _factory_index_variant(self, params: dict[str, Any]) -> str | None:
-        for name in self.config.factory_index_maps.variant_param_names:
+    def _factory_index_source_variant(self, params: dict[str, Any]) -> str | None:
+        return self._factory_index_variant_from_params(
+            params,
+            self.config.factory_index_maps.source_variant_param_names,
+        )
+
+    def _factory_index_target_variant(self, params: dict[str, Any]) -> str | None:
+        names = list(self.config.factory_index_maps.target_variant_param_names)
+        for legacy_name in self.config.factory_index_maps.variant_param_names:
+            if legacy_name not in names:
+                names.append(legacy_name)
+        return self._factory_index_variant_from_params(params, names)
+
+    @staticmethod
+    def _factory_index_variant_from_params(
+        params: dict[str, Any],
+        names: list[str],
+    ) -> str | None:
+        for name in names:
             value = params.get(name)
             if value is not None and str(value).strip():
-                return str(value).strip()
+                return FactoryIndexMapReplacementService._normalize_variant(str(value))
         return None
 
     @staticmethod

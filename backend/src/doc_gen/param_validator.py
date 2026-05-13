@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from typing import Any
 
-from ..config import load_spec
+from ..config import get_config, load_spec
 from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
 from .upgrade_marking import UpgradeSheetCodeParseError, parse_upgrade_sheet_codes
 
@@ -79,6 +79,12 @@ class DocParamValidator:
             errors.setdefault("target_project_no", []).append("required_for_replace")
         elif source_project_no and source_project_no == target_project_no:
             errors.setdefault("target_project_no", []).append("must_differ_from_source_project_no")
+        self._validate_factory_index_variants(
+            raw_params,
+            errors,
+            source_project_no=source_project_no,
+            target_project_no=target_project_no,
+        )
 
         if not run_deliverable:
             return errors
@@ -92,6 +98,50 @@ class DocParamValidator:
         if nested_errors:
             errors.setdefault("deliverable_params", []).append("invalid_deliverable_params")
         return errors
+
+    def _validate_factory_index_variants(
+        self,
+        raw_params: dict[str, Any],
+        errors: dict[str, list[str]],
+        *,
+        source_project_no: str,
+        target_project_no: str,
+    ) -> None:
+        factory_config = get_config().factory_index_maps
+        source_rules = factory_config.source_variant_rules.get(source_project_no)
+        if source_rules:
+            source_variant = self._first_normalized_variant(
+                raw_params,
+                factory_config.source_variant_param_names,
+            )
+            if not source_variant:
+                errors.setdefault("source_island_no", []).append("required_for_source_project")
+            elif source_variant not in source_rules:
+                errors.setdefault("source_island_no", []).append("unsupported_source_island_no")
+
+        target_templates = factory_config.island_templates.get(target_project_no)
+        if target_templates:
+            target_names = list(factory_config.target_variant_param_names)
+            for legacy_name in factory_config.variant_param_names:
+                if legacy_name not in target_names:
+                    target_names.append(legacy_name)
+            target_variant = self._first_normalized_variant(raw_params, target_names)
+            if not target_variant:
+                errors.setdefault("target_island_no", []).append("required_for_target_project")
+            elif target_variant not in target_templates:
+                errors.setdefault("target_island_no", []).append("unsupported_target_island_no")
+
+    @staticmethod
+    def _first_normalized_variant(raw_params: dict[str, Any], names: list[str]) -> str | None:
+        for name in names:
+            value = raw_params.get(name)
+            text = str(value or "").strip()
+            if not text:
+                continue
+            match = re.search(r"[1-9]", text)
+            if match:
+                return match.group(0)
+        return None
 
     def _flatten_param_rules(self, source: str | None = None) -> dict[str, dict[str, Any]]:
         params_cfg = self.spec.doc_generation.get("params", {})

@@ -250,8 +250,30 @@ class FactoryIndexMapsConfig(BaseModel):
             },
         },
     )
+    source_variant_param_names: list[str] = Field(
+        default_factory=lambda: [
+            "source_factory_index_map_variant",
+            "source_island_no",
+            "source_unit_no",
+        ],
+    )
+    target_variant_param_names: list[str] = Field(
+        default_factory=lambda: ["factory_index_map_variant", "target_island_no", "island_no"],
+    )
     variant_param_names: list[str] = Field(
         default_factory=lambda: ["factory_index_map_variant", "target_island_no", "island_no"],
+    )
+    source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] = Field(
+        default_factory=lambda: {
+            "2016": {
+                "1": {"required_texts": ["QF"]},
+                "2": {"forbidden_texts": ["QF"]},
+            },
+            "1916": {
+                "3": {"required_texts": ["KP"]},
+                "4": {"forbidden_texts": ["KP"]},
+            },
+        },
     )
 
 

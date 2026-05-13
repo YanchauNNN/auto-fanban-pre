@@ -190,6 +190,12 @@ class FakeJobProcessor:
                 job.artifacts.report_json = report_json
                 job.artifacts.replaced_dwg = replaced_dwg
                 job.progress.details["replacement_count"] = 2
+                job.progress.details["factory_index_map"] = {
+                    "applied": True,
+                    "action_count": 1,
+                    "report_json": str(reports_dir / "factory-index-map.json"),
+                    "message": "",
+                }
                 job.mark_succeeded()
                 return
 
@@ -1113,7 +1119,9 @@ def test_create_audit_replace_processes_job_without_deliverable(
                 "params_json": json.dumps(
                     {
                         "source_project_no": "2016",
-                        "target_project_no": "1818",
+                        "source_island_no": "1",
+                        "target_project_no": "1916",
+                        "target_island_no": "3",
                         "run_deliverable": False,
                     },
                     ensure_ascii=False,
@@ -1137,7 +1145,10 @@ def test_create_audit_replace_processes_job_without_deliverable(
         assert detail["artifacts"]["replaced_dwg_download_url"] == f"/api/jobs/{job_id}/download/replaced"
         assert detail["replace_summary"]["replacement_count"] == 2
         assert detail["replace_summary"]["source_project_no"] == "2016"
-        assert detail["replace_summary"]["target_project_no"] == "1818"
+        assert detail["replace_summary"]["target_project_no"] == "1916"
+        assert detail["replace_summary"]["target_island_no"] == "3"
+        assert detail["factory_index_map"]["applied"] is True
+        assert detail["factory_index_map"]["action_count"] == 1
 
         replaced_download = client.get(f"/api/jobs/{job_id}/download/replaced")
         assert replaced_download.status_code == 200
@@ -1158,6 +1169,7 @@ def test_create_audit_replace_creates_group_when_run_deliverable_enabled(
                 "params_json": json.dumps(
                     {
                         "source_project_no": "2016",
+                        "source_island_no": "1",
                         "target_project_no": "1818",
                         "run_deliverable": True,
                         "deliverable_params": params,
@@ -1245,6 +1257,7 @@ def test_create_audit_replace_with_deliverable_runs_replace_before_deliverable(
                 "params_json": json.dumps(
                     {
                         "source_project_no": "2016",
+                        "source_island_no": "1",
                         "target_project_no": "1818",
                         "run_deliverable": True,
                         "deliverable_params": params,

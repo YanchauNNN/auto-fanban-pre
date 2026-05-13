@@ -117,6 +117,7 @@ class FactoryIndexMapReplacementService:
         source_project_no: str,
         target_project_no: str,
         source_filename: str = "",
+        source_variant: str | None = None,
         target_variant: str | None = None,
         source_dxf: Path,
         source_dwg: Path,
@@ -136,11 +137,22 @@ class FactoryIndexMapReplacementService:
                 output_dwg=source_dwg,
                 message="factory_index_map_same_project",
             )
+        normalized_source_variant = self._normalize_variant(source_variant)
+        source_variant_rules = self.config.factory_index_maps.source_variant_rules.get(
+            str(source_project_no or "").strip(),
+        )
+        if source_variant_rules and not normalized_source_variant:
+            return FactoryIndexReplacementResult(
+                applied=False,
+                output_dwg=source_dwg,
+                message=f"factory_index_map_source_variant_required:{source_project_no}",
+            )
 
         selection = self.select_template(
             source_project_no=source_project_no,
             target_project_no=target_project_no,
             source_filename=source_filename,
+            source_variant=normalized_source_variant,
             target_variant=target_variant,
         )
         if selection is None:
@@ -163,9 +175,11 @@ class FactoryIndexMapReplacementService:
         plan = build_factory_index_replacement_plan(
             source_project_no=source_project_no,
             target_project_no=target_project_no,
+            source_variant=normalized_source_variant,
             source_dxf=source_dxf,
             target_template_dxf=template_dxf,
             target_template_dwg=template_dwg,
+            source_variant_rules=self.config.factory_index_maps.source_variant_rules,
         )
         report_json = workspace_dir / "factory_index_map_plan.json"
         if not plan.actions:
@@ -213,6 +227,7 @@ class FactoryIndexMapReplacementService:
         source_project_no: str,
         target_project_no: str,
         source_filename: str = "",
+        source_variant: str | None = None,
         target_variant: str | None = None,
     ) -> FactoryIndexTemplateSelection | None:
         config = self.config.factory_index_maps

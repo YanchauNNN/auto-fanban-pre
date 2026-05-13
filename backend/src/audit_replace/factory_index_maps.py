@@ -93,6 +93,7 @@ class FactoryIndexCandidate:
     source_insert_handle: str | None
     source_insert_point: Point2D | None
     source_bounds: BBox2D | None
+    source_texts: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -116,6 +117,7 @@ class FactoryIndexCandidate:
                 self.source_insert_point.to_dict() if self.source_insert_point else None
             ),
             "source_bounds": self.source_bounds.to_dict() if self.source_bounds else None,
+            "source_texts": list(self.source_texts),
         }
 
 
@@ -222,6 +224,7 @@ class FactoryIndexReplacementPlan:
     enabled: bool
     source_project_no: str
     target_project_no: str
+    source_variant: str | None
     target_template_dwg: Path
     target_template: FactoryIndexMapTemplate
     actions: list[FactoryIndexReplacementAction]
@@ -231,6 +234,7 @@ class FactoryIndexReplacementPlan:
             "enabled": self.enabled,
             "source_project_no": self.source_project_no,
             "target_project_no": self.target_project_no,
+            "source_variant": self.source_variant,
             "target_template_dwg": str(self.target_template_dwg),
             "target_template": self.target_template.to_dict(),
             "actions": [action.to_dict() for action in self.actions],
@@ -241,6 +245,7 @@ class FactoryIndexReplacementPlan:
             "enabled": self.enabled,
             "source_project_no": self.source_project_no,
             "target_project_no": self.target_project_no,
+            "source_variant": self.source_variant,
             "target_template_dwg": str(self.target_template_dwg),
             "target_template": self.target_template.to_dict(),
             "actions": [action.to_dict() for action in self.actions],
@@ -404,12 +409,19 @@ def build_factory_index_replacement_plan(
     *,
     source_project_no: str,
     target_project_no: str,
+    source_variant: str | None = None,
     source_dxf: Path,
     target_template_dxf: Path,
     target_template_dwg: Path,
+    source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] | None = None,
 ) -> FactoryIndexReplacementPlan:
     source_candidates = FactoryIndexMapDetector().detect(source_dxf)
-    source_candidates = _replacement_ready_candidates(source_candidates)
+    source_candidates = _replacement_ready_candidates(
+        source_candidates,
+        source_project_no=source_project_no,
+        source_variant=source_variant,
+        source_variant_rules=source_variant_rules,
+    )
     target_template = FactoryIndexMapTemplate.from_dxf(
         target_template_dxf,
         project_no=target_project_no,
@@ -436,6 +448,7 @@ def build_factory_index_replacement_plan(
         enabled=bool(actions),
         source_project_no=source_project_no,
         target_project_no=target_project_no,
+        source_variant=source_variant,
         target_template_dwg=Path(target_template_dwg),
         target_template=target_template,
         actions=actions,
@@ -444,6 +457,10 @@ def build_factory_index_replacement_plan(
 
 def _replacement_ready_candidates(
     candidates: list[FactoryIndexCandidate],
+    *,
+    source_project_no: str = "",
+    source_variant: str | None = None,
+    source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] | None = None,
 ) -> list[FactoryIndexCandidate]:
     ready: dict[str, FactoryIndexCandidate] = {}
     for candidate in candidates:
@@ -455,6 +472,13 @@ def _replacement_ready_candidates(
             or candidate.source_bounds.height <= 0
         ):
             continue
+        if not _candidate_matches_source_variant(
+            candidate,
+            source_project_no=source_project_no,
+            source_variant=source_variant,
+            source_variant_rules=source_variant_rules,
+        ):
+            continue
         existing = ready.get(candidate.source_insert_handle)
         if existing is None or candidate.score > existing.score:
             ready[candidate.source_insert_handle] = candidate
@@ -463,6 +487,30 @@ def _replacement_ready_candidates(
         key=lambda item: (item.score, item.compass.center.y, item.compass.center.x),
         reverse=True,
     )
+
+
+def _candidate_matches_source_variant(
+    candidate: FactoryIndexCandidate,
+    *,
+    source_project_no: str,
+    source_variant: str | None,
+    source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] | None,
+) -> bool:
+    variant = _normalize_variant_token(source_variant)
+    if not variant:
+        return True
+
+    project_rules = (source_variant_rules or {}).get(str(source_project_no or "").strip())
+    if not project_rules:
+        return True
+    rule = project_rules.get(variant)
+    if not rule:
+        return True
+
+    source_texts = {normalize_text(text).upper() for text in candidate.source_texts}
+    required = {normalize_text(text).upper() for text in rule.get("required_texts", [])}
+    forbidden = {normalize_text(text).upper() for text in rule.get("forbidden_texts", [])}
+    return required.issubset(source_texts) and source_texts.isdisjoint(forbidden)
 
 
 @dataclass(frozen=True)
@@ -721,6 +769,10 @@ def _build_candidates(
     circles_by_layout: dict[str, list[CircleFeature]] = {}
     for circle in circles:
         circles_by_layout.setdefault(circle.layout, []).append(circle)
+    texts_by_insert_handle: dict[str, set[str]] = {}
+    for text in texts:
+        if text.source_insert_handle:
+            texts_by_insert_handle.setdefault(text.source_insert_handle, set()).add(text.text)
 
     candidates: list[FactoryIndexCandidate] = []
     for text in texts:
@@ -747,6 +799,7 @@ def _build_candidates(
                 source_insert_handle=text.source_insert_handle,
                 source_insert_point=text.source_insert_point,
                 source_bounds=text.source_insert_bounds,
+                source_texts=tuple(sorted(texts_by_insert_handle.get(text.source_insert_handle or "", set()))),
             )
         )
     candidates.sort(key=lambda item: (item.score, item.compass.center.y, item.compass.center.x), reverse=True)
@@ -764,3 +817,11 @@ def _nearest_circle(text: TextFeature, circles: list[CircleFeature]) -> CircleFe
         if best is None or distance < best[0]:
             best = (distance, circle)
     return best[1] if best else None
+
+
+def _normalize_variant_token(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = re.search(r"[1-9]", text)
+    return match.group(0) if match else None

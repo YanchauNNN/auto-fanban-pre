@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import DocContext, GlobalDocParams
+
+
+def _validator() -> DocParamValidator:
+    return DocParamValidator(str(Path(__file__).resolve().parents[3] / "documents" / "参数规范.yaml"))
 
 
 def _base_ctx() -> DocContext:
@@ -41,7 +47,7 @@ def _base_frontend_params() -> dict[str, str]:
 
 
 def test_required_when_fields_are_checked() -> None:
-    validator = DocParamValidator()
+    validator = _validator()
     ctx = _base_ctx()
 
     errors = validator.validate(ctx)
@@ -52,7 +58,7 @@ def test_required_when_fields_are_checked() -> None:
 
 
 def test_format_validation_for_name_id_and_date() -> None:
-    validator = DocParamValidator()
+    validator = _validator()
     ctx = _base_ctx()
 
     ctx.params.ied_prepared_by = "张三A001"
@@ -72,7 +78,7 @@ def test_format_validation_for_name_id_and_date() -> None:
 
 
 def test_validate_frontend_params_accepts_upgrade_sheet_codes() -> None:
-    validator = DocParamValidator()
+    validator = _validator()
     payload = _base_frontend_params()
     payload["is_upgrade"] = "true"
     payload["upgrade_sheet_codes"] = "001、3,5-9"
@@ -83,7 +89,7 @@ def test_validate_frontend_params_accepts_upgrade_sheet_codes() -> None:
 
 
 def test_validate_frontend_params_rejects_invalid_upgrade_sheet_codes() -> None:
-    validator = DocParamValidator()
+    validator = _validator()
     payload = _base_frontend_params()
     payload["is_upgrade"] = "true"
     payload["upgrade_sheet_codes"] = "001~000,abc"
@@ -94,16 +100,18 @@ def test_validate_frontend_params_rejects_invalid_upgrade_sheet_codes() -> None:
 
 
 def test_validate_frontend_params_replace_deliverable_params_only_when_requested() -> None:
-    validator = DocParamValidator()
+    validator = _validator()
 
     without_deliverable = {
         "source_project_no": "2016",
+        "source_island_no": "1",
         "target_project_no": "1818",
         "run_deliverable": "false",
         "deliverable_params": {"album_title_cn": ""},
     }
     with_deliverable = {
         "source_project_no": "2016",
+        "source_island_no": "1",
         "target_project_no": "1818",
         "run_deliverable": "true",
         "deliverable_params": {"album_title_cn": ""},
@@ -113,3 +121,34 @@ def test_validate_frontend_params_replace_deliverable_params_only_when_requested
     assert validator.validate_replace_frontend_params(with_deliverable)["deliverable_params"] == [
         "invalid_deliverable_params"
     ]
+
+
+def test_validate_replace_frontend_params_requires_source_and_target_islands() -> None:
+    validator = _validator()
+
+    errors = validator.validate_replace_frontend_params(
+        {
+            "source_project_no": "2016",
+            "target_project_no": "1916",
+            "run_deliverable": "false",
+        }
+    )
+
+    assert errors["source_island_no"] == ["required_for_source_project"]
+    assert errors["target_island_no"] == ["required_for_target_project"]
+
+
+def test_validate_replace_frontend_params_accepts_source_and_target_islands() -> None:
+    validator = _validator()
+
+    errors = validator.validate_replace_frontend_params(
+        {
+            "source_project_no": "2016",
+            "source_island_no": "1号机组",
+            "target_project_no": "1916",
+            "target_island_no": "4号岛",
+            "run_deliverable": "false",
+        }
+    )
+
+    assert errors == {}

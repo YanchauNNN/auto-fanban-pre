@@ -177,6 +177,202 @@ def test_replacement_plan_skips_non_block_candidates(monkeypatch: pytest.MonkeyP
     assert plan.actions == []
 
 
+def test_replacement_plan_filters_2016_source_variant_by_qf_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.audit_replace import factory_index_maps as maps
+
+    with_qf = maps.FactoryIndexCandidate(
+        layout="Model",
+        angle_text='40°44\'40"',
+        angle_key="040-44-40",
+        angle_position=maps.Point2D(10.0, 10.0),
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="C1",
+            center=maps.Point2D(0.0, 0.0),
+            radius=354.442,
+        ),
+        score=10.0,
+        source_block_name="factory-index-1",
+        source_insert_handle="I1",
+        source_insert_point=maps.Point2D(0.0, 0.0),
+        source_bounds=maps.BBox2D(0.0, 0.0, 100.0, 50.0),
+        source_texts=("RX", "QF"),
+    )
+    without_qf = maps.FactoryIndexCandidate(
+        layout="Model",
+        angle_text='40°44\'40"',
+        angle_key="040-44-40",
+        angle_position=maps.Point2D(110.0, 10.0),
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="C2",
+            center=maps.Point2D(100.0, 0.0),
+            radius=354.442,
+        ),
+        score=10.0,
+        source_block_name="factory-index-2",
+        source_insert_handle="I2",
+        source_insert_point=maps.Point2D(100.0, 0.0),
+        source_bounds=maps.BBox2D(100.0, 0.0, 200.0, 50.0),
+        source_texts=("RX", "DU"),
+    )
+    template = maps.FactoryIndexMapTemplate(
+        project_no="2026",
+        template_dxf=Path("template.dxf"),
+        angle_text='24°4\'17.09"',
+        angle_key="024-04-17.09",
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="TC1",
+            center=maps.Point2D(0.0, 0.0),
+            radius=498.137,
+        ),
+        bounds=maps.BBox2D(0.0, 0.0, 100.0, 50.0),
+    )
+
+    monkeypatch.setattr(
+        maps.FactoryIndexMapDetector,
+        "detect",
+        lambda self, dxf_path: [with_qf, without_qf],
+    )
+    monkeypatch.setattr(
+        maps.FactoryIndexMapTemplate,
+        "from_dxf",
+        classmethod(lambda cls, template_dxf, *, project_no: template),
+    )
+
+    variant_rules = {
+        "2016": {
+            "1": {"required_texts": ["QF"]},
+            "2": {"forbidden_texts": ["QF"]},
+        },
+    }
+    one_plan = maps.build_factory_index_replacement_plan(
+        source_project_no="2016",
+        target_project_no="2026",
+        source_variant="1",
+        source_variant_rules=variant_rules,
+        source_dxf=Path("source.dxf"),
+        target_template_dxf=Path("template.dxf"),
+        target_template_dwg=Path("template.dwg"),
+    )
+    two_plan = maps.build_factory_index_replacement_plan(
+        source_project_no="2016",
+        target_project_no="2026",
+        source_variant="2",
+        source_variant_rules=variant_rules,
+        source_dxf=Path("source.dxf"),
+        target_template_dxf=Path("template.dxf"),
+        target_template_dwg=Path("template.dwg"),
+    )
+
+    assert [action.source_insert_handle for action in one_plan.actions] == ["I1"]
+    assert [action.source_insert_handle for action in two_plan.actions] == ["I2"]
+
+
+def test_replacement_plan_filters_1916_source_variant_by_kp_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.audit_replace import factory_index_maps as maps
+
+    with_kp = maps.FactoryIndexCandidate(
+        layout="Model",
+        angle_text='40°44\'40"',
+        angle_key="040-44-40",
+        angle_position=maps.Point2D(10.0, 10.0),
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="C1",
+            center=maps.Point2D(0.0, 0.0),
+            radius=354.442,
+        ),
+        score=10.0,
+        source_block_name="factory-index-3",
+        source_insert_handle="I3",
+        source_insert_point=maps.Point2D(0.0, 0.0),
+        source_bounds=maps.BBox2D(0.0, 0.0, 100.0, 50.0),
+        source_texts=("RX", "KP"),
+    )
+    without_kp = maps.FactoryIndexCandidate(
+        layout="Model",
+        angle_text='40°44\'40"',
+        angle_key="040-44-40",
+        angle_position=maps.Point2D(110.0, 10.0),
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="C2",
+            center=maps.Point2D(100.0, 0.0),
+            radius=354.442,
+        ),
+        score=10.0,
+        source_block_name="factory-index-4",
+        source_insert_handle="I4",
+        source_insert_point=maps.Point2D(100.0, 0.0),
+        source_bounds=maps.BBox2D(100.0, 0.0, 200.0, 50.0),
+        source_texts=("RX", "DU"),
+    )
+    template = maps.FactoryIndexMapTemplate(
+        project_no="2026",
+        template_dxf=Path("template.dxf"),
+        angle_text='24°4\'17.09"',
+        angle_key="024-04-17.09",
+        compass=maps.CircleFeature(
+            layout="Model",
+            space="modelspace",
+            handle="TC1",
+            center=maps.Point2D(0.0, 0.0),
+            radius=498.137,
+        ),
+        bounds=maps.BBox2D(0.0, 0.0, 100.0, 50.0),
+    )
+
+    monkeypatch.setattr(
+        maps.FactoryIndexMapDetector,
+        "detect",
+        lambda self, dxf_path: [with_kp, without_kp],
+    )
+    monkeypatch.setattr(
+        maps.FactoryIndexMapTemplate,
+        "from_dxf",
+        classmethod(lambda cls, template_dxf, *, project_no: template),
+    )
+
+    variant_rules = {
+        "1916": {
+            "3": {"required_texts": ["KP"]},
+            "4": {"forbidden_texts": ["KP"]},
+        },
+    }
+    three_plan = maps.build_factory_index_replacement_plan(
+        source_project_no="1916",
+        target_project_no="2026",
+        source_variant="3",
+        source_variant_rules=variant_rules,
+        source_dxf=Path("source.dxf"),
+        target_template_dxf=Path("template.dxf"),
+        target_template_dwg=Path("template.dwg"),
+    )
+    four_plan = maps.build_factory_index_replacement_plan(
+        source_project_no="1916",
+        target_project_no="2026",
+        source_variant="4",
+        source_variant_rules=variant_rules,
+        source_dxf=Path("source.dxf"),
+        target_template_dxf=Path("template.dxf"),
+        target_template_dwg=Path("template.dwg"),
+    )
+
+    assert [action.source_insert_handle for action in three_plan.actions] == ["I3"]
+    assert [action.source_insert_handle for action in four_plan.actions] == ["I4"]
+
+
 def test_angle_parser_normalizes_autocad_mtext_control_codes() -> None:
     from src.audit_replace.factory_index_maps import angle_key, canonical_angle_text
 

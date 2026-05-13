@@ -1376,6 +1376,14 @@ submission_contracts:
               default: false
               desc: "true 时翻版完成后继续走交付主链，并返回 TaskGroup 摘要"
           optional_fields:
+            source_island_no:
+              type: str
+              required_when: "source_project_no in ['2016','1916']"
+              desc: "来源厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于区分同角度源索引图块"
+            target_island_no:
+              type: str
+              required_when: "target_project_no in ['2016','1916']"
+              desc: "目标厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于选择目标模板"
             deliverable_params:
               type: object
               required_when: "run_deliverable == true"

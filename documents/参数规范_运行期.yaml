@@ -255,10 +255,32 @@ runtime_options:
           "1": "2016项目1号岛厂房索引图.dwg"
           "2": "2016项目2号岛厂房索引图.dwg"
       desc: "需要岛号区分的目标项目模板映射：target_project_no -> 岛号 -> 模板文件名"
+    source_variant_param_names:
+      type: "list[str]"
+      default: ["source_factory_index_map_variant", "source_island_no", "source_unit_no"]
+      desc: "来源厂房索引图机组/岛号显式参数名；前端后续接入时传入 1/2/3/4 或 1号机组/3号岛"
+    target_variant_param_names:
+      type: "list[str]"
+      default: ["factory_index_map_variant", "target_island_no", "island_no"]
+      desc: "目标厂房索引图机组/岛号显式参数名；factory_index_map_variant/island_no 为旧字段兼容"
     variant_param_names:
       type: "list[str]"
       default: ["factory_index_map_variant", "target_island_no", "island_no"]
-      desc: "后端接受的岛号显式参数名；前端后续接入时任选其一传入 1/2/3/4 或 3号岛/4号岛"
+      desc: "旧版目标岛号参数名兼容；新接入应优先使用 target_island_no"
+    source_variant_rules:
+      type: object
+      default:
+        "2016":
+          "1":
+            required_texts: ["QF"]
+          "2":
+            forbidden_texts: ["QF"]
+        "1916":
+          "3":
+            required_texts: ["KP"]
+          "4":
+            forbidden_texts: ["KP"]
+      desc: "来源项目索引图同角度时的块内文字区分规则：2016-1含QF、2016-2不含QF；1916-3含KP、1916-4不含KP"
 
   # --------------------------------------------------------------------------
   # 6) 交付图签一致性修正
