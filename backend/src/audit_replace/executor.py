@@ -22,6 +22,23 @@ from .mapping import ReplaceMapping, ReplaceMappingBuilder
 from .reporting import write_replace_report_json, write_replace_report_xlsx
 
 
+def derive_replaced_dwg_filename(
+    *,
+    source_name: str,
+    source_project_no: str,
+    target_project_no: str,
+) -> str:
+    path = Path(str(source_name or "").strip() or "replaced.dwg")
+    suffix = path.suffix or ".dwg"
+    stem = path.stem or "replaced"
+    source_project_no = str(source_project_no or "").strip()
+    target_project_no = str(target_project_no or "").strip()
+
+    if source_project_no and source_project_no in stem:
+        return f"{stem.replace(source_project_no, target_project_no, 1)}{suffix}"
+    return f"{stem}——{target_project_no}{suffix}"
+
+
 class AuditReplaceExecutor:
     def __init__(self) -> None:
         self.config = get_config()
@@ -112,7 +129,11 @@ class AuditReplaceExecutor:
             slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
         )
         final_dwg = factory_result.output_dwg if factory_result.applied else converted_dwg
-        replaced_dwg = job.work_dir / "replaced.dwg"
+        replaced_dwg = job.work_dir / derive_replaced_dwg_filename(
+            source_name=source_dwg.name,
+            source_project_no=source_project_no,
+            target_project_no=target_project_no,
+        )
         replaced_dwg.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(final_dwg, replaced_dwg)
 

@@ -8,7 +8,7 @@ import ezdxf
 from openpyxl import load_workbook
 
 from src.audit_check.models import AuditLexicon, ScanTextItem
-from src.audit_replace.executor import AuditReplaceExecutor
+from src.audit_replace.executor import AuditReplaceExecutor, derive_replaced_dwg_filename
 from src.audit_replace.mapping import ReplaceMapping
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
@@ -137,6 +137,7 @@ def test_audit_replace_executor_writes_replaced_dwg_reports_and_preserves_source
     assert job.status == JobStatus.SUCCEEDED
     assert source_dwg.read_bytes() == b"original-dwg"
     assert job.artifacts.replaced_dwg and job.artifacts.replaced_dwg.exists()
+    assert job.artifacts.replaced_dwg.name == "20161NH-JGS51-B.dwg"
     assert job.artifacts.replaced_dwg.read_text(encoding="utf-8")  # copied DXF payload
     assert job.artifacts.report_json and job.artifacts.report_json.exists()
     assert job.artifacts.report_xlsx and job.artifacts.report_xlsx.exists()
@@ -169,3 +170,25 @@ def test_replace_token_ignores_spaces_in_source_project_name() -> None:
     )
 
     assert updated == "3.根据江苏徐圩核能供热发电厂一期工程2016-J01ZHC04《厂址设计参数》"
+
+
+def test_derive_replaced_dwg_filename_replaces_source_project_no() -> None:
+    assert (
+        derive_replaced_dwg_filename(
+            source_name="20162KA-JGS03-A.dwg",
+            source_project_no="2016",
+            target_project_no="2026",
+        )
+        == "20262KA-JGS03-A.dwg"
+    )
+
+
+def test_derive_replaced_dwg_filename_appends_target_project_when_source_project_absent() -> None:
+    assert (
+        derive_replaced_dwg_filename(
+            source_name="厂房索引图.dwg",
+            source_project_no="2016",
+            target_project_no="2026",
+        )
+        == "厂房索引图——2026.dwg"
+    )
