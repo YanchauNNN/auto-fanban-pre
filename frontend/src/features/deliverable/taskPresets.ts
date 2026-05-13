@@ -145,5 +145,11 @@ function normalizeStoredPreset(preset: TaskConfigPreset): TaskConfigPreset {
   return {
     ...preset,
     runAuditCheck: preset.runAuditCheck ?? false,
+    replaceConfig: {
+      sourceProjectNo: preset.replaceConfig?.sourceProjectNo ?? "",
+      sourceIslandNo: preset.replaceConfig?.sourceIslandNo ?? "",
+      targetProjectNo: preset.replaceConfig?.targetProjectNo ?? "",
+      targetIslandNo: preset.replaceConfig?.targetIslandNo ?? "",
+    },
   };
 }

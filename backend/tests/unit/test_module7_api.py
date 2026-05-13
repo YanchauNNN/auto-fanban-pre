@@ -1145,6 +1145,7 @@ def test_create_audit_replace_processes_job_without_deliverable(
         assert detail["artifacts"]["replaced_dwg_download_url"] == f"/api/jobs/{job_id}/download/replaced"
         assert detail["replace_summary"]["replacement_count"] == 2
         assert detail["replace_summary"]["source_project_no"] == "2016"
+        assert detail["replace_summary"]["source_island_no"] == "1"
         assert detail["replace_summary"]["target_project_no"] == "1916"
         assert detail["replace_summary"]["target_island_no"] == "3"
         assert detail["factory_index_map"]["applied"] is True

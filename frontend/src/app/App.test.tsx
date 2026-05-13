@@ -1211,10 +1211,18 @@ describe("job detail pages", () => {
         replacementCount: 51,
         skippedCount: 0,
         affectedDrawingsCount: 10,
-        sourceProjectNo: "2026",
-        targetProjectNo: "2016",
+        sourceProjectNo: "2016",
+        sourceIslandNo: "2",
+        targetProjectNo: "1916",
+        targetIslandNo: "3",
         topReplacedTexts: ["2026", "2026XNI-JGS02"],
         topInternalCodes: ["20261NH-JGS51-001"],
+      },
+      factoryIndexMap: {
+        applied: true,
+        actionCount: 1,
+        reportJson: "factory-index-map.json",
+        message: "",
       },
     });
 
@@ -1222,8 +1230,12 @@ describe("job detail pages", () => {
 
     expect(await screen.findByText("翻版摘要")).toBeInTheDocument();
     expect(screen.getByText("51")).toBeInTheDocument();
-    expect(screen.getByText("2026")).toBeInTheDocument();
     expect(screen.getByText("2016")).toBeInTheDocument();
+    expect(screen.getByText("2号机组")).toBeInTheDocument();
+    expect(screen.getByText("1916")).toBeInTheDocument();
+    expect(screen.getByText("3号岛")).toBeInTheDocument();
+    expect(screen.getByText("厂房索引图替换")).toBeInTheDocument();
+    expect(screen.getByText("是")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });

@@ -27,7 +27,9 @@ export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
     },
     replaceConfig: {
       sourceProjectNo: "",
+      sourceIslandNo: "",
       targetProjectNo: "",
+      targetIslandNo: "",
     },
   };
 }
@@ -48,6 +50,12 @@ export function syncTaskConfigDraft(
     values: {
       ...defaultValues,
       ...currentDraft.values,
+    },
+    replaceConfig: {
+      sourceProjectNo: currentDraft.replaceConfig?.sourceProjectNo ?? "",
+      sourceIslandNo: currentDraft.replaceConfig?.sourceIslandNo ?? "",
+      targetProjectNo: currentDraft.replaceConfig?.targetProjectNo ?? "",
+      targetIslandNo: currentDraft.replaceConfig?.targetIslandNo ?? "",
     },
   };
 }

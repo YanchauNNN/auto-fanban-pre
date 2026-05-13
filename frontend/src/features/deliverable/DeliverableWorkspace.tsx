@@ -45,7 +45,9 @@ type DeliverableWorkspaceProps = {
   incomingFiles: File[];
   pendingReplaceConfig?: {
     sourceProjectNo: string;
+    sourceIslandNo: string;
     targetProjectNo: string;
+    targetIslandNo: string;
     runDeliverable: boolean;
   } | null;
   onBatchCreated: (payload: CreateBatchPayload) => void;
@@ -283,7 +285,9 @@ export function DeliverableWorkspace({
       const payload = pendingReplaceConfig?.runDeliverable
         ? await adapter.createAuditReplace({
             sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
+            sourceIslandNo: pendingReplaceConfig.sourceIslandNo,
             targetProjectNo: pendingReplaceConfig.targetProjectNo,
+            targetIslandNo: pendingReplaceConfig.targetIslandNo,
             files: draft.files,
             runDeliverable: true,
             deliverableParams: submissionValues,
@@ -796,6 +800,12 @@ export function DeliverableWorkspace({
                     <p>
                       当前将以翻版+出图模式提交。
                       <strong>{` ${pendingReplaceConfig.sourceProjectNo} -> ${pendingReplaceConfig.targetProjectNo}`}</strong>
+                      {pendingReplaceConfig.sourceIslandNo ? (
+                        <strong>{`（来源${formatSourceIslandLabel(pendingReplaceConfig.sourceProjectNo, pendingReplaceConfig.sourceIslandNo)}）`}</strong>
+                      ) : null}
+                      {pendingReplaceConfig.targetIslandNo ? (
+                        <strong>{`（${pendingReplaceConfig.targetIslandNo}号岛）`}</strong>
+                      ) : null}
                       ，本页参数会整体写入 <code>deliverable_params</code>。
                     </p>
                   ) : (
@@ -1562,7 +1572,9 @@ function applyFilesToDraft(
         pendingReplaceConfig?.sourceProjectNo ??
         inference.primaryProjectNo ??
         draft.replaceConfig.sourceProjectNo,
+      sourceIslandNo: pendingReplaceConfig?.sourceIslandNo ?? draft.replaceConfig.sourceIslandNo,
       targetProjectNo: replaceTargetProjectNo,
+      targetIslandNo: pendingReplaceConfig?.targetIslandNo ?? draft.replaceConfig.targetIslandNo,
     },
   };
 }
@@ -1593,7 +1605,9 @@ function toDeliverableOnlyDraft(draft: TaskConfigDraft): TaskConfigDraft {
     intent: "deliverable",
     replaceConfig: {
       sourceProjectNo: "",
+      sourceIslandNo: "",
       targetProjectNo: "",
+      targetIslandNo: "",
     },
   };
 }
@@ -1608,6 +1622,17 @@ function getFieldPlaceholder(field: FormField) {
   }
 
   return `请输入${field.label}`;
+}
+
+function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string) {
+  const normalizedProjectNo = sourceProjectNo.trim();
+  const normalizedIslandNo = sourceIslandNo.trim();
+  if (!normalizedIslandNo) {
+    return "";
+  }
+  return normalizedProjectNo === "2016"
+    ? `${normalizedIslandNo}号机组`
+    : `${normalizedIslandNo}号岛`;
 }
 
 function normalizeFontPreflightStatus(status: string) {

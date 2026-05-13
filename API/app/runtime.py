@@ -1180,10 +1180,20 @@ class DeliverableApiRuntime:
                     'skipped_count': int(report_payload.get('skipped_count', 0) or 0),
                     'affected_drawings_count': int(report_payload.get('affected_drawings_count', 0) or 0),
                     'source_project_no': str(report_payload.get('source_project_no') or ''),
+                    'source_island_no': str(job.params.get('source_island_no') or '').strip() or None,
                     'target_project_no': str(report_payload.get('target_project_no') or ''),
+                    'target_island_no': str(job.params.get('target_island_no') or '').strip() or None,
                     'top_replaced_texts': list(report_payload.get('top_replaced_texts', []) or []),
                     'top_internal_codes': list(report_payload.get('top_internal_codes', []) or []),
                 }
+                factory_index_map = job.progress.details.get('factory_index_map')
+                if isinstance(factory_index_map, dict):
+                    payload['factory_index_map'] = {
+                        'applied': bool(factory_index_map.get('applied')),
+                        'action_count': int(factory_index_map.get('action_count', 0) or 0),
+                        'report_json': str(factory_index_map.get('report_json') or '') or None,
+                        'message': str(factory_index_map.get('message') or ''),
+                    }
         return payload
 
     def _serialize_job_artifacts(self, job: Job, *, include_urls: bool = False, job_id: str | None = None) -> dict[str, Any]:

@@ -113,9 +113,17 @@ type RawJobDetail = RawJobSummary & {
     skipped_count?: number | null;
     affected_drawings_count?: number | null;
     source_project_no?: string | null;
+    source_island_no?: string | null;
     target_project_no?: string | null;
+    target_island_no?: string | null;
     top_replaced_texts?: string[] | null;
     top_internal_codes?: string[] | null;
+  } | null;
+  factory_index_map?: {
+    applied?: boolean | null;
+    action_count?: number | null;
+    report_json?: string | null;
+    message?: string | null;
   } | null;
 };
 
@@ -328,7 +336,9 @@ export class HttpAdapter implements ApiAdapter {
 
   async createAuditReplace({
     sourceProjectNo,
+    sourceIslandNo,
     targetProjectNo,
+    targetIslandNo,
     files,
     runDeliverable,
     deliverableParams,
@@ -339,7 +349,9 @@ export class HttpAdapter implements ApiAdapter {
       "params_json",
       JSON.stringify({
         source_project_no: sourceProjectNo,
+        ...(sourceIslandNo ? { source_island_no: sourceIslandNo } : {}),
         target_project_no: targetProjectNo,
+        ...(targetIslandNo ? { target_island_no: targetIslandNo } : {}),
         run_deliverable: runDeliverable,
         ...(runDeliverable && deliverableParams
           ? { deliverable_params: deliverableParams }
@@ -397,6 +409,7 @@ export class HttpAdapter implements ApiAdapter {
       deliverableOutputs: this.normalizeDeliverableOutputs(payload.deliverable_outputs),
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
       replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
+      factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
     };
   }
 
@@ -536,9 +549,24 @@ export class HttpAdapter implements ApiAdapter {
       skippedCount: payload.skipped_count ?? 0,
       affectedDrawingsCount: payload.affected_drawings_count ?? 0,
       sourceProjectNo: payload.source_project_no ?? "",
+      sourceIslandNo: payload.source_island_no ?? null,
       targetProjectNo: payload.target_project_no ?? "",
+      targetIslandNo: payload.target_island_no ?? null,
       topReplacedTexts: payload.top_replaced_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
+    };
+  }
+
+  private normalizeFactoryIndexMap(payload: RawJobDetail["factory_index_map"]) {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      applied: Boolean(payload.applied),
+      actionCount: payload.action_count ?? 0,
+      reportJson: payload.report_json ?? null,
+      message: payload.message ?? "",
     };
   }
 

@@ -251,7 +251,9 @@ describe("HttpAdapter", () => {
 
     const created = await adapter.createAuditReplace({
       sourceProjectNo: "2026",
+      sourceIslandNo: "2",
       targetProjectNo: "2016",
+      targetIslandNo: "1",
       files: [file],
       runDeliverable: false,
     });
@@ -269,7 +271,9 @@ describe("HttpAdapter", () => {
     expect(formData.get("params_json")).toBe(
       JSON.stringify({
         source_project_no: "2026",
+        source_island_no: "2",
         target_project_no: "2016",
+        target_island_no: "1",
         run_deliverable: false,
       }),
     );
@@ -320,7 +324,9 @@ describe("HttpAdapter", () => {
 
     const created = await adapter.createAuditReplace({
       sourceProjectNo: "2026",
+      sourceIslandNo: "2",
       targetProjectNo: "2016",
+      targetIslandNo: "1",
       files: [file],
       runDeliverable: true,
       deliverableParams: {
@@ -334,7 +340,9 @@ describe("HttpAdapter", () => {
     expect(formData.get("params_json")).toBe(
       JSON.stringify({
         source_project_no: "2026",
+        source_island_no: "2",
         target_project_no: "2016",
+        target_island_no: "1",
         run_deliverable: true,
         deliverable_params: {
           project_no: "2016",

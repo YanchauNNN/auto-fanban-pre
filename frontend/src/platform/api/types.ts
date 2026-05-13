@@ -90,9 +90,18 @@ export type ReplaceSummary = {
   skippedCount: number;
   affectedDrawingsCount: number;
   sourceProjectNo: string;
+  sourceIslandNo?: string | null;
   targetProjectNo: string;
+  targetIslandNo?: string | null;
   topReplacedTexts: string[];
   topInternalCodes: string[];
+};
+
+export type FactoryIndexMapSummary = {
+  applied: boolean;
+  actionCount: number;
+  reportJson: string | null;
+  message: string;
 };
 
 export type MissingFontEntry = {
@@ -156,7 +165,9 @@ export type SubmissionParams = Record<string, unknown>;
 
 export type CreateAuditReplaceParams = {
   sourceProjectNo: string;
+  sourceIslandNo?: string | null;
   targetProjectNo: string;
+  targetIslandNo?: string | null;
   files: File[];
   runDeliverable: boolean;
   deliverableParams?: SubmissionParams;
@@ -215,6 +226,7 @@ export type JobDetail = JobSummary & {
   deliverableOutputs?: DeliverableOutputs;
   findingGroups?: FindingGroup[];
   replaceSummary?: ReplaceSummary;
+  factoryIndexMap?: FactoryIndexMapSummary | null;
 };
 
 export type JobList = {
@@ -235,7 +247,9 @@ export type UploadProjectInference = {
 
 export type ReplaceTaskConfig = {
   sourceProjectNo: string;
+  sourceIslandNo: string;
   targetProjectNo: string;
+  targetIslandNo: string;
 };
 
 export type TaskConfigPreset = {

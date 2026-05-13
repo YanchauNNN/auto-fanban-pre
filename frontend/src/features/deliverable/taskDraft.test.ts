@@ -87,7 +87,9 @@ describe("createTaskConfigDraft", () => {
     });
     expect(draft.replaceConfig).toEqual({
       sourceProjectNo: "",
+      sourceIslandNo: "",
       targetProjectNo: "",
+      targetIslandNo: "",
     });
   });
 });
@@ -116,7 +118,9 @@ describe("syncTaskConfigDraft", () => {
       },
       replaceConfig: {
         sourceProjectNo: "1818",
+        sourceIslandNo: "2",
         targetProjectNo: "2020",
+        targetIslandNo: "4",
       },
     };
 
@@ -157,6 +161,8 @@ describe("syncTaskConfigDraft", () => {
     });
     expect(draft.files).toHaveLength(1);
     expect(draft.replaceConfig.targetProjectNo).toBe("2020");
+    expect(draft.replaceConfig.sourceIslandNo).toBe("2");
+    expect(draft.replaceConfig.targetIslandNo).toBe("4");
   });
 
   it("preserves checker and discipline leader values independently", () => {
@@ -237,7 +243,9 @@ describe("syncTaskConfigDraft", () => {
       },
       replaceConfig: {
         sourceProjectNo: "",
+        sourceIslandNo: "",
         targetProjectNo: "",
+        targetIslandNo: "",
       },
     };
 

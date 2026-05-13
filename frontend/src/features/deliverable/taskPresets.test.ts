@@ -94,7 +94,9 @@ describe("taskPresets", () => {
     draft.values.ied_prepared_date = "2026-03-12";
     draft.replaceConfig = {
       sourceProjectNo: "2016",
+      sourceIslandNo: "2",
       targetProjectNo: "1818",
+      targetIslandNo: "1",
     };
 
     const preset = createTaskPreset("默认方案", draft);
@@ -178,7 +180,9 @@ describe("taskPresets", () => {
       },
       replaceConfig: {
         sourceProjectNo: "2020",
+        sourceIslandNo: "4",
         targetProjectNo: "1818",
+        targetIslandNo: "3",
       },
     });
 
@@ -192,6 +196,8 @@ describe("taskPresets", () => {
     expect(nextDraft.values.ied_prepared_date).toBe(new Date().toISOString().slice(0, 10));
     expect(nextDraft.intent).toBe("audit_replace");
     expect(nextDraft.runAuditCheck).toBe(true);
+    expect(nextDraft.replaceConfig.sourceIslandNo).toBe("4");
     expect(nextDraft.replaceConfig.targetProjectNo).toBe("1818");
+    expect(nextDraft.replaceConfig.targetIslandNo).toBe("3");
   });
 });

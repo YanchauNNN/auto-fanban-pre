@@ -308,8 +308,10 @@ describe("DeliverableWorkspace", () => {
         onClose={vi.fn()}
         onDraftAvailabilityChange={vi.fn()}
         pendingReplaceConfig={{
-          sourceProjectNo: "2026",
+          sourceProjectNo: "1916",
+          sourceIslandNo: "3",
           targetProjectNo: "2016",
+          targetIslandNo: "1",
           runDeliverable: true,
         }}
         schema={schema}
@@ -1744,8 +1746,10 @@ describe("DeliverableWorkspace", () => {
         onClose={vi.fn()}
         onDraftAvailabilityChange={vi.fn()}
         pendingReplaceConfig={{
-          sourceProjectNo: "2026",
+          sourceProjectNo: "1916",
+          sourceIslandNo: "3",
           targetProjectNo: "2016",
+          targetIslandNo: "1",
           runDeliverable: true,
         }}
         schema={schema}
@@ -1768,8 +1772,10 @@ describe("DeliverableWorkspace", () => {
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledWith({
-        sourceProjectNo: "2026",
+        sourceProjectNo: "1916",
+        sourceIslandNo: "3",
         targetProjectNo: "2016",
+        targetIslandNo: "1",
         files: expect.arrayContaining([
           expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
         ]),

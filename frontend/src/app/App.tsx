@@ -519,7 +519,9 @@ function WorkspacePage() {
   const [replaceConfigOpen, setReplaceConfigOpen] = useState(false);
   const [pendingReplaceConfig, setPendingReplaceConfig] = useState<{
     sourceProjectNo: string;
+    sourceIslandNo: string;
     targetProjectNo: string;
+    targetIslandNo: string;
     runDeliverable: boolean;
   } | null>(null);
 
@@ -743,7 +745,9 @@ function WorkspacePage() {
     files: File[];
     replaceConfig: {
       sourceProjectNo: string;
+      sourceIslandNo: string;
       targetProjectNo: string;
+      targetIslandNo: string;
       runDeliverable: boolean;
     };
   }) {
@@ -1672,6 +1676,13 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
+      {detail.taskKind === "audit_replace" && detail.factoryIndexMap ? (
+        <section className={styles.detailSection}>
+          <h2>厂房索引图替换</h2>
+          <FactoryIndexMapCard factoryIndexMap={detail.factoryIndexMap} />
+        </section>
+      ) : null}
+
       {detail.taskKind === "deliverable" ? (
         <section className={styles.detailSection}>
           <h2>出图结果</h2>
@@ -2289,7 +2300,19 @@ function ReplaceResultCard({
           value={String(replaceSummary.affectedDrawingsCount || affectedDrawingsCount)}
         />
         <InfoBlock label="源项目号" value={replaceSummary.sourceProjectNo} />
+        {replaceSummary.sourceIslandNo ? (
+          <InfoBlock
+            label="来源机组/岛号"
+            value={formatSourceIslandLabel(
+              replaceSummary.sourceProjectNo,
+              replaceSummary.sourceIslandNo,
+            )}
+          />
+        ) : null}
         <InfoBlock label="目标项目号" value={replaceSummary.targetProjectNo} />
+        {replaceSummary.targetIslandNo ? (
+          <InfoBlock label="目标岛号" value={`${replaceSummary.targetIslandNo}号岛`} />
+        ) : null}
       </div>
 
       <div className={styles.resultSectionBlock}>
@@ -2322,6 +2345,22 @@ function ReplaceResultCard({
         ) : (
           <p className={styles.muted}>当前没有重点图纸编码。</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function FactoryIndexMapCard({
+  factoryIndexMap,
+}: {
+  factoryIndexMap: NonNullable<JobDetail["factoryIndexMap"]>;
+}) {
+  return (
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="已执行替换" value={factoryIndexMap.applied ? "是" : "否"} />
+        <InfoBlock label="动作数量" value={String(factoryIndexMap.actionCount)} />
+        <InfoBlock label="调试信息" value={factoryIndexMap.message || "无"} />
       </div>
     </div>
   );
@@ -2385,6 +2424,17 @@ function kindToneClass(kind: TaskKind) {
     return styles.kindReplace;
   }
   return styles.kindDeliverable;
+}
+
+function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string) {
+  const normalizedProjectNo = sourceProjectNo.trim();
+  const normalizedIslandNo = sourceIslandNo.trim();
+  if (!normalizedIslandNo) {
+    return "";
+  }
+  return normalizedProjectNo === "2016"
+    ? `${normalizedIslandNo}号机组`
+    : `${normalizedIslandNo}号岛`;
 }
 
 function renderArtifactButtons(
