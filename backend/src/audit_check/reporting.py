@@ -11,6 +11,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 from ..result_views import build_finding_groups
 from .models import AuditFinding
 
+_FORBIDDEN_TERM_PRIORITY = {"工种": 0}
+
 
 def build_summary(findings: list[AuditFinding]) -> dict[str, Any]:
     wrong_texts = Counter(finding.matched_text for finding in findings)
@@ -18,10 +20,21 @@ def build_summary(findings: list[AuditFinding]) -> dict[str, Any]:
         finding.internal_code or "未归属"
         for finding in findings
     )
+    top_wrong_texts = [
+        text
+        for text, _ in sorted(
+            wrong_texts.items(),
+            key=lambda item: (
+                _FORBIDDEN_TERM_PRIORITY.get(str(item[0]), 1),
+                -int(item[1]),
+                str(item[0]),
+            ),
+        )[:10]
+    ]
     return {
         "findings_count": len(findings),
         "affected_drawings_count": len(internal_codes),
-        "top_wrong_texts": [text for text, _ in wrong_texts.most_common(10)],
+        "top_wrong_texts": top_wrong_texts,
         "top_internal_codes": [code for code, _ in internal_codes.most_common(10)],
     }
 

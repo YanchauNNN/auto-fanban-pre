@@ -13,6 +13,7 @@ _DIRECTLY_FILTERED_FLAG_CODES = frozenset(
         "PLOT_WINDOW_USED",
     }
 )
+_FINDING_GROUP_PRIORITY = {"工种": 0}
 
 
 def normalize_user_flags(flags: Sequence[str]) -> list[str]:
@@ -53,7 +54,11 @@ def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str
             bucket["internal_codes"].append(internal_code)
     return sorted(
         grouped.values(),
-        key=lambda item: (-int(item["count"]), str(item["matched_text"])),
+        key=lambda item: (
+            _FINDING_GROUP_PRIORITY.get(str(item["matched_text"]), 1),
+            -int(item["count"]),
+            str(item["matched_text"]),
+        ),
     )
 
 

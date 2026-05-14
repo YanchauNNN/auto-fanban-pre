@@ -73,7 +73,8 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_revision",
   "upgrade_note_text",
 ]);
-const MANUALLY_POSITIONED_FIELDS = new Set(["include_ied_plan"]);
+const INCLUDE_IED_PLAN_KEY = "include_ied_plan";
+const MANUALLY_POSITIONED_FIELDS = new Set([INCLUDE_IED_PLAN_KEY]);
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
 const LAST_FONT_REPLACEMENTS_STORAGE_KEY = "auto-fanban.last-font-replacements";
 const PLOT_STYLE_OPTIONS = [
@@ -185,45 +186,6 @@ export function DeliverableWorkspace({
     () => buildDisplayedReplacementOptionsByKind(fontPreflightResult),
     [fontPreflightResult],
   );
-
-  useEffect(() => {
-    if (!upgradeEnabled) {
-      return;
-    }
-
-    const schemaDefault = coverRevisionField?.defaultValue?.trim() ?? "";
-    const currentCoverRevision = draft.values.cover_revision?.trim() ?? "";
-    if (
-      currentCoverRevision &&
-      currentCoverRevision !== schemaDefault &&
-      currentCoverRevision !== "A"
-    ) {
-      return;
-    }
-
-    setDraft((current) => {
-      const nextCurrentCover = current.values.cover_revision?.trim() ?? "";
-      if (
-        nextCurrentCover &&
-        nextCurrentCover !== schemaDefault &&
-        nextCurrentCover !== "A"
-      ) {
-        return current;
-      }
-
-      return {
-        ...current,
-        values: {
-          ...current.values,
-          cover_revision: "B",
-        },
-        fieldErrors: {
-          ...current.fieldErrors,
-          cover_revision: [],
-        },
-      };
-    });
-  }, [coverRevisionField?.defaultValue, draft.values.cover_revision, upgradeEnabled]);
 
   useEffect(() => {
     onDraftAvailabilityChange(hasTaskConfigDraft(schema, draft));
@@ -344,9 +306,12 @@ export function DeliverableWorkspace({
     const nextFormErrors: string[] = [];
 
     for (const field of schema.sections.flatMap((section) => section.fields)) {
+      if (shouldSkipFieldValidation(field, draft.values)) {
+        continue;
+      }
+
       const value = draft.values[field.key]?.trim() ?? "";
-      const required =
-        field.required || evaluateRequiredWhen(field.requiredWhen, draft.values);
+      const required = isFieldRequired(field, draft.values);
 
       if (required && !value) {
         nextFieldErrors[field.key] = ["required"];
@@ -1189,7 +1154,7 @@ function FieldControl({
   error?: string;
   onChange: (value: string) => void;
 }) {
-  const required = field.required || evaluateRequiredWhen(field.requiredWhen, values);
+  const required = isFieldRequired(field, values);
   const inputId = useId();
   const helperText = field.description.trim();
   const placeholder = getFieldPlaceholder(field);
@@ -1511,6 +1476,22 @@ function filterSections(
       }),
     }))
     .filter((section) => section.fields.length > 0);
+}
+
+function isFieldRequired(field: FormField, values: Record<string, string>) {
+  if (shouldSkipFieldValidation(field, values)) {
+    return false;
+  }
+
+  return field.required || evaluateRequiredWhen(field.requiredWhen, values);
+}
+
+function shouldSkipFieldValidation(field: FormField, values: Record<string, string>) {
+  return isIedParameterField(field.key) && values[INCLUDE_IED_PLAN_KEY] === "false";
+}
+
+function isIedParameterField(fieldKey: string) {
+  return fieldKey.startsWith("ied_");
 }
 
 function hasTaskConfigDraft(schema: FormSchema, draft: TaskConfigDraft) {

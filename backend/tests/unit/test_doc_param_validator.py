@@ -99,6 +99,27 @@ def test_validate_frontend_params_rejects_invalid_upgrade_sheet_codes() -> None:
     assert errors["upgrade_sheet_codes"] == ["format:upgrade-sheet-codes"]
 
 
+def test_validate_frontend_params_skips_ied_required_fields_when_plan_disabled() -> None:
+    validator = _validator()
+    payload = _base_frontend_params()
+    payload.update(
+        {
+            "include_ied_plan": False,
+            "ied_status": "发布",
+            "ied_doc_type": "",
+            "ied_checked_by": "李四A002",
+            "ied_checked_date": "2026/03/01",
+        }
+    )
+
+    errors = validator.validate_frontend_params(payload)
+
+    assert "ied_doc_type" not in errors
+    assert "ied_prepared_by" not in errors
+    assert "ied_checked_by" not in errors
+    assert "ied_checked_date" not in errors
+
+
 def test_validate_frontend_params_replace_deliverable_params_only_when_requested() -> None:
     validator = _validator()
 

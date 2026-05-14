@@ -52,6 +52,8 @@ class TextItem:
 class TitleblockExtractor(ITitleblockExtractor):
     """图签提取器实现"""
 
+    STATUS_MISSING_FLAG = "状态为空"
+
     def __init__(self, spec_path: str | None = None):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
         self.field_defs = self.spec.get_field_definitions()
@@ -207,8 +209,14 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         frame.titleblock = fields
         frame.raw_extracts = raw_extracts
+        self._validate_required_status(frame)
         self._check_scale_mismatch(frame)
         return frame
+
+    def _validate_required_status(self, frame: FrameMeta) -> None:
+        if str(frame.titleblock.status or "").strip():
+            return
+        frame.add_flag(self.STATUS_MISSING_FLAG)
 
     def _load_text_items(self, dxf_path: Path) -> list[TextItem]:
         resolved = dxf_path.resolve()

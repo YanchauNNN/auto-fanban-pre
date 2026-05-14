@@ -75,6 +75,34 @@ def test_group_frames_marks_non_a4_same_code_family() -> None:
     assert meta1["page_total"] == 2
 
 
+def test_group_frames_accepts_total_then_index_page_markers_for_same_code_family() -> None:
+    grouper = SameCodeMultipageGrouper()
+    page1 = _make_frame(
+        internal_code="20162SD-JGS03-002",
+        external_code="JD2SDH11002B25C42SD",
+        page_index=2,
+        page_total=1,
+    )
+    page2 = _make_frame(
+        internal_code="20162SD-JGS03-002",
+        external_code="JD2SDH11002B25C42SD",
+        page_index=2,
+        page_total=2,
+    )
+
+    families = grouper.group_frames([page1, page2])
+
+    assert len(families) == 1
+    meta1 = page1.raw_extracts["same_code_multipage"]
+    meta2 = page2.raw_extracts["same_code_multipage"]
+    assert meta1["page_index"] == 1
+    assert meta2["page_index"] == 2
+    assert meta1["page_total"] == 2
+    assert meta2["page_total"] == 2
+    assert output_name_for_frame(page1) == "JD2SDH11002B25C42SDA1@2CFC (20162SD-JGS03-002)"
+    assert output_name_for_frame(page2) == "JD2SDH11002B25C42SDA2@2CFC (20162SD-JGS03-002)"
+
+
 def test_group_frames_skips_a4_pages() -> None:
     grouper = SameCodeMultipageGrouper()
     page1 = _make_frame(

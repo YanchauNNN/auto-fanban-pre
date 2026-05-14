@@ -172,6 +172,40 @@ const schemaWithIedPlan: FormSchema = {
   ),
 };
 
+const schemaWithRequiredIedPlanFields: FormSchema = {
+  ...schemaWithIedPlan,
+  sections: schemaWithIedPlan.sections.map((section) =>
+    section.id === "ied"
+      ? {
+          ...section,
+          fields: [
+            ...(section.fields ?? []),
+            {
+              key: "ied_doc_type",
+              label: "IED 文档类型",
+              type: "text",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "IED 文档类型",
+              options: [],
+            },
+            {
+              key: "ied_checked_by",
+              label: "IED 校核者",
+              type: "text",
+              required: true,
+              requiredWhen: null,
+              defaultValue: "",
+              description: "IED 校核者",
+              options: [],
+            },
+          ],
+        }
+      : section,
+  ),
+};
+
 const schemaWithIedPlanInDesignSection: FormSchema = {
   ...schema,
   sections: [
@@ -406,6 +440,8 @@ describe("DeliverableWorkspace", () => {
     const coverRevision = screen.getByLabelText(coverRevisionLabel);
     const upgradeSheetCodes = screen.getByLabelText(upgradeSheetCodesLabel);
     expect(coverRevision).toHaveValue("B");
+    await user.clear(coverRevision);
+    await waitFor(() => expect(coverRevision).toHaveValue(""));
     await user.type(upgradeSheetCodes, "005~012");
 
     await user.click(screen.getByRole("button", { name: "展开高级选项" }));
@@ -826,6 +862,66 @@ describe("DeliverableWorkspace", () => {
 
     const submittedValues = vi.mocked(adapter.createBatch).mock.calls[0]?.[0] ?? {};
     expect(submittedValues.include_ied_plan).toBe(false);
+  });
+
+  it("does not require IED-only fields when the IED plan toggle is unchecked", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacementFonts: {},
+          replacedStyleCount: 0,
+          verifyAfterReplace: null,
+          fontReplacementIncomplete: false,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      replacementOptionsByKind: {},
+      defaultReplacementFont: null,
+      defaultReplacementFonts: {},
+      requiresConfirmation: false,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-ied-off-required-fields",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithRequiredIedPlanFields}
+      />,
+    );
+
+    const includeIedPlan = await screen.findByLabelText("包含 IED 计划");
+    await user.click(includeIedPlan);
+    await user.type(screen.getByLabelText(albumTitleLabel), "ied-plan-off");
+    await user.type(screen.getByLabelText(subitemNameLabel), "ied-plan-off-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include_ied_plan: false,
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
   });
 
   it("opens a missing-font confirmation dialog and submits with the chosen replacement font", async () => {

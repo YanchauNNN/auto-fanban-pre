@@ -15,6 +15,7 @@ class SameCodeMultipagePage:
     frame_id: str
     page_index: int
     page_total: int
+    marker_mode: str = "index_then_total"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +109,7 @@ class SameCodeMultipageGrouper:
             return False
         page_index = int(tb.page_index or 0)
         page_total = int(tb.page_total or 0)
-        return page_index > 0 and page_total > 1
+        return page_index > 0 and page_total > 0 and max(page_index, page_total) > 1
 
     @staticmethod
     def _build_family(
@@ -122,7 +123,62 @@ class SameCodeMultipageGrouper:
         if len(frames) < 2:
             return None
 
-        totals = {int(frame.titleblock.page_total or 0) for frame in frames}
+        candidates = [
+            family
+            for family in (
+                SameCodeMultipageGrouper._build_family_with_marker_mode(
+                    internal_code=internal_code,
+                    external_code=external_code,
+                    revision=revision,
+                    status=status,
+                    frames=frames,
+                    marker_mode="index_then_total",
+                ),
+                SameCodeMultipageGrouper._build_family_with_marker_mode(
+                    internal_code=internal_code,
+                    external_code=external_code,
+                    revision=revision,
+                    status=status,
+                    frames=frames,
+                    marker_mode="total_then_index",
+                ),
+            )
+            if family is not None
+        ]
+        if len(candidates) != 1:
+            return None
+        return candidates[0]
+
+    @staticmethod
+    def _build_family_with_marker_mode(
+        *,
+        internal_code: str,
+        external_code: str,
+        revision: str,
+        status: str,
+        frames: list[FrameMeta],
+        marker_mode: str,
+    ) -> SameCodeMultipageFamily | None:
+        pages: list[SameCodeMultipagePage] = []
+        for frame in frames:
+            raw_index = int(frame.titleblock.page_index or 0)
+            raw_total = int(frame.titleblock.page_total or 0)
+            if marker_mode == "total_then_index":
+                page_index = raw_total
+                page_total = raw_index
+            else:
+                page_index = raw_index
+                page_total = raw_total
+            pages.append(
+                SameCodeMultipagePage(
+                    frame_id=frame.frame_id,
+                    page_index=page_index,
+                    page_total=page_total,
+                    marker_mode=marker_mode,
+                )
+            )
+
+        totals = {page.page_total for page in pages}
         totals.discard(0)
         if len(totals) != 1:
             return None
@@ -131,17 +187,7 @@ class SameCodeMultipageGrouper:
         if page_total < 2 or len(frames) != page_total:
             return None
 
-        pages = sorted(
-            (
-                SameCodeMultipagePage(
-                    frame_id=frame.frame_id,
-                    page_index=int(frame.titleblock.page_index or 0),
-                    page_total=int(frame.titleblock.page_total or 0),
-                )
-                for frame in frames
-            ),
-            key=lambda item: item.page_index,
-        )
+        pages.sort(key=lambda item: item.page_index)
         expected = list(range(1, page_total + 1))
         actual = [page.page_index for page in pages]
         if actual != expected:
@@ -168,4 +214,5 @@ class SameCodeMultipageGrouper:
                 "family_id": family.family_id,
                 "page_index": page.page_index,
                 "page_total": family.page_total,
+                "marker_mode": page.marker_mode,
             }

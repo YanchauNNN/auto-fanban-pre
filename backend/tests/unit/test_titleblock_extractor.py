@@ -447,6 +447,32 @@ def test_extract_fields_reuses_loaded_text_items_for_same_dxf(
     assert calls["count"] == 1
 
 
+def test_extract_fields_flags_empty_status_roi(tmp_path, monkeypatch) -> None:
+    dxf_path = tmp_path / "sample.dxf"
+    ezdxf.new("R2018").saveas(dxf_path)
+
+    extractor = TitleblockExtractor()
+    extractor.anchor_texts = []
+
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f-empty-status",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=150.0),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        )
+    )
+
+    monkeypatch.setattr(extractor, "_load_text_items", lambda _path: [])
+
+    extractor.extract_fields(dxf_path, frame)
+
+    assert frame.titleblock.status is None
+    assert "状态为空" in frame.runtime.flags
+
+
 def test_extract_fields_keeps_page_fragments_out_of_title_roi(tmp_path, monkeypatch) -> None:
     dxf_path = tmp_path / "sample.dxf"
     ezdxf.new("R2018").saveas(dxf_path)

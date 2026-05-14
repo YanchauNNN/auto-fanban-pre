@@ -32,6 +32,9 @@ class DocParamValidator:
         field_rules = self._flatten_param_rules()
 
         for field_name, rule in field_rules.items():
+            if self._should_skip_ied_field(field_name, params):
+                continue
+
             value = params.get(field_name)
             if self._is_required(rule, params) and self._is_empty(value):
                 errors.append(f"文档参数缺失: {field_name}")
@@ -50,6 +53,9 @@ class DocParamValidator:
         field_rules = self._flatten_param_rules(source="frontend")
 
         for field_name, rule in field_rules.items():
+            if self._should_skip_ied_field(field_name, normalized):
+                continue
+
             value = normalized.get(field_name)
             if self._is_required(rule, normalized) and self._is_empty(value):
                 errors.setdefault(field_name, []).append("required")
@@ -203,6 +209,11 @@ class DocParamValidator:
         if isinstance(value, str):
             return value.strip() == ""
         return False
+
+    def _should_skip_ied_field(self, field_name: str, values: dict[str, Any]) -> bool:
+        if not field_name.startswith("ied_"):
+            return False
+        return not self._coerce_bool(values.get("include_ied_plan", True))
 
     def _validate_format(self, value: str, fmt: str) -> bool:
         if fmt == "YYYY-MM-DD":

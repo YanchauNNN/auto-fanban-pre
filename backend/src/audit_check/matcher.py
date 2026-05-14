@@ -6,6 +6,8 @@ from ..config import get_config
 from .lexicon import normalize_text, normalize_text_without_spaces
 from .models import AuditFinding, AuditLexicon, ScanTextItem
 
+FORBIDDEN_DISCIPLINE_WORD = "工种"
+
 
 class AuditMatchEngine:
     def __init__(self, lexicon: AuditLexicon) -> None:
@@ -38,6 +40,24 @@ class AuditMatchEngine:
                 continue
 
             context_kind = self._classify_context(item.field_context, normalized_text)
+            if FORBIDDEN_DISCIPLINE_WORD in normalized_text:
+                findings.append(
+                    AuditFinding(
+                        raw_text=item.raw_text,
+                        matched_text=FORBIDDEN_DISCIPLINE_WORD,
+                        matched_project_nos=[],
+                        context_kind="forbidden_term",
+                        confidence="high",
+                        entity_type=item.entity_type,
+                        field_context=item.field_context,
+                        internal_code=item.internal_code,
+                        layout_name=item.layout_name,
+                        entity_handle=item.entity_handle,
+                        block_path=item.block_path,
+                        position_x=item.position_x,
+                        position_y=item.position_y,
+                    )
+                )
             if (
                 context_kind == "date_like"
                 and self.matching_policy.suppress_project_no_in_date_like
