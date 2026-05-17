@@ -4,6 +4,8 @@
 每个模块完成后必须运行：pytest tests/unit/test_derivation.py -v
 """
 
+import json
+
 import pytest
 
 from src.doc_gen.derivation import DerivationEngine
@@ -177,6 +179,33 @@ class TestDerivationEngine:
         assert derived.document_revision == "A"
         assert derived.catalog_revision == "B"
         assert derived.cover_catalog_revision == "B"
+
+    def test_upgrade_entries_drive_cover_catalog_revision_to_highest_input_revision(
+        self,
+        engine: DerivationEngine,
+        sample_frame,
+    ):
+        params = GlobalDocParams(
+            project_no="2016",
+            cover_revision="",
+            is_upgrade=True,
+            upgrade_entries=json.dumps(
+                [
+                    {"revision": "B", "sheet_codes": "001", "is_added": False},
+                    {"revision": "D", "sheet_codes": "021~024", "is_added": True},
+                ],
+                ensure_ascii=False,
+            ),
+        )
+        frame_a = sample_frame.model_copy(deep=True)
+        frame_a.titleblock.revision = "A"
+        ctx = DocContext(params=params, frames=[frame_a])
+
+        derived = engine.compute(ctx)
+
+        assert derived.document_revision == "A"
+        assert derived.catalog_revision == "D"
+        assert derived.cover_catalog_revision == "D"
 
     def test_derive_fixed_cover_and_catalog_paper_labels(self, engine: DerivationEngine):
         """封面与目录固定图幅值应符合设计文件业务口径"""

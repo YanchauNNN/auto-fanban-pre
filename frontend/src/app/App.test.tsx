@@ -629,6 +629,29 @@ describe("job cards", () => {
     expect(await screen.findByText("出图完成")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看任务" })).toBeInTheDocument();
   });
+
+  it("prioritizes the real failure reason over the last completed stage", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeSingleJob(1, "20162SD-JGS03-出图.dwg"),
+          status: "failed",
+          stage: "A4_MULTIPAGE_GROUPING",
+          percent: 60,
+          message: "完成阶段: A4_MULTIPAGE_GROUPING",
+          failureReason: "服务重启/中断，任务未完成",
+          stageContext: "中断前最后完成阶段：A4 多页合并",
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("服务重启/中断，任务未完成")).toBeInTheDocument();
+    expect(screen.getByText("中断前最后完成阶段：A4 多页合并")).toBeInTheDocument();
+    expect(screen.queryByText("完成阶段: A4_MULTIPAGE_GROUPING")).not.toBeInTheDocument();
+  });
 });
 
 describe("job detail pages", () => {

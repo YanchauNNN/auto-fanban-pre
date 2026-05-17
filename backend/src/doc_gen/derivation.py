@@ -22,6 +22,11 @@ import re
 
 from ..config import load_spec
 from ..models import DerivedFields, DocContext, normalize_discipline_label
+from .upgrade_marking import (
+    UpgradeEntryParseError,
+    parse_upgrade_entries,
+    resolve_highest_upgrade_revision,
+)
 
 
 class DerivationEngine:
@@ -154,8 +159,17 @@ class DerivationEngine:
         if cover_revision:
             return cover_revision
         if ctx.params.is_upgrade:
+            upgrade_entries_revision = self._resolve_upgrade_entries_revision(ctx.params.upgrade_entries)
+            if upgrade_entries_revision:
+                return upgrade_entries_revision
             return "B"
         return "A"
+
+    def _resolve_upgrade_entries_revision(self, raw_entries) -> str:
+        try:
+            return resolve_highest_upgrade_revision(parse_upgrade_entries(raw_entries))
+        except UpgradeEntryParseError:
+            return ""
 
     @staticmethod
     def _revision_sort_key(revision: str) -> tuple[tuple[int, int | str], ...]:

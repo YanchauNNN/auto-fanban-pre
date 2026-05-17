@@ -48,6 +48,8 @@ type RawJobSummary = {
   stage: string | null;
   percent: number | null;
   message: string | null;
+  failure_reason?: string | null;
+  stage_context?: string | null;
   created_at: string;
   finished_at: string | null;
   run_audit_check?: boolean | null;
@@ -429,6 +431,8 @@ export class HttpAdapter implements ApiAdapter {
       stage: payload.stage,
       percent: payload.percent ?? 0,
       message: payload.message ?? "",
+      failureReason: payload.failure_reason ?? null,
+      stageContext: payload.stage_context ?? null,
       createdAt: payload.created_at,
       finishedAt: payload.finished_at,
       runAuditCheck: payload.run_audit_check ?? false,

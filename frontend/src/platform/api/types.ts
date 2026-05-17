@@ -187,6 +187,8 @@ export type JobSummary = {
   stage: string | null;
   percent: number;
   message: string;
+  failureReason?: string | null;
+  stageContext?: string | null;
   createdAt: string;
   finishedAt: string | null;
   runAuditCheck: boolean;

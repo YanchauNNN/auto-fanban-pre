@@ -65,6 +65,16 @@ const schema: FormSchema = {
           options: [],
         },
         {
+          key: "upgrade_entries",
+          label: "升版规则",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "[]",
+          description: "结构化升版规则",
+          options: [],
+        },
+        {
           key: "ied_prepared_date",
           label: "编制日期",
           type: "date",
@@ -91,6 +101,8 @@ describe("taskPresets", () => {
     draft.values.album_title_cn = "示例图册";
     draft.values.is_upgrade = "true";
     draft.values.upgrade_sheet_codes = "001、003";
+    draft.values.upgrade_entries =
+      '[{"revision":"B","sheet_codes":"001、003","is_added":false}]';
     draft.values.ied_prepared_date = "2026-03-12";
     draft.replaceConfig = {
       sourceProjectNo: "2016",
@@ -106,6 +118,9 @@ describe("taskPresets", () => {
     expect(loadTaskPresets()[0].values.ied_prepared_date).toBeUndefined();
     expect(loadTaskPresets()[0].values.is_upgrade).toBe("true");
     expect(loadTaskPresets()[0].values.upgrade_sheet_codes).toBe("001、003");
+    expect(loadTaskPresets()[0].values.upgrade_entries).toBe(
+      '[{"revision":"B","sheet_codes":"001、003","is_added":false}]',
+    );
   });
 
   it("renames and deletes saved presets", () => {
@@ -176,6 +191,7 @@ describe("taskPresets", () => {
         album_title_cn: "翻版图册",
         is_upgrade: "true",
         upgrade_sheet_codes: "001~003",
+        upgrade_entries: '[{"revision":"D","sheet_codes":"001~003","is_added":true}]',
         ied_prepared_date: "2026-03-12",
       },
       replaceConfig: {
@@ -193,6 +209,9 @@ describe("taskPresets", () => {
     expect(nextDraft.values.project_no).toBe("2020");
     expect(nextDraft.values.is_upgrade).toBe("true");
     expect(nextDraft.values.upgrade_sheet_codes).toBe("001~003");
+    expect(nextDraft.values.upgrade_entries).toBe(
+      '[{"revision":"D","sheet_codes":"001~003","is_added":true}]',
+    );
     expect(nextDraft.values.ied_prepared_date).toBe(new Date().toISOString().slice(0, 10));
     expect(nextDraft.intent).toBe("audit_replace");
     expect(nextDraft.runAuditCheck).toBe(true);

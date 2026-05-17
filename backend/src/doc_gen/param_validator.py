@@ -10,7 +10,12 @@ from typing import Any
 
 from ..config import get_config, load_spec
 from ..models import DocContext, GlobalDocParams, normalize_global_doc_params
-from .upgrade_marking import UpgradeSheetCodeParseError, parse_upgrade_sheet_codes
+from .upgrade_marking import (
+    UpgradeEntryParseError,
+    UpgradeSheetCodeParseError,
+    parse_upgrade_entries,
+    parse_upgrade_sheet_codes,
+)
 
 _COND_RE = re.compile(
     r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(==|!=)\s*['"]([^'"]*)['"]\s*$""",
@@ -63,7 +68,7 @@ class DocParamValidator:
 
             fmt = rule.get("format")
             if (
-                field_name == "upgrade_sheet_codes"
+                field_name in {"upgrade_sheet_codes", "upgrade_entries"}
                 and not self._coerce_bool(normalized.get("is_upgrade"))
             ):
                 continue
@@ -232,6 +237,13 @@ class DocParamValidator:
             try:
                 parse_upgrade_sheet_codes(value)
             except UpgradeSheetCodeParseError:
+                return False
+            return True
+
+        if fmt == "upgrade-entries":
+            try:
+                parse_upgrade_entries(value)
+            except UpgradeEntryParseError:
                 return False
             return True
 

@@ -54,6 +54,7 @@ const FIELD_LABELS: Record<string, string> = {
   cover_revision: "封面和目录版次",
   is_upgrade: "是否升版",
   upgrade_sheet_codes: "升版图纸编号",
+  upgrade_entries: "升版规则",
   wbs_code: "WBS 编码",
   system_code: "系统代码",
   system_name: "系统名称",
@@ -102,6 +103,8 @@ const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
     "启用后只需填写升版图纸编号；关闭时会隐藏输入框，但会保留已输入内容。",
   upgrade_sheet_codes:
     "输入图纸内部编码末三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、, . ; ；；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。",
+  upgrade_entries:
+    "结构化升版规则，由升版设置区自动维护；每行包含版次、图纸编号和是否新增。",
   ied_chief_designer: "例如：王任超@wangrca",
   ied_checked_by: "例如：王任超@wangrca",
   ied_checked_date: "点击选择日期",
@@ -116,7 +119,12 @@ const LEGACY_UPGRADE_FIELDS = new Set([
   "upgrade_note_text",
 ]);
 
-const CUSTOM_RENDERED_FIELDS = new Set(["cover_revision", "is_upgrade", "upgrade_sheet_codes"]);
+const CUSTOM_RENDERED_FIELDS = new Set([
+  "cover_revision",
+  "is_upgrade",
+  "upgrade_sheet_codes",
+  "upgrade_entries",
+]);
 
 const HIDDEN_FRONTEND_FIELDS = new Set(["ied_discipline_office", ...LEGACY_UPGRADE_FIELDS]);
 
@@ -134,6 +142,7 @@ const ADVANCED_FIELDS = new Set([
   "cover_revision",
   "is_upgrade",
   "upgrade_sheet_codes",
+  "upgrade_entries",
   "system_code",
   "system_name",
   "design_status",

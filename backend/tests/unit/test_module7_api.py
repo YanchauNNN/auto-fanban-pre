@@ -1894,6 +1894,8 @@ def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -
         status=JobStatus.RUNNING,
         params=_deliverable_params(),
     )
+    stale_job.progress.stage = "A4_MULTIPAGE_GROUPING"
+    stale_job.progress.message = "完成阶段: A4_MULTIPAGE_GROUPING"
     job_dir = storage_root / "jobs" / stale_job.job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "job.json").write_text(
@@ -1908,3 +1910,12 @@ def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -
     payload = response.json()
     assert payload["status"] == "failed"
     assert "service_restarted_before_completion" in payload["errors"]
+    assert payload["failure_reason"] == "服务重启/中断，任务未完成"
+    assert payload["stage_context"] == "中断前最后完成阶段：A4 多页合并"
+
+    list_response = client.get("/api/jobs")
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    [summary] = list_payload["items"]
+    assert summary["failure_reason"] == "服务重启/中断，任务未完成"
+    assert summary["stage_context"] == "中断前最后完成阶段：A4 多页合并"

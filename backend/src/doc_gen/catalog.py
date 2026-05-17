@@ -42,8 +42,11 @@ from .naming import make_document_output_name
 from .office_automation import get_office_automation_limiter
 from .pdf_engine import PDFExporter
 from .upgrade_marking import (
+    UpgradeEntryParseError,
     UpgradeSheetCodeParseError,
+    get_added_note_text,
     get_upgrade_note_text,
+    parse_upgrade_entries,
     parse_upgrade_sheet_codes,
 )
 
@@ -369,9 +372,19 @@ class CatalogGenerator(ICatalogGenerator):
         derived = ctx.derived
         params = ctx.params
         upgrade_note_text = get_upgrade_note_text(params.project_no) if params.is_upgrade else ""
+        added_note_text = get_added_note_text(params.project_no) if params.is_upgrade else ""
+        note_by_sheet_code: dict[str, str] = {}
         upgraded_sheet_codes: set[str] = set()
 
-        if params.is_upgrade and params.upgrade_sheet_codes.strip():
+        if params.is_upgrade and params.upgrade_entries:
+            try:
+                for entry in parse_upgrade_entries(params.upgrade_entries):
+                    note = added_note_text if entry.is_added else upgrade_note_text
+                    for sheet_code in entry.sheet_codes:
+                        note_by_sheet_code[sheet_code] = note
+            except UpgradeEntryParseError as exc:
+                raise GenerationError(f"升版规则格式错误: {exc.error_code}") from exc
+        elif params.is_upgrade and params.upgrade_sheet_codes.strip():
             try:
                 upgraded_sheet_codes = set(parse_upgrade_sheet_codes(params.upgrade_sheet_codes))
             except UpgradeSheetCodeParseError as exc:
@@ -411,8 +424,12 @@ class CatalogGenerator(ICatalogGenerator):
 
             # 判断是否需要升版标记
             upgrade_note = ""
-            if params.is_upgrade and seq_no is not None and f"{seq_no:03d}" in upgraded_sheet_codes:
-                upgrade_note = upgrade_note_text
+            if params.is_upgrade and seq_no is not None:
+                sheet_code = f"{seq_no:03d}"
+                if note_by_sheet_code:
+                    upgrade_note = note_by_sheet_code.get(sheet_code, "")
+                elif sheet_code in upgraded_sheet_codes:
+                    upgrade_note = upgrade_note_text
 
             rows.append({
                 "type": "drawing",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable
 
 from ..config import load_spec
 from ..models import BBox, FrameMeta, SheetSet
@@ -27,7 +28,7 @@ class AuditFieldContextMapper:
         tolerances = self.spec.titleblock_extract.get("tolerances", {})
         self._roi_margin_percent = float(tolerances.get("roi_margin_percent", 0.0))
         self._frame_regions = self._build_frame_regions(frames, sheet_sets)
-        self._field_regions = self._build_field_regions(frames)
+        self._field_regions = self._build_field_regions(frames, sheet_sets)
 
     def annotate(self, item: ScanTextItem) -> ScanTextItem:
         x = item.position_x
@@ -90,7 +91,11 @@ class AuditFieldContextMapper:
                 )
         return regions
 
-    def _build_field_regions(self, frames: list[FrameMeta]) -> list[_FieldRegion]:
+    def _build_field_regions(
+        self,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> list[_FieldRegion]:
         field_defs = self.spec.get_field_definitions()
         fields = {
             "engineering_no": "titleblock_engineering_no",
@@ -98,7 +103,7 @@ class AuditFieldContextMapper:
             "external_code": "titleblock_external_code",
         }
         regions: list[_FieldRegion] = []
-        for frame in frames:
+        for frame, internal_code in self._iter_field_frames(frames, sheet_sets):
             profile = self.spec.get_roi_profile(frame.runtime.roi_profile_id or "BASE10")
             if profile is None:
                 continue
@@ -117,10 +122,30 @@ class AuditFieldContextMapper:
                     _FieldRegion(
                         bbox=bbox,
                         field_context=context_name,
-                        internal_code=frame.titleblock.internal_code,
+                        internal_code=internal_code,
                     )
                 )
         return regions
+
+    @staticmethod
+    def _iter_field_frames(
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> Iterable[tuple[FrameMeta, str | None]]:
+        seen_frame_ids: set[str] = set()
+        for frame in frames:
+            seen_frame_ids.add(frame.runtime.frame_id)
+            yield frame, frame.titleblock.internal_code
+
+        for sheet_set in sheet_sets:
+            inherited = sheet_set.get_inherited_titleblock()
+            inherited_internal_code = str(inherited.get("internal_code") or "") or None
+            for page in sheet_set.pages:
+                frame = page.frame_meta
+                if frame is None or frame.runtime.frame_id in seen_frame_ids:
+                    continue
+                seen_frame_ids.add(frame.runtime.frame_id)
+                yield frame, frame.titleblock.internal_code or inherited_internal_code
 
     @staticmethod
     def _restore_roi(outer_bbox: BBox, rb_offset: list[float], sx: float, sy: float) -> BBox:

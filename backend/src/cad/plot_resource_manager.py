@@ -137,20 +137,19 @@ def default_asset_roots() -> list[Path]:
     configured_roots = list(getattr(plot_assets_cfg, "asset_roots", []) or [])
     if configured_roots:
         roots.extend(Path(root) for root in configured_roots)
-    else:
-        module_path = Path(__file__).resolve()
-        repo_like_roots: list[Path] = []
-        for idx in (3, 4):
-            with_root = module_path.parents[idx] if len(module_path.parents) > idx else None
-            if with_root is not None and with_root not in repo_like_roots:
-                repo_like_roots.append(with_root)
-        for repo_root in repo_like_roots:
-            roots.extend(
-                [
-                    repo_root / "test" / "dist" / "assets",
-                    repo_root / "documents" / "Resources",
-                ]
-            )
+    module_path = Path(__file__).resolve()
+    repo_like_roots: list[Path] = []
+    for idx in (3, 4):
+        with_root = module_path.parents[idx] if len(module_path.parents) > idx else None
+        if with_root is not None and with_root not in repo_like_roots:
+            repo_like_roots.append(with_root)
+    for repo_root in repo_like_roots:
+        roots.extend(
+            [
+                repo_root / "test" / "dist" / "assets",
+                repo_root / "documents" / "Resources",
+            ]
+        )
     if getattr(sys, "frozen", False) and bool(
         getattr(plot_assets_cfg, "include_frozen_asset_dirs", True),
     ):

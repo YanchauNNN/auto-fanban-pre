@@ -20,6 +20,45 @@ export default defineConfig({
   },
   build: {
     cssTarget: "chrome61",
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.split("\\").join("/");
+          if (!normalizedId.includes("/node_modules/")) {
+            return undefined;
+          }
+
+          if (
+            normalizedId.includes("/react-pdf/") ||
+            normalizedId.includes("/pdfjs-dist/")
+          ) {
+            return "pdf-preview-vendor";
+          }
+
+          if (
+            normalizedId.includes("/react/") ||
+            normalizedId.includes("/react-dom/") ||
+            normalizedId.includes("/scheduler/")
+          ) {
+            return "react-vendor";
+          }
+
+          if (normalizedId.includes("/@tanstack/react-query/")) {
+            return "query-vendor";
+          }
+
+          if (
+            normalizedId.includes("/react-router") ||
+            normalizedId.includes("/@remix-run/")
+          ) {
+            return "router-vendor";
+          }
+
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     proxy: apiProxyConfig,

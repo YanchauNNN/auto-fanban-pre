@@ -10,6 +10,8 @@ export type JobCardModel =
       percent: number;
       stageLabel: string;
       messageLabel: string;
+      failureReason: string | null;
+      stageContext: string | null;
       findingsCount: number;
       affectedDrawingsCount: number;
       childCount: number;
@@ -25,6 +27,8 @@ export type JobCardModel =
       percent: number;
       stageLabel: string;
       messageLabel: string;
+      failureReason: string | null;
+      stageContext: string | null;
       findingsCount: number;
       affectedDrawingsCount: number;
       childCount: number;
@@ -40,6 +44,8 @@ export type JobCardModel =
       percent: number;
       stageLabel: string;
       messageLabel: string;
+      failureReason: string | null;
+      stageContext: string | null;
       findingsCount: number;
       affectedDrawingsCount: number;
       childCount: 1;
@@ -47,7 +53,10 @@ export type JobCardModel =
       summary: JobSummary;
     };
 
-type PresentableJob = Pick<JobSummary, "isGroup" | "taskKind" | "stage" | "status" | "message">;
+type PresentableJob = Pick<
+  JobSummary,
+  "failureReason" | "isGroup" | "message" | "stage" | "stageContext" | "status" | "taskKind"
+>;
 
 const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
@@ -126,6 +135,8 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
     percent: group.percent,
     stageLabel: getStageLabel(group.stage, group),
     messageLabel: getMessageLabel(group),
+    failureReason: group.failureReason ?? null,
+    stageContext: group.stageContext ?? null,
     findingsCount: group.findingsCount,
     affectedDrawingsCount: group.affectedDrawingsCount,
     childCount: Math.max(group.childJobIds.length, group.children?.length ?? 0, group.runAuditCheck ? 2 : 1),
@@ -150,6 +161,8 @@ export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[]
         percent: aggregate.percent,
         stageLabel: getStageLabel(aggregate.stage, syntheticPresentation),
         messageLabel: getMessageLabel(syntheticPresentation),
+        failureReason: aggregate.failureReason ?? null,
+        stageContext: aggregate.stageContext ?? null,
         findingsCount: aggregate.findingsCount,
         affectedDrawingsCount: aggregate.affectedDrawingsCount,
         childCount: sortedBucket.length,
@@ -263,6 +276,10 @@ export function getMessageLabel(job: PresentableJob): string {
     return "交付任务已取消";
   }
 
+  if (job.status === "failed" && job.failureReason) {
+    return job.failureReason;
+  }
+
   if (job.status === "failed" && isReadableMessage(message)) {
     return message;
   }
@@ -308,6 +325,8 @@ function toSingleJobModel(job: JobSummary): JobCardModel {
     percent: job.percent,
     stageLabel: getStageLabel(job.stage, job),
     messageLabel: getMessageLabel(job),
+    failureReason: job.failureReason ?? null,
+    stageContext: job.stageContext ?? null,
     findingsCount: job.findingsCount,
     affectedDrawingsCount: job.affectedDrawingsCount,
     childCount: 1,
@@ -320,6 +339,7 @@ function buildSyntheticAggregate(children: readonly JobSummary[]): JobSummary {
   const representative = pickRepresentativeJob(children);
   const status = aggregateStatus(children);
   const stage = deriveSyntheticStage(children, status);
+  const statusRepresentative = pickRepresentativeJob(children, status);
   const percent = aggregatePercent(children);
   const findingsCount = children.reduce((sum, child) => sum + child.findingsCount, 0);
   const affectedDrawingsCount = children.reduce((sum, child) => sum + child.affectedDrawingsCount, 0);
@@ -330,6 +350,8 @@ function buildSyntheticAggregate(children: readonly JobSummary[]): JobSummary {
     stage,
     percent,
     message: "",
+    failureReason: statusRepresentative.failureReason ?? null,
+    stageContext: statusRepresentative.stageContext ?? null,
     findingsCount,
     affectedDrawingsCount,
     childJobIds: children.map((child) => child.jobId),

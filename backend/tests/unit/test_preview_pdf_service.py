@@ -32,6 +32,26 @@ def _write_pdf(path: Path, labels: list[str], *, width: float = 1000, height: fl
     doc.close()
 
 
+def _write_rotated_pdf(path: Path) -> None:
+    doc = fitz.open()
+    page = doc.new_page(width=927, height=680)
+    page.insert_text((72, 72), "rotated-frame-001", fontsize=18)
+    page.set_rotation(270)
+    doc.save(path)
+    doc.close()
+
+
+def _count_red_pixels(page: fitz.Page, clip: fitz.Rect) -> int:
+    pix = page.get_pixmap(clip=clip, alpha=False)
+    samples = pix.samples
+    channels = pix.n
+    return sum(
+        1
+        for offset in range(0, len(samples), channels)
+        if samples[offset] > 200 and samples[offset + 1] < 80 and samples[offset + 2] < 80
+    )
+
+
 def _make_frame(*, pdf_path: Path, internal_code: str, seq: str) -> FrameMeta:
     return FrameMeta(
         runtime=FrameRuntime(
@@ -191,6 +211,45 @@ def test_build_preview_draws_red_boxes_for_positioned_findings(monkeypatch, tmp_
     try:
         drawings = doc[0].get_drawings()
         assert drawings, "expected at least one visible rectangle drawing on annotated preview"
+    finally:
+        doc.close()
+
+
+def test_build_preview_draws_field_roi_on_rotated_pdf_pages(monkeypatch, tmp_path: Path) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    frame_pdf = tmp_path / "rotated-frame.pdf"
+    _write_rotated_pdf(frame_pdf)
+    frame = _make_frame(pdf_path=frame_pdf, internal_code="20261RS-JGS65-001", seq="001")
+
+    findings = [
+        AuditFinding(
+            raw_text="20261RS-JGS65-001",
+            matched_text="2026",
+            matched_project_nos=["2026"],
+            context_kind="titleblock_internal_code",
+            confidence="high",
+            entity_type="DBText",
+            field_context="titleblock_internal_code",
+            internal_code="20261RS-JGS65-001",
+            position_x=960,
+            position_y=47,
+        )
+    ]
+
+    result = PreviewPdfService().build_preview(
+        job_id="job-preview-rotated-annotated",
+        output_dir=tmp_path / "preview",
+        frames=[frame],
+        sheet_sets=[],
+        findings=findings,
+    )
+
+    doc = fitz.open(result.pdf_path)
+    try:
+        page = doc[0]
+        assert page.rotation == 270
+        expected_visible_roi = fitz.Rect(640, 850, 680, 880)
+        assert _count_red_pixels(page, expected_visible_roi) > 0
     finally:
         doc.close()
 

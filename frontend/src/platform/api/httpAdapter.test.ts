@@ -209,6 +209,50 @@ describe("HttpAdapter", () => {
     expect(jobs.items).toHaveLength(0);
   });
 
+  it("maps failure display fields in job summaries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 1,
+          items: [
+            {
+              job_id: "failed-job-1",
+              batch_id: "batch-failed-1",
+              source_filename: "20162SD-JGS03-出图.dwg",
+              task_kind: "deliverable",
+              job_mode: "deliverable",
+              project_no: "2016",
+              status: "failed",
+              stage: "A4_MULTIPAGE_GROUPING",
+              percent: 60,
+              message: "完成阶段: A4_MULTIPAGE_GROUPING",
+              failure_reason: "服务重启/中断，任务未完成",
+              stage_context: "中断前最后完成阶段：A4 多页合并",
+              created_at: "2026-05-14T10:19:22+08:00",
+              finished_at: "2026-05-14T10:20:00+08:00",
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const jobs = await adapter.listJobs();
+
+    expect(jobs.items[0]?.failureReason).toBe("服务重启/中断，任务未完成");
+    expect(jobs.items[0]?.stageContext).toBe("中断前最后完成阶段：A4 多页合并");
+  });
+
   it("creates replace-only jobs with mode=replace and run_deliverable=false", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

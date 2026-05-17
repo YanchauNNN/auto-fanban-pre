@@ -232,11 +232,20 @@ doc_generation:
         source: frontend
         default: ""
         format: "upgrade-sheet-codes"
-        desc: "升版图纸编号，匹配internal_code最后三位；支持单值和区间组合，留空表示仅标记目录文件本身为升版"
+        desc: "兼容旧字段：普通升版图纸编号，匹配internal_code最后三位；新前端优先提交upgrade_entries，本字段保留用于历史任务/旧调用"
         ui:
           widget: text
           placeholder: "例如：001~099、001、003、005~009"
-          tooltip: "输入图纸内部编码最后三位，支持单个编号和区间组合。示例：001~099、001、003、005~009；支持分隔符：、 ， , 。 . ； ;；支持连接符：~ 和 -；留空表示仅标记目录文件本身为升版。"
+          tooltip: "兼容旧输入：输入图纸内部编码最后三位，支持单个编号和区间组合。新前端多行升版规则会优先提交upgrade_entries。"
+      upgrade_entries:
+        type: str
+        required: false
+        source: frontend
+        default: "[]"
+        format: "upgrade-entries"
+        desc: "结构化升版规则JSON数组：每行包含revision、sheet_codes、is_added；普通升版写升版备注，新增行写新增备注；封面/目录版次按revision最高值计算"
+        ui:
+          widget: hidden
 
     # ========== 设计文件参数 ==========
     design:
@@ -622,7 +631,7 @@ doc_generation:
           format: "{title_cn}\\n{title_en}"
           note: "换行符分隔，需设置单元格自动换行"
         
-        upgrade_note_rule: "当is_upgrade=true时，封面行与目录行固定写项目对应升版标记；当upgrade_sheet_codes解析后命中internal_code尾号时，对应图纸行写入相同标记；is_upgrade=false时全部留空"
+        upgrade_note_rule: "当is_upgrade=true时，封面行与目录行固定写项目对应升版标记；新逻辑优先解析upgrade_entries，普通升版行命中internal_code尾号时写升版标记，is_added=true新增行命中时写新增/新增Add；upgrade_sheet_codes仅保留为旧兼容字段；is_upgrade=false时全部留空"
       
       pagination:
         paper_size: "A4横向"

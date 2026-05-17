@@ -98,6 +98,7 @@ class GlobalDocParams(BaseModel):
     # === 目录参数 ===
     is_upgrade: bool = False
     upgrade_sheet_codes: str = ""
+    upgrade_entries: str | list[dict[str, Any]] = ""
 
     # === 设计文件参数 ===
     wbs_code: str | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -157,6 +158,49 @@ def test_catalog_1818_uses_upgrade_upgrade_label() -> None:
     assert rows[2]["upgrade_note"] == ""
     assert rows[3]["upgrade_note"] == "升版 upgrade"
     assert rows[4]["upgrade_note"] == ""
+
+
+def test_catalog_uses_structured_upgrade_entries_for_upgrade_and_added_notes() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context()
+    ctx.params.is_upgrade = True
+    ctx.params.upgrade_entries = json.dumps(
+        [
+            {"revision": "B", "sheet_codes": "001~002", "is_added": False},
+            {"revision": "D", "sheet_codes": "003", "is_added": True},
+        ],
+        ensure_ascii=False,
+    )
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["upgrade_note"] == "升版"
+    assert rows[1]["upgrade_note"] == "升版"
+    assert rows[2]["upgrade_note"] == "升版"
+    assert rows[3]["upgrade_note"] == "升版"
+    assert rows[4]["upgrade_note"] == "新增"
+    assert rows[4]["revision"] == "A"
+
+
+def test_catalog_1818_uses_added_add_label_for_structured_added_entries() -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="1818")
+    ctx.params.is_upgrade = True
+    ctx.params.upgrade_entries = json.dumps(
+        [
+            {"revision": "B", "sheet_codes": "001", "is_added": False},
+            {"revision": "C", "sheet_codes": "003", "is_added": True},
+        ],
+        ensure_ascii=False,
+    )
+
+    rows = gen._build_detail_rows(ctx)
+
+    assert rows[0]["upgrade_note"] == "升版 upgrade"
+    assert rows[1]["upgrade_note"] == "升版 upgrade"
+    assert rows[2]["upgrade_note"] == "升版 upgrade"
+    assert rows[3]["upgrade_note"] == ""
+    assert rows[4]["upgrade_note"] == "新增Add"
 
 
 def test_catalog_cover_and_catalog_rows_use_cover_catalog_revision() -> None:

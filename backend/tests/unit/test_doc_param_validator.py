@@ -99,6 +99,42 @@ def test_validate_frontend_params_rejects_invalid_upgrade_sheet_codes() -> None:
     assert errors["upgrade_sheet_codes"] == ["format:upgrade-sheet-codes"]
 
 
+def test_validate_frontend_params_rejects_invalid_upgrade_entries_json() -> None:
+    validator = _validator()
+    payload = _base_frontend_params()
+    payload["is_upgrade"] = "true"
+    payload["upgrade_entries"] = "not-json"
+
+    errors = validator.validate_frontend_params(payload)
+
+    assert errors["upgrade_entries"] == ["format:upgrade-entries"]
+
+
+def test_validate_frontend_params_rejects_duplicate_upgrade_entry_codes() -> None:
+    validator = _validator()
+    payload = _base_frontend_params()
+    payload["is_upgrade"] = "true"
+    payload["upgrade_entries"] = (
+        '[{"revision":"B","sheet_codes":"001~003","is_added":false},'
+        '{"revision":"C","sheet_codes":"003","is_added":true}]'
+    )
+
+    errors = validator.validate_frontend_params(payload)
+
+    assert errors["upgrade_entries"] == ["format:upgrade-entries"]
+
+
+def test_validate_frontend_params_rejects_added_upgrade_entry_without_codes() -> None:
+    validator = _validator()
+    payload = _base_frontend_params()
+    payload["is_upgrade"] = "true"
+    payload["upgrade_entries"] = '[{"revision":"B","sheet_codes":"","is_added":true}]'
+
+    errors = validator.validate_frontend_params(payload)
+
+    assert errors["upgrade_entries"] == ["format:upgrade-entries"]
+
+
 def test_validate_frontend_params_skips_ied_required_fields_when_plan_disabled() -> None:
     validator = _validator()
     payload = _base_frontend_params()

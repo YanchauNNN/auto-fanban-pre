@@ -9,7 +9,17 @@ from src.audit_check.executor import AuditCheckExecutor
 from src.audit_check.models import AuditLexicon, ScanTextItem
 from src.audit_check.roi_mapper import AuditFieldContextMapper
 from src.config import SpecLoader, reload_config
-from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, TitleblockFields
+from src.models import (
+    BBox,
+    FrameMeta,
+    FrameRuntime,
+    Job,
+    JobStatus,
+    JobType,
+    PageInfo,
+    SheetSet,
+    TitleblockFields,
+)
 
 
 def _configure_env(monkeypatch, tmp_path: Path) -> None:
@@ -116,6 +126,66 @@ def test_audit_field_context_mapper_initializes_roi_margin_before_building_regio
     mapper = AuditFieldContextMapper([frame], [])
 
     assert mapper is not None
+
+
+def test_audit_field_context_mapper_uses_sheet_page_roi_for_field_context(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    outer_bbox = BBox(xmin=0, ymin=0, xmax=1000, ymax=700)
+    master_frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="sheet-master-001",
+            source_file=tmp_path / "demo.dxf",
+            outer_bbox=outer_bbox,
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(internal_code="20162SD-JGS03-001"),
+    )
+    page_frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="sheet-page-001",
+            source_file=tmp_path / "demo.dxf",
+            outer_bbox=outer_bbox,
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(),
+    )
+    sheet_set = SheetSet(
+        cluster_id="sheet-001",
+        page_total=1,
+        pages=[
+            PageInfo(
+                page_index=1,
+                outer_bbox=outer_bbox,
+                frame_meta=page_frame,
+            )
+        ],
+        master_page=PageInfo(
+            page_index=1,
+            outer_bbox=outer_bbox,
+            frame_meta=master_frame,
+        ),
+    )
+
+    mapper = AuditFieldContextMapper([], [sheet_set])
+    annotated = mapper.annotate(
+        ScanTextItem(
+            raw_text="20162SD-JGS03-001",
+            entity_type="DBText",
+            position_x=960.0,
+            position_y=47.0,
+        )
+    )
+
+    assert annotated.internal_code == "20162SD-JGS03-001"
+    assert annotated.field_context == "titleblock_internal_code"
 
 
 def test_audit_check_executor_reuses_shared_prep_without_rerunning_oda_or_detection(

@@ -158,8 +158,9 @@ class PreviewPdfService:
                 rect = self._resolve_annotation_rect(doc[target.preview_page_index], target, finding)
                 if rect is None:
                     continue
-                doc[target.preview_page_index].draw_rect(
-                    rect,
+                page = doc[target.preview_page_index]
+                page.draw_rect(
+                    self._to_pdf_drawing_rect(page, rect),
                     color=(1, 0, 0),
                     width=1.25,
                     overlay=True,
@@ -310,6 +311,14 @@ class PreviewPdfService:
         if padded.is_empty or padded.width <= 0 or padded.height <= 0:
             return None
         return padded
+
+    @staticmethod
+    def _to_pdf_drawing_rect(page: fitz.Page, rect: fitz.Rect) -> fitz.Rect:
+        if page.rotation == 0:
+            return rect
+        transformed = fitz.Rect(rect) * page.derotation_matrix
+        transformed.normalize()
+        return transformed
 
     @staticmethod
     def _contains(bbox: BBox, x: float, y: float) -> bool:

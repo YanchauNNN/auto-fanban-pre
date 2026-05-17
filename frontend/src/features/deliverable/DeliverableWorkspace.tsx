@@ -73,6 +73,8 @@ const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_revision",
   "upgrade_note_text",
 ]);
+const UPGRADE_ENTRIES_KEY = "upgrade_entries";
+const DEFAULT_UPGRADE_REVISION = "B";
 const INCLUDE_IED_PLAN_KEY = "include_ied_plan";
 const MANUALLY_POSITIONED_FIELDS = new Set([INCLUDE_IED_PLAN_KEY]);
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
@@ -87,6 +89,12 @@ type FontSubmitConfig = {
   fontReplacePolicy: "none" | "replace_missing";
   fontReplacementFont?: string;
   fontReplacementFonts?: FontReplacementMap;
+};
+
+type UpgradeEntryDraft = {
+  revision: string;
+  sheet_codes: string;
+  is_added: boolean;
 };
 
 export function DeliverableWorkspace({
@@ -122,9 +130,15 @@ export function DeliverableWorkspace({
     promise: Promise<FontPreflightResult | null>;
   } | null>(null);
   const preflightRequestIdRef = useRef(0);
+  const schemaSyncInitializedRef = useRef(false);
   const tutorialPreviewEnabled = Boolean(tutorialPreview);
 
   useEffect(() => {
+    if (!schemaSyncInitializedRef.current) {
+      schemaSyncInitializedRef.current = true;
+      return;
+    }
+
     setDraft((current) => syncTaskConfigDraft(schema, current));
   }, [schema]);
 
@@ -167,6 +181,10 @@ export function DeliverableWorkspace({
     [schema],
   );
   const upgradeEnabled = draft.values.is_upgrade === "true";
+  const upgradeEntries = useMemo(
+    () => getUpgradeEntriesForDraft(draft.values, getUpgradeRevisionFallback(draft.values)),
+    [draft.values],
+  );
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [savedPresets, selectedPresetId],
@@ -436,24 +454,108 @@ export function DeliverableWorkspace({
     const schemaDefault = coverRevisionField?.defaultValue?.trim() ?? "";
     setDraft((current) => ({
       ...current,
-      values: {
-        ...current.values,
-        is_upgrade: current.values.is_upgrade === "true" ? "false" : "true",
-        cover_revision:
-          current.values.is_upgrade === "true"
-            ? current.values.cover_revision ?? ""
-            : !current.values.cover_revision?.trim() ||
-                current.values.cover_revision?.trim() === schemaDefault ||
-                current.values.cover_revision?.trim() === "A"
-              ? "B"
-              : current.values.cover_revision,
-      },
+      values:
+        current.values.is_upgrade === "true"
+          ? {
+              ...current.values,
+              is_upgrade: "false",
+            }
+          : syncUpgradeEntryValues(
+              {
+                ...current.values,
+                is_upgrade: "true",
+                cover_revision:
+                  !current.values.cover_revision?.trim() ||
+                  current.values.cover_revision?.trim() === schemaDefault ||
+                  current.values.cover_revision?.trim() === "A"
+                    ? DEFAULT_UPGRADE_REVISION
+                    : current.values.cover_revision,
+              },
+              fillBlankUpgradeRevision(
+                getUpgradeEntriesForDraft(
+                  current.values,
+                  current.values.cover_revision?.trim() || DEFAULT_UPGRADE_REVISION,
+                ),
+              ),
+            ),
       fieldErrors: {
         ...current.fieldErrors,
         is_upgrade: [],
         upgrade_sheet_codes: [],
+        upgrade_entries: [],
       },
     }));
+  }
+
+  function handleUpgradeEntryChange(index: number, patch: Partial<UpgradeEntryDraft>) {
+    setPresetUpdatedNotice(false);
+    setDraft((current) => {
+      const entries = getUpgradeEntriesForDraft(
+        current.values,
+        getUpgradeRevisionFallback(current.values),
+      );
+      const nextEntries = entries.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, ...patch } : entry,
+      );
+      return {
+        ...current,
+        values: syncUpgradeEntryValues(current.values, nextEntries),
+        fieldErrors: {
+          ...current.fieldErrors,
+          cover_revision: [],
+          upgrade_sheet_codes: [],
+          upgrade_entries: [],
+        },
+      };
+    });
+  }
+
+  function handleAddUpgradeEntry(index: number) {
+    setPresetUpdatedNotice(false);
+    setDraft((current) => {
+      const entries = getUpgradeEntriesForDraft(
+        current.values,
+        getUpgradeRevisionFallback(current.values),
+      );
+      const source = entries[index] ?? createDefaultUpgradeEntry(getUpgradeRevisionFallback(current.values));
+      const nextEntries = [
+        ...entries.slice(0, index + 1),
+        { ...source },
+        ...entries.slice(index + 1),
+      ];
+      return {
+        ...current,
+        values: syncUpgradeEntryValues(current.values, nextEntries),
+        fieldErrors: {
+          ...current.fieldErrors,
+          upgrade_entries: [],
+        },
+      };
+    });
+  }
+
+  function handleRemoveUpgradeEntry(index: number) {
+    setPresetUpdatedNotice(false);
+    setDraft((current) => {
+      const entries = getUpgradeEntriesForDraft(
+        current.values,
+        getUpgradeRevisionFallback(current.values),
+      );
+      const nextEntries = entries.filter((_, entryIndex) => entryIndex !== index);
+      return {
+        ...current,
+        values: syncUpgradeEntryValues(
+          current.values,
+          nextEntries.length > 0
+            ? nextEntries
+            : [createDefaultUpgradeEntry(getUpgradeRevisionFallback(current.values))],
+        ),
+        fieldErrors: {
+          ...current.fieldErrors,
+          upgrade_entries: [],
+        },
+      };
+    });
   }
 
   function handleReplaceFiles(files: File[]) {
@@ -801,10 +903,14 @@ export function DeliverableWorkspace({
                   draft={draft}
                   fieldErrors={draft.fieldErrors}
                   iedPlanField={iedPlanField}
+                  onAddUpgradeEntry={handleAddUpgradeEntry}
                   onFieldChange={handleFieldChange}
+                  onRemoveUpgradeEntry={handleRemoveUpgradeEntry}
+                  onUpgradeEntryChange={handleUpgradeEntryChange}
                   onUpgradeToggle={handleUpgradeToggle}
                   section={section}
                   upgradeEnabled={upgradeEnabled}
+                  upgradeEntries={upgradeEntries}
                   upgradeSheetCodesField={upgradeSheetCodesField}
                 />
               ))}
@@ -1220,9 +1326,13 @@ function FragmentWithUpgradeSection({
   draft,
   fieldErrors,
   iedPlanField,
+  onAddUpgradeEntry,
   onFieldChange,
+  onRemoveUpgradeEntry,
+  onUpgradeEntryChange,
   onUpgradeToggle,
   upgradeEnabled,
+  upgradeEntries,
   coverRevisionField,
   upgradeSheetCodesField,
 }: {
@@ -1230,9 +1340,13 @@ function FragmentWithUpgradeSection({
   draft: TaskConfigDraft;
   fieldErrors: Record<string, string[]>;
   iedPlanField: FormField | undefined;
+  onAddUpgradeEntry: (index: number) => void;
   onFieldChange: (key: string, value: string) => void;
+  onRemoveUpgradeEntry: (index: number) => void;
+  onUpgradeEntryChange: (index: number, patch: Partial<UpgradeEntryDraft>) => void;
   onUpgradeToggle: () => void;
   upgradeEnabled: boolean;
+  upgradeEntries: UpgradeEntryDraft[];
   coverRevisionField: FormField | undefined;
   upgradeSheetCodesField: FormField | undefined;
 }) {
@@ -1302,33 +1416,157 @@ function FragmentWithUpgradeSection({
             </button>
           </div>
           <span className={styles.helperText}>
-            启用后可填写封面和目录版次、升版图纸编号；关闭时会隐藏输入框，但会保留已输入内容。
+            启用后可按版次拆成多行规则；封面和目录版次会自动取所有规则中的最高版次。
           </span>
           {upgradeEnabled ? (
-            <div className={styles.fieldGrid}>
-              {coverRevisionField ? (
-                <FieldControl
-                  error={fieldErrors.cover_revision?.[0]}
-                  field={coverRevisionField}
-                  onChange={(value) => onFieldChange("cover_revision", value)}
-                  value={draft.values.cover_revision ?? ""}
-                  values={draft.values}
-                />
-              ) : null}
-              {upgradeSheetCodesField ? (
-                <FieldControl
-                  error={fieldErrors.upgrade_sheet_codes?.[0]}
-                  field={upgradeSheetCodesField}
-                  onChange={(value) => onFieldChange("upgrade_sheet_codes", value)}
-                  value={draft.values.upgrade_sheet_codes ?? ""}
-                  values={draft.values}
-                />
-              ) : null}
-            </div>
+            <UpgradeRulesEditor
+              coverRevisionField={coverRevisionField}
+              entries={upgradeEntries}
+              error={
+                fieldErrors.upgrade_entries?.[0] ??
+                fieldErrors.upgrade_sheet_codes?.[0] ??
+                fieldErrors.cover_revision?.[0]
+              }
+              onAddEntry={onAddUpgradeEntry}
+              onChangeEntry={onUpgradeEntryChange}
+              onRemoveEntry={onRemoveUpgradeEntry}
+              upgradeSheetCodesField={upgradeSheetCodesField}
+            />
           ) : null}
         </section>
       ) : null}
     </>
+  );
+}
+
+function UpgradeRulesEditor({
+  coverRevisionField,
+  entries,
+  error,
+  onAddEntry,
+  onChangeEntry,
+  onRemoveEntry,
+  upgradeSheetCodesField,
+}: {
+  coverRevisionField: FormField | undefined;
+  entries: UpgradeEntryDraft[];
+  error?: string;
+  onAddEntry: (index: number) => void;
+  onChangeEntry: (index: number, patch: Partial<UpgradeEntryDraft>) => void;
+  onRemoveEntry: (index: number) => void;
+  upgradeSheetCodesField: FormField | undefined;
+}) {
+  const revisionLabel = coverRevisionField?.label ?? "版次";
+  const sheetCodesLabel = upgradeSheetCodesField?.label ?? "图纸编号";
+
+  return (
+    <div className={styles.upgradeRules}>
+      {entries.map((entry, index) => (
+        <UpgradeRuleRow
+          key={index}
+          canRemove={entries.length > 1}
+          entry={entry}
+          index={index}
+          revisionLabel={revisionLabel}
+          sheetCodesLabel={sheetCodesLabel}
+          onAdd={() => onAddEntry(index)}
+          onChange={(patch) => onChangeEntry(index, patch)}
+          onRemove={() => onRemoveEntry(index)}
+        />
+      ))}
+      {error ? <span className={styles.errorText}>{error}</span> : null}
+    </div>
+  );
+}
+
+function UpgradeRuleRow({
+  canRemove,
+  entry,
+  index,
+  revisionLabel,
+  sheetCodesLabel,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  canRemove: boolean;
+  entry: UpgradeEntryDraft;
+  index: number;
+  revisionLabel: string;
+  sheetCodesLabel: string;
+  onAdd: () => void;
+  onChange: (patch: Partial<UpgradeEntryDraft>) => void;
+  onRemove: () => void;
+}) {
+  const revisionId = useId();
+  const sheetCodesId = useId();
+  const addedId = useId();
+
+  return (
+    <div className={styles.upgradeRuleRow}>
+      <div className={styles.upgradeRuleIndex}>规则 {index + 1}</div>
+      <label className={styles.field} htmlFor={revisionId}>
+        <span className={styles.fieldLabel}>
+          <span>{revisionLabel}</span>
+        </span>
+        <input
+          aria-label={revisionLabel}
+          className={styles.input}
+          id={revisionId}
+          name={`upgrade_revision_${index}`}
+          placeholder="例如 B、C、D"
+          type="text"
+          value={entry.revision}
+          onChange={(event) => onChange({ revision: event.target.value })}
+        />
+      </label>
+      <label className={styles.field} htmlFor={sheetCodesId}>
+        <span className={styles.fieldLabel}>
+          <span>{sheetCodesLabel}</span>
+        </span>
+        <input
+          aria-label={sheetCodesLabel}
+          className={styles.input}
+          id={sheetCodesId}
+          name={`upgrade_sheet_codes_${index}`}
+          placeholder="例如 001~003、021~024"
+          type="text"
+          value={entry.sheet_codes}
+          onChange={(event) => onChange({ sheet_codes: event.target.value })}
+        />
+      </label>
+      <label className={styles.upgradeAddedToggle} htmlFor={addedId}>
+        <input
+          aria-label="新增"
+          checked={entry.is_added}
+          className={styles.checkboxInput}
+          id={addedId}
+          type="checkbox"
+          onChange={(event) => onChange({ is_added: event.target.checked })}
+        />
+        <span>新增</span>
+      </label>
+      <div className={styles.upgradeRuleActions}>
+        <button
+          aria-label="复制升版规则"
+          className={styles.secondaryButton}
+          type="button"
+          onClick={onAdd}
+        >
+          +
+        </button>
+        {canRemove ? (
+          <button
+            aria-label="删除升版规则"
+            className={styles.ghostButton}
+            type="button"
+            onClick={onRemove}
+          >
+            删除
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1544,6 +1782,7 @@ function applyFilesToDraft(
       project_no: nextProjectNo,
       is_upgrade: draft.values.is_upgrade ?? "false",
       upgrade_sheet_codes: draft.values.upgrade_sheet_codes ?? "",
+      [UPGRADE_ENTRIES_KEY]: draft.values[UPGRADE_ENTRIES_KEY] ?? "[]",
     },
     fieldErrors: {},
     formErrors: [],
@@ -1854,6 +2093,155 @@ function pickSelectedReplacementFonts(
   );
 }
 
+function createDefaultUpgradeEntry(revision = DEFAULT_UPGRADE_REVISION): UpgradeEntryDraft {
+  return {
+    revision,
+    sheet_codes: "",
+    is_added: false,
+  };
+}
+
+function getUpgradeRevisionFallback(values: Record<string, string>) {
+  return values.cover_revision?.trim() || DEFAULT_UPGRADE_REVISION;
+}
+
+function getUpgradeEntriesForDraft(
+  values: Record<string, string>,
+  fallbackRevision = DEFAULT_UPGRADE_REVISION,
+): UpgradeEntryDraft[] {
+  const parsedEntries = parseUpgradeEntriesValue(values[UPGRADE_ENTRIES_KEY]);
+  if (parsedEntries.length > 0) {
+    return parsedEntries;
+  }
+
+  if ((values.cover_revision ?? "").trim() || (values.upgrade_sheet_codes ?? "").trim()) {
+    return [
+      {
+        revision: values.cover_revision ?? fallbackRevision,
+        sheet_codes: values.upgrade_sheet_codes ?? "",
+        is_added: false,
+      },
+    ];
+  }
+
+  return [createDefaultUpgradeEntry(fallbackRevision)];
+}
+
+function parseUpgradeEntriesValue(rawValue: unknown): UpgradeEntryDraft[] {
+  if (Array.isArray(rawValue)) {
+    return normalizeUpgradeEntries(rawValue);
+  }
+
+  if (typeof rawValue !== "string" || !rawValue.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? normalizeUpgradeEntries(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeUpgradeEntries(rawEntries: unknown[]): UpgradeEntryDraft[] {
+  return rawEntries
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const candidate = entry as Partial<Record<keyof UpgradeEntryDraft, unknown>>;
+      return {
+        revision: String(candidate.revision ?? ""),
+        sheet_codes: String(candidate.sheet_codes ?? ""),
+        is_added: candidate.is_added === true || candidate.is_added === "true",
+      };
+    })
+    .filter((entry): entry is UpgradeEntryDraft => Boolean(entry));
+}
+
+function fillBlankUpgradeRevision(entries: UpgradeEntryDraft[]) {
+  return entries.map((entry, index) =>
+    index === 0 && !entry.revision.trim()
+      ? {
+          ...entry,
+          revision: DEFAULT_UPGRADE_REVISION,
+        }
+      : entry,
+  );
+}
+
+function syncUpgradeEntryValues(
+  values: Record<string, string>,
+  entries: UpgradeEntryDraft[],
+): Record<string, string> {
+  const normalizedEntries = entries.length > 0 ? entries : [createDefaultUpgradeEntry()];
+  return {
+    ...values,
+    cover_revision:
+      resolveHighestUpgradeRevision(normalizedEntries) || values.cover_revision || DEFAULT_UPGRADE_REVISION,
+    upgrade_sheet_codes: collectLegacyUpgradeSheetCodes(normalizedEntries),
+    [UPGRADE_ENTRIES_KEY]: stringifyUpgradeEntries(normalizedEntries),
+  };
+}
+
+function stringifyUpgradeEntries(entries: UpgradeEntryDraft[]) {
+  return JSON.stringify(
+    entries.map((entry) => ({
+      revision: entry.revision,
+      sheet_codes: entry.sheet_codes,
+      is_added: entry.is_added,
+    })),
+  );
+}
+
+function normalizeUpgradeEntriesForSubmit(values: Record<string, string>) {
+  return getUpgradeEntriesForDraft(values, getUpgradeRevisionFallback(values)).map((entry) => ({
+    revision: entry.revision.trim().toUpperCase(),
+    sheet_codes: entry.sheet_codes.trim(),
+    is_added: entry.is_added,
+  }));
+}
+
+function collectLegacyUpgradeSheetCodes(entries: UpgradeEntryDraft[]) {
+  return entries
+    .filter((entry) => !entry.is_added)
+    .map((entry) => entry.sheet_codes.trim())
+    .filter(Boolean)
+    .join("、");
+}
+
+function resolveHighestUpgradeRevision(entries: UpgradeEntryDraft[]) {
+  return entries
+    .map((entry) => entry.revision.trim().toUpperCase())
+    .filter(Boolean)
+    .sort(compareRevisionDesc)[0];
+}
+
+function compareRevisionDesc(left: string, right: string) {
+  const leftKey = revisionSortKey(left);
+  const rightKey = revisionSortKey(right);
+  if (leftKey.kind !== rightKey.kind) {
+    return rightKey.kind - leftKey.kind;
+  }
+  if (leftKey.value !== rightKey.value) {
+    return rightKey.value - leftKey.value;
+  }
+  return right.localeCompare(left);
+}
+
+function revisionSortKey(revision: string) {
+  if (/^[A-Z]$/.test(revision)) {
+    return { kind: 2, value: revision.charCodeAt(0) - "A".charCodeAt(0) + 1 };
+  }
+  const numericValue = Number.parseInt(revision, 10);
+  if (Number.isFinite(numericValue)) {
+    return { kind: 1, value: numericValue };
+  }
+  return { kind: 0, value: 0 };
+}
+
 function buildSubmissionValues(
   schema: FormSchema,
   values: Record<string, string>,
@@ -1878,9 +2266,21 @@ function buildSubmissionValues(
   delete sanitized.upgrade_note_text;
 
   const isUpgradeEnabled = sanitized.is_upgrade === "true";
+  const upgradeEntriesForSubmit = isUpgradeEnabled
+    ? normalizeUpgradeEntriesForSubmit(values)
+    : [];
   sanitized.is_upgrade = isUpgradeEnabled ? "true" : "false";
-  sanitized.cover_revision = isUpgradeEnabled ? sanitized.cover_revision ?? "" : "";
-  sanitized.upgrade_sheet_codes = isUpgradeEnabled ? sanitized.upgrade_sheet_codes ?? "" : "";
+  sanitized.cover_revision = isUpgradeEnabled
+    ? resolveHighestUpgradeRevision(upgradeEntriesForSubmit) ||
+      String(sanitized.cover_revision ?? "").trim().toUpperCase() ||
+      DEFAULT_UPGRADE_REVISION
+    : "";
+  sanitized.upgrade_sheet_codes = isUpgradeEnabled
+    ? collectLegacyUpgradeSheetCodes(upgradeEntriesForSubmit)
+    : "";
+  sanitized[UPGRADE_ENTRIES_KEY] = isUpgradeEnabled
+    ? stringifyUpgradeEntries(upgradeEntriesForSubmit)
+    : "[]";
   sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
   if (fontConfig.fontReplacePolicy === "replace_missing") {
     const replacementFonts = normalizeReplacementSelectionMap(

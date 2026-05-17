@@ -117,6 +117,16 @@ const schema: FormSchema = {
           options: [],
         },
         {
+          key: "upgrade_entries",
+          label: "升版规则",
+          type: "text",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "[]",
+          description: "结构化升版规则",
+          options: [],
+        },
+        {
           key: "upgrade_start_seq",
           label: "升版起始号",
           type: "text",
@@ -254,6 +264,32 @@ function createAdapter(): ApiAdapter {
   };
 }
 
+function createOkFontPreflightResult(filename = "2016-A01.dwg"): FontPreflightResult {
+  return {
+    files: [
+      {
+        filename,
+        status: "ok",
+        missingFonts: [],
+        detectedStyleCount: 12,
+        missingStyleCount: 0,
+        fontReplacementApplied: false,
+        replacementFont: null,
+        replacementFonts: {},
+        replacedStyleCount: 0,
+        verifyAfterReplace: null,
+        fontReplacementIncomplete: false,
+        errors: [],
+      },
+    ],
+    replacementOptions: [],
+    replacementOptionsByKind: {},
+    defaultReplacementFont: null,
+    defaultReplacementFonts: {},
+    requiresConfirmation: false,
+  };
+}
+
 describe("DeliverableWorkspace", () => {
   const albumTitleLabel =
     schema.sections[1].fields.find((field) => field.key === "album_title_cn")?.label ?? "";
@@ -274,7 +310,7 @@ describe("DeliverableWorkspace", () => {
     render(
       <DeliverableWorkspace
         adapter={adapter}
-        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        incomingFiles={[]}
         isOpen
         onBatchCreated={vi.fn()}
         onClose={vi.fn()}
@@ -361,7 +397,7 @@ describe("DeliverableWorkspace", () => {
     render(
       <DeliverableWorkspace
         adapter={adapter}
-        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        incomingFiles={[]}
         isOpen
         onBatchCreated={vi.fn()}
         onClose={vi.fn()}
@@ -379,7 +415,7 @@ describe("DeliverableWorkspace", () => {
     render(
       <DeliverableWorkspace
         adapter={adapter}
-        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        incomingFiles={[]}
         isOpen
         onBatchCreated={vi.fn()}
         onClose={vi.fn()}
@@ -399,7 +435,7 @@ describe("DeliverableWorkspace", () => {
     render(
       <DeliverableWorkspace
         adapter={adapter}
-        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        incomingFiles={[]}
         isOpen
         onBatchCreated={vi.fn()}
         onClose={vi.fn()}
@@ -457,6 +493,68 @@ describe("DeliverableWorkspace", () => {
     await user.click(upgradeToggle);
     expect(screen.getByLabelText(coverRevisionLabel)).toHaveValue("B");
     expect(screen.getByLabelText(upgradeSheetCodesLabel)).toHaveValue("005~012");
+  });
+
+  it("duplicates upgrade rule rows and submits structured upgrade entries", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult());
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-upgrade-rules-1",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "示例图册");
+    await user.type(screen.getByLabelText(subitemNameLabel), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "同线宽" }));
+
+    const upgradeBlock = screen.getByTestId("upgrade-config-section");
+    await user.click(within(upgradeBlock).getByRole("button", { name: isUpgradeLabel }));
+
+    const firstCodesInput = within(upgradeBlock).getByLabelText(upgradeSheetCodesLabel);
+    await user.type(firstCodesInput, "001~003");
+    await user.click(within(upgradeBlock).getByRole("button", { name: "复制升版规则" }));
+
+    const revisionInputs = within(upgradeBlock).getAllByLabelText(coverRevisionLabel);
+    const codesInputs = within(upgradeBlock).getAllByLabelText(upgradeSheetCodesLabel);
+    expect(revisionInputs).toHaveLength(2);
+    expect(revisionInputs[1]).toHaveValue("B");
+    expect(codesInputs[1]).toHaveValue("001~003");
+
+    await user.clear(revisionInputs[1]);
+    await user.type(revisionInputs[1], "D");
+    await user.clear(codesInputs[1]);
+    await user.type(codesInputs[1], "021~024");
+    await user.click(within(upgradeBlock).getAllByRole("checkbox", { name: "新增" })[1]);
+
+    await user.click(screen.getByRole("button", { name: "纠错" }));
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => expect(adapter.createBatch).toHaveBeenCalledTimes(1));
+    const submittedValues = vi.mocked(adapter.createBatch).mock.calls[0]?.[0] ?? {};
+    expect(submittedValues).toEqual(
+      expect.objectContaining({
+        is_upgrade: "true",
+        cover_revision: "D",
+        upgrade_sheet_codes: "001~003",
+      }),
+    );
+    expect(JSON.parse(String(submittedValues.upgrade_entries))).toEqual([
+      { revision: "B", sheet_codes: "001~003", is_added: false },
+      { revision: "D", sheet_codes: "021~024", is_added: true },
+    ]);
   });
 
   it("maps 422 param errors into field and form messages", async () => {
@@ -1654,13 +1752,13 @@ describe("DeliverableWorkspace", () => {
     expect(screen.getByText("A01.dwg")).toBeInTheDocument();
   });
 
-  it("defaults IED dates to today without rendering a shortcut button", () => {
+  it("defaults IED dates to today without rendering a shortcut button", async () => {
     const adapter = createAdapter();
 
     render(
       <DeliverableWorkspace
         adapter={adapter}
-        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        incomingFiles={[]}
         isOpen
         onBatchCreated={vi.fn()}
         onClose={vi.fn()}
@@ -1670,7 +1768,7 @@ describe("DeliverableWorkspace", () => {
     );
 
     const today = new Date().toISOString().slice(0, 10);
-    expect(screen.getByLabelText("编制日期")).toHaveValue(today);
+    await waitFor(() => expect(screen.getByLabelText("编制日期")).toHaveValue(today));
     expect(screen.queryByRole("button", { name: /当日/ })).not.toBeInTheDocument();
   });
 
@@ -1769,6 +1867,7 @@ describe("DeliverableWorkspace", () => {
           is_upgrade: "false",
           cover_revision: "",
           upgrade_sheet_codes: "",
+          upgrade_entries: "[]",
         }),
         expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
         true,

@@ -36,6 +36,32 @@ from src.pipeline.shared_prep import SharedPrepService
 from src.result_views import normalize_user_flags
 
 
+DISPLAY_STAGE_LABELS: dict[str, str] = {
+    'INIT': '初始化',
+    'PREP_SOURCE': '准备源文件',
+    'INGEST': '接收文件',
+    'FONT_PREFLIGHT_AND_REPLACE': '字体预检与替换',
+    'CONVERT_DWG_TO_DXF': '转换 DWG/DXF',
+    'DETECT_FRAMES': '识别图框',
+    'VERIFY_FRAMES_BY_ANCHOR': '锚点校验图框',
+    'SCALE_FIT_AND_CHECK': '图幅比例校验',
+    'EXTRACT_TITLEBLOCK_FIELDS': '提取图签字段',
+    'A4_MULTIPAGE_GROUPING': 'A4 多页合并',
+    'FIX_TITLEBLOCK_CONSISTENCY': '修正图签一致性',
+    'SPLIT_AND_RENAME': '拆分与命名',
+    'EXPORT_PDF_AND_DWG': '导出 DWG/PDF',
+    'GENERATE_DOCS': '生成目录和文档',
+    'PACKAGE_ZIP': '生成交付压缩包',
+    'DELIVERABLE_BRANCH': '执行出图子任务',
+    'AUDIT_BRANCH': '执行纠错子任务',
+    'DOCS_AND_PACKAGE': '整理文档与压缩包',
+    'GROUP_COMPLETE': '任务包完成',
+    'AUDIT_CHECK': '执行纠错识别',
+    'AUDIT_REPLACE': '执行翻版替换',
+    'EXPORT_REPORT': '导出纠错报告',
+}
+
+
 @dataclass(frozen=True)
 class UploadedFilePayload:
     filename: str
@@ -1109,6 +1135,12 @@ class DeliverableApiRuntime:
             else:
                 task_kind = 'audit_replace'
                 job_mode = mode or 'replace'
+        failure_display = self._build_failure_display(
+            status_value=job.status.value,
+            stage=job.progress.stage,
+            message=job.progress.message,
+            errors=job.errors,
+        )
         return {
             'job_id': job.job_id,
             'batch_id': job.batch_id,
@@ -1139,6 +1171,8 @@ class DeliverableApiRuntime:
             'stage': job.progress.stage,
             'percent': job.progress.percent,
             'message': job.progress.message,
+            'failure_reason': failure_display['failure_reason'],
+            'stage_context': failure_display['stage_context'],
             'created_at': job.created_at.isoformat(),
             'finished_at': job.finished_at.isoformat() if job.finished_at else None,
             'artifacts': self._serialize_job_artifacts(job),
@@ -1229,6 +1263,12 @@ class DeliverableApiRuntime:
                 affected_drawings_count,
                 int(child.progress.details.get('affected_drawings_count', 0) or 0),
             )
+        failure_display = self._build_failure_display(
+            status_value=group.status.value,
+            stage=group.progress.stage,
+            message=group.progress.message,
+            errors=list(group.errors),
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
@@ -1241,6 +1281,8 @@ class DeliverableApiRuntime:
             'stage': group.progress.stage,
             'percent': group.progress.percent,
             'message': group.progress.message,
+            'failure_reason': failure_display['failure_reason'],
+            'stage_context': failure_display['stage_context'],
             'created_at': group.created_at.isoformat(),
             'finished_at': group.finished_at.isoformat() if group.finished_at else None,
             'run_audit_check': group.run_audit_check,
@@ -1285,6 +1327,59 @@ class DeliverableApiRuntime:
                 f'/api/jobs/{group.group_id}/download/replaced' if replaced_dwg_available else None
             ),
         }
+
+    @classmethod
+    def _build_failure_display(
+        cls,
+        *,
+        status_value: str,
+        stage: str | None,
+        message: str | None,
+        errors: list[str],
+    ) -> dict[str, str | None]:
+        if status_value != JobStatus.FAILED.value:
+            return {'failure_reason': None, 'stage_context': None}
+
+        normalized_errors = [str(error).strip() for error in errors if str(error).strip()]
+        failure_reason = cls._normalize_failure_reason(normalized_errors, message)
+        stage_label = cls._display_stage_label(stage)
+        stage_context: str | None = None
+        if stage_label:
+            if 'service_restarted_before_completion' in normalized_errors:
+                stage_context = f'中断前最后完成阶段：{stage_label}'
+            else:
+                stage_context = f'失败发生阶段：{stage_label}'
+
+        return {'failure_reason': failure_reason, 'stage_context': stage_context}
+
+    @classmethod
+    def _normalize_failure_reason(cls, errors: list[str], message: str | None) -> str:
+        if 'service_restarted_before_completion' in errors:
+            return '服务重启/中断，任务未完成'
+
+        if errors:
+            return errors[0]
+
+        readable_message = str(message or '').strip()
+        if cls._is_readable_failure_message(readable_message):
+            return readable_message
+        return '任务失败，请查看详情'
+
+    @staticmethod
+    def _display_stage_label(stage: str | None) -> str | None:
+        if not stage:
+            return None
+        return DISPLAY_STAGE_LABELS.get(stage, stage)
+
+    @staticmethod
+    def _is_readable_failure_message(message: str) -> bool:
+        if not message:
+            return False
+        if message == '?' * len(message) or '????' in message:
+            return False
+        if '\ufffd' in message:
+            return False
+        return True
 
     def _resolve_group_artifact_owner(self, group: TaskGroup, artifact: str) -> Job | None:
         for child in self._iter_group_children(group):
