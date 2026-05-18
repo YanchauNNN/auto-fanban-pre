@@ -924,6 +924,13 @@ describe("job detail pages", () => {
       }),
     );
     expect(screen.getByText("共 2 页")).toBeInTheDocument();
+    const zoomControls = within(screen.getByLabelText("PDF 局部缩放"));
+    expect(zoomControls.getByText("局部缩放")).toBeInTheDocument();
+    expect(zoomControls.getByText("100%")).toBeInTheDocument();
+    await user.click(zoomControls.getByRole("button", { name: "放大" }));
+    expect(zoomControls.getByText("125%")).toBeInTheDocument();
+    await user.click(zoomControls.getByRole("button", { name: "缩小" }));
+    expect(zoomControls.getByText("100%")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-page-1")).toBeInTheDocument();
     expect(screen.queryByTitle("预览 PDF（纠错标注）")).not.toBeInTheDocument();
   });

@@ -215,6 +215,51 @@ def test_build_preview_draws_red_boxes_for_positioned_findings(monkeypatch, tmp_
         doc.close()
 
 
+def test_build_preview_prefers_matched_text_bbox_over_position_fallback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    frame_pdf = tmp_path / "frame.pdf"
+    _write_pdf(frame_pdf, ["frame-001"], width=1000, height=700)
+    frame = _make_frame(pdf_path=frame_pdf, internal_code="20162RC-JGS41-001", seq="001")
+
+    findings = [
+        AuditFinding(
+            raw_text="20162RC-JGS41-001 A版",
+            matched_text="2016",
+            matched_project_nos=["2016"],
+            context_kind="plain_text",
+            confidence="medium",
+            entity_type="DBText",
+            internal_code="20162RC-JGS41-001",
+            position_x=880,
+            position_y=95,
+            text_bbox=BBox(xmin=760, ymin=82, xmax=950, ymax=118),
+        )
+    ]
+
+    result = PreviewPdfService().build_preview(
+        job_id="job-preview-text-bbox",
+        output_dir=tmp_path / "preview",
+        frames=[frame],
+        sheet_sets=[],
+        findings=findings,
+    )
+
+    doc = fitz.open(result.pdf_path)
+    try:
+        page = doc[0]
+        expected_matched_text_rect = fitz.Rect(755, 575, 805, 625)
+        expected_code_prefix_rect = fitz.Rect(810, 575, 840, 625)
+        fallback_position_rect = fitz.Rect(840, 560, 920, 640)
+        assert _count_red_pixels(page, expected_matched_text_rect) > 0
+        assert _count_red_pixels(page, expected_code_prefix_rect) > 0
+        assert _count_red_pixels(page, fallback_position_rect) == 0
+    finally:
+        doc.close()
+
+
 def test_build_preview_draws_field_roi_on_rotated_pdf_pages(monkeypatch, tmp_path: Path) -> None:
     _configure_env(monkeypatch, tmp_path)
     frame_pdf = tmp_path / "rotated-frame.pdf"

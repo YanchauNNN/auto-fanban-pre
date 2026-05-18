@@ -56,6 +56,7 @@ class AuditMatchEngine:
                         block_path=item.block_path,
                         position_x=item.position_x,
                         position_y=item.position_y,
+                        text_bbox=item.text_bbox,
                     )
                 )
             if (
@@ -88,6 +89,7 @@ class AuditMatchEngine:
                             block_path=item.block_path,
                             position_x=item.position_x,
                             position_y=item.position_y,
+                            text_bbox=item.text_bbox,
                         )
                     )
 

@@ -347,6 +347,11 @@ class FontPreflightService:
             str(option.get("value") or "").strip().lower(): option
             for option in options
         }
+        stem_lookup = {
+            _font_option_stem(str(option.get("value") or "")): option
+            for option in options
+            if _font_option_stem(str(option.get("value") or ""))
+        }
         family_lookup = {
             str(option.get("family") or "").strip().lower(): option
             for option in options
@@ -359,9 +364,16 @@ class FontPreflightService:
                 return lookup[normalized]
             if normalized in family_lookup:
                 return family_lookup[normalized]
-            stem = normalized.rsplit(".", 1)[0]
+            stem = _font_option_stem(normalized)
+            if stem in stem_lookup:
+                return stem_lookup[stem]
             if stem in family_lookup:
                 return family_lookup[stem]
+            for option in options:
+                family = str(option.get("family") or "").strip().lower()
+                label = str(option.get("label") or "").strip().lower()
+                if stem and (stem in family or stem in label):
+                    return option
         return options[0]
 
     @staticmethod
@@ -423,3 +435,11 @@ def _safe_bridge_token(value: str) -> str:
 
 def _safe_bridge_filename(source_dwg: Path) -> str:
     return f"{_safe_bridge_token(source_dwg.stem)}{source_dwg.suffix.lower()}"
+
+
+def _font_option_stem(value: str) -> str:
+    normalized = str(value or "").strip().lower().replace("\\", "/")
+    if not normalized:
+        return ""
+    name = normalized.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[0]

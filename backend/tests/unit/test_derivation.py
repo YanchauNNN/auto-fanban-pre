@@ -49,6 +49,29 @@ class TestDerivationEngine:
         assert derived_2016.cover_external_code == "JD1NHT11F01B25C42SD"
         assert derived_2016.catalog_external_code == "JD1NHT11T01B25C42SD"
 
+    def test_steel_liner_mode_uses_album_code_for_cover_catalog_external_codes(
+        self,
+        engine: DerivationEngine,
+        sample_frame,
+    ):
+        params = GlobalDocParams(project_no="2016")
+        frame_001 = sample_frame.model_copy(deep=True)
+        frame_001.titleblock.internal_code = "20161RC-JGS07-001"
+        frame_001.titleblock.external_code = "JD1RCT11001B25C42SD"
+        frame_001.titleblock.title_cn = "钢衬里布置图"
+        frame_002 = sample_frame.model_copy(deep=True)
+        frame_002.titleblock.internal_code = "20161RC-JGS07-002"
+        frame_002.titleblock.external_code = "JD1RCT11002B25C42SD"
+        frame_002.titleblock.title_cn = "钢衬里详图"
+        ctx = DocContext(params=params, frames=[frame_001, frame_002])
+
+        derived = engine.compute(ctx)
+
+        assert derived.steel_liner_mode is True
+        assert derived.album_code == "07"
+        assert derived.cover_external_code == "JD1RCT11F07B25C42SD"
+        assert derived.catalog_external_code == "JD1RCT11T07B25C42SD"
+
     def test_derive_titles(self, derived_2016: DerivedFields):
         """测试标题派生"""
         # album_title_cn = "测试图册"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ..models import BBox
+
 
 @dataclass(slots=True)
 class ScanTextItem:
@@ -14,6 +16,7 @@ class ScanTextItem:
     block_path: str | None = None
     position_x: float | None = None
     position_y: float | None = None
+    text_bbox: BBox | None = None
 
 
 @dataclass(slots=True)
@@ -31,6 +34,7 @@ class AuditFinding:
     block_path: str | None = None
     position_x: float | None = None
     position_y: float | None = None
+    text_bbox: BBox | None = None
 
 
 @dataclass(slots=True)

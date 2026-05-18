@@ -11,6 +11,11 @@ namespace Module5CadBridge;
 
 internal sealed class FontPreflightProcessor
 {
+    private static readonly Dictionary<string, string[]> TrueTypeFileAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["simsun.ttf"] = new[] { "simsun.ttc" },
+    };
+
     private readonly BridgeTask _task;
     private readonly BridgeTraceLogger _trace;
     private readonly HashSet<string> _installedFontFiles;
@@ -348,6 +353,14 @@ internal sealed class FontPreflightProcessor
                 return true;
             }
 
+            foreach (var alias in ResolveTrueTypeFileAliases(normalized))
+            {
+                if (_installedFontFiles.Contains(alias))
+                {
+                    return true;
+                }
+            }
+
             var family = Path.GetFileNameWithoutExtension(normalized);
             if (_installedFamilies.Contains(family))
             {
@@ -369,6 +382,17 @@ internal sealed class FontPreflightProcessor
         }
 
         return false;
+    }
+
+    private static IEnumerable<string> ResolveTrueTypeFileAliases(string normalizedFontName)
+    {
+        if (TrueTypeFileAliases.TryGetValue(normalizedFontName, out var aliases))
+        {
+            foreach (var alias in aliases)
+            {
+                yield return alias;
+            }
+        }
     }
 
     private bool ExistsInAutoCADFontDirs(string normalizedFontName)

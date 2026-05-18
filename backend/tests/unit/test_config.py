@@ -121,6 +121,7 @@ class TestRuntimeConfig:
             "red_wider": "fanban_monochrome.ctb",
             "same_width": "fanban_monochrome-same width.ctb",
             "review_white": "打白图.ctb",
+            "steel_liner": "结构二室大图.ctb",
         }
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001

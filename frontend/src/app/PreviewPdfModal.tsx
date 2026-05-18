@@ -1,5 +1,5 @@
 import pdfPreviewWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 import { TaskConfigModal } from "../features/deliverable/TaskConfigModal";
@@ -22,8 +22,10 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageWidth, setPageWidth] = useState(960);
+  const [localZoom, setLocalZoom] = useState(1);
   const previewPagesRef = useRef<HTMLDivElement | null>(null);
   const previewFile = useMemo(() => (pdfData ? { data: pdfData } : null), [pdfData]);
+  const zoomPercent = Math.round(localZoom * 100);
   const previewStatusText = loadError
     ? "预览加载失败"
     : isLoading
@@ -91,6 +93,18 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
     };
   }, []);
 
+  const decreaseZoom = () => {
+    setLocalZoom((value) => Math.max(0.75, Number((value - 0.25).toFixed(2))));
+  };
+
+  const increaseZoom = () => {
+    setLocalZoom((value) => Math.min(2, Number((value + 0.25).toFixed(2))));
+  };
+
+  const zoomLayerStyle = {
+    "--preview-local-zoom": String(localZoom),
+  } as CSSProperties;
+
   return (
     <TaskConfigModal dialogClassName={styles.previewDialog} title={title}>
       <div className={styles.previewModalContent}>
@@ -116,6 +130,34 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
         <div className={styles.previewViewerShell}>
           <div className={styles.previewViewerStatusRow}>
             <span className={styles.previewStatusText}>{previewStatusText}</span>
+            <div className={styles.previewZoomControls} aria-label="PDF 局部缩放">
+              <span>局部缩放</span>
+              <button
+                className={styles.previewZoomButton}
+                disabled={localZoom <= 0.75}
+                onClick={decreaseZoom}
+                type="button"
+              >
+                缩小
+              </button>
+              <strong>{zoomPercent}%</strong>
+              <button
+                className={styles.previewZoomButton}
+                disabled={localZoom >= 2}
+                onClick={increaseZoom}
+                type="button"
+              >
+                放大
+              </button>
+              <button
+                className={styles.previewZoomButton}
+                disabled={localZoom === 1}
+                onClick={() => setLocalZoom(1)}
+                type="button"
+              >
+                还原
+              </button>
+            </div>
           </div>
           <div className={styles.previewPages} ref={previewPagesRef}>
             {loadError ? (
@@ -141,12 +183,14 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
               >
                 {Array.from({ length: Math.max(pageCount, 1) }, (_, index) => (
                   <div className={styles.previewPageCard} key={`${url}-${index + 1}`}>
-                    <Page
-                      pageNumber={index + 1}
-                      renderAnnotationLayer={false}
-                      renderTextLayer={false}
-                      width={pageWidth}
-                    />
+                    <div className={styles.previewPageZoomLayer} style={zoomLayerStyle}>
+                      <Page
+                        pageNumber={index + 1}
+                        renderAnnotationLayer={false}
+                        renderTextLayer={false}
+                        width={pageWidth}
+                      />
+                    </div>
                     <span className={styles.previewPageNumber}>第 {index + 1} 页</span>
                   </div>
                 ))}

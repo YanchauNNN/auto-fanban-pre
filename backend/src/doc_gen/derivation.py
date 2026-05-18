@@ -63,10 +63,23 @@ class DerivationEngine:
                 derived.cover_internal_code = self._replace_suffix(internal_code_001, "-001", "-FM")
                 derived.catalog_internal_code = self._replace_suffix(internal_code_001, "-001", "-TM")
 
+            derived.steel_liner_mode = ctx.is_steel_liner_mode()
+
             if external_code_001:
                 # cover/catalog external codes (第9-11位替换)
-                derived.cover_external_code = self._replace_pos(external_code_001, 8, 11, "F01")
-                derived.catalog_external_code = self._replace_pos(external_code_001, 8, 11, "T01")
+                code_suffix = self._cover_catalog_external_suffix(derived)
+                derived.cover_external_code = self._replace_pos(
+                    external_code_001,
+                    8,
+                    11,
+                    f"F{code_suffix}",
+                )
+                derived.catalog_external_code = self._replace_pos(
+                    external_code_001,
+                    8,
+                    11,
+                    f"T{code_suffix}",
+                )
 
         # === 标题派生 ===
         album_title_cn = ctx.params.album_title_cn
@@ -135,6 +148,12 @@ class DerivationEngine:
         if len(s) >= end:
             return s[:start] + replacement + s[end:]
         return s
+
+    @staticmethod
+    def _cover_catalog_external_suffix(derived: DerivedFields) -> str:
+        if derived.steel_liner_mode and derived.album_code:
+            return str(derived.album_code).strip().zfill(2)
+        return "01"
 
     @staticmethod
     def _normalize_revision(value: str | None) -> str:

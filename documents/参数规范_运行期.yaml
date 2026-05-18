@@ -83,7 +83,7 @@ runtime_options:
     pmp_name: { type: str, default: "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp", desc: "托管打印资源使用的 PMP 文件名" }
     managed_ctb_names:
       type: "list[str]"
-      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "打白图.ctb"]
+      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "打白图.ctb", "结构二室大图.ctb"]
       desc: "系统需要确保部署到 AutoCAD 可见目录的托管 CTB 文件名集合"
     min_valid_ctb_bytes: { type: int, default: 512, desc: "CTB 文件最小有效体积；小于该阈值视为无效资源" }
     source_priority:
@@ -133,13 +133,14 @@ runtime_options:
     plot:
       pc3_name: { type: str, default: "打印PDF2.pc3", desc: "CAD 打印设备 PC3 名称（按图幅匹配规则使用）" }
       ctb_name: { type: str, default: "fanban_monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
-      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/review_white" }
+      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/review_white/steel_liner" }
       plot_style_profiles:
         type: object
         default:
           red_wider: "fanban_monochrome.ctb"
           same_width: "fanban_monochrome-same width.ctb"
           review_white: "打白图.ctb"
+          steel_liner: "结构二室大图.ctb"
         desc: "打印样式 key 到 CTB 文件名的映射"
       paper_from_frame: { type: bool, default: true, desc: "是否按图框纸张推导打印图幅" }
       use_monochrome: { type: bool, default: true, desc: "是否强制黑白打印" }
@@ -404,8 +405,8 @@ runtime_options:
       desc: "团队字体库默认目录列表；预检/替代前会追加到 AutoCAD Support Path，并复制字体到任务工作目录，优先让 AutoCAD 直接命中原字体文件"
     preferred_replacements_by_missing_font:
       type: object
-      default: { "MENU2.TTF": "simsun.ttc" }
-      desc: "按缺失字体文件名精确命中的优先替代映射；命中后优先于 kind 级默认顺序，适合沉淀已验证有效的通用对应关系"
+      default: { "MENU2.TTF": "simsun.ttc", "SimSun.ttf": "simsun.ttc" }
+      desc: "按缺失字体文件名精确命中的优先替代映射；SimSun.ttf 是 Windows 宋体常见 DWG 写法，实际系统文件通常为 simsun.ttc；命中后优先于 kind 级默认顺序，适合沉淀已验证有效的通用对应关系"
     default_ttf_families:
       type: "list[str]"
       default: ["SimSun", "Microsoft YaHei", "SimHei"]

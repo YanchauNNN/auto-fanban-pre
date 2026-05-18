@@ -22,6 +22,10 @@ _FIELD_CONTEXT_TO_FIELD_NAME = {
 }
 
 
+def _is_ascii_alnum(char: str) -> bool:
+    return char.isascii() and char.isalnum()
+
+
 @dataclass(frozen=True, slots=True)
 class PreviewPdfBuildResult:
     pdf_path: Path
@@ -227,6 +231,11 @@ class PreviewPdfService:
         page_region: _PreviewPageRegion,
         finding: AuditFinding,
     ) -> fitz.Rect | None:
+        text_bbox = self._matched_text_bbox(finding)
+        if text_bbox is not None:
+            rect = self._bbox_to_page_rect(page.rect, page_region.bbox, text_bbox)
+            return self._pad_rect(rect, 2.0)
+
         roi_bbox = self._resolve_field_roi_bbox(page_region.frame, finding.field_context)
         if roi_bbox is not None:
             rect = self._bbox_to_page_rect(page.rect, page_region.bbox, roi_bbox)
@@ -237,6 +246,48 @@ class PreviewPdfService:
         fallback_bbox = self._fallback_bbox(page_region.bbox, finding.position_x, finding.position_y)
         rect = self._bbox_to_page_rect(page.rect, page_region.bbox, fallback_bbox)
         return self._pad_rect(rect, 3.0)
+
+    @staticmethod
+    def _matched_text_bbox(finding: AuditFinding) -> BBox | None:
+        bbox = finding.text_bbox
+        if bbox is None or bbox.width <= 0 or bbox.height <= 0:
+            return None
+        raw_text = finding.raw_text or ""
+        matched_text = finding.matched_text or ""
+        if not raw_text or not matched_text:
+            return bbox
+
+        index = raw_text.find(matched_text)
+        if index < 0:
+            return bbox
+
+        start_index, end_index = PreviewPdfService._matched_text_span(
+            raw_text=raw_text,
+            matched_text=matched_text,
+            index=index,
+        )
+        raw_length = max(len(raw_text), 1)
+        start_ratio = start_index / raw_length
+        end_ratio = end_index / raw_length
+        return BBox(
+            xmin=bbox.xmin + bbox.width * start_ratio,
+            xmax=bbox.xmin + bbox.width * end_ratio,
+            ymin=bbox.ymin,
+            ymax=bbox.ymax,
+        )
+
+    @staticmethod
+    def _matched_text_span(*, raw_text: str, matched_text: str, index: int) -> tuple[int, int]:
+        start_index = index
+        end_index = index + len(matched_text)
+        if not matched_text.isascii() or not matched_text.isalnum():
+            return start_index, end_index
+
+        while start_index > 0 and _is_ascii_alnum(raw_text[start_index - 1]):
+            start_index -= 1
+        while end_index < len(raw_text) and _is_ascii_alnum(raw_text[end_index]):
+            end_index += 1
+        return start_index, end_index
 
     def _resolve_field_roi_bbox(
         self,

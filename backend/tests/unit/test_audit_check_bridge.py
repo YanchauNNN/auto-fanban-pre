@@ -35,6 +35,7 @@ def test_audit_dotnet_scanner_reads_utf8_bom_result_json(monkeypatch, tmp_path: 
                     "layout_name": "Model",
                     "position_x": 12.5,
                     "position_y": 35.0,
+                    "bbox": {"xmin": 10.0, "ymin": 30.0, "xmax": 40.0, "ymax": 50.0},
                 }
             ]
         }
@@ -47,6 +48,9 @@ def test_audit_dotnet_scanner_reads_utf8_bom_result_json(monkeypatch, tmp_path: 
     assert len(items) == 1
     assert items[0].raw_text == "示例文本"
     assert items[0].position_x == 12.5
+    assert items[0].text_bbox is not None
+    assert items[0].text_bbox.xmin == 10.0
+    assert items[0].text_bbox.xmax == 40.0
 
 
 def test_audit_dotnet_scanner_preserves_block_path_from_nested_blocks(

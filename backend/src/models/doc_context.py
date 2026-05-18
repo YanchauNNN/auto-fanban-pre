@@ -169,6 +169,7 @@ class DerivedFields(BaseModel):
     external_code_001: str | None = None
     cover_external_code: str | None = None
     catalog_external_code: str | None = None
+    steel_liner_mode: bool = False
 
     # 标题派生
     cover_title_cn: str | None = None
@@ -317,6 +318,20 @@ class DocContext(BaseModel):
             return same_code_total
 
         return frame.titleblock.page_total or 1
+
+    def is_steel_liner_mode(self) -> bool:
+        """Two or more document drawings titled with 钢衬里 trigger the steel-liner plot/doc mode."""
+
+        return sum(
+            1
+            for frame in self.get_sorted_document_frames()
+            if self._has_steel_liner_title(frame)
+        ) >= 2
+
+    @staticmethod
+    def _has_steel_liner_title(frame: FrameMeta) -> bool:
+        tb = frame.titleblock
+        return "钢衬里" in f"{tb.title_cn or ''}\n{tb.title_en or ''}"
 
     @staticmethod
     def _same_code_meta(frame: FrameMeta) -> dict[str, Any] | None:

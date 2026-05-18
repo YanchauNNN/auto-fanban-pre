@@ -83,7 +83,8 @@ internal sealed class AuditCheckScanner
                     layoutName: layoutName,
                     entityHandle: attributeDefinition.Handle.ToString(),
                     blockPath: blockPath,
-                    position: TransformPoint(attributeDefinition.Position, transform)
+                    position: TransformPoint(attributeDefinition.Position, transform),
+                    bbox: TryGetEntityBounds(attributeDefinition, transform)
                 );
                 return;
             case AttributeReference attributeReference:
@@ -94,7 +95,8 @@ internal sealed class AuditCheckScanner
                     layoutName: layoutName,
                     entityHandle: attributeReference.Handle.ToString(),
                     blockPath: blockPath,
-                    position: TransformPoint(attributeReference.Position, transform)
+                    position: TransformPoint(attributeReference.Position, transform),
+                    bbox: TryGetEntityBounds(attributeReference, transform)
                 );
                 return;
             case DBText dbText:
@@ -105,7 +107,8 @@ internal sealed class AuditCheckScanner
                     layoutName: layoutName,
                     entityHandle: dbText.Handle.ToString(),
                     blockPath: blockPath,
-                    position: TransformPoint(dbText.Position, transform)
+                    position: TransformPoint(dbText.Position, transform),
+                    bbox: TryGetEntityBounds(dbText, transform)
                 );
                 return;
             case MText mText:
@@ -116,7 +119,8 @@ internal sealed class AuditCheckScanner
                     layoutName: layoutName,
                     entityHandle: mText.Handle.ToString(),
                     blockPath: blockPath,
-                    position: TransformPoint(mText.Location, transform)
+                    position: TransformPoint(mText.Location, transform),
+                    bbox: TryGetEntityBounds(mText, transform)
                 );
                 return;
             case Dimension dimension:
@@ -129,7 +133,8 @@ internal sealed class AuditCheckScanner
                         layoutName: layoutName,
                         entityHandle: dimension.Handle.ToString(),
                         blockPath: blockPath,
-                        position: TransformPoint(dimension.TextPosition, transform)
+                        position: TransformPoint(dimension.TextPosition, transform),
+                        bbox: TryGetEntityBounds(dimension, transform)
                     );
                 }
                 return;
@@ -143,7 +148,8 @@ internal sealed class AuditCheckScanner
                         layoutName: layoutName,
                         entityHandle: leader.Handle.ToString(),
                         blockPath: blockPath,
-                        position: TryGetLeaderPosition(leader, transform)
+                        position: TryGetLeaderPosition(leader, transform),
+                        bbox: TryGetEntityBounds(leader, transform)
                     );
                 }
                 return;
@@ -183,7 +189,8 @@ internal sealed class AuditCheckScanner
                     layoutName: layoutName,
                     entityHandle: attributeReference.Handle.ToString(),
                     blockPath: blockPath,
-                    position: TransformPoint(attributeReference.Position, parentTransform)
+                    position: TransformPoint(attributeReference.Position, parentTransform),
+                    bbox: TryGetEntityBounds(attributeReference, parentTransform)
                 );
             }
         }
@@ -305,7 +312,8 @@ internal sealed class AuditCheckScanner
         string layoutName,
         string entityHandle,
         List<string> blockPath,
-        Point3d? position
+        Point3d? position,
+        Dictionary<string, object>? bbox = null
     )
     {
         if (string.IsNullOrWhiteSpace(rawText))
@@ -327,6 +335,10 @@ internal sealed class AuditCheckScanner
         {
             payload["position_x"] = position.Value.X;
             payload["position_y"] = position.Value.Y;
+        }
+        if (bbox is not null)
+        {
+            payload["bbox"] = bbox;
         }
 
         sink.Add(payload);
@@ -364,6 +376,42 @@ internal sealed class AuditCheckScanner
     private static Point3d TransformPoint(Point3d point, Matrix3d transform)
     {
         return point.TransformBy(transform);
+    }
+
+    private static Dictionary<string, object>? TryGetEntityBounds(Entity entity, Matrix3d transform)
+    {
+        try
+        {
+            var extents = entity.GeometricExtents;
+            var points = new[]
+            {
+                new Point3d(extents.MinPoint.X, extents.MinPoint.Y, 0.0),
+                new Point3d(extents.MaxPoint.X, extents.MinPoint.Y, 0.0),
+                new Point3d(extents.MaxPoint.X, extents.MaxPoint.Y, 0.0),
+                new Point3d(extents.MinPoint.X, extents.MaxPoint.Y, 0.0),
+            }.Select(point => point.TransformBy(transform)).ToArray();
+            var xs = points.Select(point => point.X).ToArray();
+            var ys = points.Select(point => point.Y).ToArray();
+            var xmin = xs.Min();
+            var xmax = xs.Max();
+            var ymin = ys.Min();
+            var ymax = ys.Max();
+            if (xmax <= xmin || ymax <= ymin)
+            {
+                return null;
+            }
+            return new Dictionary<string, object>
+            {
+                ["xmin"] = xmin,
+                ["ymin"] = ymin,
+                ["xmax"] = xmax,
+                ["ymax"] = ymax,
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static Point3d? TryGetLeaderPosition(MLeader leader, Matrix3d transform)

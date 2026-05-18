@@ -405,6 +405,47 @@ def test_default_replacement_fonts_prefers_missing_font_specific_mapping(tmp_pat
     assert defaults == {"ttf": "simsun.ttc"}
 
 
+def test_default_replacement_fonts_maps_simsun_ttf_to_simsun_ttc(tmp_path: Path) -> None:
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "AcadEref (TrueType) (AcadEref.ttf)",
+                        "value": "AcadEref.ttf",
+                        "family": "AcadEref (TrueType)",
+                        "path": r"C:\Windows\Fonts\AcadEref.ttf",
+                        "kind": "ttf",
+                    },
+                    {
+                        "label": "SimSun & NSimSun (TrueType) (simsun.ttc)",
+                        "value": "simsun.ttc",
+                        "family": "SimSun & NSimSun (TrueType)",
+                        "path": r"C:\Windows\Fonts\simsun.ttc",
+                        "kind": "ttf",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, _FakeBridge()),
+    )
+
+    defaults = service.default_replacement_fonts(
+        missing_kinds=["ttf"],
+        missing_fonts=[
+            {
+                "style_name": "宋体",
+                "font_name": "SimSun.ttf",
+                "bigfont_name": "",
+                "kind": "ttf",
+            }
+        ],
+    )
+
+    assert defaults == {"ttf": "simsun.ttc"}
+
+
 def test_installed_font_inventory_returns_kind_specific_options(tmp_path: Path) -> None:
     autocad_fonts_dir = tmp_path / "Fonts"
     autocad_fonts_dir.mkdir()

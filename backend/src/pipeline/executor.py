@@ -50,7 +50,9 @@ from ..doc_gen import (
 from ..doc_gen.param_validator import DocParamValidator
 from ..models import (
     DocContext,
+    FrameMeta,
     GlobalDocParams,
+    SheetSet,
     normalize_discipline_label,
     normalize_global_doc_params,
 )
@@ -64,6 +66,8 @@ if TYPE_CHECKING:
     from ..models import Job
 
 logger = logging.getLogger(__name__)
+
+STEEL_LINER_PLOT_STYLE_KEY = "steel_liner"
 
 
 class PipelineExecutor:
@@ -682,6 +686,15 @@ class PipelineExecutor:
         """模块5主执行引擎（固定为 cad_dxf）。"""
         return "cad_dxf"
 
+    @staticmethod
+    def _is_steel_liner_mode(frames: list[FrameMeta], sheet_sets: list[SheetSet]) -> bool:
+        ctx = DocContext(
+            params=GlobalDocParams(project_no=""),
+            frames=frames,
+            sheet_sets=sheet_sets,
+        )
+        return ctx.is_steel_liner_mode()
+
     # ==================================================================
     # 阶段 7 (Stage B): SPLIT_AND_RENAME — 仅裁切
     # ==================================================================
@@ -702,6 +715,8 @@ class PipelineExecutor:
             context["frames"],
             context["sheet_sets"],
         )
+        steel_liner_mode = self._is_steel_liner_mode(context["frames"], context["sheet_sets"])
+        context["steel_liner_mode"] = steel_liner_mode
         total = len(grouped)
         done = 0
         job.progress.details.update({"split_total": total, "split_done": 0})
@@ -724,6 +739,7 @@ class PipelineExecutor:
                     output_dir=drawings_dir,
                     task_root=task_root,
                     slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
+                    plot_style_key=STEEL_LINER_PLOT_STYLE_KEY if steel_liner_mode else None,
                 )
                 context["cad_dxf_results"][str(source_dxf)] = result
             except Exception as e:  # noqa: BLE001

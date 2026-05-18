@@ -75,6 +75,7 @@ def write_report_json(
                 "confidence": finding.confidence,
                 "position_x": finding.position_x,
                 "position_y": finding.position_y,
+                "text_bbox": finding.text_bbox.model_dump() if finding.text_bbox else None,
                 "context_excerpt": finding.raw_text[:120],
             }
             for finding in findings
@@ -121,6 +122,7 @@ def write_report_xlsx(
             "context_excerpt",
             "position_x",
             "position_y",
+            "text_bbox",
         ]
     )
     for finding in findings:
@@ -142,6 +144,9 @@ def write_report_xlsx(
                 finding.raw_text[:120],
                 finding.position_x,
                 finding.position_y,
+                json.dumps(finding.text_bbox.model_dump(), ensure_ascii=False)
+                if finding.text_bbox
+                else "",
             ]
         )
 

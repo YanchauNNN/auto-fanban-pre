@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..cad.accoreconsole_runner import AcCoreConsoleRunner
 from ..config import get_config
+from ..models import BBox
 from .models import ScanTextItem
 
 
@@ -71,9 +72,24 @@ class AuditDotNetScanner:
                     block_path=row.get("block_path"),
                     position_x=_to_float(row.get("position_x")),
                     position_y=_to_float(row.get("position_y")),
+                    text_bbox=_to_bbox(row.get("bbox")),
                 )
             )
         return items
+
+
+def _to_bbox(value: object) -> BBox | None:
+    if not isinstance(value, dict):
+        return None
+    xmin = _to_float(value.get("xmin"))
+    ymin = _to_float(value.get("ymin"))
+    xmax = _to_float(value.get("xmax"))
+    ymax = _to_float(value.get("ymax"))
+    if xmin is None or ymin is None or xmax is None or ymax is None:
+        return None
+    if xmax <= xmin or ymax <= ymin:
+        return None
+    return BBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
 
 
 def _to_float(value: object) -> float | None:

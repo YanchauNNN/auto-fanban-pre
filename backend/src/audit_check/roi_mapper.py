@@ -33,6 +33,9 @@ class AuditFieldContextMapper:
     def annotate(self, item: ScanTextItem) -> ScanTextItem:
         x = item.position_x
         y = item.position_y
+        if item.text_bbox is not None:
+            x = (item.text_bbox.xmin + item.text_bbox.xmax) / 2
+            y = (item.text_bbox.ymin + item.text_bbox.ymax) / 2
         internal_code = item.internal_code
         field_context = item.field_context
 
@@ -52,6 +55,7 @@ class AuditFieldContextMapper:
             block_path=item.block_path,
             position_x=item.position_x,
             position_y=item.position_y,
+            text_bbox=item.text_bbox,
         )
 
     def _resolve_internal_code(self, x: float, y: float) -> str | None:

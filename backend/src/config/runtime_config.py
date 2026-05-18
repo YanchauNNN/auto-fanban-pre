@@ -97,6 +97,7 @@ class Module5PlotConfig(BaseModel):
             "red_wider": "fanban_monochrome.ctb",
             "same_width": "fanban_monochrome-same width.ctb",
             "review_white": "打白图.ctb",
+            "steel_liner": "结构二室大图.ctb",
         }
     )
     paper_from_frame: bool = True
@@ -354,6 +355,7 @@ class FontPreflightRuntimeConfig(BaseModel):
     preferred_replacements_by_missing_font: dict[str, str] = Field(
         default_factory=lambda: {
             "MENU2.TTF": "simsun.ttc",
+            "SimSun.ttf": "simsun.ttc",
         },
     )
     default_ttf_families: list[str] = Field(
@@ -396,6 +398,7 @@ class PlotAssetsConfig(BaseModel):
             "fanban_monochrome.ctb",
             "fanban_monochrome-same width.ctb",
             "打白图.ctb",
+            "结构二室大图.ctb",
         ],
     )
     min_valid_ctb_bytes: int = 512
