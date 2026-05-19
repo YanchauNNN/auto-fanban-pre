@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     from ..models import DocContext
 
 _CELL_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
+_CN_SPLIT_PROTECTED_PHRASES = ("标高", "厂房")
 
 
 class CoverGenerator(ICoverGenerator):
@@ -236,50 +237,49 @@ class CoverGenerator(ICoverGenerator):
         doc = None
         ws = None
         limiter = get_office_automation_limiter()
-        with limiter.word_session():
-            with limiter.excel_session():
-                try:
-                    pythoncom.CoInitialize()
-                    word = win32com.client.DispatchEx("Word.Application")
-                    word.Visible = False
-                    word.DisplayAlerts = 0
-                    doc = word.Documents.Open(str(output_path.absolute()))
-                    time.sleep(1.0)
-                    ws = self._get_embedded_excel_sheet(doc)
-                    if ws is None:
-                        raise GenerationError("未找到封面中的嵌入 Excel 对象")
-                    worksheet = ws
+        with limiter.word_session(), limiter.excel_session():
+            try:
+                pythoncom.CoInitialize()
+                word = win32com.client.DispatchEx("Word.Application")
+                word.Visible = False
+                word.DisplayAlerts = 0
+                doc = word.Documents.Open(str(output_path.absolute()))
+                time.sleep(1.0)
+                ws = self._get_embedded_excel_sheet(doc)
+                if ws is None:
+                    raise GenerationError("未找到封面中的嵌入 Excel 对象")
+                worksheet = ws
 
-                    def read_cell(cell: str) -> Any:
-                        return self._com_call_with_retry(
-                            lambda: worksheet.Range(cell).Value,
-                            f"Range({cell}).Value",
-                        )
+                def read_cell(cell: str) -> Any:
+                    return self._com_call_with_retry(
+                        lambda: worksheet.Range(cell).Value,
+                        f"Range({cell}).Value",
+                    )
 
-                    def write_cell(cell: str, value: Any) -> None:
-                        self._com_call_with_retry(
-                            lambda: setattr(worksheet.Range(cell), "Value", value),
-                            f"Range({cell}).Value={value}",
-                        )
+                def write_cell(cell: str, value: Any) -> None:
+                    self._com_call_with_retry(
+                        lambda: setattr(worksheet.Range(cell), "Value", value),
+                        f"Range({cell}).Value={value}",
+                    )
 
-                    self._apply_bindings(bindings, data, read_cell, write_cell)
-                    self._com_call_with_retry(doc.Save, "Document.Save")
-                finally:
-                    ws = None
-                    if doc is not None:
-                        doc_obj = doc
-                        self._mark_document_saved(doc)
-                        self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
-                    doc = None
-                    if word is not None:
-                        self._close_all_word_documents(word, keep=doc)
-                        self._mark_normal_template_saved(word)
-                        self._close_com_object(word.Quit, "Word.Quit")
-                    word = None
-                    gc.collect()
-                    if pythoncom is not None:
-                        with contextlib.suppress(Exception):
-                            pythoncom.CoUninitialize()
+                self._apply_bindings(bindings, data, read_cell, write_cell)
+                self._com_call_with_retry(doc.Save, "Document.Save")
+            finally:
+                ws = None
+                if doc is not None:
+                    doc_obj = doc
+                    self._mark_document_saved(doc)
+                    self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
+                doc = None
+                if word is not None:
+                    self._close_all_word_documents(word, keep=doc)
+                    self._mark_normal_template_saved(word)
+                    self._close_com_object(word.Quit, "Word.Quit")
+                word = None
+                gc.collect()
+                if pythoncom is not None:
+                    with contextlib.suppress(Exception):
+                        pythoncom.CoUninitialize()
 
     def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
         for collection_name in ("InlineShapes", "Shapes"):
@@ -427,14 +427,18 @@ class CoverGenerator(ICoverGenerator):
         if not s:
             return "", ""
         mid = len(s) // 2
-        candidates = [idx for idx in range(1, len(s)) if self._is_cjk(s[idx])]
+        candidates = [
+            idx
+            for idx in range(1, len(s))
+            if self._is_cjk(s[idx]) and not self._crosses_cn_protected_phrase(s, idx)
+        ]
         if not candidates:
             return s, ""
-        idx = min(candidates, key=lambda n: abs(n - mid))
+        idx = min(candidates, key=lambda n: (self._cn_split_boundary_penalty(s, n), abs(n - mid)))
         return s[:idx].rstrip(), s[idx:].lstrip()
 
     def _split_en_two_cells(self, text: str) -> tuple[str, str]:
-        s = re.sub(r"\s+", " ", text.strip())
+        s = self._normalize_cover_english_spacing(text)
         if not s:
             return "", ""
         mid = len(s) // 2
@@ -456,6 +460,29 @@ class CoverGenerator(ICoverGenerator):
             return False
         code = ord(ch)
         return 0x4E00 <= code <= 0x9FFF
+
+    @staticmethod
+    def _crosses_cn_protected_phrase(text: str, split_index: int) -> bool:
+        for phrase in _CN_SPLIT_PROTECTED_PHRASES:
+            start = text.find(phrase)
+            while start >= 0:
+                end = start + len(phrase)
+                if start < split_index < end:
+                    return True
+                start = text.find(phrase, start + 1)
+        return False
+
+    def _cn_split_boundary_penalty(self, text: str, split_index: int) -> int:
+        if split_index <= 0:
+            return 1
+        return 0 if self._is_cjk(text[split_index - 1]) else 1
+
+    @staticmethod
+    def _normalize_cover_english_spacing(text: str) -> str:
+        s = re.sub(r"\s+", " ", text.strip())
+        s = re.sub(r"\b(Level|Elevation)(?=[+-]?\d)", r"\1 ", s, flags=re.IGNORECASE)
+        s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)
+        return re.sub(r"\s+", " ", s).strip()
 
     def _write_external_code_chars(
         self,

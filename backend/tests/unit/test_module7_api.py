@@ -753,6 +753,48 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
     ]
 
 
+def test_preflight_fonts_keeps_file_results_when_replacement_inventory_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FailingReplacementInventoryFontService(FakeFontPreflightService):
+        def list_replacement_options(self, *, missing_kinds: list[str] | None = None):  # noqa: ANN201
+            raise RuntimeError("font inventory unavailable")
+
+        def list_replacement_options_by_kind(  # noqa: ANN201
+            self,
+            *,
+            missing_kinds: list[str] | None = None,
+        ):
+            raise RuntimeError("font inventory unavailable")
+
+        def default_replacement_fonts(  # noqa: ANN201
+            self,
+            *,
+            missing_kinds: list[str] | None = None,
+            missing_fonts: list[dict[str, object]] | None = None,
+        ):
+            raise RuntimeError("font inventory unavailable")
+
+    with _create_client(
+        monkeypatch,
+        tmp_path,
+        font_service=FailingReplacementInventoryFontService(),
+    ) as client:
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[("files[]", ("missing-font.dwg", b"dwg-a", "application/acad"))],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["replacement_options"] == []
+    assert payload["replacement_options_by_kind"] == {}
+    assert payload["default_replacement_fonts"] == {}
+    assert payload["files"][0]["status"] == "missing_fonts"
+
+
 def test_preflight_fonts_uses_ascii_working_copy_for_non_ascii_upload_names(
     monkeypatch,
     tmp_path: Path,

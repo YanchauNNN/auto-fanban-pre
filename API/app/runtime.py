@@ -3,6 +3,7 @@
 import importlib.util
 import hashlib
 import json
+import logging
 import queue
 import re
 import threading
@@ -60,6 +61,8 @@ DISPLAY_STAGE_LABELS: dict[str, str] = {
     'AUDIT_REPLACE': '执行翻版替换',
     'EXPORT_REPORT': '导出纠错报告',
 }
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -269,16 +272,28 @@ class DeliverableApiRuntime:
 
         missing_kinds = self._collect_missing_font_kinds(results)
         missing_fonts = self._collect_missing_fonts(results)
-        replacement_options = self.font_preflight_service.list_replacement_options(
-            missing_kinds=missing_kinds
-        )
-        replacement_options_by_kind = self.font_preflight_service.list_replacement_options_by_kind(
-            missing_kinds=missing_kinds,
-        )
-        default_replacement_fonts = self.font_preflight_service.default_replacement_fonts(
-            missing_kinds=missing_kinds,
-            missing_fonts=missing_fonts,
-        )
+        try:
+            replacement_options = self.font_preflight_service.list_replacement_options(
+                missing_kinds=missing_kinds
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("font preflight replacement options failed: %s", exc)
+            replacement_options = []
+        try:
+            replacement_options_by_kind = self.font_preflight_service.list_replacement_options_by_kind(
+                missing_kinds=missing_kinds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("font preflight replacement options by kind failed: %s", exc)
+            replacement_options_by_kind = {}
+        try:
+            default_replacement_fonts = self.font_preflight_service.default_replacement_fonts(
+                missing_kinds=missing_kinds,
+                missing_fonts=missing_fonts,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("font preflight default replacement fonts failed: %s", exc)
+            default_replacement_fonts = {}
         return {
             "files": results,
             "replacement_options": replacement_options,

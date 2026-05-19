@@ -340,6 +340,28 @@
   font-size: 0.88rem;
 }
 
+.fontMemoryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.fontMemoryCard {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem 0.78rem;
+  border: 1px solid rgba(33, 74, 126, 0.1);
+  border-radius: 14px;
+  background: rgba(248, 251, 255, 0.92);
+  color: #14395e;
+  font-size: 0.82rem;
+}
+
+.fontMemoryCard strong {
+  font-size: 0.86rem;
+}
+
 .fontNoticeList {
   margin: 0;
   padding-left: 1.2rem;

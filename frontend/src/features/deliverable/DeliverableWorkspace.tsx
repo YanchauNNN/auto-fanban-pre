@@ -77,6 +77,7 @@ const UPGRADE_ENTRIES_KEY = "upgrade_entries";
 const DEFAULT_UPGRADE_REVISION = "B";
 const INCLUDE_IED_PLAN_KEY = "include_ied_plan";
 const MANUALLY_POSITIONED_FIELDS = new Set([INCLUDE_IED_PLAN_KEY]);
+const FONT_REPLACEMENT_OVERRIDES_STORAGE_KEY = "auto-fanban.font-replacement-overrides";
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
 const LAST_FONT_REPLACEMENTS_STORAGE_KEY = "auto-fanban.last-font-replacements";
 const PLOT_STYLE_OPTIONS = [
@@ -90,6 +91,8 @@ type FontSubmitConfig = {
   fontReplacementFont?: string;
   fontReplacementFonts?: FontReplacementMap;
 };
+
+type FontReplacementDialogMode = "submit" | "review";
 
 type UpgradeEntryDraft = {
   revision: string;
@@ -114,10 +117,13 @@ export function DeliverableWorkspace({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isPreflighting, setIsPreflighting] = useState(false);
   const [isAwaitingSubmitPreflight, setIsAwaitingSubmitPreflight] = useState(false);
+  const [isOpeningFontReplacementReview, setIsOpeningFontReplacementReview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fontPreflightResult, setFontPreflightResult] = useState<FontPreflightResult | null>(null);
   const [selectedReplacementFonts, setSelectedReplacementFonts] = useState<FontReplacementMap>({});
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
+  const [fontReplacementDialogMode, setFontReplacementDialogMode] =
+    useState<FontReplacementDialogMode | null>(null);
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -204,6 +210,18 @@ export function DeliverableWorkspace({
     () => buildDisplayedReplacementOptionsByKind(fontPreflightResult),
     [fontPreflightResult],
   );
+  const manualReplacementDefaults = useMemo(
+    () => (fontPreflightResult ? loadManualReplacementDefaults() : {}),
+    [fontPreflightResult],
+  );
+  const lastSuccessfulReplacementFonts = useMemo(
+    () => (fontPreflightResult ? loadLastSuccessfulReplacementFonts() : {}),
+    [fontPreflightResult],
+  );
+  const backendDefaultReplacementFonts = useMemo(
+    () => resolveBackendDefaultReplacementFonts(fontPreflightResult, missingFontKinds),
+    [fontPreflightResult, missingFontKinds],
+  );
 
   useEffect(() => {
     onDraftAvailabilityChange(hasTaskConfigDraft(schema, draft));
@@ -217,6 +235,7 @@ export function DeliverableWorkspace({
     setFontPreflightResult(null);
     setSelectedReplacementFonts({});
     setFontReplacementError(null);
+    setFontReplacementDialogMode(null);
   }
 
   function resetCachedFontPreflightState() {
@@ -225,6 +244,7 @@ export function DeliverableWorkspace({
     preflightPromiseRef.current = null;
     setIsPreflighting(false);
     setIsAwaitingSubmitPreflight(false);
+    setIsOpeningFontReplacementReview(false);
     resetFontPreflightState();
   }
 
@@ -247,12 +267,60 @@ export function DeliverableWorkspace({
       return undefined;
     }
 
-    return (error as {
-      detail?: {
-        upload_errors?: Record<string, string[]>;
-        param_errors?: Record<string, string[]>;
-      };
-    }).detail;
+    const detail = (error as { detail?: unknown }).detail;
+    if (typeof detail !== "object" || !detail) {
+      return undefined;
+    }
+
+    return detail as {
+      upload_errors?: Record<string, string[]>;
+      param_errors?: Record<string, string[]>;
+    };
+  }
+
+  function extractApiErrorMessage(error: unknown) {
+    if (typeof error === "object" && error && "detail" in error) {
+      const detail = (error as { detail?: unknown }).detail;
+      if (typeof detail === "string") {
+        const cleaned = cleanPlainErrorMessage(detail);
+        if (cleaned) {
+          return cleaned;
+        }
+      }
+      const status = (error as { status?: unknown }).status;
+      if (typeof status === "number") {
+        return `HTTP ${status}`;
+      }
+    }
+    if (error instanceof Error) {
+      return cleanPlainErrorMessage(error.message);
+    }
+    return "";
+  }
+
+  function buildFontPreflightErrorMessages(error: unknown) {
+    const detail = extractValidationDetail(error);
+    if (
+      detail &&
+      (Object.keys(detail.upload_errors ?? {}).length > 0 ||
+        Object.keys(detail.param_errors ?? {}).length > 0)
+    ) {
+      return [];
+    }
+
+    const message = extractApiErrorMessage(error);
+    if (!message) {
+      return ["字体预检失败，请稍后重试。"];
+    }
+    return [`字体预检失败：${message}`];
+  }
+
+  function cleanPlainErrorMessage(message: string) {
+    const cleaned = message
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
   }
 
   async function submitDeliverable(fontConfig: FontSubmitConfig) {
@@ -395,7 +463,7 @@ export function DeliverableWorkspace({
         (file) => normalizeFontPreflightStatus(file.status) === "missing_fonts",
       );
       if (missingFiles.length > 0) {
-        openFontReplacementConfirmation(preflight, missingFiles);
+        openFontReplacementDialog(preflight, missingFiles, "submit");
         return;
       }
 
@@ -432,6 +500,74 @@ export function DeliverableWorkspace({
       fontReplacePolicy: "replace_missing",
       fontReplacementFonts: selectedFonts,
     });
+  }
+
+  async function handleOpenFontReplacementReview() {
+    if (tutorialPreviewEnabled || isSubmitting || isOpeningFontReplacementReview) {
+      return;
+    }
+
+    if (draft.files.length === 0) {
+      setDraft((current) => ({
+        ...current,
+        formErrors: ["请先上传 DWG 文件后查看字体替换。"],
+      }));
+      return;
+    }
+
+    resetFontPreflightState();
+    setIsOpeningFontReplacementReview(true);
+    try {
+      const preflight = await ensureFontPreflight(draft.files);
+      if (!preflight) {
+        return;
+      }
+
+      const failedFiles = preflight.files.filter(
+        (file) => normalizeFontPreflightStatus(file.status) === "failed",
+      );
+      if (failedFiles.length > 0) {
+        showFontPreflightFailures(failedFiles);
+        return;
+      }
+
+      const missingFiles = preflight.files.filter(
+        (file) => normalizeFontPreflightStatus(file.status) === "missing_fonts",
+      );
+      openFontReplacementDialog(preflight, missingFiles, "review");
+    } finally {
+      setIsOpeningFontReplacementReview(false);
+    }
+  }
+
+  function handleSaveFontReplacementReview() {
+    const selectedFonts = pickSelectedReplacementFonts(
+      missingFontKinds,
+      selectedReplacementFonts,
+      displayedReplacementOptionsByKind,
+    );
+    const missingSelections = missingFontKinds.filter((kind) => !selectedFonts[kind]);
+
+    if (missingSelections.length > 0) {
+      setFontReplacementError(
+        missingSelections.length === 1
+          ? `请先选择${getFontReplacementKindLabel(missingSelections[0] ?? "")}替代字体。`
+          : `请先选择以下类型的替代字体：${missingSelections
+              .map((kind) => getFontReplacementKindLabel(kind))
+              .join("、")}。`,
+      );
+      return;
+    }
+
+    saveManualReplacementDefaults(selectedFonts);
+    onNotice?.("字体替换设置已保存。");
+    resetFontPreflightState();
+  }
+
+  function handleClearFontReplacementReview() {
+    saveManualReplacementDefaults({});
+    onNotice?.("字体替换手动默认已清除。");
+    resetFontPreflightState();
   }
 
   function handleFieldChange(key: string, value: string) {
@@ -690,6 +826,14 @@ export function DeliverableWorkspace({
   }
 
   const submitLabel = "创建交付任务";
+  const isFontReplacementReviewMode = fontReplacementDialogMode === "review";
+  const isManualReplacementDefaultAvailable =
+    Object.keys(manualReplacementDefaults).length > 0;
+  const fontDialogTitle = isFontReplacementReviewMode ? "字体替换管理" : "缺失字体处理";
+  const fontDialogHeading = isFontReplacementReviewMode ? "字体替换管理" : "缺失字体处理";
+  const fontDialogDescription = isFontReplacementReviewMode
+    ? "查看当前上传批次的字体预检结果，并保存本机手动默认替代设置。保存不会立即创建任务。"
+    : "检测到当前批次存在缺失字体。请按缺失字体类型选择替代字体，确认后再继续正式提交。";
 
   return (
     <>
@@ -973,8 +1117,18 @@ export function DeliverableWorkspace({
 
             <footer className={styles.actions}>
               <button
+                className={styles.ghostButton}
+                disabled={
+                  isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview
+                }
+                type="button"
+                onClick={handleOpenFontReplacementReview}
+              >
+                {isOpeningFontReplacementReview ? "正在读取字体..." : "查看字体替换"}
+              </button>
+              <button
                 className={styles.primaryButton}
-                disabled={isSubmitting || isAwaitingSubmitPreflight}
+                disabled={isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview}
                 type="submit"
               >
                 {isSubmitting ? "创建中..." : isPreflighting ? "正在执行字体搜索..." : submitLabel}
@@ -984,16 +1138,14 @@ export function DeliverableWorkspace({
         </div>
       </TaskConfigModal>
 
-      {fontPreflightResult ? (
-        <TaskConfigModal title="缺失字体处理">
+      {fontPreflightResult && fontReplacementDialogMode ? (
+        <TaskConfigModal title={fontDialogTitle}>
           <div className={styles.fontModalBody}>
             <header className={styles.modalHeader}>
               <div>
                 <p className={styles.kicker}>Font Preflight</p>
-                <h2>缺失字体处理</h2>
-                <p className={styles.description}>
-                  检测到当前批次存在缺失字体。请按缺失字体类型选择替代字体，确认后再继续正式提交。
-                </p>
+                <h2>{fontDialogHeading}</h2>
+                <p className={styles.description}>{fontDialogDescription}</p>
               </div>
             </header>
 
@@ -1002,32 +1154,36 @@ export function DeliverableWorkspace({
                 <h3>缺失字体文件</h3>
               </header>
               <div className={styles.fontFileList}>
-                {missingFontFiles.map((file) => (
-                  <article className={styles.fontFileCard} key={file.filename}>
-                    <div className={styles.summaryHeaderRow}>
-                      <h3>{file.filename}</h3>
-                      <span>{`${file.missingStyleCount} 处缺失`}</span>
-                    </div>
-                    {file.missingFonts.length > 0 ? (
-                      <div className={styles.fontMissingList}>
-                        {file.missingFonts.map((font) => (
-                          <div
-                            className={styles.fontMissingItem}
-                            key={`${file.filename}-${font.styleName}-${font.fontName}`}
-                          >
-                            <strong>{font.styleName}</strong>
-                            <span>{`字体：${font.fontName || "-"}`}</span>
-                            <span>{`大字体：${font.bigfontName || "-"}`}</span>
-                            <span>{`类型：${font.kind}`}</span>
-                            <span>{`是否在块中使用：${font.usedInBlock ? "是" : "否"}`}</span>
-                          </div>
-                        ))}
+                {missingFontFiles.length > 0 ? (
+                  missingFontFiles.map((file) => (
+                    <article className={styles.fontFileCard} key={file.filename}>
+                      <div className={styles.summaryHeaderRow}>
+                        <h3>{file.filename}</h3>
+                        <span>{`${file.missingStyleCount} 处缺失`}</span>
                       </div>
-                    ) : (
-                      <p className={styles.emptyState}>当前文件未返回具体缺失字体条目。</p>
-                    )}
-                  </article>
-                ))}
+                      {file.missingFonts.length > 0 ? (
+                        <div className={styles.fontMissingList}>
+                          {file.missingFonts.map((font) => (
+                            <div
+                              className={styles.fontMissingItem}
+                              key={`${file.filename}-${font.styleName}-${font.fontName}`}
+                            >
+                              <strong>{font.styleName}</strong>
+                              <span>{`字体：${font.fontName || "-"}`}</span>
+                              <span>{`大字体：${font.bigfontName || "-"}`}</span>
+                              <span>{`类型：${font.kind}`}</span>
+                              <span>{`是否在块中使用：${font.usedInBlock ? "是" : "否"}`}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className={styles.emptyState}>当前文件未返回具体缺失字体条目。</p>
+                      )}
+                    </article>
+                  ))
+                ) : (
+                  <p className={styles.emptyState}>当前文件未检测到缺失字体。</p>
+                )}
               </div>
             </section>
 
@@ -1036,7 +1192,8 @@ export function DeliverableWorkspace({
                 <h3>替代策略</h3>
               </header>
               <div className={styles.advancedStack}>
-                {missingFontKinds.map((kind) => {
+                {missingFontKinds.length > 0 ? (
+                  missingFontKinds.map((kind) => {
                   const options = displayedReplacementOptionsByKind[kind] ?? [];
                   const selectedValue = selectedReplacementFonts[kind] ?? "";
                   const selectedOption =
@@ -1093,10 +1250,34 @@ export function DeliverableWorkspace({
                       ) : null}
                     </div>
                   );
-                })}
+                  })
+                ) : (
+                  <div className={styles.fontReplacementPreview}>
+                    <strong>当前没有需要选择的替代字体。</strong>
+                    <span>当前文件未检测到缺失字体，不会凭空创建替代字体设置。</span>
+                  </div>
+                )}
                 {fontReplacementError ? (
                   <span className={styles.errorText}>{fontReplacementError}</span>
                 ) : null}
+              </div>
+
+              <div className={styles.fontMemoryGrid}>
+                <FontReplacementMemorySummary
+                  emptyText="暂无手动默认设置。"
+                  title="手动默认设置"
+                  values={manualReplacementDefaults}
+                />
+                <FontReplacementMemorySummary
+                  emptyText="后端未返回默认替代字体。"
+                  title="后端默认建议"
+                  values={backendDefaultReplacementFonts}
+                />
+                <FontReplacementMemorySummary
+                  emptyText="暂无上次成功提交记忆。"
+                  title="上次成功提交记忆"
+                  values={lastSuccessfulReplacementFonts}
+                />
               </div>
 
               <ul className={styles.fontNoticeList}>
@@ -1114,16 +1295,37 @@ export function DeliverableWorkspace({
                 type="button"
                 onClick={resetFontPreflightState}
               >
-                取消
+                {isFontReplacementReviewMode ? "关闭" : "取消"}
               </button>
-              <button
-                className={styles.primaryButton}
-                disabled={isSubmitting}
-                type="button"
-                onClick={handleConfirmFontReplacement}
-              >
-                {isSubmitting ? "提交中..." : "继续提交"}
-              </button>
+              {isFontReplacementReviewMode && isManualReplacementDefaultAvailable ? (
+                <button
+                  className={styles.ghostButton}
+                  type="button"
+                  onClick={handleClearFontReplacementReview}
+                >
+                  清除手动默认
+                </button>
+              ) : null}
+              {isFontReplacementReviewMode ? (
+                missingFontKinds.length > 0 ? (
+                  <button
+                    className={styles.primaryButton}
+                    type="button"
+                    onClick={handleSaveFontReplacementReview}
+                  >
+                    保存设置
+                  </button>
+                ) : null
+              ) : (
+                <button
+                  className={styles.primaryButton}
+                  disabled={isSubmitting}
+                  type="button"
+                  onClick={handleConfirmFontReplacement}
+                >
+                  {isSubmitting ? "提交中..." : "继续提交"}
+                </button>
+              )}
             </footer>
           </div>
         </TaskConfigModal>
@@ -1139,9 +1341,10 @@ export function DeliverableWorkspace({
     }));
   }
 
-  function openFontReplacementConfirmation(
+  function openFontReplacementDialog(
     preflight: FontPreflightResult,
     missingFiles: FontPreflightResult["files"],
+    mode: FontReplacementDialogMode,
   ) {
     const replacementOptionsByKind = buildDisplayedReplacementOptionsByKind(preflight);
     const unavailableKinds = collectMissingFontKinds(missingFiles).filter(
@@ -1161,10 +1364,12 @@ export function DeliverableWorkspace({
     }
 
     setFontPreflightResult(preflight);
+    setFontReplacementDialogMode(mode);
     setSelectedReplacementFonts(
       resolveInitialReplacementFonts(
         missingFiles,
         replacementOptionsByKind,
+        loadManualReplacementDefaults(),
         preflight.defaultReplacementFonts ?? {},
         preflight.defaultReplacementFont ?? null,
         loadLastReplacementFonts(),
@@ -1225,7 +1430,7 @@ export function DeliverableWorkspace({
         }
 
         preflightCacheRef.current = null;
-        setValidationErrors(extractValidationDetail(error), ["字体预检失败，请稍后重试。"]);
+        setValidationErrors(extractValidationDetail(error), buildFontPreflightErrorMessages(error));
         return null;
       } finally {
         if (preflightRequestIdRef.current === requestId) {
@@ -1317,6 +1522,31 @@ function FieldControl({
       )}
       {helperText ? <span className={styles.helperText}>{helperText}</span> : null}
       {error ? <span className={styles.errorText}>{error}</span> : null}
+    </div>
+  );
+}
+
+function FontReplacementMemorySummary({
+  title,
+  values,
+  emptyText,
+}: {
+  title: string;
+  values: FontReplacementMap;
+  emptyText: string;
+}) {
+  const entries = Object.entries(normalizeReplacementSelectionMap(values));
+
+  return (
+    <div className={styles.fontMemoryCard}>
+      <strong>{title}</strong>
+      {entries.length > 0 ? (
+        entries.map(([kind, value]) => (
+          <span key={`${title}-${kind}`}>{`${getFontReplacementKindLabel(kind)}：${value}`}</span>
+        ))
+      ) : (
+        <span>{emptyText}</span>
+      )}
     </div>
   );
 }
@@ -1939,11 +2169,39 @@ function resolveRawReplacementOptionsForKind(
   );
 }
 
+function resolveBackendDefaultReplacementFonts(
+  result: FontPreflightResult | null,
+  missingKinds: string[],
+): FontReplacementMap {
+  if (!result) {
+    return {};
+  }
+
+  const defaults = normalizeReplacementSelectionMap(result.defaultReplacementFonts ?? {});
+  const fallbackDefault = result.defaultReplacementFont?.trim() ?? "";
+  if (missingKinds.length === 1 && fallbackDefault && !defaults[missingKinds[0] ?? ""]) {
+    return {
+      ...defaults,
+      [missingKinds[0] ?? ""]: fallbackDefault,
+    };
+  }
+  return defaults;
+}
+
 function resolveInitialReplacementFont(
   options: FontReplacementOption[],
+  manualDefaultValue: string,
   explicitDefaultValue: string,
   rememberedValue: string,
 ) {
+  const trimmedManualDefaultValue = manualDefaultValue.trim();
+  if (
+    trimmedManualDefaultValue &&
+    options.some((option) => option.value === trimmedManualDefaultValue)
+  ) {
+    return trimmedManualDefaultValue;
+  }
+
   const trimmedDefaultValue = explicitDefaultValue.trim();
   if (trimmedDefaultValue && options.some((option) => option.value === trimmedDefaultValue)) {
     return trimmedDefaultValue;
@@ -1967,6 +2225,7 @@ function resolveInitialReplacementFont(
 function resolveInitialReplacementFonts(
   missingFiles: FontPreflightResult["files"],
   optionsByKind: Record<string, FontReplacementOption[]>,
+  manualDefaultFonts: FontReplacementMap,
   defaultReplacementFonts: FontReplacementMap,
   defaultReplacementFont: string | null,
   rememberedValues: FontReplacementMap,
@@ -1981,6 +2240,7 @@ function resolveInitialReplacementFonts(
       kinds.length === 1 ? (defaultReplacementFont?.trim() ?? "") : "";
     const resolved = resolveInitialReplacementFont(
       options,
+      manualDefaultFonts[kind] ?? "",
       defaultReplacementFonts[kind] ?? fallbackDefaultValue,
       rememberedValues[kind] ?? (kinds.length === 1 ? rememberedValue : ""),
     );
@@ -2016,6 +2276,41 @@ function getFontReplacementSourceLabel(source: string) {
   }
 }
 
+function loadManualReplacementDefaults(): FontReplacementMap {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const raw = window.localStorage.getItem(FONT_REPLACEMENT_OVERRIDES_STORAGE_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return normalizeReplacementSelectionMap(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function saveManualReplacementDefaults(values: FontReplacementMap) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const normalizedValues = normalizeReplacementSelectionMap(values);
+  if (Object.keys(normalizedValues).length === 0) {
+    window.localStorage.removeItem(FONT_REPLACEMENT_OVERRIDES_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(
+    FONT_REPLACEMENT_OVERRIDES_STORAGE_KEY,
+    JSON.stringify(normalizedValues),
+  );
+}
+
 function loadLastReplacementFont() {
   if (typeof window === "undefined") {
     return "";
@@ -2040,6 +2335,15 @@ function loadLastReplacementFonts(): FontReplacementMap {
   } catch {
     return {};
   }
+}
+
+function loadLastSuccessfulReplacementFonts(): FontReplacementMap {
+  const values = loadLastReplacementFonts();
+  const legacyValue = loadLastReplacementFont();
+  if (legacyValue && !values.shx) {
+    return { ...values, shx: legacyValue };
+  }
+  return values;
 }
 
 function saveLastReplacementFont(value: string) {

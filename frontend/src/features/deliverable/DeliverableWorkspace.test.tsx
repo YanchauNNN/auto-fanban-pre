@@ -290,6 +290,62 @@ function createOkFontPreflightResult(filename = "2016-A01.dwg"): FontPreflightRe
   };
 }
 
+function createMissingShxFontPreflightResult(
+  filename = "A01.dwg",
+  defaultReplacementFonts = { shx: "simplex.shx" },
+): FontPreflightResult {
+  return {
+    files: [
+      {
+        filename,
+        status: "missing_fonts",
+        missingFonts: [
+          {
+            styleName: "HZTXT",
+            fontName: "missing.shx",
+            bigfontName: "",
+            kind: "shx",
+            usedInBlock: true,
+          },
+        ],
+        detectedStyleCount: 12,
+        missingStyleCount: 1,
+        fontReplacementApplied: false,
+        replacementFont: null,
+        replacementFonts: {},
+        replacedStyleCount: 0,
+        verifyAfterReplace: null,
+        fontReplacementIncomplete: false,
+        errors: [],
+      },
+    ],
+    replacementOptions: [],
+    replacementOptionsByKind: {
+      shx: [
+        {
+          label: "simplex.shx (AutoCAD SHX)",
+          value: "simplex.shx",
+          family: "simplex",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\simplex.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+        {
+          label: "romans.shx (AutoCAD SHX)",
+          value: "romans.shx",
+          family: "romans",
+          path: "D:\\Program Files\\AUTOCAD\\AutoCAD 2022\\Fonts\\romans.shx",
+          kind: "shx",
+          source: "autocad_fonts",
+        },
+      ],
+    },
+    defaultReplacementFont: null,
+    defaultReplacementFonts,
+    requiresConfirmation: true,
+  };
+}
+
 describe("DeliverableWorkspace", () => {
   const albumTitleLabel =
     schema.sections[1].fields.find((field) => field.key === "album_title_cn")?.label ?? "";
@@ -747,6 +803,212 @@ describe("DeliverableWorkspace", () => {
     });
 
     expect(adapter.preflightFonts).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the font replacement review from cached upload preflight without another request", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(
+      createMissingShxFontPreflightResult("A06.dwg"),
+    );
+    adapter.createBatch = vi.fn();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A06.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByText("A06.dwg")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "创建交付任务" });
+
+    await user.click(screen.getByRole("button", { name: "查看字体替换" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "字体替换管理" });
+    expect(within(dialog).getByLabelText("替代字体")).toHaveValue("simplex.shx");
+    expect(adapter.preflightFonts).toHaveBeenCalledTimes(1);
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+  });
+
+  it("waits for the upload-time font preflight promise when reviewing replacement settings", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    let resolvePreflight!: (value: FontPreflightResult) => void;
+    adapter.preflightFonts = vi.fn().mockImplementation(
+      () =>
+        new Promise<FontPreflightResult>((resolve) => {
+          resolvePreflight = resolve;
+        }),
+    );
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A07.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByText("A07.dwg")).toBeInTheDocument();
+    await waitFor(() => expect(adapter.preflightFonts).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "查看字体替换" }));
+    resolvePreflight(createMissingShxFontPreflightResult("A07.dwg"));
+
+    const dialog = await screen.findByRole("dialog", { name: "字体替换管理" });
+    expect(within(dialog).getByLabelText("替代字体")).toHaveValue("simplex.shx");
+    expect(adapter.preflightFonts).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves manual font replacement defaults from the review dialog without creating a task", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(
+      createMissingShxFontPreflightResult("A08.dwg"),
+    );
+    adapter.createBatch = vi.fn();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A08.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "创建交付任务" });
+    await user.click(screen.getByRole("button", { name: "查看字体替换" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "字体替换管理" });
+    await user.selectOptions(within(dialog).getByLabelText("替代字体"), "romans.shx");
+    await user.click(within(dialog).getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "字体替换管理" })).not.toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem("auto-fanban.font-replacement-overrides")).toBe(
+      JSON.stringify({ shx: "romans.shx" }),
+    );
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+  });
+
+  it("uses manual font replacement defaults before backend defaults when creating a task", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "auto-fanban.font-replacement-overrides",
+      JSON.stringify({ shx: "romans.shx" }),
+    );
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(
+      createMissingShxFontPreflightResult("A09.dwg", { shx: "simplex.shx" }),
+    );
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A09.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "manual-font-default");
+    await user.type(screen.getByLabelText(subitemNameLabel), "manual-font-default-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
+    expect(within(dialog).getByLabelText("替代字体")).toHaveValue("romans.shx");
+  });
+
+  it("falls back to backend defaults when manual font replacement defaults are not visible candidates", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "auto-fanban.font-replacement-overrides",
+      JSON.stringify({ shx: "missing-local-only.shx" }),
+    );
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(
+      createMissingShxFontPreflightResult("A11.dwg", { shx: "simplex.shx" }),
+    );
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A11.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "manual-font-missing");
+    await user.type(screen.getByLabelText(subitemNameLabel), "manual-font-missing-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "缺失字体处理" });
+    expect(within(dialog).getByLabelText("替代字体")).toHaveValue("simplex.shx");
+  });
+
+  it("shows remembered font replacement information when review finds no missing fonts", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "auto-fanban.font-replacement-overrides",
+      JSON.stringify({ shx: "romans.shx" }),
+    );
+    window.localStorage.setItem(
+      "auto-fanban.last-font-replacements",
+      JSON.stringify({ ttf: "simsun.ttc" }),
+    );
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult("A10.dwg"));
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A10.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "创建交付任务" });
+    await user.click(screen.getByRole("button", { name: "查看字体替换" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "字体替换管理" });
+    expect(within(dialog).getByText("当前文件未检测到缺失字体。")).toBeInTheDocument();
+    expect(within(dialog).getByText("手动默认设置")).toBeInTheDocument();
+    expect(within(dialog).getByText("SHX：romans.shx")).toBeInTheDocument();
+    expect(within(dialog).getByText("上次成功提交记忆")).toBeInTheDocument();
+    expect(within(dialog).getByText("TrueType：simsun.ttc")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("替代字体")).not.toBeInTheDocument();
   });
 
   it("preflights fonts before direct deliverable submit and proceeds immediately when all files are ok", async () => {

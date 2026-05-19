@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterable
 from pathlib import Path
@@ -14,6 +15,7 @@ from .autocad_path_resolver import resolve_autocad_paths
 
 _TTF_EXTENSIONS = {".ttf", ".ttc", ".otf"}
 _SHX_EXTENSIONS = {".shx"}
+logger = logging.getLogger(__name__)
 
 
 class InstalledFontInventory:
@@ -82,7 +84,14 @@ class InstalledFontInventory:
         for raw in paths:
             path = Path(raw)
             key = str(path).strip().lower()
-            if not key or key in seen or not path.exists() or not path.is_dir():
+            if not key or key in seen:
+                continue
+            try:
+                is_existing_dir = path.exists() and path.is_dir()
+            except OSError as exc:
+                logger.warning("font inventory skipped inaccessible directory %s: %s", path, exc)
+                continue
+            if not is_existing_dir:
                 continue
             seen.add(key)
             results.append(path)
@@ -91,8 +100,17 @@ class InstalledFontInventory:
     def _list_autocad_shx_options(self, *, kind: str) -> list[dict[str, str]]:
         entries: list[dict[str, str]] = []
         for fonts_dir in self.autocad_fonts_dirs:
-            for path in sorted(fonts_dir.iterdir(), key=lambda item: item.name.lower()):
-                if not path.is_file() or path.suffix.lower() not in _SHX_EXTENSIONS:
+            try:
+                candidates = sorted(fonts_dir.iterdir(), key=lambda item: item.name.lower())
+            except OSError as exc:
+                logger.warning("font inventory skipped AutoCAD font directory %s: %s", fonts_dir, exc)
+                continue
+            for path in candidates:
+                try:
+                    if not path.is_file() or path.suffix.lower() not in _SHX_EXTENSIONS:
+                        continue
+                except OSError as exc:
+                    logger.warning("font inventory skipped AutoCAD font file %s: %s", path, exc)
                     continue
                 suffix = "AutoCAD BigFont" if kind == "bigfont" else "AutoCAD SHX"
                 entries.append(
@@ -113,8 +131,14 @@ class InstalledFontInventory:
 
         entries: list[dict[str, str]] = []
         if self.include_registry:
-            entries.extend(self._iter_registry_entries())
-        entries.extend(self._iter_windows_font_files())
+            try:
+                entries.extend(self._iter_registry_entries())
+            except OSError as exc:
+                logger.warning("font inventory skipped Windows font registry: %s", exc)
+        try:
+            entries.extend(self._iter_windows_font_files())
+        except OSError as exc:
+            logger.warning("font inventory skipped Windows font directory %s: %s", self.windows_fonts_dir, exc)
         return entries
 
     def _iter_registry_entries(self) -> list[dict[str, str]]:
@@ -159,20 +183,27 @@ class InstalledFontInventory:
         return results
 
     def _iter_windows_font_files(self) -> list[dict[str, str]]:
-        if not self.windows_fonts_dir.exists():
+        if not self.windows_fonts_dir.exists() or not self.windows_fonts_dir.is_dir():
             return []
-        return [
-            {
-                "label": f"{path.stem} ({path.name})",
-                "value": path.name,
-                "family": path.stem,
-                "path": str(path),
-                "kind": "ttf",
-                "source": "windows_fonts",
-            }
-            for path in sorted(self.windows_fonts_dir.iterdir(), key=lambda item: item.name.lower())
-            if path.is_file() and path.suffix.lower() in _TTF_EXTENSIONS
-        ]
+        entries: list[dict[str, str]] = []
+        for path in sorted(self.windows_fonts_dir.iterdir(), key=lambda item: item.name.lower()):
+            try:
+                if not path.is_file() or path.suffix.lower() not in _TTF_EXTENSIONS:
+                    continue
+            except OSError as exc:
+                logger.warning("font inventory skipped Windows font file %s: %s", path, exc)
+                continue
+            entries.append(
+                {
+                    "label": f"{path.stem} ({path.name})",
+                    "value": path.name,
+                    "family": path.stem,
+                    "path": str(path),
+                    "kind": "ttf",
+                    "source": "windows_fonts",
+                }
+            )
+        return entries
 
     @staticmethod
     def _dedupe(options: list[dict[str, str]]) -> list[dict[str, str]]:

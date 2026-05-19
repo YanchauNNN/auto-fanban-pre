@@ -477,7 +477,7 @@ export class HttpAdapter implements ApiAdapter {
   private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(this.buildUrl(path), init);
     const text = await response.text();
-    const payload = text ? (JSON.parse(text) as unknown) : null;
+    const payload = text ? this.parseJsonOrText(text) : null;
 
     if (!response.ok) {
       const error: ApiError = {
@@ -485,12 +485,22 @@ export class HttpAdapter implements ApiAdapter {
         detail:
           payload && typeof payload === "object" && "detail" in payload
             ? (payload as { detail: ApiError["detail"] }).detail
+            : typeof payload === "string"
+              ? payload
             : null,
       };
       throw error;
     }
 
     return payload as T;
+  }
+
+  private parseJsonOrText(text: string): unknown {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
   }
 
   private buildUrl(path: string) {

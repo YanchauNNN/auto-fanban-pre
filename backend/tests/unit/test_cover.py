@@ -209,3 +209,22 @@ def test_1818_cover_binding_writes_external_code_on_row_30() -> None:
 
     assert "cover_external_code" in bindings
     assert bindings["cover_external_code"].cell == "B30:T30"
+
+
+def test_cn_title_split_keeps_protected_phrases_together() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+
+    left, right = gen._split_cn_two_cells("NP厂房标高3.900m~屋面模板图")
+
+    assert left == "NP厂房"
+    assert right == "标高3.900m~屋面模板图"
+    assert not (left.endswith("标") and right.startswith("高"))
+
+
+def test_en_title_split_restores_common_missing_spaces() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+
+    left, right = gen._split_en_two_cells("NP Building Level3.900m~RoofFormwork")
+
+    assert left == "NP Building"
+    assert right == "Level 3.900m~Roof Formwork"

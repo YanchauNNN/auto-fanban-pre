@@ -525,6 +525,25 @@ describe("HttpAdapter", () => {
     });
   });
 
+  it("preserves non-JSON API error bodies when a request fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => "<html><body>Bad Gateway</body></html>",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "bad.dwg", {
+      type: "application/acad",
+    });
+
+    await expect(adapter.preflightFonts([file])).rejects.toMatchObject({
+      status: 502,
+      detail: "<html><body>Bad Gateway</body></html>",
+    });
+  });
+
   it("creates grouped deliverable batches with run_audit_check=true when requested", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
