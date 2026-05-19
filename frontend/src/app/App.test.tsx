@@ -1,7 +1,8 @@
 ﻿import { render, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, type ReactNode } from "react";
+import { act, useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -19,6 +20,7 @@ const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
 const mockPdfDocument = vi.fn();
+const mockPdfPage = vi.fn();
 
 vi.mock("react-pdf", () => ({
   pdfjs: {
@@ -42,9 +44,10 @@ vi.mock("react-pdf", () => ({
     mockPdfDocument(file);
     return <div data-testid="pdf-document">{children}</div>;
   },
-  Page: ({ pageNumber }: { pageNumber: number }) => (
-    <div data-testid={`pdf-page-${pageNumber}`}>PDF Page {pageNumber}</div>
-  ),
+  Page: ({ pageNumber, width }: { pageNumber: number; width?: number }) => {
+    mockPdfPage({ pageNumber, width });
+    return <div data-testid={`pdf-page-${pageNumber}`}>PDF Page {pageNumber}</div>;
+  },
 }));
 
 vi.mock("../platform/api/useApiAdapter", () => ({
@@ -130,6 +133,7 @@ beforeEach(() => {
   mockCreateObjectURL.mockReturnValue("blob:preview");
   mockRevokeObjectURL.mockReset();
   mockPdfDocument.mockReset();
+  mockPdfPage.mockReset();
   vi.stubGlobal("fetch", mockFetch);
   URL.createObjectURL = mockCreateObjectURL;
   URL.revokeObjectURL = mockRevokeObjectURL;
@@ -346,6 +350,20 @@ describe("homepage shell", () => {
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
 
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
+    expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tutorial-spotlight")).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
+    expect(document.documentElement.style.scrollbarGutter).toBe("");
+
+    await user.click(screen.getByRole("button", { name: "教程" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByText("任务包概览")).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "退出" }));
     expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
     expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
@@ -430,6 +448,9 @@ describe("recent jobs area", () => {
     const modal = await screen.findByRole("dialog");
     expect(within(modal).getByText("sample-2.dwg")).toBeInTheDocument();
     expect(within(modal).getByText("sample-1.dwg")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "全部任务浏览器" })).not.toBeInTheDocument();
   });
 
   it("uses total instead of fetched item count for the expand button", async () => {
@@ -616,6 +637,63 @@ describe("job cards", () => {
     expect(screen.getByText("任务包")).toBeInTheDocument();
     expect(screen.getAllByText("交付").length).toBeGreaterThan(0);
     expect(screen.getAllByText("纠错").length).toBeGreaterThan(0);
+  });
+
+  it("returns from a task group detail page with Escape", async () => {
+    window.history.pushState({}, "", "/jobs/group-esc");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "group-esc",
+      batchId: "batch-esc",
+      groupId: "group-esc",
+      isGroup: true,
+      sourceFilename: "20261RC-JGS10-B - 副本.dwg",
+      sourceFilenames: ["20261RC-JGS10-B - 副本.dwg"],
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      projectNo: "2026",
+      status: "succeeded",
+      stage: "GROUP_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-05-19T09:00:00+08:00",
+      finishedAt: "2026-05-19T09:10:00+08:00",
+      startedAt: "2026-05-19T09:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: true,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        previewAvailable: true,
+        previewMode: "annotated",
+        packageDownloadUrl: "/api/jobs/group-esc/download/package",
+        iedDownloadUrl: "/api/jobs/group-esc/download/ied",
+        previewDownloadUrl: "/api/jobs/group-esc/download/preview",
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/group-esc/download/report",
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      children: [],
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText("任务包概览")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("module-business-panel")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
   });
 
   it("shows a completed single deliverable job with a detail link", async () => {
@@ -927,12 +1005,52 @@ describe("job detail pages", () => {
     const zoomControls = within(screen.getByLabelText("PDF 局部缩放"));
     expect(zoomControls.getByText("局部缩放")).toBeInTheDocument();
     expect(zoomControls.getByText("100%")).toBeInTheDocument();
+    expect(mockPdfPage).toHaveBeenCalledWith(expect.objectContaining({ pageNumber: 1, width: 320 }));
     await user.click(zoomControls.getByRole("button", { name: "放大" }));
     expect(zoomControls.getByText("125%")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockPdfPage).toHaveBeenCalledWith(
+        expect.objectContaining({ pageNumber: 1, width: 400 }),
+      );
+    });
+    await user.click(zoomControls.getByRole("button", { name: "放大" }));
+    expect(zoomControls.getByText("150%")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockPdfPage).toHaveBeenCalledWith(
+        expect.objectContaining({ pageNumber: 1, width: 480 }),
+      );
+    });
     await user.click(zoomControls.getByRole("button", { name: "缩小" }));
-    expect(zoomControls.getByText("100%")).toBeInTheDocument();
+    expect(zoomControls.getByText("125%")).toBeInTheDocument();
+    fireEvent.wheel(screen.getByTestId("pdf-page-1"), { deltaY: -120 });
+    expect(zoomControls.getByText("125%")).toBeInTheDocument();
+    fireEvent.wheel(screen.getByLabelText("PDF 预览页面"), { ctrlKey: true, deltaY: -120 });
+    expect(zoomControls.getByText("150%")).toBeInTheDocument();
+    fireEvent.wheel(screen.getByLabelText("PDF 预览页面"), { ctrlKey: true, deltaY: 120 });
+    expect(zoomControls.getByText("125%")).toBeInTheDocument();
+    expect(screen.getByLabelText("PDF 横向拖动条")).toBeDisabled();
+    const previewPages = screen.getByLabelText("PDF 预览页面");
+    Object.defineProperties(previewPages, {
+      clientWidth: { configurable: true, value: 300 },
+      scrollWidth: { configurable: true, value: 900 },
+    });
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    fireEvent.scroll(previewPages);
+    const horizontalSlider = await screen.findByLabelText("PDF 横向拖动条");
+    expect(
+      horizontalSlider.compareDocumentPosition(previewPages) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(horizontalSlider).toHaveAttribute("max", "600");
+    expect(horizontalSlider).not.toBeDisabled();
+    fireEvent.change(horizontalSlider, { target: { value: "260" } });
+    expect(previewPages.scrollLeft).toBe(260);
     expect(screen.getByTestId("pdf-page-1")).toBeInTheDocument();
     expect(screen.queryByTitle("预览 PDF（纠错标注）")).not.toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "预览 PDF（纠错标注）" })).not.toBeInTheDocument();
   });
 
   it("shows an explicit fallback message when the preview PDF cannot be loaded", async () => {

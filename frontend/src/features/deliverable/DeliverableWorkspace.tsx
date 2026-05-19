@@ -845,6 +845,7 @@ export function DeliverableWorkspace({
             ? { "data-tutorial-target": tutorialPreview.dialogTarget }
             : undefined
         }
+        onRequestClose={tutorialPreviewEnabled ? undefined : handleClose}
       >
         <div
           className={`${styles.modalLayout} ${
@@ -1139,7 +1140,7 @@ export function DeliverableWorkspace({
       </TaskConfigModal>
 
       {fontPreflightResult && fontReplacementDialogMode ? (
-        <TaskConfigModal title={fontDialogTitle}>
+        <TaskConfigModal title={fontDialogTitle} onRequestClose={resetFontPreflightState}>
           <div className={styles.fontModalBody}>
             <header className={styles.modalHeader}>
               <div>

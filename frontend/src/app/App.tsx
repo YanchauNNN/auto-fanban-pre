@@ -1223,6 +1223,22 @@ function JobsBrowserModal({
   const totalJobs = modalJobsQuery.data?.pages[0]?.total ?? 0;
   const remainingJobs = Math.max(totalJobs - loadedJobs.length, 0);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+
+      event.preventDefault();
+      onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
     <div className={styles.jobsModalBackdrop}>
       <div
@@ -1523,6 +1539,22 @@ function DeliverableTutorialOverlay({
     };
   }, []);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+
+      event.preventDefault();
+      onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
     <>
       <TutorialSpotlight stepId={step.id} />
@@ -1576,6 +1608,26 @@ function JobDetailPage() {
 
   const detail = detailQuery.data;
   const hasWarnings = Boolean(detail && (detail.flags.length > 0 || detail.errors.length > 0));
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || event.defaultPrevented) {
+        return;
+      }
+
+      if (document.querySelector('[role="dialog"]')) {
+        return;
+      }
+
+      event.preventDefault();
+      navigate("/");
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [navigate]);
 
   return (
     <div className={styles.detailPage}>

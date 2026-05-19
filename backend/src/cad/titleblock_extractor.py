@@ -356,6 +356,10 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _parse_page_marker_from_text(
         self, items: list[TextItem]
     ) -> tuple[int | None, int | None]:
+        labeled_total, labeled_index = self._parse_labeled_page_info_from_lines(items)
+        if labeled_total is not None or labeled_index is not None:
+            return labeled_total, labeled_index
+
         joined = self._join_text(items)
         if joined:
             m = re.search(r"rolls\s*(\d+)\s*of\s*(\d+)", joined, flags=re.IGNORECASE)
@@ -768,6 +772,10 @@ class TitleblockExtractor(ITitleblockExtractor):
         *,
         total_then_index_tokens: bool = False,
     ) -> tuple[int | None, int | None]:
+        labeled_total, labeled_index = self._parse_labeled_page_info_from_lines(items)
+        if labeled_total is not None or labeled_index is not None:
+            return labeled_total, labeled_index
+
         pattern = parse_cfg.get("pattern")
         if pattern:
             regex = re.compile(str(pattern))
@@ -1053,6 +1061,149 @@ class TitleblockExtractor(ITitleblockExtractor):
             return False
         return TitleblockExtractor._is_a4_frame(frame)
 
+    def _parse_labeled_page_info_from_lines(
+        self,
+        items: list[TextItem],
+    ) -> tuple[int | None, int | None]:
+        best: tuple[int, float, int | None, int | None] | None = None
+
+        def remember(
+            *,
+            line_text: str,
+            y: float,
+            total: int | None,
+            index: int | None,
+        ) -> None:
+            nonlocal best
+            if total is None and index is None:
+                return
+            score = (self._page_info_line_priority(line_text), y, total, index)
+            if best is None or score[:2] > best[:2]:
+                best = score
+
+        for line in self._cluster_by_y(items, self.y_cluster_abs):
+            ordered = sorted(line, key=lambda it: it.x)
+            line_text = self._normalize_spaces(
+                " ".join((it.text or "").strip() for it in ordered if it.text)
+            )
+            if not line_text:
+                continue
+
+            parsed = self._parse_page_info_text(line_text)
+            if parsed != (None, None):
+                total, index = parsed
+            else:
+                token_order = self._page_info_token_order(line_text)
+                if token_order is None:
+                    continue
+                numeric_tokens = [
+                    (it.x, token)
+                    for it in ordered
+                    if (token := self._page_info_numeric_token(it.text or "")) is not None
+                ]
+                if len(numeric_tokens) < 2:
+                    continue
+                numeric_tokens.sort(key=lambda t: t[0])
+                first = numeric_tokens[0][1]
+                second = numeric_tokens[-1][1]
+                if token_order == "index_total":
+                    index = self._page_info_token_to_int(first, is_index=True)
+                    total = self._page_info_token_to_int(second, is_index=False)
+                else:
+                    total = self._page_info_token_to_int(first, is_index=False)
+                    index = self._page_info_token_to_int(second, is_index=True)
+
+            remember(
+                line_text=line_text,
+                y=max((it.y for it in ordered), default=0.0),
+                total=total,
+                index=index,
+            )
+
+        for label in items:
+            label_text = self._normalize_spaces(label.text or "")
+            token_order = self._page_info_token_order(label_text)
+            if token_order is None:
+                continue
+            label_height = max(1.0, label.text_height or 0.0)
+            y_tol = max(self.y_cluster_abs * 3.0, label_height * 0.35, 8.0)
+            numeric_tokens: list[tuple[float, str]] = []
+            for item in items:
+                if item is label:
+                    continue
+                token = self._page_info_numeric_token(item.text or "")
+                if token is None:
+                    continue
+                if item.x < label.x - 1.0:
+                    continue
+                if abs(item.y - label.y) > y_tol:
+                    continue
+                numeric_tokens.append((item.x, token))
+            if len(numeric_tokens) < 2:
+                continue
+            numeric_tokens.sort(key=lambda t: t[0])
+            first = numeric_tokens[0][1]
+            second = numeric_tokens[-1][1]
+            if token_order == "index_total":
+                index = self._page_info_token_to_int(first, is_index=True)
+                total = self._page_info_token_to_int(second, is_index=False)
+            else:
+                total = self._page_info_token_to_int(first, is_index=False)
+                index = self._page_info_token_to_int(second, is_index=True)
+            remember(line_text=label_text, y=label.y, total=total, index=index)
+
+        if best is None:
+            return None, None
+        return best[2], best[3]
+
+    @classmethod
+    def _parse_page_info_text(cls, text: str) -> tuple[int | None, int | None]:
+        normalized = cls._normalize_spaces(text)
+        if not normalized:
+            return None, None
+
+        patterns = [
+            (
+                re.compile(r"第\s*([0-9Xx]+)\s*[张页]\s*共\s*([0-9Xx]+)\s*[张页]"),
+                "index_total",
+            ),
+            (
+                re.compile(r"共\s*([0-9Xx]+)\s*[张页]\s*第\s*([0-9Xx]+)\s*[张页]"),
+                "total_index",
+            ),
+            (
+                re.compile(r"(?:page|rolls)?\s*([0-9Xx]+)\s*of\s*([0-9Xx]+)", re.IGNORECASE),
+                "index_total",
+            ),
+        ]
+        for pattern, token_order in patterns:
+            match = pattern.search(normalized)
+            if not match:
+                continue
+            first = match.group(1)
+            second = match.group(2)
+            if token_order == "index_total":
+                total = cls._page_info_token_to_int(second, is_index=False)
+                index = cls._page_info_token_to_int(first, is_index=True)
+            else:
+                total = cls._page_info_token_to_int(first, is_index=False)
+                index = cls._page_info_token_to_int(second, is_index=True)
+            return total, index
+        return None, None
+
+    @classmethod
+    def _page_info_token_order(cls, text: str) -> str | None:
+        compact = cls._strip_all_whitespace(text).upper()
+        if not compact:
+            return None
+        first_index = compact.find("第")
+        first_total = compact.find("共")
+        if first_index >= 0 and first_total >= 0:
+            return "index_total" if first_index < first_total else "total_index"
+        if "PAGE" in compact or "OF" in compact:
+            return "index_total"
+        return None
+
     def _page_info_two_tokens(
         self,
         items: list[TextItem],
@@ -1118,6 +1269,15 @@ class TitleblockExtractor(ITitleblockExtractor):
             return None
         if cleaned == "X" or cleaned.isdigit():
             return cleaned
+        return None
+
+    @staticmethod
+    def _page_info_token_to_int(token: str, *, is_index: bool) -> int | None:
+        normalized = str(token or "").strip().upper()
+        if normalized == "X":
+            return 1 if is_index else None
+        if normalized.isdigit():
+            return int(normalized)
         return None
 
     def _rebuild_fixed19_from_single_chars(

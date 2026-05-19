@@ -1,5 +1,13 @@
 import pdfPreviewWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
-import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 import { TaskConfigModal } from "../features/deliverable/TaskConfigModal";
@@ -16,6 +24,19 @@ type PreviewPdfModalProps = {
   onClose: () => void;
 };
 
+type HorizontalScrollState = {
+  left: number;
+  max: number;
+};
+
+const MIN_PREVIEW_ZOOM = 0.75;
+const MAX_PREVIEW_ZOOM = 2;
+const PREVIEW_ZOOM_STEP = 0.25;
+
+function clampPreviewZoom(value: number) {
+  return Math.min(MAX_PREVIEW_ZOOM, Math.max(MIN_PREVIEW_ZOOM, Number(value.toFixed(2))));
+}
+
 export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -23,9 +44,14 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageWidth, setPageWidth] = useState(960);
   const [localZoom, setLocalZoom] = useState(1);
+  const [horizontalScroll, setHorizontalScroll] = useState<HorizontalScrollState>({
+    left: 0,
+    max: 0,
+  });
   const previewPagesRef = useRef<HTMLDivElement | null>(null);
   const previewFile = useMemo(() => (pdfData ? { data: pdfData } : null), [pdfData]);
   const zoomPercent = Math.round(localZoom * 100);
+  const renderedPageWidth = Math.round(pageWidth * localZoom);
   const previewStatusText = loadError
     ? "预览加载失败"
     : isLoading
@@ -93,20 +119,94 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
     };
   }, []);
 
+  const updateHorizontalScrollState = useCallback(() => {
+    const node = previewPagesRef.current;
+    if (!node) {
+      return;
+    }
+
+    const max = Math.max(0, Math.round(node.scrollWidth - node.clientWidth));
+    const left = Math.min(max, Math.max(0, Math.round(node.scrollLeft)));
+    setHorizontalScroll((current) =>
+      current.max === max && current.left === left ? current : { left, max },
+    );
+  }, []);
+
+  const changeZoom = useCallback((direction: 1 | -1) => {
+    setLocalZoom((value) => clampPreviewZoom(value + direction * PREVIEW_ZOOM_STEP));
+  }, []);
+
   const decreaseZoom = () => {
-    setLocalZoom((value) => Math.max(0.75, Number((value - 0.25).toFixed(2))));
+    changeZoom(-1);
   };
 
   const increaseZoom = () => {
-    setLocalZoom((value) => Math.min(2, Number((value + 0.25).toFixed(2))));
+    changeZoom(1);
   };
 
-  const zoomLayerStyle = {
-    "--preview-local-zoom": String(localZoom),
-  } as CSSProperties;
+  const handlePreviewWheel = useCallback((event: WheelEvent) => {
+    if (!(event.ctrlKey || event.metaKey) || event.deltaY === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    changeZoom(event.deltaY < 0 ? 1 : -1);
+  }, [changeZoom]);
+
+  useEffect(() => {
+    const node = previewPagesRef.current;
+    if (!node) {
+      return;
+    }
+
+    node.addEventListener("wheel", handlePreviewWheel, { passive: false });
+    return () => {
+      node.removeEventListener("wheel", handlePreviewWheel);
+    };
+  }, [handlePreviewWheel]);
+
+  useEffect(() => {
+    const node = previewPagesRef.current;
+    if (!node) {
+      return;
+    }
+
+    const handleScroll = () => {
+      updateHorizontalScrollState();
+    };
+
+    const handleResize = () => {
+      updateHorizontalScrollState();
+    };
+
+    node.addEventListener("scroll", handleScroll);
+    window.addEventListener("resize", handleResize);
+    updateHorizontalScrollState();
+
+    return () => {
+      node.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [updateHorizontalScrollState]);
+
+  useLayoutEffect(() => {
+    updateHorizontalScrollState();
+  }, [pageCount, renderedPageWidth, updateHorizontalScrollState]);
+
+  const handleHorizontalScrollChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextLeft = Number(event.currentTarget.value);
+    const node = previewPagesRef.current;
+    if (node) {
+      node.scrollLeft = nextLeft;
+    }
+    setHorizontalScroll((current) => ({
+      max: current.max,
+      left: Math.min(current.max, Math.max(0, Math.round(nextLeft))),
+    }));
+  };
 
   return (
-    <TaskConfigModal dialogClassName={styles.previewDialog} title={title}>
+    <TaskConfigModal dialogClassName={styles.previewDialog} title={title} onRequestClose={onClose}>
       <div className={styles.previewModalContent}>
         <div className={styles.previewModalHeader}>
           <div>
@@ -128,38 +228,57 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
           </div>
         </div>
         <div className={styles.previewViewerShell}>
-          <div className={styles.previewViewerStatusRow}>
-            <span className={styles.previewStatusText}>{previewStatusText}</span>
-            <div className={styles.previewZoomControls} aria-label="PDF 局部缩放">
-              <span>局部缩放</span>
-              <button
-                className={styles.previewZoomButton}
-                disabled={localZoom <= 0.75}
-                onClick={decreaseZoom}
-                type="button"
-              >
-                缩小
-              </button>
-              <strong>{zoomPercent}%</strong>
-              <button
-                className={styles.previewZoomButton}
-                disabled={localZoom >= 2}
-                onClick={increaseZoom}
-                type="button"
-              >
-                放大
-              </button>
-              <button
-                className={styles.previewZoomButton}
-                disabled={localZoom === 1}
-                onClick={() => setLocalZoom(1)}
-                type="button"
-              >
-                还原
-              </button>
+          <div className={styles.previewViewerControls}>
+            <div className={styles.previewViewerStatusRow}>
+              <span className={styles.previewStatusText}>{previewStatusText}</span>
+              <div className={styles.previewZoomControls} aria-label="PDF 局部缩放">
+                <span>局部缩放</span>
+                <button
+                  className={styles.previewZoomButton}
+                  disabled={localZoom <= 0.75}
+                  onClick={decreaseZoom}
+                  type="button"
+                >
+                  缩小
+                </button>
+                <strong>{zoomPercent}%</strong>
+                <button
+                  className={styles.previewZoomButton}
+                  disabled={localZoom >= 2}
+                  onClick={increaseZoom}
+                  type="button"
+                >
+                  放大
+                </button>
+                <button
+                  className={styles.previewZoomButton}
+                  disabled={localZoom === 1}
+                  onClick={() => setLocalZoom(1)}
+                  type="button"
+                >
+                  还原
+                </button>
+              </div>
+            </div>
+            <div className={styles.previewHorizontalScrollBar}>
+              <input
+                aria-label="PDF 横向拖动条"
+                className={styles.previewHorizontalSlider}
+                disabled={horizontalScroll.max <= 0}
+                max={Math.max(horizontalScroll.max, 1)}
+                min="0"
+                step="1"
+                type="range"
+                value={Math.min(horizontalScroll.left, horizontalScroll.max)}
+                onChange={handleHorizontalScrollChange}
+              />
             </div>
           </div>
-          <div className={styles.previewPages} ref={previewPagesRef}>
+          <div
+            aria-label="PDF 预览页面"
+            className={styles.previewPages}
+            ref={previewPagesRef}
+          >
             {loadError ? (
               <div className={styles.previewFallback} role="status">
                 <strong>预览暂时不可用</strong>
@@ -183,12 +302,13 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
               >
                 {Array.from({ length: Math.max(pageCount, 1) }, (_, index) => (
                   <div className={styles.previewPageCard} key={`${url}-${index + 1}`}>
-                    <div className={styles.previewPageZoomLayer} style={zoomLayerStyle}>
+                    <div className={styles.previewPageZoomLayer} data-preview-page-zoom="true">
                       <Page
                         pageNumber={index + 1}
                         renderAnnotationLayer={false}
                         renderTextLayer={false}
-                        width={pageWidth}
+                        width={renderedPageWidth}
+                        onRenderSuccess={updateHorizontalScrollState}
                       />
                     </div>
                     <span className={styles.previewPageNumber}>第 {index + 1} 页</span>

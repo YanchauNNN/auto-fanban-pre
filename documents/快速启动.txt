@@ -1,5 +1,18 @@
+主空间 main（默认端口）
+
 cd E:\project\auto-fanban-pre
 uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8000
 
 cd E:\project\auto-fanban-pre\frontend
 npm run dev -- --host 127.0.0.1 --port 5173
+
+
+前端分支测试空间 codex/frontend-app-shell-sync（独立端口，避免和 main 冲突）
+
+cd E:\project\auto-fanban-pre\.worktrees\codex-frontend-app-shell-sync
+uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8080
+
+cd E:\project\auto-fanban-pre\.worktrees\codex-frontend-app-shell-sync\frontend
+$env:VITE_API_BASE_URL='http://127.0.0.1:8080'
+$env:VITE_API_PROXY_TARGET='http://127.0.0.1:8080'
+npm run dev -- --host 127.0.0.1 --port 5180

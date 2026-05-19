@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 
 import { TaskConfigModal } from "./TaskConfigModal";
 
@@ -51,5 +52,27 @@ describe("TaskConfigModal", () => {
     expect(screen.queryByRole("dialog", { name: "主弹窗" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "次弹窗" })).not.toBeInTheDocument();
     expect(document.body.style.overflow).toBe("");
+  });
+
+  it("calls the close handler for only the topmost modal when Escape is pressed", async () => {
+    const onPrimaryClose = vi.fn();
+    const onSecondaryClose = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <>
+        <TaskConfigModal title="主弹窗" onRequestClose={onPrimaryClose}>
+          <div>primary</div>
+        </TaskConfigModal>
+        <TaskConfigModal title="次弹窗" onRequestClose={onSecondaryClose}>
+          <div>secondary</div>
+        </TaskConfigModal>
+      </>,
+    );
+
+    await user.keyboard("{Escape}");
+
+    expect(onSecondaryClose).toHaveBeenCalledTimes(1);
+    expect(onPrimaryClose).not.toHaveBeenCalled();
   });
 });

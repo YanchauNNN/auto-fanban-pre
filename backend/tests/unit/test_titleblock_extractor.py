@@ -291,6 +291,32 @@ def test_parse_page_info_001_homepage_reads_total_then_index_tokens() -> None:
     assert idx == 1
 
 
+def test_parse_page_info_full_index_then_total_line_overrides_001_fallback_order() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [_item("第1张 共10张")]
+
+    total, idx = extractor._parse_page_info(
+        items,
+        parse_cfg,
+        total_then_index_tokens=True,
+    )
+
+    assert total == 10
+    assert idx == 1
+
+
+def test_parse_page_info_full_total_then_index_line_with_page_unit() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [_item("共10页 第1页")]
+
+    total, idx = extractor._parse_page_info(items, parse_cfg)
+
+    assert total == 10
+    assert idx == 1
+
+
 def test_parse_a4_page_marker_identity_with_parenthesized_revision() -> None:
     extractor = TitleblockExtractor()
     items = [_item("18185NE-JGS11-001(A)", x=10.0, y=100.0)]
@@ -599,6 +625,16 @@ def test_parse_a4_page_marker_from_fragmented_coordinate_tokens() -> None:
     assert page_index == 7
 
 
+def test_parse_a4_page_marker_reads_index_then_total_full_chinese_line() -> None:
+    extractor = TitleblockExtractor()
+    items = [_item("第2张 共10张")]
+
+    page_total, page_index = extractor._parse_page_marker_from_text(items)
+
+    assert page_total == 10
+    assert page_index == 2
+
+
 def test_parse_page_info_prefers_primary_row_and_reads_index_total_from_same_row() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse
@@ -614,6 +650,65 @@ def test_parse_page_info_prefers_primary_row_and_reads_index_total_from_same_row
     total, idx = extractor._parse_page_info(items, parse_cfg)
 
     assert total == 2
+    assert idx == 1
+
+
+def test_parse_page_info_fragmented_index_then_total_ignores_001_token_fallback_order() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("第     张 共     张", x=10.0, y=100.0),
+        _item("1", x=36.0, y=100.0),
+        _item("10", x=86.0, y=100.0),
+        _item("Page       of", x=10.0, y=92.0),
+        _item("1", x=36.0, y=92.0),
+        _item("10", x=86.0, y=92.0),
+    ]
+
+    total, idx = extractor._parse_page_info(
+        items,
+        parse_cfg,
+        total_then_index_tokens=True,
+    )
+
+    assert total == 10
+    assert idx == 1
+
+
+def test_parse_page_info_fragmented_index_then_total_allows_baseline_offset() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("第     张 共     张", x=10.0, y=100.0, height=125.0),
+        _item("Page       of", x=10.0, y=80.0, height=100.0),
+        _item("10", x=86.0, y=82.0, height=125.0),
+        _item("1", x=36.0, y=79.0, height=125.0),
+        _item("1", x=36.0, y=89.0, height=125.0),
+        _item("10", x=86.0, y=92.0, height=125.0),
+    ]
+
+    total, idx = extractor._parse_page_info(
+        items,
+        parse_cfg,
+        total_then_index_tokens=True,
+    )
+
+    assert total == 10
+    assert idx == 1
+
+
+def test_parse_page_info_fragmented_total_then_index_page_unit() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("共     页 第     页", x=10.0, y=100.0),
+        _item("4", x=36.0, y=100.0),
+        _item("1", x=86.0, y=100.0),
+    ]
+
+    total, idx = extractor._parse_page_info(items, parse_cfg)
+
+    assert total == 4
     assert idx == 1
 
 

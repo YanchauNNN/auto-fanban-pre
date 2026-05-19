@@ -24,4 +24,15 @@ describe("vite browser compatibility", () => {
     expect(previewSource).toContain('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
     expect(previewSource).toContain('pdfjs.GlobalWorkerOptions.workerSrc = `${pdfPreviewWorkerUrl}?react-pdf-compat=5.4.296`');
   });
+
+  it("keeps oversized pdf preview pages horizontally scrollable from a top control", () => {
+    const appCssSource = readFileSync(resolve(process.cwd(), "src/app/App.module.css"), "utf8");
+    const viewerControlsBlock =
+      appCssSource.match(/\.previewViewerControls \{[\s\S]*?\n\}/)?.[0] ?? "";
+    const previewPagesBlock = appCssSource.match(/\.previewPages \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+    expect(viewerControlsBlock).toContain("position: sticky;");
+    expect(previewPagesBlock).toContain("overflow-x: hidden;");
+    expect(appCssSource).toContain("width: max-content;");
+  });
 });

@@ -288,7 +288,7 @@ export function ReplaceWorkspace({
   }
 
   return (
-    <TaskConfigModal title="翻版配置">
+    <TaskConfigModal title="翻版配置" onRequestClose={onClose}>
       <div className={styles.layout}>
         <header className={styles.header}>
           <div>

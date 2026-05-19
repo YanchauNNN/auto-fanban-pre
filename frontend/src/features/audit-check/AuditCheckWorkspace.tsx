@@ -137,7 +137,7 @@ export function AuditCheckWorkspace({
   }
 
   return (
-    <TaskConfigModal title="纠错配置">
+    <TaskConfigModal title="纠错配置" onRequestClose={onClose}>
       <div className={styles.layout}>
         <header className={styles.header}>
           <div>
