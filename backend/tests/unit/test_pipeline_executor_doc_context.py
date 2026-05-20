@@ -386,6 +386,66 @@ def test_stage_generate_docs_skips_ied_when_disabled(tmp_path: Path) -> None:
     assert job.artifacts.ied_xlsx is None
 
 
+def test_stage_generate_docs_uses_catalog_page_count_when_catalog_pdf_export_fails(
+    tmp_path: Path,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.doc_param_validator = cast(Any, SimpleNamespace(validate=lambda ctx: []))
+    executor.derivation = cast(Any, SimpleNamespace(compute=lambda ctx: ctx.derived))
+    executor.cover_gen = MagicMock()
+    executor.ied_gen = MagicMock()
+
+    catalog_result = SimpleNamespace(
+        xlsx_path=tmp_path / "output" / "docs" / "catalog.xlsx",
+        pdf_path=tmp_path / "output" / "docs" / "catalog.pdf",
+        page_count=3,
+        pdf_export_error=RuntimeError("Workbook.ExportAsFixedFormat failed"),
+    )
+    catalog_result.xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_result.xlsx_path.write_text("xlsx", encoding="utf-8")
+    generate_with_diagnostics = MagicMock(return_value=catalog_result)
+    executor.catalog_gen = cast(Any, SimpleNamespace(
+        generate_with_diagnostics=generate_with_diagnostics,
+    ))
+
+    captured: dict[str, Any] = {}
+
+    def generate_design(ctx: DocContext, docs_dir: Path) -> Path:
+        captured["catalog_page_total"] = ctx.derived.catalog_page_total
+        output = docs_dir / "设计文件.xlsx"
+        output.write_text("design", encoding="utf-8")
+        return output
+
+    executor.design_gen = cast(Any, SimpleNamespace(generate=generate_design))
+    executor._build_doc_context = MagicMock(
+        return_value=DocContext(
+            params=GlobalDocParams(project_no="2026", include_ied_plan=False),
+            frames=[],
+            sheet_sets=[],
+        )
+    )
+
+    job = Job(
+        job_id="job-doc-catalog-pdf-warning",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+        params={"include_ied_plan": False},
+    )
+
+    PipelineExecutor._stage_generate_docs(executor, job, {"frames": [], "sheet_sets": []})
+
+    generate_with_diagnostics.assert_called_once()
+    assert captured["catalog_page_total"] == 3
+    assert any(
+        "目录PDF导出失败" in flag and "Workbook.ExportAsFixedFormat failed" in flag
+        for flag in job.flags
+    )
+    assert job.progress.details["catalog_pdf_export_error"] == "Workbook.ExportAsFixedFormat failed"
+    assert job.artifacts.docs_dir == tmp_path / "output" / "docs"
+
+
 def test_stage_split_uses_steel_liner_plot_style_when_two_titles_match(
     tmp_path: Path,
     sample_frame: FrameMeta,

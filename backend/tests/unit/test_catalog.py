@@ -30,6 +30,14 @@ class DummyPDFExporter:
         return 2
 
 
+class FailingPDFExporter:
+    def export_xlsx_to_pdf(self, xlsx_path: Path, pdf_path: Path) -> None:
+        raise RuntimeError("Workbook.ExportAsFixedFormat failed")
+
+    def count_pdf_pages(self, pdf_path: Path) -> int:
+        return 2
+
+
 def _make_frame(seq: int) -> FrameMeta:
     code = f"1234567-JG001-{seq:03d}"
     runtime = FrameRuntime(
@@ -255,6 +263,28 @@ def test_catalog_backfill_page_count(temp_dir: Path) -> None:
     gen._backfill_page_count(output_xlsx, 3, bindings)
 
     ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["H10"].value == 3
+
+
+def test_catalog_diagnostics_preserves_xlsx_page_count_when_pdf_export_fails(
+    temp_dir: Path,
+    monkeypatch,
+) -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, FailingPDFExporter()))
+    ctx = _build_context()
+    monkeypatch.setattr(CatalogGenerator, "_count_pages", lambda self, path: 3)
+
+    result = gen.generate_with_diagnostics(ctx, temp_dir)
+
+    assert result.xlsx_path.exists()
+    assert result.page_count == 3
+    assert result.pdf_path is not None
+    assert not result.pdf_path.exists()
+    assert result.pdf_export_error is not None
+    assert "Workbook.ExportAsFixedFormat failed" in str(result.pdf_export_error)
+
+    ws = load_workbook(result.xlsx_path).active
     assert ws is not None
     assert ws["H10"].value == 3
 

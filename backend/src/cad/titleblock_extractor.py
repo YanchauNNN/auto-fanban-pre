@@ -635,23 +635,26 @@ class TitleblockExtractor(ITitleblockExtractor):
         )
         if joined_fragments:
             candidates.append(joined_fragments)
+        short_match: re.Match[str] | None = None
         for cand in candidates:
             text = self._strip_all_whitespace(cand.upper())
             m = re_full.match(text)
-            if not m:
-                m = re_short.match(text)
-            if not m:
-                continue
-            internal_code = m.group(0)
-            album_code = None
-            mid = m.groupdict().get("mid")
-            if mid:
-                mm = re_mid_album.match(mid)
-                if mm:
-                    album_code = mm.group("album")
-                elif len(mid) >= 2:
-                    album_code = mid[-2:]
-            return internal_code, album_code
+            if m:
+                internal_code = m.group(0)
+                album_code = None
+                mid = m.groupdict().get("mid")
+                if mid:
+                    mm = re_mid_album.match(mid)
+                    if mm:
+                        album_code = mm.group("album")
+                    elif len(mid) >= 2:
+                        album_code = mid[-2:]
+                return internal_code, album_code
+
+            m = re_short.match(text)
+            if m and short_match is None:
+                short_match = m
+
         rebuilt = self._rebuild_internal_code_from_segments(items, re_full, re_short)
         if rebuilt:
             m = re_full.match(rebuilt)
@@ -665,6 +668,19 @@ class TitleblockExtractor(ITitleblockExtractor):
                     elif len(mid) >= 2:
                         album_code = mid[-2:]
                 return rebuilt, album_code
+
+        if short_match:
+            internal_code = short_match.group(0)
+            album_code = None
+            mid = short_match.groupdict().get("mid")
+            if mid:
+                mm = re_mid_album.match(mid)
+                if mm:
+                    album_code = mm.group("album")
+                elif len(mid) >= 2:
+                    album_code = mid[-2:]
+            return internal_code, album_code
+
         return None, None
 
     # 外部编码中至少包含的数字个数（过滤模板占位文字）
@@ -869,7 +885,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         return self.line_join.join(joined).strip()
 
     def _extract_title_lines(self, items: list[TextItem]) -> list[str]:
-        frags: list[tuple[float, float, str]] = []
+        frags: list[tuple[float, float, str, float, float]] = []
         for it in items:
             text = (it.text or "").strip()
             if not text:
@@ -877,23 +893,25 @@ class TitleblockExtractor(ITitleblockExtractor):
             parts = [p.strip() for p in text.splitlines() if p.strip()]
             if not parts:
                 continue
+            _, ymin, _, ymax = self._item_span(it)
             if len(parts) == 1:
-                frags.append((it.y, it.x, parts[0]))
+                frags.append((it.y, it.x, parts[0], ymin, ymax))
             else:
                 for idx, part in enumerate(parts):
-                    frags.append((it.y - idx * (self.y_cluster_abs * 0.1), it.x, part))
+                    part_y = it.y - idx * (self.y_cluster_abs * 0.1)
+                    frags.append((part_y, it.x, part, ymin, ymax))
 
         frags.sort(key=lambda t: (-t[0], t[1]))
-        lines: list[list[tuple[float, float, str]]] = []
-        for y, x, text in frags:
+        lines: list[list[tuple[float, float, str, float, float]]] = []
+        for y, x, text, ymin, ymax in frags:
             placed = False
             for line in lines:
-                if abs(line[0][0] - y) <= self.y_cluster_abs:
-                    line.append((y, x, text))
+                if self._title_fragments_same_visual_line(line, y, ymin, ymax):
+                    line.append((y, x, text, ymin, ymax))
                     placed = True
                     break
             if not placed:
-                lines.append([(y, x, text)])
+                lines.append([(y, x, text, ymin, ymax)])
 
         out: list[str] = []
         for line in lines:
@@ -903,6 +921,25 @@ class TitleblockExtractor(ITitleblockExtractor):
             if s:
                 out.append(s)
         return out
+
+    def _title_fragments_same_visual_line(
+        self,
+        line: list[tuple[float, float, str, float, float]],
+        y: float,
+        ymin: float,
+        ymax: float,
+    ) -> bool:
+        if abs(line[0][0] - y) <= self.y_cluster_abs:
+            return True
+
+        line_ymin = min(seg[3] for seg in line)
+        line_ymax = max(seg[4] for seg in line)
+        overlap = min(line_ymax, ymax) - max(line_ymin, ymin)
+        if overlap <= 0:
+            return False
+        line_height = max(line_ymax - line_ymin, 1e-6)
+        frag_height = max(ymax - ymin, 1e-6)
+        return overlap / min(line_height, frag_height) >= 0.35
 
     @staticmethod
     def _cluster_by_y(items: list[TextItem], y_tol: float) -> list[list[TextItem]]:
@@ -976,16 +1013,25 @@ class TitleblockExtractor(ITitleblockExtractor):
         for prefix_item, prefix in prefix_candidates:
             prefix_right = self._text_item_right_edge(prefix_item)
             y_tol = max(self.y_cluster_abs * 3.0, (prefix_item.text_height or 0.0) * 0.25, 3.0)
+            suffix_chunks: list[tuple[float, str]] = []
             suffix_tokens: list[tuple[float, str]] = []
             for item in items:
                 text = self._strip_all_whitespace((item.text or "").upper())
-                if len(text) != 1 or not text.isdigit():
-                    continue
                 if item.x <= prefix_right:
                     continue
                 if abs(item.y - prefix_item.y) > y_tol:
                     continue
+                if re.fullmatch(r"-?[0-9]{3}", text):
+                    suffix_chunks.append((item.x, text.lstrip("-")))
+                    continue
+                if len(text) != 1 or not text.isdigit():
+                    continue
                 suffix_tokens.append((item.x, text))
+            suffix_chunks.sort(key=lambda t: t[0])
+            for _, suffix in suffix_chunks:
+                candidate = f"{prefix}-{suffix}"
+                if re_full.match(candidate):
+                    return candidate
             suffix_tokens.sort(key=lambda t: t[0])
             suffix = "".join(token for _, token in suffix_tokens[:3])
             candidate = f"{prefix}-{suffix}"

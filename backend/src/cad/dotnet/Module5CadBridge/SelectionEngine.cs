@@ -43,9 +43,22 @@ internal sealed class SelectionEngine
         {
             flags.Add("CAD_EMPTY_SELECTION");
         }
-        else if (TryWriteWblock(db, selectedIds, outputDwg, _task.SourceDwgVersion, out var writeError))
+        else if (TryWriteWblock(
+                     db,
+                     selectedIds,
+                     outputDwg,
+                     _task.SourceDwgVersion,
+                     frame.BBox.Expand(_task.Selection.BBoxMarginPercent),
+                     _trace,
+                     out var writeError,
+                     out var cleanedCount
+                 ))
         {
             status = "ok";
+            if (cleanedCount > 0)
+            {
+                flags.Add($"DWG_OUTSIDE_ENTITY_CLEANED:{cleanedCount}");
+            }
             _trace.Log($"[DOTNET][SPLIT] frame={frame.FrameId} selected={selectedIds.Count} dwg={outputDwg}");
         }
         else
@@ -88,7 +101,16 @@ internal sealed class SelectionEngine
                 continue;
             }
 
-            if (TryWriteWblock(db, pageIds, pageDwg, _task.SourceDwgVersion, out _))
+            if (TryWriteWblock(
+                    db,
+                    pageIds,
+                    pageDwg,
+                    _task.SourceDwgVersion,
+                    page.BBox.Expand(_task.Selection.BBoxMarginPercent),
+                    _trace,
+                    out _,
+                    out _
+                ))
             {
                 pageDwgPaths.Add(pageDwg);
             }
@@ -106,8 +128,21 @@ internal sealed class SelectionEngine
         {
             flags.Add("CAD_EMPTY_SELECTION");
         }
-        else if (TryWriteWblock(db, union, unionDwg, _task.SourceDwgVersion, out var writeError))
+        else if (TryWriteWblock(
+                     db,
+                     union,
+                     unionDwg,
+                     _task.SourceDwgVersion,
+                     UnionPageBBoxes(sheetSet).Expand(_task.Selection.BBoxMarginPercent),
+                     _trace,
+                     out var writeError,
+                     out var cleanedCount
+                 ))
         {
+            if (cleanedCount > 0)
+            {
+                flags.Add($"DWG_OUTSIDE_ENTITY_CLEANED:{cleanedCount}");
+            }
             if (pagePartial || pageDwgPaths.Count != sheetSet.Pages.Count)
             {
                 flags.Add("A4_PAGE_WBLOCK_PARTIAL");
@@ -212,7 +247,7 @@ internal sealed class SelectionEngine
 
             if (TryGetEntityExtents(ent!, out var extents))
             {
-                if (Intersects(extents, bbox))
+                if (ShouldKeepEntityInSelection(ent!, extents, bbox))
                 {
                     selected.Add(id);
                 }
@@ -232,9 +267,13 @@ internal sealed class SelectionEngine
         IEnumerable<ObjectId> ids,
         string outputDwg,
         string sourceDwgVersion,
-        out string error
+        BridgeBBox cleanupBBox,
+        BridgeTraceLogger trace,
+        out string error,
+        out int cleanedCount
     )
     {
+        cleanedCount = 0;
         error = string.Empty;
         try
         {
@@ -242,6 +281,7 @@ internal sealed class SelectionEngine
             var idCollection = new ObjectIdCollection(ids.ToArray());
             using var targetDb = new Database(true, true);
             sourceDb.Wblock(targetDb, idCollection, Point3d.Origin, DuplicateRecordCloning.Ignore);
+            cleanedCount = CleanOutsideEntities(targetDb, cleanupBBox, trace);
             var saveVersion = DwgVersionResolver.Resolve(
                 sourceDwgVersion,
                 sourceDb.OriginalFileVersion
@@ -254,6 +294,174 @@ internal sealed class SelectionEngine
             error = ex.Message;
             return false;
         }
+    }
+
+    private static int CleanOutsideEntities(
+        Database db,
+        BridgeBBox cleanupBBox,
+        BridgeTraceLogger trace
+    )
+    {
+        var erased = 0;
+
+        using var tr = db.TransactionManager.StartTransaction();
+        if (!SafeCadAccess.TryGetObject(
+                tr,
+                db.BlockTableId,
+                OpenMode.ForRead,
+                trace,
+                "selection.cleanup.block_table",
+                out BlockTable? bt
+            ))
+        {
+            return erased;
+        }
+
+        if (!SafeCadAccess.TryRead(
+                () => bt![BlockTableRecord.ModelSpace],
+                trace,
+                "selection.cleanup.model_space_id",
+                out ObjectId modelSpaceId
+            ))
+        {
+            return erased;
+        }
+
+        if (!SafeCadAccess.TryGetObject(
+                tr,
+                modelSpaceId,
+                OpenMode.ForRead,
+                trace,
+                "selection.cleanup.model_space",
+                out BlockTableRecord? modelSpace
+            ))
+        {
+            return erased;
+        }
+
+        var eraseIds = new List<ObjectId>();
+        foreach (ObjectId id in modelSpace!)
+        {
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    id,
+                    OpenMode.ForRead,
+                    trace,
+                    "selection.cleanup.entity",
+                    out Entity? ent
+                ))
+            {
+                continue;
+            }
+
+            if (!TryGetEntityExtents(ent!, out var extents))
+            {
+                continue;
+            }
+
+            if (!ShouldKeepEntityInSelection(ent!, extents, cleanupBBox))
+            {
+                eraseIds.Add(id);
+            }
+        }
+
+        foreach (var id in eraseIds)
+        {
+            if (!SafeCadAccess.TryGetObject(
+                    tr,
+                    id,
+                    OpenMode.ForWrite,
+                    trace,
+                    "selection.cleanup.erase_entity",
+                    out Entity? ent
+                ))
+            {
+                continue;
+            }
+
+            ent!.Erase();
+            erased += 1;
+        }
+
+        tr.Commit();
+        if (erased > 0)
+        {
+            trace.Log($"[DOTNET][SPLIT][CLEANUP] erased_outside_entities={erased}");
+        }
+
+        return erased;
+    }
+
+    private static bool ShouldKeepEntityInSelection(
+        Entity entity,
+        Extents3d extents,
+        BridgeBBox bbox
+    )
+    {
+        if (!Intersects(extents, bbox))
+        {
+            return false;
+        }
+
+        if (!TryGetTextReferencePoint(entity, out var textPoint))
+        {
+            return true;
+        }
+
+        return ContainsPoint(bbox, textPoint);
+    }
+
+    private static bool TryGetTextReferencePoint(Entity entity, out Point3d point)
+    {
+        switch (entity)
+        {
+            case MText mtext:
+                point = mtext.Location;
+                return true;
+            case AttributeReference attribute:
+                point = attribute.Position;
+                return true;
+            case AttributeDefinition attributeDefinition:
+                point = attributeDefinition.Position;
+                return true;
+            case DBText dbText:
+                point = dbText.Position;
+                return true;
+            default:
+                point = Point3d.Origin;
+                return false;
+        }
+    }
+
+    private static bool ContainsPoint(BridgeBBox bbox, Point3d point)
+    {
+        return point.X >= bbox.Xmin
+               && point.X <= bbox.Xmax
+               && point.Y >= bbox.Ymin
+               && point.Y <= bbox.Ymax;
+    }
+
+    private static BridgeBBox UnionPageBBoxes(BridgeSheetSetTask sheetSet)
+    {
+        var pages = sheetSet.Pages;
+        if (pages.Count == 0)
+        {
+            return BridgeBBox.Empty;
+        }
+
+        var xmin = pages[0].BBox.Xmin;
+        var ymin = pages[0].BBox.Ymin;
+        var xmax = pages[0].BBox.Xmax;
+        var ymax = pages[0].BBox.Ymax;
+        foreach (var page in pages.Skip(1))
+        {
+            xmin = Math.Min(xmin, page.BBox.Xmin);
+            ymin = Math.Min(ymin, page.BBox.Ymin);
+            xmax = Math.Max(xmax, page.BBox.Xmax);
+            ymax = Math.Max(ymax, page.BBox.Ymax);
+        }
+
+        return new BridgeBBox(xmin, ymin, xmax, ymax);
     }
 
     private static bool TryGetEntityExtents(Entity entity, out Extents3d extents)

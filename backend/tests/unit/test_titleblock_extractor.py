@@ -86,6 +86,32 @@ def test_parse_internal_code_rebuilds_suffix_from_discrete_tokens_by_x_order() -
     assert album == "01"
 
 
+def test_parse_internal_code_prefers_split_suffix_over_short_code() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["internal_code"].parse
+
+    code, album = extractor._parse_internal_code(
+        [
+            _item(
+                "19077OS-DQS01",
+                x=10.0,
+                y=10.0,
+                bbox=BBox(xmin=10.0, ymin=7.0, xmax=60.0, ymax=13.0),
+            ),
+            _item(
+                "-001",
+                x=62.0,
+                y=7.5,
+                bbox=BBox(xmin=62.0, ymin=5.0, xmax=78.0, ymax=10.0),
+            ),
+        ],
+        parse_cfg,
+    )
+
+    assert code == "19077OS-DQS01-001"
+    assert album == "01"
+
+
 def test_parse_external_code_fixed19() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse
@@ -249,6 +275,41 @@ def test_parse_title_bilingual_keeps_english_bill_of_material_with_cjk_index() -
 
     assert title_cn == "5NE 8.450及 8.450至12.950m间预制楼梯\n钢筋表（一）"
     assert title_en == "5NE 8.450 and 8.450~12.950m Prefabricated Stairs\nBill of Material（一）"
+
+
+def test_parse_title_bilingual_merges_visual_line_by_bbox_overlap() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item(
+            "机械通风冷却塔",
+            x=10.0,
+            y=120.0,
+            bbox=BBox(xmin=10.0, ymin=120.0, xmax=40.0, ymax=124.0),
+        ),
+        _item(
+            "结构设计说明（二）",
+            x=10.0,
+            y=110.0,
+            bbox=BBox(xmin=10.0, ymin=110.0, xmax=45.0, ymax=114.0),
+        ),
+        _item(
+            "ZT Structural Design Description",
+            x=10.0,
+            y=100.0,
+            bbox=BBox(xmin=10.0, ymin=100.0, xmax=80.0, ymax=104.0),
+        ),
+        _item(
+            "（二）",
+            x=78.0,
+            y=102.0,
+            bbox=BBox(xmin=78.0, ymin=101.0, xmax=88.0, ymax=105.0),
+        ),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "机械通风冷却塔\n结构设计说明（二）"
+    assert title_en == "ZT Structural Design Description （二）"
 
 
 def test_parse_title_bilingual_treats_compact_alnum_prefix_as_chinese_title() -> None:

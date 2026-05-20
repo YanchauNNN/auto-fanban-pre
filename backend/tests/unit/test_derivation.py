@@ -41,6 +41,29 @@ class TestDerivationEngine:
         assert derived_2016.cover_internal_code == "1234567-JG001-FM"
         assert derived_2016.catalog_internal_code == "1234567-JG001-TM"
 
+    def test_derive_cover_catalog_codes_use_album_base_when_001_missing(
+        self,
+        engine: DerivationEngine,
+        sample_frame,
+    ):
+        params = GlobalDocParams(project_no="1818")
+        frame_003 = sample_frame.model_copy(deep=True)
+        frame_003.titleblock.internal_code = "18185NR-JGS08-003"
+        frame_003.titleblock.external_code = "PC5NRG08003B25C42SD"
+        frame_003.titleblock.engineering_no = "1818"
+        frame_003.titleblock.subitem_no = "NR"
+        frame_003.titleblock.discipline = "缁撴瀯"
+        frame_003.titleblock.revision = "A"
+        frame_003.titleblock.status = "CFC"
+        ctx = DocContext(params=params, frames=[frame_003])
+
+        derived = engine.compute(ctx)
+
+        assert derived.album_internal_code == "18185NR-JGS08"
+        assert derived.album_code == "08"
+        assert derived.cover_internal_code == "18185NR-JGS08-FM"
+        assert derived.catalog_internal_code == "18185NR-JGS08-TM"
+
     def test_derive_external_codes(self, derived_2016: DerivedFields):
         """测试外部编码派生"""
         # external_code_001 = "JD1NHT11001B25C42SD"
