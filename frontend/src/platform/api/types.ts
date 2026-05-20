@@ -267,6 +267,7 @@ export type TaskConfigPreset = {
 export type TaskConfigDraft = {
   intent: TaskIntent;
   runAuditCheck: boolean;
+  runSplitOnly?: boolean;
   files: File[];
   values: Record<string, string>;
   fieldErrors: Record<string, string[]>;
@@ -293,6 +294,10 @@ export type ApiAdapter = {
     params: SubmissionParams,
     files: File[],
     runAuditCheck?: boolean,
+  ) => Promise<CreateBatchPayload>;
+  createSplitOnlyBatch: (
+    params: SubmissionParams,
+    files: File[],
   ) => Promise<CreateBatchPayload>;
   createAuditCheck: (
     projectNo: string,

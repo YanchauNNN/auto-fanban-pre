@@ -24,6 +24,7 @@ function createAdapter(): ApiAdapter {
     createBatch: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
   };

@@ -16,6 +16,7 @@ export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
   return {
     intent: "deliverable",
     runAuditCheck: false,
+    runSplitOnly: false,
     files: [],
     values: getDefaultTaskValues(schema),
     fieldErrors: {},
@@ -47,6 +48,7 @@ export function syncTaskConfigDraft(
   return {
     ...currentDraft,
     runAuditCheck: currentDraft.runAuditCheck ?? false,
+    runSplitOnly: currentDraft.runSplitOnly ?? false,
     values: {
       ...defaultValues,
       ...currentDraft.values,

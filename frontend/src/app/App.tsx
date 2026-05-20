@@ -429,6 +429,9 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createBatch: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  createSplitOnlyBatch: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
   createAuditCheck: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
@@ -1372,7 +1375,9 @@ function JobCard({
       <div className={styles.jobMetaRow}>
         {card.kind === "single_job" ? (
           <>
-            {card.summary.taskKind ? <TaskKindBadge kind={card.summary.taskKind} /> : null}
+            {card.summary.taskKind ? (
+              <TaskKindBadge kind={card.summary.taskKind} jobMode={card.summary.jobMode} />
+            ) : null}
             <Link className={styles.subtaskLink} to={`/jobs/${card.jobId}`}>
               查看任务
             </Link>
@@ -1382,7 +1387,7 @@ function JobCard({
             <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
             {childJobs.map((child) => (
               <Link className={styles.subtaskLink} key={child.jobId} to={`/jobs/${child.jobId}`}>
-                {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+                {child.taskKind ? <TaskKindBadge kind={child.taskKind} jobMode={child.jobMode} /> : null}
                 <span className={styles.subtaskStatus}>{getStatusLabel(child.status)}</span>
               </Link>
             ))}
@@ -1693,7 +1698,10 @@ function SingleJobDetailPanel({
       ) : null}
 
       <div className={styles.detailGrid}>
-        <InfoBlock label="任务类型" value={getTaskKindLabel(detail.taskKind ?? "deliverable")} />
+        <InfoBlock
+          label="任务类型"
+          value={getTaskKindDisplayLabel(detail.taskKind ?? "deliverable", detail.jobMode)}
+        />
         <InfoBlock label="当前阶段" value={stageLabel} />
         <InfoBlock label="进度" value={`${detail.percent}%`} />
         <InfoBlock label="当前文件" value={detail.currentFile ?? "-"} />
@@ -1857,7 +1865,9 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
               <div className={styles.jobCardHeader}>
                 <div className={styles.childTaskTitle}>
                   <strong>{child.taskRole ?? child.jobId}</strong>
-                  {child.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
+                  {child.taskKind ? (
+                    <TaskKindBadge kind={child.taskKind} jobMode={child.jobMode} />
+                  ) : null}
                 </div>
                 <StatusPill status={child.status} />
               </div>
@@ -2297,8 +2307,19 @@ function ListBlock({
   );
 }
 
-function TaskKindBadge({ kind }: { kind: TaskKind }) {
-  return <span className={`${styles.kindBadge} ${kindToneClass(kind)}`}>{getTaskKindLabel(kind)}</span>;
+function TaskKindBadge({ kind, jobMode }: { kind: TaskKind; jobMode?: string | null }) {
+  return (
+    <span className={`${styles.kindBadge} ${kindToneClass(kind)}`}>
+      {getTaskKindDisplayLabel(kind, jobMode)}
+    </span>
+  );
+}
+
+function getTaskKindDisplayLabel(kind: TaskKind, jobMode?: string | null) {
+  if (jobMode === "split_only") {
+    return "仅拆图";
+  }
+  return getTaskKindLabel(kind);
 }
 
 function StatusPill({ status }: { status: string }) {

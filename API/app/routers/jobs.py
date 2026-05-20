@@ -45,6 +45,7 @@ async def create_batch(
     authorization: str | None = Header(default=None),
     params_json: str = Form(...),
     run_audit_check: bool = Form(False),
+    split_only: bool = Form(False),
     files: list[UploadFile] = File(..., alias="files[]"),
 ) -> JSONResponse:
     try:
@@ -74,6 +75,7 @@ async def create_batch(
         files=uploads,
         raw_params=params,
         run_audit_check=run_audit_check,
+        split_only=split_only,
         creator_snapshot=_resolve_optional_account(request, authorization),
     )
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)

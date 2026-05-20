@@ -93,6 +93,7 @@ type FontSubmitConfig = {
 };
 
 type FontReplacementDialogMode = "submit" | "review";
+type SubmitMode = "deliverable" | "split_only";
 
 type UpgradeEntryDraft = {
   revision: string;
@@ -124,6 +125,7 @@ export function DeliverableWorkspace({
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
   const [fontReplacementDialogMode, setFontReplacementDialogMode] =
     useState<FontReplacementDialogMode | null>(null);
+  const [pendingSubmitMode, setPendingSubmitMode] = useState<SubmitMode>("deliverable");
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -191,6 +193,7 @@ export function DeliverableWorkspace({
     () => getUpgradeEntriesForDraft(draft.values, getUpgradeRevisionFallback(draft.values)),
     [draft.values],
   );
+  const splitOnlyMode = Boolean(draft.runSplitOnly && !pendingReplaceConfig?.runDeliverable);
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
     [savedPresets, selectedPresetId],
@@ -236,6 +239,7 @@ export function DeliverableWorkspace({
     setSelectedReplacementFonts({});
     setFontReplacementError(null);
     setFontReplacementDialogMode(null);
+    setPendingSubmitMode("deliverable");
   }
 
   function resetCachedFontPreflightState() {
@@ -323,26 +327,37 @@ export function DeliverableWorkspace({
     return cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
   }
 
-  async function submitDeliverable(fontConfig: FontSubmitConfig) {
+  async function submitDeliverable(
+    fontConfig: FontSubmitConfig,
+    submitMode: SubmitMode = "deliverable",
+  ) {
     setIsSubmitting(true);
     setFontReplacementError(null);
 
-    const submissionValues = buildSubmissionValues(schema, draft.values, fontConfig);
+    const submissionValues =
+      submitMode === "split_only"
+        ? buildSplitOnlySubmissionValues(draft.values, fontConfig)
+        : buildSubmissionValues(schema, draft.values, fontConfig);
 
     try {
-      const payload = pendingReplaceConfig?.runDeliverable
-        ? await adapter.createAuditReplace({
-            sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
-            sourceIslandNo: pendingReplaceConfig.sourceIslandNo,
-            targetProjectNo: pendingReplaceConfig.targetProjectNo,
-            targetIslandNo: pendingReplaceConfig.targetIslandNo,
-            files: draft.files,
-            runDeliverable: true,
-            deliverableParams: submissionValues,
-          })
-        : await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
+      const payload =
+        submitMode === "split_only"
+          ? await adapter.createSplitOnlyBatch(submissionValues, draft.files)
+          : pendingReplaceConfig?.runDeliverable
+            ? await adapter.createAuditReplace({
+                sourceProjectNo: pendingReplaceConfig.sourceProjectNo,
+                sourceIslandNo: pendingReplaceConfig.sourceIslandNo,
+                targetProjectNo: pendingReplaceConfig.targetProjectNo,
+                targetIslandNo: pendingReplaceConfig.targetIslandNo,
+                files: draft.files,
+                runDeliverable: true,
+                deliverableParams: submissionValues,
+              })
+            : await adapter.createBatch(submissionValues, draft.files, draft.runAuditCheck);
       onNotice?.(
-        pendingReplaceConfig?.runDeliverable
+        submitMode === "split_only"
+          ? "仅拆图任务已创建。"
+          : pendingReplaceConfig?.runDeliverable
           ? "翻版与出图任务包已创建。"
           : draft.runAuditCheck
             ? "出图与纠错任务包已创建。"
@@ -388,28 +403,31 @@ export function DeliverableWorkspace({
       return;
     }
 
+    const submitMode: SubmitMode = splitOnlyMode ? "split_only" : "deliverable";
     const nextFieldErrors: Record<string, string[]> = {};
     const nextFormErrors: string[] = [];
 
-    for (const field of schema.sections.flatMap((section) => section.fields)) {
-      if (shouldSkipFieldValidation(field, draft.values)) {
-        continue;
-      }
+    if (!splitOnlyMode) {
+      for (const field of schema.sections.flatMap((section) => section.fields)) {
+        if (shouldSkipFieldValidation(field, draft.values)) {
+          continue;
+        }
 
-      const value = draft.values[field.key]?.trim() ?? "";
-      const required = isFieldRequired(field, draft.values);
+        const value = draft.values[field.key]?.trim() ?? "";
+        const required = isFieldRequired(field, draft.values);
 
-      if (required && !value) {
-        nextFieldErrors[field.key] = ["required"];
-        continue;
-      }
+        if (required && !value) {
+          nextFieldErrors[field.key] = ["required"];
+          continue;
+        }
 
-      if (value && field.type === "date" && !DATE_PATTERN.test(value)) {
-        nextFieldErrors[field.key] = ["YYYY-MM-DD"];
-      }
+        if (value && field.type === "date" && !DATE_PATTERN.test(value)) {
+          nextFieldErrors[field.key] = ["YYYY-MM-DD"];
+        }
 
-      if (value && field.type === "nameId" && !NAME_ID_PATTERN.test(value)) {
-        nextFieldErrors[field.key] = ["姓名@ID"];
+        if (value && field.type === "nameId" && !NAME_ID_PATTERN.test(value)) {
+          nextFieldErrors[field.key] = ["姓名@ID"];
+        }
       }
     }
 
@@ -444,6 +462,7 @@ export function DeliverableWorkspace({
       formErrors: [],
     }));
     resetFontPreflightState();
+    setPendingSubmitMode(submitMode);
     setIsAwaitingSubmitPreflight(true);
     try {
       const preflight = await ensureFontPreflight(draft.files);
@@ -467,7 +486,7 @@ export function DeliverableWorkspace({
         return;
       }
 
-      await submitDeliverable({ fontReplacePolicy: "none" });
+      await submitDeliverable({ fontReplacePolicy: "none" }, submitMode);
     } finally {
       setIsAwaitingSubmitPreflight(false);
     }
@@ -499,7 +518,7 @@ export function DeliverableWorkspace({
     await submitDeliverable({
       fontReplacePolicy: "replace_missing",
       fontReplacementFonts: selectedFonts,
-    });
+    }, pendingSubmitMode);
   }
 
   async function handleOpenFontReplacementReview() {
@@ -730,7 +749,22 @@ export function DeliverableWorkspace({
     setDraft((current) => ({
       ...current,
       runAuditCheck: !current.runAuditCheck,
+      runSplitOnly: false,
     }));
+  }
+
+  function handleSplitOnlyToggle() {
+    setPresetUpdatedNotice(false);
+    setDraft((current) => {
+      const nextSplitOnly = !current.runSplitOnly;
+      return {
+        ...current,
+        runAuditCheck: nextSplitOnly ? false : current.runAuditCheck,
+        runSplitOnly: nextSplitOnly,
+        fieldErrors: nextSplitOnly ? {} : current.fieldErrors,
+        formErrors: nextSplitOnly ? [] : current.formErrors,
+      };
+    });
   }
 
   function handlePresetSelectionChange(nextId: string) {
@@ -825,7 +859,7 @@ export function DeliverableWorkspace({
     setPresetUpdatedNotice(false);
   }
 
-  const submitLabel = "创建交付任务";
+  const submitLabel = splitOnlyMode ? "创建仅拆图任务" : "创建交付任务";
   const isFontReplacementReviewMode = fontReplacementDialogMode === "review";
   const isManualReplacementDefaultAvailable =
     Object.keys(manualReplacementDefaults).length > 0;
@@ -988,23 +1022,37 @@ export function DeliverableWorkspace({
                   <span>
                     {pendingReplaceConfig?.runDeliverable
                       ? "翻版+交付"
-                      : draft.runAuditCheck
+                      : splitOnlyMode
+                        ? "仅拆图"
+                        : draft.runAuditCheck
                         ? "交付+纠错"
                         : "交付"}
                   </span>
                 </div>
                 <div className={styles.intentNotice}>
                   {pendingReplaceConfig?.runDeliverable ? null : (
-                    <button
-                      aria-pressed={draft.runAuditCheck}
-                      className={`${styles.intentChip} ${
-                        draft.runAuditCheck ? styles.intentChipActive : ""
-                      }`}
-                      type="button"
-                      onClick={handleAuditToggle}
-                    >
-                      纠错
-                    </button>
+                    <>
+                      <button
+                        aria-pressed={draft.runAuditCheck}
+                        className={`${styles.intentChip} ${
+                          draft.runAuditCheck ? styles.intentChipActive : ""
+                        }`}
+                        type="button"
+                        onClick={handleAuditToggle}
+                      >
+                        纠错
+                      </button>
+                      <button
+                        aria-pressed={splitOnlyMode}
+                        className={`${styles.intentChip} ${
+                          splitOnlyMode ? styles.intentChipActive : ""
+                        }`}
+                        type="button"
+                        onClick={handleSplitOnlyToggle}
+                      >
+                        仅拆图
+                      </button>
+                    </>
                   )}
                 </div>
                 <div className={styles.intentHelp}>
@@ -1022,10 +1070,15 @@ export function DeliverableWorkspace({
                     </p>
                   ) : (
                     <p>
-                      当前按交付处理链路提交。
-                      {draft.runAuditCheck
+                      {splitOnlyMode
+                        ? "当前为仅拆图模式：不生成封面、目录、设计文件和 IED，只输出拆分后的 DWG/PDF 压缩包。"
+                        : "当前按交付处理链路提交。"}
+                      {!splitOnlyMode && draft.runAuditCheck
                         ? "已选中同时执行纠错，提交后会直接创建一个包含交付和纠错子任务的任务包。"
-                        : "未选中纠错时，只会创建出图任务。"}
+                        : null}
+                      {!splitOnlyMode && !draft.runAuditCheck
+                        ? "未选中纠错时，只会创建出图任务。"
+                        : null}
                     </p>
                   )}
                 </div>
@@ -1041,79 +1094,98 @@ export function DeliverableWorkspace({
                 </div>
               ) : null}
 
-              {primarySections.map((section) => (
-                <FragmentWithUpgradeSection
-                  key={`primary-${section.id}`}
-                  coverRevisionField={coverRevisionField}
-                  draft={draft}
-                  fieldErrors={draft.fieldErrors}
-                  iedPlanField={iedPlanField}
-                  onAddUpgradeEntry={handleAddUpgradeEntry}
-                  onFieldChange={handleFieldChange}
-                  onRemoveUpgradeEntry={handleRemoveUpgradeEntry}
-                  onUpgradeEntryChange={handleUpgradeEntryChange}
-                  onUpgradeToggle={handleUpgradeToggle}
-                  section={section}
-                  upgradeEnabled={upgradeEnabled}
-                  upgradeEntries={upgradeEntries}
-                  upgradeSheetCodesField={upgradeSheetCodesField}
-                />
-              ))}
-
-              <section className={styles.section}>
-                <header className={styles.sectionHeader}>
-                  <h3>打印设置</h3>
-                </header>
-                <div className={styles.intentNotice}>
-                  {PLOT_STYLE_OPTIONS.map((option) => (
-                    <button
-                      key={option.key}
-                      aria-pressed={draft.values.plot_style_key === option.key}
-                      className={`${styles.intentChip} ${
-                        draft.values.plot_style_key === option.key ? styles.intentChipActive : ""
-                      }`}
-                      type="button"
-                      onClick={() => handleFieldChange("plot_style_key", option.key)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-                <span className={styles.helperText}>
-                  这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的
-                  {" "}
-                  <code>plot_style_key</code>。
-                </span>
-              </section>
-
-              {showAdvanced && advancedSections.length > 0 ? (
+              {splitOnlyMode ? (
                 <section className={styles.section}>
                   <header className={styles.sectionHeader}>
-                    <h3>高级选项</h3>
+                    <h3>仅拆图模式</h3>
                   </header>
-                  <div className={styles.advancedStack}>
-                    {advancedSections.map((section) => (
-                      <div className={styles.advancedBlock} key={`advanced-${section.id}`}>
-                        <h4>{section.title}</h4>
-                        <div className={styles.fieldGrid}>
-                          {section.fields
-                            .filter((field) => !isCustomRenderedField(field.key))
-                            .map((field) => (
-                            <FieldControl
-                              key={field.key}
-                              error={draft.fieldErrors[field.key]?.[0]}
-                              field={field}
-                              onChange={(value) => handleFieldChange(field.key, value)}
-                              value={draft.values[field.key] ?? ""}
-                              values={draft.values}
-                            />
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <p className={styles.helperText}>
+                    本模式会跳过封面、目录、设计文件和 IED 参数校验，只按图框拆分并导出
+                    DWG/PDF，最终下载包中只包含拆分后的图纸文件。
+                  </p>
+                  {draft.values.project_no ? (
+                    <p className={styles.helperText}>
+                      当前项目号将使用 <strong>{draft.values.project_no}</strong>；如文件名无法识别，
+                      后端会按默认项目号继续尝试。
+                    </p>
+                  ) : null}
                 </section>
-              ) : null}
+              ) : (
+                <>
+                  {primarySections.map((section) => (
+                    <FragmentWithUpgradeSection
+                      key={`primary-${section.id}`}
+                      coverRevisionField={coverRevisionField}
+                      draft={draft}
+                      fieldErrors={draft.fieldErrors}
+                      iedPlanField={iedPlanField}
+                      onAddUpgradeEntry={handleAddUpgradeEntry}
+                      onFieldChange={handleFieldChange}
+                      onRemoveUpgradeEntry={handleRemoveUpgradeEntry}
+                      onUpgradeEntryChange={handleUpgradeEntryChange}
+                      onUpgradeToggle={handleUpgradeToggle}
+                      section={section}
+                      upgradeEnabled={upgradeEnabled}
+                      upgradeEntries={upgradeEntries}
+                      upgradeSheetCodesField={upgradeSheetCodesField}
+                    />
+                  ))}
+
+                  <section className={styles.section}>
+                    <header className={styles.sectionHeader}>
+                      <h3>打印设置</h3>
+                    </header>
+                    <div className={styles.intentNotice}>
+                      {PLOT_STYLE_OPTIONS.map((option) => (
+                        <button
+                          key={option.key}
+                          aria-pressed={draft.values.plot_style_key === option.key}
+                          className={`${styles.intentChip} ${
+                            draft.values.plot_style_key === option.key ? styles.intentChipActive : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleFieldChange("plot_style_key", option.key)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                    <span className={styles.helperText}>
+                      这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的{" "}
+                      <code>plot_style_key</code>。
+                    </span>
+                  </section>
+
+                  {showAdvanced && advancedSections.length > 0 ? (
+                    <section className={styles.section}>
+                      <header className={styles.sectionHeader}>
+                        <h3>高级选项</h3>
+                      </header>
+                      <div className={styles.advancedStack}>
+                        {advancedSections.map((section) => (
+                          <div className={styles.advancedBlock} key={`advanced-${section.id}`}>
+                            <h4>{section.title}</h4>
+                            <div className={styles.fieldGrid}>
+                              {section.fields
+                                .filter((field) => !isCustomRenderedField(field.key))
+                                .map((field) => (
+                                  <FieldControl
+                                    key={field.key}
+                                    error={draft.fieldErrors[field.key]?.[0]}
+                                    field={field}
+                                    onChange={(value) => handleFieldChange(field.key, value)}
+                                    value={draft.values[field.key] ?? ""}
+                                    values={draft.values}
+                                  />
+                                ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </>
+              )}
             </section>
 
             <footer className={styles.actions}>
@@ -1972,6 +2044,10 @@ function hasTaskConfigDraft(schema: FormSchema, draft: TaskConfigDraft) {
     return true;
   }
 
+  if (draft.runSplitOnly) {
+    return true;
+  }
+
   const defaultValues = getDefaultTaskValues(schema);
 
   return Object.entries(defaultValues).some(
@@ -2007,6 +2083,7 @@ function applyFilesToDraft(
   return {
     ...draft,
     intent: "deliverable" as const,
+    runSplitOnly: draft.runSplitOnly ?? false,
     files,
     values: {
       ...draft.values,
@@ -2054,6 +2131,7 @@ function toDeliverableOnlyDraft(draft: TaskConfigDraft): TaskConfigDraft {
   return {
     ...draft,
     intent: "deliverable",
+    runSplitOnly: false,
     replaceConfig: {
       sourceProjectNo: "",
       sourceIslandNo: "",
@@ -2607,6 +2685,39 @@ function buildSubmissionValues(
   } else {
     delete sanitized.font_replacement_fonts;
     delete sanitized.font_replacement_font;
+  }
+
+  return sanitized;
+}
+
+function buildSplitOnlySubmissionValues(
+  values: Record<string, string>,
+  fontConfig: FontSubmitConfig = { fontReplacePolicy: "none" },
+) {
+  const sanitized: Record<string, unknown> = {};
+  const projectNo = String(values.project_no ?? "").trim();
+  const plotStyleKey = String(values.plot_style_key ?? "").trim();
+
+  if (projectNo) {
+    sanitized.project_no = projectNo;
+  }
+  if (plotStyleKey) {
+    sanitized.plot_style_key = plotStyleKey;
+  }
+
+  sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
+  if (fontConfig.fontReplacePolicy === "replace_missing") {
+    const replacementFonts = normalizeReplacementSelectionMap(
+      fontConfig.fontReplacementFonts ?? {},
+    );
+    if (Object.keys(replacementFonts).length > 0) {
+      sanitized.font_replacement_fonts = replacementFonts;
+    }
+    if (Object.keys(replacementFonts).length === 1) {
+      sanitized.font_replacement_font = Object.values(replacementFonts)[0] ?? "";
+    } else if (fontConfig.fontReplacementFont) {
+      sanitized.font_replacement_font = fontConfig.fontReplacementFont;
+    }
   }
 
   return sanitized;

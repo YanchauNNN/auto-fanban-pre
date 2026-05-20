@@ -601,4 +601,57 @@ describe("HttpAdapter", () => {
       sourceFilenames: ["18185NE-JGS11.dwg"],
     });
   });
+
+  it("creates split-only deliverable batches with split_only=true", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-split-1",
+          jobs: [
+            {
+              job_id: "split-job-1",
+              batch_id: "batch-split-1",
+              source_filename: "20261RS-JGS65.dwg",
+              task_kind: "deliverable",
+              job_mode: "split_only",
+              task_role: "仅拆图",
+              project_no: "2026",
+              status: "queued",
+              stage: "INIT",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-16T11:00:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "20261RS-JGS65.dwg", {
+      type: "application/acad",
+    });
+
+    const created = await adapter.createSplitOnlyBatch({ project_no: "2026" }, [file]);
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("params_json")).toBe(JSON.stringify({ project_no: "2026" }));
+    expect(formData.get("split_only")).toBe("true");
+    expect(created.jobs[0]).toMatchObject({
+      jobId: "split-job-1",
+      jobMode: "split_only",
+      taskRole: "仅拆图",
+    });
+  });
 });

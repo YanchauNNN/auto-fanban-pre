@@ -306,6 +306,31 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createSplitOnlyBatch(
+    params: SubmissionParams,
+    files: File[],
+  ): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("params_json", JSON.stringify(params));
+    formData.append("split_only", "true");
+    for (const file of files) {
+      formData.append("files[]", file);
+    }
+
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/batch", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
   async createAuditCheck(
     projectNo: string,
     files: File[],

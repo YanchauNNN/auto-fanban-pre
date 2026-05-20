@@ -86,6 +86,7 @@ def test_execute_records_stage_timings_into_job_details_and_artifact(tmp_path: P
         "_stage_fix_titleblock_consistency",
         "_stage_split",
         "_stage_export",
+        "_stage_package",
     ):
         setattr(executor, attr, lambda job, context: None)
 
@@ -103,15 +104,37 @@ def test_execute_records_stage_timings_into_job_details_and_artifact(tmp_path: P
 
     stage_timings = job.progress.details.get("stage_timings")
     assert isinstance(stage_timings, list)
-    assert len(stage_timings) == 11
+    assert len(stage_timings) == 12
     assert stage_timings[0]["stage"] == StageEnum.INGEST.value
-    assert stage_timings[-1]["stage"] == StageEnum.EXPORT_PDF_AND_DWG.value
+    assert stage_timings[-1]["stage"] == StageEnum.PACKAGE_ZIP.value
     assert all(item["status"] == "succeeded" for item in stage_timings)
 
     timings_path = tmp_path / "storage" / "jobs" / job.job_id / "stage_timings.json"
     assert timings_path.exists()
     persisted = json.loads(timings_path.read_text(encoding="utf-8"))
     assert persisted == stage_timings
+
+
+def test_split_only_execution_plan_packages_drawings_without_docs(tmp_path: Path) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.config = cast(
+        Any,
+        SimpleNamespace(get_job_dir=lambda job_id: tmp_path / "storage" / "jobs" / job_id),
+    )
+
+    job = Job(
+        job_id="job-split-only-package",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        options={"split_only": True},
+    )
+
+    _, stages = PipelineExecutor._prepare_execution_plan(executor, job)
+    stage_names = [stage.name for stage in stages]
+
+    assert StageEnum.EXPORT_PDF_AND_DWG.value in stage_names
+    assert StageEnum.GENERATE_DOCS.value not in stage_names
+    assert stage_names[-1] == StageEnum.PACKAGE_ZIP.value
 
 
 def test_execute_uses_shared_prep_and_skips_early_detection_stages(tmp_path: Path):

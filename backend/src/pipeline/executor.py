@@ -169,12 +169,12 @@ class PipelineExecutor:
                 StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
                 StageEnum.SPLIT_AND_RENAME.value,
                 StageEnum.EXPORT_PDF_AND_DWG.value,
+                StageEnum.PACKAGE_ZIP.value,
             }
             if not split_only:
                 allowed.update(
                     {
                         StageEnum.GENERATE_DOCS.value,
-                        StageEnum.PACKAGE_ZIP.value,
                     }
                 )
             stages = [stage for stage in DELIVERABLE_STAGES if stage.name in allowed]
@@ -207,6 +207,7 @@ class PipelineExecutor:
                     StageEnum.FIX_TITLEBLOCK_CONSISTENCY.value,
                     StageEnum.SPLIT_AND_RENAME.value,
                     StageEnum.EXPORT_PDF_AND_DWG.value,
+                    StageEnum.PACKAGE_ZIP.value,
                 }
             ]
             if split_only
@@ -1029,7 +1030,8 @@ class PipelineExecutor:
         self.packager.generate_manifest(job, context=context)
         zip_path = self.packager.package(job)
         job.artifacts.package_zip = zip_path
-        self._generate_preview_pdf(job, context)
+        if not bool(job.options.get("split_only", False)):
+            self._generate_preview_pdf(job, context)
 
     def _generate_preview_pdf(self, job: Job, context: dict) -> None:
         try:

@@ -147,6 +147,7 @@ function createAdapter(): ApiAdapter {
     }),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn().mockResolvedValue({

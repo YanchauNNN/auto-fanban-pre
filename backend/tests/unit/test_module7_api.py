@@ -255,6 +255,42 @@ class FakeJobProcessor:
             job.mark_succeeded()
             return
 
+        if bool(job.options.get("split_only")):
+            job.mark_running(stage="EXPORT_PDF_AND_DWG")
+            job.progress.message = "split only"
+            package_zip = job.work_dir / "package.zip"
+            drawings_dir = job.work_dir / "output" / "drawings"
+            drawings_dir.mkdir(parents=True, exist_ok=True)
+            package_zip.write_bytes(b"PK\x03\x04split-only")
+            (drawings_dir / "drawing-001.dwg").write_bytes(b"dwg")
+            (drawings_dir / "drawing-001.pdf").write_bytes(b"pdf")
+            (job.work_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "deliverable_outputs": {
+                            "dwg_count": 1,
+                            "pdf_count": 1,
+                            "documents": [],
+                            "drawings": [
+                                {
+                                    "name": "DRAW001 (20261RS-JGS65-001)",
+                                    "internal_code": "20261RS-JGS65-001",
+                                    "dwg_name": "drawing-001.dwg",
+                                    "pdf_name": "drawing-001.pdf",
+                                    "page_total": 1,
+                                }
+                            ],
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            job.artifacts.package_zip = package_zip
+            job.artifacts.drawings_dir = drawings_dir
+            job.mark_succeeded()
+            return
+
         job.mark_running(stage="GENERATE_DOCS")
         job.progress.message = "processing"
 
@@ -937,6 +973,35 @@ def test_create_batch_rejects_missing_required_param(monkeypatch, tmp_path: Path
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"]["param_errors"]["album_title_cn"] == ["required"]
+
+
+def test_create_batch_split_only_skips_document_param_validation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps({"project_no": ""}, ensure_ascii=False),
+                "split_only": "true",
+            },
+            files=[("files[]", ("20261RS-JGS65.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        job_id = payload["jobs"][0]["job_id"]
+        assert payload["jobs"][0]["job_mode"] == "split_only"
+        assert payload["jobs"][0]["task_role"] == "仅拆图"
+        detail = _poll_job(client, job_id)
+
+    job_payload = json.loads(
+        (tmp_path / "storage" / "jobs" / job_id / "job.json").read_text(encoding="utf-8")
+    )
+    assert job_payload["project_no"] == "2026"
+    assert job_payload["options"]["split_only"] is True
+    assert detail["artifacts"]["package_available"] is True
 
 
 def test_create_batch_infers_project_no_from_uploaded_filename_when_blank(

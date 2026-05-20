@@ -335,13 +335,16 @@ class DeliverableApiRuntime:
         files: list[UploadedFilePayload],
         raw_params: dict[str, Any],
         run_audit_check: bool = False,
+        split_only: bool = False,
         creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
         upload_errors = self._validate_uploads(files)
         resolved_submissions = [
             (upload, self._resolve_params_for_upload(raw_params, upload.filename)) for upload in files
         ]
-        param_errors = self._collect_param_errors(resolved_submissions)
+        param_errors = {} if split_only else self._collect_param_errors(resolved_submissions)
+        if split_only and run_audit_check:
+            param_errors.setdefault("split_only", []).append("cannot_combine_with_audit_check")
         font_param_errors = self._collect_font_param_errors(raw_params)
         for field_name, field_errors in font_param_errors.items():
             bucket = param_errors.setdefault(field_name, [])
@@ -368,7 +371,7 @@ class DeliverableApiRuntime:
             return {'batch_id': batch_id, 'jobs': groups}
 
         jobs: list[dict[str, Any]] = []
-        options = {'enabled': True, 'export_pdf': True, 'split_only': False}
+        options = {'enabled': True, 'export_pdf': True, 'split_only': bool(split_only)}
         for upload, resolved_params in resolved_submissions:
             source_filename = Path(upload.filename).name or 'upload.dwg'
             job = self.job_manager.create_job(
@@ -378,6 +381,7 @@ class DeliverableApiRuntime:
                 params=resolved_params,
                 batch_id=batch_id,
                 source_filename=source_filename,
+                task_role='仅拆图' if split_only else None,
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
@@ -1150,6 +1154,8 @@ class DeliverableApiRuntime:
             else:
                 task_kind = 'audit_replace'
                 job_mode = mode or 'replace'
+        elif job.job_type == JobType.DELIVERABLE and self._coerce_bool(job.options.get('split_only')):
+            job_mode = 'split_only'
         failure_display = self._build_failure_display(
             status_value=job.status.value,
             stage=job.progress.stage,

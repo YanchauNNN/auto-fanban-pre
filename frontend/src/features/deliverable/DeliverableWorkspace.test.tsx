@@ -258,6 +258,7 @@ function createAdapter(): ApiAdapter {
     preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
@@ -1009,6 +1010,42 @@ describe("DeliverableWorkspace", () => {
     expect(within(dialog).getByText("上次成功提交记忆")).toBeInTheDocument();
     expect(within(dialog).getByText("TrueType：simsun.ttc")).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("替代字体")).not.toBeInTheDocument();
+  });
+
+  it("submits split-only without document parameters", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult());
+    adapter.createSplitOnlyBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-split-only-1",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "20261RS-JGS65.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "仅拆图" }));
+    await user.click(screen.getByRole("button", { name: "创建仅拆图任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createSplitOnlyBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_no: "2026",
+          font_replace_policy: "none",
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "20261RS-JGS65.dwg" })]),
+      );
+    });
+    expect(adapter.createBatch).not.toHaveBeenCalled();
   });
 
   it("preflights fonts before direct deliverable submit and proceeds immediately when all files are ok", async () => {
