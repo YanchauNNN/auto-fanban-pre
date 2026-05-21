@@ -38,6 +38,18 @@ class FailingPDFExporter:
         return 2
 
 
+class MismatchedPageCountPDFExporter:
+    def __init__(self) -> None:
+        self.export_count = 0
+
+    def export_xlsx_to_pdf(self, xlsx_path: Path, pdf_path: Path) -> None:
+        self.export_count += 1
+        pdf_path.write_bytes(b"%PDF-1.4\n%dummy\n")
+
+    def count_pdf_pages(self, pdf_path: Path) -> int:
+        return 16
+
+
 def _make_frame(seq: int) -> FrameMeta:
     code = f"1234567-JG001-{seq:03d}"
     runtime = FrameRuntime(
@@ -287,6 +299,26 @@ def test_catalog_diagnostics_preserves_xlsx_page_count_when_pdf_export_fails(
     ws = load_workbook(result.xlsx_path).active
     assert ws is not None
     assert ws["H10"].value == 3
+
+
+def test_catalog_generate_reconciles_page_count_with_exported_pdf(
+    temp_dir: Path,
+    monkeypatch,
+) -> None:
+    exporter = MismatchedPageCountPDFExporter()
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, exporter))
+    ctx = _build_context()
+    monkeypatch.setattr(CatalogGenerator, "_count_pages", lambda self, path: 6)
+
+    output_xlsx, output_pdf, page_count = gen.generate(ctx, temp_dir)
+
+    assert output_pdf.exists()
+    assert page_count == 16
+    assert exporter.export_count == 2
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["H10"].value == 16
 
 
 def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set_001(

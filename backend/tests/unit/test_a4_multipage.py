@@ -328,7 +328,7 @@ class TestAuxiliaryPageCountCheck:
 
 
 class TestConsistencyDuplicatePageIndex:
-    """页码重复时产生 flag"""
+    """只有重复页码时不成多页组，只保留首个候选"""
 
     def test_consistency_duplicate_page_index(self):
         grouper = _make_grouper()
@@ -340,10 +340,86 @@ class TestConsistencyDuplicatePageIndex:
             page_total=2,
         )
 
-        _, sheet_sets = grouper.group_a4_pages([master, slave])
+        remaining, sheet_sets = grouper.group_a4_pages([master, slave])
+
+        assert sheet_sets == []
+        assert remaining == [master]
+
+
+class TestDuplicatePageIndexDeduplication:
+    """A4 成组时按页码去重，每个页码只保留第一个候选"""
+
+    def test_keeps_first_frame_for_each_page_index(self):
+        grouper = _make_grouper()
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=4)
+        duplicate_page_1 = make_a4_frame(
+            x_offset=1,
+            y_offset=1,
+            page_total=4,
+            page_index=1,
+            frame_id="page-1-duplicate",
+            internal_code="1234567-JG001-001",
+            external_code="JD1NHT11001B25C42SD",
+            engineering_no="1234",
+            title_cn="重复首页",
+        )
+        page_2 = make_slave_frame(
+            x_offset=0,
+            y_offset=_A4_H + 5,
+            page_index=2,
+            page_total=4,
+        )
+        duplicate_page_2 = make_slave_frame(
+            x_offset=1,
+            y_offset=_A4_H + 6,
+            page_index=2,
+            page_total=4,
+        )
+        page_3 = make_slave_frame(
+            x_offset=0,
+            y_offset=2 * (_A4_H + 5),
+            page_index=3,
+            page_total=4,
+        )
+        duplicate_page_3 = make_slave_frame(
+            x_offset=1,
+            y_offset=2 * (_A4_H + 5) + 1,
+            page_index=3,
+            page_total=4,
+        )
+        page_4 = make_slave_frame(
+            x_offset=0,
+            y_offset=3 * (_A4_H + 5),
+            page_index=4,
+            page_total=4,
+        )
+        duplicate_page_4 = make_slave_frame(
+            x_offset=1,
+            y_offset=3 * (_A4_H + 5) + 1,
+            page_index=4,
+            page_total=4,
+        )
+
+        _, sheet_sets = grouper.group_a4_pages(
+            [
+                master,
+                duplicate_page_1,
+                page_2,
+                duplicate_page_2,
+                page_3,
+                duplicate_page_3,
+                page_4,
+                duplicate_page_4,
+            ]
+        )
 
         assert len(sheet_sets) == 1
-        assert "A4多页_页码重复" in sheet_sets[0].flags
+        ss = sheet_sets[0]
+        assert ss.page_total == 4
+        assert [page.page_index for page in ss.pages] == [1, 2, 3, 4]
+        assert [page.frame_meta for page in ss.pages] == [master, page_2, page_3, page_4]
+        assert "A4多页_页码重复" not in ss.flags
+        assert "A4张数有误，请检查" not in ss.flags
 
 
 class TestConsistencyGapInPageIndex:

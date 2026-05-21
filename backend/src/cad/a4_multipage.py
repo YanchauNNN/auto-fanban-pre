@@ -63,7 +63,16 @@ class A4MultipageGrouper(IA4MultipageGrouper):
                 # 单帧簇不成组，保留为普通帧
                 continue
 
-            sheet_set = self._process_cluster(cluster)
+            effective_cluster = self._dedupe_cluster_by_page_index(cluster)
+            effective_frame_ids = {frame.frame_id for frame in effective_cluster}
+            for frame in cluster:
+                if frame.frame_id not in effective_frame_ids:
+                    processed_frame_ids.add(frame.frame_id)
+
+            if len(effective_cluster) < 2:
+                continue
+
+            sheet_set = self._process_cluster(effective_cluster)
             if sheet_set:
                 sheet_sets.append(sheet_set)
                 for frame in cluster:
@@ -214,6 +223,21 @@ class A4MultipageGrouper(IA4MultipageGrouper):
         sheet_set.validate_consistency()
 
         return sheet_set
+
+    def _dedupe_cluster_by_page_index(self, cluster: list[FrameMeta]) -> list[FrameMeta]:
+        """同一 A4 簇内每个明确页码只保留第一个候选。"""
+        seen_page_indices: set[int] = set()
+        deduped: list[FrameMeta] = []
+        for frame in cluster:
+            page_index = frame.titleblock.page_index
+            if page_index is None or page_index <= 0:
+                deduped.append(frame)
+                continue
+            if page_index in seen_page_indices:
+                continue
+            seen_page_indices.add(page_index)
+            deduped.append(frame)
+        return deduped
 
     def _check_master_fields(
         self, master: FrameMeta, flags: list[str],

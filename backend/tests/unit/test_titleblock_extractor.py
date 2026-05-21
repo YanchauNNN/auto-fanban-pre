@@ -112,6 +112,44 @@ def test_parse_internal_code_prefers_split_suffix_over_short_code() -> None:
     assert album == "01"
 
 
+def test_parse_internal_code_rebuilds_visual_line_prefix_with_partial_suffix() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["internal_code"].parse
+
+    code, album = extractor._parse_internal_code(
+        [
+            _item(
+                "11",
+                x=712901.65,
+                y=-175523.73,
+                bbox=BBox(
+                    xmin=712901.65,
+                    ymin=-175523.73,
+                    xmax=712991.65,
+                    ymax=-175433.73,
+                ),
+                height=75.0,
+            ),
+            _item(
+                "18185NX-JGS06-0",
+                x=712117.81,
+                y=-175525.69,
+                bbox=BBox(
+                    xmin=712117.81,
+                    ymin=-175525.69,
+                    xmax=712792.81,
+                    ymax=-175435.69,
+                ),
+                height=75.0,
+            ),
+        ],
+        parse_cfg,
+    )
+
+    assert code == "18185NX-JGS06-011"
+    assert album == "06"
+
+
 def test_parse_external_code_fixed19() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse

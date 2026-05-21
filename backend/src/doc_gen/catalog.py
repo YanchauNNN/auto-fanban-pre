@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 from copy import copy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -54,6 +55,14 @@ if TYPE_CHECKING:
     from ..models import DocContext
 
 
+@dataclass(frozen=True)
+class CatalogGenerationResult:
+    xlsx_path: Path
+    pdf_path: Path
+    page_count: int
+    pdf_export_error: Exception | None = None
+
+
 class CatalogGenerator(ICatalogGenerator):
     """目录生成器实现"""
 
@@ -75,6 +84,17 @@ class CatalogGenerator(ICatalogGenerator):
 
     def generate(self, ctx: DocContext, output_dir: Path) -> tuple[Path, Path, int]:
         """生成目录文档"""
+        result = self.generate_with_diagnostics(ctx, output_dir)
+        if result.pdf_export_error is not None:
+            raise result.pdf_export_error
+        return result.xlsx_path, result.pdf_path, result.page_count
+
+    def generate_with_diagnostics(
+        self,
+        ctx: DocContext,
+        output_dir: Path,
+    ) -> CatalogGenerationResult:
+        """生成目录文档，并保留 PDF 导出失败等诊断信息。"""
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. 选择模板
@@ -98,9 +118,24 @@ class CatalogGenerator(ICatalogGenerator):
 
         # 6. 导出PDF
         output_pdf = output_dir / f"{output_stem}.pdf"
-        self.pdf_exporter.export_xlsx_to_pdf(output_xlsx, output_pdf)
+        pdf_export_error: Exception | None = None
+        try:
+            self.pdf_exporter.export_xlsx_to_pdf(output_xlsx, output_pdf)
+            page_count, pdf_export_error = self._reconcile_page_count_from_pdf(
+                output_xlsx,
+                output_pdf,
+                page_count,
+                bindings,
+            )
+        except Exception as exc:
+            pdf_export_error = exc
 
-        return output_xlsx, output_pdf, page_count
+        return CatalogGenerationResult(
+            xlsx_path=output_xlsx,
+            pdf_path=output_pdf,
+            page_count=page_count,
+            pdf_export_error=pdf_export_error,
+        )
 
     def _build_output_stem(self, ctx: DocContext) -> str:
         return make_document_output_name(
@@ -727,6 +762,29 @@ class CatalogGenerator(ICatalogGenerator):
         except Exception:
             return 1  # 默认1页
 
+    def _reconcile_page_count_from_pdf(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        page_count: int,
+        bindings: dict,
+    ) -> tuple[int, Exception | None]:
+        """以实际导出的 PDF 页数为最终目录页数，并在不一致时回填重导。"""
+        try:
+            actual_page_count = int(self.pdf_exporter.count_pdf_pages(pdf_path))
+        except Exception:
+            return page_count, None
+
+        if actual_page_count <= 0 or actual_page_count == page_count:
+            return page_count, None
+
+        self._backfill_page_count(xlsx_path, actual_page_count, bindings)
+        try:
+            self.pdf_exporter.export_xlsx_to_pdf(xlsx_path, pdf_path)
+        except Exception as exc:
+            return actual_page_count, exc
+        return actual_page_count, None
+
     def _count_pages_via_com(self, xlsx_path: Path) -> int:
         pythoncom = None
         try:
@@ -757,11 +815,23 @@ class CatalogGenerator(ICatalogGenerator):
                     "Workbook.Worksheets(1)",
                 )
                 worksheet_com = cast(Any, ws)
-                page_break_count = PDFExporter._retry_excel_com_call(
+                page_setup_count = PDFExporter._retry_excel_com_call(
+                    lambda: worksheet_com.PageSetup.Pages.Count,
+                    "Worksheet.PageSetup.Pages.Count",
+                )
+                page_count = int(page_setup_count or 0)
+                if page_count > 0:
+                    return page_count
+
+                h_break_count = PDFExporter._retry_excel_com_call(
                     lambda: worksheet_com.HPageBreaks.Count,
                     "Worksheet.HPageBreaks.Count",
                 )
-                page_count = int(page_break_count) + 1
+                v_break_count = PDFExporter._retry_excel_com_call(
+                    lambda: worksheet_com.VPageBreaks.Count,
+                    "Worksheet.VPageBreaks.Count",
+                )
+                page_count = (int(h_break_count) + 1) * (int(v_break_count) + 1)
                 return max(1, page_count)
             finally:
                 ws = None

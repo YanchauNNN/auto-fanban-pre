@@ -1037,7 +1037,64 @@ class TitleblockExtractor(ITitleblockExtractor):
             candidate = f"{prefix}-{suffix}"
             if len(suffix) == 3 and re_full.match(candidate):
                 return candidate
+        visual_line_rebuilt = self._rebuild_internal_code_from_visual_lines(items, re_full)
+        if visual_line_rebuilt:
+            return visual_line_rebuilt
         return None
+
+    def _rebuild_internal_code_from_visual_lines(
+        self,
+        items: list[TextItem],
+        re_full: re.Pattern[str],
+    ) -> str | None:
+        lines: list[list[TextItem]] = []
+        for item in sorted(items, key=lambda t: (-self._item_center_y(t), t.x)):
+            text = self._clean_internal_code_fragment(item.text or "")
+            if not text:
+                continue
+            for line in lines:
+                if self._items_on_same_visual_line(line[0], item):
+                    line.append(item)
+                    break
+            else:
+                lines.append([item])
+
+        for line in lines:
+            line.sort(key=lambda t: t.x)
+            candidate = "".join(
+                self._clean_internal_code_fragment(item.text or "") for item in line
+            )
+            if re_full.match(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _clean_internal_code_fragment(text: str) -> str:
+        text = TitleblockExtractor._strip_all_whitespace((text or "").upper())
+        return "".join(ch for ch in text if ("A" <= ch <= "Z") or ("0" <= ch <= "9") or ch == "-")
+
+    @classmethod
+    def _items_on_same_visual_line(cls, left: TextItem, right: TextItem) -> bool:
+        left_span = cls._item_span(left)
+        right_span = cls._item_span(right)
+        overlap = min(left_span[3], right_span[3]) - max(left_span[1], right_span[1])
+        if overlap > 0:
+            left_height = max(left_span[3] - left_span[1], 1e-6)
+            right_height = max(right_span[3] - right_span[1], 1e-6)
+            if overlap / min(left_height, right_height) >= 0.35:
+                return True
+        y_tol = max(
+            3.0,
+            (left.text_height or 0.0) * 0.25,
+            (right.text_height or 0.0) * 0.25,
+        )
+        return abs(cls._item_center_y(left) - cls._item_center_y(right)) <= y_tol
+
+    @staticmethod
+    def _item_center_y(item: TextItem) -> float:
+        if item.bbox is not None:
+            return (item.bbox.ymin + item.bbox.ymax) / 2.0
+        return item.y
 
     @staticmethod
     def _text_item_right_edge(item: TextItem) -> float:

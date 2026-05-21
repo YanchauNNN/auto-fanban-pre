@@ -25,6 +25,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from ..cad import (
@@ -852,11 +853,13 @@ class PipelineExecutor:
 
         try:
             self._update_progress(job, message="生成目录中")
-            catalog_xlsx, catalog_pdf, page_count = self.catalog_gen.generate(
-                doc_ctx,
-                docs_dir,
-            )
+            catalog_result = self._generate_catalog_with_diagnostics(doc_ctx, docs_dir)
+            page_count = catalog_result.page_count
             doc_ctx.derived.catalog_page_total = page_count
+            if catalog_result.pdf_export_error is not None:
+                error_text = str(catalog_result.pdf_export_error)
+                job.add_flag(f"目录PDF导出失败: {error_text}")
+                job.progress.details["catalog_pdf_export_error"] = error_text
         except Exception as e:
             logger.error(f"目录生成失败: {e}")
             job.add_flag("目录生成失败")
@@ -883,6 +886,23 @@ class PipelineExecutor:
             job.add_flag("IED生成失败")
 
         job.artifacts.docs_dir = docs_dir
+
+    def _generate_catalog_with_diagnostics(self, doc_ctx: DocContext, docs_dir: Path) -> Any:
+        catalog_gen_dict = getattr(self.catalog_gen, "__dict__", {})
+        has_diagnostics = (
+            "generate_with_diagnostics" in catalog_gen_dict
+            or hasattr(type(self.catalog_gen), "generate_with_diagnostics")
+        )
+        if has_diagnostics:
+            return self.catalog_gen.generate_with_diagnostics(doc_ctx, docs_dir)
+
+        catalog_xlsx, catalog_pdf, page_count = self.catalog_gen.generate(doc_ctx, docs_dir)
+        return SimpleNamespace(
+            xlsx_path=catalog_xlsx,
+            pdf_path=catalog_pdf,
+            page_count=page_count,
+            pdf_export_error=None,
+        )
 
     def _build_doc_context(self, job: Job, context: dict) -> DocContext:
         merged_params = dict(job.params)
