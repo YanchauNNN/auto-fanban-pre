@@ -45,6 +45,11 @@ public class Commands
                 var auditScanner = new AuditCheckScanner(task, trace);
                 auditScanner.Execute(result);
             }
+            else if (task.WorkflowStage.Equals("rebar_scan", StringComparison.OrdinalIgnoreCase))
+            {
+                var rebarScanner = new RebarScanner(task, trace);
+                rebarScanner.Execute(result);
+            }
             else if (
                 task.WorkflowStage.Equals("font_preflight", StringComparison.OrdinalIgnoreCase)
                 || task.WorkflowStage.Equals("font_replace_missing", StringComparison.OrdinalIgnoreCase)
