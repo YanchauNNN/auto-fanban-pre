@@ -136,6 +136,42 @@ def test_plot_resources_deploy_into_slot_local_dirs_when_runtime_context_present
     assert plot_styles_dir in cast(list[Path], captured["target_plot_styles_dirs"])
 
 
+def test_build_runtime_context_injects_font_library_for_plot_stage(tmp_path: Path) -> None:
+    cfg = RuntimeConfig()
+    font_lib = tmp_path / "font-lib"
+    font_lib.mkdir()
+    cfg.font_preflight.font_library_dirs = [font_lib]
+    cfg.font_preflight.default_fontalt_by_kind = {
+        "ttf": "simsun.ttc",
+        "shx": "simplex.shx",
+        "bigfont": "gbcbig.shx",
+    }
+    plotters_dir = tmp_path / "plotters"
+    plot_styles_dir = plotters_dir / "Plot Styles"
+    pmp_dir = plotters_dir / "PMP Files"
+    context = cast(
+        Any,
+        SimpleNamespace(
+            plotters_dir=plotters_dir,
+            plot_styles_dir=plot_styles_dir,
+            pc3_path=plotters_dir / PDF2_PC3_NAME,
+            pmp_path=pmp_dir / PDF2_PMP_NAME,
+            ctb_path=plot_styles_dir / MANAGED_CTB_NAME,
+        ),
+    )
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, _RunnerSuccessStub()), spec=_SpecStub())
+
+    runtime = executor._build_runtime_context(
+        slot_runtime=None,
+        plot_resource_context=context,
+        plot_style_key="red_wider",
+        ctb_name=MANAGED_CTB_NAME,
+    )
+
+    assert runtime["support_path"] == str(font_lib)
+    assert runtime["font_alt"] == "simsun.ttc"
+
+
 class _RunnerSuccessStub:
     """模拟 AcCoreConsole 成功执行并写入 result.json。"""
 

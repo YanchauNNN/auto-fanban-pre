@@ -565,10 +565,12 @@ def test_runtime_preferences_content_writes_support_path(tmp_path: Path) -> None
     runner = AcCoreConsoleRunner(config=RuntimeConfig())
 
     content = runner._build_runtime_preferences_content(
-        {"support_path": str(tmp_path / "font-lib")},
+        {"support_path": str(tmp_path / "font-lib"), "font_alt": "simsun.ttc"},
     )
 
     assert any("SupportPath" in line for line in content)
+    assert any('setvar "FONTALT" "simsun.ttc"' in line for line in content)
+    assert any("[M5][RUNTIME]" in line and "support_path=" in line for line in content)
 
 
 def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):

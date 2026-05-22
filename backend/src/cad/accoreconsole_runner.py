@@ -505,6 +505,10 @@ class AcCoreConsoleRunner:
             content.append(f'(setvar "FONTMAP" "{font_map_path}")')
         if font_alt:
             content.append(f'(setvar "FONTALT" "{font_alt}")')
+        content.append(
+            f'(princ "\\n[M5][RUNTIME] support_path={support_path} '
+            f'font_map_path={font_map_path} font_alt={font_alt}\\n")'
+        )
         return content
 
     @staticmethod

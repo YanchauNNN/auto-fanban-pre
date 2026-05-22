@@ -24,6 +24,7 @@ from ..models import BBox, FrameMeta, SheetSet
 from .accoreconsole_runner import AcCoreConsoleRunner
 from .autocad_path_resolver import resolve_autocad_paths
 from .dwg_version import detect_dwg_version_code_or_none
+from .font_mapping_runtime import build_font_search_runtime_overrides, choose_fontalt_font
 from .plot_resource_manager import PlotResourceContext, ensure_plot_resources
 from .same_code_multipage import get_same_code_multipage_meta, get_same_code_output_suffix
 
@@ -445,6 +446,22 @@ class CADDXFExecutor:
             "plot_style_key": plot_style_key,
             "ctb_name": ctb_name,
         }
+        runtime.update(
+            build_font_search_runtime_overrides(
+                font_library_dirs=self.config.font_preflight.font_library_dirs,
+                existing_support_path=str((slot_runtime or {}).get("support_path") or ""),
+            ),
+        )
+        slot_font_map = str((slot_runtime or {}).get("font_map_path") or "").strip()
+        if slot_font_map:
+            runtime["font_map_path"] = slot_font_map
+        slot_font_alt = str((slot_runtime or {}).get("font_alt") or "").strip()
+        font_alt = slot_font_alt or choose_fontalt_font(
+            replacement_fonts=None,
+            default_fontalt_by_kind=dict(self.config.font_preflight.default_fontalt_by_kind),
+        )
+        if font_alt:
+            runtime["font_alt"] = font_alt
         if slot_runtime:
             for key in ("slot_id", "slot_root", "profile_arg", "spool_dir", "temp_dir"):
                 value = str(slot_runtime.get(key, "")).strip()
