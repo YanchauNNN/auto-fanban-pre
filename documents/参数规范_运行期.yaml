@@ -166,7 +166,7 @@ runtime_options:
       plot_preferred_area: { type: enum, default: "window", desc: "切图DWG打印主策略：window/extents（纯CAD图幅控制默认window）" }
       plot_fallback_area: { type: enum, default: "none", desc: "切图DWG打印回退策略：none/window（严格图幅默认none）" }
       plot_session_mode: { type: enum, default: "per_source_batch", desc: "打印会话模式：per_source_batch(每个source_dxf一次窗口批量打印)" }
-      plot_from_source_window_enabled: { type: bool, default: true, desc: "是否启用原始DWG窗口批量打印主路径" }
+      plot_from_source_window_enabled: { type: bool, default: false, desc: "是否启用原始DWG窗口批量打印主路径；默认关闭，PDF从拆分后的单张DWG打印" }
       plot_fallback_to_split_on_failure: { type: bool, default: true, desc: "窗口主路径失败时是否仅对失败页/失败帧回退到切图DWG打印" }
       pdf_validation_min_size_bytes: { type: int, default: 1024, desc: "PDF 最小体积门禁（字节）" }
       pdf_validation_min_stream_bytes: { type: int, default: 64, desc: "PDF 最小内容流门禁（字节）" }

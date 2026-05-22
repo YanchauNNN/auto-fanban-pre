@@ -779,6 +779,12 @@ def _make_executor(
     )
 
 
+def _config_with_source_window_plot() -> RuntimeConfig:
+    cfg = RuntimeConfig()
+    cfg.module5_export.output.plot_from_source_window_enabled = True
+    return cfg
+
+
 def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     source = tmp_path / "src.dwg"
     source.write_bytes(b"AC1027rest-of-file")
@@ -1197,7 +1203,7 @@ def test_safe_task_dir_name_strips_non_ascii():
     assert all(ch.isascii() for ch in name)
 
 
-def test_execute_source_dxf_runs_split_then_plot_without_python_fallback(tmp_path: Path):
+def test_execute_source_dxf_runs_split_then_split_dwg_plot_without_python_fallback(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
     frame = _make_frame(
@@ -1222,8 +1228,8 @@ def test_execute_source_dxf_runs_split_then_plot_without_python_fallback(tmp_pat
         for call in runner.calls
     ]
     assert stages[0] == "split_only"
-    assert "plot_window_only" in stages
-    assert "plot_from_split_dwg" not in stages
+    assert "plot_window_only" not in stages
+    assert "plot_from_split_dwg" in stages
     assert "PDF_PYTHON_FALLBACK" not in result["frames"][0]["flags"]
 
 
@@ -1307,7 +1313,7 @@ def test_window_batch_failure_falls_back_to_split_for_single_frame(tmp_path: Pat
         external_code="E001",
     )
     runner = _RunnerWindowFailFallbackStub(fail_frame_ids={"f-1"})
-    executor = _make_executor(runner=runner)
+    executor = _make_executor(config=_config_with_source_window_plot(), runner=runner)
     output_dir = tmp_path / "drawings"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1329,6 +1335,37 @@ def test_window_batch_failure_falls_back_to_split_for_single_frame(tmp_path: Pat
     assert "plot_from_split_dwg" in stages
     assert result["frames"][0]["status"] == "ok"
     assert "PLOT_FROM_SPLIT_FALLBACK" in result["frames"][0]["flags"]
+
+
+def test_default_plot_path_uses_split_dwg_not_source_window(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+    runner = _RunnerSuccessStub()
+    executor = _make_executor(runner=runner)
+
+    result = executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "drawings",
+        task_root=tmp_path / "tasks",
+    )
+
+    stages = [
+        json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
+        for call in runner.calls
+    ]
+    assert stages == ["split_only", "plot_from_split_dwg"]
+    assert result["frames"][0]["status"] == "ok"
+    assert "PLOT_FROM_SPLIT_DWG" in result["frames"][0]["flags"]
+    assert "PLOT_FROM_SOURCE_WINDOW" not in result["frames"][0]["flags"]
 
 
 def test_dotnet_engine_error_auto_falls_back_to_lisp(tmp_path: Path):
@@ -1369,7 +1406,7 @@ def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):
     sheet_set = _make_sheet_set_two_pages("cluster-1", frame)
     # 仅让第2页窗口打印失败，验证定向回退。
     runner = _RunnerWindowFailFallbackStub(fail_frame_ids={"cluster-1__p2"})
-    executor = _make_executor(runner=runner)
+    executor = _make_executor(config=_config_with_source_window_plot(), runner=runner)
     output_dir = tmp_path / "drawings"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1401,7 +1438,10 @@ def test_window_success_with_missing_split_dwg_still_marks_ok(tmp_path: Path):
         internal_code="I-001",
         external_code="E001",
     )
-    executor = _make_executor(runner=_RunnerWindowOkMissingDwgStub())
+    executor = _make_executor(
+        config=_config_with_source_window_plot(),
+        runner=_RunnerWindowOkMissingDwgStub(),
+    )
     result = executor.execute_source_dxf(
         job_id="job-1",
         source_dxf=source,
@@ -1426,7 +1466,7 @@ def test_window_invalid_pdf_falls_back_to_split_plot(tmp_path: Path):
         external_code="E001",
     )
     runner = _RunnerWindowInvalidPdfFallbackStub()
-    executor = _make_executor(runner=runner)
+    executor = _make_executor(config=_config_with_source_window_plot(), runner=runner)
     result = executor.execute_source_dxf(
         job_id="job-1",
         source_dxf=source,
@@ -1456,6 +1496,7 @@ def test_window_invalid_pdf_without_fallback_marks_failed(tmp_path: Path):
         external_code="E001",
     )
     cfg = RuntimeConfig()
+    cfg.module5_export.output.plot_from_source_window_enabled = True
     cfg.module5_export.output.plot_fallback_to_split_on_failure = False
     runner = _RunnerWindowInvalidPdfFallbackStub()
     executor = _make_executor(config=cfg, runner=runner)
@@ -1485,7 +1526,7 @@ def test_missing_window_result_falls_back_to_split_plot(tmp_path: Path):
         external_code="E001",
     )
     runner = _RunnerWindowResultMissingStub()
-    executor = _make_executor(runner=runner)
+    executor = _make_executor(config=_config_with_source_window_plot(), runner=runner)
     result = executor.execute_source_dxf(
         job_id="job-1",
         source_dxf=source,

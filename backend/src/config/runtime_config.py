@@ -131,7 +131,7 @@ class Module5OutputConfig(BaseModel):
     plot_preferred_area: str = "window"
     plot_fallback_area: str = "none"
     plot_session_mode: str = "per_source_batch"
-    plot_from_source_window_enabled: bool = True
+    plot_from_source_window_enabled: bool = False
     plot_fallback_to_split_on_failure: bool = True
     pdf_validation_min_size_bytes: int = 1024
     pdf_validation_min_stream_bytes: int = 64
