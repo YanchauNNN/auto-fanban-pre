@@ -41,9 +41,17 @@ class AuditMatchEngine:
         foreign_tokens = sorted(self.lexicon.foreign_texts.get(project_no, set()), key=len, reverse=True)
         findings: list[AuditFinding] = []
         normalized_unit_no = str(unit_no or "").strip()
+        normalized_items = [
+            (item, normalize_text(item.raw_text))
+            for item in items
+        ]
+        unit_code_pattern = self._compile_unit_code_pattern(project_no)
+        observed_factory_codes = self._collect_observed_factory_codes(
+            unit_code_pattern=unit_code_pattern,
+            normalized_texts=[normalized_text for _, normalized_text in normalized_items],
+        )
 
-        for item in items:
-            normalized_text = normalize_text(item.raw_text)
+        for item, normalized_text in normalized_items:
             if not normalized_text:
                 continue
 
@@ -74,6 +82,8 @@ class AuditMatchEngine:
                     unit_no=normalized_unit_no,
                     item=item,
                     normalized_text=normalized_text,
+                    unit_code_pattern=unit_code_pattern,
+                    observed_factory_codes=observed_factory_codes,
                 )
             )
             if (
@@ -119,6 +129,8 @@ class AuditMatchEngine:
         unit_no: str,
         item: ScanTextItem,
         normalized_text: str,
+        unit_code_pattern: re.Pattern[str],
+        observed_factory_codes: set[str],
     ) -> list[AuditFinding]:
         if not self._unit_consistency.enabled or not project_no or not unit_no:
             return []
@@ -131,38 +143,83 @@ class AuditMatchEngine:
 
         findings: list[AuditFinding] = []
         seen: set[tuple[str, str]] = set()
-        patterns = [
-            self._compile_unit_code_pattern(project_no),
-            re.compile(self._unit_consistency.explicit_unit_text_pattern),
-            re.compile(self._unit_consistency.short_factory_code_pattern),
-        ]
-        for pattern in patterns:
+        for pattern in [unit_code_pattern, re.compile(self._unit_consistency.explicit_unit_text_pattern)]:
             for match in pattern.finditer(normalized_text):
-                matched_unit = str(match.group("unit_no") or "").strip()
-                matched_text = match.group(0)
-                key = (matched_text, matched_unit)
-                if not matched_unit or matched_unit == unit_no or key in seen:
-                    continue
-                seen.add(key)
-                findings.append(
-                    AuditFinding(
-                        raw_text=item.raw_text,
-                        matched_text=matched_text,
-                        matched_project_nos=[project_no],
-                        context_kind="unit_consistency",
-                        confidence="high",
-                        entity_type=item.entity_type,
-                        field_context=item.field_context,
-                        internal_code=item.internal_code,
-                        layout_name=item.layout_name,
-                        entity_handle=item.entity_handle,
-                        block_path=item.block_path,
-                        position_x=item.position_x,
-                        position_y=item.position_y,
-                        text_bbox=item.text_bbox,
-                    )
+                self._append_unit_consistency_finding(
+                    findings=findings,
+                    seen=seen,
+                    project_no=project_no,
+                    selected_unit_no=unit_no,
+                    item=item,
+                    match=match,
                 )
+
+        short_pattern = re.compile(self._unit_consistency.short_factory_code_pattern)
+        for match in short_pattern.finditer(normalized_text):
+            factory_code = str(match.group("factory_code") or "").strip().upper()
+            if (
+                self._unit_consistency.short_factory_code_requires_observed_album_factory
+                and factory_code not in observed_factory_codes
+            ):
+                continue
+            self._append_unit_consistency_finding(
+                findings=findings,
+                seen=seen,
+                project_no=project_no,
+                selected_unit_no=unit_no,
+                item=item,
+                match=match,
+            )
         return findings
+
+    @staticmethod
+    def _collect_observed_factory_codes(
+        *,
+        unit_code_pattern: re.Pattern[str],
+        normalized_texts: list[str],
+    ) -> set[str]:
+        factory_codes: set[str] = set()
+        for normalized_text in normalized_texts:
+            for match in unit_code_pattern.finditer(normalized_text):
+                factory_code = str(match.group("factory_code") or "").strip().upper()
+                if factory_code:
+                    factory_codes.add(factory_code)
+        return factory_codes
+
+    @staticmethod
+    def _append_unit_consistency_finding(
+        *,
+        findings: list[AuditFinding],
+        seen: set[tuple[str, str]],
+        project_no: str,
+        selected_unit_no: str,
+        item: ScanTextItem,
+        match: re.Match[str],
+    ) -> None:
+        matched_unit = str(match.group("unit_no") or "").strip()
+        matched_text = match.group(0)
+        key = (matched_text, matched_unit)
+        if not matched_unit or matched_unit == selected_unit_no or key in seen:
+            return
+        seen.add(key)
+        findings.append(
+            AuditFinding(
+                raw_text=item.raw_text,
+                matched_text=matched_text,
+                matched_project_nos=[project_no],
+                context_kind="unit_consistency",
+                confidence="high",
+                entity_type=item.entity_type,
+                field_context=item.field_context,
+                internal_code=item.internal_code,
+                layout_name=item.layout_name,
+                entity_handle=item.entity_handle,
+                block_path=item.block_path,
+                position_x=item.position_x,
+                position_y=item.position_y,
+                text_bbox=item.text_bbox,
+            )
+        )
 
     def _compile_unit_code_pattern(self, project_no: str) -> re.Pattern[str]:
         pattern = self._unit_consistency.code_pattern.replace(

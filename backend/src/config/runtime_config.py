@@ -226,7 +226,7 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     )
     code_pattern: str = (
         r"(?<!\d){project_no}(?P<unit_no>[1-9])(?P<factory_code>[A-Z0-9]{2,4})"
-        r"-JGS\d{2}(?:-\d{3})?"
+        r"-[A-Z]{3}\d{2}(?:-\d{3})?"
     )
     explicit_unit_text_pattern: str = r"(?P<unit_no>[1-9])\s*号\s*(?:机组|岛)"
     short_factory_code_pattern: str = (
@@ -234,6 +234,7 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
         r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
         r"(?![A-Z0-9])"
     )
+    short_factory_code_requires_observed_album_factory: bool = True
 
 
 class AuditCheckConfig(BaseModel):

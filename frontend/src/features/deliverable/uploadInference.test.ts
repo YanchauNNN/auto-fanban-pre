@@ -34,6 +34,7 @@ describe("inferProjectNumbers", () => {
     const inference = inferProjectNumbers([
       new File(["dwg"], "20261NS-JGS01.dwg", { type: "application/acad" }),
       new File(["dwg"], "20261RS-JGS65.dwg", { type: "application/acad" }),
+      new File(["dwg"], "20261RB-SBS01.dwg", { type: "application/acad" }),
     ]);
 
     expect(inference.inferredProjectNos).toEqual(["2026"]);

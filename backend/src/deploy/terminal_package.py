@@ -152,7 +152,7 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
             shutil.rmtree(target)
         ignore = None
         if entry.destination != PYTHON_PACKAGES_DEST:
-            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo")
+            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.lscache", ".build_packages")
         shutil.copytree(
             entry.source,
             target,
@@ -456,17 +456,20 @@ if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_E
 }
 
 $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
+$previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
 $previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
 $previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
 
 Push-Location (Join-Path $root "backend-runtime")
 try {
     [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
     [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
     [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
     & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $ListenHost --port $Port
 } finally {
     [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
+    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
     [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
     [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
     Pop-Location
@@ -1337,13 +1340,34 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 
 ## 建议顺序
 
-1. 先执行 `install\install_runtime_prereqs.ps1`
-2. 再执行 `scripts\prepare_terminal.ps1`
-3. 再执行 `scripts\deep_check_terminal.ps1`
-4. 配置 IIS：`install\configure_iis_site.ps1`
-5. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
-6. 执行 `scripts\check_health.ps1`
-7. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+1. 先执行 `install\check_iis_proxy_prereqs.ps1`
+2. 需要时执行 `install\install_iis_proxy_prereqs.ps1`
+3. 再执行 `install\install_runtime_prereqs.ps1`
+4. 再执行 `scripts\prepare_terminal.ps1`
+5. 再执行 `scripts\deep_check_terminal.ps1`
+6. 配置 IIS：`install\configure_iis_site.ps1`
+7. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
+8. 执行 `scripts\check_health.ps1`
+9. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+
+## 一致性边界
+
+- 部署后运行行为应与本机构建产物一致，但目录结构不会和开发环境逐字节一致。
+- 部署包会使用 `backend-runtime/`、`frontend-dist/`、`python-runtime/`、`python-packages/` 这些部署布局。
+- 测试、缓存、`__pycache__`、`.lscache`、editable 安装记录和开发绝对路径不应进入部署运行面。
+- 真正上线验收以 `prepare_terminal.ps1`、`deep_check_terminal.ps1`、`check_health.ps1` 和样例 DWG 冒烟为准。
+
+## 打包卫生检查
+
+构建机打包后至少检查：
+
+```powershell
+rg -n "<开发机绝对路径>|<仓库目录名>" build\fanban-terminal-deploy
+rg --files build\fanban-terminal-deploy -g "*.lscache" -g "direct_url.json" -g "_auto_fanban.pth" -g "_editable_impl_auto_fanban.pth" -g "a1_coverage.pth" -g ".build_packages/**"
+Get-ChildItem build\fanban-terminal-deploy\backend-runtime,build\fanban-terminal-deploy\scripts,build\fanban-terminal-deploy\install -Recurse -Force | Where-Object { $_.Name -eq "__pycache__" -or $_.Extension -eq ".pyc" }
+```
+
+前两条不应命中。第三条不应在后端运行源码、脚本或安装目录中发现源码缓存；第三方依赖自身的 `__pycache__` 不作为阻塞项。
 
 ## 为什么默认不用 Windows 服务
 

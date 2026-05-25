@@ -38,6 +38,7 @@ export function AuditCheckWorkspace({
     () => (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim().length > 0),
     [schema.auditReplaceProjectOptions],
   );
+  const unitOptions = useMemo(() => getUnitOptions(schema), [schema]);
 
   useEffect(() => {
     onDraftAvailabilityChange(
@@ -147,6 +148,7 @@ export function AuditCheckWorkspace({
     setDraft((current) => ({
       ...current,
       files,
+      projectNo: current.projectNo || inference.primaryProjectNo,
       unitNo: current.unitNo || inference.primaryUnitNo,
       formErrors: [],
     }));
@@ -268,8 +270,11 @@ export function AuditCheckWorkspace({
                     onChange={(event) => handleUnitNoChange(event.target.value)}
                   >
                     <option value="">请选择</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
+                    {unitOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
                   </select>
                   <span className={styles.helperText}>用于检查项目号与机组号是否一致。</span>
                   {draft.fieldErrors.unit_no?.[0] ? (
@@ -402,4 +407,14 @@ function createAuditDraft(): AuditCheckDraft {
 function getExtension(filename: string) {
   const dot = filename.lastIndexOf(".");
   return dot >= 0 ? filename.slice(dot).toLowerCase() : "";
+}
+
+function getUnitOptions(schema: FormSchema): string[] {
+  for (const section of schema.sections) {
+    const field = section.fields.find((candidate) => candidate.key === "unit_no");
+    if (field?.options?.length) {
+      return [...field.options];
+    }
+  }
+  return ["1", "2", "3", "4", "5", "6"];
 }

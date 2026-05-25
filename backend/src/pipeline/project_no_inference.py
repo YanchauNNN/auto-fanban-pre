@@ -5,7 +5,7 @@ from pathlib import Path
 
 _PROJECT_NO_PREFIX_RE = re.compile(r"^(\d{4})")
 _UNIT_NO_BY_PROJECT_PREFIX_RE = re.compile(
-    r"^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-JGS\d{2})",
+    r"^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})",
 )
 
 

@@ -12,7 +12,24 @@ const schema = {
     allowedExts: [".dwg"],
     maxTotalMb: 2048,
   },
-  sections: [],
+  sections: [
+    {
+      id: "project",
+      title: "project",
+      fields: [
+        {
+          key: "unit_no",
+          label: "unit_no",
+          type: "select",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "",
+          options: ["1", "2", "3", "4", "5", "6"],
+        },
+      ],
+    },
+  ],
   auditReplaceProjectOptions: ["2026", "1818", "2035"],
 } as const;
 
@@ -123,6 +140,32 @@ describe("AuditCheckWorkspace", () => {
         ]),
       );
     });
+  });
+
+  it("fills project number from uploaded DWG filename without manual selection", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    const { container } = render(
+      <AuditCheckWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(
+      fileInput,
+      new File(["dwg"], "20261RB-JGS11-校审图A版-2026.05.20.dwg", {
+        type: "application/acad",
+      }),
+    );
+
+    expect(container.querySelector("#audit-project-no")).toHaveValue("2026");
+    expect(container.querySelector("#audit-unit-no")).toHaveValue("1");
   });
 
   it("preserves the audit draft after closing and reopening", async () => {

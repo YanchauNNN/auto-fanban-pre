@@ -86,6 +86,26 @@ def _make_fake_repo(repo_root: Path) -> None:
         / "cad"
         / "dotnet"
         / "Module5CadBridge"
+        / "Module5CadBridge.csproj.lscache",
+        "SolutionPath=<PATH>../../../../../auto-fanban-pre.sln",
+    )
+    _write_file(
+        repo_root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / ".build_packages"
+        / "microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg",
+        "build cache",
+    )
+    _write_file(
+        repo_root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
         / "bin"
         / "x64"
         / "Debug"
@@ -195,6 +215,25 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "cad"
         / "dotnet"
         / "Module5CadBridge"
+        / "Module5CadBridge.csproj.lscache"
+    ).exists()
+    assert not (
+        output_root
+        / "backend-runtime"
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / ".build_packages"
+    ).exists()
+    assert not (
+        output_root
+        / "backend-runtime"
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
         / "bin"
         / "x64"
     ).exists()
@@ -222,6 +261,10 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
     assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
     assert (output_root / DEPLOY_README).exists()
+    deploy_readme = (output_root / DEPLOY_README).read_text(encoding="utf-8")
+    assert "install\\check_iis_proxy_prereqs.ps1" in deploy_readme
+    assert "一致性边界" in deploy_readme
+    assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
     assert any(item["path"] == "scripts/start_backend.ps1" for item in manifest["files"])
@@ -318,6 +361,7 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
     assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in start_backend
+    assert '[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")' in start_backend
     assert "probe_target_env.ps1" in prepare_terminal

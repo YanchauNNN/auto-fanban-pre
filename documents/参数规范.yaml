@@ -49,7 +49,7 @@ enums:
   
   # 专业中英文映射（用于1818封面）
   discipline_en_map:
-    结构: "Structural Engineering"
+    结构: "Structure"
     建筑: "Architectural"
     总图运输: "Site & Transportation"
     # 其他专业待补充

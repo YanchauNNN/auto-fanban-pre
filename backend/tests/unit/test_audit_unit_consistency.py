@@ -30,6 +30,7 @@ def _engine() -> AuditMatchEngine:
 
 def test_infer_unit_no_from_project_code_filename() -> None:
     assert infer_unit_no_from_path("20261NS-JGS01.dwg", "2026") == "1"
+    assert infer_unit_no_from_path("20261RB-SBS01.dwg", "2026") == "1"
     assert infer_unit_no_from_path("19151NS-JGS01.dwg", "1915") == "1"
 
 
@@ -41,7 +42,9 @@ def test_unit_consistency_flags_wrong_code_and_explicit_unit_text() -> None:
             ScanTextItem(raw_text="20261NS-JGS01", entity_type="TEXT"),
             ScanTextItem(raw_text="20262NS-JGS01", entity_type="TEXT"),
             ScanTextItem(raw_text="1号机组", entity_type="TEXT"),
+            ScanTextItem(raw_text="1号岛", entity_type="TEXT"),
             ScanTextItem(raw_text="2号机组", entity_type="TEXT"),
+            ScanTextItem(raw_text="2号岛", entity_type="TEXT"),
             ScanTextItem(raw_text="2号图纸", entity_type="TEXT"),
             ScanTextItem(raw_text="2026-02-01", entity_type="TEXT"),
         ],
@@ -50,6 +53,7 @@ def test_unit_consistency_flags_wrong_code_and_explicit_unit_text() -> None:
     assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
         ("20262NS-JGS01", "unit_consistency"),
         ("2号机组", "unit_consistency"),
+        ("2号岛", "unit_consistency"),
     ]
 
 
@@ -94,3 +98,50 @@ def test_unit_consistency_flags_short_unit_factory_code_fragment() -> None:
         ("20261RB-JGS11", "unit_consistency"),
         ("1RB", "unit_consistency"),
     ]
+
+
+def test_unit_consistency_flags_unit_factory_prefix_in_non_jgs_codes() -> None:
+    findings = _engine().evaluate(
+        project_no="2026",
+        unit_no="1",
+        items=[
+            ScanTextItem(raw_text="20261RB-JGS11", entity_type="TEXT"),
+            ScanTextItem(raw_text="20261RB-SBS01", entity_type="TEXT"),
+            ScanTextItem(raw_text="20262RB-SBS01", entity_type="TEXT"),
+        ],
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("20262RB-SBS01", "unit_consistency"),
+    ]
+
+
+def test_unit_consistency_suppresses_dimension_like_short_fragments() -> None:
+    findings = _engine().evaluate(
+        project_no="2026",
+        unit_no="1",
+        items=[
+            ScanTextItem(raw_text="20261RB-JGS11", entity_type="TEXT"),
+            ScanTextItem(raw_text="3492x(570+600)x4", entity_type="TEXT"),
+            ScanTextItem(raw_text="板厚6mm", entity_type="TEXT"),
+            ScanTextItem(raw_text="9x300=<>", entity_type="Dimension"),
+            ScanTextItem(raw_text="2RB非能动热量导出水池", entity_type="TEXT"),
+        ],
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("2RB", "unit_consistency"),
+    ]
+
+
+def test_unit_consistency_requires_observed_album_factory_for_short_fragments() -> None:
+    findings = _engine().evaluate(
+        project_no="2026",
+        unit_no="1",
+        items=[
+            ScanTextItem(raw_text="2RB非能动热量导出水池", entity_type="TEXT"),
+            ScanTextItem(raw_text="2MM", entity_type="TEXT"),
+        ],
+    )
+
+    assert findings == []
