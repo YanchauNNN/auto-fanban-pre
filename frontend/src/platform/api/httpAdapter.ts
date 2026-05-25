@@ -333,12 +333,16 @@ export class HttpAdapter implements ApiAdapter {
 
   async createAuditCheck(
     projectNo: string,
+    unitNo: string,
     files: File[],
     batchId?: string,
   ): Promise<CreateBatchPayload> {
     const formData = new FormData();
     formData.append("mode", "check");
     const params: Record<string, string> = { project_no: projectNo };
+    if (unitNo.trim()) {
+      params.unit_no = unitNo.trim();
+    }
     if (batchId) {
       params.batch_id = batchId;
     }

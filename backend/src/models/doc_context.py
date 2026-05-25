@@ -78,6 +78,7 @@ class GlobalDocParams(BaseModel):
 
     # === 项目级 ===
     project_no: str
+    unit_no: str | None = None
     cover_variant: str = "通用"
     classification: str = "非密"
 

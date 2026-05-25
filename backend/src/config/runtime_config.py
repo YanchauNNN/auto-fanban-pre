@@ -211,6 +211,31 @@ class AuditCheckMatchingPolicyConfig(BaseModel):
     suppress_project_no_in_dimension_like: bool = True
 
 
+class AuditCheckUnitConsistencyConfig(BaseModel):
+    """纠错机组一致性配置"""
+
+    enabled: bool = True
+    project_units: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "1915": ["1", "2"],
+            "1916": ["3", "4"],
+            "1907": ["5", "6"],
+            "1418": ["3", "4"],
+            "2026": ["1", "2"],
+        },
+    )
+    code_pattern: str = (
+        r"(?<!\d){project_no}(?P<unit_no>[1-9])(?P<factory_code>[A-Z0-9]{2,4})"
+        r"-JGS\d{2}(?:-\d{3})?"
+    )
+    explicit_unit_text_pattern: str = r"(?P<unit_no>[1-9])\s*号\s*(?:机组|岛)"
+    short_factory_code_pattern: str = (
+        r"(?<![A-Z0-9])(?P<unit_no>[1-9])"
+        r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
+        r"(?![A-Z0-9])"
+    )
+
+
 class AuditCheckConfig(BaseModel):
     """纠错运行配置"""
 
@@ -224,6 +249,9 @@ class AuditCheckConfig(BaseModel):
     context_rules: AuditCheckContextRulesConfig = Field(default_factory=AuditCheckContextRulesConfig)
     matching_policy: AuditCheckMatchingPolicyConfig = Field(
         default_factory=AuditCheckMatchingPolicyConfig,
+    )
+    unit_consistency: AuditCheckUnitConsistencyConfig = Field(
+        default_factory=AuditCheckUnitConsistencyConfig,
     )
 
 

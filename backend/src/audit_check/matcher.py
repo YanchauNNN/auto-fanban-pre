@@ -29,10 +29,18 @@ class AuditMatchEngine:
             re.compile(pattern)
             for pattern in audit_cfg.generic_identifier_like.exempt_embed_patterns
         ]
+        self._unit_consistency = audit_cfg.unit_consistency
 
-    def evaluate(self, *, project_no: str, items: list[ScanTextItem]) -> list[AuditFinding]:
+    def evaluate(
+        self,
+        *,
+        project_no: str,
+        items: list[ScanTextItem],
+        unit_no: str | None = None,
+    ) -> list[AuditFinding]:
         foreign_tokens = sorted(self.lexicon.foreign_texts.get(project_no, set()), key=len, reverse=True)
         findings: list[AuditFinding] = []
+        normalized_unit_no = str(unit_no or "").strip()
 
         for item in items:
             normalized_text = normalize_text(item.raw_text)
@@ -59,6 +67,15 @@ class AuditMatchEngine:
                         text_bbox=item.text_bbox,
                     )
                 )
+
+            findings.extend(
+                self._unit_consistency_findings(
+                    project_no=project_no,
+                    unit_no=normalized_unit_no,
+                    item=item,
+                    normalized_text=normalized_text,
+                )
+            )
             if (
                 context_kind == "date_like"
                 and self.matching_policy.suppress_project_no_in_date_like
@@ -94,6 +111,65 @@ class AuditMatchEngine:
                     )
 
         return findings
+
+    def _unit_consistency_findings(
+        self,
+        *,
+        project_no: str,
+        unit_no: str,
+        item: ScanTextItem,
+        normalized_text: str,
+    ) -> list[AuditFinding]:
+        if not self._unit_consistency.enabled or not project_no or not unit_no:
+            return []
+        allowed_units = [
+            str(value).strip()
+            for value in self._unit_consistency.project_units.get(project_no, [])
+        ]
+        if unit_no not in allowed_units:
+            return []
+
+        findings: list[AuditFinding] = []
+        seen: set[tuple[str, str]] = set()
+        patterns = [
+            self._compile_unit_code_pattern(project_no),
+            re.compile(self._unit_consistency.explicit_unit_text_pattern),
+            re.compile(self._unit_consistency.short_factory_code_pattern),
+        ]
+        for pattern in patterns:
+            for match in pattern.finditer(normalized_text):
+                matched_unit = str(match.group("unit_no") or "").strip()
+                matched_text = match.group(0)
+                key = (matched_text, matched_unit)
+                if not matched_unit or matched_unit == unit_no or key in seen:
+                    continue
+                seen.add(key)
+                findings.append(
+                    AuditFinding(
+                        raw_text=item.raw_text,
+                        matched_text=matched_text,
+                        matched_project_nos=[project_no],
+                        context_kind="unit_consistency",
+                        confidence="high",
+                        entity_type=item.entity_type,
+                        field_context=item.field_context,
+                        internal_code=item.internal_code,
+                        layout_name=item.layout_name,
+                        entity_handle=item.entity_handle,
+                        block_path=item.block_path,
+                        position_x=item.position_x,
+                        position_y=item.position_y,
+                        text_bbox=item.text_bbox,
+                    )
+                )
+        return findings
+
+    def _compile_unit_code_pattern(self, project_no: str) -> re.Pattern[str]:
+        pattern = self._unit_consistency.code_pattern.replace(
+            "{project_no}",
+            re.escape(str(project_no or "").strip()),
+        )
+        return re.compile(pattern)
 
     def _classify_context(self, field_context: str | None, normalized_text: str) -> str:
         if field_context:

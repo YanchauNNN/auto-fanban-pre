@@ -2,6 +2,7 @@ import { startTransition, useDeferredValue, useEffect, useId, useMemo, useRef, u
 
 import type { ApiAdapter, CreateBatchPayload, FormSchema } from "../../platform/api/types";
 import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { inferProjectNumbers } from "../deliverable/uploadInference";
 import styles from "./AuditCheckWorkspace.module.css";
 
 type AuditCheckWorkspaceProps = {
@@ -15,6 +16,7 @@ type AuditCheckWorkspaceProps = {
 
 type AuditCheckDraft = {
   projectNo: string;
+  unitNo: string;
   files: File[];
   fieldErrors: Record<string, string[]>;
   formErrors: string[];
@@ -38,8 +40,10 @@ export function AuditCheckWorkspace({
   );
 
   useEffect(() => {
-    onDraftAvailabilityChange(Boolean(draft.projectNo.trim()) || draft.files.length > 0);
-  }, [draft.files.length, draft.projectNo, onDraftAvailabilityChange]);
+    onDraftAvailabilityChange(
+      Boolean(draft.projectNo.trim()) || Boolean(draft.unitNo.trim()) || draft.files.length > 0,
+    );
+  }, [draft.files.length, draft.projectNo, draft.unitNo, onDraftAvailabilityChange]);
 
   if (!isOpen) {
     return null;
@@ -84,7 +88,11 @@ export function AuditCheckWorkspace({
     setIsSubmitting(true);
 
     try {
-      const payload = await adapter.createAuditCheck(draft.projectNo.trim(), draft.files);
+      const payload = await adapter.createAuditCheck(
+        draft.projectNo.trim(),
+        draft.unitNo.trim(),
+        draft.files,
+      );
       setDraft(createAuditDraft());
       startTransition(() => onBatchCreated(payload));
       onClose();
@@ -120,13 +128,26 @@ export function AuditCheckWorkspace({
     }));
   }
 
+  function handleUnitNoChange(value: string) {
+    setDraft((current) => ({
+      ...current,
+      unitNo: value,
+      fieldErrors: {
+        ...current.fieldErrors,
+        unit_no: [],
+      },
+    }));
+  }
+
   function handleFilesReplace(files: File[]) {
     if (files.length === 0) {
       return;
     }
+    const inference = inferProjectNumbers(files);
     setDraft((current) => ({
       ...current,
       files,
+      unitNo: current.unitNo || inference.primaryUnitNo,
       formErrors: [],
     }));
   }
@@ -210,6 +231,7 @@ export function AuditCheckWorkspace({
               ) : null}
 
               <div className={styles.fieldStack}>
+                <div className={styles.projectUnitRow}>
                 <div className={styles.field}>
                   <div className={styles.fieldHeader}>
                     <label className={styles.fieldLabel} htmlFor="audit-project-no">
@@ -230,6 +252,30 @@ export function AuditCheckWorkspace({
                   {draft.fieldErrors.project_no?.[0] ? (
                     <span className={styles.errorText}>{draft.fieldErrors.project_no[0]}</span>
                   ) : null}
+                </div>
+
+                <div className={styles.field}>
+                  <div className={styles.fieldHeader}>
+                    <label className={styles.fieldLabel} htmlFor="audit-unit-no">
+                      <span>机组号</span>
+                    </label>
+                  </div>
+                  <select
+                    aria-label="机组号"
+                    className={styles.input}
+                    id="audit-unit-no"
+                    value={draft.unitNo}
+                    onChange={(event) => handleUnitNoChange(event.target.value)}
+                  >
+                    <option value="">请选择</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                  <span className={styles.helperText}>用于检查项目号与机组号是否一致。</span>
+                  {draft.fieldErrors.unit_no?.[0] ? (
+                    <span className={styles.errorText}>{draft.fieldErrors.unit_no[0]}</span>
+                  ) : null}
+                </div>
                 </div>
 
                 <div className={styles.field}>
@@ -346,6 +392,7 @@ function ProjectNoCombobox({
 function createAuditDraft(): AuditCheckDraft {
   return {
     projectNo: "",
+    unitNo: "",
     files: [],
     fieldErrors: {},
     formErrors: [],

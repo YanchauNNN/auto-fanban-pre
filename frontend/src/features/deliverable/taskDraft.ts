@@ -23,8 +23,11 @@ export function createTaskConfigDraft(schema: FormSchema): TaskConfigDraft {
     formErrors: [],
     inference: {
       inferredProjectNos: [],
+      inferredUnitNos: [],
       primaryProjectNo: "",
+      primaryUnitNo: "",
       hasConflict: false,
+      hasUnitConflict: false,
     },
     replaceConfig: {
       sourceProjectNo: "",

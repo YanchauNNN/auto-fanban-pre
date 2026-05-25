@@ -45,6 +45,7 @@ const SECTION_TITLES: Record<string, string> = {
 
 const FIELD_LABELS: Record<string, string> = {
   project_no: "项目号",
+  unit_no: "机组号",
   cover_variant: "封面模板",
   classification: "密级",
   subitem_name: "子项名称（中文）",
@@ -96,6 +97,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 const FIELD_DESCRIPTION_OVERRIDES: Record<string, string> = {
   project_no: "可留空，会优先从DWG文件名自动推断",
+  unit_no: "用于纠错机组一致性检查，可从DWG文件名自动推断",
   cover_variant: "封面模板选择",
   classification: "写入设计文件/IED",
   cover_revision: "封面和目录版次，写入封面和目录版次位（追加模式）",

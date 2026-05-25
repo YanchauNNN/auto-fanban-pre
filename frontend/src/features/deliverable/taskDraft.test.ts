@@ -113,8 +113,11 @@ describe("syncTaskConfigDraft", () => {
       formErrors: ["文件缺失"],
       inference: {
         inferredProjectNos: ["1818"],
+        inferredUnitNos: [],
         primaryProjectNo: "1818",
+        primaryUnitNo: "",
         hasConflict: false,
+        hasUnitConflict: false,
       },
       replaceConfig: {
         sourceProjectNo: "1818",
@@ -238,8 +241,11 @@ describe("syncTaskConfigDraft", () => {
       formErrors: [],
       inference: {
         inferredProjectNos: [],
+        inferredUnitNos: [],
         primaryProjectNo: "",
+        primaryUnitNo: "",
         hasConflict: false,
+        hasUnitConflict: false,
       },
       replaceConfig: {
         sourceProjectNo: "",

@@ -82,6 +82,7 @@ class AuditCheckExecutor:
 
         findings = AuditMatchEngine(lexicon).evaluate(
             project_no=project_no,
+            unit_no=str(job.params.get("unit_no") or "").strip() or None,
             items=annotated_items,
         )
 

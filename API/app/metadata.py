@@ -92,6 +92,10 @@ class FormMetadataService:
         return payload
 
     def _resolve_options(self, field_key: str, rule: dict[str, Any]) -> list[str]:
+        inline_options = rule.get("options")
+        if isinstance(inline_options, list):
+            return [str(item) for item in inline_options]
+
         option_source = rule.get("option_source")
         if isinstance(option_source, dict):
             source_type = str(option_source.get("type") or "").strip().lower()

@@ -20,6 +20,7 @@ enums:
   project_no:
     - { id: "1818", name: "巴基斯坦恰希玛核电厂五号机组" }
     - { id: "2016", name: "浙江金七门核电厂1、2号机组" }
+    - { id: "1915", name: "华能霞浦核电项目压水堆一期工程" }
     - { id: "2026", name: "江苏徐圩核能供热发电厂一期工程" }
     - { id: "1916", name: "福建漳州核电厂3、4号机组" }
     - { id: "1907", name: "三门核电项目5、6号机组" }
@@ -162,6 +163,14 @@ doc_generation:
         required: false
         source: frontend
         desc: "项目号；可留空，API/桌面端会优先从DWG文件名自动推断，推断失败时回退2016"
+
+      unit_no:
+        type: enum
+        required: false
+        source: frontend
+        default: ""
+        desc: "机组号；用于纠错机组/岛号一致性检查，可从DWG文件名自动推断；项目允许范围以运行期 audit_check.unit_consistency.project_units 为准"
+        options: ["1", "2", "3", "4", "5", "6"]
       
       cover_variant:
         type: enum[cover_variant]

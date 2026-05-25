@@ -101,6 +101,7 @@ class AuditReplaceExecutor:
         annotated_items = [mapper.annotate(item) for item in scan_items]
         findings = AuditMatchEngine(lexicon).evaluate(
             project_no=target_project_no,
+            unit_no=str(job.params.get("unit_no") or "").strip() or None,
             items=annotated_items,
         )
 

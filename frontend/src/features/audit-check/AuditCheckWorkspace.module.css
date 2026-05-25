@@ -150,6 +150,13 @@
   gap: 0.9rem;
 }
 
+.projectUnitRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 0.36fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -299,5 +306,9 @@
   .summaryActions,
   .actions {
     justify-content: stretch;
+  }
+
+  .projectUnitRow {
+    grid-template-columns: 1fr;
   }
 }

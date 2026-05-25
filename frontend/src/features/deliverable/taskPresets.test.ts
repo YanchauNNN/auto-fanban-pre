@@ -178,8 +178,11 @@ describe("taskPresets", () => {
     draft.files = [new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })];
     draft.inference = {
       inferredProjectNos: ["2016"],
+      inferredUnitNos: [],
       primaryProjectNo: "2016",
+      primaryUnitNo: "",
       hasConflict: false,
+      hasUnitConflict: false,
     };
 
     const preset = createTaskPreset("翻版方案", {

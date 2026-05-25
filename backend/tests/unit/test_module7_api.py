@@ -602,6 +602,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"
     )
     project_no = next(field for field in project_section["fields"] if field["key"] == "project_no")
+    unit_no = next(field for field in project_section["fields"] if field["key"] == "unit_no")
     file_category = next(
         field
         for section in payload["deliverable"]["sections"]
@@ -634,9 +635,12 @@ def test_form_schema_returns_deliverable_fields_and_options(
     )
 
     assert "2016" in project_no["options"]
+    assert "1915" in project_no["options"]
     assert project_no["required"] is False
     assert "DWG" in project_no["desc"]
     assert "2016" in project_no["desc"]
+    assert unit_no["required"] is False
+    assert unit_no["options"] == ["1", "2", "3", "4", "5", "6"]
     assert "1 总体文件" in file_category["options"]
     assert ied_design_type["required_when"] == "ied_status == '发布'"
     assert ied_design_type["type"] == "combobox"
@@ -1081,6 +1085,44 @@ def test_create_audit_check_rejects_when_project_no_cannot_be_inferred(
     assert response.status_code == 422
     payload = response.json()
     assert payload["detail"]["param_errors"]["project_no"] == ["required_for_audit_check"]
+
+
+def test_create_audit_check_requires_unit_no_for_unit_consistency_project(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps({"project_no": "2026"}, ensure_ascii=False),
+            },
+            files=[("files[]", ("sample-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["detail"]["param_errors"]["unit_no"] == ["required_for_unit_consistency"]
+
+
+def test_create_audit_check_infers_unit_no_from_filename(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps({"project_no": "2026"}, ensure_ascii=False),
+            },
+            files=[("files[]", ("20261NS-JGS01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["project_no"] == "2026"
 
 
 def test_create_audit_check_processes_job_and_exposes_report_download(

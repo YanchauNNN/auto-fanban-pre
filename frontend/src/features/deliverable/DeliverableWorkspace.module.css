@@ -383,6 +383,14 @@
   gap: 0.7rem 0.85rem;
 }
 
+.projectUnitRow {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) minmax(108px, 0.34fr);
+  gap: 0.7rem 0.85rem;
+  align-items: start;
+}
+
 .upgradeRules {
   display: grid;
   gap: 0.75rem;
@@ -642,6 +650,10 @@
   }
 
   .fieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .projectUnitRow {
     grid-template-columns: 1fr;
   }
 

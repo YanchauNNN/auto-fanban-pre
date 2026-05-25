@@ -159,6 +159,47 @@ def test_write_runtime_script_uses_dotnet_bridge_when_enabled(tmp_path: Path):
     assert "(module5-finalize)" not in content
 
 
+def test_write_runtime_script_adds_cad_environment_probe(tmp_path: Path):
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    runtime_scr = tmp_path / "runtime.scr"
+    lsp_path = tmp_path / "module5_cad_executor.lsp"
+    lsp_path.write_text("(princ)\n", encoding="utf-8")
+    task_json = tmp_path / "task.json"
+    result_json = tmp_path / "result.json"
+    trace_log = tmp_path / "module5_trace.log"
+
+    runner._write_runtime_script(
+        runtime_scr=runtime_scr,
+        task_json=task_json,
+        lsp_path=lsp_path,
+        task_data={
+            "workflow_stage": "plot_from_split_dwg",
+            "engines": {
+                "selection_engine": "dotnet",
+                "plot_engine": "dotnet",
+                "dotnet_bridge": {
+                    "enabled": True,
+                    "dll_path": str(tmp_path / "Module5CadBridge.dll"),
+                    "command_name": "M5BRIDGE_RUN",
+                    "netload_each_run": True,
+                },
+            },
+        },
+        result_json=result_json,
+        module5_trace_log=trace_log,
+    )
+
+    content = runtime_scr.read_text(encoding="utf-8")
+    assert "fanban-cad-env-probe" in content
+    assert "FONTMAP" in content
+    assert "FONTALT" in content
+    assert "ACADPREFIX" in content
+    assert "tssdeng.shx" in content
+    assert "hztxt.shx" in content
+    assert "打印PDF2.pc3" in content
+    assert str(trace_log).replace("\\", "/") in content
+
+
 def test_write_runtime_script_uses_absolute_dotnet_dll_path(tmp_path: Path):
     runner = AcCoreConsoleRunner(config=RuntimeConfig())
     workspace = tmp_path / "workspace"

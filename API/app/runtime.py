@@ -32,7 +32,11 @@ from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, T
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
-from src.pipeline.project_no_inference import infer_project_no_from_path, resolve_project_no
+from src.pipeline.project_no_inference import (
+    infer_project_no_from_path,
+    infer_unit_no_from_path,
+    resolve_project_no,
+)
 from src.pipeline.shared_prep import SharedPrepService
 from src.result_views import normalize_user_flags
 
@@ -345,6 +349,14 @@ class DeliverableApiRuntime:
         param_errors = {} if split_only else self._collect_param_errors(resolved_submissions)
         if split_only and run_audit_check:
             param_errors.setdefault("split_only", []).append("cannot_combine_with_audit_check")
+        if run_audit_check:
+            for field_name, field_errors in self._collect_unit_consistency_param_errors(
+                resolved_submissions
+            ).items():
+                bucket = param_errors.setdefault(field_name, [])
+                for error in field_errors:
+                    if error not in bucket:
+                        bucket.append(error)
         font_param_errors = self._collect_font_param_errors(raw_params)
         for field_name, field_errors in font_param_errors.items():
             bucket = param_errors.setdefault(field_name, [])
@@ -411,6 +423,13 @@ class DeliverableApiRuntime:
                 for upload in files
             ]
             param_errors = self._collect_audit_param_errors(resolved_submissions)
+            for field_name, field_errors in self._collect_unit_consistency_param_errors(
+                resolved_submissions
+            ).items():
+                bucket = param_errors.setdefault(field_name, [])
+                for error in field_errors:
+                    if error not in bucket:
+                        bucket.append(error)
         else:
             resolved_submissions = [(upload, self._resolve_replace_params(raw_params)) for upload in files]
             param_errors = self._collect_replace_param_errors(raw_params)
@@ -473,6 +492,11 @@ class DeliverableApiRuntime:
     def _resolve_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
         resolved = dict(raw_params)
         resolved['project_no'] = resolve_project_no(raw_params.get('project_no'), filename)
+        resolved['unit_no'] = DeliverableApiRuntime._resolve_unit_no(
+            raw_params,
+            filename,
+            resolved['project_no'],
+        )
         return resolved
 
     @staticmethod
@@ -481,6 +505,11 @@ class DeliverableApiRuntime:
         explicit = str(raw_params.get('project_no') or '').strip()
         inferred = infer_project_no_from_path(filename)
         resolved['project_no'] = explicit or inferred or ''
+        resolved['unit_no'] = DeliverableApiRuntime._resolve_unit_no(
+            raw_params,
+            filename,
+            resolved['project_no'],
+        )
         return resolved
 
     @staticmethod
@@ -495,6 +524,13 @@ class DeliverableApiRuntime:
             normalized_deliverable['project_no'] = resolved['target_project_no']
             resolved['deliverable_params'] = normalized_deliverable
         return resolved
+
+    @staticmethod
+    def _resolve_unit_no(raw_params: dict[str, Any], filename: str, project_no: str | None) -> str:
+        explicit = str(raw_params.get("unit_no") or "").strip()
+        if explicit:
+            return explicit
+        return infer_unit_no_from_path(filename, project_no) or ""
 
     def _collect_param_errors(
         self,
@@ -517,6 +553,29 @@ class DeliverableApiRuntime:
         for _, params in resolved_submissions:
             if not str(params.get('project_no') or '').strip():
                 merged.setdefault('project_no', []).append('required_for_audit_check')
+        return merged
+
+    def _collect_unit_consistency_param_errors(
+        self,
+        resolved_submissions: list[tuple[UploadedFilePayload, dict[str, Any]]],
+    ) -> dict[str, list[str]]:
+        merged: dict[str, list[str]] = {}
+        unit_config = self.config.audit_check.unit_consistency
+        if not unit_config.enabled:
+            return merged
+        for _, params in resolved_submissions:
+            project_no = str(params.get("project_no") or "").strip()
+            allowed_units = [
+                str(value).strip()
+                for value in unit_config.project_units.get(project_no, [])
+            ]
+            if not allowed_units:
+                continue
+            unit_no = str(params.get("unit_no") or "").strip()
+            if not unit_no:
+                merged.setdefault("unit_no", []).append("required_for_unit_consistency")
+            elif unit_no not in allowed_units:
+                merged.setdefault("unit_no", []).append("unsupported_unit_no")
         return merged
 
     def _collect_replace_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:

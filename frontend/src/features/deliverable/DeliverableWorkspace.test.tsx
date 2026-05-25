@@ -28,6 +28,16 @@ const schema: FormSchema = {
           options: ["2016", "1818", "2020"],
         },
         {
+          key: "unit_no",
+          label: "机组号",
+          type: "select",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "",
+          description: "用于纠错机组一致性检查",
+          options: ["1", "2"],
+        },
+        {
           key: "cover_variant",
           label: "封面模板",
           type: "select",
@@ -421,6 +431,65 @@ describe("DeliverableWorkspace", () => {
     expect(await screen.findByRole("option", { name: "通用" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "压力容器" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "核安全设备" })).toBeInTheDocument();
+  });
+
+  it("shows unit number next to project number and submits it for audit runs", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "20261NS-JGS01.dwg",
+          status: "ok",
+          missingFonts: [],
+          missingStyleCount: 0,
+          detectedStyleCount: 1,
+          fontReplacementApplied: false,
+          replacedStyleCount: 0,
+          replacementFont: null,
+          replacementFonts: {},
+        },
+      ],
+      defaultReplacementFont: null,
+      defaultReplacementFonts: {},
+      availableReplacementFonts: [],
+      availableReplacementFontsByKind: {},
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-1",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "20261NS-JGS01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(await screen.findByRole("combobox", { name: "项目号" })).toHaveValue("2026");
+    expect(screen.getByLabelText("机组号")).toHaveValue("1");
+
+    await user.type(screen.getByLabelText(albumTitleLabel), "示例图册");
+    await user.type(screen.getByLabelText(subitemNameLabel), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "纠错" }));
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          project_no: "2026",
+          unit_no: "1",
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "20261NS-JGS01.dwg" })]),
+        true,
+      );
+    });
   });
 
   it("uses the replace target project number as the deliverable project number during handoff", async () => {

@@ -243,8 +243,11 @@ export type CreateBatchPayload = {
 
 export type UploadProjectInference = {
   inferredProjectNos: string[];
+  inferredUnitNos: string[];
   primaryProjectNo: string;
+  primaryUnitNo: string;
   hasConflict: boolean;
+  hasUnitConflict: boolean;
 };
 
 export type ReplaceTaskConfig = {
@@ -301,6 +304,7 @@ export type ApiAdapter = {
   ) => Promise<CreateBatchPayload>;
   createAuditCheck: (
     projectNo: string,
+    unitNo: string,
     files: File[],
     batchId?: string,
   ) => Promise<CreateBatchPayload>;

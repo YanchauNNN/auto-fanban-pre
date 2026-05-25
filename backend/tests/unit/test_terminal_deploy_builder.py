@@ -111,6 +111,8 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
+    _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
+    _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -217,6 +219,8 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "scripts" / "check_health.ps1").exists()
     assert (output_root / "scripts" / "deep_check_terminal.ps1").exists()
     assert (output_root / "scripts" / "probe_target_env.ps1").exists()
+    assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
+    assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
     assert (output_root / DEPLOY_README).exists()
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"

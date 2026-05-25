@@ -201,10 +201,10 @@ class AcCoreConsoleRunner:
 
         repo_root = Path(__file__).resolve().parents[3]
         candidates = [
-            (Path.cwd() / path).resolve(),
             (repo_root / "documents" / path).resolve(),
             (repo_root / path).resolve(),
             (repo_root / "backend" / path).resolve(),
+            (Path.cwd() / path).resolve(),
         ]
         for candidate in candidates:
             if candidate.exists():
@@ -308,11 +308,16 @@ class AcCoreConsoleRunner:
         ]
         if isinstance(runtime, dict):
             content.extend(self._build_runtime_preferences_content(runtime))
+        content.extend(
+            self._build_environment_probe_definitions(module5_trace_log=module5_trace_log),
+        )
+        content.append(self._build_environment_probe_call(stage="pre"))
         if netload_each_run:
             content.append(f'(command "_.NETLOAD" "{dll_path}")')
         content.append(
             f'(command "{command_name}" "{task_json_escaped}" "{result_escaped}" "{trace_escaped}")',
         )
+        content.append(self._build_environment_probe_call(stage="post"))
         return content
 
     def _build_lisp_runtime_content(
@@ -391,6 +396,17 @@ class AcCoreConsoleRunner:
         ]
         if isinstance(runtime, dict):
             content[3:3] = self._build_runtime_preferences_content(runtime)
+        probe_content = self._build_environment_probe_definitions(
+            module5_trace_log=module5_trace_log,
+        )
+        reset_index = next(
+            (idx for idx, line in enumerate(content) if line.startswith("(module5-reset ")),
+            len(content) - 1,
+        )
+        content[reset_index + 1 : reset_index + 1] = [
+            *probe_content,
+            self._build_environment_probe_call(stage="pre"),
+        ]
 
         for frame in task_data.get("frames", []):
             frame_id = self._escape_lisp_string(str(frame.get("frame_id", "")))
@@ -453,6 +469,7 @@ class AcCoreConsoleRunner:
                 ),
             )
 
+        content.append(self._build_environment_probe_call(stage="post"))
         content.append("(module5-finalize)")
         return content
 
@@ -471,6 +488,57 @@ class AcCoreConsoleRunner:
             env["TEMP"] = temp_dir
             env["TMP"] = temp_dir
         return env
+
+    def _build_environment_probe_definitions(self, *, module5_trace_log: Path) -> list[str]:
+        trace_escaped = self._quote_lisp_path(module5_trace_log)
+        return [
+            "; fanban-cad-env-probe definitions",
+            "(vl-load-com)",
+            f'(setq _fanban_cad_env_probe_log "{trace_escaped}")',
+            (
+                "(defun fanban-cad-env-probe-log (line / fh) "
+                "(setq fh (open _fanban_cad_env_probe_log \"a\")) "
+                "(if fh (progn (write-line line fh) (close fh))) "
+                "(princ))"
+            ),
+            (
+                "(defun fanban-cad-env-probe-safe-getvar (name / value) "
+                "(setq value (vl-catch-all-apply 'getvar (list name))) "
+                "(if (vl-catch-all-error-p value) "
+                "(strcat \"<error:\" (vl-catch-all-error-message value) \">\") "
+                "(vl-princ-to-string value)))"
+            ),
+            (
+                "(defun fanban-cad-env-probe-safe-findfile (name / value) "
+                "(setq value (vl-catch-all-apply 'findfile (list name))) "
+                "(if (vl-catch-all-error-p value) "
+                "(strcat \"<error:\" (vl-catch-all-error-message value) \">\") "
+                "(if value value \"\")))"
+            ),
+            (
+                "(defun fanban-cad-env-probe (stage / item) "
+                "(foreach item '(\"FONTMAP\" \"FONTALT\" \"ACADPREFIX\" "
+                "\"ROAMABLEROOTPREFIX\" \"LOCALROOTPREFIX\" "
+                "\"BACKGROUNDPLOT\" \"PDFSHX\" \"EPDFSHX\") "
+                "(fanban-cad-env-probe-log "
+                "(strcat \"[CAD_ENV_PROBE][\" stage \"] getvar \" item \"=\" "
+                "(fanban-cad-env-probe-safe-getvar item)))) "
+                "(foreach item '(\"tssdeng.shx\" \"hztxt.shx\" \"tssdchn.shx\" "
+                "\"simplex.shx\" \"gbcbig.shx\" \"simsun.ttc\" \"打印PDF2.pc3\") "
+                "(fanban-cad-env-probe-log "
+                "(strcat \"[CAD_ENV_PROBE][\" stage \"] findfile \" item \"=\" "
+                "(fanban-cad-env-probe-safe-findfile item)))) "
+                "(princ))"
+            ),
+        ]
+
+    @staticmethod
+    def _build_environment_probe_call(*, stage: str) -> str:
+        safe_stage = AcCoreConsoleRunner._escape_lisp_string(stage)
+        return (
+            f'(vl-catch-all-apply \'fanban-cad-env-probe (list "{safe_stage}")) '
+            "(princ)"
+        )
 
     def _build_runtime_preferences_content(self, runtime: dict[str, Any]) -> list[str]:
         plotters_dir = self._escape_lisp_string(str(runtime.get("plotters_dir", "")))

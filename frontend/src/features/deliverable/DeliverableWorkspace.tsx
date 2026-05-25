@@ -67,6 +67,7 @@ const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
 const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
 const SCROLLABLE_FULL_OPTION_FIELDS = new Set(["file_category"]);
+const UNIT_CONSISTENCY_PROJECTS = new Set(["1915", "2026"]);
 const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_start_seq",
   "upgrade_end_seq",
@@ -433,6 +434,14 @@ export function DeliverableWorkspace({
 
     if (draft.files.length === 0) {
       nextFormErrors.push("请至少上传一个 DWG 文件。");
+    }
+
+    if (
+      draft.runAuditCheck &&
+      UNIT_CONSISTENCY_PROJECTS.has(String(draft.values.project_no ?? "").trim()) &&
+      !String(draft.values.unit_no ?? "").trim()
+    ) {
+      nextFieldErrors.unit_no = ["required_for_unit_consistency"];
     }
 
     const invalidFiles = draft.files.filter(
@@ -1654,6 +1663,9 @@ function FragmentWithUpgradeSection({
   upgradeSheetCodesField: FormField | undefined;
 }) {
   const showIedPlanToggle = section.id === "ied" && iedPlanField;
+  const projectField = section.fields.find((field) => field.key === "project_no");
+  const unitField = section.fields.find((field) => field.key === "unit_no");
+  const projectUnitKeys = new Set(["project_no", "unit_no"]);
 
   return (
     <>
@@ -1686,11 +1698,36 @@ function FragmentWithUpgradeSection({
               {draft.inference.hasConflict ? (
                 <p>同一批文件识别到多个项目号，请以人工输入为准。</p>
               ) : null}
+              {draft.inference.primaryUnitNo ? (
+                <p>
+                  已从文件名识别机组号 <strong>{draft.inference.primaryUnitNo}</strong>
+                  ，用于纠错机组一致性检查。
+                </p>
+              ) : null}
+              {draft.inference.hasUnitConflict ? (
+                <p>同一批文件识别到多个机组号，请以人工输入为准。</p>
+              ) : null}
             </div>
           ) : null}
         </header>
         <div className={styles.fieldGrid}>
-          {section.fields.map((field) => (
+          {section.id === "project" && projectField && unitField ? (
+            <div className={styles.projectUnitRow}>
+              {[projectField, unitField].map((field) => (
+                <FieldControl
+                  key={field.key}
+                  error={fieldErrors[field.key]?.[0]}
+                  field={field}
+                  onChange={(value) => onFieldChange(field.key, value)}
+                  value={draft.values[field.key] ?? ""}
+                  values={draft.values}
+                />
+              ))}
+            </div>
+          ) : null}
+          {section.fields
+            .filter((field) => section.id !== "project" || !projectUnitKeys.has(field.key))
+            .map((field) => (
             <FieldControl
               key={field.key}
               error={fieldErrors[field.key]?.[0]}
@@ -2067,6 +2104,7 @@ function applyFilesToDraft(
 ) {
   const inference = inferProjectNumbers(files);
   const currentProjectNo = (draft.values.project_no ?? "").trim();
+  const currentUnitNo = (draft.values.unit_no ?? "").trim();
   const replaceTargetProjectNo = pendingReplaceConfig?.runDeliverable
     ? pendingReplaceConfig.targetProjectNo.trim()
     : "";
@@ -2079,6 +2117,10 @@ function applyFilesToDraft(
     : inference.primaryProjectNo && shouldAutofillProjectNo
       ? inference.primaryProjectNo
       : currentProjectNo;
+  const shouldAutofillUnitNo =
+    !currentUnitNo || currentUnitNo === draft.inference.primaryUnitNo;
+  const nextUnitNo =
+    inference.primaryUnitNo && shouldAutofillUnitNo ? inference.primaryUnitNo : currentUnitNo;
 
   return {
     ...draft,
@@ -2088,6 +2130,7 @@ function applyFilesToDraft(
     values: {
       ...draft.values,
       project_no: nextProjectNo,
+      unit_no: nextUnitNo,
       is_upgrade: draft.values.is_upgrade ?? "false",
       upgrade_sheet_codes: draft.values.upgrade_sheet_codes ?? "",
       [UPGRADE_ENTRIES_KEY]: draft.values[UPGRADE_ENTRIES_KEY] ?? "[]",

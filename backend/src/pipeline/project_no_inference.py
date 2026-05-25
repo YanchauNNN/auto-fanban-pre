@@ -4,6 +4,9 @@ import re
 from pathlib import Path
 
 _PROJECT_NO_PREFIX_RE = re.compile(r"^(\d{4})")
+_UNIT_NO_BY_PROJECT_PREFIX_RE = re.compile(
+    r"^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-JGS\d{2})",
+)
 
 
 def infer_project_no_from_path(path_or_name: str | Path | None) -> str | None:
@@ -31,3 +34,21 @@ def resolve_project_no(
     if inferred:
         return inferred
     return default
+
+
+def infer_unit_no_from_path(
+    path_or_name: str | Path | None,
+    project_no: str | None = None,
+) -> str | None:
+    if path_or_name is None:
+        return None
+    stem = Path(str(path_or_name)).stem.strip()
+    if not stem:
+        return None
+    match = _UNIT_NO_BY_PROJECT_PREFIX_RE.match(stem)
+    if match is None:
+        return None
+    expected_project_no = str(project_no or "").strip()
+    if expected_project_no and match.group("project_no") != expected_project_no:
+        return None
+    return match.group("unit_no")

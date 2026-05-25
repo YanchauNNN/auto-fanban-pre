@@ -11,7 +11,7 @@
 from .executor import PipelineExecutor
 from .job_manager import JobManager
 from .packager import Packager
-from .project_no_inference import infer_project_no_from_path, resolve_project_no
+from .project_no_inference import infer_project_no_from_path, infer_unit_no_from_path, resolve_project_no
 from .stages import DELIVERABLE_STAGES, PipelineStage
 
 __all__ = [
@@ -21,5 +21,6 @@ __all__ = [
     "JobManager",
     "Packager",
     "infer_project_no_from_path",
+    "infer_unit_no_from_path",
     "resolve_project_no",
 ]

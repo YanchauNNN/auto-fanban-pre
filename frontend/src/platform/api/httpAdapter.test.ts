@@ -163,7 +163,7 @@ describe("HttpAdapter", () => {
       type: "application/acad",
     });
 
-    const created = await adapter.createAuditCheck("2026", [file], "batch-shared-1");
+    const created = await adapter.createAuditCheck("2026", "1", [file], "batch-shared-1");
     const jobs = await adapter.listJobs();
 
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -178,7 +178,7 @@ describe("HttpAdapter", () => {
     const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
     expect(formData.get("mode")).toBe("check");
     expect(formData.get("params_json")).toBe(
-      JSON.stringify({ project_no: "2026", batch_id: "batch-shared-1" }),
+      JSON.stringify({ project_no: "2026", unit_no: "1", batch_id: "batch-shared-1" }),
     );
     expect(formData.getAll("files[]")).toHaveLength(1);
 

@@ -83,6 +83,8 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(repo_root / "documents" / RUNTIME_SPEC_NAME, Path("documents") / RUNTIME_SPEC_NAME),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
+        CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
+        CopyPlanEntry(repo_root / "tools" / "cad_env_sync.ps1", Path("scripts") / "cad_env_sync.ps1"),
     ]
 
 

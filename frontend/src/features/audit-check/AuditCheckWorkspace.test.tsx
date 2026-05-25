@@ -86,6 +86,45 @@ describe("AuditCheckWorkspace", () => {
     expect(await screen.findByText("required_for_audit_check")).toBeInTheDocument();
   });
 
+  it("infers and submits unit number for audit checks", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditCheck = vi.fn().mockResolvedValue({
+      batchId: "batch-audit-1",
+      jobs: [],
+    });
+
+    render(
+      <AuditCheckWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("选择纠错 DWG 文件"),
+      new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
+    );
+    await user.click(screen.getByRole("button", { name: "2026" }));
+    expect(await screen.findByLabelText("机组号")).toHaveValue("1");
+
+    await user.click(screen.getByRole("button", { name: "创建纠错任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createAuditCheck).toHaveBeenCalledWith(
+        "2026",
+        "1",
+        expect.arrayContaining([
+          expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
+        ]),
+      );
+    });
+  });
+
   it("preserves the audit draft after closing and reopening", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
@@ -167,6 +206,7 @@ describe("AuditCheckWorkspace", () => {
     await waitFor(() => {
       expect(adapter.createAuditCheck).toHaveBeenCalledWith(
         "2026",
+        "1",
         expect.arrayContaining([
           expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
         ]),
