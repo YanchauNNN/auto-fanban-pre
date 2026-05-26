@@ -562,6 +562,12 @@ class CatalogGenerator(ICatalogGenerator):
                     continue
                 if self._border_signature(prev_cell.border) != self._border_signature(next_cell.border):
                     continue
+                if self._style_signature(prev_cell) == self._style_signature(next_cell):
+                    cell.font = copy(prev_cell.font)
+                    cell.fill = copy(prev_cell.fill)
+                    cell.alignment = copy(prev_cell.alignment)
+                    cell.number_format = prev_cell.number_format
+                    cell.protection = copy(prev_cell.protection)
                 cell.border = copy(prev_cell.border)
 
     @staticmethod
@@ -578,6 +584,22 @@ class CatalogGenerator(ICatalogGenerator):
             border.right.style,
             border.top.style,
             border.bottom.style,
+        )
+
+    @staticmethod
+    def _style_signature(cell) -> tuple[object, ...]:
+        return (
+            cell.font.name,
+            cell.font.sz,
+            cell.font.bold,
+            cell.font.italic,
+            cell.fill.fill_type,
+            cell.fill.fgColor.type,
+            cell.fill.fgColor.rgb,
+            cell.alignment.horizontal,
+            cell.alignment.vertical,
+            cell.alignment.wrapText,
+            cell.number_format,
         )
 
     def _refine_detail_layout_via_com(

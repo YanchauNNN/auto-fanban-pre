@@ -485,6 +485,15 @@
   (setvar "TILEMODE" 1)
 )
 
+(defun m5-regen-before-plot (/ regen-ret)
+  (setq regen-ret (vl-catch-all-apply 'command-s (list "_.REGENALL")))
+  (if (vl-catch-all-error-p regen-ret)
+    (m5-log (strcat "[PLOT][REGEN][WARN] " (vl-catch-all-error-message regen-ret)))
+    (m5-log "[PLOT][REGEN] drawing regenerated before PDF plotting")
+  )
+  (princ)
+)
+
 (defun m5-media-name (paper-w paper-h / w h)
   (setq w (abs paper-w))
   (setq h (abs paper-h))
@@ -613,6 +622,7 @@
 
 (defun m5-do-plot-with-area (pdf-path bbox paper-w paper-h area-mode / media1 media2 orient1 orient2 ok)
   (setq *m5-last-plot-error* "")
+  (m5-regen-before-plot)
   (setq media1 (m5-media-name paper-w paper-h))
   (setq media2 (m5-media-name paper-h paper-w))
   (setq orient1 (m5-orientation-name paper-w paper-h))

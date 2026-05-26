@@ -141,7 +141,7 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.output.plot_preferred_area == "window"
         assert runtime_config.module5_export.output.plot_fallback_area == "none"
         assert runtime_config.module5_export.output.plot_session_mode == "per_source_batch"
-        assert runtime_config.module5_export.output.plot_from_source_window_enabled is False
+        assert runtime_config.module5_export.output.plot_from_source_window_enabled is True
         assert runtime_config.module5_export.output.plot_fallback_to_split_on_failure is True
         assert runtime_config.module5_export.output.pdf_validation_min_size_bytes == 1024
         assert runtime_config.module5_export.output.pdf_validation_min_stream_bytes == 64
@@ -335,4 +335,28 @@ runtime_options:
             (tmp_path / "documents_bin" / "font-library" / "ttf").resolve(),
             (tmp_path / "documents_bin" / "font-library" / "shx").resolve(),
         ]
+
+    def test_runtime_config_reads_font_compatibility_replacements(
+        self,
+        tmp_path: Path,
+    ):
+        """字体兼容替代表应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    font_compatibility_replacements:
+      type: object
+      default: { "hztxt.shx": "tssdchn.shx" }
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.font_compatibility_replacements == {
+            "hztxt.shx": "tssdchn.shx",
+        }
 

@@ -66,7 +66,9 @@ internal sealed class FontPreflightProcessor
 
                 var styleName = styleRecord.Name ?? string.Empty;
                 var hasExplicitTarget = targetByStyleName.TryGetValue(styleName, out var explicitTarget);
-                if (!hasExplicitTarget && !IsStyleMissing(styleRecord, db))
+                var compatibilityMatch = ResolveCompatibilityMatch(styleRecord);
+                var hasCompatibilityTarget = compatibilityMatch != null;
+                if (!hasExplicitTarget && !hasCompatibilityTarget && !IsStyleMissing(styleRecord, db))
                 {
                     continue;
                 }
@@ -83,10 +85,14 @@ internal sealed class FontPreflightProcessor
                 }
 
                 EnsureWriteEnabled(styleRecord);
-                var replacementKind = hasExplicitTarget
-                    ? explicitTarget.Kind
-                    : DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
-                var replacementFont = ResolveReplacementFont(replacementKind);
+                var replacementKind = hasCompatibilityTarget
+                    ? compatibilityMatch!.Kind
+                    : hasExplicitTarget
+                        ? explicitTarget.Kind
+                        : DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
+                var replacementFont = hasCompatibilityTarget
+                    ? compatibilityMatch!.ReplacementFont
+                    : ResolveReplacementFont(replacementKind);
                 if (string.IsNullOrWhiteSpace(replacementFont))
                 {
                     result.Errors.Add($"FONT_REPLACEMENT_FONT_MISSING:{replacementKind}");
@@ -107,7 +113,7 @@ internal sealed class FontPreflightProcessor
                 }
                 replacedStyleCount += 1;
                 _trace.Log(
-                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} kind={replacementKind} replacement={replacementFont} explicitTarget={hasExplicitTarget}"
+                    $"[DOTNET][FONT][REPLACE] style={styleRecord.Name} kind={replacementKind} replacement={replacementFont} explicitTarget={hasExplicitTarget} compatibilityTarget={hasCompatibilityTarget} compatibilitySource={compatibilityMatch?.SourceFont ?? string.Empty}"
                 );
             }
 
@@ -147,6 +153,8 @@ internal sealed class FontPreflightProcessor
             ? string.Empty
             : _task.ReplacementFont;
         result.AdditionalData["replacement_fonts"] = new Dictionary<string, string>(_task.ReplacementFonts);
+        result.AdditionalData["font_compatibility_replacements"] =
+            new Dictionary<string, string>(_task.FontCompatibilityReplacements);
         result.AdditionalData["replaced_style_count"] = replacedStyleCount;
         result.AdditionalData["skipped_invalid_object_count"] = _skippedInvalidObjectCount;
         _trace.Log(
@@ -304,6 +312,46 @@ internal sealed class FontPreflightProcessor
         }
 
         MarkUsage(usageByStyle, styleId, usedInBlock, usedInAttribute);
+    }
+
+    private FontCompatibilityMatch? ResolveCompatibilityMatch(TextStyleTableRecord styleRecord)
+    {
+        var bigfontName = NormalizeFontFileName(styleRecord.BigFontFileName ?? string.Empty);
+        if (TryGetCompatibilityReplacement(bigfontName, out var bigfontReplacement))
+        {
+            return new FontCompatibilityMatch("bigfont", bigfontName, bigfontReplacement.Trim());
+        }
+
+        var fontName = NormalizeFontFileName(styleRecord.FileName ?? string.Empty);
+        if (TryGetCompatibilityReplacement(fontName, out var replacement))
+        {
+            var kind = DetectKind(styleRecord.FileName ?? string.Empty, string.Empty);
+            return new FontCompatibilityMatch(kind, fontName, replacement.Trim());
+        }
+
+        return null;
+    }
+
+    private bool TryGetCompatibilityReplacement(string fontName, out string replacement)
+    {
+        replacement = string.Empty;
+        var normalized = NormalizeFontFileName(fontName);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        foreach (var candidateName in BuildShxCandidateNames(normalized.ToLowerInvariant()))
+        {
+            if (_task.FontCompatibilityReplacements.TryGetValue(candidateName, out var mapped)
+                && !string.IsNullOrWhiteSpace(mapped))
+            {
+                replacement = mapped;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsStyleMissing(TextStyleTableRecord styleRecord, Database db)
@@ -487,6 +535,17 @@ internal sealed class FontPreflightProcessor
         }
     }
 
+    private static string NormalizeFontFileName(string fontName)
+    {
+        var normalized = (fontName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        return Path.GetFileName(normalized).Trim();
+    }
+
     private string ResolveReplacementFont(string kind)
     {
         var normalized = (kind ?? string.Empty).Trim().ToLowerInvariant();
@@ -617,6 +676,20 @@ internal sealed class FontPreflightProcessor
         public bool IsUsed { get; set; }
         public bool UsedInBlock { get; set; }
         public bool UsedInAttribute { get; set; }
+    }
+
+    private sealed class FontCompatibilityMatch
+    {
+        public FontCompatibilityMatch(string kind, string sourceFont, string replacementFont)
+        {
+            Kind = kind;
+            SourceFont = sourceFont;
+            ReplacementFont = replacementFont;
+        }
+
+        public string Kind { get; }
+        public string SourceFont { get; }
+        public string ReplacementFont { get; }
     }
 
     private bool TryGetObject<T>(

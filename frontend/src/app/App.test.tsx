@@ -994,6 +994,9 @@ describe("job detail pages", () => {
     await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
 
     expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
+    const downloadLink = screen.getByRole("link", { name: "下载预览 PDF" });
+    expect(downloadLink).toHaveAttribute("href", "/api/jobs/audit-preview/download/preview");
+    expect(downloadLink).toHaveAttribute("download");
     expect(mockFetch).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview", expect.any(Object));
     expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
     expect(mockPdfDocument).toHaveBeenCalledWith(

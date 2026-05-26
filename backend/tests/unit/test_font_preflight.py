@@ -90,6 +90,35 @@ class _FakeBridge:
         }
 
 
+class _OkBridge:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def preflight(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append({"method": "preflight", **kwargs})
+        return {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 4,
+            "missing_style_count": 0,
+            "font_replacement_applied": False,
+            "replaced_style_count": 0,
+        }
+
+    def replace_missing(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append({"method": "replace_missing", **kwargs})
+        return {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 4,
+            "missing_style_count": 0,
+            "font_replacement_applied": True,
+            "replacement_fonts": kwargs.get("replacement_fonts") or {},
+            "font_compatibility_replacements": kwargs.get("font_compatibility_replacements") or {},
+            "replaced_style_count": 1,
+        }
+
+
 def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) -> None:
     service = FontPreflightService(
         inventory=cast(
@@ -204,6 +233,52 @@ def test_font_preflight_service_passes_missing_targets_into_replace_pass(tmp_pat
             "used_in_block": True,
         }
     ]
+
+
+def test_font_preflight_service_runs_compatibility_replacement_without_missing_fonts(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {
+        "hztxt.shx": "tssdchn.shx",
+    }
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert [call["method"] for call in bridge.calls] == ["preflight", "replace_missing"]
+    replace_call = bridge.calls[1]
+    assert replace_call["font_compatibility_replacements"] == {
+        "hztxt.shx": "tssdchn.shx",
+    }
+    assert result["font_compatibility_mode"] is True
+    assert result["font_compatibility_replacements"] == {
+        "hztxt.shx": "tssdchn.shx",
+    }
 
 
 def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -> None:

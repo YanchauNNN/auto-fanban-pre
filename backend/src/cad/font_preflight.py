@@ -131,6 +131,7 @@ class FontPreflightService:
         replacement_policy: str = "none",
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
+        font_compatibility_mode: bool = False,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -139,6 +140,11 @@ class FontPreflightService:
             raise ValueError(f"unsupported font_replace_policy: {replacement_policy}")
         normalized_font = str(replacement_font or "").strip() or None
         normalized_font_map = normalize_replacement_map(replacement_fonts)
+        font_compatibility_replacements = (
+            self._resolve_font_compatibility_replacements()
+            if font_compatibility_mode
+            else {}
+        )
         base_runtime = dict(slot_runtime or {})
         base_runtime.update(
             build_font_search_runtime_overrides(
@@ -171,7 +177,12 @@ class FontPreflightService:
             replacement_font=None,
             replacement_fonts=None,
         )
-        if policy == "replace_missing" and list(preflight_result.get("missing_fonts") or []):
+        should_replace_missing = (
+            policy == "replace_missing"
+            and bool(list(preflight_result.get("missing_fonts") or []))
+        )
+        should_run_replace_pass = should_replace_missing or bool(font_compatibility_replacements)
+        if should_replace_missing:
             effective_replacements = self.resolve_replacement_fonts(
                 missing_kinds=self._collect_missing_kinds(preflight_result.get("missing_fonts")),
                 missing_fonts=list(preflight_result.get("missing_fonts") or []),
@@ -197,21 +208,39 @@ class FontPreflightService:
                 replacement_font=self._legacy_replacement_font(effective_replacements),
                 replacement_fonts=effective_replacements,
                 replacement_targets=replacement_targets,
+                font_compatibility_replacements=font_compatibility_replacements,
                 workspace_dir=workspace,
                 slot_runtime=replace_runtime or None,
+            )
+        elif should_run_replace_pass:
+            effective_replacements = {}
+            font_runtime_plan = None
+            raw = self.bridge.replace_missing(
+                job_id=f"font-{source_dwg.stem}",
+                source_dwg=staged_source,
+                replacement_font=None,
+                replacement_fonts={},
+                replacement_targets=[],
+                font_compatibility_replacements=font_compatibility_replacements,
+                workspace_dir=workspace,
+                slot_runtime=base_runtime or None,
             )
         else:
             raw = preflight_raw
             effective_replacements = {}
             font_runtime_plan = None
 
-        if policy == "replace_missing" and staged_source.resolve() != source_dwg.resolve() and list(preflight_result.get("missing_fonts") or []):
+        if should_run_replace_pass and staged_source.resolve() != source_dwg.resolve():
             shutil.copy2(staged_source, source_dwg)
         normalized_result = self._normalize_result(
             source_dwg=source_dwg,
             payload=raw,
             replacement_font=normalized_font,
             replacement_fonts=effective_replacements if policy == "replace_missing" else normalized_font_map,
+        )
+        normalized_result["font_compatibility_mode"] = bool(font_compatibility_mode)
+        normalized_result["font_compatibility_replacements"] = dict(
+            raw.get("font_compatibility_replacements") or font_compatibility_replacements
         )
         if font_runtime_plan is not None:
             if font_runtime_plan.font_map_path is not None:
@@ -250,6 +279,55 @@ class FontPreflightService:
                 if isinstance(flags, list) and "FONT_REPLACEMENT_INCOMPLETE" not in flags:
                     flags.append("FONT_REPLACEMENT_INCOMPLETE")
         return normalized_result
+
+    def _resolve_font_compatibility_replacements(self) -> dict[str, str]:
+        replacements: dict[str, str] = {}
+        configured = getattr(
+            self.config.font_preflight,
+            "font_compatibility_replacements",
+            {},
+        )
+        if not isinstance(configured, dict):
+            return replacements
+        for raw_source, raw_target in configured.items():
+            source_name = Path(str(raw_source or "").strip()).name
+            target_name = Path(str(raw_target or "").strip()).name
+            if not source_name or not target_name:
+                continue
+            if not self._is_runtime_font_available(target_name):
+                raise ValueError(
+                    f"font_compatibility_replacements target is unavailable: {target_name}"
+                )
+            replacements[source_name] = target_name
+        return replacements
+
+    def _is_runtime_font_available(self, font_name: str) -> bool:
+        normalized = str(font_name or "").strip()
+        if not normalized:
+            return False
+        for kind in ("bigfont", "shx", "ttf"):
+            try:
+                if self.inventory.is_valid_font(normalized, kind=kind):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        for fonts_dir in self.config.font_preflight.font_library_dirs:
+            for candidate_name in self._font_file_candidates(normalized):
+                try:
+                    if (Path(fonts_dir) / candidate_name).exists():
+                        return True
+                except OSError:
+                    continue
+        return False
+
+    @staticmethod
+    def _font_file_candidates(font_name: str) -> list[str]:
+        normalized = Path(str(font_name or "").strip()).name
+        if not normalized:
+            return []
+        if Path(normalized).suffix:
+            return [normalized]
+        return [normalized, f"{normalized}.shx"]
 
     @staticmethod
     def _normalize_result(

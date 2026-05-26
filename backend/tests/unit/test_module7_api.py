@@ -103,6 +103,7 @@ class FakeFontPreflightService:
         replacement_policy: str = "none",
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
+        font_compatibility_mode: bool = False,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -112,6 +113,7 @@ class FakeFontPreflightService:
                 "replacement_policy": replacement_policy,
                 "replacement_font": replacement_font,
                 "replacement_fonts": replacement_fonts,
+                "font_compatibility_mode": font_compatibility_mode,
                 "workspace_dir": workspace_dir,
                 "slot_runtime": slot_runtime,
             }
@@ -1579,6 +1581,7 @@ class FakeSharedPrepService(SharedPrepService):
         font_replace_policy: str = "none",
         font_replacement_font: str | None = None,
         font_replacement_fonts: dict[str, str] | None = None,
+        font_compatibility_mode: bool = False,
         slot_runtime: dict[str, str] | None = None,
     ) -> SharedPrepArtifacts:
         shared_dir.mkdir(parents=True, exist_ok=True)
@@ -1615,6 +1618,7 @@ class FakeSharedPrepService(SharedPrepService):
                 "font_replacement_applied": font_replace_policy == "replace_missing",
                 "replacement_font": font_replacement_font,
                 "replacement_fonts": font_replacement_fonts or {},
+                "font_compatibility_mode": font_compatibility_mode,
                 "replaced_style_count": 0,
             },
             frames=[],

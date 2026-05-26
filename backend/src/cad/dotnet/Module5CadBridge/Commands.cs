@@ -173,6 +173,8 @@ internal sealed class BridgeTask
     public string ReplacementFont { get; private set; } = string.Empty;
     public Dictionary<string, string> ReplacementFonts { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> FontCompatibilityReplacements { get; private set; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     public static BridgeTask Load(string taskPath)
     {
@@ -195,6 +197,9 @@ internal sealed class BridgeTask
             ReplacementFont = BridgeValue.GetString(root, "replacement_font", string.Empty),
             ReplacementFonts = BridgeValue.GetStringMap(
                 root.TryGetValue("replacement_fonts", out var replacementFontsObj) ? replacementFontsObj : null
+            ),
+            FontCompatibilityReplacements = BridgeValue.GetStringMap(
+                root.TryGetValue("font_compatibility_replacements", out var compatibilityObj) ? compatibilityObj : null
             ),
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),

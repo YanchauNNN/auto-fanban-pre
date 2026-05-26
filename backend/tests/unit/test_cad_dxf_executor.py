@@ -785,6 +785,12 @@ def _config_with_source_window_plot() -> RuntimeConfig:
     return cfg
 
 
+def _config_with_split_dwg_plot() -> RuntimeConfig:
+    cfg = RuntimeConfig()
+    cfg.module5_export.output.plot_from_source_window_enabled = False
+    return cfg
+
+
 def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     source = tmp_path / "src.dwg"
     source.write_bytes(b"AC1027rest-of-file")
@@ -1203,14 +1209,14 @@ def test_safe_task_dir_name_strips_non_ascii():
     assert all(ch.isascii() for ch in name)
 
 
-def test_execute_source_dxf_runs_split_then_split_dwg_plot_without_python_fallback(tmp_path: Path):
+def test_execute_source_dxf_can_run_split_dwg_plot_when_source_window_disabled(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
     frame = _make_frame(
         frame_id="f-1", source_file=source, internal_code="I-001", external_code="E001"
     )
     runner = _RunnerSuccessStub()
-    executor = _make_executor(runner=runner)
+    executor = _make_executor(config=_config_with_split_dwg_plot(), runner=runner)
     output_dir = tmp_path / "drawings"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1337,7 +1343,7 @@ def test_window_batch_failure_falls_back_to_split_for_single_frame(tmp_path: Pat
     assert "PLOT_FROM_SPLIT_FALLBACK" in result["frames"][0]["flags"]
 
 
-def test_default_plot_path_uses_split_dwg_not_source_window(tmp_path: Path):
+def test_default_plot_path_uses_source_window_not_split_dwg(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
     frame = _make_frame(
@@ -1362,10 +1368,10 @@ def test_default_plot_path_uses_split_dwg_not_source_window(tmp_path: Path):
         json.loads(call["task_json"].read_text(encoding="utf-8"))["workflow_stage"]
         for call in runner.calls
     ]
-    assert stages == ["split_only", "plot_from_split_dwg"]
+    assert stages == ["split_only", "plot_window_only"]
     assert result["frames"][0]["status"] == "ok"
-    assert "PLOT_FROM_SPLIT_DWG" in result["frames"][0]["flags"]
-    assert "PLOT_FROM_SOURCE_WINDOW" not in result["frames"][0]["flags"]
+    assert "PLOT_FROM_SOURCE_WINDOW" in result["frames"][0]["flags"]
+    assert "PLOT_FROM_SPLIT_DWG" not in result["frames"][0]["flags"]
 
 
 def test_dotnet_engine_error_auto_falls_back_to_lisp(tmp_path: Path):

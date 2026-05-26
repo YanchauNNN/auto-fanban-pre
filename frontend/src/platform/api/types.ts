@@ -138,6 +138,8 @@ export type FontPreflightFileResult = {
   fontReplacementApplied: boolean;
   replacementFont: string | null;
   replacementFonts: FontReplacementMap;
+  fontCompatibilityMode?: boolean;
+  fontCompatibilityReplacements?: FontReplacementMap;
   replacedStyleCount: number;
   verifyAfterReplace: FontVerifyAfterReplaceResult | null;
   fontReplacementIncomplete: boolean;
@@ -156,6 +158,7 @@ export type FontPreflightResult = {
 export type FontPreflightSummary = {
   files: FontPreflightFileResult[];
   policy: string;
+  fontCompatibilityMode?: boolean;
   replacementFonts: FontReplacementMap;
   fontMapPath: string | null;
   fontAlt: string | null;

@@ -518,6 +518,8 @@ describe("HttpAdapter", () => {
       fontReplacementApplied: false,
       replacementFont: null,
       replacementFonts: {},
+      fontCompatibilityMode: false,
+      fontCompatibilityReplacements: {},
       replacedStyleCount: 0,
       verifyAfterReplace: null,
       fontReplacementIncomplete: false,

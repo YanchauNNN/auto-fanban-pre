@@ -359,6 +359,7 @@ class PipelineExecutor:
         input_dir = self._require_work_dir(job) / "input"
         dwg_files = sorted(input_dir.glob("*.dwg"))
         policy = str(job.params.get("font_replace_policy") or "none").strip().lower() or "none"
+        font_compatibility_mode = self._coerce_bool(job.params.get("font_compatibility_mode"))
         replacement_font = str(job.params.get("font_replacement_font") or "").strip() or None
         replacement_fonts_raw = job.params.get("font_replacement_fonts")
         replacement_fonts = (
@@ -386,6 +387,7 @@ class PipelineExecutor:
                 replacement_policy=policy,
                 replacement_font=replacement_font,
                 replacement_fonts=replacement_fonts,
+                font_compatibility_mode=font_compatibility_mode,
                 workspace_dir=input_dir / ".font-preflight",
                 slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
             )
@@ -403,6 +405,7 @@ class PipelineExecutor:
         summary = {
             "files": results,
             "policy": policy,
+            "font_compatibility_mode": font_compatibility_mode,
         }
         job.font_preflight_summary = summary
         job.missing_fonts_detected = missing_detected
@@ -1139,3 +1142,13 @@ class PipelineExecutor:
                 indent=2,
                 default=str,
             )
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)

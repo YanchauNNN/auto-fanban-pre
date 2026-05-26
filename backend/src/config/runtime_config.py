@@ -131,7 +131,7 @@ class Module5OutputConfig(BaseModel):
     plot_preferred_area: str = "window"
     plot_fallback_area: str = "none"
     plot_session_mode: str = "per_source_batch"
-    plot_from_source_window_enabled: bool = False
+    plot_from_source_window_enabled: bool = True
     plot_fallback_to_split_on_failure: bool = True
     pdf_validation_min_size_bytes: int = 1024
     pdf_validation_min_stream_bytes: int = 64
@@ -395,6 +395,11 @@ class FontPreflightRuntimeConfig(BaseModel):
     )
     default_bigfont_fonts: list[str] = Field(
         default_factory=lambda: ["gbcbig.shx", "hztxt.shx", "txt.shx"],
+    )
+    font_compatibility_replacements: dict[str, str] = Field(
+        default_factory=lambda: {
+            "hztxt.shx": "tssdchn.shx",
+        },
     )
     enable_fontmap: bool = True
     verify_after_replace: bool = True

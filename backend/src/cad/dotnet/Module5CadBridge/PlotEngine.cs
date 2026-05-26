@@ -30,6 +30,7 @@ internal sealed class PlotEngine
     public void Execute(Database db, BridgeResultEnvelope result)
     {
         LogPlotContext();
+        RunRegenBeforePlot();
         RunMediaPrecheck(db, result);
 
         foreach (var frame in _task.Frames)
@@ -53,6 +54,26 @@ internal sealed class PlotEngine
         _trace.Log(
             $"[DOTNET][PLOT][CFG] pc3_name={pc3Name} pc3_resolved_path={pc3Path} pc3_search_dirs={searchDirs} center={_task.Plot.CenterPlot} offset={_task.Plot.PlotOffsetXmm:F3},{_task.Plot.PlotOffsetYmm:F3} window_expand_tr_ratio={_task.Plot.PlotWindowTopRightExpandRatio:F6} scale_mode={_task.Plot.ScaleMode} scale_rounding={_task.Plot.ScaleIntegerRounding}"
         );
+    }
+
+    private void RunRegenBeforePlot()
+    {
+        try
+        {
+            var doc = Application.DocumentManager.MdiActiveDocument;
+            if (doc == null)
+            {
+                _trace.Log("[DOTNET][PLOT][REGEN][WARN] active document unavailable");
+                return;
+            }
+
+            doc.Editor.Regen();
+            _trace.Log("[DOTNET][PLOT][REGEN] active document regenerated before PDF plotting");
+        }
+        catch (System.Exception ex)
+        {
+            _trace.Log($"[DOTNET][PLOT][REGEN][WARN] regen failed: {ex.Message}");
+        }
     }
 
     private Dictionary<string, object> PlotFrame(Database db, BridgeFrameTask frame)

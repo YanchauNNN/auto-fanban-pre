@@ -91,6 +91,7 @@ type FontSubmitConfig = {
   fontReplacePolicy: "none" | "replace_missing";
   fontReplacementFont?: string;
   fontReplacementFonts?: FontReplacementMap;
+  fontCompatibilityMode?: boolean;
 };
 
 type FontReplacementDialogMode = "submit" | "review";
@@ -126,6 +127,7 @@ export function DeliverableWorkspace({
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
   const [fontReplacementDialogMode, setFontReplacementDialogMode] =
     useState<FontReplacementDialogMode | null>(null);
+  const [fontCompatibilityMode, setFontCompatibilityMode] = useState(false);
   const [pendingSubmitMode, setPendingSubmitMode] = useState<SubmitMode>("deliverable");
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
@@ -375,6 +377,7 @@ export function DeliverableWorkspace({
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
+      setFontCompatibilityMode(false);
       resetFontPreflightState();
       onClearPendingReplaceFlow?.();
       startTransition(() => onBatchCreated(payload));
@@ -495,7 +498,10 @@ export function DeliverableWorkspace({
         return;
       }
 
-      await submitDeliverable({ fontReplacePolicy: "none" }, submitMode);
+      await submitDeliverable(
+        { fontReplacePolicy: "none", fontCompatibilityMode },
+        submitMode,
+      );
     } finally {
       setIsAwaitingSubmitPreflight(false);
     }
@@ -527,6 +533,7 @@ export function DeliverableWorkspace({
     await submitDeliverable({
       fontReplacePolicy: "replace_missing",
       fontReplacementFonts: selectedFonts,
+      fontCompatibilityMode,
     }, pendingSubmitMode);
   }
 
@@ -1198,6 +1205,17 @@ export function DeliverableWorkspace({
             </section>
 
             <footer className={styles.actions}>
+              <label className={styles.compatibilityToggle}>
+                <input
+                  checked={fontCompatibilityMode}
+                  disabled={
+                    isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview
+                  }
+                  onChange={(event) => setFontCompatibilityMode(event.currentTarget.checked)}
+                  type="checkbox"
+                />
+                <span>以字体兼容模式打印</span>
+              </label>
               <button
                 className={styles.ghostButton}
                 disabled={
@@ -2708,6 +2726,7 @@ function buildSubmissionValues(
     ? stringifyUpgradeEntries(upgradeEntriesForSubmit)
     : "[]";
   sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
+  sanitized.font_compatibility_mode = Boolean(fontConfig.fontCompatibilityMode);
   if (fontConfig.fontReplacePolicy === "replace_missing") {
     const replacementFonts = normalizeReplacementSelectionMap(
       fontConfig.fontReplacementFonts ?? {},
@@ -2749,6 +2768,7 @@ function buildSplitOnlySubmissionValues(
   }
 
   sanitized.font_replace_policy = fontConfig.fontReplacePolicy;
+  sanitized.font_compatibility_mode = Boolean(fontConfig.fontCompatibilityMode);
   if (fontConfig.fontReplacePolicy === "replace_missing") {
     const replacementFonts = normalizeReplacementSelectionMap(
       fontConfig.fontReplacementFonts ?? {},

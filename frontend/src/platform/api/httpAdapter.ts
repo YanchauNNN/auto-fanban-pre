@@ -68,6 +68,7 @@ type RawJobSummary = {
   font_preflight_summary?: {
     files?: RawFontPreflightResult["files"];
     policy?: string | null;
+    font_compatibility_mode?: boolean | null;
     replacement_fonts?: Record<string, string | null> | null;
     font_map_path?: string | null;
     font_alt?: string | null;
@@ -145,6 +146,8 @@ type RawFontPreflightResult = {
     font_replacement_applied?: boolean | null;
     replacement_font?: string | null;
     replacement_fonts?: Record<string, string | null> | null;
+    font_compatibility_mode?: boolean | null;
+    font_compatibility_replacements?: Record<string, string | null> | null;
     replaced_style_count?: number | null;
     verify_after_replace?: {
       status?: string | null;
@@ -623,6 +626,7 @@ export class HttpAdapter implements ApiAdapter {
     return {
       files: (payload.files ?? []).map((file) => this.normalizeFontPreflightFile(file)),
       policy: payload.policy ?? "none",
+      fontCompatibilityMode: Boolean(payload.font_compatibility_mode),
       replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       fontMapPath: payload.font_map_path ?? null,
       fontAlt: payload.font_alt ?? null,
@@ -647,6 +651,10 @@ export class HttpAdapter implements ApiAdapter {
       fontReplacementApplied: Boolean(file.font_replacement_applied),
       replacementFont: file.replacement_font ?? null,
       replacementFonts: this.normalizeFontReplacementMap(file.replacement_fonts),
+      fontCompatibilityMode: Boolean(file.font_compatibility_mode),
+      fontCompatibilityReplacements: this.normalizeFontReplacementMap(
+        file.font_compatibility_replacements,
+      ),
       replacedStyleCount: file.replaced_style_count ?? 0,
       verifyAfterReplace: file.verify_after_replace
         ? {

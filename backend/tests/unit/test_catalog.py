@@ -511,4 +511,10 @@ def test_catalog_repairs_missing_detail_grid_borders_from_template_holes(tmp_pat
     assert ws["A15"].border.right.style == "thin"
     assert ws["A15"].border.top.style == "thin"
     assert ws["A15"].border.bottom.style == "thin"
+    assert ws["A15"].alignment.horizontal == ws["A14"].alignment.horizontal
+    assert ws["A15"].alignment.vertical == ws["A14"].alignment.vertical
+    assert ws["A15"].alignment.wrapText == ws["A14"].alignment.wrapText
+    assert ws["A15"].font.name == ws["A14"].font.name
+    assert ws["A15"].font.sz == ws["A14"].font.sz
+    assert ws["A15"].fill.fill_type == ws["A14"].fill.fill_type
 

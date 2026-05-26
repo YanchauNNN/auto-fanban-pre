@@ -875,6 +875,67 @@ describe("DeliverableWorkspace", () => {
     expect(adapter.preflightFonts).toHaveBeenCalledTimes(1);
   });
 
+  it("submits font compatibility mode when the footer checkbox is enabled", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue({
+      files: [
+        {
+          filename: "A01.dwg",
+          status: "ok",
+          missingFonts: [],
+          detectedStyleCount: 12,
+          missingStyleCount: 0,
+          fontReplacementApplied: false,
+          replacementFont: null,
+          replacementFonts: {},
+          replacedStyleCount: 0,
+          verifyAfterReplace: null,
+          fontReplacementIncomplete: false,
+          errors: [],
+        },
+      ],
+      replacementOptions: [],
+      replacementOptionsByKind: {},
+      defaultReplacementFont: null,
+      defaultReplacementFonts: {},
+      requiresConfirmation: false,
+    });
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-font-compatibility",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await screen.findByText("A01.dwg");
+    await user.type(screen.getByLabelText(albumTitleLabel), "font-compatibility");
+    await user.type(screen.getByLabelText(subitemNameLabel), "font-compatibility-subitem");
+    await user.click(screen.getByLabelText("以字体兼容模式打印"));
+    await user.click(screen.getByRole("button", { name: /创建交付任务/ }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          font_replace_policy: "none",
+          font_compatibility_mode: true,
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+  });
+
   it("opens the font replacement review from cached upload preflight without another request", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();

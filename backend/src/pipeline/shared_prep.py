@@ -46,6 +46,7 @@ class SharedPrepService:
         font_replace_policy: str = "none",
         font_replacement_font: str | None = None,
         font_replacement_fonts: dict[str, str] | None = None,
+        font_compatibility_mode: bool = False,
         slot_runtime: dict[str, str] | None = None,
     ) -> SharedPrepArtifacts:
         source_dwg = source_dwg.resolve()
@@ -73,6 +74,7 @@ class SharedPrepService:
             replacement_policy=policy,
             replacement_font=font_replacement_font,
             replacement_fonts=font_replacement_fonts,
+            font_compatibility_mode=font_compatibility_mode,
             workspace_dir=shared_dir / "font_preflight",
             slot_runtime=slot_runtime,
         )

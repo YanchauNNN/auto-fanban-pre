@@ -844,6 +844,7 @@ class DeliverableApiRuntime:
                 font_replace_policy=str(font_params.get("font_replace_policy") or "none"),
                 font_replacement_font=str(font_params.get("font_replacement_font") or "").strip() or None,
                 font_replacement_fonts=normalize_replacement_map(font_params.get("font_replacement_fonts")),
+                font_compatibility_mode=self._coerce_bool(font_params.get("font_compatibility_mode")),
             )
             group.shared_dir = prep.shared_dir
             group.progress.percent = 35
@@ -856,6 +857,9 @@ class DeliverableApiRuntime:
                 child.font_preflight_summary = {
                     "files": [prep.font_preflight_summary],
                     "policy": str(font_params.get("font_replace_policy") or "none"),
+                    "font_compatibility_mode": self._coerce_bool(
+                        font_params.get("font_compatibility_mode")
+                    ),
                 }
                 child.missing_fonts_detected = str(prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"
                 child.font_replacement_applied = bool(prep.font_preflight_summary.get("font_replacement_applied", False))
@@ -927,6 +931,9 @@ class DeliverableApiRuntime:
             font_replacement_fonts=normalize_replacement_map(
                 deliverable_job.params.get("font_replacement_fonts")
             ),
+            font_compatibility_mode=self._coerce_bool(
+                deliverable_job.params.get("font_compatibility_mode")
+            ),
         )
 
         deliverable_job.input_files = [replaced_dwg]
@@ -936,6 +943,9 @@ class DeliverableApiRuntime:
         deliverable_job.font_preflight_summary = {
             "files": [deliverable_prep.font_preflight_summary],
             "policy": str(deliverable_job.params.get("font_replace_policy") or "none"),
+            "font_compatibility_mode": self._coerce_bool(
+                deliverable_job.params.get("font_compatibility_mode")
+            ),
         }
         deliverable_job.missing_fonts_detected = (
             str(deliverable_prep.font_preflight_summary.get("status") or "").strip().lower() == "missing_fonts"

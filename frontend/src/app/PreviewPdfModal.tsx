@@ -214,6 +214,9 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
             <h2>{title}</h2>
           </div>
           <div className={styles.previewModalActions}>
+            <a className={styles.downloadButton} download href={url}>
+              下载预览 PDF
+            </a>
             <a
               className={styles.downloadButton}
               href={url}

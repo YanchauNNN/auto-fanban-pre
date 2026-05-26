@@ -12,11 +12,13 @@ from src.pipeline.shared_prep import SharedPrepService
 class _FakeFontPreflightService:
     def __init__(self, summary: dict[str, Any]) -> None:
         self.summary = summary
+        self.calls: list[dict[str, Any]] = []
 
     def validate_replacement_font(self, font_name: str) -> bool:
         return font_name == "simsun.ttc"
 
-    def inspect_dwg(self, **_: Any) -> dict[str, Any]:
+    def inspect_dwg(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(dict(kwargs))
         return dict(self.summary)
 
 
@@ -117,6 +119,32 @@ def test_shared_prep_allows_replace_missing_and_records_summary(tmp_path: Path) 
 
     assert prep.font_preflight_summary["replacement_font"] == "simsun.ttc"
     assert prep.font_preflight_summary["font_replacement_applied"] is True
+
+
+def test_shared_prep_passes_font_compatibility_mode_to_preflight(tmp_path: Path) -> None:
+    service = _make_service(
+        {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 3,
+            "missing_style_count": 0,
+            "font_replacement_applied": True,
+            "replacement_font": None,
+            "font_compatibility_mode": True,
+            "replaced_style_count": 1,
+        }
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    service.prepare(
+        group_id="g1",
+        source_dwg=source,
+        shared_dir=tmp_path / "shared",
+        font_compatibility_mode=True,
+    )
+
+    assert service.font_preflight_service.calls[0]["font_compatibility_mode"] is True
 
 
 def test_shared_prep_sets_project_no_before_detection(tmp_path: Path) -> None:
