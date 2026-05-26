@@ -193,17 +193,31 @@ describe("homepage shell", () => {
     });
   });
 
-  it("shows a maintenance warning and disables main entries when health check fails", async () => {
-    mockGetHealth.mockRejectedValueOnce(new Error("backend offline"));
+  it("does not show maintenance when a transient health check failure recovers", async () => {
+    mockGetHealth
+      .mockRejectedValueOnce(new Error("backend offline"))
+      .mockResolvedValue({
+        status: "ok",
+        ready: true,
+        storageWritable: true,
+        workerAlive: true,
+        queueDepth: 1,
+        autocadReady: true,
+        officeReady: true,
+        serverTime: "2026-03-08T10:20:31+08:00",
+      });
 
     render(<App />);
 
-    expect(
-      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+    expect(await screen.findByTestId("title-strip")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "出图" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeEnabled();
   });
 
   it("shows a maintenance warning when backend health is not ready", async () => {

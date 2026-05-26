@@ -379,6 +379,7 @@ export function DeliverableWorkspace({
       setShowAdvanced(false);
       setFontCompatibilityMode(false);
       resetFontPreflightState();
+      onDraftAvailabilityChange(false);
       onClearPendingReplaceFlow?.();
       startTransition(() => onBatchCreated(payload));
       onClose();
@@ -1205,6 +1206,16 @@ export function DeliverableWorkspace({
             </section>
 
             <footer className={styles.actions}>
+              <button
+                className={styles.ghostButton}
+                disabled={
+                  isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview
+                }
+                type="button"
+                onClick={handleOpenFontReplacementReview}
+              >
+                {isOpeningFontReplacementReview ? "正在读取字体..." : "查看字体替换"}
+              </button>
               <label className={styles.compatibilityToggle}>
                 <input
                   checked={fontCompatibilityMode}
@@ -1216,16 +1227,6 @@ export function DeliverableWorkspace({
                 />
                 <span>以字体兼容模式打印</span>
               </label>
-              <button
-                className={styles.ghostButton}
-                disabled={
-                  isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview
-                }
-                type="button"
-                onClick={handleOpenFontReplacementReview}
-              >
-                {isOpeningFontReplacementReview ? "正在读取字体..." : "查看字体替换"}
-              </button>
               <button
                 className={styles.primaryButton}
                 disabled={isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview}

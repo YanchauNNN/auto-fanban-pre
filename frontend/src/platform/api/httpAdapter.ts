@@ -231,6 +231,9 @@ export class HttpAdapter implements ApiAdapter {
       storage_writable: boolean;
       worker_alive: boolean;
       queue_depth: number;
+      active_doc_jobs?: number;
+      pending_doc_jobs?: number;
+      active_total_jobs?: number;
       autocad_ready: boolean;
       office_ready: boolean;
       server_time: string;
@@ -242,6 +245,9 @@ export class HttpAdapter implements ApiAdapter {
       storageWritable: payload.storage_writable,
       workerAlive: payload.worker_alive,
       queueDepth: payload.queue_depth,
+      activeDocJobs: payload.active_doc_jobs,
+      pendingDocJobs: payload.pending_doc_jobs,
+      activeTotalJobs: payload.active_total_jobs,
       autocadReady: payload.autocad_ready,
       officeReady: payload.office_ready,
       serverTime: payload.server_time,

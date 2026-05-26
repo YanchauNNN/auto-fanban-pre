@@ -418,6 +418,28 @@ def test_create_excel_application_uses_dispatchex_when_available() -> None:
     assert client.dispatch_calls == 1
 
 
+def test_create_excel_application_retries_transient_dispatchex_bootstrap_error() -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    excel = _FakeExcelApp()
+
+    class _Client:
+        def __init__(self) -> None:
+            self.dispatch_calls = 0
+
+        def DispatchEx(self, prog_id: str) -> object:  # noqa: N802, ARG002
+            self.dispatch_calls += 1
+            if self.dispatch_calls < 3:
+                raise RuntimeError("操作无法使用")
+            return excel
+
+    client = _Client()
+    acquired, owned = exporter._create_excel_application(SimpleNamespace(client=client))
+
+    assert acquired is excel
+    assert owned is True
+    assert client.dispatch_calls == 3
+
+
 def test_create_excel_application_falls_back_when_dispatchex_returns_unready_excel(
     monkeypatch,
 ) -> None:

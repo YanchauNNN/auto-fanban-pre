@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -92,5 +93,50 @@ def test_deliverable_api_runtime_uses_configured_doc_max_jobs(
     )
     try:
         assert runtime._max_doc_jobs == 3
+    finally:
+        runtime.stop()
+
+
+def test_runtime_health_counts_pending_doc_jobs_in_queue_depth(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    monkeypatch.setenv("FANBAN_SPEC_PATH", str(repo_root / "documents" / "参数规范.yaml"))
+    monkeypatch.setenv(
+        "FANBAN_RUNTIME_SPEC_PATH",
+        str(repo_root / "documents" / "参数规范_运行期.yaml"),
+    )
+    monkeypatch.setenv("FANBAN_STORAGE_DIR", str(tmp_path / "storage"))
+
+    SpecLoader.clear_cache()
+    reload_config()
+
+    import API.app.runtime as runtime_mod
+
+    class _FakeCADSlotPool:
+        def __init__(self, *, config, slot_count):
+            self.config = config
+            self.slot_count = slot_count
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", _FakeCADSlotPool)
+
+    runtime = runtime_mod.DeliverableApiRuntime(
+        job_processor=lambda job: None,
+        shared_prep_service=SimpleNamespace(),
+        font_preflight_service=SimpleNamespace(),
+    )
+    try:
+        pending_doc_future: Future[None] = Future()
+        with runtime._future_lock:
+            runtime._doc_futures.add(pending_doc_future)
+
+        health = runtime.health()
+
+        assert health["pending_doc_jobs"] == 1
+        assert health["active_doc_jobs"] == 0
+        assert health["queue_depth"] == 1
     finally:
         runtime.stop()

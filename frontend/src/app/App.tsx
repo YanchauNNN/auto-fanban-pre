@@ -64,6 +64,10 @@ const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const JOBS_MODAL_PAGE_SIZE = 50;
 const BACKEND_MAINTENANCE_MESSAGE = "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）";
+const BACKEND_CONNECTION_DEGRADED_MESSAGE = "后台连接波动，正在重试";
+const HEALTH_REFETCH_INTERVAL_MS = 15000;
+const HEALTH_RETRY_COUNT = 1;
+const HEALTH_RECENT_SUCCESS_GRACE_MS = 45000;
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
 }));
@@ -539,8 +543,9 @@ function WorkspacePage() {
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: () => adapter.getHealth(),
-    refetchInterval: 15000,
-    retry: false,
+    refetchInterval: HEALTH_REFETCH_INTERVAL_MS,
+    retry: HEALTH_RETRY_COUNT,
+    retryDelay: 250,
   });
 
   const schemaQuery = useQuery({
@@ -549,7 +554,21 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
-  const backendUnavailable = healthQuery.isError || healthQuery.data?.ready === false;
+  const [lastReadyHealthAt, setLastReadyHealthAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (healthQuery.data?.ready) {
+      setLastReadyHealthAt(Date.now());
+    }
+  }, [healthQuery.data?.ready, healthQuery.data?.serverTime]);
+
+  const hasRecentReadyHealth =
+    lastReadyHealthAt !== null && Date.now() - lastReadyHealthAt <= HEALTH_RECENT_SUCCESS_GRACE_MS;
+  const healthRequestFailed = healthQuery.isError;
+  const backendUnavailable =
+    healthQuery.data?.ready === false ||
+    (healthRequestFailed && healthQuery.failureCount > HEALTH_RETRY_COUNT && !hasRecentReadyHealth);
+  const backendConnectionDegraded = healthRequestFailed && !backendUnavailable;
   const entryActionsDisabled = !actionsReady || backendUnavailable;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
@@ -863,6 +882,8 @@ function WorkspacePage() {
                   value={healthQuery.data.officeReady ? "可用" : "缺失"}
                 />
               </div>
+            ) : backendConnectionDegraded ? (
+              <p className={styles.titleStripHealthWarning}>{BACKEND_CONNECTION_DEGRADED_MESSAGE}</p>
             ) : healthQuery.isError ? (
               <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
             ) : (

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { DeliverableWorkspace } from "./DeliverableWorkspace";
@@ -934,6 +935,39 @@ describe("DeliverableWorkspace", () => {
         false,
       );
     });
+  });
+
+  it("renders font compatibility mode between the font review and submit buttons", async () => {
+    const adapter = createAdapter();
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await screen.findByText("A01.dwg");
+
+    const reviewButton = screen.getByRole("button", { name: "查看字体替换" });
+    const compatibilityToggle = screen.getByRole("checkbox", {
+      name: "以字体兼容模式打印",
+    });
+    const submitButton = screen.getByRole("button", { name: "创建交付任务" });
+
+    expect(
+      reviewButton.compareDocumentPosition(compatibilityToggle) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      compatibilityToggle.compareDocumentPosition(submitButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("opens the font replacement review from cached upload preflight without another request", async () => {
@@ -2179,6 +2213,43 @@ describe("DeliverableWorkspace", () => {
 
     expect(await screen.findByDisplayValue("草稿图册")).toBeInTheDocument();
     expect(screen.getByText("A01.dwg")).toBeInTheDocument();
+  });
+
+  it("reports no deliverable draft synchronously after successful submit before closing", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    const onDraftAvailabilityChange = vi.fn();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult("A01.dwg"));
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-draft-cleared",
+      jobs: [],
+    });
+
+    function ClosingHarness() {
+      const [open, setOpen] = useState(true);
+
+      return open ? (
+        <DeliverableWorkspace
+          adapter={adapter}
+          incomingFiles={[new File(["dwg"], "A01.dwg", { type: "application/acad" })]}
+          isOpen
+          onBatchCreated={vi.fn()}
+          onClose={() => setOpen(false)}
+          onDraftAvailabilityChange={onDraftAvailabilityChange}
+          schema={schema}
+        />
+      ) : null;
+    }
+
+    render(<ClosingHarness />);
+
+    await screen.findByText("A01.dwg");
+    await user.type(screen.getByLabelText(albumTitleLabel), "submitted-draft");
+    await user.type(screen.getByLabelText(subitemNameLabel), "submitted-subitem");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => expect(adapter.createBatch).toHaveBeenCalledTimes(1));
+    expect(onDraftAvailabilityChange).toHaveBeenLastCalledWith(false);
   });
 
   it("defaults IED dates to today without rendering a shortcut button", async () => {

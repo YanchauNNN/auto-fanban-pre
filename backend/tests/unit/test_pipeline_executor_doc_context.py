@@ -446,6 +446,21 @@ def test_stage_generate_docs_uses_catalog_page_count_when_catalog_pdf_export_fai
     assert job.artifacts.docs_dir == tmp_path / "output" / "docs"
 
 
+def test_catalog_pdf_export_failure_is_reported_as_document_failure(tmp_path: Path) -> None:
+    job = Job(
+        job_id="job-doc-export-failure",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+    )
+    job.add_flag("目录PDF导出失败: Excel导出PDF失败: 无法创建 Excel.Application")
+
+    with pytest.raises(RuntimeError, match="文档导出失败") as exc_info:
+        PipelineExecutor._raise_if_fatal_export_errors(job)
+
+    assert "CAD导出失败" not in str(exc_info.value)
+
+
 def test_stage_split_uses_steel_liner_plot_style_when_two_titles_match(
     tmp_path: Path,
     sample_frame: FrameMeta,

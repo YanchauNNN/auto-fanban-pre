@@ -1088,23 +1088,38 @@ class PipelineExecutor:
 
     @staticmethod
     def _raise_if_fatal_export_errors(job: Job) -> None:
-        fatal_markers = ("DXF执行失败", "CAD结果错误", "PDF缺失", "DWG缺失", "导出失败")
-        fatal_flags = [flag for flag in job.flags if any(marker in flag for marker in fatal_markers)]
+        cad_fatal_markers = ("DXF执行失败", "CAD结果错误", "PDF缺失", "DWG缺失")
+        document_fatal_markers = ("目录PDF导出失败",)
+
+        def is_cad_fatal_flag(flag: str) -> bool:
+            text = str(flag or "").strip()
+            if any(marker in text for marker in cad_fatal_markers):
+                return True
+            return text == "导出失败" or text.endswith("] 导出失败") or text.endswith("]导出失败")
+
+        cad_fatal_flags = [flag for flag in job.flags if is_cad_fatal_flag(flag)]
+        document_fatal_flags = [
+            flag
+            for flag in job.flags
+            if any(marker in str(flag or "") for marker in document_fatal_markers)
+        ]
 
         details = job.progress.details
         export_total = int(details.get("export_total", 0) or 0)
         export_done = int(details.get("export_done", 0) or 0)
         incomplete_export = export_total > 0 and export_done < export_total
 
-        if not fatal_flags and not incomplete_export:
+        if not cad_fatal_flags and not document_fatal_flags and not incomplete_export:
             return
 
         reasons: list[str] = []
-        if fatal_flags:
-            reasons.append(fatal_flags[0])
+        if cad_fatal_flags:
+            reasons.append(cad_fatal_flags[0])
         if incomplete_export:
             reasons.append(f"export_done={export_done}/{export_total}")
-        raise RuntimeError(f"CAD导出失败: {'; '.join(reasons)}")
+        if reasons:
+            raise RuntimeError(f"CAD导出失败: {'; '.join(reasons)}")
+        raise RuntimeError(f"文档导出失败: {document_fatal_flags[0]}")
 
     # ==================================================================
     # 进度更新

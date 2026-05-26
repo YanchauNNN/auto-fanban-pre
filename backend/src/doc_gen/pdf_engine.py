@@ -37,6 +37,7 @@ from .office_automation import get_office_automation_limiter
 
 _RPC_CALL_REJECTED = -2147418111
 _FILE_NOT_FOUND_HRESULT = -2147024894
+_MK_E_UNAVAILABLE = -2147221021
 
 
 class PDFExporter(IPDFExporter):
@@ -206,9 +207,21 @@ class PDFExporter(IPDFExporter):
         message = str(exc).lower()
         return ("系统找不到指定的文件" in str(exc)) or ("cannot find the file" in message)
 
+    @staticmethod
+    def _is_excel_operation_unavailable(exc: Exception) -> bool:
+        with contextlib.suppress(Exception):
+            if getattr(exc, "hresult", None) == _MK_E_UNAVAILABLE:
+                return True
+        message = str(exc).lower()
+        return ("操作无法使用" in str(exc)) or ("operation unavailable" in message)
+
     @classmethod
     def _is_recoverable_excel_bootstrap_error(cls, exc: Exception) -> bool:
-        if cls._is_missing_excel_server_registration(exc) or cls._is_call_rejected(exc):
+        if (
+            cls._is_missing_excel_server_registration(exc)
+            or cls._is_call_rejected(exc)
+            or cls._is_excel_operation_unavailable(exc)
+        ):
             return True
         message = str(exc).lower()
         return (
@@ -322,7 +335,7 @@ class PDFExporter(IPDFExporter):
         cls,
         win32com_module: Any,
         *,
-        retries: int = 18,
+        retries: int = 36,
         delay_sec: float = 0.5,
     ) -> object:
         last_exc: Exception | None = None
@@ -333,6 +346,34 @@ class PDFExporter(IPDFExporter):
                 last_exc = exc
                 time.sleep(delay_sec)
         raise RuntimeError(f"无法附着 Excel.Application 活动对象: {last_exc}") from last_exc
+
+    @classmethod
+    def _dispatch_excel_application(
+        cls,
+        win32com_module: Any,
+        *,
+        retries: int = 3,
+        delay_sec: float = 0.8,
+    ) -> object:
+        last_exc: Exception | None = None
+        for attempt in range(retries):
+            try:
+                excel = win32com_module.client.DispatchEx("Excel.Application")
+            except Exception as exc:
+                last_exc = exc
+                if (
+                    not cls._is_recoverable_excel_bootstrap_error(exc)
+                    or cls._is_missing_excel_server_registration(exc)
+                    or attempt + 1 >= retries
+                ):
+                    raise
+                time.sleep(delay_sec)
+                continue
+
+            cls._wait_for_excel_application_ready(excel)
+            return excel
+
+        raise RuntimeError(f"无法创建 Excel.Application: {last_exc}") from last_exc
 
     @staticmethod
     def _excel_app_matches_pid(excel: object, pid: int) -> bool:
@@ -352,8 +393,7 @@ class PDFExporter(IPDFExporter):
     @classmethod
     def _create_excel_application(cls, win32com_module: Any) -> tuple[object, bool]:
         try:
-            excel = win32com_module.client.DispatchEx("Excel.Application")
-            cls._wait_for_excel_application_ready(excel)
+            excel = cls._dispatch_excel_application(win32com_module)
             return excel, True
         except Exception as dispatch_exc:
             if not cls._is_recoverable_excel_bootstrap_error(dispatch_exc):

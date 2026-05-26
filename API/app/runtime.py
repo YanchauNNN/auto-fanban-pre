@@ -168,6 +168,7 @@ class DeliverableApiRuntime:
         self._group_futures: set[Future[None]] = set()
         self._job_futures: set[Future[None]] = set()
         self._doc_futures: set[Future[None]] = set()
+        self._running_doc_job_ids: set[str] = set()
         self._future_lock = threading.Lock()
         self._job_completion_events: dict[str, threading.Event] = {}
         self._job_completion_lock = threading.Lock()
@@ -206,7 +207,10 @@ class DeliverableApiRuntime:
         storage_writable = self._storage_writable()
         group_alive = bool(self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive())
         job_alive = bool(self._job_dispatcher_thread and self._job_dispatcher_thread.is_alive())
-        queue_depth = self._group_queue.qsize() + self._job_queue.qsize()
+        active_doc_jobs = self._active_doc_count()
+        pending_doc_jobs = self._pending_doc_count()
+        active_jobs = self._active_job_count()
+        queue_depth = self._group_queue.qsize() + self._job_queue.qsize() + pending_doc_jobs
         return {
             'status': 'ok',
             'server_time': datetime.now().astimezone().isoformat(),
@@ -217,9 +221,10 @@ class DeliverableApiRuntime:
             'autocad_ready': self._autocad_ready(),
             'office_ready': importlib.util.find_spec('win32com.client') is not None,
             'active_groups': self._active_group_count(),
-            'active_jobs': self._active_job_count(),
-            'active_doc_jobs': self._active_doc_count(),
-            'active_total_jobs': self._active_job_count() + self._active_doc_count(),
+            'active_jobs': active_jobs,
+            'active_doc_jobs': active_doc_jobs,
+            'pending_doc_jobs': pending_doc_jobs,
+            'active_total_jobs': active_jobs + active_doc_jobs,
         }
 
     def form_schema(self) -> dict[str, Any]:
@@ -1063,12 +1068,16 @@ class DeliverableApiRuntime:
         post_slot_work: Callable[[], None],
     ) -> None:
         job = self.job_manager.get_job(job_id)
+        with self._future_lock:
+            self._running_doc_job_ids.add(job_id)
         try:
             post_slot_work()
         except Exception as exc:  # noqa: BLE001
             if job is not None and job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
                 job.mark_failed(str(exc))
         finally:
+            with self._future_lock:
+                self._running_doc_job_ids.discard(job_id)
             if job is not None:
                 self.job_manager.update_job(job)
             self._signal_job_completion(job_id)
@@ -1575,4 +1584,9 @@ class DeliverableApiRuntime:
     def _active_doc_count(self) -> int:
         self._prune_futures()
         with self._future_lock:
-            return len(self._doc_futures)
+            return len(self._running_doc_job_ids)
+
+    def _pending_doc_count(self) -> int:
+        self._prune_futures()
+        with self._future_lock:
+            return max(len(self._doc_futures) - len(self._running_doc_job_ids), 0)

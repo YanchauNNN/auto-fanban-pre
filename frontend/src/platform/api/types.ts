@@ -40,6 +40,9 @@ export type HealthStatus = {
   storageWritable: boolean;
   workerAlive: boolean;
   queueDepth: number;
+  activeDocJobs?: number;
+  pendingDocJobs?: number;
+  activeTotalJobs?: number;
   autocadReady: boolean;
   officeReady: boolean;
   serverTime: string;

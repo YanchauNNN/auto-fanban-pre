@@ -1,0 +1,459 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - img "中核集团标识" [ref=e7]
+        - generic [ref=e8]:
+          - paragraph [ref=e9]: CNPE Structural Drawing Platform
+          - heading "中核工程-河北分公司-建筑结构所出图平台" [level=1] [ref=e10]
+      - generic [ref=e11]:
+        - generic [ref=e12]:
+          - paragraph [ref=e13]: System Status
+          - button "教程" [ref=e14]
+        - generic [ref=e50]:
+          - generic [ref=e51]:
+            - generic [ref=e52]: 服务
+            - strong [ref=e53]: 就绪
+          - generic [ref=e54]:
+            - generic [ref=e55]: 存储
+            - strong [ref=e56]: 正常
+          - generic [ref=e57]:
+            - generic [ref=e58]: 队列
+            - strong [ref=e59]: 0 项
+          - generic [ref=e60]:
+            - generic [ref=e61]: AutoCAD
+            - strong [ref=e62]: 可用
+          - generic [ref=e63]:
+            - generic [ref=e64]: Office
+            - strong [ref=e65]: 可用
+  - navigation [ref=e16]:
+    - button "业务模块" [pressed] [ref=e17]
+    - button "账号模块" [ref=e18]
+    - button "工作量模块" [ref=e19]
+  - main [ref=e21]:
+    - generic [ref=e22]:
+      - generic [ref=e25]:
+        - generic [ref=e26]:
+          - paragraph [ref=e27]: Task Entry
+          - heading "新建任务" [level=2] [ref=e28]
+        - generic [ref=e29]:
+          - button "出图" [active] [ref=e66]
+          - button "纠错" [ref=e67]
+          - button "翻版" [ref=e32]
+          - button "继续草稿" [ref=e169]
+        - button "选择出图 DWG 文件"
+      - generic [ref=e33]:
+        - generic [ref=e34]:
+          - generic [ref=e35]:
+            - paragraph [ref=e36]: Task Record
+            - heading "任务记录" [level=2] [ref=e37]
+          - button "刷新" [ref=e38]
+        - generic [ref=e39]:
+          - button "全部" [pressed] [ref=e40]
+          - button "排队中" [ref=e41]
+          - button "运行中" [ref=e42]
+          - button "成功" [ref=e43]
+          - button "失败" [ref=e44]
+        - generic [ref=e45]:
+          - searchbox "搜索任务名称" [ref=e46]
+          - button "展开其余 148 个" [ref=e68]
+        - generic [ref=e47]:
+          - generic [ref=e69]:
+            - generic [ref=e70]:
+              - strong [ref=e71]: smoke-lishuai2-business-20260526-090526-a9fd1e
+              - generic [ref=e73]: 成功
+            - generic [ref=e74]:
+              - generic [ref=e75]: 交付
+              - link "查看任务" [ref=e76] [cursor=pointer]:
+                - /url: /jobs/smoke-lishuai2-business-20260526-090526-a9fd1e
+            - paragraph [ref=e77]: 出图完成
+            - paragraph [ref=e78]: 交付任务已完成
+          - generic [ref=e81]:
+            - generic [ref=e82]:
+              - strong [ref=e83]: smoke-lishuai2-full-20260526-090359-766347
+              - generic [ref=e85]: 失败
+            - generic [ref=e86]:
+              - generic [ref=e87]: 交付
+              - link "查看任务" [ref=e88] [cursor=pointer]:
+                - /url: /jobs/smoke-lishuai2-full-20260526-090359-766347
+            - paragraph [ref=e89]: "文档参数缺失: subitem_name"
+            - paragraph [ref=e90]: 失败发生阶段：生成目录和文档
+          - generic [ref=e93]:
+            - generic [ref=e94]:
+              - strong [ref=e95]: smoke-source-window-regen-20260526-085829
+              - generic [ref=e97]: 成功
+            - generic [ref=e98]:
+              - generic [ref=e99]: 仅拆图
+              - link "查看任务" [ref=e100] [cursor=pointer]:
+                - /url: /jobs/smoke-source-window-regen-20260526-085829
+            - paragraph [ref=e101]: 出图完成
+            - paragraph [ref=e102]: 交付任务已完成
+          - generic [ref=e105]:
+            - generic [ref=e106]:
+              - strong [ref=e107]: 20261RB-JGS11-校审图A版-2026.05.20.dwg
+              - generic [ref=e109]: 成功
+            - generic [ref=e110]:
+              - generic [ref=e111]: 交付
+              - link "查看任务" [ref=e112] [cursor=pointer]:
+                - /url: /jobs/smoke-font-compat-f09d1400
+            - paragraph [ref=e113]: 出图完成
+            - paragraph [ref=e114]: 交付任务已完成
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - strong [ref=e119]: 20261RB-JGS11-校审图A版-2026.05.20.dwg
+              - generic [ref=e121]: 成功
+            - generic [ref=e122]:
+              - generic [ref=e123]: 纠错
+              - link "查看任务" [ref=e124] [cursor=pointer]:
+                - /url: /jobs/e4a84bd2-f24b-44c7-abd4-c70624ae7434
+              - generic [ref=e125]: 错误数 154
+              - generic [ref=e126]: 受影响图纸 5
+            - paragraph [ref=e127]: 纠错完成
+            - paragraph [ref=e128]: 纠错任务已完成
+          - generic [ref=e131]:
+            - generic [ref=e132]:
+              - strong [ref=e133]: 20261RB-JGS11-校审图A版-2026.05.20.dwg
+              - generic [ref=e135]: 成功
+            - generic [ref=e136]:
+              - generic [ref=e137]: 纠错
+              - link "查看任务" [ref=e138] [cursor=pointer]:
+                - /url: /jobs/4a15abca-9949-4e80-8ffc-00de2a96b426
+            - paragraph [ref=e139]: 纠错完成
+            - paragraph [ref=e140]: 纠错任务已完成
+          - generic [ref=e143]:
+            - generic [ref=e144]:
+              - strong [ref=e145]: 20261RB-JGS11-校审图A版-2026.05.20.dwg
+              - generic [ref=e147]: 成功
+            - generic [ref=e148]:
+              - generic [ref=e149]: 纠错
+              - link "查看任务" [ref=e150] [cursor=pointer]:
+                - /url: /jobs/d6300116-9a88-46f0-969e-a302aace0dc3
+            - paragraph [ref=e151]: 纠错完成
+            - paragraph [ref=e152]: 纠错任务已完成
+          - generic [ref=e155]:
+            - generic [ref=e156]:
+              - strong [ref=e157]: 20261RB-JGS11-校审图A版-2026.05.20.dwg
+              - generic [ref=e159]: 成功
+            - generic [ref=e160]:
+              - generic [ref=e161]: 纠错
+              - link "查看任务" [ref=e162] [cursor=pointer]:
+                - /url: /jobs/e59dc93b-bd77-4dd3-bcef-41cd16b139d4
+              - generic [ref=e163]: 错误数 69
+              - generic [ref=e164]: 受影响图纸 9
+            - paragraph [ref=e165]: 纠错完成
+            - paragraph [ref=e166]: 纠错任务已完成
+  - dialog "任务配置" [ref=e171]:
+    - generic [ref=e172]:
+      - banner [ref=e173]:
+        - generic [ref=e174]:
+          - paragraph [ref=e175]: Task Config
+          - heading "任务配置" [level=2] [ref=e176]
+          - paragraph [ref=e177]: 上传文件后直接在弹窗内完成配置。关闭不会丢失草稿；只有手动清空或提交成功后才会重置。
+        - generic [ref=e178]:
+          - button "展开高级选项" [ref=e179] [cursor=pointer]
+          - button "关闭任务配置" [ref=e180] [cursor=pointer]
+      - generic [ref=e181]:
+        - generic [ref=e182]:
+          - generic [ref=e183]:
+            - generic [ref=e184]:
+              - heading "文件摘要" [level=3] [ref=e185]
+              - generic [ref=e186]: 1 个
+            - paragraph [ref=e187]: 单次上限 50 个文件，总大小不超过 2048 MB。
+            - list [ref=e188]:
+              - listitem [ref=e189]:
+                - generic [ref=e190]: 20161DA-JGS03--B - 出图平台.dwg
+                - generic [ref=e191]: 4129 KB
+            - generic [ref=e192]:
+              - generic [ref=e193] [cursor=pointer]:
+                - text: 重新选择文件
+                - button "重新选择 DWG 文件"
+              - button "清空草稿" [ref=e194] [cursor=pointer]
+          - generic [ref=e195]:
+            - generic [ref=e196]:
+              - heading "配置方案" [level=3] [ref=e197]
+              - generic [ref=e198]: 0 个
+            - generic [ref=e199]:
+              - textbox "方案名称" [ref=e200]:
+                - /placeholder: 输入方案名称
+              - generic [ref=e201]:
+                - button "保存为新方案" [ref=e202] [cursor=pointer]
+                - button "应用方案" [ref=e203] [cursor=pointer]
+                - button "更新当前方案" [disabled] [ref=e205] [cursor=pointer]
+              - combobox "已保存方案" [ref=e206]:
+                - option "选择已保存方案" [selected]
+              - generic [ref=e207]:
+                - button "重命名" [ref=e208] [cursor=pointer]
+                - button "删除" [ref=e209] [cursor=pointer]
+          - generic [ref=e210]:
+            - generic [ref=e211]:
+              - heading "次级任务开关" [level=3] [ref=e212]
+              - generic [ref=e213]: 交付
+            - generic [ref=e214]:
+              - button "纠错" [ref=e215] [cursor=pointer]
+              - button "仅拆图" [ref=e216] [cursor=pointer]
+            - paragraph [ref=e218]: 当前按交付处理链路提交。未选中纠错时，只会创建出图任务。
+        - generic [ref=e219]:
+          - generic [ref=e220]:
+            - generic [ref=e221]:
+              - heading "任务与项目" [level=3] [ref=e223]
+              - generic [ref=e224]:
+                - paragraph [ref=e225]:
+                  - text: 已从文件名识别项目号
+                  - strong [ref=e226]: "2016"
+                  - text: ，已自动填入项目号，可手动修改。
+                - paragraph [ref=e227]:
+                  - text: 已从文件名识别机组号
+                  - strong [ref=e228]: "1"
+                  - text: ，用于纠错机组一致性检查。
+            - generic [ref=e229]:
+              - generic [ref=e230]:
+                - generic [ref=e231]:
+                  - generic [ref=e234]: 项目号
+                  - generic [ref=e236]:
+                    - combobox "项目号" [ref=e237]: "2016"
+                    - button "项目号 选项" [ref=e238] [cursor=pointer]: ▾
+                  - generic [ref=e239]: 可留空，会优先从DWG文件名自动推断
+                - generic [ref=e240]:
+                  - generic [ref=e243]: 机组号
+                  - generic [ref=e245]:
+                    - combobox "机组号" [ref=e246]: "1"
+                    - button "机组号 选项" [ref=e247] [cursor=pointer]: ▾
+                  - generic [ref=e248]: 用于纠错机组一致性检查，可从DWG文件名自动推断
+              - generic [ref=e249]:
+                - generic [ref=e251]:
+                  - generic [ref=e252]: 封面模板
+                  - emphasis [ref=e253]: 必填
+                - generic [ref=e255]:
+                  - combobox "封面模板" [ref=e256]: 通用
+                  - button "封面模板 选项" [ref=e257] [cursor=pointer]: ▾
+                - generic [ref=e258]: 封面模板选择
+              - generic [ref=e259]:
+                - generic [ref=e261]:
+                  - generic [ref=e262]: 密级
+                  - emphasis [ref=e263]: 必填
+                - textbox "密级" [ref=e264]:
+                  - /placeholder: 请输入密级
+                  - text: 非密
+                - generic [ref=e265]: 写入设计文件/IED
+          - generic [ref=e266]:
+            - heading "升版设置" [level=3] [ref=e268]
+            - button "是否升版" [ref=e270] [cursor=pointer]
+            - text: 启用后可按版次拆成多行规则；封面和目录版次会自动取所有规则中的最高版次。
+          - generic [ref=e271]:
+            - heading "子项信息" [level=3] [ref=e274]
+            - generic [ref=e275]:
+              - generic [ref=e276]:
+                - generic [ref=e278]:
+                  - generic [ref=e279]: 子项名称（中文）
+                  - emphasis [ref=e280]: 必填
+                - textbox "子项名称（中文）" [ref=e281]:
+                  - /placeholder: 请输入子项名称（中文）
+                - generic [ref=e282]: 子项名称（中文），例如：反应堆厂房
+              - generic [ref=e283]:
+                - generic [ref=e286]: 子项名称（英文）
+                - textbox "子项名称（英文）" [ref=e287]:
+                  - /placeholder: 请输入子项名称（英文）
+                - generic [ref=e288]: 子项名称（英文），例如：Reactor Building
+          - generic [ref=e289]:
+            - heading "图册与封面" [level=3] [ref=e292]
+            - generic [ref=e293]:
+              - generic [ref=e294]:
+                - generic [ref=e296]:
+                  - generic [ref=e297]: 图册名称（中文）
+                  - emphasis [ref=e298]: 必填
+                - textbox "图册名称（中文）" [ref=e299]:
+                  - /placeholder: 请输入图册名称（中文）
+                - generic [ref=e300]: 图册名称(中文)，例如：XXX厂房XX标高模板图
+              - generic [ref=e301]:
+                - generic [ref=e304]: 图册名称（英文）
+                - textbox "图册名称（英文）" [ref=e305]:
+                  - /placeholder: 请输入图册名称（英文）
+                - generic [ref=e306]: 图册名称(英文)，仅1818需要
+          - generic [ref=e307]:
+            - heading "设计文件" [level=3] [ref=e310]
+            - generic [ref=e311]:
+              - generic [ref=e312]:
+                - generic [ref=e314]:
+                  - generic [ref=e315]: WBS 编码
+                  - emphasis [ref=e316]: 必填
+                - textbox "WBS 编码" [ref=e317]:
+                  - /placeholder: 请输入WBS 编码
+                - generic [ref=e318]: WBS编码，全图册共用
+              - generic [ref=e319]:
+                - generic [ref=e321]:
+                  - generic [ref=e322]: 文件类别
+                  - emphasis [ref=e323]: 必填
+                - generic [ref=e325]:
+                  - combobox "文件类别" [ref=e326]
+                  - button "文件类别 选项" [ref=e327] [cursor=pointer]: ▾
+                - generic [ref=e328]: 文件类别(U列)
+              - generic [ref=e329]:
+                - generic [ref=e331]:
+                  - generic [ref=e332]: 工时数
+                  - emphasis [ref=e333]: 必填
+                - textbox "工时数" [ref=e334]:
+                  - /placeholder: 请输入工时数
+                  - text: "100"
+                - generic [ref=e335]: 工时数，同时写入设计文件和IED计划，默认100
+          - generic [ref=e336]:
+            - generic [ref=e338]:
+              - heading "IED 基础信息" [level=3] [ref=e339]
+              - generic [ref=e340] [cursor=pointer]:
+                - checkbox "是否生成IED" [checked] [ref=e341]
+                - generic [ref=e342]: 是否生成IED
+            - generic [ref=e343]:
+              - generic [ref=e344]:
+                - generic [ref=e346]:
+                  - generic [ref=e347]: IED 状态
+                  - emphasis [ref=e348]: 必填
+                - textbox "IED 状态" [ref=e349]:
+                  - /placeholder: 请输入IED 状态
+                  - text: 发布
+                - generic [ref=e350]: IED状态(D列)，发布时触发更多必填校验
+              - generic [ref=e351]:
+                - generic [ref=e353]:
+                  - generic [ref=e354]: 文档类型
+                  - emphasis [ref=e355]: 必填
+                - generic [ref=e357]:
+                  - combobox "文档类型" [ref=e358]
+                  - button "文档类型 选项" [ref=e359] [cursor=pointer]: ▾
+                - generic [ref=e360]: 文档类型(C列)
+              - generic [ref=e361]:
+                - generic [ref=e363]:
+                  - generic [ref=e364]: 设计类型
+                  - emphasis [ref=e365]: 必填
+                - generic [ref=e367]:
+                  - combobox "设计类型" [ref=e368]
+                  - button "设计类型 选项" [ref=e369] [cursor=pointer]: ▾
+                - generic [ref=e370]: 设计类型(V列)，候选来自IED模板Sheet4的G1:G19，支持自由输入和输入筛选下拉
+              - generic [ref=e371]:
+                - generic [ref=e373]:
+                  - generic [ref=e374]: 责任单位
+                  - emphasis [ref=e375]: 必填
+                - generic [ref=e377]:
+                  - combobox "责任单位" [ref=e378]
+                  - button "责任单位 选项" [ref=e379] [cursor=pointer]: ▾
+                - generic [ref=e380]: 责任单位(X列)，候选来自IED模板Sheet3的B1:B314，支持自由输入和输入筛选下拉
+              - generic [ref=e381]:
+                - generic [ref=e383]:
+                  - generic [ref=e384]: 责任设总
+                  - emphasis [ref=e385]: 必填
+                - textbox "责任设总" [ref=e386]:
+                  - /placeholder: 请输入责任设总
+                - generic [ref=e387]: 例如：王任超@wangrca
+              - generic [ref=e388]:
+                - generic [ref=e390]:
+                  - generic [ref=e391]: 人员资格类别
+                  - emphasis [ref=e392]: 必填
+                - generic [ref=e394]:
+                  - combobox "人员资格类别" [ref=e395]: 一般核安全物项-民用
+                  - button "人员资格类别 选项" [ref=e396] [cursor=pointer]: ▾
+                - generic [ref=e397]: 人员资格类别(M列)
+              - generic [ref=e398]:
+                - generic [ref=e400]:
+                  - generic [ref=e401]: 编制者
+                  - emphasis [ref=e402]: 必填
+                - textbox "编制者" [ref=e403]:
+                  - /placeholder: 请输入编制者
+                - generic [ref=e404]: 例如：王任超@wangrca
+              - generic [ref=e405]:
+                - generic [ref=e407]:
+                  - generic [ref=e408]: 编制日期
+                  - emphasis [ref=e409]: 必填
+                - textbox "编制日期" [ref=e410]:
+                  - /placeholder: ""
+                  - text: 2026-05-26
+                - generic [ref=e411]: 点击“当日”自动填入今天日期
+              - generic [ref=e412]:
+                - generic [ref=e414]:
+                  - generic [ref=e415]: 校核者
+                  - emphasis [ref=e416]: 必填
+                - textbox "校核者" [ref=e417]:
+                  - /placeholder: 请输入校核者
+                - generic [ref=e418]: 例如：王任超@wangrca
+              - generic [ref=e419]:
+                - generic [ref=e421]:
+                  - generic [ref=e422]: 校核日期
+                  - emphasis [ref=e423]: 必填
+                - textbox "校核日期" [ref=e424]:
+                  - /placeholder: ""
+                  - text: 2026-05-26
+                - generic [ref=e425]: 点击选择日期
+              - generic [ref=e426]:
+                - generic [ref=e429]: 工种负责人
+                - textbox "工种负责人" [ref=e430]:
+                  - /placeholder: 请输入工种负责人
+                - generic [ref=e431]: 例如：王任超@wangrca
+              - generic [ref=e432]:
+                - generic [ref=e435]: 工种负责人审核日期
+                - textbox "工种负责人审核日期" [ref=e436]:
+                  - /placeholder: ""
+                  - text: 2026-05-26
+                - generic [ref=e437]: 点击选择日期
+              - generic [ref=e438]:
+                - generic [ref=e440]:
+                  - generic [ref=e441]: 审核者
+                  - emphasis [ref=e442]: 必填
+                - textbox "审核者" [ref=e443]:
+                  - /placeholder: 请输入审核者
+                - generic [ref=e444]: 例如：王任超@wangrca
+              - generic [ref=e445]:
+                - generic [ref=e447]:
+                  - generic [ref=e448]: 审核日期
+                  - emphasis [ref=e449]: 必填
+                - textbox "审核日期" [ref=e450]:
+                  - /placeholder: ""
+                  - text: 2026-05-26
+                - generic [ref=e451]: 点击“当日”自动填入今天日期
+              - generic [ref=e452]:
+                - generic [ref=e454]:
+                  - generic [ref=e455]: 审定者
+                  - emphasis [ref=e456]: 必填
+                - textbox "审定者" [ref=e457]:
+                  - /placeholder: 请输入审定者
+                - generic [ref=e458]: 例如：王任超@wangrca
+              - generic [ref=e459]:
+                - generic [ref=e461]:
+                  - generic [ref=e462]: 审定日期
+                  - emphasis [ref=e463]: 必填
+                - textbox "审定日期" [ref=e464]:
+                  - /placeholder: ""
+                  - text: 2026-05-26
+                - generic [ref=e465]: 点击“当日”自动填入今天日期
+              - generic [ref=e466]:
+                - generic [ref=e468]:
+                  - generic [ref=e469]: 所提交计划
+                  - emphasis [ref=e470]: 必填
+                - textbox "所提交计划" [ref=e471]:
+                  - /placeholder: ""
+                - generic [ref=e472]: 点击选择日期
+              - generic [ref=e473]:
+                - generic [ref=e475]:
+                  - generic [ref=e476]: 出版计划
+                  - emphasis [ref=e477]: 必填
+                - textbox "出版计划" [ref=e478]:
+                  - /placeholder: ""
+                - generic [ref=e479]: 点击选择日期
+              - generic [ref=e480]:
+                - generic [ref=e482]:
+                  - generic [ref=e483]: 外部计划
+                  - emphasis [ref=e484]: 必填
+                - textbox "外部计划" [ref=e485]:
+                  - /placeholder: ""
+                - generic [ref=e486]: 点击选择日期
+          - generic [ref=e487]:
+            - heading "打印设置" [level=3] [ref=e489]
+            - generic [ref=e490]:
+              - button "红色更宽" [pressed] [ref=e491] [cursor=pointer]
+              - button "同线宽" [ref=e492] [cursor=pointer]
+              - button "交审图" [ref=e493] [cursor=pointer]
+            - generic [ref=e494]:
+              - text: 这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的
+              - code [ref=e495]: plot_style_key
+              - text: 。
+        - contentinfo [ref=e496]:
+          - button "查看字体替换" [ref=e497] [cursor=pointer]
+          - generic [ref=e498]:
+            - checkbox "以字体兼容模式打印" [ref=e499]
+            - generic [ref=e500]: 以字体兼容模式打印
+          - button "正在执行字体搜索..." [ref=e501] [cursor=pointer]
