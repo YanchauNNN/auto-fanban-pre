@@ -19,9 +19,17 @@ from pathlib import Path
 from typing import Any
 
 from ..config import RuntimeConfig, get_config
+from ..config.mechanism_spec import CadRuntimeMechanismConfig, load_mechanism_spec
 from .autocad_path_resolver import resolve_autocad_paths
 
 logger = logging.getLogger(__name__)
+
+
+def _cad_mechanism() -> CadRuntimeMechanismConfig:
+    try:
+        return load_mechanism_spec().cad_runtime_mechanism
+    except FileNotFoundError:
+        return CadRuntimeMechanismConfig()
 
 
 @dataclass(slots=True)
@@ -341,8 +349,12 @@ class AcCoreConsoleRunner:
         output = task_data.get("output", {})
         workflow_stage = str(task_data.get("workflow_stage", "split_only")).strip().lower()
 
-        pc3_name = self._escape_lisp_string(str(plot.get("pc3_name", "打印PDF2.pc3")))
-        ctb_name = self._escape_lisp_string(str(plot.get("ctb_name", "fanban_monochrome.ctb")))
+        pc3_name = self._escape_lisp_string(
+            str(plot.get("pc3_name") or _cad_mechanism().pdf2_pc3_name)
+        )
+        ctb_name = self._escape_lisp_string(
+            str(plot.get("ctb_name") or self.config.module5_export.plot.ctb_name)
+        )
         use_monochrome = "T" if bool(plot.get("use_monochrome", True)) else "nil"
         margins = plot.get("margins_mm", {})
         margin_top = float(margins.get("top", 20.0))
@@ -491,6 +503,7 @@ class AcCoreConsoleRunner:
 
     def _build_environment_probe_definitions(self, *, module5_trace_log: Path) -> list[str]:
         trace_escaped = self._quote_lisp_path(module5_trace_log)
+        probe_pc3_name = self._escape_lisp_string(_cad_mechanism().pdf2_pc3_name)
         return [
             "; fanban-cad-env-probe definitions",
             "(vl-load-com)",
@@ -524,7 +537,7 @@ class AcCoreConsoleRunner:
                 "(strcat \"[CAD_ENV_PROBE][\" stage \"] getvar \" item \"=\" "
                 "(fanban-cad-env-probe-safe-getvar item)))) "
                 "(foreach item '(\"tssdeng.shx\" \"hztxt.shx\" \"tssdchn.shx\" "
-                "\"simplex.shx\" \"gbcbig.shx\" \"simsun.ttc\" \"打印PDF2.pc3\") "
+                f"\"simplex.shx\" \"gbcbig.shx\" \"simsun.ttc\" \"{probe_pc3_name}\") "
                 "(fanban-cad-env-probe-log "
                 "(strcat \"[CAD_ENV_PROBE][\" stage \"] findfile \" item \"=\" "
                 "(fanban-cad-env-probe-safe-findfile item)))) "

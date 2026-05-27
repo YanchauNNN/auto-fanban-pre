@@ -1,0 +1,5001 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/0slb8r",
+    "id": "0slb8r",
+    "slide": 1,
+    "layoutId": "b8350e11-e7fd-43d7-a057-ff96172f8d3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+    "masterLayoutName": "Master",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "+mn-lt"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "b8350e11-e7fd-43d7-a057-ff96172f8d3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/d8v6psfi",
+      "id": "1",
+      "name": "shape",
+      "bbox": [
+        0,
+        0,
+        1920,
+        1080
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#F7F8FA"
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6hcrmhk3",
+      "id": "2",
+      "name": "shape",
+      "bbox": [
+        0,
+        0,
+        16,
+        1080
+      ],
+      "composeSource": {
+        "run": 2,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 3,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/qtcj6tov",
+      "id": "3",
+      "name": "image",
+      "bbox": [
+        1320,
+        0,
+        600,
+        1080
+      ],
+      "composeSource": {
+        "run": 3,
+        "path": "0"
+      },
+      "alt": "CNPE Hebei Branch building",
+      "contentType": "image/jpeg",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "f28025a5-21f1-4a4d-a806-1fe967984906",
+        "contentType": "image/jpeg",
+        "byteLength": 139261
+      }
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ovahoza1",
+      "id": "4",
+      "name": "shape",
+      "bbox": [
+        1320,
+        0,
+        600,
+        1080
+      ],
+      "composeSource": {
+        "run": 4,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "rgba(0, 78, 162, 0.34)"
+    },
+    {
+      "order": 5,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/87ed8bat",
+      "id": "5",
+      "name": "image",
+      "bbox": [
+        1410,
+        8,
+        360,
+        190
+      ],
+      "composeSource": {
+        "run": 5,
+        "path": "0"
+      },
+      "alt": "CNPE logo",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "bb55f1fb-7efc-4fee-a3c7-e12a0c7c0ab6",
+        "contentType": "image/png",
+        "byteLength": 17720
+      }
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6tovahoz",
+      "id": "6",
+      "name": "cover-title",
+      "bbox": [
+        96,
+        150,
+        920,
+        96
+      ],
+      "composeSource": {
+        "run": 6,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "翻版功能模块介绍",
+      "textPreview": "翻版功能模块介绍",
+      "resolvedFontSize": 72,
+      "resolvedTextStyle": {
+        "fontSize": 72,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "翻版功能模块介绍"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "翻版功能模块介绍",
+          "resolvedTextStyle": {
+            "fontSize": 72,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "翻版功能模块介绍",
+              "fontSize": 72,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vahoza1g",
+      "id": "7",
+      "name": "cover-subtitle",
+      "bbox": [
+        96,
+        264,
+        1000,
+        64
+      ],
+      "composeSource": {
+        "run": 7,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "旧项目 DWG 到目标项目 DWG 的批量翻版链路",
+      "textPreview": "旧项目 DWG 到目标项目 DWG 的批量翻版链路",
+      "resolvedFontSize": 36,
+      "resolvedTextStyle": {
+        "fontSize": 36,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "旧项目 DWG 到目标项目 DWG 的批量翻版链路"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "旧项目 DWG 到目标项目 DWG 的批量翻版链路",
+          "resolvedTextStyle": {
+            "fontSize": 36,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "旧项目 DWG 到目标项目 DWG 的批量翻版链路",
+              "fontSize": 36,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/o7qpg3ex",
+      "id": "8",
+      "name": "rule",
+      "bbox": [
+        96,
+        350,
+        760,
+        5
+      ],
+      "composeSource": {
+        "run": 8,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2",
+      "lineColor": "#004EA2",
+      "lineWidth": 0
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dsji5sne",
+      "id": "9",
+      "name": "toc-heading",
+      "bbox": [
+        96,
+        402,
+        220,
+        54
+      ],
+      "composeSource": {
+        "run": 9,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "目录",
+      "textPreview": "目录",
+      "resolvedFontSize": 40,
+      "resolvedTextStyle": {
+        "fontSize": 40,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "目录"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "目录",
+          "resolvedTextStyle": {
+            "fontSize": 40,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "目录",
+              "fontSize": 40,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pwb2hwfy",
+      "id": "10",
+      "name": "shape",
+      "bbox": [
+        96,
+        488,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 10,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0bi9s36h",
+      "id": "11",
+      "name": "shape",
+      "bbox": [
+        96,
+        488,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 11,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7qpg3ex0",
+      "id": "12",
+      "name": "toc-no",
+      "bbox": [
+        118,
+        496,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 12,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "01",
+      "textPreview": "01",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "01"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "01",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "01",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/i5sneloj",
+      "id": "13",
+      "name": "toc-label",
+      "bbox": [
+        182,
+        496,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 13,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "模块定位",
+      "textPreview": "模块定位",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "模块定位"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "模块定位",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "模块定位",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/p4r65wju",
+      "id": "14",
+      "name": "shape",
+      "bbox": [
+        96,
+        568,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 14,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wjudg7ad",
+      "id": "15",
+      "name": "shape",
+      "bbox": [
+        96,
+        564,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 15,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#53958D"
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7y1kre1w",
+      "id": "16",
+      "name": "toc-no",
+      "bbox": [
+        118,
+        574,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 16,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "02",
+      "textPreview": "02",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "02"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "02",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "02",
+              "fontSize": 25,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ed8v6psf",
+      "id": "17",
+      "name": "toc-label",
+      "bbox": [
+        182,
+        574,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 17,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "配置窗口",
+      "textPreview": "配置窗口",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "配置窗口"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "配置窗口",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "配置窗口",
+              "fontSize": 25,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/p8nqxs72",
+      "id": "18",
+      "name": "shape",
+      "bbox": [
+        96,
+        640,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 18,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/0nuxc3yl",
+      "id": "19",
+      "name": "shape",
+      "bbox": [
+        96,
+        644,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 19,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#C00000"
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wval87ed",
+      "id": "20",
+      "name": "toc-no",
+      "bbox": [
+        118,
+        652,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 20,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "03",
+      "textPreview": "03",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "03"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "03",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "03",
+              "fontSize": 25,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pg3ex0nu",
+      "id": "21",
+      "name": "toc-label",
+      "bbox": [
+        182,
+        652,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 21,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "接口设计",
+      "textPreview": "接口设计",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "接口设计"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "接口设计",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "接口设计",
+              "fontSize": 25,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 22,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/epkzupwb",
+      "id": "22",
+      "name": "shape",
+      "bbox": [
+        96,
+        720,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 22,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7adsji5s",
+      "id": "23",
+      "name": "shape",
+      "bbox": [
+        96,
+        720,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 23,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#D97706"
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/w7mp0bi9",
+      "id": "24",
+      "name": "toc-no",
+      "bbox": [
+        118,
+        730,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 24,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "04",
+      "textPreview": "04",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "04"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "04",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "04",
+              "fontSize": 25,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/psfil0rq",
+      "id": "25",
+      "name": "toc-label",
+      "bbox": [
+        182,
+        730,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 25,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "后端流程",
+      "textPreview": "后端流程",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "后端流程"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "后端流程",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "后端流程",
+              "fontSize": 25,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e1w7mp0b",
+      "id": "26",
+      "name": "shape",
+      "bbox": [
+        96,
+        800,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 26,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7mp0bi9s",
+      "id": "27",
+      "name": "shape",
+      "bbox": [
+        96,
+        800,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 27,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wfyxobm5",
+      "id": "28",
+      "name": "toc-no",
+      "bbox": [
+        118,
+        808,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 28,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "05",
+      "textPreview": "05",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "05"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "05",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "05",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/l0rqd4vm",
+      "id": "29",
+      "name": "toc-label",
+      "bbox": [
+        182,
+        808,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 29,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "图签 ROI",
+      "textPreview": "图签 ROI",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "图签 ROI"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "图签 ROI",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "图签 ROI",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/b2hwfyxo",
+      "id": "30",
+      "name": "shape",
+      "bbox": [
+        600,
+        488,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 30,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 31,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mhk3q5o7",
+      "id": "31",
+      "name": "shape",
+      "bbox": [
+        596,
+        488,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 31,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 32,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/t83itgfm",
+      "id": "32",
+      "name": "toc-no",
+      "bbox": [
+        618,
+        496,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 32,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "06",
+      "textPreview": "06",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "06"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "06",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "06",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 33,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4nap4r65",
+      "id": "33",
+      "name": "toc-label",
+      "bbox": [
+        682,
+        496,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 33,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "规则配置",
+      "textPreview": "规则配置",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "规则配置"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "规则配置",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "规则配置",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 34,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bq1oryts",
+      "id": "34",
+      "name": "shape",
+      "bbox": [
+        600,
+        568,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 34,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 35,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m58z25kb",
+      "id": "35",
+      "name": "shape",
+      "bbox": [
+        596,
+        564,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 35,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#53958D"
+    },
+    {
+      "order": 36,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/twra5gbq",
+      "id": "36",
+      "name": "toc-no",
+      "bbox": [
+        618,
+        574,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 36,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "07",
+      "textPreview": "07",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "07"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "07",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "07",
+              "fontSize": 25,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 37,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4byhgn29",
+      "id": "37",
+      "name": "toc-label",
+      "bbox": [
+        682,
+        574,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 37,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "执行证据",
+      "textPreview": "执行证据",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "执行证据"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "执行证据",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "执行证据",
+              "fontSize": 25,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bm58z25k",
+      "id": "38",
+      "name": "shape",
+      "bbox": [
+        600,
+        640,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 38,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 39,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m1cfa9w3",
+      "id": "39",
+      "name": "shape",
+      "bbox": [
+        596,
+        644,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 39,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#C00000"
+    },
+    {
+      "order": 40,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2x4nap4r",
+      "id": "40",
+      "name": "toc-no",
+      "bbox": [
+        618,
+        652,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 40,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "08",
+      "textPreview": "08",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "08"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "08",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "08",
+              "fontSize": 25,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 41,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vixczed8",
+      "id": "41",
+      "name": "toc-label",
+      "bbox": [
+        682,
+        652,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 41,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "替换摘要",
+      "textPreview": "替换摘要",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "替换摘要"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "替换摘要",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "替换摘要",
+              "fontSize": 25,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 42,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/k3q5o7qp",
+      "id": "42",
+      "name": "shape",
+      "bbox": [
+        600,
+        720,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 42,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 43,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/donyd0z6",
+      "id": "43",
+      "name": "shape",
+      "bbox": [
+        596,
+        720,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 43,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#D97706"
+    },
+    {
+      "order": 44,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6psfil0r",
+      "id": "44",
+      "name": "toc-no",
+      "bbox": [
+        618,
+        730,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 44,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "09",
+      "textPreview": "09",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "09"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "09",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "09",
+              "fontSize": 25,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 45,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/val87ed8",
+      "id": "45",
+      "name": "toc-label",
+      "bbox": [
+        682,
+        730,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 45,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "出图联动",
+      "textPreview": "出图联动",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "出图联动"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "出图联动",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "出图联动",
+              "fontSize": 25,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 46,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kre1w7mp",
+      "id": "46",
+      "name": "shape",
+      "bbox": [
+        600,
+        800,
+        360,
+        56
+      ],
+      "composeSource": {
+        "run": 46,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(255, 255, 255, 0.86)"
+    },
+    {
+      "order": 47,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dcbulwva",
+      "id": "47",
+      "name": "shape",
+      "bbox": [
+        596,
+        800,
+        8,
+        60
+      ],
+      "composeSource": {
+        "run": 47,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 48,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2lszqtcj",
+      "id": "48",
+      "name": "toc-no",
+      "bbox": [
+        618,
+        808,
+        58,
+        34
+      ],
+      "composeSource": {
+        "run": 48,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "10",
+      "textPreview": "10",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "10"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "10",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "10",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 49,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/v6psfil0",
+      "id": "49",
+      "name": "toc-label",
+      "bbox": [
+        682,
+        808,
+        240,
+        34
+      ],
+      "composeSource": {
+        "run": 49,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "验收方式",
+      "textPreview": "验收方式",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "fontSize": 25,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "验收方式"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "验收方式",
+          "resolvedTextStyle": {
+            "fontSize": 25,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "验收方式",
+              "fontSize": 25,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 50,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h4byhgn2",
+      "id": "50",
+      "name": "date",
+      "bbox": [
+        96,
+        928,
+        420,
+        34
+      ],
+      "composeSource": {
+        "run": 50,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "汇报版 | 2026-05-26",
+      "textPreview": "汇报版 | 2026-05-26",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#7B8497",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "汇报版 | 2026-05-26"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "汇报版 | 2026-05-26",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#7B8497",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "汇报版 | 2026-05-26",
+              "fontSize": 20,
+              "color": "#7B8497",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 51,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sji5snel",
+      "id": "51",
+      "name": "footer-developer",
+      "bbox": [
+        1620,
+        1018,
+        230,
+        28
+      ],
+      "composeSource": {
+        "run": 51,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "开发者：王任超",
+      "textPreview": "开发者：王任超",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "fontSize": 18,
+        "typeface": "+mn-lt",
+        "color": "#FFFFFF",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "开发者：王任超"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "开发者：王任超",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "color": "#FFFFFF",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "开发者：王任超",
+              "fontSize": 18,
+              "color": "#FFFFFF",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    }
+  ],
+  "composeRuns": [
+    {
+      "index": 1,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/d8v6psfi",
+          "id": "1",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 18,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 18,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 16,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/6hcrmhk3",
+          "id": "2",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 3,
+      "frame": {
+        "left": 1320,
+        "top": 0,
+        "width": 600,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "image",
+        "name": "image",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1320,
+          "top": 0,
+          "width": 600,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 1320,
+          "top": 0,
+          "width": 600,
+          "height": 1080
+        },
+        "children": [],
+        "source": {
+          "kind": "dataUrl"
+        },
+        "contentType": "image/jpeg",
+        "fit": "cover",
+        "alt": "CNPE Hebei Branch building",
+        "element": {
+          "aid": "im/qtcj6tov",
+          "id": "3",
+          "kind": "image"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "frame": {
+        "left": 1320,
+        "top": 0,
+        "width": 600,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1320,
+          "top": 0,
+          "width": 600,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 1320,
+          "top": 0,
+          "width": 600,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/ovahoza1",
+          "id": "4",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "frame": {
+        "left": 1410,
+        "top": 8,
+        "width": 360,
+        "height": 190
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "image",
+        "name": "image",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1410,
+          "top": 8,
+          "width": 360,
+          "height": 190
+        },
+        "snappedFrame": {
+          "left": 1410,
+          "top": 8,
+          "width": 360,
+          "height": 190
+        },
+        "children": [],
+        "source": {
+          "kind": "dataUrl"
+        },
+        "contentType": "image/png",
+        "fit": "contain",
+        "alt": "CNPE logo",
+        "element": {
+          "aid": "im/87ed8bat",
+          "id": "5",
+          "kind": "image"
+        }
+      }
+    },
+    {
+      "index": 6,
+      "frame": {
+        "left": 96,
+        "top": 150,
+        "width": 920,
+        "height": 96
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "cover-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 150,
+          "width": 920,
+          "height": 96
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 150,
+          "width": 920,
+          "height": 96
+        },
+        "children": [],
+        "text": "翻版功能模块介绍",
+        "transform": "none",
+        "element": {
+          "aid": "sh/6tovahoz",
+          "id": "6",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 7,
+      "frame": {
+        "left": 96,
+        "top": 264,
+        "width": 1000,
+        "height": 64
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "cover-subtitle",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 264,
+          "width": 1000,
+          "height": 64
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 264,
+          "width": 1000,
+          "height": 64
+        },
+        "children": [],
+        "text": "旧项目 DWG 到目标项目 DWG 的批量翻版链路",
+        "transform": "none",
+        "element": {
+          "aid": "sh/vahoza1g",
+          "id": "7",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 8,
+      "frame": {
+        "left": 96,
+        "top": 350,
+        "width": 760,
+        "height": 8
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "rule",
+        "name": "rule",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fixed",
+            "value": 5
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 5
+        },
+        "frame": {
+          "left": 96,
+          "top": 350,
+          "width": 760,
+          "height": 5
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 350,
+          "width": 760,
+          "height": 5
+        },
+        "children": [],
+        "weight": 5,
+        "element": {
+          "aid": "sh/o7qpg3ex",
+          "id": "8",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 9,
+      "frame": {
+        "left": 96,
+        "top": 402,
+        "width": 220,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-heading",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 402,
+          "width": 220,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 402,
+          "width": 220,
+          "height": 54
+        },
+        "children": [],
+        "text": "目录",
+        "transform": "none",
+        "element": {
+          "aid": "sh/dsji5sne",
+          "id": "9",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 10,
+      "frame": {
+        "left": 96,
+        "top": 486,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 486,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 488,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/pwb2hwfy",
+          "id": "10",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 11,
+      "frame": {
+        "left": 96,
+        "top": 486,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 486,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 488,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/0bi9s36h",
+          "id": "11",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 12,
+      "frame": {
+        "left": 118,
+        "top": 496,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 118,
+          "top": 496,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 118,
+          "top": 496,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "01",
+        "transform": "none",
+        "element": {
+          "aid": "sh/7qpg3ex0",
+          "id": "12",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 13,
+      "frame": {
+        "left": 182,
+        "top": 496,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 182,
+          "top": 496,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 182,
+          "top": 496,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "模块定位",
+        "transform": "none",
+        "element": {
+          "aid": "sh/i5sneloj",
+          "id": "13",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 14,
+      "frame": {
+        "left": 96,
+        "top": 564,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 564,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 568,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/p4r65wju",
+          "id": "14",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 15,
+      "frame": {
+        "left": 96,
+        "top": 564,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 564,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 564,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/wjudg7ad",
+          "id": "15",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 16,
+      "frame": {
+        "left": 118,
+        "top": 574,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 118,
+          "top": 574,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 118,
+          "top": 574,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "02",
+        "transform": "none",
+        "element": {
+          "aid": "sh/7y1kre1w",
+          "id": "16",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 17,
+      "frame": {
+        "left": 182,
+        "top": 574,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 182,
+          "top": 574,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 182,
+          "top": 574,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "配置窗口",
+        "transform": "none",
+        "element": {
+          "aid": "sh/ed8v6psf",
+          "id": "17",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 18,
+      "frame": {
+        "left": 96,
+        "top": 642,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 642,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 640,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/p8nqxs72",
+          "id": "18",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 19,
+      "frame": {
+        "left": 96,
+        "top": 642,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 642,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 644,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/0nuxc3yl",
+          "id": "19",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 20,
+      "frame": {
+        "left": 118,
+        "top": 652,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 118,
+          "top": 652,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 118,
+          "top": 652,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "03",
+        "transform": "none",
+        "element": {
+          "aid": "sh/wval87ed",
+          "id": "20",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 21,
+      "frame": {
+        "left": 182,
+        "top": 652,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 182,
+          "top": 652,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 182,
+          "top": 652,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "接口设计",
+        "transform": "none",
+        "element": {
+          "aid": "sh/pg3ex0nu",
+          "id": "21",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 22,
+      "frame": {
+        "left": 96,
+        "top": 720,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 720,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 720,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/epkzupwb",
+          "id": "22",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 23,
+      "frame": {
+        "left": 96,
+        "top": 720,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 720,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 720,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/7adsji5s",
+          "id": "23",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 24,
+      "frame": {
+        "left": 118,
+        "top": 730,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 118,
+          "top": 730,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 118,
+          "top": 730,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "04",
+        "transform": "none",
+        "element": {
+          "aid": "sh/w7mp0bi9",
+          "id": "24",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 25,
+      "frame": {
+        "left": 182,
+        "top": 730,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 182,
+          "top": 730,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 182,
+          "top": 730,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "后端流程",
+        "transform": "none",
+        "element": {
+          "aid": "sh/psfil0rq",
+          "id": "25",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "frame": {
+        "left": 96,
+        "top": 798,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 798,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 800,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/e1w7mp0b",
+          "id": "26",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 27,
+      "frame": {
+        "left": 96,
+        "top": 798,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 798,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 800,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/7mp0bi9s",
+          "id": "27",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 28,
+      "frame": {
+        "left": 118,
+        "top": 808,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 118,
+          "top": 808,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 118,
+          "top": 808,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "05",
+        "transform": "none",
+        "element": {
+          "aid": "sh/wfyxobm5",
+          "id": "28",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 29,
+      "frame": {
+        "left": 182,
+        "top": 808,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 182,
+          "top": 808,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 182,
+          "top": 808,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "图签 ROI",
+        "transform": "none",
+        "element": {
+          "aid": "sh/l0rqd4vm",
+          "id": "29",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 30,
+      "frame": {
+        "left": 596,
+        "top": 486,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 486,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 600,
+          "top": 488,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/b2hwfyxo",
+          "id": "30",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 31,
+      "frame": {
+        "left": 596,
+        "top": 486,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 486,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 596,
+          "top": 488,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/mhk3q5o7",
+          "id": "31",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 32,
+      "frame": {
+        "left": 618,
+        "top": 496,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 618,
+          "top": 496,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 618,
+          "top": 496,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "06",
+        "transform": "none",
+        "element": {
+          "aid": "sh/t83itgfm",
+          "id": "32",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 33,
+      "frame": {
+        "left": 682,
+        "top": 496,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 682,
+          "top": 496,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 682,
+          "top": 496,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "规则配置",
+        "transform": "none",
+        "element": {
+          "aid": "sh/4nap4r65",
+          "id": "33",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 34,
+      "frame": {
+        "left": 596,
+        "top": 564,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 564,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 600,
+          "top": 568,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/bq1oryts",
+          "id": "34",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 35,
+      "frame": {
+        "left": 596,
+        "top": 564,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 564,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 596,
+          "top": 564,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/m58z25kb",
+          "id": "35",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 36,
+      "frame": {
+        "left": 618,
+        "top": 574,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 618,
+          "top": 574,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 618,
+          "top": 574,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "07",
+        "transform": "none",
+        "element": {
+          "aid": "sh/twra5gbq",
+          "id": "36",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 37,
+      "frame": {
+        "left": 682,
+        "top": 574,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 682,
+          "top": 574,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 682,
+          "top": 574,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "执行证据",
+        "transform": "none",
+        "element": {
+          "aid": "sh/4byhgn29",
+          "id": "37",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 38,
+      "frame": {
+        "left": 596,
+        "top": 642,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 642,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 600,
+          "top": 640,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/bm58z25k",
+          "id": "38",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 39,
+      "frame": {
+        "left": 596,
+        "top": 642,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 642,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 596,
+          "top": 644,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/m1cfa9w3",
+          "id": "39",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 40,
+      "frame": {
+        "left": 618,
+        "top": 652,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 618,
+          "top": 652,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 618,
+          "top": 652,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "08",
+        "transform": "none",
+        "element": {
+          "aid": "sh/2x4nap4r",
+          "id": "40",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 41,
+      "frame": {
+        "left": 682,
+        "top": 652,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 682,
+          "top": 652,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 682,
+          "top": 652,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "替换摘要",
+        "transform": "none",
+        "element": {
+          "aid": "sh/vixczed8",
+          "id": "41",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 42,
+      "frame": {
+        "left": 596,
+        "top": 720,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 720,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 600,
+          "top": 720,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/k3q5o7qp",
+          "id": "42",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 43,
+      "frame": {
+        "left": 596,
+        "top": 720,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 720,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 596,
+          "top": 720,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/donyd0z6",
+          "id": "43",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 44,
+      "frame": {
+        "left": 618,
+        "top": 730,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 618,
+          "top": 730,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 618,
+          "top": 730,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "09",
+        "transform": "none",
+        "element": {
+          "aid": "sh/6psfil0r",
+          "id": "44",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 45,
+      "frame": {
+        "left": 682,
+        "top": 730,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 682,
+          "top": 730,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 682,
+          "top": 730,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "出图联动",
+        "transform": "none",
+        "element": {
+          "aid": "sh/val87ed8",
+          "id": "45",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 46,
+      "frame": {
+        "left": 596,
+        "top": 798,
+        "width": 360,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 798,
+          "width": 360,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 600,
+          "top": 800,
+          "width": 360,
+          "height": 56
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/kre1w7mp",
+          "id": "46",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 47,
+      "frame": {
+        "left": 596,
+        "top": 798,
+        "width": 8,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 596,
+          "top": 798,
+          "width": 8,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 596,
+          "top": 800,
+          "width": 8,
+          "height": 60
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/dcbulwva",
+          "id": "47",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 48,
+      "frame": {
+        "left": 618,
+        "top": 808,
+        "width": 58,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 618,
+          "top": 808,
+          "width": 58,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 618,
+          "top": 808,
+          "width": 58,
+          "height": 34
+        },
+        "children": [],
+        "text": "10",
+        "transform": "none",
+        "element": {
+          "aid": "sh/2lszqtcj",
+          "id": "48",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 49,
+      "frame": {
+        "left": 682,
+        "top": 808,
+        "width": 240,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "toc-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 682,
+          "top": 808,
+          "width": 240,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 682,
+          "top": 808,
+          "width": 240,
+          "height": 34
+        },
+        "children": [],
+        "text": "验收方式",
+        "transform": "none",
+        "element": {
+          "aid": "sh/v6psfil0",
+          "id": "49",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 50,
+      "frame": {
+        "left": 96,
+        "top": 928,
+        "width": 420,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "date",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 928,
+          "width": 420,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 928,
+          "width": 420,
+          "height": 34
+        },
+        "children": [],
+        "text": "汇报版 | 2026-05-26",
+        "transform": "none",
+        "element": {
+          "aid": "sh/h4byhgn2",
+          "id": "50",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 51,
+      "frame": {
+        "left": 1620,
+        "top": 1018,
+        "width": 230,
+        "height": 28
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "footer-developer",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1620,
+          "top": 1018,
+          "width": 230,
+          "height": 28
+        },
+        "snappedFrame": {
+          "left": 1620,
+          "top": 1018,
+          "width": 230,
+          "height": 28
+        },
+        "children": [],
+        "text": "开发者：王任超",
+        "transform": "none",
+        "element": {
+          "aid": "sh/sji5snel",
+          "id": "51",
+          "kind": "shape"
+        }
+      }
+    }
+  ]
+}

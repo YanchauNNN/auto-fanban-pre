@@ -1,0 +1,3233 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/8d856h",
+    "id": "8d856h",
+    "slide": 9,
+    "layoutId": "b8350e11-e7fd-43d7-a057-ff96172f8d3e",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+    "masterLayoutName": "Master",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "+mn-lt"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "b8350e11-e7fd-43d7-a057-ff96172f8d3e",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "6fc10801-3568-4d50-9d7d-bfcc90766bf8",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dsji5sne",
+      "id": "1",
+      "name": "shape",
+      "bbox": [
+        0,
+        0,
+        1920,
+        1080
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#F7F8FA"
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/61032lsz",
+      "id": "2",
+      "name": "section-no",
+      "bbox": [
+        70,
+        48,
+        90,
+        60
+      ],
+      "composeSource": {
+        "run": 2,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "08",
+      "textPreview": "08",
+      "resolvedFontSize": 42,
+      "resolvedTextStyle": {
+        "fontSize": 42,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "08"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "08",
+          "resolvedTextStyle": {
+            "fontSize": 42,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "08",
+              "fontSize": 42,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vmtwra5g",
+      "id": "3",
+      "name": "section-title",
+      "bbox": [
+        170,
+        48,
+        500,
+        60
+      ],
+      "composeSource": {
+        "run": 3,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "替换摘要",
+      "textPreview": "替换摘要",
+      "resolvedFontSize": 40,
+      "resolvedTextStyle": {
+        "fontSize": 40,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "替换摘要"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "替换摘要",
+          "resolvedTextStyle": {
+            "fontSize": 40,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "替换摘要",
+              "fontSize": 40,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/oj2t83it",
+      "id": "4",
+      "name": "shape",
+      "bbox": [
+        72,
+        128,
+        16,
+        80
+      ],
+      "composeSource": {
+        "run": 4,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/d4vmtwra",
+      "id": "5",
+      "name": "claim",
+      "bbox": [
+        100,
+        112,
+        1380,
+        100
+      ],
+      "composeSource": {
+        "run": 32,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "摘要页集中呈现替换数量、图纸影响和复核重点",
+      "textPreview": "摘要页集中呈现替换数量、图纸影响和复核重点",
+      "resolvedFontSize": 48,
+      "resolvedTextStyle": {
+        "fontSize": 48,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "摘要页集中呈现替换数量、图纸影响和复核重点"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "摘要页集中呈现替换数量、图纸影响和复核重点",
+          "resolvedTextStyle": {
+            "fontSize": 48,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "摘要页集中呈现替换数量、图纸影响和复核重点",
+              "fontSize": 48,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6dcbulwv",
+      "id": "6",
+      "name": "rule",
+      "bbox": [
+        70,
+        250,
+        1080,
+        5
+      ],
+      "composeSource": {
+        "run": 31,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2",
+      "lineColor": "#004EA2",
+      "lineWidth": 0
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vy90je9c",
+      "id": "7",
+      "name": "subtitle",
+      "bbox": [
+        70,
+        274,
+        1280,
+        58
+      ],
+      "composeSource": {
+        "run": 30,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "报告之外，详情页直接展示高频替换文本和关键图纸编码。",
+      "textPreview": "报告之外，详情页直接展示高频替换文本和关键图纸编码。",
+      "resolvedFontSize": 28,
+      "resolvedTextStyle": {
+        "fontSize": 28,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "报告之外，详情页直接展示高频替换文本和关键图纸编码。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "报告之外，详情页直接展示高频替换文本和关键图纸编码。",
+          "resolvedTextStyle": {
+            "fontSize": 28,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "报告之外，详情页直接展示高频替换文本和关键图纸编码。",
+              "fontSize": 28,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 8,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/t83itgfm",
+      "id": "8",
+      "name": "image",
+      "bbox": [
+        1494,
+        16,
+        360,
+        190
+      ],
+      "composeSource": {
+        "run": 8,
+        "path": "0"
+      },
+      "alt": "CNPE logo",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "e0f9712a-1cd6-4116-b8f4-e17b06e3447f",
+        "contentType": "image/png",
+        "byteLength": 17720
+      }
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/d8v6psfi",
+      "id": "9",
+      "name": "shape",
+      "bbox": [
+        72,
+        344,
+        1104,
+        632
+      ],
+      "composeSource": {
+        "run": 9,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/twra5gbq",
+      "id": "10",
+      "name": "shape",
+      "bbox": [
+        72,
+        344,
+        1104,
+        632
+      ],
+      "composeSource": {
+        "run": 10,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "rgba(0, 0, 0, 0)",
+      "lineColor": "#D9DEE8",
+      "lineWidth": 2
+    },
+    {
+      "order": 11,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/judg7ads",
+      "id": "11",
+      "name": "image",
+      "bbox": [
+        80,
+        350,
+        1080,
+        608
+      ],
+      "composeSource": {
+        "run": 11,
+        "path": "0"
+      },
+      "alt": "翻版摘要与高频替换文本",
+      "contentType": "image/png",
+      "imageFit": "cover",
+      "asset": {
+        "assetId": "4c45ad6e-afbb-4a12-8329-f1bbf507f29b",
+        "contentType": "image/png",
+        "byteLength": 213266
+      }
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bq1oryts",
+      "id": "12",
+      "name": "shape",
+      "bbox": [
+        1224,
+        352,
+        248,
+        152
+      ],
+      "composeSource": {
+        "run": 12,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/m58z25kb",
+      "id": "13",
+      "name": "metric-value",
+      "bbox": [
+        1248,
+        370,
+        194,
+        80
+      ],
+      "composeSource": {
+        "run": 13,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "95",
+      "textPreview": "95",
+      "resolvedFontSize": 62,
+      "resolvedTextStyle": {
+        "fontSize": 62,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "95"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "95",
+          "resolvedTextStyle": {
+            "fontSize": 62,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "95",
+              "fontSize": 62,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/t83itgfm",
+      "id": "14",
+      "name": "metric-label",
+      "bbox": [
+        1250,
+        454,
+        190,
+        34
+      ],
+      "composeSource": {
+        "run": 14,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "替换数量",
+      "textPreview": "替换数量",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "替换数量"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "替换数量",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "替换数量",
+              "fontSize": 27,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4nap4r65",
+      "id": "15",
+      "name": "shape",
+      "bbox": [
+        1512,
+        352,
+        248,
+        152
+      ],
+      "composeSource": {
+        "run": 15,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/b2hwfyxo",
+      "id": "16",
+      "name": "metric-value",
+      "bbox": [
+        1538,
+        370,
+        194,
+        80
+      ],
+      "composeSource": {
+        "run": 16,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "15",
+      "textPreview": "15",
+      "resolvedFontSize": 62,
+      "resolvedTextStyle": {
+        "fontSize": 62,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "15"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "15",
+          "resolvedTextStyle": {
+            "fontSize": 62,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "15",
+              "fontSize": 62,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/mhk3q5o7",
+      "id": "17",
+      "name": "metric-label",
+      "bbox": [
+        1540,
+        454,
+        190,
+        34
+      ],
+      "composeSource": {
+        "run": 17,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "受影响图纸数",
+      "textPreview": "受影响图纸数",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "受影响图纸数"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "受影响图纸数",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "受影响图纸数",
+              "fontSize": 27,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/tgfmlkjm",
+      "id": "18",
+      "name": "shape",
+      "bbox": [
+        1224,
+        544,
+        248,
+        152
+      ],
+      "composeSource": {
+        "run": 18,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4vmtwra5",
+      "id": "19",
+      "name": "metric-value",
+      "bbox": [
+        1248,
+        560,
+        194,
+        80
+      ],
+      "composeSource": {
+        "run": 19,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2016",
+      "textPreview": "2016",
+      "resolvedFontSize": 62,
+      "resolvedTextStyle": {
+        "fontSize": 62,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2016"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2016",
+          "resolvedTextStyle": {
+            "fontSize": 62,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2016",
+              "fontSize": 62,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/gr2p8nqx",
+      "id": "20",
+      "name": "metric-label",
+      "bbox": [
+        1250,
+        644,
+        190,
+        34
+      ],
+      "composeSource": {
+        "run": 20,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "源项目号",
+      "textPreview": "源项目号",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "源项目号"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "源项目号",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "源项目号",
+              "fontSize": 27,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9cvixcze",
+      "id": "21",
+      "name": "shape",
+      "bbox": [
+        1512,
+        544,
+        248,
+        152
+      ],
+      "composeSource": {
+        "run": 21,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 22,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ylc7u54z",
+      "id": "22",
+      "name": "metric-value",
+      "bbox": [
+        1538,
+        560,
+        194,
+        80
+      ],
+      "composeSource": {
+        "run": 22,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2026",
+      "textPreview": "2026",
+      "resolvedFontSize": 62,
+      "resolvedTextStyle": {
+        "fontSize": 62,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2026"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2026",
+          "resolvedTextStyle": {
+            "fontSize": 62,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2026",
+              "fontSize": 62,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/r65wjudg",
+      "id": "23",
+      "name": "metric-label",
+      "bbox": [
+        1540,
+        644,
+        190,
+        34
+      ],
+      "composeSource": {
+        "run": 23,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "目标项目号",
+      "textPreview": "目标项目号",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "目标项目号"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "目标项目号",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "目标项目号",
+              "fontSize": 27,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/g3ex0nux",
+      "id": "24",
+      "name": "shape",
+      "bbox": [
+        1224,
+        720,
+        544,
+        136
+      ],
+      "composeSource": {
+        "run": 24,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5o7qpg3e",
+      "id": "25",
+      "name": "shape",
+      "bbox": [
+        1224,
+        720,
+        16,
+        136
+      ],
+      "composeSource": {
+        "run": 25,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/yxobm58z",
+      "id": "26",
+      "name": "card-title",
+      "bbox": [
+        1254,
+        736,
+        472,
+        34
+      ],
+      "composeSource": {
+        "run": 26,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "复核重点",
+      "textPreview": "复核重点",
+      "resolvedFontSize": 28,
+      "resolvedTextStyle": {
+        "fontSize": 28,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "复核重点"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "复核重点",
+          "resolvedTextStyle": {
+            "fontSize": 28,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "复核重点",
+              "fontSize": 28,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nih4byhg",
+      "id": "27",
+      "name": "card-body",
+      "bbox": [
+        1254,
+        798,
+        472,
+        46
+      ],
+      "composeSource": {
+        "run": 27,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适合作为人工抽检入口。",
+      "textPreview": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适合作为人工抽检入口。",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "fontSize": 18,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适"
+          },
+          {
+            "index": 2,
+            "text": "合作为人工抽检入口。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适合作为人工抽检入口。",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适合作为人工抽检入口。",
+              "fontSize": 18,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/g7adsji5",
+      "id": "28",
+      "name": "shape",
+      "bbox": [
+        1224,
+        880,
+        544,
+        104
+      ],
+      "composeSource": {
+        "run": 28,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9s36hcrm",
+      "id": "29",
+      "name": "shape",
+      "bbox": [
+        1224,
+        880,
+        16,
+        104
+      ],
+      "composeSource": {
+        "run": 29,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#53958D"
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/vy90je9c",
+      "id": "30",
+      "name": "card-title",
+      "bbox": [
+        1254,
+        898,
+        472,
+        34
+      ],
+      "composeSource": {
+        "run": 30,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "索引图",
+      "textPreview": "索引图",
+      "resolvedFontSize": 28,
+      "resolvedTextStyle": {
+        "fontSize": 28,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "索引图"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "索引图",
+          "resolvedTextStyle": {
+            "fontSize": 28,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "索引图",
+              "fontSize": 28,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 31,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/6dcbulwv",
+      "id": "31",
+      "name": "card-body",
+      "bbox": [
+        1254,
+        950,
+        472,
+        24
+      ],
+      "composeSource": {
+        "run": 31,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "厂房索引图替换在同一任务中记录执行结果。",
+      "textPreview": "厂房索引图替换在同一任务中记录执行结果。",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "fontSize": 18,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "厂房索引图替换在同一任务中记录执行结果。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "厂房索引图替换在同一任务中记录执行结果。",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "厂房索引图替换在同一任务中记录执行结果。",
+              "fontSize": 18,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 32,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/d4vmtwra",
+      "id": "32",
+      "name": "footer-developer",
+      "bbox": [
+        1620,
+        1018,
+        230,
+        28
+      ],
+      "composeSource": {
+        "run": 32,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "开发者：王任超",
+      "textPreview": "开发者：王任超",
+      "resolvedFontSize": 18,
+      "resolvedTextStyle": {
+        "fontSize": 18,
+        "typeface": "+mn-lt",
+        "color": "#7B8497",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "开发者：王任超"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "开发者：王任超",
+          "resolvedTextStyle": {
+            "fontSize": 18,
+            "color": "#7B8497",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "开发者：王任超",
+              "fontSize": 18,
+              "color": "#7B8497",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    }
+  ],
+  "composeRuns": [
+    {
+      "index": 1,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/dsji5sne",
+          "id": "1",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "frame": {
+        "left": 70,
+        "top": 48,
+        "width": 90,
+        "height": 60
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "section-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 48,
+          "width": 90,
+          "height": 60
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 48,
+          "width": 90,
+          "height": 60
+        },
+        "children": [],
+        "text": "08",
+        "transform": "none",
+        "element": {
+          "aid": "sh/61032lsz",
+          "id": "2",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 3,
+      "frame": {
+        "left": 170,
+        "top": 48,
+        "width": 500,
+        "height": 60
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "section-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 170,
+          "top": 48,
+          "width": 500,
+          "height": 60
+        },
+        "snappedFrame": {
+          "left": 170,
+          "top": 48,
+          "width": 500,
+          "height": 60
+        },
+        "children": [],
+        "text": "替换摘要",
+        "transform": "none",
+        "element": {
+          "aid": "sh/vmtwra5g",
+          "id": "3",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "frame": {
+        "left": 70,
+        "top": 128,
+        "width": 12,
+        "height": 82
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 128,
+          "width": 12,
+          "height": 82
+        },
+        "snappedFrame": {
+          "left": 72,
+          "top": 128,
+          "width": 16,
+          "height": 80
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/oj2t83it",
+          "id": "4",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "frame": {
+        "left": 100,
+        "top": 112,
+        "width": 1380,
+        "height": 100
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "claim",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 100,
+          "top": 112,
+          "width": 1380,
+          "height": 100
+        },
+        "snappedFrame": {
+          "left": 100,
+          "top": 112,
+          "width": 1380,
+          "height": 100
+        },
+        "children": [],
+        "text": "摘要页集中呈现替换数量、图纸影响和复核重点",
+        "transform": "none",
+        "element": {
+          "aid": "sh/d4vmtwra",
+          "id": "5",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 6,
+      "frame": {
+        "left": 70,
+        "top": 250,
+        "width": 1080,
+        "height": 8
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "rule",
+        "name": "rule",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fixed",
+            "value": 5
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 5
+        },
+        "frame": {
+          "left": 70,
+          "top": 250,
+          "width": 1080,
+          "height": 5
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 250,
+          "width": 1080,
+          "height": 5
+        },
+        "children": [],
+        "weight": 5,
+        "element": {
+          "aid": "sh/6dcbulwv",
+          "id": "6",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 7,
+      "frame": {
+        "left": 70,
+        "top": 274,
+        "width": 1280,
+        "height": 58
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "subtitle",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 274,
+          "width": 1280,
+          "height": 58
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 274,
+          "width": 1280,
+          "height": 58
+        },
+        "children": [],
+        "text": "报告之外，详情页直接展示高频替换文本和关键图纸编码。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/vy90je9c",
+          "id": "7",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 8,
+      "frame": {
+        "left": 1494,
+        "top": 16,
+        "width": 360,
+        "height": 190
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "image",
+        "name": "image",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1494,
+          "top": 16,
+          "width": 360,
+          "height": 190
+        },
+        "snappedFrame": {
+          "left": 1494,
+          "top": 16,
+          "width": 360,
+          "height": 190
+        },
+        "children": [],
+        "source": {
+          "kind": "dataUrl"
+        },
+        "contentType": "image/png",
+        "fit": "contain",
+        "alt": "CNPE logo",
+        "element": {
+          "aid": "im/t83itgfm",
+          "id": "8",
+          "kind": "image"
+        }
+      }
+    },
+    {
+      "index": 9,
+      "frame": {
+        "left": 70,
+        "top": 340,
+        "width": 1100,
+        "height": 628
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 340,
+          "width": 1100,
+          "height": 628
+        },
+        "snappedFrame": {
+          "left": 72,
+          "top": 344,
+          "width": 1104,
+          "height": 632
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/d8v6psfi",
+          "id": "9",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 10,
+      "frame": {
+        "left": 70,
+        "top": 340,
+        "width": 1100,
+        "height": 628
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 340,
+          "width": 1100,
+          "height": 628
+        },
+        "snappedFrame": {
+          "left": 72,
+          "top": 344,
+          "width": 1104,
+          "height": 632
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/twra5gbq",
+          "id": "10",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 11,
+      "frame": {
+        "left": 80,
+        "top": 350,
+        "width": 1080,
+        "height": 608
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "image",
+        "name": "image",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 80,
+          "top": 350,
+          "width": 1080,
+          "height": 608
+        },
+        "snappedFrame": {
+          "left": 80,
+          "top": 350,
+          "width": 1080,
+          "height": 608
+        },
+        "children": [],
+        "source": {
+          "kind": "dataUrl"
+        },
+        "contentType": "image/png",
+        "fit": "cover",
+        "alt": "翻版摘要与高频替换文本",
+        "element": {
+          "aid": "im/judg7ads",
+          "id": "11",
+          "kind": "image"
+        }
+      }
+    },
+    {
+      "index": 12,
+      "frame": {
+        "left": 1220,
+        "top": 350,
+        "width": 250,
+        "height": 150
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 350,
+          "width": 250,
+          "height": 150
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 352,
+          "width": 248,
+          "height": 152
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/bq1oryts",
+          "id": "12",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 13,
+      "frame": {
+        "left": 1248,
+        "top": 370,
+        "width": 194,
+        "height": 80
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-value",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1248,
+          "top": 370,
+          "width": 194,
+          "height": 80
+        },
+        "snappedFrame": {
+          "left": 1248,
+          "top": 370,
+          "width": 194,
+          "height": 80
+        },
+        "children": [],
+        "text": "95",
+        "transform": "none",
+        "element": {
+          "aid": "sh/m58z25kb",
+          "id": "13",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 14,
+      "frame": {
+        "left": 1250,
+        "top": 454,
+        "width": 190,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1250,
+          "top": 454,
+          "width": 190,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1250,
+          "top": 454,
+          "width": 190,
+          "height": 34
+        },
+        "children": [],
+        "text": "替换数量",
+        "transform": "none",
+        "element": {
+          "aid": "sh/t83itgfm",
+          "id": "14",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 15,
+      "frame": {
+        "left": 1510,
+        "top": 350,
+        "width": 250,
+        "height": 150
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1510,
+          "top": 350,
+          "width": 250,
+          "height": 150
+        },
+        "snappedFrame": {
+          "left": 1512,
+          "top": 352,
+          "width": 248,
+          "height": 152
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/4nap4r65",
+          "id": "15",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 16,
+      "frame": {
+        "left": 1538,
+        "top": 370,
+        "width": 194,
+        "height": 80
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-value",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1538,
+          "top": 370,
+          "width": 194,
+          "height": 80
+        },
+        "snappedFrame": {
+          "left": 1538,
+          "top": 370,
+          "width": 194,
+          "height": 80
+        },
+        "children": [],
+        "text": "15",
+        "transform": "none",
+        "element": {
+          "aid": "sh/b2hwfyxo",
+          "id": "16",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 17,
+      "frame": {
+        "left": 1540,
+        "top": 454,
+        "width": 190,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1540,
+          "top": 454,
+          "width": 190,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1540,
+          "top": 454,
+          "width": 190,
+          "height": 34
+        },
+        "children": [],
+        "text": "受影响图纸数",
+        "transform": "none",
+        "element": {
+          "aid": "sh/mhk3q5o7",
+          "id": "17",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 18,
+      "frame": {
+        "left": 1220,
+        "top": 540,
+        "width": 250,
+        "height": 150
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 540,
+          "width": 250,
+          "height": 150
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 544,
+          "width": 248,
+          "height": 152
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/tgfmlkjm",
+          "id": "18",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 19,
+      "frame": {
+        "left": 1248,
+        "top": 560,
+        "width": 194,
+        "height": 80
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-value",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1248,
+          "top": 560,
+          "width": 194,
+          "height": 80
+        },
+        "snappedFrame": {
+          "left": 1248,
+          "top": 560,
+          "width": 194,
+          "height": 80
+        },
+        "children": [],
+        "text": "2016",
+        "transform": "none",
+        "element": {
+          "aid": "sh/4vmtwra5",
+          "id": "19",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 20,
+      "frame": {
+        "left": 1250,
+        "top": 644,
+        "width": 190,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1250,
+          "top": 644,
+          "width": 190,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1250,
+          "top": 644,
+          "width": 190,
+          "height": 34
+        },
+        "children": [],
+        "text": "源项目号",
+        "transform": "none",
+        "element": {
+          "aid": "sh/gr2p8nqx",
+          "id": "20",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 21,
+      "frame": {
+        "left": 1510,
+        "top": 540,
+        "width": 250,
+        "height": 150
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1510,
+          "top": 540,
+          "width": 250,
+          "height": 150
+        },
+        "snappedFrame": {
+          "left": 1512,
+          "top": 544,
+          "width": 248,
+          "height": 152
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/9cvixcze",
+          "id": "21",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 22,
+      "frame": {
+        "left": 1538,
+        "top": 560,
+        "width": 194,
+        "height": 80
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-value",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1538,
+          "top": 560,
+          "width": 194,
+          "height": 80
+        },
+        "snappedFrame": {
+          "left": 1538,
+          "top": 560,
+          "width": 194,
+          "height": 80
+        },
+        "children": [],
+        "text": "2026",
+        "transform": "none",
+        "element": {
+          "aid": "sh/ylc7u54z",
+          "id": "22",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 23,
+      "frame": {
+        "left": 1540,
+        "top": 644,
+        "width": 190,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "metric-label",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1540,
+          "top": 644,
+          "width": 190,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1540,
+          "top": 644,
+          "width": 190,
+          "height": 34
+        },
+        "children": [],
+        "text": "目标项目号",
+        "transform": "none",
+        "element": {
+          "aid": "sh/r65wjudg",
+          "id": "23",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 24,
+      "frame": {
+        "left": 1220,
+        "top": 720,
+        "width": 540,
+        "height": 138
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 720,
+          "width": 540,
+          "height": 138
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 720,
+          "width": 544,
+          "height": 136
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/g3ex0nux",
+          "id": "24",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 25,
+      "frame": {
+        "left": 1220,
+        "top": 720,
+        "width": 12,
+        "height": 138
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 720,
+          "width": 12,
+          "height": 138
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 720,
+          "width": 16,
+          "height": 136
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/5o7qpg3e",
+          "id": "25",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "frame": {
+        "left": 1254,
+        "top": 736,
+        "width": 472,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "card-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1254,
+          "top": 736,
+          "width": 472,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1254,
+          "top": 736,
+          "width": 472,
+          "height": 34
+        },
+        "children": [],
+        "text": "复核重点",
+        "transform": "none",
+        "element": {
+          "aid": "sh/yxobm58z",
+          "id": "26",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 27,
+      "frame": {
+        "left": 1254,
+        "top": 798,
+        "width": 472,
+        "height": 46
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "card-body",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1254,
+          "top": 798,
+          "width": 472,
+          "height": 46
+        },
+        "snappedFrame": {
+          "left": 1254,
+          "top": 798,
+          "width": 472,
+          "height": 46
+        },
+        "children": [],
+        "text": "高频文本包含项目号、厂名、设计参数编号和图纸编码，适合作为人工抽检入口。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/nih4byhg",
+          "id": "27",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 28,
+      "frame": {
+        "left": 1220,
+        "top": 882,
+        "width": 540,
+        "height": 100
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 882,
+          "width": 540,
+          "height": 100
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 880,
+          "width": 544,
+          "height": 104
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/g7adsji5",
+          "id": "28",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 29,
+      "frame": {
+        "left": 1220,
+        "top": 882,
+        "width": 12,
+        "height": 100
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1220,
+          "top": 882,
+          "width": 12,
+          "height": 100
+        },
+        "snappedFrame": {
+          "left": 1224,
+          "top": 880,
+          "width": 16,
+          "height": 104
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/9s36hcrm",
+          "id": "29",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 30,
+      "frame": {
+        "left": 1254,
+        "top": 898,
+        "width": 472,
+        "height": 34
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "card-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1254,
+          "top": 898,
+          "width": 472,
+          "height": 34
+        },
+        "snappedFrame": {
+          "left": 1254,
+          "top": 898,
+          "width": 472,
+          "height": 34
+        },
+        "children": [],
+        "text": "索引图",
+        "transform": "none",
+        "element": {
+          "aid": "sh/vy90je9c",
+          "id": "30",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 31,
+      "frame": {
+        "left": 1254,
+        "top": 950,
+        "width": 472,
+        "height": 24
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "card-body",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1254,
+          "top": 950,
+          "width": 472,
+          "height": 24
+        },
+        "snappedFrame": {
+          "left": 1254,
+          "top": 950,
+          "width": 472,
+          "height": 24
+        },
+        "children": [],
+        "text": "厂房索引图替换在同一任务中记录执行结果。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/6dcbulwv",
+          "id": "31",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 32,
+      "frame": {
+        "left": 1620,
+        "top": 1018,
+        "width": 230,
+        "height": 28
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "footer-developer",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1620,
+          "top": 1018,
+          "width": 230,
+          "height": 28
+        },
+        "snappedFrame": {
+          "left": 1620,
+          "top": 1018,
+          "width": 230,
+          "height": 28
+        },
+        "children": [],
+        "text": "开发者：王任超",
+        "transform": "none",
+        "element": {
+          "aid": "sh/d4vmtwra",
+          "id": "32",
+          "kind": "shape"
+        }
+      }
+    }
+  ]
+}

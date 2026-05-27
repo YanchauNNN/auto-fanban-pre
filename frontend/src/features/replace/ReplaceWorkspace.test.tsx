@@ -250,6 +250,40 @@ describe("ReplaceWorkspace", () => {
     expect(screen.getByLabelText("原始项目号")).toHaveValue("2026");
   });
 
+  it("infers source project and source unit from uploaded album-code dwg names", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      "auto-fanban.replace-draft",
+      JSON.stringify({
+        mode: "replace_only",
+        sourceProjectNo: "1916",
+        sourceIslandNo: "3",
+        targetProjectNo: "2026",
+        targetIslandNo: "",
+      }),
+    );
+
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("选择翻版 DWG 文件"),
+      new File(["dwg"], "20162RC-JGS09-A.dwg", { type: "application/acad" }),
+    );
+
+    expect(screen.getByLabelText("原始项目号")).toHaveValue("2016");
+    expect(screen.getByLabelText("来源机组号")).toHaveValue("2");
+  });
+
   it("submits replace-only jobs through the replace endpoint", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();

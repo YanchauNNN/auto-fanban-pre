@@ -11,6 +11,7 @@ from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
 from ..workflow.models import WorkflowStatus
 from .admin_config_store import AdminConfigStore
+from .identity import build_archive_identity
 from .models import ArchiveState, ArchiveStatus
 from .overwrite_service import ArchiveOverwriteService
 
@@ -48,12 +49,12 @@ class ArchiveService:
         params = GlobalDocParams.model_validate(normalize_global_doc_params(primary_job.params))
         ctx = DocContext(params=params, frames=prep.frames, sheet_sets=prep.sheet_sets)
         derived = self.derivation_engine.compute(ctx)
-        engineering_no = str(params.engineering_no or "").strip() or "UNKNOWN_ENGINEERING"
-        subitem_no = str(params.subitem_no or "").strip() or "UNKNOWN_SUBITEM"
-        album_internal_code = str(derived.album_internal_code or "").strip() or "UNKNOWN_ALBUM"
-        revision = str(derived.document_revision or params.revision or "A").strip() or "A"
-
-        target_dir = archive_root / engineering_no / subitem_no / album_internal_code / revision
+        identity = build_archive_identity(
+            params,
+            album_internal_code=derived.album_internal_code,
+            document_revision=derived.document_revision,
+        )
+        target_dir = identity.target_dir(archive_root)
         if self.overwrite_service is not None:
             self.overwrite_service.clear_target_directory(target_dir)
         target_dir.mkdir(parents=True, exist_ok=True)

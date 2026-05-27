@@ -94,6 +94,16 @@ def test_probe_target_env_prefers_package_python_runtime() -> None:
     assert 'Label "package_runtime"' in script_text
 
 
+def test_probe_target_env_downgrades_windows_store_python_alias() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "Test-WindowsStorePythonAliasFailure" in script_text
+    assert "windows app execution alias is not an installed Python runtime" in script_text
+
+
 def test_probe_target_env_keeps_excel_failure_evidence_and_checks_logon_task_support() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(

@@ -2,17 +2,16 @@ from __future__ import annotations
 
 import re
 
-from ..config import get_config
+from ..config import get_config, load_mechanism_spec
 from .lexicon import normalize_text, normalize_text_without_spaces
 from .models import AuditFinding, AuditLexicon, ScanTextItem
-
-FORBIDDEN_DISCIPLINE_WORD = "工种"
-
 
 class AuditMatchEngine:
     def __init__(self, lexicon: AuditLexicon) -> None:
         self.lexicon = lexicon
         audit_cfg = get_config().audit_check
+        mechanism_cfg = load_mechanism_spec().audit_display
+        self.forbidden_terms = [str(term) for term in mechanism_cfg.forbidden_terms if str(term)]
         self.matching_policy = audit_cfg.matching_policy
         self._date_patterns = [re.compile(pattern) for pattern in audit_cfg.context_rules.date_like]
         self._dimension_patterns = [
@@ -56,25 +55,26 @@ class AuditMatchEngine:
                 continue
 
             context_kind = self._classify_context(item.field_context, normalized_text)
-            if FORBIDDEN_DISCIPLINE_WORD in normalized_text:
-                findings.append(
-                    AuditFinding(
-                        raw_text=item.raw_text,
-                        matched_text=FORBIDDEN_DISCIPLINE_WORD,
-                        matched_project_nos=[],
-                        context_kind="forbidden_term",
-                        confidence="high",
-                        entity_type=item.entity_type,
-                        field_context=item.field_context,
-                        internal_code=item.internal_code,
-                        layout_name=item.layout_name,
-                        entity_handle=item.entity_handle,
-                        block_path=item.block_path,
-                        position_x=item.position_x,
-                        position_y=item.position_y,
-                        text_bbox=item.text_bbox,
+            for forbidden_term in self.forbidden_terms:
+                if forbidden_term in normalized_text:
+                    findings.append(
+                        AuditFinding(
+                            raw_text=item.raw_text,
+                            matched_text=forbidden_term,
+                            matched_project_nos=[],
+                            context_kind="forbidden_term",
+                            confidence="high",
+                            entity_type=item.entity_type,
+                            field_context=item.field_context,
+                            internal_code=item.internal_code,
+                            layout_name=item.layout_name,
+                            entity_handle=item.entity_handle,
+                            block_path=item.block_path,
+                            position_x=item.position_x,
+                            position_y=item.position_y,
+                            text_bbox=item.text_bbox,
+                        )
                     )
-                )
 
             findings.extend(
                 self._unit_consistency_findings(

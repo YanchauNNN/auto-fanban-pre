@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from src.config import SpecLoader, reload_config
+from src.config import MechanismSpecLoader, SpecLoader, reload_config
 
 
 def configure_management_env(monkeypatch, tmp_path: Path, rows: list[dict[str, str]] | None = None) -> Path:
@@ -22,12 +22,20 @@ def configure_management_env(monkeypatch, tmp_path: Path, rows: list[dict[str, s
     runtime_payload = yaml.safe_load(
         (repo_root / "documents" / "参数规范_运行期.yaml").read_text(encoding="utf-8")
     )
+    mechanism_payload = yaml.safe_load(
+        (repo_root / "documents" / "参数规范-3.yaml").read_text(encoding="utf-8")
+    )
 
     spec_path = documents_dir / "参数规范.yaml"
     runtime_path = documents_dir / "参数规范_运行期.yaml"
+    mechanism_path = documents_dir / "参数规范-3.yaml"
     spec_path.write_text(yaml.safe_dump(spec_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
     runtime_path.write_text(
         yaml.safe_dump(runtime_payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    mechanism_path.write_text(
+        yaml.safe_dump(mechanism_payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -75,7 +83,9 @@ def configure_management_env(monkeypatch, tmp_path: Path, rows: list[dict[str, s
 
     monkeypatch.setenv("FANBAN_SPEC_PATH", str(spec_path))
     monkeypatch.setenv("FANBAN_RUNTIME_SPEC_PATH", str(runtime_path))
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(mechanism_path))
     monkeypatch.setenv("FANBAN_STORAGE_DIR", str(project_root / "storage"))
     SpecLoader.clear_cache()
+    MechanismSpecLoader.clear_cache()
     reload_config()
     return project_root

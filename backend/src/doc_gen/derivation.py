@@ -53,15 +53,14 @@ class DerivationEngine:
             derived.external_code_001 = external_code_001
 
             if internal_code_001:
-                # album_internal_code = strip_suffix(internal_code_001, '-001')
-                derived.album_internal_code = self._strip_suffix(internal_code_001, "-001")
+                derived.album_internal_code = self._album_base_internal_code(internal_code_001)
 
                 # album_code = extract_mid5_last2(internal_code_001)
                 derived.album_code = self._extract_mid5_last2(internal_code_001)
 
                 # cover/catalog internal codes
-                derived.cover_internal_code = self._replace_suffix(internal_code_001, "-001", "-FM")
-                derived.catalog_internal_code = self._replace_suffix(internal_code_001, "-001", "-TM")
+                derived.cover_internal_code = f"{derived.album_internal_code}-FM"
+                derived.catalog_internal_code = f"{derived.album_internal_code}-TM"
 
             derived.steel_liner_mode = ctx.is_steel_liner_mode()
 
@@ -133,6 +132,14 @@ class DerivationEngine:
         if s.endswith(old_suffix):
             return s[:-len(old_suffix)] + new_suffix
         return s + new_suffix
+
+    @staticmethod
+    def _album_base_internal_code(internal_code: str) -> str:
+        """Resolve the album-level internal code from a drawing-level internal code."""
+        match = re.match(r"^(.*)-\d{3}$", internal_code)
+        if match:
+            return match.group(1)
+        return internal_code
 
     def _extract_mid5_last2(self, internal_code: str) -> str | None:
         """从internal_code提取图册编号（中间5位的末2位）"""

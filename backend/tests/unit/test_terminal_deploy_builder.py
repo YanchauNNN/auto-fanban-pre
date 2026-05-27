@@ -22,6 +22,7 @@ from src.deploy.terminal_package import (
 
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
+MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
@@ -129,6 +130,7 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome.ctb")
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
+    _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
@@ -145,6 +147,7 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (Path("frontend/dist"), Path("frontend-dist")) in rel_pairs
     assert (Path("backend/.venv/Lib/site-packages"), Path("python-packages/Lib/site-packages")) in rel_pairs
     assert (Path("documents/Resources"), Path("documents/Resources")) in rel_pairs
+    assert (Path("documents") / MECHANISM_SPEC_NAME, Path("documents") / MECHANISM_SPEC_NAME) in rel_pairs
     assert (Path("documents_bin"), Path("documents_bin")) in rel_pairs
     assert (Path("bin/ODAFileConverter 25.12.0"), Path("bin/ODAFileConverter 25.12.0")) in rel_pairs
 
@@ -253,6 +256,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe").exists()
     assert (output_root / "documents" / "Resources" / PC3_NAME).exists()
     assert (output_root / "documents" / SPEC_NAME).exists()
+    assert (output_root / "documents" / MECHANISM_SPEC_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()
     assert (output_root / "scripts" / "start_backend.ps1").exists()
     assert (output_root / "scripts" / "check_health.ps1").exists()
@@ -356,8 +360,10 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "runtime.env.ps1" in start_backend
     assert 'Join-Path $root "documents\\参数规范.yaml"' in start_backend
     assert 'Join-Path $root "documents\\参数规范_运行期.yaml"' in start_backend
+    assert 'Join-Path $root "documents\\参数规范-3.yaml"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH"' in start_backend
     assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
     assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in start_backend
@@ -376,19 +382,22 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Invoke-RestMethod" in check_health
     assert "check_iis_proxy_prereqs.ps1" in check_health
     assert "probe_target_env.ps1" in check_health
-    assert '-OfficeProbeMode quick' in check_health
-    assert '-OfficeProbeMode deep -ReuseQuickProbeJson $quickProbeJson' in check_health
-    assert 'ValidateSet("full", "quick")' in check_health
+    assert '-OfficeProbeMode quick' not in check_health
+    assert '-OfficeProbeMode deep' in check_health
+    assert '-ReuseQuickProbeJson' not in check_health
+    assert "[int]$taskInfo.LastTaskResult" not in check_health
+    assert "[int64]$taskInfo.LastTaskResult" in check_health
+    assert "last_task_result_hex" in check_health
+    assert 'ValidateSet("full", "deep")' in check_health
     assert "check_health.summary.json" in check_health
     assert "check_health.full.json" in check_health
     assert "==== FanBan Health Summary ====" in check_health
     assert 'Get-Content -LiteralPath $probeJson' not in check_health
     assert 'OfficeProbeMode = "deep"' in deep_check
-    assert "ForceFullProbe" in deep_check
-    assert "ReuseQuickProbeJson" in deep_check
-    assert "probe_target_env.json" in deep_check
+    assert "ForceFullProbe" not in deep_check
+    assert "ReuseQuickProbeJson" not in deep_check
+    assert "probe_target_env.json" not in deep_check
     assert "$probeArgs = @{" in deep_check
-    assert "$probeArgs.ReuseQuickProbeJson = $quickProbeJson" in deep_check
     assert "Test-DotNet48OrAboveInstalled" in install_runtime
     assert "Get-VcRuntimeInfo" in install_runtime
     assert "Expand-PackagePythonRuntime" in install_runtime
@@ -677,7 +686,7 @@ $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $OutJson -Encoding ut
     assert deep_probe["repo_root"] == str(output_root)
     assert deep_probe["storage_root"] == storage_root
     assert deep_probe["office_probe_mode"] == "deep"
-    assert deep_probe["reuse_quick_probe_json"] == str(quick_probe)
+    assert deep_probe["reuse_quick_probe_json"] == ""
 
 
 def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(

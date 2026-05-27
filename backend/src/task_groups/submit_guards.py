@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..archive.admin_config_store import AdminConfigStore
+from ..archive.identity import build_archive_identity
 from ..archive.overwrite_service import ArchiveOverwriteService
 from ..config import BusinessSpec, load_spec
 from ..doc_gen.derivation import DerivationEngine
@@ -131,21 +132,19 @@ class TaskGroupSubmitGuards:
         ctx = DocContext(params=params, frames=prep.frames, sheet_sets=prep.sheet_sets)
         derived = self.derivation_engine.compute(ctx)
 
-        engineering_no = str(params.engineering_no or "").strip() or "UNKNOWN_ENGINEERING"
-        subitem_no = str(params.subitem_no or "").strip() or "UNKNOWN_SUBITEM"
-        album_internal_code = str(derived.album_internal_code or "").strip() or "UNKNOWN_ALBUM"
-        revision = str(derived.document_revision or params.revision or "A").strip() or "A"
+        identity = build_archive_identity(
+            params,
+            album_internal_code=derived.album_internal_code,
+            document_revision=derived.document_revision,
+            spec=self.spec,
+        )
 
         archive_root = self.admin_config_store.get_archive_root_path()
-        archive_target = (
-            archive_root / engineering_no / subitem_no / album_internal_code / revision
-            if archive_root is not None
-            else None
-        )
+        archive_target = identity.target_dir(archive_root) if archive_root is not None else None
         return TaskGroupAlbumIdentity(
-            engineering_no=engineering_no,
-            subitem_no=subitem_no,
-            album_internal_code=album_internal_code,
-            revision=revision,
+            engineering_no=identity.engineering_no,
+            subitem_no=identity.subitem_no,
+            album_internal_code=identity.album_internal_code,
+            revision=identity.revision,
             archive_target=archive_target.resolve() if archive_target is not None else None,
         )

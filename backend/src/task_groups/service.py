@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..accounts.account_registry import AccountRegistry
 from ..accounts.personnel_normalizer import PersonnelNormalizer
 from ..archive.service import ArchiveService
+from ..config import load_spec
 from ..models import AccountSnapshot, TaskGroup
 from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
@@ -178,23 +179,34 @@ class TaskGroupService:
         primary_job = self.job_manager.get_job(group.child_job_ids[0]) if group.child_job_ids else None
         if primary_job is None:
             raise ValueError("group has no child jobs")
-        values = {
-            "ied_prepared_by": primary_job.params.get("ied_prepared_by"),
-            "ied_checked_by": primary_job.params.get("ied_checked_by"),
-            "ied_discipline_leader": primary_job.params.get("ied_discipline_leader"),
-            "ied_reviewed_by": primary_job.params.get("ied_reviewed_by"),
-            "ied_approved_by": primary_job.params.get("ied_approved_by"),
+        workflow_cfg = dict(load_spec().get_management_features().get("workflow") or {})
+        field_names: set[str] = {
+            str(field_name)
+            for field_name in (workflow_cfg.get("deduplication_rules") or {}).get("unique_role_fields") or []
+            if str(field_name).strip()
         }
+        for node_cfg in workflow_cfg.get("nodes") or []:
+            source = str(node_cfg.get("assignee_source") or "").strip()
+            if source:
+                field_names.add(source)
+        one_review_source = str((workflow_cfg.get("one_review") or {}).get("assignee_source") or "").strip()
+        if one_review_source:
+            field_names.add(one_review_source)
+        if bool(workflow_cfg.get("preserve_discipline_leader")):
+            field_names.add("ied_discipline_leader")
+        values = {field_name: primary_job.params.get(field_name) for field_name in sorted(field_names)}
         return self.personnel_normalizer.normalize_fields(values)
 
     def _apply_factors(self, group: TaskGroup) -> None:
+        workflow_cfg = dict(load_spec().get_management_features().get("workflow") or {})
+        factor_keys = {
+            str(node_cfg.get("key") or ""): str(node_cfg.get("factor_key") or "")
+            for node_cfg in workflow_cfg.get("nodes") or []
+        }
         for node in group.workflow.nodes:
-            if node.node_key == "one_review":
-                group.workload.one_review_factor = node.factor
-            elif node.node_key == "two_review":
-                group.workload.two_review_factor = node.factor
-            elif node.node_key == "three_review":
-                group.workload.three_review_factor = node.factor
+            factor_key = factor_keys.get(node.node_key)
+            if factor_key and hasattr(group.workload, factor_key):
+                setattr(group.workload, factor_key, node.factor)
         self.workload_calculator.refresh_final(group.workload)
 
     def _require_group(self, group_id: str) -> TaskGroup:

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from src.accounts.account_models import AccountCreatePayload, AccountUpdatePayload
+from src.config import load_mechanism_spec
 
 from ..auth_helpers import require_current_account
 
@@ -17,7 +18,8 @@ class NormalizePersonnelPayload(BaseModel):
 
 
 def require_admin(account=Depends(require_current_account)):
-    if account.role != "管理员":
+    admin_roles = set(load_mechanism_spec().permissions.account_admin_roles)
+    if account.role not in admin_roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
     return account
 

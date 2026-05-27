@@ -15,8 +15,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-MIN_SUPPORTED_AUTOCAD_YEAR = 2010
-PDF2_PC3_NAME = "打印PDF2.pc3"
+from ..config import load_mechanism_spec
+from ..config.mechanism_spec import CadRuntimeMechanismConfig
 
 
 @dataclass(frozen=True)
@@ -97,9 +97,9 @@ def resolve_autocad_paths(
         ),
         pc3_path=_first_existing_file(
             [
-                *(p / PDF2_PC3_NAME for p in preferred_user_plotters),
-                install_dir / "Plotters" / PDF2_PC3_NAME,
-                *(p / PDF2_PC3_NAME for p in other_user_plotters),
+                *(p / _pdf2_pc3_name() for p in preferred_user_plotters),
+                install_dir / "Plotters" / _pdf2_pc3_name(),
+                *(p / _pdf2_pc3_name() for p in other_user_plotters),
             ],
         ),
         fallback_pdf_pc3_path=_first_existing_file(
@@ -320,7 +320,7 @@ def _expand_install_dir_candidates(path: Path) -> list[Path]:
 
 def _install_dir_rank(path: Path) -> tuple[int, int, int]:
     year = _extract_year_int(path)
-    if year is not None and year < MIN_SUPPORTED_AUTOCAD_YEAR:
+    if year is not None and year < _min_supported_autocad_year():
         return (0, 0, 0)
 
     has_accoreconsole = (path / "accoreconsole.exe").exists()
@@ -347,20 +347,36 @@ def _first_existing_file(paths: Iterable[Path]) -> Path | None:
 
 
 def _default_install_candidates() -> list[Path]:
-    versions = tuple(str(year) for year in range(2026, 2009, -1))
-    roots = (
-        Path(r"D:\AUTOCAD"),
-        Path(r"C:\AUTOCAD"),
-        Path(r"D:\Program Files\AUTOCAD"),
-        Path(r"C:\Program Files\AUTOCAD"),
-        Path(r"D:\Program Files\Autodesk"),
-        Path(r"C:\Program Files\Autodesk"),
+    cad_mechanism = _cad_mechanism()
+    versions = tuple(
+        str(year)
+        for year in range(
+            int(cad_mechanism.default_install_year_start),
+            int(cad_mechanism.default_install_year_end) - 1,
+            -1,
+        )
     )
+    roots = tuple(Path(root) for root in cad_mechanism.default_install_roots)
     result: list[Path] = []
     for root in roots:
         for year in versions:
             result.append(root / f"AutoCAD {year}")
     return result
+
+
+def _min_supported_autocad_year() -> int:
+    return int(_cad_mechanism().min_supported_autocad_year)
+
+
+def _pdf2_pc3_name() -> str:
+    return _cad_mechanism().pdf2_pc3_name
+
+
+def _cad_mechanism() -> CadRuntimeMechanismConfig:
+    try:
+        return load_mechanism_spec().cad_runtime_mechanism
+    except FileNotFoundError:
+        return CadRuntimeMechanismConfig()
 
 
 def _discover_registry_install_dirs() -> list[Path]:

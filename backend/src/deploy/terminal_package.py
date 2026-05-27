@@ -8,8 +8,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
-RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
+from ..config.mechanism_spec import (
+    DeploymentMechanismConfig,
+    MechanismSpecLoader,
+    load_mechanism_spec,
+)
+
+_DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
+SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
+RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
+MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -24,9 +32,9 @@ DELTA_MANIFEST = "delta-manifest.json"
 DELTA_OVERWRITE_LIST = "覆盖清单.txt"
 DELTA_DELETE_LIST = "删除清单.txt"
 DELTA_USAGE = "使用说明.txt"
-MANAGED_PDF2_PC3_NAME = "打印PDF2.pc3"
-MANAGED_MONOCHROME_CTB_NAME = "fanban_monochrome.ctb"
-DEFAULT_FRONTEND_API_PORT = 8000
+MANAGED_PDF2_PC3_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_pdf2_pc3_name
+MANAGED_MONOCHROME_CTB_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_monochrome_ctb_name
+DEFAULT_FRONTEND_API_PORT = _DEFAULT_DEPLOYMENT_MECHANISM.default_frontend_api_port
 
 
 @dataclass(frozen=True)
@@ -41,7 +49,19 @@ class DeployArtifacts:
     delta_root: Path
 
 
+def _deployment_mechanism(root: Path | None = None) -> DeploymentMechanismConfig:
+    if root is not None:
+        local_spec = root / "documents" / _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
+        if local_spec.exists():
+            return MechanismSpecLoader.load(local_spec).deployment_mechanism
+    try:
+        return load_mechanism_spec().deployment_mechanism
+    except FileNotFoundError:
+        return DeploymentMechanismConfig()
+
+
 def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
+    deployment = _deployment_mechanism(repo_root)
     return [
         CopyPlanEntry(repo_root / "frontend" / "dist", Path("frontend-dist")),
         CopyPlanEntry(repo_root / "API", Path("backend-runtime") / "API"),
@@ -79,8 +99,15 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             Path("bin") / "ODAFileConverter 25.12.0",
         ),
         CopyPlanEntry(repo_root / "documents" / "Resources", Path("documents") / "Resources"),
-        CopyPlanEntry(repo_root / "documents" / SPEC_NAME, Path("documents") / SPEC_NAME),
-        CopyPlanEntry(repo_root / "documents" / RUNTIME_SPEC_NAME, Path("documents") / RUNTIME_SPEC_NAME),
+        CopyPlanEntry(repo_root / "documents" / deployment.spec_name, Path("documents") / deployment.spec_name),
+        CopyPlanEntry(
+            repo_root / "documents" / deployment.runtime_spec_name,
+            Path("documents") / deployment.runtime_spec_name,
+        ),
+        CopyPlanEntry(
+            repo_root / "documents" / deployment.mechanism_spec_name,
+            Path("documents") / deployment.mechanism_spec_name,
+        ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
         CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
@@ -106,7 +133,13 @@ def _validate_frontend_preview_assets(repo_root: Path) -> None:
         )
 
 
-def _build_frontend_web_config(api_port: int = DEFAULT_FRONTEND_API_PORT) -> str:
+def _build_frontend_web_config(
+    api_port: int | None = None,
+    *,
+    deployment: DeploymentMechanismConfig | None = None,
+) -> str:
+    if api_port is None:
+        api_port = int((deployment or _deployment_mechanism()).default_frontend_api_port)
     return f'''<?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
@@ -142,7 +175,10 @@ def _write_frontend_web_config(output_root: Path) -> None:
     frontend_root = output_root / "frontend-dist"
     if not frontend_root.exists():
         raise FileNotFoundError(f"前端静态目录不存在: {frontend_root}")
-    _write_text(frontend_root / "web.config", _build_frontend_web_config())
+    _write_text(
+        frontend_root / "web.config",
+        _build_frontend_web_config(deployment=_deployment_mechanism(output_root)),
+    )
 
 
 def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
@@ -203,11 +239,11 @@ def _prune_development_artifacts(output_root: Path) -> None:
             shutil.rmtree(target)
 
 
-def _find_local_managed_pdf2_pc3() -> Path | None:
+def _find_local_managed_pdf2_pc3(pc3_name: str) -> Path | None:
     preferred_candidates: list[Path] = []
     for base in filter(None, (os.getenv("APPDATA"), os.getenv("LOCALAPPDATA"))):
         preferred_candidates.append(
-            Path(base) / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters" / MANAGED_PDF2_PC3_NAME
+            Path(base) / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters" / pc3_name
         )
 
     for candidate in preferred_candidates:
@@ -218,17 +254,19 @@ def _find_local_managed_pdf2_pc3() -> Path | None:
         autodesk_root = Path(base) / "Autodesk"
         if not autodesk_root.exists() or not autodesk_root.is_dir():
             continue
-        for candidate in sorted(autodesk_root.rglob(MANAGED_PDF2_PC3_NAME), reverse=True):
+        for candidate in sorted(autodesk_root.rglob(pc3_name), reverse=True):
             if candidate.is_file() and "Plotters" in candidate.parts:
                 return candidate
     return None
 
 
 def _overlay_local_managed_plotter_assets(output_root: Path) -> None:
-    local_pc3 = _find_local_managed_pdf2_pc3()
+    deployment = _deployment_mechanism(output_root)
+    pc3_name = deployment.managed_pdf2_pc3_name
+    local_pc3 = _find_local_managed_pdf2_pc3(pc3_name)
     if local_pc3 is None:
         return
-    target = output_root / "documents" / "Resources" / MANAGED_PDF2_PC3_NAME
+    target = output_root / "documents" / "Resources" / pc3_name
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(local_pc3, target)
 
@@ -413,13 +451,14 @@ def _write_support_files(
     url_rewrite_installer: Path | None,
     arr_installer: Path | None,
 ) -> None:
+    deployment = _deployment_mechanism(output_root)
     storage_root = output_root / "storage"
     for rel in [Path("jobs"), Path("groups"), Path("runtime")]:
         (storage_root / rel).mkdir(parents=True, exist_ok=True)
 
     start_backend = r'''param(
     [string]$ListenHost = "127.0.0.1",
-    [int]$Port = 8000
+    [int]$Port = __DEFAULT_FRONTEND_API_PORT__
 )
 
 $ErrorActionPreference = "Stop"
@@ -435,9 +474,10 @@ if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
     . $runtimeEnv
 }
 
-$managedSpecPath = Join-Path $root "documents\参数规范.yaml"
-$managedRuntimeSpecPath = Join-Path $root "documents\参数规范_运行期.yaml"
-$managedCtbName = "fanban_monochrome.ctb"
+$managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
+$managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
+$managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+$managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
 
 if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
     if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
@@ -448,6 +488,12 @@ if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_S
 if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
     if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
         Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
+    }
+}
+
+if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
+    if (Test-Path -LiteralPath $managedMechanismSpecPath -PathType Leaf) {
+        Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $managedMechanismSpecPath
     }
 }
 
@@ -475,6 +521,14 @@ try {
     Pop-Location
 }
 '''
+    start_backend = (
+        start_backend
+        .replace("__DEFAULT_FRONTEND_API_PORT__", str(int(deployment.default_frontend_api_port)))
+        .replace("__SPEC_NAME__", deployment.spec_name)
+        .replace("__RUNTIME_SPEC_NAME__", deployment.runtime_spec_name)
+        .replace("__MECHANISM_SPEC_NAME__", deployment.mechanism_spec_name)
+        .replace("__MANAGED_MONOCHROME_CTB_NAME__", deployment.managed_monochrome_ctb_name)
+    )
     _write_text(output_root / "scripts" / "start_backend.ps1", start_backend)
 
     init_storage = r'''$ErrorActionPreference = "Stop"
@@ -554,14 +608,12 @@ Write-Host ("已生成运行环境文件: " + $runtimeEnv)
 
     deep_check_terminal = r'''param(
     [string]$StorageRoot = "",
-    [int]$Port = 8000,
-    [switch]$ForceFullProbe
+    [int]$Port = 8000
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $probeJson = Join-Path $root "logs\probe_target_env.deep.json"
-$quickProbeJson = Join-Path $root "logs\probe_target_env.json"
 $probeArgs = @{
     OutJson = $probeJson
     RepoRoot = $root
@@ -570,15 +622,7 @@ $probeArgs = @{
     OfficeProbeMode = "deep"
 }
 
-if ($ForceFullProbe) {
-    Write-Host "开始执行深度环境检查（完整重跑模式）..."
-} elseif (Test-Path -LiteralPath $quickProbeJson -PathType Leaf) {
-    Write-Host ("开始执行深度环境检查（复用 quick 探针结果）: " + $quickProbeJson)
-    $probeArgs.ReuseQuickProbeJson = $quickProbeJson
-} else {
-    Write-Host "未找到 quick 探针结果，将执行完整 deep 探针..."
-}
-
+Write-Host "开始执行深度环境检查..."
 & (Join-Path $PSScriptRoot "probe_target_env.ps1") @probeArgs
 Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 '''
@@ -586,7 +630,7 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 
     check_health = r'''param(
     [string]$Url = "http://127.0.0.1:8000/api/system/health",
-    [ValidateSet("full", "quick")]
+    [ValidateSet("full", "deep")]
     [string]$Mode = "full"
 )
 
@@ -595,14 +639,12 @@ $root = Split-Path -Parent $PSScriptRoot
 $probeScript = Join-Path $PSScriptRoot "probe_target_env.ps1"
 $iisProxyScript = Join-Path $root "install\check_iis_proxy_prereqs.ps1"
 $logsDir = Join-Path $root "logs"
-$quickProbeJson = Join-Path $logsDir "probe_target_env.json"
 $deepProbeJson = Join-Path $logsDir "probe_target_env.deep.json"
 $summaryJson = Join-Path $logsDir "check_health.summary.json"
 $fullJson = Join-Path $logsDir "check_health.full.json"
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
-$quickProbe = $null
 $deepProbe = $null
 $selectedProbe = $null
 $proxyOutput = ""
@@ -615,16 +657,9 @@ $taskStatus = "skip"
 $taskDetails = [ordered]@{}
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
-    & $probeScript -OutJson $quickProbeJson -RepoRoot $root -OfficeProbeMode quick
-    $quickProbe = Get-Content -LiteralPath $quickProbeJson -Raw | ConvertFrom-Json
-
-    if ($Mode -eq "full") {
-        & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep -ReuseQuickProbeJson $quickProbeJson
-        $deepProbe = Get-Content -LiteralPath $deepProbeJson -Raw | ConvertFrom-Json
-        $selectedProbe = $deepProbe
-    } else {
-        $selectedProbe = $quickProbe
-    }
+    & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
+    $deepProbe = Get-Content -LiteralPath $deepProbeJson -Raw | ConvertFrom-Json
+    $selectedProbe = $deepProbe
 }
 
 if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
@@ -644,11 +679,20 @@ if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
 try {
     $task = Get-ScheduledTask -TaskName "FanBanBackend" -ErrorAction Stop
     $taskInfo = Get-ScheduledTaskInfo -TaskName "FanBanBackend" -ErrorAction Stop
+    $lastTaskResultInt64 = [int64]$taskInfo.LastTaskResult
+    $lastTaskResultUnsigned = if ($lastTaskResultInt64 -lt 0) {
+        [uint64]($lastTaskResultInt64 + 4294967296)
+    } else {
+        [uint64]$lastTaskResultInt64
+    }
+    $lastTaskResultHex = "0x{0:X8}" -f ($lastTaskResultUnsigned -band 0xffffffff)
     $taskStatus = "pass"
     $taskDetails = [ordered]@{
         state = [string]$task.State
         last_run_time = if ($taskInfo.LastRunTime) { [string]$taskInfo.LastRunTime } else { "" }
-        last_task_result = [int]$taskInfo.LastTaskResult
+        last_task_result = $lastTaskResultInt64
+        last_task_result_hex = $lastTaskResultHex
+        last_task_result_ok = ($lastTaskResultInt64 -eq 0)
         next_run_time = if ($taskInfo.NextRunTime) { [string]$taskInfo.NextRunTime } else { "" }
     }
 } catch {
@@ -684,7 +728,7 @@ $summary = [ordered]@{
     generated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     mode = $Mode
     overall_status = $overallStatus
-    selected_probe_json = if ($Mode -eq "full") { $deepProbeJson } else { $quickProbeJson }
+    selected_probe_json = $deepProbeJson
     blocking_issue_count = $blockingIssues.Count
     warning_count = $warnings.Count
     api_status = $apiStatus
@@ -698,8 +742,8 @@ $summary = [ordered]@{
 $fullReport = [ordered]@{
     summary = $summary
     probe = [ordered]@{
-        quick_json = $quickProbeJson
-        deep_json = if ($Mode -eq "full") { $deepProbeJson } else { "" }
+        quick_json = ""
+        deep_json = $deepProbeJson
         selected = $selectedProbe
     }
     scheduled_task = $taskDetails

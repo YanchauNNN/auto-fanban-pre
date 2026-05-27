@@ -28,6 +28,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..config.mechanism_spec import (
+    CadRuntimeMechanismConfig,
+    DeploymentMechanismConfig,
+    load_mechanism_spec,
+)
 from ..models import BBox
 
 logger = logging.getLogger(__name__)
@@ -43,21 +48,6 @@ _BM_CLICK = 0x00F5  # Button click message
 _RPC_CALL_REJECTED = -2147418111
 
 
-# ISO / ANSI 纸张规格名（打印PDF2.pc3 可用格式）
-_MEDIA_MAP: list[tuple[tuple[float, float], str]] = [
-    ((1189, 841), "ISO_A0_(1189.00_x_841.00_MM)"),
-    ((841, 1189), "ISO_A0_(841.00_x_1189.00_MM)"),
-    ((841, 594), "ISO_A1_(841.00_x_594.00_MM)"),
-    ((594, 841), "ISO_A1_(594.00_x_841.00_MM)"),
-    ((594, 420), "ISO_A2_(594.00_x_420.00_MM)"),
-    ((420, 594), "ISO_A2_(420.00_x_594.00_MM)"),
-    ((420, 297), "ISO_A3_(420.00_x_297.00_MM)"),
-    ((297, 420), "ISO_A3_(297.00_x_420.00_MM)"),
-    ((297, 210), "ISO_A4_(297.00_x_210.00_MM)"),
-    ((210, 297), "ISO_A4_(210.00_x_297.00_MM)"),
-]
-
-
 @dataclass(slots=True)
 class _PlotJob:
     """单页出图任务。"""
@@ -70,14 +60,33 @@ class _PlotJob:
 
 def _pick_media_name(paper_size_mm: tuple[float, float] | None) -> str:
     """根据图幅尺寸选择 PC3 标准纸张格式名。"""
+    cad_mechanism = _cad_mechanism()
     if paper_size_mm is None:
-        return "ISO_A1_(841.00_x_594.00_MM)"
+        return cad_mechanism.default_pdf_media_name
     w, h = paper_size_mm
-    for (mw, mh), name in _MEDIA_MAP:
+    for item in cad_mechanism.pdf_media_map:
+        size = item.get("size") or []
+        if len(size) != 2:
+            continue
+        mw, mh = float(size[0]), float(size[1])
+        name = str(item.get("name") or "").strip()
         if abs(w - mw) <= 10 and abs(h - mh) <= 10:
             return name
-    # 找不到精确匹配时返回 A1 横向作为安全兜底
-    return "ISO_A1_(841.00_x_594.00_MM)"
+    return cad_mechanism.default_pdf_media_name
+
+
+def _cad_mechanism() -> CadRuntimeMechanismConfig:
+    try:
+        return load_mechanism_spec().cad_runtime_mechanism
+    except FileNotFoundError:
+        return CadRuntimeMechanismConfig()
+
+
+def _deployment_mechanism() -> DeploymentMechanismConfig:
+    try:
+        return load_mechanism_spec().deployment_mechanism
+    except FileNotFoundError:
+        return DeploymentMechanismConfig()
 
 
 class AutoCADPdfExporter:
@@ -92,11 +101,12 @@ class AutoCADPdfExporter:
         prog_id_candidates: list[str] | None = None,
         visible: bool = False,
         plot_timeout_sec: int = 180,
-        ctb_name: str = "fanban_monochrome.ctb",
-        pc3_name: str = "打印PDF2.pc3",
+        ctb_name: str | None = None,
+        pc3_name: str | None = None,
         retry: int = 1,
         margins: dict[str, float] | None = None,
     ):
+        cad_mechanism = _cad_mechanism()
         self.prog_id_candidates = prog_id_candidates or [
             "AutoCAD.Application.24.1",
             "AutoCAD.Application.24.0",
@@ -104,8 +114,8 @@ class AutoCADPdfExporter:
         ]
         self.visible = visible
         self.plot_timeout_sec = plot_timeout_sec
-        self.ctb_name = ctb_name
-        self.pc3_name = pc3_name
+        self.ctb_name = ctb_name or _deployment_mechanism().managed_monochrome_ctb_name
+        self.pc3_name = pc3_name or cad_mechanism.pdf2_pc3_name
         self.retry = max(0, retry)
         self.margins = margins or {"top": 20, "bottom": 10, "left": 20, "right": 10}
 

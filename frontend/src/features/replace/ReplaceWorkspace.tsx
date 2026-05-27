@@ -71,6 +71,10 @@ export function ReplaceWorkspace({
   const [draft, setDraft] = useState<ReplaceDraft>(() =>
     createReplaceDraft(loadPersistedReplaceDraft()),
   );
+  const [manualFields, setManualFields] = useState({
+    sourceProjectNo: false,
+    sourceIslandNo: false,
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const projectOptions = (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim());
   const sourceIslandOptions = getSourceIslandOptions(draft.sourceProjectNo);
@@ -209,6 +213,7 @@ export function ReplaceWorkspace({
       });
       clearPersistedReplaceDraft();
       setDraft(createReplaceDraft());
+      setManualFields({ sourceProjectNo: false, sourceIslandNo: false });
       startTransition(() => onBatchCreated(payload));
       onClose();
     } catch (error) {
@@ -243,6 +248,12 @@ export function ReplaceWorkspace({
     field: "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo",
     value: string,
   ) {
+    if (field === "sourceProjectNo" || field === "sourceIslandNo") {
+      setManualFields((current) => ({
+        ...current,
+        [field]: true,
+      }));
+    }
     const errorKey =
       field === "sourceProjectNo"
         ? "source_project_no"
@@ -270,20 +281,43 @@ export function ReplaceWorkspace({
       return;
     }
     const inference = inferProjectNumbers(files);
-    setDraft((current) => ({
-      ...current,
-      files,
-      sourceProjectNo:
-        current.sourceProjectNo.trim() || !inference.primaryProjectNo
-          ? current.sourceProjectNo
-          : inference.primaryProjectNo,
-      formErrors: [],
-    }));
+    setDraft((current) => {
+      const shouldUseInferredProjectNo =
+        Boolean(inference.primaryProjectNo) &&
+        (!manualFields.sourceProjectNo || !current.sourceProjectNo.trim());
+      const nextSourceProjectNo = shouldUseInferredProjectNo
+        ? inference.primaryProjectNo
+        : current.sourceProjectNo;
+      const nextSourceIslandOptions = getSourceIslandOptions(nextSourceProjectNo);
+      const inferredSourceIslandNo = nextSourceIslandOptions.some(
+        (option) => option.value === inference.primaryUnitNo,
+      )
+        ? inference.primaryUnitNo
+        : "";
+      const shouldUseInferredSourceIslandNo =
+        Boolean(inferredSourceIslandNo) &&
+        (!manualFields.sourceIslandNo || !current.sourceIslandNo.trim());
+      const keepCurrentSourceIsland =
+        !shouldUseInferredSourceIslandNo && nextSourceProjectNo === current.sourceProjectNo;
+
+      return {
+        ...current,
+        files,
+        sourceProjectNo: nextSourceProjectNo,
+        sourceIslandNo: shouldUseInferredSourceIslandNo
+          ? inferredSourceIslandNo
+          : keepCurrentSourceIsland
+            ? current.sourceIslandNo
+            : "",
+        formErrors: [],
+      };
+    });
   }
 
   function handleClearDraft() {
     clearPersistedReplaceDraft();
     setDraft(createReplaceDraft());
+    setManualFields({ sourceProjectNo: false, sourceIslandNo: false });
     onClose();
   }
 

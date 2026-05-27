@@ -7,20 +7,7 @@ from shutil import which
 from subprocess import run
 from urllib.request import urlopen
 
-DOTNET48_URL = "https://go.microsoft.com/fwlink/?linkid=2088631"
-VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-PYTHON_313_X64_URL = "https://www.python.org/ftp/python/3.13.12/python-3.13.12-embed-amd64.zip"
-URL_REWRITE_X64_URL = (
-    "https://download.microsoft.com/download/1/2/8/"
-    "128E2E22-C1B9-44A4-BE2A-5859ED1D4592/rewrite_amd64_zh-CN.msi"
-)
-ARR_X64_URL = "https://go.microsoft.com/fwlink/?LinkID=615136"
-
-DOTNET48_FILENAME = "ndp48-x86-x64-allos-enu.exe"
-VC_REDIST_X64_FILENAME = "VC_redist.x64.exe"
-PYTHON_313_X64_FILENAME = "python-3.13.12-embed-amd64.zip"
-URL_REWRITE_X64_FILENAME = "rewrite_amd64_zh-CN.msi"
-ARR_X64_FILENAME = "requestRouter_amd64.msi"
+from ..config import load_mechanism_spec
 
 Downloader = Callable[[str, Path], Path]
 
@@ -62,39 +49,40 @@ def ensure_prereq_installers(
     arr_installer: Path | None = None,
     downloader: Downloader = download_file,
 ) -> PrereqInstallerBundle:
+    installers_cfg = load_mechanism_spec().deployment_mechanism.installers
     dotnet = _resolve_or_download(
         explicit_path=dotnet_installer,
         download_root=download_root / "dotnet",
-        filename=DOTNET48_FILENAME,
-        url=DOTNET48_URL,
+        filename=_installer_value(installers_cfg, "dotnet48").filename,
+        url=_installer_value(installers_cfg, "dotnet48").url,
         downloader=downloader,
     )
     vc_redist = _resolve_or_download(
         explicit_path=vc_redist_installer,
         download_root=download_root / "vc_redist",
-        filename=VC_REDIST_X64_FILENAME,
-        url=VC_REDIST_X64_URL,
+        filename=_installer_value(installers_cfg, "vc_redist_x64").filename,
+        url=_installer_value(installers_cfg, "vc_redist_x64").url,
         downloader=downloader,
     )
     python = _resolve_or_download(
         explicit_path=python_installer,
         download_root=download_root / "python",
-        filename=PYTHON_313_X64_FILENAME,
-        url=PYTHON_313_X64_URL,
+        filename=_installer_value(installers_cfg, "python_313_x64").filename,
+        url=_installer_value(installers_cfg, "python_313_x64").url,
         downloader=downloader,
     )
     url_rewrite = _resolve_or_download(
         explicit_path=url_rewrite_installer,
         download_root=download_root / "iis" / "url_rewrite",
-        filename=URL_REWRITE_X64_FILENAME,
-        url=URL_REWRITE_X64_URL,
+        filename=_installer_value(installers_cfg, "url_rewrite_x64").filename,
+        url=_installer_value(installers_cfg, "url_rewrite_x64").url,
         downloader=downloader,
     )
     arr = _resolve_or_download(
         explicit_path=arr_installer,
         download_root=download_root / "iis" / "arr",
-        filename=ARR_X64_FILENAME,
-        url=ARR_X64_URL,
+        filename=_installer_value(installers_cfg, "arr_x64").filename,
+        url=_installer_value(installers_cfg, "arr_x64").url,
         downloader=downloader,
     )
     return PrereqInstallerBundle(
@@ -104,6 +92,13 @@ def ensure_prereq_installers(
         url_rewrite=url_rewrite,
         arr=arr,
     )
+
+
+def _installer_value(installers: dict, key: str):
+    try:
+        return installers[key]
+    except KeyError as exc:
+        raise KeyError(f"参数规范-3.yaml 缺少 deployment_mechanism.installers.{key}") from exc
 
 
 def _resolve_or_download(

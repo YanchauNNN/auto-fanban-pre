@@ -4,19 +4,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from .config import load_mechanism_spec
 from .cad.splitter import output_name_for_frame, output_name_for_sheet_set
 from .models import FrameMeta, SheetSet
 
-_DIRECTLY_FILTERED_FLAG_CODES = frozenset(
-    {
-        "PLOT_FROM_SOURCE_WINDOW",
-        "PLOT_WINDOW_USED",
-    }
-)
-_FINDING_GROUP_PRIORITY = {"工种": 0}
-
 
 def normalize_user_flags(flags: Sequence[str]) -> list[str]:
+    directly_filtered = set(load_mechanism_spec().audit_display.directly_filtered_flag_codes)
     auto_fixed_keys = {
         _flag_identity(flag)
         for flag in flags
@@ -25,7 +19,7 @@ def normalize_user_flags(flags: Sequence[str]) -> list[str]:
     normalized: list[str] = []
     for flag in flags:
         code = _flag_code(flag)
-        if code in _DIRECTLY_FILTERED_FLAG_CODES:
+        if code in directly_filtered:
             continue
         if code == "PAPER_SIZE_MISMATCH" and _flag_identity(flag) in auto_fixed_keys:
             continue
@@ -35,6 +29,7 @@ def normalize_user_flags(flags: Sequence[str]) -> list[str]:
 
 
 def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    group_priority = load_mechanism_spec().audit_display.finding_group_priority
     grouped: dict[str, dict[str, Any]] = {}
     for finding in findings:
         matched_text = str(finding.get("matched_text") or "").strip()
@@ -55,7 +50,7 @@ def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str
     return sorted(
         grouped.values(),
         key=lambda item: (
-            _FINDING_GROUP_PRIORITY.get(str(item["matched_text"]), 1),
+            group_priority.get(str(item["matched_text"]), 1),
             -int(item["count"]),
             str(item["matched_text"]),
         ),

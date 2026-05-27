@@ -162,6 +162,10 @@ def configure_runtime_environment(*, selected_install_dir: str | Path | None = N
         str(bundle_root / "documents" / "参数规范_运行期.yaml"),
     )
     os.environ.setdefault(
+        "FANBAN_MECHANISM_SPEC_PATH",
+        str(bundle_root / "documents" / "参数规范-3.yaml"),
+    )
+    os.environ.setdefault(
         "FANBAN_ODA__EXE_PATH",
         str(bundle_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe"),
     )

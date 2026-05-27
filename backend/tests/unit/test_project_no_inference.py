@@ -1,30 +1,32 @@
 from __future__ import annotations
 
-from pathlib import Path
+import yaml
 
-from src.pipeline.project_no_inference import (
-    infer_project_no_from_path,
-    resolve_project_no,
-)
+from src.pipeline.project_no_inference import infer_unit_no_from_path, resolve_project_no
 
 
-def test_infer_project_no_from_dwg_name_prefix() -> None:
-    assert infer_project_no_from_path(Path("20261RS-JGS65.dwg")) == "2026"
-    assert infer_project_no_from_path("19076NH-JGS45") == "1907"
+def test_project_no_inference_reads_defaults_and_patterns_from_mechanism_yaml(tmp_path, monkeypatch) -> None:
+    mechanism_spec = tmp_path / "documents" / "参数规范-3.yaml"
+    mechanism_spec.parent.mkdir(parents=True, exist_ok=True)
+    mechanism_spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1.0",
+                "backend_mechanism": {
+                    "project_inference": {
+                        "project_no_prefix_regex": r"^FB-(\d{4})",
+                        "unit_no_by_project_prefix_regex": r"^FB-(?P<project_no>\d{4})-U(?P<unit_no>[1-9])",
+                        "default_project_no": "2026",
+                    },
+                },
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(mechanism_spec))
 
-
-def test_infer_project_no_returns_none_when_name_has_no_four_digit_prefix() -> None:
-    assert infer_project_no_from_path(Path("A20261RS-JGS65.dwg")) is None
-    assert infer_project_no_from_path("JGS65-2026") is None
-
-
-def test_resolve_project_no_prefers_explicit_value() -> None:
-    assert resolve_project_no("2016", Path("20261RS-JGS65.dwg")) == "2016"
-
-
-def test_resolve_project_no_uses_inferred_value_when_explicit_blank() -> None:
-    assert resolve_project_no("", Path("20261RS-JGS65.dwg")) == "2026"
-
-
-def test_resolve_project_no_falls_back_to_default_when_not_inferable() -> None:
-    assert resolve_project_no("", Path("sample.dwg")) == "2016"
+    assert resolve_project_no(None, "no-project.dwg") == "2026"
+    assert resolve_project_no(None, "FB-1818-U3-JG001.dwg") == "1818"
+    assert infer_unit_no_from_path("FB-1818-U3-JG001.dwg", "1818") == "3"

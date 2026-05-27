@@ -1,0 +1,5390 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/mcb51h",
+    "id": "mcb51h",
+    "slide": 6,
+    "layoutId": "a2836902-585b-4fb8-881a-464911864e8a",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "5dcef4cd-f49f-4fb0-91f0-949f44992823",
+    "masterLayoutName": "Master",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1920,
+      "height": 1080
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "+mn-lt"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "a2836902-585b-4fb8-881a-464911864e8a",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "5dcef4cd-f49f-4fb0-91f0-949f44992823",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "5dcef4cd-f49f-4fb0-91f0-949f44992823",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/uxc3ylc7",
+      "id": "1",
+      "name": "shape",
+      "bbox": [
+        0,
+        0,
+        1920,
+        1080
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#F7F8FA"
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1kre1w7m",
+      "id": "2",
+      "name": "shape",
+      "bbox": [
+        0,
+        0,
+        16,
+        1080
+      ],
+      "composeSource": {
+        "run": 2,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/c3ylc7u5",
+      "id": "3",
+      "name": "section-no",
+      "bbox": [
+        70,
+        42,
+        80,
+        52
+      ],
+      "composeSource": {
+        "run": 3,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "05",
+      "textPreview": "05",
+      "resolvedFontSize": 34,
+      "resolvedTextStyle": {
+        "fontSize": 34,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "05"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "05",
+          "resolvedTextStyle": {
+            "fontSize": 34,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "05",
+              "fontSize": 34,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/j6tovaho",
+      "id": "4",
+      "name": "section-title",
+      "bbox": [
+        160,
+        42,
+        460,
+        52
+      ],
+      "composeSource": {
+        "run": 4,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "索引图替换",
+      "textPreview": "索引图替换",
+      "resolvedFontSize": 32,
+      "resolvedTextStyle": {
+        "fontSize": 32,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "索引图替换"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "索引图替换",
+          "resolvedTextStyle": {
+            "fontSize": 32,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "索引图替换",
+              "fontSize": 32,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ulwval87",
+      "id": "5",
+      "name": "shape",
+      "bbox": [
+        72,
+        112,
+        12,
+        64
+      ],
+      "composeSource": {
+        "run": 5,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1cfa9w3m",
+      "id": "6",
+      "name": "slide-title",
+      "bbox": [
+        96,
+        102,
+        1260,
+        82
+      ],
+      "composeSource": {
+        "run": 6,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "厂房索引图已经从文字替换扩展到块级模板替换",
+      "textPreview": "厂房索引图已经从文字替换扩展到块级模板替换",
+      "resolvedFontSize": 36,
+      "resolvedTextStyle": {
+        "fontSize": 36,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "厂房索引图已经从文字替换扩展到块级模板替换"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "厂房索引图已经从文字替换扩展到块级模板替换",
+          "resolvedTextStyle": {
+            "fontSize": 36,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "厂房索引图已经从文字替换扩展到块级模板替换",
+              "fontSize": 36,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/crmhk3q5",
+      "id": "7",
+      "name": "rule",
+      "bbox": [
+        70,
+        194,
+        1110,
+        4
+      ],
+      "composeSource": {
+        "run": 7,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#004EA2",
+      "lineColor": "#004EA2",
+      "lineWidth": 0
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/j2t83itg",
+      "id": "8",
+      "name": "slide-subtitle",
+      "bbox": [
+        70,
+        220,
+        1320,
+        52
+      ],
+      "composeSource": {
+        "run": 8,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行",
+      "textPreview": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "fontSize": 24,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行",
+              "fontSize": 24,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 9,
+      "kind": "image",
+      "scope": "slide",
+      "aid": "im/jm1cfa9w",
+      "id": "9",
+      "name": "image",
+      "bbox": [
+        1500,
+        16,
+        360,
+        190
+      ],
+      "composeSource": {
+        "run": 9,
+        "path": "0"
+      },
+      "alt": "CNPE logo",
+      "contentType": "image/png",
+      "imageFit": "contain",
+      "asset": {
+        "assetId": "16e648e9-46f6-4067-880f-11f934214fed",
+        "contentType": "image/png",
+        "byteLength": 17720
+      }
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/s36hcrmh",
+      "id": "10",
+      "name": "shape",
+      "bbox": [
+        104,
+        312,
+        520,
+        472
+      ],
+      "composeSource": {
+        "run": 10,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hoza1gvy",
+      "id": "11",
+      "name": "template-title",
+      "bbox": [
+        142,
+        350,
+        220,
+        44
+      ],
+      "composeSource": {
+        "run": 11,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "模板覆盖",
+      "textPreview": "模板覆盖",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "fontSize": 30,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "模板覆盖"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "模板覆盖",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "模板覆盖",
+              "fontSize": 30,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/a1gvy90j",
+      "id": "12",
+      "name": "shape",
+      "bbox": [
+        144,
+        424,
+        112,
+        48
+      ],
+      "composeSource": {
+        "run": 12,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#E7F0FB"
+    },
+    {
+      "order": 13,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zidonyd0",
+      "id": "13",
+      "name": "tag",
+      "bbox": [
+        164,
+        434,
+        76,
+        32
+      ],
+      "composeSource": {
+        "run": 13,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1818",
+      "textPreview": "1818",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1818"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1818",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1818",
+              "fontSize": 19,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 14,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/svu9knih",
+      "id": "14",
+      "name": "template-file",
+      "bbox": [
+        284,
+        432,
+        300,
+        36
+      ],
+      "composeSource": {
+        "run": 14,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1818项目厂房索引图.dwg",
+      "textPreview": "1818项目厂房索引图.dwg",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1818项目厂房索引图.dwg"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1818项目厂房索引图.dwg",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1818项目厂房索引图.dwg",
+              "fontSize": 20,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 15,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hgn29gr2",
+      "id": "15",
+      "name": "shape",
+      "bbox": [
+        144,
+        488,
+        112,
+        48
+      ],
+      "composeSource": {
+        "run": 15,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#E7F0FB"
+    },
+    {
+      "order": 16,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/ap4r65wj",
+      "id": "16",
+      "name": "tag",
+      "bbox": [
+        164,
+        496,
+        76,
+        32
+      ],
+      "composeSource": {
+        "run": 16,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1907",
+      "textPreview": "1907",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1907"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1907",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1907",
+              "fontSize": 19,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 17,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/za1gvy90",
+      "id": "17",
+      "name": "template-file",
+      "bbox": [
+        284,
+        494,
+        300,
+        36
+      ],
+      "composeSource": {
+        "run": 17,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1907项目厂房索引图.dwg",
+      "textPreview": "1907项目厂房索引图.dwg",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1907项目厂房索引图.dwg"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1907项目厂房索引图.dwg",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1907项目厂房索引图.dwg",
+              "fontSize": 20,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 18,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sji5snel",
+      "id": "18",
+      "name": "shape",
+      "bbox": [
+        144,
+        552,
+        112,
+        48
+      ],
+      "composeSource": {
+        "run": 18,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#E7F0FB"
+    },
+    {
+      "order": 19,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h4byhgn2",
+      "id": "19",
+      "name": "tag",
+      "bbox": [
+        164,
+        558,
+        76,
+        32
+      ],
+      "composeSource": {
+        "run": 19,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2026",
+      "textPreview": "2026",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2026"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2026",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2026",
+              "fontSize": 19,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 20,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/psfil0rq",
+      "id": "20",
+      "name": "template-file",
+      "bbox": [
+        284,
+        556,
+        300,
+        36
+      ],
+      "composeSource": {
+        "run": 20,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2026项目厂房索引图.dwg",
+      "textPreview": "2026项目厂房索引图.dwg",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2026项目厂房索引图.dwg"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2026项目厂房索引图.dwg",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2026项目厂房索引图.dwg",
+              "fontSize": 20,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 21,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/w7mp0bi9",
+      "id": "21",
+      "name": "shape",
+      "bbox": [
+        144,
+        608,
+        112,
+        48
+      ],
+      "composeSource": {
+        "run": 21,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFF4D8"
+    },
+    {
+      "order": 22,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7mp0bi9s",
+      "id": "22",
+      "name": "tag",
+      "bbox": [
+        164,
+        620,
+        76,
+        32
+      ],
+      "composeSource": {
+        "run": 22,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1916",
+      "textPreview": "1916",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1916"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1916",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1916",
+              "fontSize": 19,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 23,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e1w7mp0b",
+      "id": "23",
+      "name": "template-file",
+      "bbox": [
+        284,
+        618,
+        300,
+        36
+      ],
+      "composeSource": {
+        "run": 23,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "3号岛 / 4号岛模板",
+      "textPreview": "3号岛 / 4号岛模板",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3号岛 / 4号岛模板"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3号岛 / 4号岛模板",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3号岛 / 4号岛模板",
+              "fontSize": 20,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 24,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pg3ex0nu",
+      "id": "24",
+      "name": "shape",
+      "bbox": [
+        144,
+        672,
+        112,
+        48
+      ],
+      "composeSource": {
+        "run": 24,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFF4D8"
+    },
+    {
+      "order": 25,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wval87ed",
+      "id": "25",
+      "name": "tag",
+      "bbox": [
+        164,
+        682,
+        76,
+        32
+      ],
+      "composeSource": {
+        "run": 25,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2016",
+      "textPreview": "2016",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#D97706",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2016"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2016",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#D97706",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2016",
+              "fontSize": 19,
+              "color": "#D97706",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 26,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/7adsji5s",
+      "id": "26",
+      "name": "template-file",
+      "bbox": [
+        284,
+        680,
+        300,
+        36
+      ],
+      "composeSource": {
+        "run": 26,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "1号岛 / 2号岛模板",
+      "textPreview": "1号岛 / 2号岛模板",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "fontSize": 20,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1号岛 / 2号岛模板"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1号岛 / 2号岛模板",
+          "resolvedTextStyle": {
+            "fontSize": 20,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1号岛 / 2号岛模板",
+              "fontSize": 20,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 27,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/epkzupwb",
+      "id": "27",
+      "name": "shape",
+      "bbox": [
+        728,
+        312,
+        520,
+        472
+      ],
+      "composeSource": {
+        "run": 27,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 28,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/lc7u54zi",
+      "id": "28",
+      "name": "detect-title",
+      "bbox": [
+        762,
+        350,
+        220,
+        44
+      ],
+      "composeSource": {
+        "run": 28,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "源块识别",
+      "textPreview": "源块识别",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "fontSize": 30,
+        "typeface": "+mn-lt",
+        "color": "#53958D",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "源块识别"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "源块识别",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "color": "#53958D",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "源块识别",
+              "fontSize": 30,
+              "color": "#53958D",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 29,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/wra5gbq1",
+      "id": "29",
+      "name": "shape",
+      "bbox": [
+        766,
+        440,
+        12,
+        12
+      ],
+      "composeSource": {
+        "run": 29,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#53958D"
+    },
+    {
+      "order": 30,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/al87ed8b",
+      "id": "30",
+      "name": "bullet",
+      "bbox": [
+        794,
+        426,
+        410,
+        54
+      ],
+      "composeSource": {
+        "run": 30,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "角度文字与圆形罗盘形成候选锚点。",
+      "textPreview": "角度文字与圆形罗盘形成候选锚点。",
+      "resolvedFontSize": 21,
+      "resolvedTextStyle": {
+        "fontSize": 21,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "角度文字与圆形罗盘形成候选锚点。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "角度文字与圆形罗盘形成候选锚点。",
+          "resolvedTextStyle": {
+            "fontSize": 21,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "角度文字与圆形罗盘形成候选锚点。",
+              "fontSize": 21,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 31,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/z61032ls",
+      "id": "31",
+      "name": "shape",
+      "bbox": [
+        766,
+        502,
+        12,
+        12
+      ],
+      "composeSource": {
+        "run": 31,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#004EA2"
+    },
+    {
+      "order": 32,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/orytsvu9",
+      "id": "32",
+      "name": "bullet",
+      "bbox": [
+        794,
+        488,
+        410,
+        54
+      ],
+      "composeSource": {
+        "run": 32,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "候选必须来自可替换块，保留 insert handle 和 bbox。",
+      "textPreview": "候选必须来自可替换块，保留 insert handle 和 bbox。",
+      "resolvedFontSize": 21,
+      "resolvedTextStyle": {
+        "fontSize": 21,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "候选必须来自可替换块，保留 insert handle"
+          },
+          {
+            "index": 2,
+            "text": "和 bbox。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "候选必须来自可替换块，保留 insert handle 和 bbox。",
+          "resolvedTextStyle": {
+            "fontSize": 21,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "候选必须来自可替换块，保留 insert handle 和 bbox。",
+              "fontSize": 21,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 33,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/hcrmhk3q",
+      "id": "33",
+      "name": "shape",
+      "bbox": [
+        766,
+        564,
+        12,
+        12
+      ],
+      "composeSource": {
+        "run": 33,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#D97706"
+    },
+    {
+      "order": 34,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/a9w3m94f",
+      "id": "34",
+      "name": "bullet",
+      "bbox": [
+        794,
+        550,
+        410,
+        54
+      ],
+      "composeSource": {
+        "run": 34,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "2016 来源按 QF 区分 1/2，1916 来源按 KP 区分 3/4。",
+      "textPreview": "2016 来源按 QF 区分 1/2，1916 来源按 KP 区分 3/4。",
+      "resolvedFontSize": 21,
+      "resolvedTextStyle": {
+        "fontSize": 21,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2016 来源按 QF 区分 1/2，1916 来源按 KP"
+          },
+          {
+            "index": 2,
+            "text": "区分 3/4。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2016 来源按 QF 区分 1/2，1916 来源按 KP 区分 3/4。",
+          "resolvedTextStyle": {
+            "fontSize": 21,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2016 来源按 QF 区分 1/2，1916 来源按 KP 区分 3/4。",
+              "fontSize": 21,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 35,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zupwb2hw",
+      "id": "35",
+      "name": "shape",
+      "bbox": [
+        766,
+        626,
+        12,
+        12
+      ],
+      "composeSource": {
+        "run": 35,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#C00000"
+    },
+    {
+      "order": 36,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/sfil0rqd",
+      "id": "36",
+      "name": "bullet",
+      "bbox": [
+        794,
+        612,
+        410,
+        54
+      ],
+      "composeSource": {
+        "run": 36,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "没有候选、模板缺失、岛号缺失时返回 message。",
+      "textPreview": "没有候选、模板缺失、岛号缺失时返回 message。",
+      "resolvedFontSize": 21,
+      "resolvedTextStyle": {
+        "fontSize": 21,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "没有候选、模板缺失、岛号缺失时返回"
+          },
+          {
+            "index": 2,
+            "text": "message。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "没有候选、模板缺失、岛号缺失时返回 message。",
+          "resolvedTextStyle": {
+            "fontSize": 21,
+            "color": "#172033",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "没有候选、模板缺失、岛号缺失时返回 message。",
+              "fontSize": 21,
+              "color": "#172033",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 37,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/h0fepkzu",
+      "id": "37",
+      "name": "shape",
+      "bbox": [
+        1344,
+        312,
+        424,
+        472
+      ],
+      "composeSource": {
+        "run": 37,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FFFFFF"
+    },
+    {
+      "order": 38,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/65wjudg7",
+      "id": "38",
+      "name": "bridge-title",
+      "bbox": [
+        1382,
+        350,
+        220,
+        44
+      ],
+      "composeSource": {
+        "run": 38,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "执行边界",
+      "textPreview": "执行边界",
+      "resolvedFontSize": 30,
+      "resolvedTextStyle": {
+        "fontSize": 30,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "执行边界"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "执行边界",
+          "resolvedTextStyle": {
+            "fontSize": 30,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "执行边界",
+              "fontSize": 30,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 39,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/zqtcj6to",
+      "id": "39",
+      "name": "shape",
+      "bbox": [
+        1384,
+        424,
+        304,
+        120
+      ],
+      "composeSource": {
+        "run": 39,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#FBEAEA"
+    },
+    {
+      "order": 40,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fmlkjm1c",
+      "id": "40",
+      "name": "step-no",
+      "bbox": [
+        1406,
+        442,
+        54,
+        44
+      ],
+      "composeSource": {
+        "run": 40,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "A",
+      "textPreview": "A",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "A"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "A",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "A",
+              "fontSize": 27,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 41,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/q1orytsv",
+      "id": "41",
+      "name": "step-title",
+      "bbox": [
+        1462,
+        446,
+        204,
+        40
+      ],
+      "composeSource": {
+        "run": 41,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "生成计划",
+      "textPreview": "生成计划",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "fontSize": 24,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "生成计划"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "生成计划",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "生成计划",
+              "fontSize": 24,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 42,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/xs72x4na",
+      "id": "42",
+      "name": "step-body",
+      "bbox": [
+        1410,
+        504,
+        252,
+        28
+      ],
+      "composeSource": {
+        "run": 42,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "source bounds、template bounds、scale 与 action_id。",
+      "textPreview": "source bounds、template bounds、scale 与 action_id。",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "source bounds、template"
+          },
+          {
+            "index": 2,
+            "text": "bounds、scale 与 action_id。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "source bounds、template bounds、scale 与 action_id。",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "source bounds、template bounds、scale 与 action_id。",
+              "fontSize": 19,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 43,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/87ed8bat",
+      "id": "43",
+      "name": "shape",
+      "bbox": [
+        1384,
+        576,
+        304,
+        120
+      ],
+      "composeSource": {
+        "run": 43,
+        "path": "0"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#E7F0FB"
+    },
+    {
+      "order": 44,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/je9cvixc",
+      "id": "44",
+      "name": "step-no",
+      "bbox": [
+        1406,
+        596,
+        54,
+        44
+      ],
+      "composeSource": {
+        "run": 44,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "B",
+      "textPreview": "B",
+      "resolvedFontSize": 27,
+      "resolvedTextStyle": {
+        "fontSize": 27,
+        "typeface": "+mn-lt",
+        "color": "#004EA2",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "B"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "B",
+          "resolvedTextStyle": {
+            "fontSize": 27,
+            "color": "#004EA2",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "B",
+              "fontSize": 27,
+              "color": "#004EA2",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 45,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qtcj6tov",
+      "id": "45",
+      "name": "step-title",
+      "bbox": [
+        1462,
+        600,
+        204,
+        40
+      ],
+      "composeSource": {
+        "run": 45,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "Bridge 执行",
+      "textPreview": "Bridge 执行",
+      "resolvedFontSize": 24,
+      "resolvedTextStyle": {
+        "fontSize": 24,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Bridge 执行"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Bridge 执行",
+          "resolvedTextStyle": {
+            "fontSize": 24,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Bridge 执行",
+              "fontSize": 24,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 46,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/1gvy90je",
+      "id": "46",
+      "name": "step-body",
+      "bbox": [
+        1410,
+        658,
+        252,
+        28
+      ],
+      "composeSource": {
+        "run": 46,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "AcCoreConsole 加载 .NET Bridge 执行块替换。",
+      "textPreview": "AcCoreConsole 加载 .NET Bridge 执行块替换。",
+      "resolvedFontSize": 19,
+      "resolvedTextStyle": {
+        "fontSize": 19,
+        "typeface": "+mn-lt",
+        "color": "#5C667A",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 2,
+        "lines": [
+          {
+            "index": 1,
+            "text": "AcCoreConsole 加载 .NET"
+          },
+          {
+            "index": 2,
+            "text": "Bridge 执行块替换。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "AcCoreConsole 加载 .NET Bridge 执行块替换。",
+          "resolvedTextStyle": {
+            "fontSize": 19,
+            "color": "#5C667A",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "AcCoreConsole 加载 .NET Bridge 执行块替换。",
+              "fontSize": 19,
+              "color": "#5C667A",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 47,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/8z25kb6x",
+      "id": "47",
+      "name": "shape",
+      "bbox": [
+        120,
+        904,
+        1680,
+        80
+      ],
+      "composeSource": {
+        "run": 47,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#EAF1FA"
+    },
+    {
+      "order": 48,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/fa9w3m94",
+      "id": "48",
+      "name": "shape",
+      "bbox": [
+        120,
+        904,
+        16,
+        80
+      ],
+      "composeSource": {
+        "run": 48,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "fillColor": "#C00000"
+    },
+    {
+      "order": 49,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/qpg3ex0n",
+      "id": "49",
+      "name": "band-lead",
+      "bbox": [
+        148,
+        920,
+        170,
+        54
+      ],
+      "composeSource": {
+        "run": 49,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "模块边界",
+      "textPreview": "模块边界",
+      "resolvedFontSize": 22,
+      "resolvedTextStyle": {
+        "fontSize": 22,
+        "typeface": "+mn-lt",
+        "color": "#C00000",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "模块边界"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "模块边界",
+          "resolvedTextStyle": {
+            "fontSize": 22,
+            "color": "#C00000",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "模块边界",
+              "fontSize": 22,
+              "color": "#C00000",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 50,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/kzupwb2h",
+      "id": "50",
+      "name": "band-body",
+      "bbox": [
+        330,
+        920,
+        1440,
+        54
+      ],
+      "composeSource": {
+        "run": 50,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。",
+      "textPreview": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。",
+      "resolvedFontSize": 21,
+      "resolvedTextStyle": {
+        "fontSize": 21,
+        "typeface": "+mn-lt",
+        "color": "#172033",
+        "bold": true,
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。",
+          "resolvedTextStyle": {
+            "fontSize": 21,
+            "color": "#172033",
+            "bold": true,
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。",
+              "fontSize": 21,
+              "color": "#172033",
+              "bold": true,
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 51,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/9knih4by",
+      "id": "51",
+      "name": "footer-left",
+      "bbox": [
+        70,
+        1018,
+        780,
+        30
+      ],
+      "composeSource": {
+        "run": 51,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍",
+      "textPreview": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍",
+      "resolvedFontSize": 13,
+      "resolvedTextStyle": {
+        "fontSize": 13,
+        "typeface": "+mn-lt",
+        "color": "#7B8497",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍",
+          "resolvedTextStyle": {
+            "fontSize": 13,
+            "color": "#7B8497",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍",
+              "fontSize": 13,
+              "color": "#7B8497",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 52,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2t83itgf",
+      "id": "52",
+      "name": "footer-source",
+      "bbox": [
+        870,
+        1018,
+        980,
+        30
+      ],
+      "composeSource": {
+        "run": 52,
+        "path": "0"
+      },
+      "geometry": "rect",
+      "text": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。",
+      "textPreview": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。",
+      "resolvedFontSize": 12,
+      "resolvedTextStyle": {
+        "fontSize": 12,
+        "typeface": "+mn-lt",
+        "color": "#7B8497",
+        "alignment": "left",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。",
+          "resolvedTextStyle": {
+            "fontSize": 12,
+            "color": "#7B8497",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。",
+              "fontSize": 12,
+              "color": "#7B8497",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    }
+  ],
+  "composeRuns": [
+    {
+      "index": 1,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 1920,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/uxc3ylc7",
+          "id": "1",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 16,
+        "height": 1080
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 16,
+          "height": 1080
+        },
+        "snappedFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 16,
+          "height": 1080
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/1kre1w7m",
+          "id": "2",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 3,
+      "frame": {
+        "left": 70,
+        "top": 42,
+        "width": 80,
+        "height": 52
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "section-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 42,
+          "width": 80,
+          "height": 52
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 42,
+          "width": 80,
+          "height": 52
+        },
+        "children": [],
+        "text": "05",
+        "transform": "none",
+        "element": {
+          "aid": "sh/c3ylc7u5",
+          "id": "3",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "frame": {
+        "left": 160,
+        "top": 42,
+        "width": 460,
+        "height": 52
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "section-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 160,
+          "top": 42,
+          "width": 460,
+          "height": 52
+        },
+        "snappedFrame": {
+          "left": 160,
+          "top": 42,
+          "width": 460,
+          "height": 52
+        },
+        "children": [],
+        "text": "索引图替换",
+        "transform": "none",
+        "element": {
+          "aid": "sh/j6tovaho",
+          "id": "4",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "frame": {
+        "left": 70,
+        "top": 112,
+        "width": 10,
+        "height": 62
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 112,
+          "width": 10,
+          "height": 62
+        },
+        "snappedFrame": {
+          "left": 72,
+          "top": 112,
+          "width": 12,
+          "height": 64
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/ulwval87",
+          "id": "5",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 6,
+      "frame": {
+        "left": 96,
+        "top": 102,
+        "width": 1260,
+        "height": 82
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "slide-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 96,
+          "top": 102,
+          "width": 1260,
+          "height": 82
+        },
+        "snappedFrame": {
+          "left": 96,
+          "top": 102,
+          "width": 1260,
+          "height": 82
+        },
+        "children": [],
+        "text": "厂房索引图已经从文字替换扩展到块级模板替换",
+        "transform": "none",
+        "element": {
+          "aid": "sh/1cfa9w3m",
+          "id": "6",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 7,
+      "frame": {
+        "left": 70,
+        "top": 194,
+        "width": 1110,
+        "height": 8
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "rule",
+        "name": "rule",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fixed",
+            "value": 4
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 4
+        },
+        "frame": {
+          "left": 70,
+          "top": 194,
+          "width": 1110,
+          "height": 4
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 194,
+          "width": 1110,
+          "height": 4
+        },
+        "children": [],
+        "weight": 4,
+        "element": {
+          "aid": "sh/crmhk3q5",
+          "id": "7",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 8,
+      "frame": {
+        "left": 70,
+        "top": 220,
+        "width": 1320,
+        "height": 52
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "slide-subtitle",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 220,
+          "width": 1320,
+          "height": 52
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 220,
+          "width": 1320,
+          "height": 52
+        },
+        "children": [],
+        "text": "后端识别源图索引图块，按目标项目模板生成替换计划，再由 .NET Bridge 执行",
+        "transform": "none",
+        "element": {
+          "aid": "sh/j2t83itg",
+          "id": "8",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 9,
+      "frame": {
+        "left": 1500,
+        "top": 16,
+        "width": 360,
+        "height": 190
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "image",
+        "name": "image",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1500,
+          "top": 16,
+          "width": 360,
+          "height": 190
+        },
+        "snappedFrame": {
+          "left": 1500,
+          "top": 16,
+          "width": 360,
+          "height": 190
+        },
+        "children": [],
+        "source": {
+          "kind": "dataUrl"
+        },
+        "contentType": "image/png",
+        "fit": "contain",
+        "alt": "CNPE logo",
+        "element": {
+          "aid": "im/jm1cfa9w",
+          "id": "9",
+          "kind": "image"
+        }
+      }
+    },
+    {
+      "index": 10,
+      "frame": {
+        "left": 104,
+        "top": 314,
+        "width": 520,
+        "height": 470
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 104,
+          "top": 314,
+          "width": 520,
+          "height": 470
+        },
+        "snappedFrame": {
+          "left": 104,
+          "top": 312,
+          "width": 520,
+          "height": 472
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/s36hcrmh",
+          "id": "10",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 11,
+      "frame": {
+        "left": 142,
+        "top": 350,
+        "width": 220,
+        "height": 44
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 142,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "snappedFrame": {
+          "left": 142,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "children": [],
+        "text": "模板覆盖",
+        "transform": "none",
+        "element": {
+          "aid": "sh/hoza1gvy",
+          "id": "11",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 12,
+      "frame": {
+        "left": 146,
+        "top": 424,
+        "width": 112,
+        "height": 48
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 146,
+          "top": 424,
+          "width": 112,
+          "height": 48
+        },
+        "snappedFrame": {
+          "left": 144,
+          "top": 424,
+          "width": 112,
+          "height": 48
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/a1gvy90j",
+          "id": "12",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 13,
+      "frame": {
+        "left": 164,
+        "top": 433,
+        "width": 76,
+        "height": 32
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "tag",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 164,
+          "top": 433,
+          "width": 76,
+          "height": 32
+        },
+        "snappedFrame": {
+          "left": 164,
+          "top": 434,
+          "width": 76,
+          "height": 32
+        },
+        "children": [],
+        "text": "1818",
+        "transform": "none",
+        "element": {
+          "aid": "sh/zidonyd0",
+          "id": "13",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 14,
+      "frame": {
+        "left": 284,
+        "top": 432,
+        "width": 300,
+        "height": 36
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-file",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 284,
+          "top": 432,
+          "width": 300,
+          "height": 36
+        },
+        "snappedFrame": {
+          "left": 284,
+          "top": 432,
+          "width": 300,
+          "height": 36
+        },
+        "children": [],
+        "text": "1818项目厂房索引图.dwg",
+        "transform": "none",
+        "element": {
+          "aid": "sh/svu9knih",
+          "id": "14",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 15,
+      "frame": {
+        "left": 146,
+        "top": 486,
+        "width": 112,
+        "height": 48
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 146,
+          "top": 486,
+          "width": 112,
+          "height": 48
+        },
+        "snappedFrame": {
+          "left": 144,
+          "top": 488,
+          "width": 112,
+          "height": 48
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/hgn29gr2",
+          "id": "15",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 16,
+      "frame": {
+        "left": 164,
+        "top": 495,
+        "width": 76,
+        "height": 32
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "tag",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 164,
+          "top": 495,
+          "width": 76,
+          "height": 32
+        },
+        "snappedFrame": {
+          "left": 164,
+          "top": 496,
+          "width": 76,
+          "height": 32
+        },
+        "children": [],
+        "text": "1907",
+        "transform": "none",
+        "element": {
+          "aid": "sh/ap4r65wj",
+          "id": "16",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 17,
+      "frame": {
+        "left": 284,
+        "top": 494,
+        "width": 300,
+        "height": 36
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-file",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 284,
+          "top": 494,
+          "width": 300,
+          "height": 36
+        },
+        "snappedFrame": {
+          "left": 284,
+          "top": 494,
+          "width": 300,
+          "height": 36
+        },
+        "children": [],
+        "text": "1907项目厂房索引图.dwg",
+        "transform": "none",
+        "element": {
+          "aid": "sh/za1gvy90",
+          "id": "17",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 18,
+      "frame": {
+        "left": 146,
+        "top": 548,
+        "width": 112,
+        "height": 48
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 146,
+          "top": 548,
+          "width": 112,
+          "height": 48
+        },
+        "snappedFrame": {
+          "left": 144,
+          "top": 552,
+          "width": 112,
+          "height": 48
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/sji5snel",
+          "id": "18",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 19,
+      "frame": {
+        "left": 164,
+        "top": 557,
+        "width": 76,
+        "height": 32
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "tag",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 164,
+          "top": 557,
+          "width": 76,
+          "height": 32
+        },
+        "snappedFrame": {
+          "left": 164,
+          "top": 558,
+          "width": 76,
+          "height": 32
+        },
+        "children": [],
+        "text": "2026",
+        "transform": "none",
+        "element": {
+          "aid": "sh/h4byhgn2",
+          "id": "19",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 20,
+      "frame": {
+        "left": 284,
+        "top": 556,
+        "width": 300,
+        "height": 36
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-file",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 284,
+          "top": 556,
+          "width": 300,
+          "height": 36
+        },
+        "snappedFrame": {
+          "left": 284,
+          "top": 556,
+          "width": 300,
+          "height": 36
+        },
+        "children": [],
+        "text": "2026项目厂房索引图.dwg",
+        "transform": "none",
+        "element": {
+          "aid": "sh/psfil0rq",
+          "id": "20",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 21,
+      "frame": {
+        "left": 146,
+        "top": 610,
+        "width": 112,
+        "height": 48
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 146,
+          "top": 610,
+          "width": 112,
+          "height": 48
+        },
+        "snappedFrame": {
+          "left": 144,
+          "top": 608,
+          "width": 112,
+          "height": 48
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/w7mp0bi9",
+          "id": "21",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 22,
+      "frame": {
+        "left": 164,
+        "top": 619,
+        "width": 76,
+        "height": 32
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "tag",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 164,
+          "top": 619,
+          "width": 76,
+          "height": 32
+        },
+        "snappedFrame": {
+          "left": 164,
+          "top": 620,
+          "width": 76,
+          "height": 32
+        },
+        "children": [],
+        "text": "1916",
+        "transform": "none",
+        "element": {
+          "aid": "sh/7mp0bi9s",
+          "id": "22",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 23,
+      "frame": {
+        "left": 284,
+        "top": 618,
+        "width": 300,
+        "height": 36
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-file",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 284,
+          "top": 618,
+          "width": 300,
+          "height": 36
+        },
+        "snappedFrame": {
+          "left": 284,
+          "top": 618,
+          "width": 300,
+          "height": 36
+        },
+        "children": [],
+        "text": "3号岛 / 4号岛模板",
+        "transform": "none",
+        "element": {
+          "aid": "sh/e1w7mp0b",
+          "id": "23",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 24,
+      "frame": {
+        "left": 146,
+        "top": 672,
+        "width": 112,
+        "height": 48
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 146,
+          "top": 672,
+          "width": 112,
+          "height": 48
+        },
+        "snappedFrame": {
+          "left": 144,
+          "top": 672,
+          "width": 112,
+          "height": 48
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/pg3ex0nu",
+          "id": "24",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 25,
+      "frame": {
+        "left": 164,
+        "top": 681,
+        "width": 76,
+        "height": 32
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "tag",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 164,
+          "top": 681,
+          "width": 76,
+          "height": 32
+        },
+        "snappedFrame": {
+          "left": 164,
+          "top": 682,
+          "width": 76,
+          "height": 32
+        },
+        "children": [],
+        "text": "2016",
+        "transform": "none",
+        "element": {
+          "aid": "sh/wval87ed",
+          "id": "25",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "frame": {
+        "left": 284,
+        "top": 680,
+        "width": 300,
+        "height": 36
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "template-file",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 284,
+          "top": 680,
+          "width": 300,
+          "height": 36
+        },
+        "snappedFrame": {
+          "left": 284,
+          "top": 680,
+          "width": 300,
+          "height": 36
+        },
+        "children": [],
+        "text": "1号岛 / 2号岛模板",
+        "transform": "none",
+        "element": {
+          "aid": "sh/7adsji5s",
+          "id": "26",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 27,
+      "frame": {
+        "left": 724,
+        "top": 314,
+        "width": 520,
+        "height": 470
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 724,
+          "top": 314,
+          "width": 520,
+          "height": 470
+        },
+        "snappedFrame": {
+          "left": 728,
+          "top": 312,
+          "width": 520,
+          "height": 472
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/epkzupwb",
+          "id": "27",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 28,
+      "frame": {
+        "left": 762,
+        "top": 350,
+        "width": 220,
+        "height": 44
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "detect-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 762,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "snappedFrame": {
+          "left": 762,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "children": [],
+        "text": "源块识别",
+        "transform": "none",
+        "element": {
+          "aid": "sh/lc7u54zi",
+          "id": "28",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 29,
+      "frame": {
+        "left": 766,
+        "top": 439,
+        "width": 12,
+        "height": 12
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 766,
+          "top": 439,
+          "width": 12,
+          "height": 12
+        },
+        "snappedFrame": {
+          "left": 766,
+          "top": 440,
+          "width": 12,
+          "height": 12
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/wra5gbq1",
+          "id": "29",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 30,
+      "frame": {
+        "left": 794,
+        "top": 426,
+        "width": 410,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "bullet",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 794,
+          "top": 426,
+          "width": 410,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 794,
+          "top": 426,
+          "width": 410,
+          "height": 54
+        },
+        "children": [],
+        "text": "角度文字与圆形罗盘形成候选锚点。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/al87ed8b",
+          "id": "30",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 31,
+      "frame": {
+        "left": 766,
+        "top": 501,
+        "width": 12,
+        "height": 12
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 766,
+          "top": 501,
+          "width": 12,
+          "height": 12
+        },
+        "snappedFrame": {
+          "left": 766,
+          "top": 502,
+          "width": 12,
+          "height": 12
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/z61032ls",
+          "id": "31",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 32,
+      "frame": {
+        "left": 794,
+        "top": 488,
+        "width": 410,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "bullet",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 794,
+          "top": 488,
+          "width": 410,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 794,
+          "top": 488,
+          "width": 410,
+          "height": 54
+        },
+        "children": [],
+        "text": "候选必须来自可替换块，保留 insert handle 和 bbox。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/orytsvu9",
+          "id": "32",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 33,
+      "frame": {
+        "left": 766,
+        "top": 563,
+        "width": 12,
+        "height": 12
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 766,
+          "top": 563,
+          "width": 12,
+          "height": 12
+        },
+        "snappedFrame": {
+          "left": 766,
+          "top": 564,
+          "width": 12,
+          "height": 12
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/hcrmhk3q",
+          "id": "33",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 34,
+      "frame": {
+        "left": 794,
+        "top": 550,
+        "width": 410,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "bullet",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 794,
+          "top": 550,
+          "width": 410,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 794,
+          "top": 550,
+          "width": 410,
+          "height": 54
+        },
+        "children": [],
+        "text": "2016 来源按 QF 区分 1/2，1916 来源按 KP 区分 3/4。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/a9w3m94f",
+          "id": "34",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 35,
+      "frame": {
+        "left": 766,
+        "top": 625,
+        "width": 12,
+        "height": 12
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 766,
+          "top": 625,
+          "width": 12,
+          "height": 12
+        },
+        "snappedFrame": {
+          "left": 766,
+          "top": 626,
+          "width": 12,
+          "height": 12
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/zupwb2hw",
+          "id": "35",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 36,
+      "frame": {
+        "left": 794,
+        "top": 612,
+        "width": 410,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "bullet",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 794,
+          "top": 612,
+          "width": 410,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 794,
+          "top": 612,
+          "width": 410,
+          "height": 54
+        },
+        "children": [],
+        "text": "没有候选、模板缺失、岛号缺失时返回 message。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/sfil0rqd",
+          "id": "36",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 37,
+      "frame": {
+        "left": 1344,
+        "top": 314,
+        "width": 420,
+        "height": 470
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1344,
+          "top": 314,
+          "width": 420,
+          "height": 470
+        },
+        "snappedFrame": {
+          "left": 1344,
+          "top": 312,
+          "width": 424,
+          "height": 472
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/h0fepkzu",
+          "id": "37",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 38,
+      "frame": {
+        "left": 1382,
+        "top": 350,
+        "width": 220,
+        "height": 44
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "bridge-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1382,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "snappedFrame": {
+          "left": 1382,
+          "top": 350,
+          "width": 220,
+          "height": 44
+        },
+        "children": [],
+        "text": "执行边界",
+        "transform": "none",
+        "element": {
+          "aid": "sh/65wjudg7",
+          "id": "38",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 39,
+      "frame": {
+        "left": 1386,
+        "top": 424,
+        "width": 300,
+        "height": 122
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1386,
+          "top": 424,
+          "width": 300,
+          "height": 122
+        },
+        "snappedFrame": {
+          "left": 1384,
+          "top": 424,
+          "width": 304,
+          "height": 120
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/zqtcj6to",
+          "id": "39",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 40,
+      "frame": {
+        "left": 1406,
+        "top": 442,
+        "width": 54,
+        "height": 44
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1406,
+          "top": 442,
+          "width": 54,
+          "height": 44
+        },
+        "snappedFrame": {
+          "left": 1406,
+          "top": 442,
+          "width": 54,
+          "height": 44
+        },
+        "children": [],
+        "text": "A",
+        "transform": "none",
+        "element": {
+          "aid": "sh/fmlkjm1c",
+          "id": "40",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 41,
+      "frame": {
+        "left": 1462,
+        "top": 446,
+        "width": 204,
+        "height": 40
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1462,
+          "top": 446,
+          "width": 204,
+          "height": 40
+        },
+        "snappedFrame": {
+          "left": 1462,
+          "top": 446,
+          "width": 204,
+          "height": 40
+        },
+        "children": [],
+        "text": "生成计划",
+        "transform": "none",
+        "element": {
+          "aid": "sh/q1orytsv",
+          "id": "41",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 42,
+      "frame": {
+        "left": 1410,
+        "top": 504,
+        "width": 252,
+        "height": 28
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-body",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1410,
+          "top": 504,
+          "width": 252,
+          "height": 28
+        },
+        "snappedFrame": {
+          "left": 1410,
+          "top": 504,
+          "width": 252,
+          "height": 28
+        },
+        "children": [],
+        "text": "source bounds、template bounds、scale 与 action_id。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/xs72x4na",
+          "id": "42",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 43,
+      "frame": {
+        "left": 1386,
+        "top": 578,
+        "width": 300,
+        "height": 122
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1386,
+          "top": 578,
+          "width": 300,
+          "height": 122
+        },
+        "snappedFrame": {
+          "left": 1384,
+          "top": 576,
+          "width": 304,
+          "height": 120
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/87ed8bat",
+          "id": "43",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 44,
+      "frame": {
+        "left": 1406,
+        "top": 596,
+        "width": 54,
+        "height": 44
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-no",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1406,
+          "top": 596,
+          "width": 54,
+          "height": 44
+        },
+        "snappedFrame": {
+          "left": 1406,
+          "top": 596,
+          "width": 54,
+          "height": 44
+        },
+        "children": [],
+        "text": "B",
+        "transform": "none",
+        "element": {
+          "aid": "sh/je9cvixc",
+          "id": "44",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 45,
+      "frame": {
+        "left": 1462,
+        "top": 600,
+        "width": 204,
+        "height": 40
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-title",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1462,
+          "top": 600,
+          "width": 204,
+          "height": 40
+        },
+        "snappedFrame": {
+          "left": 1462,
+          "top": 600,
+          "width": 204,
+          "height": 40
+        },
+        "children": [],
+        "text": "Bridge 执行",
+        "transform": "none",
+        "element": {
+          "aid": "sh/qtcj6tov",
+          "id": "45",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 46,
+      "frame": {
+        "left": 1410,
+        "top": 658,
+        "width": 252,
+        "height": 28
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "step-body",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 1410,
+          "top": 658,
+          "width": 252,
+          "height": 28
+        },
+        "snappedFrame": {
+          "left": 1410,
+          "top": 658,
+          "width": 252,
+          "height": 28
+        },
+        "children": [],
+        "text": "AcCoreConsole 加载 .NET Bridge 执行块替换。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/1gvy90je",
+          "id": "46",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 47,
+      "frame": {
+        "left": 120,
+        "top": 902,
+        "width": 1680,
+        "height": 82
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 120,
+          "top": 902,
+          "width": 1680,
+          "height": 82
+        },
+        "snappedFrame": {
+          "left": 120,
+          "top": 904,
+          "width": 1680,
+          "height": 80
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/8z25kb6x",
+          "id": "47",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 48,
+      "frame": {
+        "left": 120,
+        "top": 902,
+        "width": 12,
+        "height": 82
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "shape",
+        "name": "shape",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 120,
+          "top": 902,
+          "width": 12,
+          "height": 82
+        },
+        "snappedFrame": {
+          "left": 120,
+          "top": 904,
+          "width": 16,
+          "height": 80
+        },
+        "children": [],
+        "geometry": "rect",
+        "element": {
+          "aid": "sh/fa9w3m94",
+          "id": "48",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 49,
+      "frame": {
+        "left": 148,
+        "top": 920,
+        "width": 170,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "band-lead",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 148,
+          "top": 920,
+          "width": 170,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 148,
+          "top": 920,
+          "width": 170,
+          "height": 54
+        },
+        "children": [],
+        "text": "模块边界",
+        "transform": "none",
+        "element": {
+          "aid": "sh/qpg3ex0n",
+          "id": "49",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 50,
+      "frame": {
+        "left": 330,
+        "top": 920,
+        "width": 1440,
+        "height": 54
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "band-body",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 330,
+          "top": 920,
+          "width": 1440,
+          "height": 54
+        },
+        "snappedFrame": {
+          "left": 330,
+          "top": 920,
+          "width": 1440,
+          "height": 54
+        },
+        "children": [],
+        "text": "前端不读取模板、不解析 DWG、不实现块替换；只提交 source_island_no / target_island_no，模板选择与 CAD 执行留在后端。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/kzupwb2h",
+          "id": "50",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 51,
+      "frame": {
+        "left": 70,
+        "top": 1018,
+        "width": 780,
+        "height": 30
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "footer-left",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 70,
+          "top": 1018,
+          "width": 780,
+          "height": 30
+        },
+        "snappedFrame": {
+          "left": 70,
+          "top": 1018,
+          "width": 780,
+          "height": 30
+        },
+        "children": [],
+        "text": "中国核电工程有限公司河北分公司 | auto-fanban-pre 翻版功能模块介绍",
+        "transform": "none",
+        "element": {
+          "aid": "sh/9knih4by",
+          "id": "51",
+          "kind": "shape"
+        }
+      }
+    },
+    {
+      "index": 52,
+      "frame": {
+        "left": 870,
+        "top": 1018,
+        "width": 980,
+        "height": 30
+      },
+      "baseUnit": 8,
+      "root": {
+        "path": "0",
+        "kind": "text",
+        "name": "footer-source",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 0,
+          "height": 0
+        },
+        "frame": {
+          "left": 870,
+          "top": 1018,
+          "width": 980,
+          "height": 30
+        },
+        "snappedFrame": {
+          "left": 870,
+          "top": 1018,
+          "width": 980,
+          "height": 30
+        },
+        "children": [],
+        "text": "资料来源：documents/厂房索引图替换前端接入指导.md、backend/src/audit_replace/factory_index_maps.py。",
+        "transform": "none",
+        "element": {
+          "aid": "sh/2t83itgf",
+          "id": "52",
+          "kind": "shape"
+        }
+      }
+    }
+  ]
+}

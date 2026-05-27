@@ -8,13 +8,13 @@ from typing import Any, cast
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from ..config import load_mechanism_spec
 from ..result_views import build_finding_groups
 from .models import AuditFinding
 
-_FORBIDDEN_TERM_PRIORITY = {"工种": 0}
-
 
 def build_summary(findings: list[AuditFinding]) -> dict[str, Any]:
+    forbidden_priority = load_mechanism_spec().audit_display.forbidden_term_priority
     wrong_texts = Counter(finding.matched_text for finding in findings)
     internal_codes = Counter(
         finding.internal_code or "未归属"
@@ -25,7 +25,7 @@ def build_summary(findings: list[AuditFinding]) -> dict[str, Any]:
         for text, _ in sorted(
             wrong_texts.items(),
             key=lambda item: (
-                _FORBIDDEN_TERM_PRIORITY.get(str(item[0]), 1),
+                forbidden_priority.get(str(item[0]), 1),
                 -int(item[1]),
                 str(item[0]),
             ),

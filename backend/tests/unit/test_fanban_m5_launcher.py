@@ -185,6 +185,7 @@ def test_configure_runtime_environment_uses_internal_bundle_root_when_frozen(
         monkeypatch.setattr(launcher.sys, "executable", str(exe_path), raising=False)
         monkeypatch.delenv("FANBAN_SPEC_PATH", raising=False)
         monkeypatch.delenv("FANBAN_RUNTIME_SPEC_PATH", raising=False)
+        monkeypatch.delenv("FANBAN_MECHANISM_SPEC_PATH", raising=False)
         monkeypatch.delenv("FANBAN_ODA__EXE_PATH", raising=False)
         monkeypatch.delenv("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", raising=False)
         monkeypatch.delenv("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", raising=False)
@@ -195,6 +196,9 @@ def test_configure_runtime_environment_uses_internal_bundle_root_when_frozen(
         assert Path(os.environ["FANBAN_SPEC_PATH"]) == internal_dir / "documents" / "参数规范.yaml"
         assert Path(os.environ["FANBAN_RUNTIME_SPEC_PATH"]) == (
             internal_dir / "documents" / "参数规范_运行期.yaml"
+        )
+        assert Path(os.environ["FANBAN_MECHANISM_SPEC_PATH"]) == (
+            internal_dir / "documents" / "参数规范-3.yaml"
         )
         assert Path(os.environ["FANBAN_ODA__EXE_PATH"]) == (
             internal_dir / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe"

@@ -714,6 +714,7 @@ function Get-RepoFacts {
         repo_root = (Resolve-FullPathOrRaw $ActualRepoRoot)
         runtime_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范_运行期.yaml"))
         business_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范.yaml"))
+        mechanism_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范-3.yaml"))
         cad_scripts_dir = (Resolve-PreferredPath -Candidates @(
             (Join-Path $ActualRepoRoot "backend\src\cad\scripts"),
             (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts")
@@ -743,7 +744,7 @@ function Get-RepoFacts {
         }
     }
 
-    $unicodeStatus = if ($exists["business_spec_exists"] -and $exists["runtime_spec_exists"]) {
+    $unicodeStatus = if ($exists["business_spec_exists"] -and $exists["runtime_spec_exists"] -and $exists["mechanism_spec_exists"]) {
         "pass"
     } else {
         "fail"
@@ -751,6 +752,7 @@ function Get-RepoFacts {
 
     $requiredPass = $exists["business_spec_exists"] -and
         $exists["runtime_spec_exists"] -and
+        $exists["mechanism_spec_exists"] -and
         $exists["cad_scripts_dir_exists"] -and
         $exists["oda_exe_exists"]
 
@@ -761,10 +763,31 @@ function Get-RepoFacts {
         unicode_paths = New-CheckResult -Status $unicodeStatus -Details ([ordered]@{
             checked = @(
                 "documents\参数规范.yaml",
-                "documents\参数规范_运行期.yaml"
+                "documents\参数规范_运行期.yaml",
+                "documents\参数规范-3.yaml"
             )
         }) -Error $(if ($unicodeStatus -eq "fail") { "unicode path resolution failed" } else { "" })
     }
+}
+
+function Test-WindowsStorePythonAliasFailure {
+    param(
+        [string]$PathHint,
+        [string]$Command,
+        [string]$ErrorText
+    )
+
+    $pathText = ([string]$PathHint).ToLowerInvariant()
+    $commandText = ([string]$Command).ToLowerInvariant()
+    $messageText = ([string]$ErrorText).ToLowerInvariant()
+    $isWindowsAppsPython = (
+        ($pathText -like "*\windowsapps\python.exe") -or
+        ($commandText -eq "python" -and $pathText -like "*\windowsapps\*")
+    )
+    return $isWindowsAppsPython -and (
+        $messageText -like "*microsoft store*" -or
+        $messageText -like "*ms-windows-store*"
+    )
 }
 
 function Test-PythonCandidate {
@@ -793,16 +816,22 @@ function Test-PythonCandidate {
     $probeCode = "import json,sys; print(json.dumps({'executable': sys.executable, 'version': [sys.version_info[0], sys.version_info[1], sys.version_info[2]]}))"
     $invoke = Invoke-ExternalCommand -FilePath $Command -Arguments ($BaseArguments + @("-c", $probeCode))
     if (-not $invoke.success) {
+        $candidateError = if ($invoke.Contains("error")) { [string]$invoke.error } else { [string]$invoke.stdout }
+        $isWindowsStoreAlias = Test-WindowsStorePythonAliasFailure -PathHint $PathHint -Command $Command -ErrorText $candidateError
         return [ordered]@{
             label = $Label
             exists = $true
             command = $Command
             path_hint = $PathHint
-            status = "fail"
+            status = if ($isWindowsStoreAlias) { "skip" } else { "fail" }
             version = ""
             executable = ""
             meets_requirement = $false
-            error = if ($invoke.Contains("error")) { [string]$invoke.error } else { [string]$invoke.stdout }
+            error = if ($isWindowsStoreAlias) {
+                "windows app execution alias is not an installed Python runtime"
+            } else {
+                $candidateError
+            }
         }
     }
 
@@ -2734,6 +2763,7 @@ $recommendedRuntime = [ordered]@{
     recommended_env = [ordered]@{
         FANBAN_SPEC_PATH = [string]$repoFacts.paths.business_spec
         FANBAN_RUNTIME_SPEC_PATH = [string]$repoFacts.paths.runtime_spec
+        FANBAN_MECHANISM_SPEC_PATH = [string]$repoFacts.paths.mechanism_spec
         FANBAN_STORAGE_DIR = $actualStorageRoot
         FANBAN_ODA__EXE_PATH = [string]$repoFacts.paths.oda_exe
         FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR = [string]$repoFacts.paths.cad_scripts_dir

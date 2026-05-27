@@ -26,7 +26,7 @@ from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
-from src.config import get_config
+from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
 from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
 from src.pipeline.executor import PipelineExecutor
@@ -40,31 +40,6 @@ from src.pipeline.project_no_inference import (
 from src.pipeline.shared_prep import SharedPrepService
 from src.result_views import normalize_user_flags
 
-
-DISPLAY_STAGE_LABELS: dict[str, str] = {
-    'INIT': '初始化',
-    'PREP_SOURCE': '准备源文件',
-    'INGEST': '接收文件',
-    'FONT_PREFLIGHT_AND_REPLACE': '字体预检与替换',
-    'CONVERT_DWG_TO_DXF': '转换 DWG/DXF',
-    'DETECT_FRAMES': '识别图框',
-    'VERIFY_FRAMES_BY_ANCHOR': '锚点校验图框',
-    'SCALE_FIT_AND_CHECK': '图幅比例校验',
-    'EXTRACT_TITLEBLOCK_FIELDS': '提取图签字段',
-    'A4_MULTIPAGE_GROUPING': 'A4 多页合并',
-    'FIX_TITLEBLOCK_CONSISTENCY': '修正图签一致性',
-    'SPLIT_AND_RENAME': '拆分与命名',
-    'EXPORT_PDF_AND_DWG': '导出 DWG/PDF',
-    'GENERATE_DOCS': '生成目录和文档',
-    'PACKAGE_ZIP': '生成交付压缩包',
-    'DELIVERABLE_BRANCH': '执行出图子任务',
-    'AUDIT_BRANCH': '执行纠错子任务',
-    'DOCS_AND_PACKAGE': '整理文档与压缩包',
-    'GROUP_COMPLETE': '任务包完成',
-    'AUDIT_CHECK': '执行纠错识别',
-    'AUDIT_REPLACE': '执行翻版替换',
-    'EXPORT_REPORT': '导出纠错报告',
-}
 
 logger = logging.getLogger(__name__)
 
@@ -1082,14 +1057,19 @@ class DeliverableApiRuntime:
                 self.job_manager.update_job(job)
             self._signal_job_completion(job_id)
 
-    def _wait_for_job_completion(self, job_id: str, timeout_sec: float = 3600.0) -> Job | None:
-        deadline = time.monotonic() + timeout_sec
+    def _wait_for_job_completion(self, job_id: str, timeout_sec: float | None = None) -> Job | None:
+        wait_timeout = (
+            float(timeout_sec)
+            if timeout_sec is not None
+            else float(load_mechanism_spec().api_runtime.job_completion_wait_timeout_sec)
+        )
+        deadline = time.monotonic() + wait_timeout
         while not self._stop_event.is_set():
             with self._job_completion_lock:
                 event = self._job_completion_events.setdefault(job_id, threading.Event())
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f'job did not finish within {timeout_sec}s: {job_id}')
+                raise TimeoutError(f'job did not finish within {wait_timeout}s: {job_id}')
             if event.wait(timeout=min(0.2, remaining)):
                 return self.job_manager.get_job(job_id)
         raise RuntimeError(f'service stopping before job completion: {job_id}')
@@ -1468,7 +1448,7 @@ class DeliverableApiRuntime:
     def _display_stage_label(stage: str | None) -> str | None:
         if not stage:
             return None
-        return DISPLAY_STAGE_LABELS.get(stage, stage)
+        return load_mechanism_spec().api_runtime.stage_labels.get(stage, stage)
 
     @staticmethod
     def _is_readable_failure_message(message: str) -> bool:

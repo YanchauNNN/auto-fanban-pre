@@ -3,10 +3,15 @@
 import re
 from pathlib import Path
 
-_PROJECT_NO_PREFIX_RE = re.compile(r"^(\d{4})")
-_UNIT_NO_BY_PROJECT_PREFIX_RE = re.compile(
-    r"^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})",
-)
+from ..config import load_mechanism_spec
+
+
+def _project_no_prefix_re() -> re.Pattern[str]:
+    return re.compile(load_mechanism_spec().project_inference.project_no_prefix_regex)
+
+
+def _unit_no_by_project_prefix_re() -> re.Pattern[str]:
+    return re.compile(load_mechanism_spec().project_inference.unit_no_by_project_prefix_regex)
 
 
 def infer_project_no_from_path(path_or_name: str | Path | None) -> str | None:
@@ -15,17 +20,19 @@ def infer_project_no_from_path(path_or_name: str | Path | None) -> str | None:
     stem = Path(str(path_or_name)).stem.strip()
     if not stem:
         return None
-    match = _PROJECT_NO_PREFIX_RE.match(stem)
+    match = _project_no_prefix_re().match(stem)
     if match is None:
         return None
-    return match.group(1)
+    if match.lastindex:
+        return match.group(1)
+    return match.group(0)
 
 
 def resolve_project_no(
     explicit_project_no: str | None,
     dwg_path: str | Path | None,
     *,
-    default: str = "2016",
+    default: str | None = None,
 ) -> str:
     value = (explicit_project_no or "").strip()
     if value:
@@ -33,7 +40,7 @@ def resolve_project_no(
     inferred = infer_project_no_from_path(dwg_path)
     if inferred:
         return inferred
-    return default
+    return str(default or load_mechanism_spec().project_inference.default_project_no)
 
 
 def infer_unit_no_from_path(
@@ -45,7 +52,7 @@ def infer_unit_no_from_path(
     stem = Path(str(path_or_name)).stem.strip()
     if not stem:
         return None
-    match = _UNIT_NO_BY_PROJECT_PREFIX_RE.match(stem)
+    match = _unit_no_by_project_prefix_re().match(stem)
     if match is None:
         return None
     expected_project_no = str(project_no or "").strip()

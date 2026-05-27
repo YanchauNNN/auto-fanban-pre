@@ -188,13 +188,16 @@ class FrameSplitter(IFrameSplitter):
 
         # AutoCAD COM 导出器（仅在 pdf_engine=autocad_com/both 时使用）
         acad_cfg = getattr(self.config, "autocad", None)
-        ctb_name = Path(getattr(acad_cfg, "ctb_path", "fanban_monochrome.ctb")).name
+        ctb_name = Path(
+            getattr(acad_cfg, "ctb_path", None)
+            or self.config.module5_export.plot.ctb_name
+        ).name
         self.autocad_pdf_exporter: AutoCADPdfExporter = AutoCADPdfExporter(
             prog_id_candidates=getattr(acad_cfg, "prog_id_candidates", None),
             visible=getattr(acad_cfg, "visible", False),
             plot_timeout_sec=getattr(acad_cfg, "plot_timeout_sec", 180),
             ctb_name=ctb_name,
-            pc3_name=getattr(acad_cfg, "pc3_name", "打印PDF2.pc3"),
+            pc3_name=getattr(acad_cfg, "pc3_name", None),
             retry=getattr(acad_cfg, "retry", 1),
             margins=self.margins,
         )

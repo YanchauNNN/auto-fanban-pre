@@ -5,7 +5,10 @@ from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
 
+import yaml
+
 from src.config import SpecLoader, reload_config
+from src.config.mechanism_spec import MechanismSpecLoader
 from src.config.runtime_config import RuntimeConfig
 
 
@@ -140,3 +143,31 @@ def test_runtime_health_counts_pending_doc_jobs_in_queue_depth(
         assert health["queue_depth"] == 1
     finally:
         runtime.stop()
+
+
+def test_runtime_stage_labels_read_from_mechanism_yaml(monkeypatch, tmp_path: Path) -> None:
+    mechanism_spec = tmp_path / "documents" / "参数规范-3.yaml"
+    mechanism_spec.parent.mkdir(parents=True, exist_ok=True)
+    mechanism_spec.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "1.0",
+                "backend_mechanism": {
+                    "api_runtime": {
+                        "stage_labels": {
+                            "CUSTOM_STAGE": "自定义阶段",
+                        },
+                    },
+                },
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(mechanism_spec))
+    MechanismSpecLoader.clear_cache()
+
+    import API.app.runtime as runtime_mod
+
+    assert runtime_mod.DeliverableApiRuntime._display_stage_label("CUSTOM_STAGE") == "自定义阶段"

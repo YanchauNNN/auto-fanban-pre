@@ -275,6 +275,9 @@ runtime_options:
     runtime_spec_path:
       type: str
       default: "documents/参数规范_运行期.yaml"
+    mechanism_spec_path:
+      type: str
+      default: "documents/参数规范-3.yaml"
   cad_runtime:
     slot_count:
       type: int
@@ -302,6 +305,7 @@ runtime_options:
         assert config.storage_dir == (tmp_path / "custom-storage").resolve()
         assert config.spec_path == (tmp_path / "documents" / "参数规范.yaml").resolve()
         assert config.runtime_spec_path == runtime_spec.resolve()
+        assert config.mechanism_spec_path == (tmp_path / "documents" / "参数规范-3.yaml").resolve()
         assert config.cad_runtime.slot_count == 6
         assert config.plot_assets.asset_roots == [
             (tmp_path / "assets-a").resolve(),
@@ -359,4 +363,15 @@ runtime_options:
         assert config.font_preflight.font_compatibility_replacements == {
             "hztxt.shx": "tssdchn.shx",
         }
+
+    def test_runtime_factory_index_maps_include_1915_target_template(self):
+        """1915 作为翻版目标项目时应有无需岛号的厂房索引图模板。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+
+        assert config.factory_index_maps.templates["1915"] == "1915项目厂房索引图.dwg"
+        assert (
+            config.factory_index_maps.template_dir
+            / config.factory_index_maps.templates["1915"]
+        ).exists()
 

@@ -1,0 +1,129 @@
+# ============================================================================
+# CNPE 图纸处理系统 - 后端机制参数规范 v1.0
+# ============================================================================
+# 说明：
+# - 本文件只承接后端机制/策略参数，不重复声明业务规范或运行期规范已有根域。
+# - 业务事实源仍见 documents/参数规范.yaml。
+# - 并发、路径、外部程序等运行期参数仍见 documents/参数规范_运行期.yaml。
+# ============================================================================
+
+schema_version: "1.0"
+last_updated: "2026-05-26"
+
+backend_mechanism:
+  permissions:
+    account_admin_roles: ["管理员"]
+    workflow_admin_roles: ["管理员"]
+    workload_scope_roles:
+      office: ["室主任", "所领导", "管理员"]
+      institute: ["所领导", "管理员"]
+      admin: ["管理员"]
+
+  archive_defaults:
+    engineering_no: "UNKNOWN_ENGINEERING"
+    subitem_no: "UNKNOWN_SUBITEM"
+    album_internal_code: "UNKNOWN_ALBUM"
+    revision: "A"
+
+  workload_settlement:
+    include_initiator: true
+    initiator_role_key: "initiator"
+    include_approved_nodes: true
+    node_role_key_source: "node_key"
+
+  audit_display:
+    forbidden_terms: ["工种"]
+    forbidden_term_priority:
+      工种: 0
+    finding_group_priority:
+      工种: 0
+    directly_filtered_flag_codes:
+      - "PLOT_FROM_SOURCE_WINDOW"
+      - "PLOT_WINDOW_USED"
+
+  project_inference:
+    project_no_prefix_regex: '^\d{4}'
+    unit_no_by_project_prefix_regex: '^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})'
+    default_project_no: "2016"
+
+  api_runtime:
+    job_completion_wait_timeout_sec: 3600
+    stage_labels:
+      INIT: "初始化"
+      PREP_SOURCE: "准备源文件"
+      INGEST: "接收文件"
+      FONT_PREFLIGHT_AND_REPLACE: "字体预检与替换"
+      CONVERT_DWG_TO_DXF: "转换 DWG/DXF"
+      DETECT_FRAMES: "识别图框"
+      VERIFY_FRAMES_BY_ANCHOR: "锚点校验图框"
+      SCALE_FIT_AND_CHECK: "图幅比例校验"
+      EXTRACT_TITLEBLOCK_FIELDS: "提取图签字段"
+      A4_MULTIPAGE_GROUPING: "A4 多页合并"
+      FIX_TITLEBLOCK_CONSISTENCY: "修正图签一致性"
+      SPLIT_AND_RENAME: "拆分与命名"
+      EXPORT_PDF_AND_DWG: "导出 DWG/PDF"
+      GENERATE_DOCS: "生成目录和文档"
+      PACKAGE_ZIP: "生成交付压缩包"
+      DELIVERABLE_BRANCH: "执行出图子任务"
+      AUDIT_BRANCH: "执行纠错子任务"
+      DOCS_AND_PACKAGE: "整理文档与压缩包"
+      GROUP_COMPLETE: "任务包完成"
+      AUDIT_CHECK: "执行纠错识别"
+      AUDIT_REPLACE: "执行翻版替换"
+      EXPORT_REPORT: "导出纠错报告"
+
+  cad_runtime_mechanism:
+    min_supported_autocad_year: 2010
+    pdf2_pc3_name: "打印PDF2.pc3"
+    default_install_year_start: 2026
+    default_install_year_end: 2010
+    default_install_roots:
+      - "D:\\AUTOCAD"
+      - "C:\\AUTOCAD"
+      - "D:\\Program Files\\AUTOCAD"
+      - "C:\\Program Files\\AUTOCAD"
+      - "D:\\Program Files\\Autodesk"
+      - "C:\\Program Files\\Autodesk"
+    default_pdf_media_name: "ISO_A1_(841.00_x_594.00_MM)"
+    pdf_media_map:
+      - { size: [1189, 841], name: "ISO_A0_(1189.00_x_841.00_MM)" }
+      - { size: [841, 1189], name: "ISO_A0_(841.00_x_1189.00_MM)" }
+      - { size: [841, 594], name: "ISO_A1_(841.00_x_594.00_MM)" }
+      - { size: [594, 841], name: "ISO_A1_(594.00_x_841.00_MM)" }
+      - { size: [594, 420], name: "ISO_A2_(594.00_x_420.00_MM)" }
+      - { size: [420, 594], name: "ISO_A2_(420.00_x_594.00_MM)" }
+      - { size: [420, 297], name: "ISO_A3_(420.00_x_297.00_MM)" }
+      - { size: [297, 420], name: "ISO_A3_(297.00_x_420.00_MM)" }
+      - { size: [297, 210], name: "ISO_A4_(297.00_x_210.00_MM)" }
+      - { size: [210, 297], name: "ISO_A4_(210.00_x_297.00_MM)" }
+    office_com_retry_policy:
+      excel_active_object: { retries: 36, delay_sec: 0.5 }
+      excel_dispatch: { retries: 3, delay_sec: 0.8 }
+      excel_call: { retries: 10, delay_sec: 0.5 }
+      excel_ready: { retries: 18, delay_sec: 0.5 }
+      word_call: { retries: 6, delay_sec: 0.8 }
+      word_dispatch: { retries: 3, delay_sec: 0.8 }
+
+  deployment_mechanism:
+    spec_name: "参数规范.yaml"
+    runtime_spec_name: "参数规范_运行期.yaml"
+    mechanism_spec_name: "参数规范-3.yaml"
+    default_frontend_api_port: 8000
+    managed_pdf2_pc3_name: "打印PDF2.pc3"
+    managed_monochrome_ctb_name: "fanban_monochrome.ctb"
+    installers:
+      dotnet48:
+        filename: "ndp48-x86-x64-allos-enu.exe"
+        url: "https://go.microsoft.com/fwlink/?linkid=2088631"
+      vc_redist_x64:
+        filename: "VC_redist.x64.exe"
+        url: "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+      python_313_x64:
+        filename: "python-3.13.12-embed-amd64.zip"
+        url: "https://www.python.org/ftp/python/3.13.12/python-3.13.12-embed-amd64.zip"
+      url_rewrite_x64:
+        filename: "rewrite_amd64_zh-CN.msi"
+        url: "https://download.microsoft.com/download/1/2/8/128E2E22-C1B9-44A4-BE2A-5859ED1D4592/rewrite_amd64_zh-CN.msi"
+      arr_x64:
+        filename: "requestRouter_amd64.msi"
+        url: "https://go.microsoft.com/fwlink/?LinkID=615136"

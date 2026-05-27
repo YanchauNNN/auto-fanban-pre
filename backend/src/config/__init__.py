@@ -8,12 +8,16 @@
 """
 
 from .runtime_config import RuntimeConfig, get_config, reload_config
+from .mechanism_spec import MechanismSpec, MechanismSpecLoader, load_mechanism_spec
 from .spec_loader import BusinessSpec, SpecLoader, load_spec
 
 __all__ = [
     "SpecLoader",
     "BusinessSpec",
     "load_spec",
+    "MechanismSpec",
+    "MechanismSpecLoader",
+    "load_mechanism_spec",
     "RuntimeConfig",
     "get_config",
     "reload_config",

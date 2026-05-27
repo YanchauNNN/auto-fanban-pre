@@ -4,6 +4,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+from src.config import load_mechanism_spec
 from src.workload.queries import WorkloadQueryFilters
 
 from ..auth_helpers import require_current_account
@@ -24,6 +25,12 @@ def _build_filters(
         status=str(status_value or "").strip().lower() or None,
         valid_only=valid_only,
     )
+
+
+def _require_workload_scope(account, scope: str, detail: str) -> None:
+    allowed_roles = load_mechanism_spec().permissions.roles_for_scope(scope)
+    if account.role not in allowed_roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 @router.get("/me")
@@ -49,8 +56,7 @@ def workload_office(
     status_value: str | None = Query(default=None, alias="status"),
     valid_only: bool = Query(default=False),
 ) -> dict[str, object]:
-    if account.role not in {"室主任", "所领导", "管理员"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="office scope unavailable")
+    _require_workload_scope(account, "office", "office scope unavailable")
     groups = request.app.state.runtime.group_manager.load_all_groups()
     filters = _build_filters(start_date, end_date, status_value, valid_only)
     return request.app.state.management.workload_queries.office(account, groups, filters)
@@ -65,8 +71,7 @@ def workload_institute(
     status_value: str | None = Query(default=None, alias="status"),
     valid_only: bool = Query(default=False),
 ) -> dict[str, object]:
-    if account.role not in {"所领导", "管理员"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="institute scope unavailable")
+    _require_workload_scope(account, "institute", "institute scope unavailable")
     groups = request.app.state.runtime.group_manager.load_all_groups()
     filters = _build_filters(start_date, end_date, status_value, valid_only)
     return request.app.state.management.workload_queries.institute(groups, filters)
@@ -81,8 +86,7 @@ def workload_admin(
     status_value: str | None = Query(default=None, alias="status"),
     valid_only: bool = Query(default=False),
 ) -> dict[str, object]:
-    if account.role != "管理员":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+    _require_workload_scope(account, "admin", "admin only")
     groups = request.app.state.runtime.group_manager.load_all_groups()
     filters = _build_filters(start_date, end_date, status_value, valid_only)
     return request.app.state.management.workload_queries.admin(groups, filters)

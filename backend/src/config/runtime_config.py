@@ -265,6 +265,7 @@ class FactoryIndexMapsConfig(BaseModel):
         default_factory=lambda: {
             "1818": "1818项目厂房索引图.dwg",
             "1907": "1907项目厂房索引图.dwg",
+            "1915": "1915项目厂房索引图.dwg",
             "2026": "2026项目厂房索引图.dwg",
         },
     )
@@ -456,6 +457,7 @@ class RuntimeConfig(BaseSettings):
     storage_dir: Path = Path("storage")
     spec_path: Path = Path("documents/参数规范.yaml")
     runtime_spec_path: Path = Path("documents/参数规范_运行期.yaml")
+    mechanism_spec_path: Path = Path("documents/参数规范-3.yaml")
 
     # 各子配置
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
@@ -532,7 +534,13 @@ class RuntimeConfig(BaseSettings):
             "plot_assets": PlotAssetsConfig(**cls._extract(runtime_opts, "plot_assets")),
             "management": ManagementRuntimeConfig(**cls._extract(runtime_opts, "management")),
         }
-        for path_key in ("base_dir", "storage_dir", "spec_path", "runtime_spec_path"):
+        for path_key in (
+            "base_dir",
+            "storage_dir",
+            "spec_path",
+            "runtime_spec_path",
+            "mechanism_spec_path",
+        ):
             if path_key in path_values:
                 yaml_values[path_key] = path_values[path_key]
 
@@ -677,6 +685,7 @@ class RuntimeConfig(BaseSettings):
         self.storage_dir = self._resolve_root_path(self.storage_dir, runtime_root)
         self.spec_path = self._resolve_root_path(self.spec_path, project_root)
         self.runtime_spec_path = self._resolve_root_path(self.runtime_spec_path, project_root)
+        self.mechanism_spec_path = self._resolve_root_path(self.mechanism_spec_path, project_root)
         self.management.admin_config_path = self._resolve_root_path(
             self.management.admin_config_path,
             runtime_root,

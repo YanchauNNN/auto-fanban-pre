@@ -18,10 +18,12 @@ runtime_options:
     storage_dir: { type: str, default: "storage", desc: "任务存储根目录；实际会派生出 storage/jobs、storage/groups、storage/runtime、storage/preflight、storage/runtime/cad-slots。相对路径在源码模式下相对仓库根，在打包模式下相对 exe 所在目录" }
     spec_path: { type: str, default: "documents/参数规范.yaml", desc: "业务规范文件路径；相对 base_dir 解析" }
     runtime_spec_path: { type: str, default: "documents/参数规范_运行期.yaml", desc: "当前运行期规范文件路径；相对 base_dir 解析" }
+    mechanism_spec_path: { type: str, default: "documents/参数规范-3.yaml", desc: "后端机制参数规范文件路径；相对 base_dir 解析" }
 
   bootstrap_contract:
     spec_path_env_var: { type: str, default: "FANBAN_SPEC_PATH", desc: "业务规范文件路径的启动期环境变量；属于引导变量，在 YAML 加载前生效" }
     runtime_spec_path_env_var: { type: str, default: "FANBAN_RUNTIME_SPEC_PATH", desc: "运行期规范文件路径的启动期环境变量；属于引导变量，在 YAML 加载前生效" }
+    mechanism_spec_path_env_var: { type: str, default: "FANBAN_MECHANISM_SPEC_PATH", desc: "后端机制参数规范文件路径的启动期环境变量；属于引导变量，在 YAML 加载前生效" }
     autocad_install_dir_env_var: { type: str, default: "FANBAN_AUTOCAD_INSTALL_DIR", desc: "AutoCAD 安装目录环境变量；用于自动探测链的高优先级覆盖" }
     plot_asset_root_env_var: { type: str, default: "FANBAN_PLOT_ASSET_ROOT", desc: "打印资源资产根目录环境变量；高于 plot_assets.asset_roots" }
     runtime_spec_fallback_paths:
@@ -35,6 +37,7 @@ runtime_options:
       default:
         - "FANBAN_SPEC_PATH"
         - "FANBAN_RUNTIME_SPEC_PATH"
+        - "FANBAN_MECHANISM_SPEC_PATH"
         - "FANBAN_ODA__EXE_PATH"
         - "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR"
         - "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH"
@@ -271,6 +274,7 @@ runtime_options:
       default:
         "1818": "1818项目厂房索引图.dwg"
         "1907": "1907项目厂房索引图.dwg"
+        "1915": "1915项目厂房索引图.dwg"
         "2026": "2026项目厂房索引图.dwg"
       desc: "无需岛号区分的目标项目模板映射：target_project_no -> 模板文件名"
     island_templates:

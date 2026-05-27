@@ -237,49 +237,50 @@ class CoverGenerator(ICoverGenerator):
         doc = None
         ws = None
         limiter = get_office_automation_limiter()
-        with limiter.word_session(), limiter.excel_session():
-            try:
-                pythoncom.CoInitialize()
-                word = win32com.client.DispatchEx("Word.Application")
-                word.Visible = False
-                word.DisplayAlerts = 0
-                doc = word.Documents.Open(str(output_path.absolute()))
-                time.sleep(1.0)
-                ws = self._get_embedded_excel_sheet(doc)
-                if ws is None:
-                    raise GenerationError("未找到封面中的嵌入 Excel 对象")
-                worksheet = ws
+        with limiter.word_session():
+            with limiter.excel_session():
+                try:
+                    pythoncom.CoInitialize()
+                    word = win32com.client.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    doc = word.Documents.Open(str(output_path.absolute()))
+                    time.sleep(1.0)
+                    ws = self._get_embedded_excel_sheet(doc)
+                    if ws is None:
+                        raise GenerationError("未找到封面中的嵌入 Excel 对象")
+                    worksheet = ws
 
-                def read_cell(cell: str) -> Any:
-                    return self._com_call_with_retry(
-                        lambda: worksheet.Range(cell).Value,
-                        f"Range({cell}).Value",
-                    )
+                    def read_cell(cell: str) -> Any:
+                        return self._com_call_with_retry(
+                            lambda: worksheet.Range(cell).Value,
+                            f"Range({cell}).Value",
+                        )
 
-                def write_cell(cell: str, value: Any) -> None:
-                    self._com_call_with_retry(
-                        lambda: setattr(worksheet.Range(cell), "Value", value),
-                        f"Range({cell}).Value={value}",
-                    )
+                    def write_cell(cell: str, value: Any) -> None:
+                        self._com_call_with_retry(
+                            lambda: setattr(worksheet.Range(cell), "Value", value),
+                            f"Range({cell}).Value={value}",
+                        )
 
-                self._apply_bindings(bindings, data, read_cell, write_cell)
-                self._com_call_with_retry(doc.Save, "Document.Save")
-            finally:
-                ws = None
-                if doc is not None:
-                    doc_obj = doc
-                    self._mark_document_saved(doc)
-                    self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
-                doc = None
-                if word is not None:
-                    self._close_all_word_documents(word, keep=doc)
-                    self._mark_normal_template_saved(word)
-                    self._close_com_object(word.Quit, "Word.Quit")
-                word = None
-                gc.collect()
-                if pythoncom is not None:
-                    with contextlib.suppress(Exception):
-                        pythoncom.CoUninitialize()
+                    self._apply_bindings(bindings, data, read_cell, write_cell)
+                    self._com_call_with_retry(doc.Save, "Document.Save")
+                finally:
+                    ws = None
+                    if doc is not None:
+                        doc_obj = doc
+                        self._mark_document_saved(doc)
+                        self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
+                    doc = None
+                    if word is not None:
+                        self._close_all_word_documents(word, keep=doc)
+                        self._mark_normal_template_saved(word)
+                        self._close_com_object(word.Quit, "Word.Quit")
+                    word = None
+                    gc.collect()
+                    if pythoncom is not None:
+                        with contextlib.suppress(Exception):
+                            pythoncom.CoUninitialize()
 
     def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
         for collection_name in ("InlineShapes", "Shapes"):
