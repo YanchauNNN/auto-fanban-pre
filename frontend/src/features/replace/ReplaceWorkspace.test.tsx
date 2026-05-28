@@ -14,6 +14,16 @@ const schema: FormSchema = {
   },
   sections: [],
   auditReplaceProjectOptions: ["2026", "2016", "1916", "1818"],
+  auditReplaceFactoryIndexMaps: {
+    sourceVariantOptions: {
+      "1916": ["3", "4"],
+      "2016": ["1", "2"],
+    },
+    targetVariantOptions: {
+      "1916": ["3", "4"],
+      "2016": ["1", "2"],
+    },
+  },
 };
 
 function createAdapter(): ApiAdapter {
@@ -168,6 +178,43 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2026");
     expect(screen.queryByLabelText("来源机组号")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("来源岛号")).not.toBeInTheDocument();
+  });
+
+  it("uses backend schema for source and target variant selectors", async () => {
+    const user = userEvent.setup();
+    const schemaWithRuntimeVariants = {
+      ...schema,
+      auditReplaceFactoryIndexMaps: {
+        sourceVariantOptions: {
+          "3000": ["7", "8"],
+        },
+        targetVariantOptions: {
+          "4000": ["5", "6"],
+        },
+      },
+    } as unknown as FormSchema;
+
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithRuntimeVariants}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("原始项目号"), "3000");
+    expect(screen.getByLabelText("来源岛号")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "7号岛" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "8号岛" })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("目标项目号"), "4000");
+    expect(screen.getByLabelText("目标岛号")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "5号岛" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "6号岛" })).toBeInTheDocument();
   });
 
   it("clears the persisted replace draft after a successful submit", async () => {

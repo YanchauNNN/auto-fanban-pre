@@ -599,6 +599,17 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert payload["upload_limits"]["max_files"] == 3
     assert payload["deliverable"]["sections"]
     assert "2016" in payload["audit_replace"]["project_options"]
+    assert payload["audit_replace"]["factory_index_maps"]["source_variant_options"]["2016"] == [
+        "1",
+        "2",
+    ]
+    assert payload["audit_replace"]["factory_index_maps"]["target_variant_options"]["1916"] == [
+        "3",
+        "4",
+    ]
+    assert payload["audit_check"]["unit_consistency"]["enabled"] is True
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == ["1", "2"]
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == ["3", "4"]
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"
@@ -1136,7 +1147,7 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
             "/api/jobs/audit-replace",
             data={
                 "mode": "check",
-                "params_json": json.dumps({"project_no": "2016"}, ensure_ascii=False),
+                "params_json": json.dumps({"project_no": "2016", "unit_no": "1"}, ensure_ascii=False),
             },
             files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
         )
@@ -1196,7 +1207,7 @@ def test_create_audit_check_reuses_explicit_batch_id_when_provided(
             data={
                 "mode": "check",
                 "params_json": json.dumps(
-                    {"project_no": "2016", "batch_id": "batch-shared-1"},
+                    {"project_no": "2016", "unit_no": "1", "batch_id": "batch-shared-1"},
                     ensure_ascii=False,
                 ),
             },
@@ -1642,10 +1653,12 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
             shared_prep_service=FakeSharedPrepService(),
         ),
     ) as client:
+        params = _deliverable_params()
+        params["unit_no"] = "1"
         response = client.post(
             "/api/jobs/batch",
             data={
-                "params_json": json.dumps(_deliverable_params(), ensure_ascii=False),
+                "params_json": json.dumps(params, ensure_ascii=False),
                 "run_audit_check": "true",
             },
             files=[("files[]", ("20261RS-JGS65.dwg", b"dwg", "application/acad"))],
@@ -1728,6 +1741,7 @@ def test_grouped_batches_can_run_children_concurrently(
     params = _deliverable_params()
     params["subitem_name_en"] = "Example Subitem"
     params["album_title_en"] = "Example Album"
+    params["unit_no"] = "1"
 
     with TestClient(
         create_app(
@@ -1997,6 +2011,7 @@ def test_grouped_batch_keeps_pending_groups_in_external_queue(
         params = _deliverable_params()
         params["subitem_name_en"] = "Example Subitem"
         params["album_title_en"] = "Example Album"
+        params["unit_no"] = "1"
         response = client.post(
             "/api/jobs/batch",
             data={

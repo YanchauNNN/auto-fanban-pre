@@ -38,27 +38,6 @@ type ReplaceDraft = {
 };
 
 const REPLACE_DRAFT_STORAGE_KEY = "auto-fanban.replace-draft";
-const SOURCE_ISLAND_OPTIONS_BY_PROJECT = {
-  "1916": [
-    { value: "3", label: "3号岛" },
-    { value: "4", label: "4号岛" },
-  ],
-  "2016": [
-    { value: "1", label: "1号机组" },
-    { value: "2", label: "2号机组" },
-  ],
-} as const;
-const ISLAND_OPTIONS_BY_PROJECT = {
-  "1916": [
-    { value: "3", label: "3号岛" },
-    { value: "4", label: "4号岛" },
-  ],
-  "2016": [
-    { value: "1", label: "1号岛" },
-    { value: "2", label: "2号岛" },
-  ],
-} as const;
-
 export function ReplaceWorkspace({
   adapter,
   schema,
@@ -77,9 +56,9 @@ export function ReplaceWorkspace({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const projectOptions = (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim());
-  const sourceIslandOptions = getSourceIslandOptions(draft.sourceProjectNo);
+  const sourceIslandOptions = getSourceIslandOptions(schema, draft.sourceProjectNo);
   const sourceSelectionRequired = sourceIslandOptions.length > 0;
-  const targetIslandOptions = getTargetIslandOptions(draft.targetProjectNo);
+  const targetIslandOptions = getTargetIslandOptions(schema, draft.targetProjectNo);
   const islandSelectionRequired = targetIslandOptions.length > 0;
 
   useEffect(() => {
@@ -184,11 +163,13 @@ export function ReplaceWorkspace({
           replaceConfig: {
             sourceProjectNo: draft.sourceProjectNo.trim(),
             sourceIslandNo: normalizeSourceIslandNo(
+              schema,
               draft.sourceProjectNo,
               draft.sourceIslandNo,
             ),
             targetProjectNo: draft.targetProjectNo.trim(),
             targetIslandNo: normalizeTargetIslandNo(
+              schema,
               draft.targetProjectNo,
               draft.targetIslandNo,
             ),
@@ -205,9 +186,9 @@ export function ReplaceWorkspace({
     try {
       const payload = await adapter.createAuditReplace({
         sourceProjectNo: draft.sourceProjectNo.trim(),
-        sourceIslandNo: normalizeSourceIslandNo(draft.sourceProjectNo, draft.sourceIslandNo),
+        sourceIslandNo: normalizeSourceIslandNo(schema, draft.sourceProjectNo, draft.sourceIslandNo),
         targetProjectNo: draft.targetProjectNo.trim(),
-        targetIslandNo: normalizeTargetIslandNo(draft.targetProjectNo, draft.targetIslandNo),
+        targetIslandNo: normalizeTargetIslandNo(schema, draft.targetProjectNo, draft.targetIslandNo),
         files: draft.files,
         runDeliverable: false,
       });
@@ -288,7 +269,7 @@ export function ReplaceWorkspace({
       const nextSourceProjectNo = shouldUseInferredProjectNo
         ? inference.primaryProjectNo
         : current.sourceProjectNo;
-      const nextSourceIslandOptions = getSourceIslandOptions(nextSourceProjectNo);
+      const nextSourceIslandOptions = getSourceIslandOptions(schema, nextSourceProjectNo);
       const inferredSourceIslandNo = nextSourceIslandOptions.some(
         (option) => option.value === inference.primaryUnitNo,
       )
@@ -672,30 +653,48 @@ function getExtension(filename: string) {
   return dot >= 0 ? filename.slice(dot).toLowerCase() : "";
 }
 
-function getTargetIslandOptions(targetProjectNo: string) {
+function getTargetIslandOptions(schema: FormSchema, targetProjectNo: string) {
   const normalizedProjectNo = targetProjectNo.trim();
-  return ISLAND_OPTIONS_BY_PROJECT[
-    normalizedProjectNo as keyof typeof ISLAND_OPTIONS_BY_PROJECT
-  ] ?? [];
+  return buildVariantOptions(
+    schema.auditReplaceFactoryIndexMaps?.targetVariantOptions[normalizedProjectNo],
+    "island",
+  );
 }
 
-function getSourceIslandOptions(sourceProjectNo: string) {
+function getSourceIslandOptions(schema: FormSchema, sourceProjectNo: string) {
   const normalizedProjectNo = sourceProjectNo.trim();
-  return SOURCE_ISLAND_OPTIONS_BY_PROJECT[
-    normalizedProjectNo as keyof typeof SOURCE_ISLAND_OPTIONS_BY_PROJECT
-  ] ?? [];
+  const labelKind = normalizedProjectNo === "2016" ? "unit" : "island";
+  return buildVariantOptions(
+    schema.auditReplaceFactoryIndexMaps?.sourceVariantOptions[normalizedProjectNo],
+    labelKind,
+  );
 }
 
-function normalizeSourceIslandNo(sourceProjectNo: string, sourceIslandNo: string) {
+function buildVariantOptions(
+  values: readonly string[] | undefined,
+  labelKind: "island" | "unit",
+) {
+  const suffix = labelKind === "unit" ? "机组" : "岛";
+  return (values ?? []).map((value) => ({
+    value,
+    label: `${value}号${suffix}`,
+  }));
+}
+
+function normalizeSourceIslandNo(schema: FormSchema, sourceProjectNo: string, sourceIslandNo: string) {
   const normalizedIslandNo = sourceIslandNo.trim();
-  return getSourceIslandOptions(sourceProjectNo).some((option) => option.value === normalizedIslandNo)
+  return getSourceIslandOptions(schema, sourceProjectNo).some(
+    (option) => option.value === normalizedIslandNo,
+  )
     ? normalizedIslandNo
     : "";
 }
 
-function normalizeTargetIslandNo(targetProjectNo: string, targetIslandNo: string) {
+function normalizeTargetIslandNo(schema: FormSchema, targetProjectNo: string, targetIslandNo: string) {
   const normalizedIslandNo = targetIslandNo.trim();
-  return getTargetIslandOptions(targetProjectNo).some((option) => option.value === normalizedIslandNo)
+  return getTargetIslandOptions(schema, targetProjectNo).some(
+    (option) => option.value === normalizedIslandNo,
+  )
     ? normalizedIslandNo
     : "";
 }

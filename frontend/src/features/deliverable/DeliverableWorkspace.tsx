@@ -67,7 +67,6 @@ const NAME_ID_PATTERN = /^.+@.+$/;
 const MAX_COMBO_OPTIONS = 10;
 const FULL_MENU_COMBOBOX_FIELDS = new Set(["project_no", "cover_variant"]);
 const SCROLLABLE_FULL_OPTION_FIELDS = new Set(["file_category"]);
-const UNIT_CONSISTENCY_PROJECTS = new Set(["1915", "2026"]);
 const LEGACY_UPGRADE_KEYS = new Set([
   "upgrade_start_seq",
   "upgrade_end_seq",
@@ -442,7 +441,7 @@ export function DeliverableWorkspace({
 
     if (
       draft.runAuditCheck &&
-      UNIT_CONSISTENCY_PROJECTS.has(String(draft.values.project_no ?? "").trim()) &&
+      requiresUnitNoForAuditProject(schema, String(draft.values.project_no ?? "")) &&
       !String(draft.values.unit_no ?? "").trim()
     ) {
       nextFieldErrors.unit_no = ["required_for_unit_consistency"];
@@ -2213,6 +2212,17 @@ function getFieldPlaceholder(field: FormField) {
   }
 
   return `请输入${field.label}`;
+}
+
+function requiresUnitNoForAuditProject(schema: FormSchema, projectNo: string) {
+  const normalizedProjectNo = projectNo.trim();
+  if (!normalizedProjectNo || !schema.auditCheckUnitConsistency?.enabled) {
+    return false;
+  }
+  return Object.prototype.hasOwnProperty.call(
+    schema.auditCheckUnitConsistency.projectUnits,
+    normalizedProjectNo,
+  );
 }
 
 function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string) {

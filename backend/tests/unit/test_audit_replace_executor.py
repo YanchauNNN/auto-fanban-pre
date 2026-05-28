@@ -50,6 +50,18 @@ def _build_replace_source_dxf(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     }
 
 
+def _build_external_code_split_dxf(tmp_path: Path) -> tuple[Path, list[tuple[str, str]]]:
+    dxf_path = tmp_path / "external-code-source.dxf"
+    doc = ezdxf.new("R2018")
+    modelspace = doc.modelspace()
+    chars: list[tuple[str, str]] = []
+    for index, char in enumerate("JD1RCG11002B25C42SD"):
+        entity = modelspace.add_text(char, dxfattribs={"insert": (float(index), 0.0)})
+        chars.append((char, entity.dxf.handle))
+    doc.saveas(dxf_path)
+    return dxf_path, chars
+
+
 def test_audit_replace_executor_writes_replaced_dwg_reports_and_preserves_source(
     monkeypatch,
     tmp_path: Path,
@@ -181,6 +193,171 @@ def test_derive_replaced_dwg_filename_replaces_source_project_no() -> None:
         )
         == "20262KA-JGS03-A.dwg"
     )
+
+
+def test_audit_replace_executor_uses_original_upload_name_for_replaced_dwg(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    stored_source_dwg = tmp_path / "uploads" / "20162RC-JGS09-A-4d8dd053.dwg"
+    stored_source_dwg.parent.mkdir(parents=True, exist_ok=True)
+    stored_source_dwg.write_bytes(b"original-dwg")
+    dxf_path, handles = _build_replace_source_dxf(tmp_path)
+
+    lexicon = AuditLexicon(
+        project_options=["2016", "1915"],
+        allowed_texts={"2016": {"2016"}, "1915": {"1915"}},
+        foreign_texts={"2016": {"1915"}, "1915": {"2016"}},
+        token_projects={"2016": {"2016"}, "1915": {"1915"}},
+    )
+    mapping = ReplaceMapping(
+        source_project_no="2016",
+        target_project_no="1915",
+        replacements={"2016": "1915"},
+    )
+
+    executor = AuditReplaceExecutor()
+    monkeypatch.setattr(executor.oda, "dwg_to_dxf", lambda src, out_dir: dxf_path)
+
+    def _fake_dxf_to_dwg(
+        src: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "converted.dwg"
+        shutil.copyfile(src, output_path)
+        return output_path
+
+    monkeypatch.setattr(executor.oda, "dxf_to_dwg", _fake_dxf_to_dwg)
+    monkeypatch.setattr(executor.frame_detector, "detect_frames", lambda path: [])
+    monkeypatch.setattr(executor.titleblock_extractor, "extract_fields", lambda *args, **kwargs: None)
+    monkeypatch.setattr(executor.a4_grouper, "group_a4_pages", lambda frames: ([], []))
+    monkeypatch.setattr(executor.lexicon_loader, "load", lambda path: lexicon)
+    monkeypatch.setattr(
+        executor.mapping_builder,
+        "build",
+        lambda workbook_path, source_project_no, target_project_no: mapping,
+    )
+    monkeypatch.setattr(
+        executor.dotnet_scanner,
+        "scan",
+        lambda **kwargs: [
+            ScanTextItem(raw_text="2016", entity_type="DBText", entity_handle=handles["text"]),
+        ],
+    )
+
+    job = Job(
+        job_id="job-audit-replace-original-name",
+        job_type=JobType.AUDIT_REPLACE,
+        project_no="1915",
+        input_files=[stored_source_dwg],
+        options={"mode": "replace"},
+        params={"source_project_no": "2016", "target_project_no": "1915"},
+        source_filename="20162RC-JGS09-A.dwg",
+    )
+
+    executor.execute(job)
+
+    assert job.artifacts.replaced_dwg is not None
+    assert job.artifacts.replaced_dwg.name == "19152RC-JGS09-A.dwg"
+    assert job.artifacts.report_json is not None
+    report_payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+    assert report_payload["source_filename"] == "20162RC-JGS09-A.dwg"
+
+
+def test_audit_replace_executor_replaces_split_external_code_prefix(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    source_dwg = tmp_path / "20162RC-JGS09-A.dwg"
+    source_dwg.write_bytes(b"original-dwg")
+    dxf_path, char_handles = _build_external_code_split_dxf(tmp_path)
+
+    lexicon = AuditLexicon(
+        project_options=["2016", "1915"],
+        allowed_texts={"2016": {"JD"}, "1915": {"HP"}},
+        foreign_texts={"2016": {"HP"}, "1915": {"JD"}},
+        token_projects={"JD": {"2016"}, "HP": {"1915"}},
+    )
+    mapping = ReplaceMapping(
+        source_project_no="2016",
+        target_project_no="1915",
+        replacements={"JD": "HP"},
+    )
+
+    executor = AuditReplaceExecutor()
+    monkeypatch.setattr(executor.oda, "dwg_to_dxf", lambda src, out_dir: dxf_path)
+
+    def _fake_dxf_to_dwg(
+        src: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "converted.dwg"
+        shutil.copyfile(src, output_path)
+        return output_path
+
+    monkeypatch.setattr(executor.oda, "dxf_to_dwg", _fake_dxf_to_dwg)
+    monkeypatch.setattr(executor.frame_detector, "detect_frames", lambda path: [])
+    monkeypatch.setattr(executor.titleblock_extractor, "extract_fields", lambda *args, **kwargs: None)
+    monkeypatch.setattr(executor.a4_grouper, "group_a4_pages", lambda frames: ([], []))
+    monkeypatch.setattr(executor.lexicon_loader, "load", lambda path: lexicon)
+    monkeypatch.setattr(
+        executor.mapping_builder,
+        "build",
+        lambda workbook_path, source_project_no, target_project_no: mapping,
+    )
+    monkeypatch.setattr(
+        executor.dotnet_scanner,
+        "scan",
+        lambda **kwargs: [
+            ScanTextItem(
+                raw_text=char,
+                entity_type="DBText",
+                entity_handle=handle,
+                field_context="titleblock_external_code",
+                internal_code="20162RC-JGS09-001",
+                position_x=float(index),
+                position_y=0.0,
+            )
+            for index, (char, handle) in enumerate(char_handles)
+        ],
+    )
+
+    job = Job(
+        job_id="job-audit-replace-split-external-code",
+        job_type=JobType.AUDIT_REPLACE,
+        project_no="1915",
+        input_files=[source_dwg],
+        options={"mode": "replace"},
+        params={"source_project_no": "2016", "target_project_no": "1915"},
+    )
+
+    executor.execute(job)
+
+    replaced_dxf = job.work_dir / "work" / "replace" / "replaced.dxf"
+    replaced_doc = ezdxf.readfile(replaced_dxf)
+    entity_db = replaced_doc.entitydb
+    rebuilt = "".join(str(entity_db.get(handle).dxf.text) for _, handle in char_handles)
+    assert rebuilt == "HP1RCG11002B25C42SD"
+
+    assert job.artifacts.report_json is not None
+    report_payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+    external_rows = [
+        entry
+        for entry in report_payload["replacements"]
+        if entry.get("field_context") == "titleblock_external_code"
+    ]
+    assert [(row["matched_text"], row["replacement_text"]) for row in external_rows] == [
+        ("J", "H"),
+        ("D", "P"),
+    ]
 
 
 def test_derive_replaced_dwg_filename_appends_target_project_when_source_project_absent() -> None:

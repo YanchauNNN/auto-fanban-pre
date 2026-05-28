@@ -14,6 +14,7 @@ test/dist/src/__pycache__/
 test/dist/src/*.pyc
 
 # Runtime artifacts
+.codex-smoke/
 storage/
 tmp/
 /build/
@@ -31,4 +32,3 @@ backend/src/cad/dotnet/Module5CadBridge/obj/
 .worktrees/
 docs/
 .playwright-cli/
-

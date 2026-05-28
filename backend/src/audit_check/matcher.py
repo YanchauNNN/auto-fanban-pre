@@ -3,8 +3,10 @@ from __future__ import annotations
 import re
 
 from ..config import get_config, load_mechanism_spec
+from ..models import BBox
 from .lexicon import normalize_text, normalize_text_without_spaces
 from .models import AuditFinding, AuditLexicon, ScanTextItem
+
 
 class AuditMatchEngine:
     def __init__(self, lexicon: AuditLexicon) -> None:
@@ -29,6 +31,15 @@ class AuditMatchEngine:
             for pattern in audit_cfg.generic_identifier_like.exempt_embed_patterns
         ]
         self._unit_consistency = audit_cfg.unit_consistency
+        self._explicit_unit_text_pattern = re.compile(
+            self._unit_consistency.explicit_unit_text_pattern,
+        )
+        self._short_factory_code_pattern = re.compile(
+            self._unit_consistency.short_factory_code_pattern,
+        )
+        self._external_unit_code_pattern = re.compile(
+            self._unit_consistency.external_code_pattern,
+        )
 
     def evaluate(
         self,
@@ -120,6 +131,18 @@ class AuditMatchEngine:
                         )
                     )
 
+        for external_code_item in self._build_external_code_unit_items(items):
+            findings.extend(
+                self._unit_consistency_findings(
+                    project_no=project_no,
+                    unit_no=normalized_unit_no,
+                    item=external_code_item,
+                    normalized_text=normalize_text(external_code_item.raw_text),
+                    unit_code_pattern=unit_code_pattern,
+                    observed_factory_codes=observed_factory_codes,
+                )
+            )
+
         return findings
 
     def _unit_consistency_findings(
@@ -143,7 +166,11 @@ class AuditMatchEngine:
 
         findings: list[AuditFinding] = []
         seen: set[tuple[str, str]] = set()
-        for pattern in [unit_code_pattern, re.compile(self._unit_consistency.explicit_unit_text_pattern)]:
+        patterns = [unit_code_pattern, self._explicit_unit_text_pattern]
+        if self._should_check_external_code_unit_item(item):
+            patterns.append(self._external_unit_code_pattern)
+
+        for pattern in patterns:
             for match in pattern.finditer(normalized_text):
                 self._append_unit_consistency_finding(
                     findings=findings,
@@ -154,8 +181,7 @@ class AuditMatchEngine:
                     match=match,
                 )
 
-        short_pattern = re.compile(self._unit_consistency.short_factory_code_pattern)
-        for match in short_pattern.finditer(normalized_text):
+        for match in self._short_factory_code_pattern.finditer(normalized_text):
             factory_code = str(match.group("factory_code") or "").strip().upper()
             if (
                 self._unit_consistency.short_factory_code_requires_observed_album_factory
@@ -171,6 +197,129 @@ class AuditMatchEngine:
                 match=match,
             )
         return findings
+
+    def _should_check_external_code_unit_item(self, item: ScanTextItem) -> bool:
+        if not self._unit_consistency.external_code_requires_titleblock_roi_context:
+            return True
+        return item.field_context == "titleblock_external_code"
+
+    def _build_external_code_unit_items(self, items: list[ScanTextItem]) -> list[ScanTextItem]:
+        grouped_items: list[ScanTextItem] = []
+        for group in self._cluster_external_code_char_items(items):
+            ordered = sorted(group, key=self._item_x)
+            chars = [self._single_alnum(item.raw_text) for item in ordered]
+            if any(char is None for char in chars):
+                continue
+            code = "".join(str(char) for char in chars)
+            if not self._external_unit_code_pattern.fullmatch(code):
+                continue
+            bbox = self._union_text_bbox(ordered)
+            x, y = self._average_position(ordered, bbox)
+            grouped_items.append(
+                ScanTextItem(
+                    raw_text=code,
+                    entity_type="TEXT_GROUP",
+                    field_context="titleblock_external_code",
+                    internal_code=ordered[0].internal_code,
+                    layout_name=ordered[0].layout_name,
+                    block_path=ordered[0].block_path,
+                    position_x=x,
+                    position_y=y,
+                    text_bbox=bbox,
+                )
+            )
+        return grouped_items
+
+    def _cluster_external_code_char_items(
+        self,
+        items: list[ScanTextItem],
+    ) -> list[list[ScanTextItem]]:
+        keyed: dict[tuple[str, str], list[ScanTextItem]] = {}
+        for item in items:
+            if not self._should_check_external_code_unit_item(item):
+                continue
+            if self._single_alnum(item.raw_text) is None:
+                continue
+            y = self._item_y(item)
+            x = self._item_x(item)
+            if y is None or x is None:
+                continue
+            key = (str(item.internal_code or ""), str(item.layout_name or ""))
+            keyed.setdefault(key, []).append(item)
+
+        groups: list[list[ScanTextItem]] = []
+        for bucket in keyed.values():
+            current: list[ScanTextItem] = []
+            current_y: float | None = None
+            for item in sorted(bucket, key=lambda row: (self._item_y(row) or 0.0, self._item_x(row) or 0.0)):
+                y = self._item_y(item)
+                tolerance = self._line_y_tolerance(item)
+                if current and current_y is not None and y is not None and abs(y - current_y) > tolerance:
+                    groups.append(current)
+                    current = []
+                    current_y = None
+                current.append(item)
+                item_y = y or 0.0
+                current_y = item_y if current_y is None else (current_y * (len(current) - 1) + item_y) / len(current)
+            if current:
+                groups.append(current)
+        return groups
+
+    @staticmethod
+    def _single_alnum(value: str) -> str | None:
+        text = re.sub(r"[^A-Za-z0-9]", "", str(value or "").strip().upper())
+        return text if len(text) == 1 else None
+
+    @staticmethod
+    def _item_x(item: ScanTextItem) -> float | None:
+        if item.text_bbox is not None:
+            return float(item.text_bbox.xmin)
+        if item.position_x is not None:
+            return float(item.position_x)
+        return None
+
+    @staticmethod
+    def _item_y(item: ScanTextItem) -> float | None:
+        if item.text_bbox is not None:
+            return float((item.text_bbox.ymin + item.text_bbox.ymax) / 2.0)
+        if item.position_y is not None:
+            return float(item.position_y)
+        return None
+
+    @staticmethod
+    def _line_y_tolerance(item: ScanTextItem) -> float:
+        if item.text_bbox is not None and item.text_bbox.height > 0:
+            return max(5.0, float(item.text_bbox.height) * 0.75)
+        return 5.0
+
+    @staticmethod
+    def _union_text_bbox(items: list[ScanTextItem]) -> BBox | None:
+        boxes = [
+            item.text_bbox
+            for item in items
+            if item.text_bbox is not None and item.text_bbox.width > 0 and item.text_bbox.height > 0
+        ]
+        if not boxes:
+            return None
+        return BBox(
+            xmin=min(box.xmin for box in boxes),
+            ymin=min(box.ymin for box in boxes),
+            xmax=max(box.xmax for box in boxes),
+            ymax=max(box.ymax for box in boxes),
+        )
+
+    @staticmethod
+    def _average_position(
+        items: list[ScanTextItem],
+        bbox: BBox | None,
+    ) -> tuple[float | None, float | None]:
+        if bbox is not None:
+            return (bbox.xmin + bbox.xmax) / 2.0, (bbox.ymin + bbox.ymax) / 2.0
+        xs = [float(item.position_x) for item in items if item.position_x is not None]
+        ys = [float(item.position_y) for item in items if item.position_y is not None]
+        x = sum(xs) / len(xs) if xs else None
+        y = sum(ys) / len(ys) if ys else None
+        return x, y
 
     @staticmethod
     def _collect_observed_factory_codes(

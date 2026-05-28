@@ -29,10 +29,28 @@ type RawFormSchema = {
   deliverable: {
     sections: readonly RawSection[];
   };
+  audit_check?: {
+    unit_consistency?: {
+      enabled?: boolean;
+      project_units?: Record<string, readonly string[]>;
+    };
+  };
   audit_replace?: {
     project_options?: readonly string[];
+    factory_index_maps?: {
+      source_variant_options?: Record<string, readonly string[]>;
+      target_variant_options?: Record<string, readonly string[]>;
+    };
   };
 };
+
+type RawAuditCheckUnitConsistency = NonNullable<
+  NonNullable<RawFormSchema["audit_check"]>["unit_consistency"]
+>;
+
+type RawAuditReplaceFactoryIndexMaps = NonNullable<
+  NonNullable<RawFormSchema["audit_replace"]>["factory_index_maps"]
+>;
 
 const SECTION_TITLES: Record<string, string> = {
   project: "任务与项目",
@@ -188,6 +206,12 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
       }))
       .filter((section) => section.fields.length > 0),
     auditReplaceProjectOptions: payload.audit_replace?.project_options ?? [],
+    auditReplaceFactoryIndexMaps: normalizeAuditReplaceFactoryIndexMaps(
+      payload.audit_replace?.factory_index_maps,
+    ),
+    auditCheckUnitConsistency: normalizeAuditCheckUnitConsistency(
+      payload.audit_check?.unit_consistency,
+    ),
   };
 }
 
@@ -259,6 +283,44 @@ function normalizeField(field: RawField): FormField {
     description: FIELD_DESCRIPTION_OVERRIDES[field.key] ?? field.desc,
     options: normalizeFieldOptions(field.key, field.options),
   };
+}
+
+function normalizeAuditCheckUnitConsistency(
+  value: RawAuditCheckUnitConsistency | undefined,
+): FormSchema["auditCheckUnitConsistency"] {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    enabled: Boolean(value.enabled),
+    projectUnits: Object.fromEntries(
+      Object.entries(value.project_units ?? {}).map(([projectNo, unitNos]) => [
+        projectNo,
+        unitNos.map((unitNo) => unitNo.trim()).filter(Boolean),
+      ]),
+    ),
+  };
+}
+
+function normalizeAuditReplaceFactoryIndexMaps(
+  value: RawAuditReplaceFactoryIndexMaps | undefined,
+): FormSchema["auditReplaceFactoryIndexMaps"] {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    sourceVariantOptions: normalizeVariantOptions(value.source_variant_options),
+    targetVariantOptions: normalizeVariantOptions(value.target_variant_options),
+  };
+}
+
+function normalizeVariantOptions(value: Record<string, readonly string[]> | undefined) {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).map(([projectNo, variants]) => [
+      projectNo,
+      variants.map((variant) => variant.trim()).filter(Boolean),
+    ]),
+  );
 }
 
 function normalizeFieldOptions(fieldKey: string, options: readonly string[]) {

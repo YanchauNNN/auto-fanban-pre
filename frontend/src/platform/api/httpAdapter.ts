@@ -212,8 +212,18 @@ type RawFormSchema = {
       }>;
     }>;
   };
+  audit_check?: {
+    unit_consistency?: {
+      enabled?: boolean;
+      project_units?: Record<string, string[]>;
+    };
+  };
   audit_replace?: {
     project_options?: string[];
+    factory_index_maps?: {
+      source_variant_options?: Record<string, string[]>;
+      target_variant_options?: Record<string, string[]>;
+    };
   };
 };
 

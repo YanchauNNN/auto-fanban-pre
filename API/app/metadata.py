@@ -53,8 +53,24 @@ class FormMetadataService:
             "deliverable": {
                 "sections": sections,
             },
+            "audit_check": {
+                "unit_consistency": {
+                    "enabled": self.config.audit_check.unit_consistency.enabled,
+                    "project_units": self.config.audit_check.unit_consistency.project_units,
+                },
+            },
             "audit_replace": {
                 "project_options": self._resolve_project_options(),
+                "factory_index_maps": {
+                    "source_variant_options": {
+                        project_no: list(variants.keys())
+                        for project_no, variants in self.config.factory_index_maps.source_variant_rules.items()
+                    },
+                    "target_variant_options": {
+                        project_no: list(variants.keys())
+                        for project_no, variants in self.config.factory_index_maps.island_templates.items()
+                    },
+                },
             },
         }
 

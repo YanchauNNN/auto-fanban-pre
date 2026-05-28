@@ -170,6 +170,22 @@ class TestRuntimeConfig:
         assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
         assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
 
+    def test_unit_consistency_business_values_are_not_python_defaults(
+        self,
+        runtime_config: RuntimeConfig,
+    ):
+        """业务映射必须从运行期 YAML 读取，Python 只提供安全空兜底。"""
+        unit_consistency = runtime_config.audit_check.unit_consistency
+
+        assert unit_consistency.enabled is False
+        assert unit_consistency.project_units == {}
+        assert "2016" not in unit_consistency.project_units
+        assert "2026" not in unit_consistency.project_units
+        assert runtime_config.factory_index_maps.templates == {}
+        assert runtime_config.factory_index_maps.island_templates == {}
+        assert runtime_config.factory_index_maps.source_variant_rules == {}
+        assert runtime_config.font_preflight.font_compatibility_replacements == {}
+
     def test_reload_config_uses_env_override_when_default_runtime_spec_missing(
         self,
         tmp_path: Path,
@@ -374,4 +390,16 @@ runtime_options:
             config.factory_index_maps.template_dir
             / config.factory_index_maps.templates["1915"]
         ).exists()
+
+    def test_runtime_unit_consistency_reads_business_values_from_yaml(self):
+        """机组一致性项目范围和匹配规则应由运行期 YAML 提供。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+        unit_consistency = config.audit_check.unit_consistency
+
+        assert unit_consistency.enabled is True
+        assert unit_consistency.project_units["2016"] == ["1", "2"]
+        assert unit_consistency.project_units["2026"] == ["1", "2"]
+        assert "external_code_pattern" in unit_consistency.model_fields_set
+        assert "unit_no" in unit_consistency.external_code_pattern
 

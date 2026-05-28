@@ -32,6 +32,14 @@ export type FormSchema = {
   uploadLimits: UploadLimits;
   sections: readonly FormSection[];
   auditReplaceProjectOptions?: readonly string[];
+  auditReplaceFactoryIndexMaps?: {
+    sourceVariantOptions: Record<string, readonly string[]>;
+    targetVariantOptions: Record<string, readonly string[]>;
+  };
+  auditCheckUnitConsistency?: {
+    enabled: boolean;
+    projectUnits: Record<string, readonly string[]>;
+  };
 };
 
 export type HealthStatus = {

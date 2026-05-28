@@ -147,6 +147,23 @@ describe("normalizeFormSchema", () => {
       },
       audit_replace: {
         project_options: ["2016", "1818"],
+        factory_index_maps: {
+          source_variant_options: {
+            "2016": ["1", "2"],
+          },
+          target_variant_options: {
+            "1916": ["3", "4"],
+          },
+        },
+      },
+      audit_check: {
+        unit_consistency: {
+          enabled: true,
+          project_units: {
+            "2016": ["1", "2"],
+            "1916": ["3", "4"],
+          },
+        },
       },
     });
 
@@ -172,6 +189,21 @@ describe("normalizeFormSchema", () => {
       normalized.sections[2].fields.some((field) => field.key === "ied_discipline_office"),
     ).toBe(false);
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);
+    expect(normalized.auditReplaceFactoryIndexMaps).toEqual({
+      sourceVariantOptions: {
+        "2016": ["1", "2"],
+      },
+      targetVariantOptions: {
+        "1916": ["3", "4"],
+      },
+    });
+    expect(normalized.auditCheckUnitConsistency).toEqual({
+      enabled: true,
+      projectUnits: {
+        "2016": ["1", "2"],
+        "1916": ["3", "4"],
+      },
+    });
   });
 
   it("preserves combobox fields from form-schema instead of downgrading them to plain select metadata", () => {

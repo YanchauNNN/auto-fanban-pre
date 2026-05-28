@@ -1272,6 +1272,46 @@ describe("DeliverableWorkspace", () => {
     ).toBeLessThan(vi.mocked(adapter.createBatch).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY);
   });
 
+  it("requires unit number for audit projects declared by backend schema", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult());
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-deliverable-unit-check",
+      jobs: [],
+    });
+    const schemaWithUnitConsistency: FormSchema = {
+      ...schema,
+      auditCheckUnitConsistency: {
+        enabled: true,
+        projectUnits: {
+          "2016": ["1", "2"],
+        },
+      },
+    };
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithUnitConsistency}
+      />,
+    );
+
+    expect(await screen.findByText("2016-A01.dwg")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "纠错" }));
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    expect(await screen.findByText("required_for_unit_consistency")).toBeInTheDocument();
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+  });
+
   it("renders the IED plan toggle as checked by default and submits a boolean true", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();

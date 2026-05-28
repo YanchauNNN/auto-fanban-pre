@@ -40,6 +40,9 @@ def derive_replaced_dwg_filename(
 
 
 class AuditReplaceExecutor:
+    _EXTERNAL_CODE_CONTEXT = "titleblock_external_code"
+    _EXTERNAL_CODE_MIN_LEN = 19
+
     def __init__(self) -> None:
         self.config = get_config()
         self.oda = ODAConverter()
@@ -56,6 +59,7 @@ class AuditReplaceExecutor:
             raise ValueError("audit_replace requires one uploaded dwg file")
 
         source_dwg = Path(job.input_files[0]).resolve()
+        source_display_name = Path(str(job.source_filename or source_dwg.name)).name or source_dwg.name
         source_project_no = str(job.params.get("source_project_no") or "").strip()
         target_project_no = str(job.params.get("target_project_no") or "").strip()
         if not source_project_no or not target_project_no:
@@ -106,6 +110,13 @@ class AuditReplaceExecutor:
         )
 
         replace_entries = self._build_replace_entries(findings, mapping)
+        replace_entries.extend(
+            self._build_external_code_prefix_entries(
+                items=annotated_items,
+                mapping=mapping,
+                existing_entries=replace_entries,
+            )
+        )
         replace_dir = job.work_dir / "work" / "replace"
         replace_dir.mkdir(parents=True, exist_ok=True)
         replaced_dxf = replace_dir / "replaced.dxf"
@@ -121,7 +132,7 @@ class AuditReplaceExecutor:
             job_id=job.job_id,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
-            source_filename=source_dwg.name,
+            source_filename=source_display_name,
             source_variant=self._factory_index_source_variant(job.params),
             target_variant=self._factory_index_target_variant(job.params),
             source_dxf=replaced_dxf,
@@ -132,7 +143,7 @@ class AuditReplaceExecutor:
         )
         final_dwg = factory_result.output_dwg if factory_result.applied else converted_dwg
         replaced_dwg = job.work_dir / derive_replaced_dwg_filename(
-            source_name=source_dwg.name,
+            source_name=source_display_name,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
         )
@@ -146,7 +157,7 @@ class AuditReplaceExecutor:
 
         summary = write_replace_report_json(
             report_json,
-            source_filename=source_dwg.name,
+            source_filename=source_display_name,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
             entries=replace_entries,
@@ -155,7 +166,7 @@ class AuditReplaceExecutor:
         )
         write_replace_report_xlsx(
             report_xlsx,
-            source_filename=source_dwg.name,
+            source_filename=source_display_name,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
             entries=replace_entries,
@@ -252,6 +263,155 @@ class AuditReplaceExecutor:
                 }
             )
         return entries
+
+    @classmethod
+    def _build_external_code_prefix_entries(
+        cls,
+        *,
+        items: list[Any],
+        mapping: ReplaceMapping,
+        existing_entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        prefix_pairs = cls._external_code_prefix_pairs(mapping)
+        if not prefix_pairs:
+            return []
+
+        existing_handles = {
+            str(entry.get("entity_handle"))
+            for entry in existing_entries
+            if entry.get("entity_handle") and entry.get("status") == "pending"
+        }
+        entries: list[dict[str, Any]] = []
+        for group in cls._cluster_external_code_char_items(items):
+            ordered = sorted(group, key=cls._item_x)
+            chars = [cls._single_alnum(item.raw_text) for item in ordered]
+            code = "".join(chars)
+            if not cls._looks_like_external_code(code):
+                continue
+
+            upper_code = code.upper()
+            for source_prefix, target_prefix in prefix_pairs:
+                if not upper_code.startswith(source_prefix):
+                    continue
+                for index, target_char in enumerate(target_prefix):
+                    item = ordered[index]
+                    source_char = chars[index].upper()
+                    handle = str(item.entity_handle or "")
+                    if not handle or handle in existing_handles or source_char == target_char:
+                        continue
+                    existing_handles.add(handle)
+                    entries.append(
+                        {
+                            "status": "pending",
+                            "matched_text": source_char,
+                            "replacement_text": target_char,
+                            "raw_text": item.raw_text,
+                            "new_text": item.raw_text,
+                            "source_project_no": mapping.source_project_no,
+                            "target_project_no": mapping.target_project_no,
+                            "matched_project_nos": [mapping.source_project_no],
+                            "internal_code": item.internal_code,
+                            "layout_name": item.layout_name,
+                            "entity_type": item.entity_type,
+                            "entity_handle": item.entity_handle,
+                            "field_context": item.field_context,
+                            "block_path": item.block_path,
+                            "position_x": item.position_x,
+                            "position_y": item.position_y,
+                            "message": "external_code_prefix",
+                        }
+                    )
+                break
+        return entries
+
+    @staticmethod
+    def _external_code_prefix_pairs(mapping: ReplaceMapping) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for source, target in mapping.replacements.items():
+            source_text = str(source or "").strip().upper()
+            target_text = str(target or "").strip().upper()
+            if (
+                1 < len(source_text) <= 4
+                and len(source_text) == len(target_text)
+                and source_text.isalpha()
+                and target_text.isalpha()
+            ):
+                pairs.append((source_text, target_text))
+        pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
+        return pairs
+
+    @classmethod
+    def _cluster_external_code_char_items(cls, items: list[Any]) -> list[list[Any]]:
+        keyed: dict[tuple[str, str], list[Any]] = defaultdict(list)
+        for item in items:
+            if item.field_context != cls._EXTERNAL_CODE_CONTEXT:
+                continue
+            if not item.entity_handle:
+                continue
+            if cls._single_alnum(item.raw_text) is None:
+                continue
+            y = cls._item_y(item)
+            x = cls._item_x(item)
+            if y is None or x is None:
+                continue
+            keyed[
+                (
+                    str(item.internal_code or ""),
+                    str(item.layout_name or ""),
+                )
+            ].append(item)
+
+        groups: list[list[Any]] = []
+        for bucket in keyed.values():
+            current: list[Any] = []
+            current_y: float | None = None
+            for item in sorted(bucket, key=lambda row: (cls._item_y(row) or 0.0, cls._item_x(row) or 0.0)):
+                y = cls._item_y(item)
+                tolerance = cls._line_y_tolerance(item)
+                if current and current_y is not None and y is not None and abs(y - current_y) > tolerance:
+                    groups.append(current)
+                    current = []
+                    current_y = None
+                current.append(item)
+                item_y = y or 0.0
+                current_y = item_y if current_y is None else (current_y * (len(current) - 1) + item_y) / len(current)
+            if current:
+                groups.append(current)
+        return groups
+
+    @classmethod
+    def _looks_like_external_code(cls, value: str) -> bool:
+        text = str(value or "").strip().upper()
+        if len(text) < cls._EXTERNAL_CODE_MIN_LEN:
+            return False
+        return text[0].isalpha() and sum(1 for char in text if char.isdigit()) >= 3
+
+    @staticmethod
+    def _single_alnum(value: str) -> str | None:
+        text = re.sub(r"[^A-Za-z0-9]", "", str(value or "").strip().upper())
+        return text if len(text) == 1 else None
+
+    @staticmethod
+    def _item_x(item: Any) -> float | None:
+        if item.text_bbox is not None:
+            return float(item.text_bbox.xmin)
+        if item.position_x is not None:
+            return float(item.position_x)
+        return None
+
+    @staticmethod
+    def _item_y(item: Any) -> float | None:
+        if item.text_bbox is not None:
+            return float((item.text_bbox.ymin + item.text_bbox.ymax) / 2.0)
+        if item.position_y is not None:
+            return float(item.position_y)
+        return None
+
+    @staticmethod
+    def _line_y_tolerance(item: Any) -> float:
+        if item.text_bbox is not None and item.text_bbox.height > 0:
+            return max(5.0, float(item.text_bbox.height) * 0.75)
+        return 5.0
 
     def _apply_replacements(
         self,

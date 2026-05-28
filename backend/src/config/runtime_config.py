@@ -214,26 +214,13 @@ class AuditCheckMatchingPolicyConfig(BaseModel):
 class AuditCheckUnitConsistencyConfig(BaseModel):
     """纠错机组一致性配置"""
 
-    enabled: bool = True
-    project_units: dict[str, list[str]] = Field(
-        default_factory=lambda: {
-            "1915": ["1", "2"],
-            "1916": ["3", "4"],
-            "1907": ["5", "6"],
-            "1418": ["3", "4"],
-            "2026": ["1", "2"],
-        },
-    )
-    code_pattern: str = (
-        r"(?<!\d){project_no}(?P<unit_no>[1-9])(?P<factory_code>[A-Z0-9]{2,4})"
-        r"-[A-Z]{3}\d{2}(?:-\d{3})?"
-    )
-    explicit_unit_text_pattern: str = r"(?P<unit_no>[1-9])\s*号\s*(?:机组|岛)"
-    short_factory_code_pattern: str = (
-        r"(?<![A-Z0-9])(?P<unit_no>[1-9])"
-        r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
-        r"(?![A-Z0-9])"
-    )
+    enabled: bool = False
+    project_units: dict[str, list[str]] = Field(default_factory=dict)
+    code_pattern: str = r"a^"
+    explicit_unit_text_pattern: str = r"a^"
+    external_code_pattern: str = r"a^"
+    external_code_requires_titleblock_roi_context: bool = True
+    short_factory_code_pattern: str = r"a^"
     short_factory_code_requires_observed_album_factory: bool = True
 
 
@@ -261,26 +248,8 @@ class FactoryIndexMapsConfig(BaseModel):
 
     enabled: bool = True
     template_dir: Path = Path("documents_bin/factory_index_maps")
-    templates: dict[str, str] = Field(
-        default_factory=lambda: {
-            "1818": "1818项目厂房索引图.dwg",
-            "1907": "1907项目厂房索引图.dwg",
-            "1915": "1915项目厂房索引图.dwg",
-            "2026": "2026项目厂房索引图.dwg",
-        },
-    )
-    island_templates: dict[str, dict[str, str]] = Field(
-        default_factory=lambda: {
-            "1916": {
-                "3": "1916项目3号岛厂房索引图.dwg",
-                "4": "1916项目4号岛厂房索引图.dwg",
-            },
-            "2016": {
-                "1": "2016项目1号岛厂房索引图.dwg",
-                "2": "2016项目2号岛厂房索引图.dwg",
-            },
-        },
-    )
+    templates: dict[str, str] = Field(default_factory=dict)
+    island_templates: dict[str, dict[str, str]] = Field(default_factory=dict)
     source_variant_param_names: list[str] = Field(
         default_factory=lambda: [
             "source_factory_index_map_variant",
@@ -295,16 +264,7 @@ class FactoryIndexMapsConfig(BaseModel):
         default_factory=lambda: ["factory_index_map_variant", "target_island_no", "island_no"],
     )
     source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] = Field(
-        default_factory=lambda: {
-            "2016": {
-                "1": {"required_texts": ["QF"]},
-                "2": {"forbidden_texts": ["QF"]},
-            },
-            "1916": {
-                "3": {"required_texts": ["KP"]},
-                "4": {"forbidden_texts": ["KP"]},
-            },
-        },
+        default_factory=dict,
     )
 
 
@@ -397,11 +357,7 @@ class FontPreflightRuntimeConfig(BaseModel):
     default_bigfont_fonts: list[str] = Field(
         default_factory=lambda: ["gbcbig.shx", "hztxt.shx", "txt.shx"],
     )
-    font_compatibility_replacements: dict[str, str] = Field(
-        default_factory=lambda: {
-            "hztxt.shx": "tssdchn.shx",
-        },
-    )
+    font_compatibility_replacements: dict[str, str] = Field(default_factory=dict)
     enable_fontmap: bool = True
     verify_after_replace: bool = True
     default_fontalt_by_kind: dict[str, str] = Field(
