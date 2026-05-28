@@ -1686,7 +1686,7 @@ function SingleJobDetailPanel({
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, "default", setPreviewRequest);
+  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
 
   return (
     <section className={styles.detailPanel}>
@@ -1824,7 +1824,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, "default", setPreviewRequest);
+  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -1925,13 +1925,6 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
                 <Link className={styles.subtaskLink} to={`/jobs/${child.jobId}`}>
                   查看子任务 {child.taskRole ?? child.jobId}
                 </Link>
-                <div className={styles.childTaskDownloads}>
-                  {renderArtifactButtons(
-                    childDetailsById.get(child.jobId) ?? child,
-                    "child",
-                    setPreviewRequest,
-                  )}
-                </div>
               </div>
             </div>
           ))}
@@ -2385,29 +2378,15 @@ function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string
     : `${normalizedIslandNo}号岛`;
 }
 
-function renderArtifactButtons(
-  job: JobSummary,
-  scope: "default" | "child" = "default",
-  onOpenPreview?: (request: PreviewRequest) => void,
-) {
-  const labels =
-    scope === "child"
-      ? {
-          package: "下载子任务 package.zip",
-          ied: "下载子任务 IED计划.xlsx",
-          preview: "预览子任务 PDF",
-          previewAnnotated: "预览子任务 PDF（纠错标注）",
-          report: "下载子任务 report.xlsx",
-          replacedDwg: "下载子任务替换后 DWG",
-        }
-      : {
-          package: "下载 package.zip",
-          ied: "下载 IED计划.xlsx",
-          preview: "预览 PDF",
-          previewAnnotated: "预览 PDF（纠错标注）",
-          report: "下载 report.xlsx",
-          replacedDwg: "下载替换后 DWG",
-        };
+function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: PreviewRequest) => void) {
+  const labels = {
+    package: "下载 package.zip",
+    ied: "下载 IED计划.xlsx",
+    preview: "预览 PDF",
+    previewAnnotated: "预览 PDF（纠错标注）",
+    report: "下载 report.xlsx",
+    replacedDwg: "下载替换后 DWG",
+  };
 
   const previewButton =
     job.artifacts.previewAvailable &&
@@ -2437,6 +2416,15 @@ function renderArtifactButtons(
   if (job.isGroup) {
     return [
       ...previewButton,
+      ...(job.artifacts.previewAvailable && job.artifacts.previewDownloadUrl
+        ? [
+            <ArtifactButton
+              href={job.artifacts.previewDownloadUrl}
+              key="merged-preview-pdf"
+              label="下载合并版PDF"
+            />,
+          ]
+        : []),
       <ArtifactButton
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"

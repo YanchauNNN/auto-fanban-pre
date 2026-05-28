@@ -876,7 +876,7 @@ describe("DeliverableWorkspace", () => {
     expect(adapter.preflightFonts).toHaveBeenCalledTimes(1);
   });
 
-  it("submits font compatibility mode when the footer checkbox is enabled", async () => {
+  it("checks and submits font compatibility mode by default", async () => {
     const user = userEvent.setup();
     const adapter = createAdapter();
     adapter.preflightFonts = vi.fn().mockResolvedValue({
@@ -920,9 +920,9 @@ describe("DeliverableWorkspace", () => {
     );
 
     await screen.findByText("A01.dwg");
+    expect(screen.getByLabelText("以字体兼容模式打印")).toBeChecked();
     await user.type(screen.getByLabelText(albumTitleLabel), "font-compatibility");
     await user.type(screen.getByLabelText(subitemNameLabel), "font-compatibility-subitem");
-    await user.click(screen.getByLabelText("以字体兼容模式打印"));
     await user.click(screen.getByRole("button", { name: /创建交付任务/ }));
 
     await waitFor(() => {

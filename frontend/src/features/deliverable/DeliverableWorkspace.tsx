@@ -126,7 +126,7 @@ export function DeliverableWorkspace({
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
   const [fontReplacementDialogMode, setFontReplacementDialogMode] =
     useState<FontReplacementDialogMode | null>(null);
-  const [fontCompatibilityMode, setFontCompatibilityMode] = useState(false);
+  const [fontCompatibilityMode, setFontCompatibilityMode] = useState(true);
   const [pendingSubmitMode, setPendingSubmitMode] = useState<SubmitMode>("deliverable");
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");

@@ -747,6 +747,125 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
+  it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
+    window.history.pushState({}, "", "/jobs/group-downloads");
+    const groupDetail = {
+      jobId: "group-downloads",
+      batchId: "batch-downloads",
+      groupId: "group-downloads",
+      isGroup: true,
+      sourceFilename: "20261RC-JGS10-B.dwg",
+      sourceFilenames: ["20261RC-JGS10-B.dwg"],
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      projectNo: "2026",
+      status: "succeeded",
+      stage: "GROUP_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-05-28T09:00:00+08:00",
+      finishedAt: "2026-05-28T09:10:00+08:00",
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: true,
+      childJobIds: ["deliverable-child", "audit-child"],
+      findingsCount: 2,
+      affectedDrawingsCount: 1,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        previewAvailable: true,
+        previewMode: "annotated",
+        packageDownloadUrl: "/api/jobs/group-downloads/download/package",
+        iedDownloadUrl: "/api/jobs/group-downloads/download/ied",
+        previewDownloadUrl: "/api/jobs/group-downloads/download/preview",
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/group-downloads/download/report",
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      children: [
+        {
+          ...makeSingleJob(1, "20261RC-JGS10-B.dwg"),
+          jobId: "deliverable-child",
+          batchId: "batch-downloads",
+          groupId: "group-downloads",
+          taskKind: "deliverable" as const,
+          taskRole: "deliverable_main",
+          artifacts: {
+            packageAvailable: true,
+            iedAvailable: true,
+            previewAvailable: true,
+            previewMode: "plain",
+            packageDownloadUrl: "/api/jobs/deliverable-child/download/package",
+            iedDownloadUrl: "/api/jobs/deliverable-child/download/ied",
+            previewDownloadUrl: "/api/jobs/deliverable-child/download/preview",
+            reportAvailable: false,
+            replacedDwgAvailable: false,
+          },
+        },
+        {
+          ...makeSingleJob(2, "20261RC-JGS10-B.dwg"),
+          jobId: "audit-child",
+          batchId: "batch-downloads",
+          groupId: "group-downloads",
+          taskKind: "audit_check" as const,
+          taskRole: "audit_check",
+          findingsCount: 2,
+          affectedDrawingsCount: 1,
+          artifacts: {
+            packageAvailable: false,
+            iedAvailable: false,
+            previewAvailable: true,
+            previewMode: "annotated",
+            previewDownloadUrl: "/api/jobs/audit-child/download/preview",
+            reportAvailable: true,
+            reportDownloadUrl: "/api/jobs/audit-child/download/report",
+            replacedDwgAvailable: false,
+          },
+        },
+      ],
+    };
+
+    mockGetJobDetail.mockImplementation((jobId: string) => {
+      if (jobId === "deliverable-child") {
+        return Promise.resolve(groupDetail.children[0]);
+      }
+      if (jobId === "audit-child") {
+        return Promise.resolve(groupDetail.children[1]);
+      }
+      return Promise.resolve(groupDetail);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    const mergedPdfDownload = screen.getByRole("link", { name: "下载合并版PDF" });
+    expect(mergedPdfDownload).toHaveAttribute(
+      "href",
+      "/api/jobs/group-downloads/download/preview",
+    );
+    expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "查看子任务 deliverable_main" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toBeInTheDocument();
+
+    expect(screen.queryByRole("button", { name: "预览子任务 PDF" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "预览子任务 PDF（纠错标注）" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
+  });
+
   it("shows a clean font summary when no missing fonts were detected for deliverable jobs", async () => {
     window.history.pushState({}, "", "/jobs/deliverable-font-ok");
     mockGetJobDetail.mockResolvedValue({

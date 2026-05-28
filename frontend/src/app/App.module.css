@@ -1278,12 +1278,6 @@
   margin-top: 0.8rem;
 }
 
-.childTaskDownloads {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-}
-
 .warningBanner {
   display: flex;
   align-items: center;
