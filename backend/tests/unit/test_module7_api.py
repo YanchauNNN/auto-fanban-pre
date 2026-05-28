@@ -607,6 +607,23 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "3",
         "4",
     ]
+    assert payload["audit_replace"]["project_units"]["1915"] == ["1", "2"]
+    assert payload["audit_replace"]["source_unit_options"]["2016"] == [
+        {"value": "1", "label": "1号机组/岛"},
+        {"value": "2", "label": "2号机组/岛"},
+    ]
+    assert payload["audit_replace"]["source_unit_options"]["1916"] == [
+        {"value": "3", "label": "3号机组/岛"},
+        {"value": "4", "label": "4号机组/岛"},
+    ]
+    assert payload["audit_replace"]["target_unit_options"]["1915"] == [
+        {"value": "1", "label": "1号机组/岛"},
+        {"value": "2", "label": "2号机组/岛"},
+    ]
+    assert payload["audit_replace"]["target_unit_options"]["2016"] == [
+        {"value": "1", "label": "1号机组/岛"},
+        {"value": "2", "label": "2号机组/岛"},
+    ]
     assert payload["audit_check"]["unit_consistency"]["enabled"] is True
     assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == ["1", "2"]
     assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == ["3", "4"]

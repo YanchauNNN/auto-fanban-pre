@@ -61,6 +61,9 @@ class FormMetadataService:
             },
             "audit_replace": {
                 "project_options": self._resolve_project_options(),
+                "project_units": self._resolve_project_units(),
+                "source_unit_options": self._resolve_source_unit_options(),
+                "target_unit_options": self._resolve_target_unit_options(),
                 "factory_index_maps": {
                     "source_variant_options": {
                         project_no: list(variants.keys())
@@ -165,6 +168,76 @@ class FormMetadataService:
                 return [str(item["id"]) for item in enum_values if "id" in item]
             return [str(item) for item in enum_values]
         return []
+
+    def _resolve_project_units(self) -> dict[str, list[str]]:
+        return {
+            str(project_no): [str(unit_no) for unit_no in unit_nos if str(unit_no).strip()]
+            for project_no, unit_nos in self.config.audit_check.unit_consistency.project_units.items()
+            if unit_nos
+        }
+
+    def _resolve_source_unit_options(self) -> dict[str, list[dict[str, str]]]:
+        factory_config = self.config.factory_index_maps
+        return self._build_unit_option_map(
+            {
+                str(project_no): list(variant_rules.keys())
+                for project_no, variant_rules in factory_config.source_variant_rules.items()
+                if variant_rules
+            },
+            default_suffix=factory_config.variant_label_suffix,
+        )
+
+    def _resolve_target_unit_options(self) -> dict[str, list[dict[str, str]]]:
+        factory_config = self.config.factory_index_maps
+        unit_options = self._build_unit_option_map(
+            self.config.audit_check.unit_consistency.project_units,
+            default_suffix=self.config.audit_check.unit_consistency.label_suffix,
+        )
+        factory_options = self._build_unit_option_map(
+            {
+                str(project_no): list(templates.keys())
+                for project_no, templates in factory_config.island_templates.items()
+                if templates
+            },
+            default_suffix=factory_config.variant_label_suffix,
+        )
+        return self._merge_unit_option_maps(unit_options, factory_options)
+
+    @staticmethod
+    def _build_unit_option_map(
+        units_by_project: dict[str, list[str]],
+        *,
+        default_suffix: str,
+    ) -> dict[str, list[dict[str, str]]]:
+        options: dict[str, list[dict[str, str]]] = {}
+        for project_no, unit_nos in units_by_project.items():
+            normalized_project_no = str(project_no).strip()
+            if not normalized_project_no:
+                continue
+            project_options: list[dict[str, str]] = []
+            seen_values: set[str] = set()
+            for unit_no in unit_nos:
+                value = str(unit_no).strip()
+                if not value or value in seen_values:
+                    continue
+                seen_values.add(value)
+                project_options.append({"value": value, "label": f"{value}{default_suffix}"})
+            if project_options:
+                options[normalized_project_no] = project_options
+        return options
+
+    @staticmethod
+    def _merge_unit_option_maps(
+        base: dict[str, list[dict[str, str]]],
+        override: dict[str, list[dict[str, str]]],
+    ) -> dict[str, list[dict[str, str]]]:
+        merged = {project_no: list(options) for project_no, options in base.items()}
+        for project_no, options in override.items():
+            by_value = {option["value"]: option for option in merged.get(project_no, [])}
+            for option in options:
+                by_value[option["value"]] = option
+            merged[project_no] = list(by_value.values())
+        return merged
 
     @staticmethod
     def _enum_name(type_value: Any) -> str | None:

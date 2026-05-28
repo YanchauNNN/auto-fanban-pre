@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import ezdxf
+from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity
 
 from ..audit_check.bridge import AuditDotNetScanner
@@ -14,6 +15,7 @@ from ..audit_check.lexicon import AuditLexiconLoader
 from ..audit_check.matcher import AuditMatchEngine
 from ..audit_check.roi_mapper import AuditFieldContextMapper
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
+from ..cad.dwg_version import detect_dwg_version_code_or_none
 from ..config import get_config
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
@@ -27,6 +29,8 @@ def derive_replaced_dwg_filename(
     source_name: str,
     source_project_no: str,
     target_project_no: str,
+    source_unit_no: str | None = None,
+    target_unit_no: str | None = None,
 ) -> str:
     path = Path(str(source_name or "").strip() or "replaced.dwg")
     suffix = path.suffix or ".dwg"
@@ -35,8 +39,76 @@ def derive_replaced_dwg_filename(
     target_project_no = str(target_project_no or "").strip()
 
     if source_project_no and source_project_no in stem:
-        return f"{stem.replace(source_project_no, target_project_no, 1)}{suffix}"
+        replaced_stem = stem.replace(source_project_no, target_project_no, 1)
+        replaced_stem = rewrite_target_unit_text(
+            replaced_stem,
+            target_project_no=target_project_no,
+            source_unit_no=source_unit_no,
+            target_unit_no=target_unit_no,
+        )
+        return f"{replaced_stem}{suffix}"
     return f"{stem}——{target_project_no}{suffix}"
+
+
+def normalize_unit_no(value: object) -> str:
+    match = re.search(r"[1-9]", str(value or ""))
+    return match.group(0) if match else ""
+
+
+def rewrite_target_unit_text(
+    text: str,
+    *,
+    target_project_no: str,
+    source_unit_no: str | None,
+    target_unit_no: str | None,
+) -> str:
+    source_unit = normalize_unit_no(source_unit_no)
+    target_unit = normalize_unit_no(target_unit_no)
+    if not text or not source_unit or not target_unit or source_unit == target_unit:
+        return text
+
+    updated = text
+    target_project_no = str(target_project_no or "").strip()
+    if target_project_no:
+        code_pattern = re.compile(
+            rf"(?<!\d)({re.escape(target_project_no)}){re.escape(source_unit)}"
+            r"(?P<rest>[A-Z0-9]{2,4}-[A-Z]{3}\d{2}(?:-\d{3})?)",
+            re.IGNORECASE,
+        )
+        updated = code_pattern.sub(lambda match: f"{match.group(1)}{target_unit}{match.group('rest')}", updated)
+
+    explicit_unit_pattern = re.compile(
+        rf"{re.escape(source_unit)}(?P<suffix>\s*号\s*(?:机\s*组|岛))",
+        re.IGNORECASE,
+    )
+    updated = explicit_unit_pattern.sub(lambda match: f"{target_unit}{match.group('suffix')}", updated)
+
+    short_factory_pattern = re.compile(
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}"
+        r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
+        r"(?![A-Z0-9])",
+        re.IGNORECASE,
+    )
+    updated = short_factory_pattern.sub(lambda match: f"{target_unit}{match.group('factory_code')}", updated)
+
+    embedded_factory_prefix_pattern = re.compile(
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>[A-Z]{{2}})(?=\d)",
+        re.IGNORECASE,
+    )
+    updated = embedded_factory_prefix_pattern.sub(
+        lambda match: f"{target_unit}{match.group('factory_code')}",
+        updated,
+    )
+
+    prefixed_external_code_pattern = re.compile(
+        rf"(?<![A-Z0-9])(?P<prefix>[A-Z]{{1,4}}){re.escape(source_unit)}"
+        r"(?P<factory_code>[A-Z]{2})(?=[A-Z0-9])",
+        re.IGNORECASE,
+    )
+    return prefixed_external_code_pattern.sub(
+        lambda match: f"{match.group('prefix')}{target_unit}{match.group('factory_code')}",
+        updated,
+    )
 
 
 class AuditReplaceExecutor:
@@ -64,6 +136,8 @@ class AuditReplaceExecutor:
         target_project_no = str(job.params.get("target_project_no") or "").strip()
         if not source_project_no or not target_project_no:
             raise ValueError("source_project_no and target_project_no are required for replace")
+        source_unit_no = self._factory_index_source_variant(job.params)
+        target_unit_no = self._factory_index_target_variant(job.params)
 
         job.mark_running(stage="AUDIT_REPLACE")
         job.progress.message = "replacing"
@@ -105,16 +179,30 @@ class AuditReplaceExecutor:
         annotated_items = [mapper.annotate(item) for item in scan_items]
         findings = AuditMatchEngine(lexicon).evaluate(
             project_no=target_project_no,
-            unit_no=str(job.params.get("unit_no") or "").strip() or None,
+            unit_no=target_unit_no or str(job.params.get("unit_no") or "").strip() or None,
             items=annotated_items,
         )
 
-        replace_entries = self._build_replace_entries(findings, mapping)
+        replace_entries = self._build_replace_entries(
+            findings,
+            mapping,
+            source_unit_no=source_unit_no,
+            target_unit_no=target_unit_no,
+        )
         replace_entries.extend(
             self._build_external_code_prefix_entries(
                 items=annotated_items,
                 mapping=mapping,
                 existing_entries=replace_entries,
+            )
+        )
+        replace_entries.extend(
+            self._build_external_code_unit_entries(
+                items=annotated_items,
+                mapping=mapping,
+                existing_entries=replace_entries,
+                source_unit_no=source_unit_no,
+                target_unit_no=target_unit_no,
             )
         )
         replace_dir = job.work_dir / "work" / "replace"
@@ -124,6 +212,9 @@ class AuditReplaceExecutor:
             source_dxf=source_dxf,
             output_dxf=replaced_dxf,
             entries=replace_entries,
+            target_project_no=target_project_no,
+            source_unit_no=source_unit_no,
+            target_unit_no=target_unit_no,
         )
 
         converted_dir = replace_dir / "converted"
@@ -133,8 +224,8 @@ class AuditReplaceExecutor:
             source_project_no=source_project_no,
             target_project_no=target_project_no,
             source_filename=source_display_name,
-            source_variant=self._factory_index_source_variant(job.params),
-            target_variant=self._factory_index_target_variant(job.params),
+            source_variant=source_unit_no,
+            target_variant=target_unit_no,
             source_dxf=replaced_dxf,
             source_dwg=converted_dwg,
             output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
@@ -142,10 +233,20 @@ class AuditReplaceExecutor:
             slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
         )
         final_dwg = factory_result.output_dwg if factory_result.applied else converted_dwg
+        if factory_result.applied:
+            final_dwg = self._rewrite_target_units_in_dwg(
+                source_dwg=final_dwg,
+                workspace_dir=replace_dir / "target_unit_postprocess",
+                target_project_no=target_project_no,
+                source_unit_no=source_unit_no,
+                target_unit_no=target_unit_no,
+            )
         replaced_dwg = job.work_dir / derive_replaced_dwg_filename(
             source_name=source_display_name,
             source_project_no=source_project_no,
             target_project_no=target_project_no,
+            source_unit_no=source_unit_no,
+            target_unit_no=target_unit_no,
         )
         replaced_dwg.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(final_dwg, replaced_dwg)
@@ -211,7 +312,13 @@ class AuditReplaceExecutor:
         return None
 
     @staticmethod
-    def _build_replace_entries(findings: list[Any], mapping: ReplaceMapping) -> list[dict[str, Any]]:
+    def _build_replace_entries(
+        findings: list[Any],
+        mapping: ReplaceMapping,
+        *,
+        source_unit_no: str | None = None,
+        target_unit_no: str | None = None,
+    ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         seen_pairs: set[tuple[str | None, str]] = set()
         no_op_tokens = set(mapping.no_op_tokens)
@@ -226,7 +333,18 @@ class AuditReplaceExecutor:
             status = "pending"
             replacement_text: str | None = None
             message = ""
-            if finding.matched_text in no_op_tokens:
+            if getattr(finding, "context_kind", "") == "unit_consistency":
+                replacement_text = rewrite_target_unit_text(
+                    finding.matched_text,
+                    target_project_no=mapping.target_project_no,
+                    source_unit_no=source_unit_no,
+                    target_unit_no=target_unit_no,
+                )
+                if replacement_text == finding.matched_text:
+                    status = "skipped_unmapped"
+                    replacement_text = None
+                    message = "replacement_not_configured"
+            elif finding.matched_text in no_op_tokens:
                 status = "skipped_no_op"
                 message = "source_and_target_identical"
             elif finding.matched_text in missing_target_tokens:
@@ -235,11 +353,12 @@ class AuditReplaceExecutor:
             elif finding.matched_text not in mapping.replacements:
                 status = "skipped_unmapped"
                 message = "replacement_not_configured"
-            elif not finding.entity_handle:
-                status = "skipped_missing_handle"
-                message = "entity_handle_missing"
             else:
                 replacement_text = mapping.replacements[finding.matched_text]
+            if status == "pending" and not finding.entity_handle:
+                status = "skipped_missing_handle"
+                replacement_text = None
+                message = "entity_handle_missing"
 
             entries.append(
                 {
@@ -251,6 +370,7 @@ class AuditReplaceExecutor:
                     "source_project_no": mapping.source_project_no,
                     "target_project_no": mapping.target_project_no,
                     "matched_project_nos": list(finding.matched_project_nos),
+                    "context_kind": getattr(finding, "context_kind", ""),
                     "internal_code": finding.internal_code,
                     "layout_name": finding.layout_name,
                     "entity_type": finding.entity_type,
@@ -310,11 +430,12 @@ class AuditReplaceExecutor:
                             "source_project_no": mapping.source_project_no,
                             "target_project_no": mapping.target_project_no,
                             "matched_project_nos": [mapping.source_project_no],
+                            "context_kind": "code_like",
                             "internal_code": item.internal_code,
                             "layout_name": item.layout_name,
                             "entity_type": item.entity_type,
                             "entity_handle": item.entity_handle,
-                            "field_context": item.field_context,
+                            "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
                             "block_path": item.block_path,
                             "position_x": item.position_x,
                             "position_y": item.position_y,
@@ -322,6 +443,76 @@ class AuditReplaceExecutor:
                         }
                     )
                 break
+        return entries
+
+    @classmethod
+    def _build_external_code_unit_entries(
+        cls,
+        *,
+        items: list[Any],
+        mapping: ReplaceMapping,
+        existing_entries: list[dict[str, Any]],
+        source_unit_no: str | None,
+        target_unit_no: str | None,
+    ) -> list[dict[str, Any]]:
+        source_unit = normalize_unit_no(source_unit_no)
+        target_unit = normalize_unit_no(target_unit_no)
+        if not source_unit or not target_unit or source_unit == target_unit:
+            return []
+
+        existing_handles = {
+            str(entry.get("entity_handle"))
+            for entry in existing_entries
+            if entry.get("entity_handle") and entry.get("status") == "pending"
+        }
+        entries: list[dict[str, Any]] = []
+        for group in cls._cluster_external_code_char_items(items):
+            ordered = sorted(group, key=cls._item_x)
+            chars = [cls._single_alnum(item.raw_text) for item in ordered]
+            code = "".join(chars)
+            if not cls._looks_like_external_code(code):
+                continue
+
+            rewritten_code = rewrite_target_unit_text(
+                code,
+                target_project_no=mapping.target_project_no,
+                source_unit_no=source_unit,
+                target_unit_no=target_unit,
+            ).upper()
+            if rewritten_code == code.upper() or len(rewritten_code) != len(chars):
+                continue
+
+            for index, target_char in enumerate(rewritten_code):
+                source_char = chars[index].upper()
+                if source_char == target_char:
+                    continue
+                item = ordered[index]
+                handle = str(item.entity_handle or "")
+                if not handle or handle in existing_handles:
+                    continue
+                existing_handles.add(handle)
+                entries.append(
+                    {
+                        "status": "pending",
+                        "matched_text": source_char,
+                        "replacement_text": target_char,
+                        "raw_text": item.raw_text,
+                        "new_text": item.raw_text,
+                        "source_project_no": mapping.source_project_no,
+                        "target_project_no": mapping.target_project_no,
+                        "matched_project_nos": [mapping.target_project_no],
+                        "context_kind": "unit_consistency",
+                        "internal_code": item.internal_code,
+                        "layout_name": item.layout_name,
+                        "entity_type": item.entity_type,
+                        "entity_handle": item.entity_handle,
+                        "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
+                        "block_path": item.block_path,
+                        "position_x": item.position_x,
+                        "position_y": item.position_y,
+                        "message": "external_code_unit",
+                    }
+                )
         return entries
 
     @staticmethod
@@ -344,7 +535,7 @@ class AuditReplaceExecutor:
     def _cluster_external_code_char_items(cls, items: list[Any]) -> list[list[Any]]:
         keyed: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for item in items:
-            if item.field_context != cls._EXTERNAL_CODE_CONTEXT:
+            if item.field_context not in (None, cls._EXTERNAL_CODE_CONTEXT):
                 continue
             if not item.entity_handle:
                 continue
@@ -419,6 +610,9 @@ class AuditReplaceExecutor:
         source_dxf: Path,
         output_dxf: Path,
         entries: list[dict[str, Any]],
+        target_project_no: str,
+        source_unit_no: str | None = None,
+        target_unit_no: str | None = None,
     ) -> None:
         doc = ezdxf.readfile(source_dxf)
         pending_by_handle: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -445,6 +639,12 @@ class AuditReplaceExecutor:
             for entry in sorted(handle_entries, key=lambda item: len(str(item["matched_text"])), reverse=True):
                 replacement_text = str(entry.get("replacement_text") or "")
                 updated_text = self._replace_token(updated_text, str(entry["matched_text"]), replacement_text)
+            updated_text = rewrite_target_unit_text(
+                updated_text,
+                target_project_no=target_project_no,
+                source_unit_no=source_unit_no,
+                target_unit_no=target_unit_no,
+            )
 
             if updated_text == current_text:
                 for entry in handle_entries:
@@ -459,8 +659,78 @@ class AuditReplaceExecutor:
                 entry["new_text"] = updated_text
                 entry["message"] = ""
 
+        self._rewrite_target_units_in_all_text_entities(
+            doc,
+            target_project_no=target_project_no,
+            source_unit_no=source_unit_no,
+            target_unit_no=target_unit_no,
+        )
+
         output_dxf.parent.mkdir(parents=True, exist_ok=True)
         doc.saveas(output_dxf)
+
+    def _rewrite_target_units_in_dwg(
+        self,
+        *,
+        source_dwg: Path,
+        workspace_dir: Path,
+        target_project_no: str,
+        source_unit_no: str | None,
+        target_unit_no: str | None,
+    ) -> Path:
+        source_unit = normalize_unit_no(source_unit_no)
+        target_unit = normalize_unit_no(target_unit_no)
+        if not source_unit or not target_unit or source_unit == target_unit:
+            return source_dwg
+
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        source_dxf = self.oda.dwg_to_dxf(source_dwg, workspace_dir / "dxf")
+        doc = ezdxf.readfile(source_dxf)
+        changed_count = self._rewrite_target_units_in_all_text_entities(
+            doc,
+            target_project_no=target_project_no,
+            source_unit_no=source_unit,
+            target_unit_no=target_unit,
+        )
+
+        output_source_dxf = source_dxf
+        if changed_count > 0:
+            rewritten_dxf = workspace_dir / "rewritten.dxf"
+            doc.saveas(rewritten_dxf)
+            output_source_dxf = rewritten_dxf
+        try:
+            target_version_code = detect_dwg_version_code_or_none(source_dwg)
+        except ValueError:
+            target_version_code = None
+        return self.oda.dxf_to_dwg(
+            output_source_dxf,
+            workspace_dir / "dwg",
+            target_version_code=target_version_code,
+        )
+
+    def _rewrite_target_units_in_all_text_entities(
+        self,
+        doc: Drawing,
+        *,
+        target_project_no: str,
+        source_unit_no: str | None,
+        target_unit_no: str | None,
+    ) -> int:
+        changed_count = 0
+        for entity in list(doc.entitydb.values()):
+            current_text = self._get_entity_text(entity)
+            if current_text is None:
+                continue
+            updated_text = rewrite_target_unit_text(
+                current_text,
+                target_project_no=target_project_no,
+                source_unit_no=source_unit_no,
+                target_unit_no=target_unit_no,
+            )
+            if updated_text != current_text:
+                self._set_entity_text(entity, updated_text)
+                changed_count += 1
+        return changed_count
 
     @staticmethod
     def _get_entity_text(entity: DXFEntity) -> str | None:

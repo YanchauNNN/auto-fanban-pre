@@ -2233,15 +2233,15 @@ function ReplaceResultCard({
         {replaceSummary.sourceIslandNo ? (
           <InfoBlock
             label="来源机组/岛号"
-            value={formatSourceIslandLabel(
-              replaceSummary.sourceProjectNo,
-              replaceSummary.sourceIslandNo,
-            )}
+            value={formatUnitOrIslandLabel(replaceSummary.sourceIslandNo)}
           />
         ) : null}
         <InfoBlock label="目标项目号" value={replaceSummary.targetProjectNo} />
         {replaceSummary.targetIslandNo ? (
-          <InfoBlock label="目标岛号" value={`${replaceSummary.targetIslandNo}号岛`} />
+          <InfoBlock
+            label="目标机组/岛号"
+            value={formatUnitOrIslandLabel(replaceSummary.targetIslandNo)}
+          />
         ) : null}
       </div>
 
@@ -2367,15 +2367,12 @@ function kindToneClass(kind: TaskKind) {
   return styles.kindDeliverable;
 }
 
-function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string) {
-  const normalizedProjectNo = sourceProjectNo.trim();
-  const normalizedIslandNo = sourceIslandNo.trim();
+function formatUnitOrIslandLabel(unitOrIslandNo: string) {
+  const normalizedIslandNo = unitOrIslandNo.trim();
   if (!normalizedIslandNo) {
     return "";
   }
-  return normalizedProjectNo === "2016"
-    ? `${normalizedIslandNo}号机组`
-    : `${normalizedIslandNo}号岛`;
+  return `${normalizedIslandNo}号机组/岛`;
 }
 
 function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: PreviewRequest) => void) {

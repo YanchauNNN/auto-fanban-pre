@@ -220,6 +220,9 @@ type RawFormSchema = {
   };
   audit_replace?: {
     project_options?: string[];
+    project_units?: Record<string, string[]>;
+    source_unit_options?: Record<string, { value: string; label: string }[]>;
+    target_unit_options?: Record<string, { value: string; label: string }[]>;
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;

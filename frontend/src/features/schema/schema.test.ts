@@ -147,6 +147,21 @@ describe("normalizeFormSchema", () => {
       },
       audit_replace: {
         project_options: ["2016", "1818"],
+        project_units: {
+          "1915": ["1", "2"],
+        },
+        source_unit_options: {
+          "2016": [
+            { value: "1", label: "1号机组/岛" },
+            { value: " 2 ", label: " 2号机组/岛 " },
+          ],
+        },
+        target_unit_options: {
+          "1915": [
+            { value: "1", label: "1号机组/岛" },
+            { value: "2", label: "2号机组/岛" },
+          ],
+        },
         factory_index_maps: {
           source_variant_options: {
             "2016": ["1", "2"],
@@ -189,6 +204,21 @@ describe("normalizeFormSchema", () => {
       normalized.sections[2].fields.some((field) => field.key === "ied_discipline_office"),
     ).toBe(false);
     expect(normalized.auditReplaceProjectOptions).toEqual(["2016", "1818"]);
+    expect(normalized.auditReplaceProjectUnits).toEqual({
+      "1915": ["1", "2"],
+    });
+    expect(normalized.auditReplaceSourceUnitOptions).toEqual({
+      "2016": [
+        { value: "1", label: "1号机组/岛" },
+        { value: "2", label: "2号机组/岛" },
+      ],
+    });
+    expect(normalized.auditReplaceTargetUnitOptions).toEqual({
+      "1915": [
+        { value: "1", label: "1号机组/岛" },
+        { value: "2", label: "2号机组/岛" },
+      ],
+    });
     expect(normalized.auditReplaceFactoryIndexMaps).toEqual({
       sourceVariantOptions: {
         "2016": ["1", "2"],

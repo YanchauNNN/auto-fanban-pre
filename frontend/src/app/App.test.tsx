@@ -1515,9 +1515,9 @@ describe("job detail pages", () => {
     expect(await screen.findByText("翻版摘要")).toBeInTheDocument();
     expect(screen.getByText("51")).toBeInTheDocument();
     expect(screen.getByText("2016")).toBeInTheDocument();
-    expect(screen.getByText("2号机组")).toBeInTheDocument();
+    expect(screen.getByText("2号机组/岛")).toBeInTheDocument();
     expect(screen.getByText("1916")).toBeInTheDocument();
-    expect(screen.getByText("3号岛")).toBeInTheDocument();
+    expect(screen.getByText("3号机组/岛")).toBeInTheDocument();
     expect(screen.getByText("厂房索引图替换")).toBeInTheDocument();
     expect(screen.getByText("是")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();

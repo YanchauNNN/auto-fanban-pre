@@ -57,8 +57,10 @@ export function ReplaceWorkspace({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const projectOptions = (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim());
   const sourceIslandOptions = getSourceIslandOptions(schema, draft.sourceProjectNo);
+  const sourceIslandLabel = getUnitFieldLabel("来源");
   const sourceSelectionRequired = sourceIslandOptions.length > 0;
   const targetIslandOptions = getTargetIslandOptions(schema, draft.targetProjectNo);
+  const targetIslandLabel = getUnitFieldLabel("目标");
   const islandSelectionRequired = targetIslandOptions.length > 0;
 
   useEffect(() => {
@@ -344,12 +346,13 @@ export function ReplaceWorkspace({
                 <p className={styles.emptyState}>当前还没有翻版文件草稿。</p>
               )}
               <div className={styles.summaryActions}>
-                <label className={styles.fileButton}>
-                  选择翻版 DWG 文件
+                <label className={`${styles.fileButton} ${styles.filePickerButton}`}>
+                  <span>选择翻版 DWG 文件</span>
                   <input
                     accept=".dwg"
                     aria-label="选择翻版 DWG 文件"
-                    className={styles.fileInput}
+                    className={styles.fileInputOverlay}
+                    data-testid="replace-file-input"
                     multiple
                     type="file"
                     onChange={(event) => {
@@ -436,17 +439,17 @@ export function ReplaceWorkspace({
                   <div className={styles.field}>
                     <div className={styles.fieldHeader}>
                       <label className={styles.fieldLabel} htmlFor="replace-source-island-no">
-                        <span>{draft.sourceProjectNo.trim() === "2016" ? "来源机组号" : "来源岛号"}</span>
+                        <span>{sourceIslandLabel}</span>
                       </label>
                     </div>
                     <select
-                      aria-label={draft.sourceProjectNo.trim() === "2016" ? "来源机组号" : "来源岛号"}
+                      aria-label={sourceIslandLabel}
                       className={styles.input}
                       id="replace-source-island-no"
                       value={draft.sourceIslandNo}
                       onChange={(event) => handleFieldChange("sourceIslandNo", event.target.value)}
                     >
-                      <option value="">请选择{draft.sourceProjectNo.trim() === "2016" ? "来源机组号" : "来源岛号"}</option>
+                      <option value="">{`请选择${sourceIslandLabel}`}</option>
                       {sourceIslandOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -489,17 +492,17 @@ export function ReplaceWorkspace({
                   <div className={styles.field}>
                     <div className={styles.fieldHeader}>
                       <label className={styles.fieldLabel} htmlFor="replace-target-island-no">
-                        <span>目标岛号</span>
+                        <span>{targetIslandLabel}</span>
                       </label>
                     </div>
                     <select
-                      aria-label="目标岛号"
+                      aria-label={targetIslandLabel}
                       className={styles.input}
                       id="replace-target-island-no"
                       value={draft.targetIslandNo}
                       onChange={(event) => handleFieldChange("targetIslandNo", event.target.value)}
                     >
-                      <option value="">请选择目标岛号</option>
+                      <option value="">{`请选择${targetIslandLabel}`}</option>
                       {targetIslandOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
@@ -507,7 +510,7 @@ export function ReplaceWorkspace({
                       ))}
                     </select>
                     <span className={styles.helperText}>
-                      当前目标项目需要区分岛号，提交时会一并发送 <code>target_island_no</code>。
+                      当前目标项目需要区分机组或岛号，提交时会一并发送 <code>target_island_no</code>。
                     </span>
                     {draft.fieldErrors.target_island_no?.[0] ? (
                       <span className={styles.errorText}>{draft.fieldErrors.target_island_no[0]}</span>
@@ -655,30 +658,40 @@ function getExtension(filename: string) {
 
 function getTargetIslandOptions(schema: FormSchema, targetProjectNo: string) {
   const normalizedProjectNo = targetProjectNo.trim();
-  return buildVariantOptions(
-    schema.auditReplaceFactoryIndexMaps?.targetVariantOptions[normalizedProjectNo],
-    "island",
-  );
+  const configuredOptions = schema.auditReplaceTargetUnitOptions?.[normalizedProjectNo];
+  if (configuredOptions) {
+    return normalizeUnitOptions(configuredOptions);
+  }
+  return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.targetVariantOptions[normalizedProjectNo]);
 }
 
 function getSourceIslandOptions(schema: FormSchema, sourceProjectNo: string) {
   const normalizedProjectNo = sourceProjectNo.trim();
-  const labelKind = normalizedProjectNo === "2016" ? "unit" : "island";
-  return buildVariantOptions(
-    schema.auditReplaceFactoryIndexMaps?.sourceVariantOptions[normalizedProjectNo],
-    labelKind,
-  );
+  const configuredOptions = schema.auditReplaceSourceUnitOptions?.[normalizedProjectNo];
+  if (configuredOptions) {
+    return normalizeUnitOptions(configuredOptions);
+  }
+  return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.sourceVariantOptions[normalizedProjectNo]);
 }
 
-function buildVariantOptions(
-  values: readonly string[] | undefined,
-  labelKind: "island" | "unit",
-) {
-  const suffix = labelKind === "unit" ? "机组" : "岛";
+function buildVariantOptions(values: readonly string[] | undefined) {
   return (values ?? []).map((value) => ({
     value,
-    label: `${value}号${suffix}`,
+    label: `${value}号机组/岛`,
   }));
+}
+
+function normalizeUnitOptions(options: readonly { value: string; label: string }[]) {
+  return options
+    .map((option) => ({
+      value: option.value.trim(),
+      label: option.label.trim(),
+    }))
+    .filter((option) => option.value && option.label);
+}
+
+function getUnitFieldLabel(prefix: "来源" | "目标") {
+  return `${prefix}机组号/岛号`;
 }
 
 function normalizeSourceIslandNo(schema: FormSchema, sourceProjectNo: string, sourceIslandNo: string) {

@@ -27,11 +27,19 @@ export type FormSection = {
   fields: readonly FormField[];
 };
 
+export type AuditReplaceUnitOption = {
+  value: string;
+  label: string;
+};
+
 export type FormSchema = {
   schemaVersion: string;
   uploadLimits: UploadLimits;
   sections: readonly FormSection[];
   auditReplaceProjectOptions?: readonly string[];
+  auditReplaceProjectUnits?: Record<string, readonly string[]>;
+  auditReplaceSourceUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
+  auditReplaceTargetUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
   auditReplaceFactoryIndexMaps?: {
     sourceVariantOptions: Record<string, readonly string[]>;
     targetVariantOptions: Record<string, readonly string[]>;

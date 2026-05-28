@@ -37,6 +37,9 @@ type RawFormSchema = {
   };
   audit_replace?: {
     project_options?: readonly string[];
+    project_units?: Record<string, readonly string[]>;
+    source_unit_options?: Record<string, readonly { value: string; label: string }[]>;
+    target_unit_options?: Record<string, readonly { value: string; label: string }[]>;
     factory_index_maps?: {
       source_variant_options?: Record<string, readonly string[]>;
       target_variant_options?: Record<string, readonly string[]>;
@@ -206,6 +209,13 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
       }))
       .filter((section) => section.fields.length > 0),
     auditReplaceProjectOptions: payload.audit_replace?.project_options ?? [],
+    auditReplaceProjectUnits: normalizeVariantOptions(payload.audit_replace?.project_units),
+    auditReplaceSourceUnitOptions: normalizeUnitOptionMap(
+      payload.audit_replace?.source_unit_options,
+    ),
+    auditReplaceTargetUnitOptions: normalizeUnitOptionMap(
+      payload.audit_replace?.target_unit_options,
+    ),
     auditReplaceFactoryIndexMaps: normalizeAuditReplaceFactoryIndexMaps(
       payload.audit_replace?.factory_index_maps,
     ),
@@ -319,6 +329,22 @@ function normalizeVariantOptions(value: Record<string, readonly string[]> | unde
     Object.entries(value ?? {}).map(([projectNo, variants]) => [
       projectNo,
       variants.map((variant) => variant.trim()).filter(Boolean),
+    ]),
+  );
+}
+
+function normalizeUnitOptionMap(
+  value: Record<string, readonly { value: string; label: string }[]> | undefined,
+) {
+  return Object.fromEntries(
+    Object.entries(value ?? {}).map(([projectNo, options]) => [
+      projectNo,
+      options
+        .map((option) => ({
+          value: option.value.trim(),
+          label: option.label.trim(),
+        }))
+        .filter((option) => option.value && option.label),
     ]),
   );
 }

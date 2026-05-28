@@ -216,6 +216,7 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
 
     enabled: bool = False
     project_units: dict[str, list[str]] = Field(default_factory=dict)
+    label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"
     external_code_pattern: str = r"a^"
@@ -263,6 +264,7 @@ class FactoryIndexMapsConfig(BaseModel):
     variant_param_names: list[str] = Field(
         default_factory=lambda: ["factory_index_map_variant", "target_island_no", "island_no"],
     )
+    variant_label_suffix: str = "号机组/岛"
     source_variant_rules: dict[str, dict[str, dict[str, list[str]]]] = Field(
         default_factory=dict,
     )

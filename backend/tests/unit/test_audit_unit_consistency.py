@@ -189,6 +189,32 @@ def test_unit_consistency_rebuilds_split_external_code_roi() -> None:
     assert findings[0].text_bbox == BBox(xmin=0.0, ymin=95.0, xmax=188.0, ymax=105.0)
 
 
+def test_unit_consistency_does_not_rebuild_split_external_code_outside_roi() -> None:
+    code = "JD1RCG11002B25C42SD"
+    items = [
+        ScanTextItem(
+            raw_text=char,
+            entity_type="DBText",
+            field_context="titleblock_internal_code",
+            internal_code="20161RC-JGS09-001",
+            layout_name="Model",
+            position_x=float(index * 10),
+            position_y=100.0,
+            text_bbox=BBox(
+                xmin=float(index * 10),
+                ymin=95.0,
+                xmax=float(index * 10 + 8),
+                ymax=105.0,
+            ),
+        )
+        for index, char in enumerate(code)
+    ]
+
+    findings = _engine().evaluate(project_no="2016", unit_no="2", items=items)
+
+    assert findings == []
+
+
 def test_unit_consistency_suppresses_dimension_like_short_fragments() -> None:
     findings = _engine().evaluate(
         project_no="2026",

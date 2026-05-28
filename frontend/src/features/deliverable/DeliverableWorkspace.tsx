@@ -1077,10 +1077,10 @@ export function DeliverableWorkspace({
                       当前将以翻版+出图模式提交。
                       <strong>{` ${pendingReplaceConfig.sourceProjectNo} -> ${pendingReplaceConfig.targetProjectNo}`}</strong>
                       {pendingReplaceConfig.sourceIslandNo ? (
-                        <strong>{`（来源${formatSourceIslandLabel(pendingReplaceConfig.sourceProjectNo, pendingReplaceConfig.sourceIslandNo)}）`}</strong>
+                        <strong>{`（来源${formatUnitOrIslandLabel(pendingReplaceConfig.sourceIslandNo)}）`}</strong>
                       ) : null}
                       {pendingReplaceConfig.targetIslandNo ? (
-                        <strong>{`（${pendingReplaceConfig.targetIslandNo}号岛）`}</strong>
+                        <strong>{`（目标${formatUnitOrIslandLabel(pendingReplaceConfig.targetIslandNo)}）`}</strong>
                       ) : null}
                       ，本页参数会整体写入 <code>deliverable_params</code>。
                     </p>
@@ -2225,15 +2225,12 @@ function requiresUnitNoForAuditProject(schema: FormSchema, projectNo: string) {
   );
 }
 
-function formatSourceIslandLabel(sourceProjectNo: string, sourceIslandNo: string) {
-  const normalizedProjectNo = sourceProjectNo.trim();
-  const normalizedIslandNo = sourceIslandNo.trim();
+function formatUnitOrIslandLabel(unitOrIslandNo: string) {
+  const normalizedIslandNo = unitOrIslandNo.trim();
   if (!normalizedIslandNo) {
     return "";
   }
-  return normalizedProjectNo === "2016"
-    ? `${normalizedIslandNo}号机组`
-    : `${normalizedIslandNo}号岛`;
+  return `${normalizedIslandNo}号机组/岛`;
 }
 
 function normalizeFontPreflightStatus(status: string) {
