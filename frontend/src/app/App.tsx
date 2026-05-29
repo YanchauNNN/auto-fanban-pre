@@ -683,6 +683,9 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   updateAccount: async () => {
     throw new Error("Tutorial preview does not support account updates.");
   },
+  updateAccountRow: async () => {
+    throw new Error("Tutorial preview does not support account row updates.");
+  },
   getAdminConfig: async () => ({
     archiveRootPath: null,
   }),

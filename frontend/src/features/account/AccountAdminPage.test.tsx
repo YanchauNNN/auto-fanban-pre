@@ -11,6 +11,7 @@ const mockGetAdminConfig = vi.fn();
 const mockGetFormSchema = vi.fn();
 const mockCreateAccount = vi.fn();
 const mockUpdateAccount = vi.fn();
+const mockUpdateAccountRow = vi.fn();
 const mockPatchAdminConfig = vi.fn();
 const mockRefreshCurrentAccount = vi.fn();
 
@@ -22,6 +23,7 @@ vi.mock("../../platform/api/useApiAdapter", () => ({
     getFormSchema: mockGetFormSchema,
     createAccount: mockCreateAccount,
     updateAccount: mockUpdateAccount,
+    updateAccountRow: mockUpdateAccountRow,
     patchAdminConfig: mockPatchAdminConfig,
   }),
 }));
@@ -59,6 +61,7 @@ beforeEach(() => {
   mockGetFormSchema.mockReset();
   mockCreateAccount.mockReset();
   mockUpdateAccount.mockReset();
+  mockUpdateAccountRow.mockReset();
   mockPatchAdminConfig.mockReset();
   mockRefreshCurrentAccount.mockReset();
 
@@ -88,6 +91,14 @@ beforeEach(() => {
   mockGetFormSchema.mockResolvedValue({
     management: {
       account: {
+        fieldMap: {
+          officeCode: "科室编码",
+          officeName: "科室",
+          accountId: "账号",
+          displayName: "姓名",
+          role: "角色",
+          password: "密码",
+        },
         validRoles: ["yaml-designer", "yaml-admin"],
         adminRoles: ["yaml-admin"],
         adminCreatedDefaultPassword: "yaml-pass",
@@ -131,6 +142,14 @@ beforeEach(() => {
     role: "管理员",
     password: "password",
   });
+  mockUpdateAccountRow.mockResolvedValue({
+    officeCode: "25C1",
+    officeName: "结构一室",
+    accountId: "bad-role",
+    displayName: "坏角色",
+    role: "yaml-designer",
+    password: "password",
+  });
   mockPatchAdminConfig.mockResolvedValue({ archiveRootPath: "E:\\archive" });
   mockRefreshCurrentAccount.mockResolvedValue(null);
 });
@@ -141,7 +160,7 @@ describe("AccountAdminPage", () => {
 
     expect(await screen.findByRole("heading", { name: "管理员配置" })).toBeInTheDocument();
     expect(screen.getByText("2 个账号")).toBeInTheDocument();
-    expect(screen.getByText("当前没有无效账号行。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /无效账号行/ })).toBeInTheDocument();
     expect(screen.getByDisplayValue("D:\\FanBanServer\\archive")).toBeInTheDocument();
   });
 
@@ -182,5 +201,46 @@ describe("AccountAdminPage", () => {
       });
     });
     expect(mockRefreshCurrentAccount).toHaveBeenCalled();
+  });
+
+  it("opens invalid rows as a compact tab and edits the selected CSV row", async () => {
+    const user = userEvent.setup();
+    mockListInvalidAccountRows.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          rowNumber: 4,
+          raw: {
+            科室编码: "25C1",
+            科室: "结构一室",
+            账号: "bad-role",
+            姓名: "坏角色",
+            角色: "未知角色",
+            密码: "password",
+          },
+          errors: ["invalid_role"],
+        },
+      ],
+    });
+    renderAccountAdminPage();
+
+    await user.click(await screen.findByRole("button", { name: /无效账号行/ }));
+    expect(screen.getByRole("dialog", { name: "无效账号行" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "编辑此行" }));
+
+    expect(screen.getByRole("heading", { name: "修复账号行" })).toBeInTheDocument();
+    expect(screen.getByLabelText("账号")).toHaveValue("bad-role");
+    await user.click(screen.getByRole("button", { name: "保存并修复此行" }));
+
+    await waitFor(() => {
+      expect(mockUpdateAccountRow).toHaveBeenCalledWith(4, {
+        officeCode: "25C1",
+        officeName: "结构一室",
+        accountId: "bad-role",
+        displayName: "坏角色",
+        role: "yaml-designer",
+        password: "password",
+      });
+    });
   });
 });

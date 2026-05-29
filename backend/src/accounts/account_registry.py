@@ -114,6 +114,76 @@ class AccountRegistry:
             raise ValueError("failed to update account")
         return old_account, updated
 
+    def update_account_row(
+        self,
+        row_number: int,
+        payload: AccountUpdatePayload,
+    ) -> tuple[AccountRecord | None, AccountRecord]:
+        rows, headers = self.store.read_rows()
+        target_index = row_number - 2
+        if target_index < 0 or target_index >= len(rows):
+            raise ValueError("account row not found")
+
+        old_account, _ = self._parse_row(rows[target_index], row_number)
+        new_account_id = str(
+            payload.account_id
+            if payload.account_id is not None
+            else rows[target_index].get(self.field_map["account_id"], "")
+        ).strip()
+        display_name = str(
+            payload.display_name
+            if payload.display_name is not None
+            else rows[target_index].get(self.field_map["display_name"], "")
+        ).strip()
+        new_role = str(
+            payload.role
+            if payload.role is not None
+            else rows[target_index].get(self.field_map["role"], "")
+        ).strip()
+        password = str(
+            payload.password
+            if payload.password is not None
+            else rows[target_index].get(self.field_map["password"], "")
+        ).strip()
+
+        if not new_account_id:
+            raise ValueError("missing account_id")
+        if not display_name:
+            raise ValueError("missing display_name")
+        if new_role not in self.valid_roles:
+            raise ValueError("invalid role")
+        if not password:
+            raise ValueError("missing password")
+
+        account_id_key = self.field_map["account_id"]
+        for index, row in enumerate(rows):
+            if index == target_index:
+                continue
+            if str(row.get(account_id_key, "")).strip() == new_account_id:
+                raise ValueError("new account_id already exists")
+
+        rows[target_index] = self._build_row(
+            office_code=(
+                payload.office_code
+                if payload.office_code is not None
+                else rows[target_index].get(self.field_map["office_code"], "")
+            ),
+            office_name=(
+                payload.office_name
+                if payload.office_name is not None
+                else rows[target_index].get(self.field_map["office_name"], "")
+            ),
+            account_id=new_account_id,
+            display_name=display_name,
+            role=new_role,
+            password=password,
+        )
+        self.store.write_rows(rows, headers)
+        updated = self.get_account(new_account_id)
+        if updated is None:
+            raise ValueError("failed to update account row")
+        return (old_account if old_account and old_account.valid else None), updated
+
     def set_password(self, account_id: str, new_password: str) -> AccountRecord:
         rows, headers = self.store.read_rows()
         old_account = self.get_account(account_id)

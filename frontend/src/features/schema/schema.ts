@@ -49,6 +49,14 @@ type RawFormSchema = {
   };
   management?: {
     account?: {
+      fields?: {
+        office_code?: string | null;
+        office_name?: string | null;
+        account_id?: string | null;
+        display_name?: string | null;
+        role?: string | null;
+        password?: string | null;
+      };
       valid_roles?: readonly string[];
       admin_roles?: readonly string[];
       admin_created_default_password?: string | null;
@@ -371,6 +379,14 @@ function normalizeManagementSchema(
   }
   return {
     account: {
+      fieldMap: {
+        officeCode: String(value.account?.fields?.office_code ?? "科室编码"),
+        officeName: String(value.account?.fields?.office_name ?? "科室"),
+        accountId: String(value.account?.fields?.account_id ?? "账号"),
+        displayName: String(value.account?.fields?.display_name ?? "姓名"),
+        role: String(value.account?.fields?.role ?? "角色"),
+        password: String(value.account?.fields?.password ?? "密码"),
+      },
       validRoles: normalizeStringList(value.account?.valid_roles),
       adminRoles: normalizeStringList(value.account?.admin_roles),
       adminCreatedDefaultPassword: String(value.account?.admin_created_default_password ?? ""),

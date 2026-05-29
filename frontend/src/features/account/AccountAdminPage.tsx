@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import type { AccountRecord } from "../../platform/api/types";
+import type { AccountRecord, InvalidAccountRow, ManagementSchema } from "../../platform/api/types";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
 import { useSession } from "../../shared/session/SessionContext";
 import { TaskConfigModal } from "../deliverable/TaskConfigModal";
@@ -9,28 +9,78 @@ import styles from "./AccountAdminPage.module.css";
 
 function buildEmptyAccountForm(role: string, password: string) {
   return {
-  officeCode: "",
-  officeName: "",
-  accountId: "",
-  displayName: "",
+    officeCode: "",
+    officeName: "",
+    accountId: "",
+    displayName: "",
     role,
     password,
   };
 }
+
+const FALLBACK_ACCOUNT_FIELD_MAP: ManagementSchema["account"]["fieldMap"] = {
+  officeCode: "科室编码",
+  officeName: "科室",
+  accountId: "账号",
+  displayName: "姓名",
+  role: "角色",
+  password: "密码",
+};
+
+type AccountFormState = ReturnType<typeof buildEmptyAccountForm>;
 
 type FeedbackState = {
   tone: "error" | "success";
   message: string;
 } | null;
 
+function getRawAccountValue(
+  row: InvalidAccountRow,
+  fieldName: string,
+) {
+  return String(row.raw[fieldName] ?? "").trim();
+}
+
+function buildFormFromInvalidRow(
+  row: InvalidAccountRow,
+  fieldMap: ManagementSchema["account"]["fieldMap"],
+  roleOptions: readonly string[],
+  defaultRole: string,
+  defaultPassword: string,
+): AccountFormState {
+  const rawRole = getRawAccountValue(row, fieldMap.role);
+  return {
+    officeCode: getRawAccountValue(row, fieldMap.officeCode),
+    officeName: getRawAccountValue(row, fieldMap.officeName),
+    accountId: getRawAccountValue(row, fieldMap.accountId),
+    displayName: getRawAccountValue(row, fieldMap.displayName),
+    role: rawRole && roleOptions.includes(rawRole) ? rawRole : defaultRole,
+    password: getRawAccountValue(row, fieldMap.password) || defaultPassword,
+  };
+}
+
+function formatInvalidRowErrors(errors: readonly string[]) {
+  const labels: Record<string, string> = {
+    duplicate_account_id: "账号重复",
+    invalid_role: "角色无效",
+    missing_account_id: "缺少账号",
+    missing_display_name: "缺少姓名",
+    missing_password: "缺少密码",
+    missing_role: "缺少角色",
+  };
+  return errors.map((error) => labels[error] ?? error).join(" / ");
+}
+
 export function AccountAdminPage() {
   const adapter = useApiAdapter();
   const queryClient = useQueryClient();
   const { currentAccount, refreshCurrentAccount } = useSession();
-  const [mode, setMode] = useState<"create" | "edit">("create");
+  const [mode, setMode] = useState<"create" | "edit" | "row">("create");
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [editingRowNumber, setEditingRowNumber] = useState<number | null>(null);
   const [accountForm, setAccountForm] = useState(() => buildEmptyAccountForm("", ""));
   const [isAccountListOpen, setIsAccountListOpen] = useState(false);
+  const [isInvalidRowsOpen, setIsInvalidRowsOpen] = useState(false);
   const [archiveRootPath, setArchiveRootPath] = useState("");
   const [archiveRootPathDirty, setArchiveRootPathDirty] = useState(false);
   const [accountSubmitting, setAccountSubmitting] = useState(false);
@@ -55,6 +105,7 @@ export function AccountAdminPage() {
   });
 
   const managementSchema = schemaQuery.data?.management;
+  const accountFieldMap = managementSchema?.account.fieldMap ?? FALLBACK_ACCOUNT_FIELD_MAP;
   const roleOptions = useMemo(
     () =>
       managementSchema?.account.validRoles.length
@@ -105,12 +156,14 @@ export function AccountAdminPage() {
   function switchToCreateMode() {
     setMode("create");
     setEditingAccountId(null);
+    setEditingRowNumber(null);
     setAccountForm(buildEmptyAccountForm(defaultRole, defaultPassword));
   }
 
   function switchToEditMode(account: AccountRecord) {
     setMode("edit");
     setEditingAccountId(account.accountId);
+    setEditingRowNumber(null);
     setAccountForm({
       officeCode: account.officeCode ?? "",
       officeName: account.officeName ?? "",
@@ -129,6 +182,14 @@ export function AccountAdminPage() {
     setIsAccountListOpen(false);
   }
 
+  function openInvalidRows() {
+    setIsInvalidRowsOpen(true);
+  }
+
+  function closeInvalidRows() {
+    setIsInvalidRowsOpen(false);
+  }
+
   function startCreatingAccount() {
     switchToCreateMode();
     closeAccountList();
@@ -137,6 +198,22 @@ export function AccountAdminPage() {
   function startEditingAccount(account: AccountRecord) {
     switchToEditMode(account);
     closeAccountList();
+  }
+
+  function startEditingInvalidRow(row: InvalidAccountRow) {
+    setMode("row");
+    setEditingAccountId(null);
+    setEditingRowNumber(row.rowNumber);
+    setAccountForm(
+      buildFormFromInvalidRow(
+        row,
+        accountFieldMap,
+        roleOptions,
+        defaultRole,
+        defaultPassword,
+      ),
+    );
+    closeInvalidRows();
   }
 
   async function refreshManagementQueries() {
@@ -169,7 +246,11 @@ export function AccountAdminPage() {
     setAccountSubmitting(true);
     setFeedback(null);
     try {
-      if (mode === "edit" && editingAccountId) {
+      if (mode === "row" && editingRowNumber !== null) {
+        await adapter.updateAccountRow(editingRowNumber, trimmed);
+        setFeedback({ tone: "success", message: "无效账号行已修复。" });
+        switchToCreateMode();
+      } else if (mode === "edit" && editingAccountId) {
         await adapter.updateAccount(editingAccountId, trimmed);
         setFeedback({ tone: "success", message: "账号信息已更新。" });
       } else {
@@ -216,7 +297,9 @@ export function AccountAdminPage() {
   }
 
   const accountItems = accountsQuery.data?.items ?? [];
+  const invalidRows = invalidRowsQuery.data?.items ?? [];
   const accountCount = accountItems.length;
+  const invalidRowCount = invalidRows.length;
   const formRoleOptions = accountForm.role && !roleOptions.includes(accountForm.role)
     ? [accountForm.role, ...roleOptions]
     : roleOptions;
@@ -264,18 +347,55 @@ export function AccountAdminPage() {
           ) : accountsQuery.isError ? (
             <p className={styles.feedbackError}>账号列表加载失败，请稍后刷新重试。</p>
           ) : (
-            <article className={styles.accountSummaryCard}>
-              <div>
-                <strong className={styles.summaryValue}>{`${accountCount} 个账号`}</strong>
-                <p className={styles.cardMeta}>现有账号移入次级窗口浏览，主页面只保留概览和管理入口。</p>
-                <p className={styles.cardMeta}>打开后列表会在窗口内部滚动，尽量避免主页面被长列表撑高。</p>
-              </div>
-              <div className={styles.summaryActions}>
-                <button className={styles.primaryButton} onClick={openAccountList} type="button">
-                  打开账号列表
+            <>
+              <article className={styles.accountSummaryCard}>
+                <div>
+                  <strong className={styles.summaryValue}>{`${accountCount} 个账号`}</strong>
+                  <p className={styles.cardMeta}>主页面保留概览和管理入口。</p>
+                </div>
+                <div className={styles.summaryActions}>
+                  <button className={styles.primaryButton} onClick={openAccountList} type="button">
+                    打开账号列表
+                  </button>
+                </div>
+              </article>
+
+              <div className={styles.sideUtilities}>
+                <button
+                  className={invalidRowCount > 0 ? styles.utilityTabAlert : styles.utilityTab}
+                  onClick={openInvalidRows}
+                  type="button"
+                >
+                  <span>无效账号行</span>
+                  <strong>{invalidRowsQuery.isLoading ? "..." : invalidRowCount}</strong>
                 </button>
+
+                <section className={styles.archiveStrip} aria-label="归档配置">
+                  <div>
+                    <p className={styles.eyebrow}>Archive</p>
+                    <h2>归档配置</h2>
+                  </div>
+
+                  <form className={styles.archiveForm} onSubmit={handleAdminConfigSubmit}>
+                    <label className={styles.srOnly} htmlFor="admin-archive-root-path">
+                      归档根路径
+                    </label>
+                    <input
+                      className={styles.input}
+                      id="admin-archive-root-path"
+                      onChange={(event) => {
+                        setArchiveRootPathDirty(true);
+                        setArchiveRootPath(event.currentTarget.value);
+                      }}
+                      value={archiveRootPathDirty ? archiveRootPath : (adminConfigQuery.data?.archiveRootPath ?? "")}
+                    />
+                    <button className={styles.primaryButton} disabled={configSubmitting} type="submit">
+                      {configSubmitting ? "保存中..." : "保存"}
+                    </button>
+                  </form>
+                </section>
               </div>
-            </article>
+            </>
           )}
         </section>
 
@@ -283,9 +403,9 @@ export function AccountAdminPage() {
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.eyebrow}>Editor</p>
-              <h2>{mode === "edit" ? "编辑账号" : "创建账号"}</h2>
+              <h2>{mode === "row" ? "修复账号行" : mode === "edit" ? "编辑账号" : "创建账号"}</h2>
             </div>
-            {mode === "edit" ? (
+            {mode !== "create" ? (
               <button className={styles.secondaryButton} onClick={switchToCreateMode} type="button">
                 返回创建
               </button>
@@ -379,64 +499,16 @@ export function AccountAdminPage() {
             <p className={styles.helpText}>{`管理员创建账号时，默认密码来自参数规范：${defaultPassword || "未配置"}。`}</p>
 
             <button className={styles.primaryButton} disabled={accountSubmitting} type="submit">
-              {accountSubmitting ? "提交中..." : mode === "edit" ? "保存修改" : "创建账号"}
+              {accountSubmitting
+                ? "提交中..."
+                : mode === "row"
+                  ? "保存并修复此行"
+                  : mode === "edit"
+                    ? "保存修改"
+                    : "创建账号"}
             </button>
           </form>
         </section>
-      </section>
-
-      <section className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.eyebrow}>Invalid Rows</p>
-            <h2>无效账号行</h2>
-          </div>
-        </div>
-
-        {invalidRowsQuery.isLoading ? (
-          <p className={styles.muted}>正在加载无效账号行...</p>
-        ) : invalidRowsQuery.isError ? (
-          <p className={styles.feedbackError}>无效账号行加载失败，请稍后刷新重试。</p>
-        ) : (invalidRowsQuery.data?.items.length ?? 0) > 0 ? (
-          <div className={styles.invalidList}>
-            {(invalidRowsQuery.data?.items ?? []).map((row) => (
-              <article className={styles.invalidCard} key={row.rowNumber}>
-                <strong>{`第 ${row.rowNumber} 行`}</strong>
-                <p className={styles.cardMeta}>{row.errors.join(" / ")}</p>
-                <pre className={styles.rawBlock}>{JSON.stringify(row.raw, null, 2)}</pre>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.muted}>当前没有无效账号行。</p>
-        )}
-      </section>
-
-      <section className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.eyebrow}>Archive</p>
-            <h2>归档配置</h2>
-          </div>
-        </div>
-
-        <form className={styles.form} onSubmit={handleAdminConfigSubmit}>
-          <label className={styles.label} htmlFor="admin-archive-root-path">
-            归档根路径
-          </label>
-          <input
-            className={styles.input}
-            id="admin-archive-root-path"
-            onChange={(event) => {
-              setArchiveRootPathDirty(true);
-              setArchiveRootPath(event.currentTarget.value);
-            }}
-            value={archiveRootPathDirty ? archiveRootPath : (adminConfigQuery.data?.archiveRootPath ?? "")}
-          />
-          <button className={styles.primaryButton} disabled={configSubmitting} type="submit">
-            {configSubmitting ? "保存中..." : "保存归档配置"}
-          </button>
-        </form>
       </section>
 
       {isAccountListOpen ? (
@@ -492,6 +564,66 @@ export function AccountAdminPage() {
               </div>
             ) : (
               <p className={styles.muted}>当前还没有已启用账号。</p>
+            )}
+          </section>
+        </TaskConfigModal>
+      ) : null}
+
+      {isInvalidRowsOpen ? (
+        <TaskConfigModal
+          dialogClassName={styles.accountListDialog}
+          dialogDataAttributes={{ "data-admin-invalid-rows-dialog": "true" }}
+          title="无效账号行"
+        >
+          <section className={styles.accountListModal}>
+            <div className={styles.accountListModalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Invalid Rows</p>
+                <h2>无效账号行</h2>
+              </div>
+              <div className={styles.panelActions}>
+                <button className={styles.secondaryButton} onClick={closeInvalidRows} type="button">
+                  关闭
+                </button>
+              </div>
+            </div>
+
+            {invalidRowsQuery.isLoading ? (
+              <p className={styles.muted}>正在加载无效账号行...</p>
+            ) : invalidRowsQuery.isError ? (
+              <p className={styles.feedbackError}>无效账号行加载失败，请稍后刷新重试。</p>
+            ) : invalidRows.length > 0 ? (
+              <div className={styles.accountListViewport}>
+                <div className={styles.invalidList}>
+                  {invalidRows.map((row) => (
+                    <article className={styles.invalidCard} key={row.rowNumber}>
+                      <div className={styles.invalidSummary}>
+                        <div>
+                          <strong>{`第 ${row.rowNumber} 行`}</strong>
+                          <p className={styles.cardMeta}>{formatInvalidRowErrors(row.errors)}</p>
+                        </div>
+                        <button
+                          className={styles.primaryButton}
+                          onClick={() => startEditingInvalidRow(row)}
+                          type="button"
+                        >
+                          编辑此行
+                        </button>
+                      </div>
+                      <dl className={styles.invalidFields}>
+                        {Object.entries(accountFieldMap).map(([fieldKey, fieldName]) => (
+                          <div key={fieldKey}>
+                            <dt>{fieldName}</dt>
+                            <dd>{getRawAccountValue(row, fieldName) || "-"}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className={styles.muted}>当前没有无效账号行。</p>
             )}
           </section>
         </TaskConfigModal>

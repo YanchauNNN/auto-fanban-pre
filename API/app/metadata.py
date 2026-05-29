@@ -174,6 +174,11 @@ class FormMetadataService:
 
         return {
             "account": {
+                "fields": {
+                    str(key): str(value)
+                    for key, value in dict(account_cfg.get("fields") or {}).items()
+                    if str(key).strip() and str(value).strip()
+                },
                 "valid_roles": [
                     str(role)
                     for role in account_cfg.get("valid_roles") or []

@@ -23,10 +23,9 @@
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(circle at 18% 8%, rgba(35, 138, 165, 0.16), transparent 24rem),
-    linear-gradient(180deg, rgba(241, 247, 252, 0.82), rgba(228, 237, 246, 0.92));
-  -webkit-backdrop-filter: blur(1.5px);
-  backdrop-filter: blur(1.5px);
+    linear-gradient(180deg, rgba(243, 248, 252, 0.72), rgba(228, 237, 246, 0.88));
+  -webkit-backdrop-filter: blur(0.8px);
+  backdrop-filter: blur(0.8px);
 }
 
 .header {
@@ -49,7 +48,6 @@
 }
 
 .header h1,
-.cockpitHero h2,
 .sectionHeader h2,
 .modalHeader h3,
 .rankHeader strong {
@@ -62,7 +60,6 @@
   font-size: 1.8rem;
 }
 
-.cockpitHero h2,
 .sectionHeader h2 {
   font-size: 1.08rem;
 }
@@ -88,7 +85,7 @@
 
 .cockpit {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.55fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(17rem, 0.58fr) minmax(0, 1.42fr);
   gap: 0.65rem;
   margin: 0 auto 0.65rem;
   padding: 0.7rem;
@@ -96,22 +93,11 @@
 
 .cockpitHero {
   min-height: 4.9rem;
-  padding: 0.65rem;
   border-radius: 14px;
   background:
-    linear-gradient(90deg, rgba(9, 39, 70, 0.88), rgba(12, 87, 118, 0.64)),
+    linear-gradient(90deg, rgba(8, 28, 50, 0.18), rgba(255, 255, 255, 0.2)),
     url("../../assets/nuclear-plant-hero.jpg") center / cover;
-  color: #fff;
-}
-
-.cockpitHero h2 {
-  color: #fff;
-}
-
-.cockpitHero p {
-  margin: 0.3rem 0 0;
-  color: rgba(232, 242, 252, 0.82);
-  line-height: 1.35;
+  opacity: 0.82;
 }
 
 .metricStrip {
@@ -201,7 +187,7 @@
 
 .monitorGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  grid-template-columns: 1fr;
   gap: 0.6rem;
   flex: 1;
   min-height: 0;
@@ -219,6 +205,19 @@
   padding: 0.72rem;
   border-radius: 14px;
   border: 1px solid rgba(113, 142, 187, 0.18);
+}
+
+.monitorCardDefault,
+.monitorCardRelated,
+.monitorCardApprovable,
+.monitorCardFailed {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.82fr) minmax(24rem, 1.18fr) auto;
+  grid-template-areas:
+    "header rail actions"
+    "meta rail actions";
+  gap: 0.5rem 0.85rem;
+  align-items: center;
 }
 
 .monitorCardDefault {
@@ -245,6 +244,10 @@
   line-height: 1.45;
 }
 
+.monitorHeader {
+  grid-area: header;
+}
+
 .monitorBadge {
   padding: 0.35rem 0.55rem;
   border-radius: 999px;
@@ -253,10 +256,11 @@
 }
 
 .monitorMeta {
+  grid-area: meta;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.42rem;
-  margin: 0.55rem 0;
+  margin: 0;
 }
 
 .monitorMeta dt,
@@ -273,24 +277,41 @@
 }
 
 .flowRail {
+  position: relative;
+  grid-area: rail;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.4rem;
-  margin: 0.45rem 0 0.6rem;
-  padding: 0;
+  gap: 0;
+  margin: 0;
+  padding: 0 0.25rem;
   list-style: none;
+}
+
+.flowRail::before {
+  content: "";
+  position: absolute;
+  left: calc(12.5% + 0.25rem);
+  right: calc(12.5% + 0.25rem);
+  top: 0.43rem;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(33, 118, 76, 0.42), rgba(54, 102, 164, 0.34));
 }
 
 .flowNodePending,
 .flowNodeCurrent,
 .flowNodeDone,
 .flowNodeFailed {
+  position: relative;
+  z-index: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.32rem;
   min-width: 0;
   color: #6b7f98;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  text-align: center;
 }
 
 .flowNodeCurrent {
@@ -308,11 +329,12 @@
 }
 
 .flowDot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.86rem;
+  height: 0.86rem;
+  border: 2px solid #fff;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 0.22rem rgba(93, 125, 160, 0.09);
+  box-shadow: 0 0 0 0.22rem rgba(93, 125, 160, 0.1);
 }
 
 .monitorActions,
@@ -320,6 +342,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.55rem;
+}
+
+.monitorActions {
+  grid-area: actions;
+  justify-content: flex-end;
 }
 
 .primaryButton,
@@ -549,6 +576,18 @@
   .monitorGrid,
   .historyList {
     max-height: none;
+  }
+
+  .monitorCardDefault,
+  .monitorCardRelated,
+  .monitorCardApprovable,
+  .monitorCardFailed {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "meta"
+      "rail"
+      "actions";
   }
 
   .sectionPrimary,

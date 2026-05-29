@@ -652,6 +652,17 @@ export class HttpAdapter implements ApiAdapter {
     return this.normalizeAccountRecord(response);
   }
 
+  async updateAccountRow(rowNumber: number, payload: AccountUpdatePayload): Promise<AccountRecord> {
+    const response = await this.fetchJson<RawAccountRecord>(`/api/accounts/rows/${rowNumber}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(this.serializeAccountUpdatePayload(payload)),
+    });
+    return this.normalizeAccountRecord(response);
+  }
+
   async getAdminConfig(): Promise<AdminConfig> {
     const payload = await this.fetchJson<RawAdminConfig>("/api/admin/config");
     return this.normalizeAdminConfig(payload);

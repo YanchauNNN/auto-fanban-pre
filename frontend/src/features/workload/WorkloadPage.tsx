@@ -438,11 +438,7 @@ export function WorkloadPage() {
       ) : null}
 
       <section className={styles.cockpit}>
-        <div className={styles.cockpitHero}>
-          <p className={styles.eyebrow}>Cockpit</p>
-          <h2>流程驾驶舱</h2>
-          <p>审批、归档和结算集中展示，优先暴露当前需要处理的任务。</p>
-        </div>
+        <div className={styles.cockpitHero} aria-hidden="true" />
         <div className={styles.metricStrip}>
           <MetricTile label="可见流程" value={`${cockpitStats.totalFlow}`} />
           <MetricTile label="待我审批" value={`${cockpitStats.approvable}`} tone="hot" />

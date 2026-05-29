@@ -249,6 +249,14 @@ describe("normalizeFormSchema", () => {
       },
       management: {
         account: {
+          fields: {
+            office_code: "科室编码",
+            office_name: "科室",
+            account_id: "账号",
+            display_name: "姓名",
+            role: "角色",
+            password: "密码",
+          },
           valid_roles: ["designer", "admin"],
           admin_roles: ["admin"],
           admin_created_default_password: "yaml-pass",
@@ -292,6 +300,7 @@ describe("normalizeFormSchema", () => {
     });
 
     expect(normalized.management?.account.validRoles).toEqual(["designer", "admin"]);
+    expect(normalized.management?.account.fieldMap.accountId).toBe("账号");
     expect(normalized.management?.account.adminRoles).toEqual(["admin"]);
     expect(normalized.management?.account.adminCreatedDefaultPassword).toBe("yaml-pass");
     expect(normalized.management?.workflow.factor.max).toBe(1.3);

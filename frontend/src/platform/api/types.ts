@@ -46,6 +46,14 @@ export type WorkloadStatusOption = {
 
 export type ManagementSchema = {
   account: {
+    fieldMap: {
+      officeCode: string;
+      officeName: string;
+      accountId: string;
+      displayName: string;
+      role: string;
+      password: string;
+    };
     validRoles: readonly string[];
     adminRoles: readonly string[];
     adminCreatedDefaultPassword: string;
@@ -647,6 +655,7 @@ export type ApiAdapter = {
   listInvalidAccountRows?: () => Promise<InvalidAccountRowList>;
   createAccount?: (payload: AccountCreatePayload) => Promise<AccountRecord>;
   updateAccount?: (accountId: string, payload: AccountUpdatePayload) => Promise<AccountRecord>;
+  updateAccountRow?: (rowNumber: number, payload: AccountUpdatePayload) => Promise<AccountRecord>;
   getAdminConfig?: () => Promise<AdminConfig>;
   patchAdminConfig?: (payload: AdminConfig) => Promise<AdminConfig>;
   getHealth: () => Promise<HealthStatus>;

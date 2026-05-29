@@ -65,6 +65,25 @@ def create_account(
     return account.model_dump(mode="json")
 
 
+@router.patch("/rows/{row_number}")
+def update_account_row(
+    row_number: int,
+    payload: AccountUpdatePayload,
+    request: Request,
+    _=Depends(require_admin),
+) -> dict[str, object]:
+    old_account, updated = request.app.state.management.account_registry.update_account_row(
+        row_number,
+        payload,
+    )
+    if old_account is not None:
+        request.app.state.management.task_group_service.rebind_account_references(
+            old_account.account_id,
+            updated.to_snapshot(),
+        )
+    return updated.model_dump(mode="json")
+
+
 @router.patch("/{account_id}")
 def update_account(
     account_id: str,
