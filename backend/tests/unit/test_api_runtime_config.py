@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,6 +143,28 @@ def test_runtime_health_counts_pending_doc_jobs_in_queue_depth(
         assert health["queue_depth"] == 1
     finally:
         runtime.stop()
+
+
+def test_runtime_storage_health_probe_is_safe_under_concurrent_calls(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+
+    import API.app.runtime as runtime_mod
+
+    class _RuntimeConfig:
+        storage_dir = tmp_path / "storage"
+
+        def ensure_dirs(self) -> None:
+            self.storage_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime = object.__new__(runtime_mod.DeliverableApiRuntime)
+    runtime.config = _RuntimeConfig()
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        results = list(executor.map(lambda _: runtime._storage_writable(), range(1000)))
+
+    assert all(results)
 
 
 def test_runtime_stage_labels_read_from_mechanism_yaml(monkeypatch, tmp_path: Path) -> None:

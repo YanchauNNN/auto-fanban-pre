@@ -64,6 +64,12 @@ export type HealthStatus = {
   serverTime: string;
 };
 
+export type PingStatus = {
+  ok: boolean;
+  serverTime: string;
+  version?: string | null;
+};
+
 export type JobArtifacts = {
   packageAvailable: boolean;
   iedAvailable: boolean;
@@ -312,6 +318,7 @@ export type ApiError = {
 };
 
 export type ApiAdapter = {
+  ping: () => Promise<PingStatus>;
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
   preflightFonts: (files: File[]) => Promise<FontPreflightResult>;

@@ -380,6 +380,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "$probe.blocking_issues" in prepare_terminal
     assert "[1/4]" in prepare_terminal
     assert "Invoke-RestMethod" in check_health
+    assert "/api/system/ping" in check_health
+    assert "api_ping_status" in check_health
+    assert "api_health_status" in check_health
     assert "check_iis_proxy_prereqs.ps1" in check_health
     assert "probe_target_env.ps1" in check_health
     assert '-OfficeProbeMode quick' not in check_health

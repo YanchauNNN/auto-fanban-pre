@@ -1,6 +1,7 @@
 ﻿import { render, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
 import userEvent from "@testing-library/user-event";
 import { act, useEffect, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import styles from "./App.module.css";
 
+const mockPing = vi.fn();
 const mockGetHealth = vi.fn();
 const mockGetFormSchema = vi.fn();
 const mockPreflightFonts = vi.fn();
@@ -52,6 +54,7 @@ vi.mock("react-pdf", () => ({
 
 vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
+    ping: mockPing,
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
     preflightFonts: mockPreflightFonts,
@@ -66,6 +69,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
 beforeEach(() => {
   window.history.pushState({}, "", "/");
 
+  mockPing.mockReset();
   mockGetHealth.mockReset();
   mockGetFormSchema.mockReset();
   mockPreflightFonts.mockReset();
@@ -75,6 +79,10 @@ beforeEach(() => {
   mockListJobs.mockReset();
   mockGetJobDetail.mockReset();
 
+  mockPing.mockResolvedValue({
+    ok: true,
+    serverTime: "2026-03-08T10:20:29+08:00",
+  });
   mockGetHealth.mockResolvedValue({
     status: "ok",
     ready: true,
@@ -141,6 +149,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  focusManager.setFocused(undefined);
   vi.unstubAllGlobals();
 });
 
@@ -220,7 +229,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "翻版" })).toBeEnabled();
   });
 
-  it("shows a maintenance warning when backend health is not ready", async () => {
+  it("keeps entries available when ping succeeds but backend business health is not ready", async () => {
     mockGetHealth.mockResolvedValueOnce({
       status: "maintenance",
       ready: false,
@@ -234,12 +243,39 @@ describe("homepage shell", () => {
 
     render(<App />);
 
+    expect(await screen.findByText("后台业务健康异常")).toBeInTheDocument();
     expect(
-      await screen.findByText("后台维护升级中，为您带来的不便十分抱歉（＞人＜；）"),
+      screen.queryByText("后台服务连接中断，请检查后端服务或代理配置。"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出图" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "纠错" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "翻版" })).toBeEnabled();
+  });
+
+  it("shows connection interruption only after repeated ping failures without a recent success", async () => {
+    mockPing.mockRejectedValue(new Error("backend offline"));
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("后台服务连接中断，请检查后端服务或代理配置。"),
     ).toBeInTheDocument();
+    expect(mockPing).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+  });
+
+  it("keeps entries enabled when a health probe fails but ping still succeeds", async () => {
+    mockGetHealth.mockRejectedValue(new Error("health probe reset"));
+
+    render(<App />);
+
+    expect(await screen.findByText("后台业务健康异常")).toBeInTheDocument();
+    expect(
+      screen.queryByText("后台服务连接中断，请检查后端服务或代理配置。"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "出图" })).toBeEnabled();
   });
 
   it("renders the title strip, module toolbar, and primary actions", async () => {

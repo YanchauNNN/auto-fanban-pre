@@ -15,8 +15,20 @@ import type {
   JobDetail,
   JobList,
   JobSummary,
+  PingStatus,
   SubmissionParams,
 } from "./types";
+
+type FetchPolicy = {
+  retry?: boolean;
+  retryCount?: number;
+  retryBaseDelayMs?: number;
+  timeoutMs?: number;
+};
+
+const DEFAULT_GET_RETRY_COUNT = 2;
+const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
+const DEFAULT_GET_TIMEOUT_MS = 8000;
 
 type RawArtifacts = {
   package_available: boolean;
@@ -237,6 +249,25 @@ export class HttpAdapter implements ApiAdapter {
     this.normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   }
 
+  async ping(): Promise<PingStatus> {
+    const payload = await this.fetchJson<{
+      ok: boolean;
+      server_time: string;
+      version?: string | null;
+    }>("/api/system/ping", undefined, {
+      retry: true,
+      retryCount: 2,
+      retryBaseDelayMs: 150,
+      timeoutMs: 3000,
+    });
+
+    return {
+      ok: Boolean(payload.ok),
+      serverTime: payload.server_time,
+      version: payload.version ?? null,
+    };
+  }
+
   async getHealth(): Promise<HealthStatus> {
     const payload = await this.fetchJson<{
       status: string;
@@ -250,7 +281,7 @@ export class HttpAdapter implements ApiAdapter {
       autocad_ready: boolean;
       office_ready: boolean;
       server_time: string;
-    }>("/api/system/health");
+    }>("/api/system/health", undefined, { retry: true });
 
     return {
       status: payload.status,
@@ -268,7 +299,9 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async getFormSchema(): Promise<FormSchema> {
-    const payload = await this.fetchJson<RawFormSchema>("/api/meta/form-schema");
+    const payload = await this.fetchJson<RawFormSchema>("/api/meta/form-schema", undefined, {
+      retry: true,
+    });
     return normalizeFormSchema(payload);
   }
 
@@ -440,7 +473,7 @@ export class HttpAdapter implements ApiAdapter {
     const payload = await this.fetchJson<{
       total: number;
       items: RawJobSummary[];
-    }>(`/api/jobs?${search.toString()}`);
+    }>(`/api/jobs?${search.toString()}`, undefined, { retry: true });
 
     return {
       total: payload.total,
@@ -449,7 +482,9 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async getJobDetail(jobId: string): Promise<JobDetail> {
-    const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`);
+    const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`, undefined, {
+      retry: true,
+    });
     return {
       ...this.normalizeSummary(payload),
       startedAt: payload.started_at ?? null,
@@ -525,25 +560,68 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  private async fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(this.buildUrl(path), init);
-    const text = await response.text();
-    const payload = text ? this.parseJsonOrText(text) : null;
+  private async fetchJson<T>(
+    path: string,
+    init?: RequestInit,
+    policy: FetchPolicy = {},
+  ): Promise<T> {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const shouldRetry = method === "GET" && Boolean(policy.retry);
+    const maxAttempts = shouldRetry ? (policy.retryCount ?? DEFAULT_GET_RETRY_COUNT) + 1 : 1;
+    let lastError: unknown = null;
 
-    if (!response.ok) {
-      const error: ApiError = {
-        status: response.status,
-        detail:
-          payload && typeof payload === "object" && "detail" in payload
-            ? (payload as { detail: ApiError["detail"] }).detail
-            : typeof payload === "string"
-              ? payload
-            : null,
-      };
-      throw error;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        return await this.fetchJsonOnce<T>(path, init, policy);
+      } catch (error) {
+        lastError = error;
+        if (!shouldRetry || attempt >= maxAttempts - 1 || !this.isRetryableError(error)) {
+          throw error;
+        }
+        await this.delay(this.retryDelayMs(attempt, policy.retryBaseDelayMs));
+      }
     }
 
-    return payload as T;
+    throw lastError;
+  }
+
+  private async fetchJsonOnce<T>(
+    path: string,
+    init?: RequestInit,
+    policy: FetchPolicy = {},
+  ): Promise<T> {
+    const timeoutMs = policy.timeoutMs ?? (policy.retry ? DEFAULT_GET_TIMEOUT_MS : undefined);
+    const abortController = timeoutMs ? new AbortController() : null;
+    const timeoutId =
+      abortController && timeoutMs
+        ? window.setTimeout(() => abortController.abort(), timeoutMs)
+        : null;
+    const requestInit = abortController ? { ...init, signal: abortController.signal } : init;
+
+    try {
+      const response = await fetch(this.buildUrl(path), requestInit);
+      const text = await response.text();
+      const payload = text ? this.parseJsonOrText(text) : null;
+
+      if (!response.ok) {
+        const error: ApiError = {
+          status: response.status,
+          detail:
+            payload && typeof payload === "object" && "detail" in payload
+              ? (payload as { detail: ApiError["detail"] }).detail
+              : typeof payload === "string"
+                ? payload
+                : null,
+        };
+        throw error;
+      }
+
+      return payload as T;
+    } finally {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    }
   }
 
   private parseJsonOrText(text: string): unknown {
@@ -566,6 +644,27 @@ export class HttpAdapter implements ApiAdapter {
       return path;
     }
     return this.buildUrl(path);
+  }
+
+  private isRetryableError(error: unknown) {
+    if (this.isApiError(error)) {
+      return [408, 429, 500, 502, 503, 504].includes(error.status);
+    }
+    return true;
+  }
+
+  private isApiError(error: unknown): error is ApiError {
+    return Boolean(error && typeof error === "object" && "status" in error);
+  }
+
+  private retryDelayMs(attempt: number, baseDelayMs = DEFAULT_GET_RETRY_BASE_DELAY_MS) {
+    const exponentialDelayMs = baseDelayMs * 2 ** attempt;
+    const jitterMs = Math.floor(exponentialDelayMs * 0.2 * Math.random());
+    return exponentialDelayMs + jitterMs;
+  }
+
+  private async delay(ms: number) {
+    await new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   private normalizeDeliverableOutputs(

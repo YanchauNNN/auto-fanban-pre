@@ -264,6 +264,7 @@ const schemaWithIedPlanInDesignSection: FormSchema = {
 
 function createAdapter(): ApiAdapter {
   return {
+    ping: vi.fn(),
     getHealth: vi.fn(),
     getFormSchema: vi.fn(),
     preflightFonts: vi.fn(),

@@ -462,6 +462,23 @@ def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> 
     assert "active_total_jobs" in payload
 
 
+def test_ping_endpoint_reports_http_process_without_runtime_health_probe(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        def _health_should_not_run() -> dict[str, object]:
+            raise AssertionError("ping must not call runtime.health")
+
+        client.app.state.runtime.health = _health_should_not_run
+        response = client.get("/api/system/ping")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert "server_time" in payload
+
+
 def test_pipeline_job_processor_dispatches_audit_jobs(monkeypatch) -> None:
     from API.app.runtime import PipelineJobProcessor
 

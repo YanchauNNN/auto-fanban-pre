@@ -1106,13 +1106,20 @@ class DeliverableApiRuntime:
         raise FileNotFoundError(f'group source input not found: {group.group_id}')
 
     def _storage_writable(self) -> bool:
+        probe: Path | None = None
         try:
             self.config.ensure_dirs()
-            probe = self.config.storage_dir / '.api-healthcheck'
+            probe = self.config.storage_dir / f'.api-healthcheck-{uuid.uuid4().hex}.tmp'
             probe.write_text('ok', encoding='utf-8')
             probe.unlink(missing_ok=True)
         except Exception:
             return False
+        finally:
+            if probe is not None:
+                try:
+                    probe.unlink(missing_ok=True)
+                except Exception:
+                    pass
         return True
 
     def _autocad_ready(self) -> bool:

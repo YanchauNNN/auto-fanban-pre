@@ -630,6 +630,7 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 
     check_health = r'''param(
     [string]$Url = "http://127.0.0.1:8000/api/system/health",
+    [string]$PingUrl = "http://127.0.0.1:8000/api/system/ping",
     [ValidateSet("full", "deep")]
     [string]$Mode = "full"
 )
@@ -650,9 +651,12 @@ $selectedProbe = $null
 $proxyOutput = ""
 $proxyStatus = "skip"
 $proxyError = ""
-$apiStatus = "fail"
-$apiError = ""
-$apiResponse = $null
+$apiPingStatus = "fail"
+$apiPingError = ""
+$apiPingResponse = $null
+$apiHealthStatus = "fail"
+$apiHealthError = ""
+$apiHealthResponse = $null
 $taskStatus = "skip"
 $taskDetails = [ordered]@{}
 
@@ -703,11 +707,19 @@ try {
 }
 
 try {
-    $apiResponse = Invoke-RestMethod -Uri $Url -Method Get
-    $apiStatus = "pass"
+    $apiPingResponse = Invoke-RestMethod -Uri $PingUrl -Method Get
+    $apiPingStatus = "pass"
 } catch {
-    $apiStatus = "fail"
-    $apiError = $_.Exception.Message
+    $apiPingStatus = "fail"
+    $apiPingError = $_.Exception.Message
+}
+
+try {
+    $apiHealthResponse = Invoke-RestMethod -Uri $Url -Method Get
+    $apiHealthStatus = "pass"
+} catch {
+    $apiHealthStatus = "fail"
+    $apiHealthError = $_.Exception.Message
 }
 
 $blockingIssues = @()
@@ -718,7 +730,7 @@ if ($null -ne $selectedProbe) {
 }
 
 $overallStatus = "pass"
-if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiStatus -ne "pass" -or $taskStatus -ne "pass") {
+if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass") {
     $overallStatus = "fail"
 } elseif ($proxyStatus -eq "warn") {
     $overallStatus = "warn"
@@ -731,8 +743,12 @@ $summary = [ordered]@{
     selected_probe_json = $deepProbeJson
     blocking_issue_count = $blockingIssues.Count
     warning_count = $warnings.Count
-    api_status = $apiStatus
-    api_url = $Url
+    api_status = $apiPingStatus
+    api_url = $PingUrl
+    api_ping_status = $apiPingStatus
+    api_ping_url = $PingUrl
+    api_health_status = $apiHealthStatus
+    api_health_url = $Url
     task_status = $taskStatus
     proxy_status = $proxyStatus
     summary_json = $summaryJson
@@ -748,10 +764,22 @@ $fullReport = [ordered]@{
     }
     scheduled_task = $taskDetails
     api = [ordered]@{
-        status = $apiStatus
-        url = $Url
-        error = $apiError
-        response = $apiResponse
+        status = $apiPingStatus
+        url = $PingUrl
+        error = $apiPingError
+        response = $apiPingResponse
+        ping = [ordered]@{
+            status = $apiPingStatus
+            url = $PingUrl
+            error = $apiPingError
+            response = $apiPingResponse
+        }
+        health = [ordered]@{
+            status = $apiHealthStatus
+            url = $Url
+            error = $apiHealthError
+            response = $apiHealthResponse
+        }
     }
     iis_proxy = [ordered]@{
         status = $proxyStatus
@@ -769,7 +797,8 @@ Write-Host ("Overall status: " + $overallStatus)
 Write-Host ("Blocking issues: " + $blockingIssues.Count)
 Write-Host ("Warnings: " + $warnings.Count)
 Write-Host ("Scheduled task: " + $taskStatus)
-Write-Host ("API health: " + $apiStatus)
+Write-Host ("API ping: " + $apiPingStatus)
+Write-Host ("API health: " + $apiHealthStatus)
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
 if ($blockingIssues.Count -gt 0) {
     Write-Host "Top blocking issues:"
@@ -780,8 +809,11 @@ if ($blockingIssues.Count -gt 0) {
         Write-Host ("- [{0}/{1}] {2}" -f $section, $code, $message)
     }
 }
-if ($apiStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiError)) {
-    Write-Host ("API detail: " + $apiError)
+if ($apiPingStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiPingError)) {
+    Write-Host ("API ping detail: " + $apiPingError)
+}
+if ($apiHealthStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiHealthError)) {
+    Write-Host ("API health detail: " + $apiHealthError)
 }
 Write-Host ("Summary JSON: " + $summaryJson)
 Write-Host ("Full JSON: " + $fullJson)

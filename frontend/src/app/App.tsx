@@ -63,11 +63,15 @@ import {
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const JOBS_MODAL_PAGE_SIZE = 50;
-const BACKEND_MAINTENANCE_MESSAGE = "后台维护升级中，为您带来的不便十分抱歉（＞人＜；）";
-const BACKEND_CONNECTION_DEGRADED_MESSAGE = "后台连接波动，正在重试";
-const HEALTH_REFETCH_INTERVAL_MS = 15000;
+const BACKEND_CONNECTION_INTERRUPTED_MESSAGE = "后台服务连接中断，请检查后端服务或代理配置。";
+const BACKEND_BUSINESS_HEALTH_WARNING_MESSAGE = "后台业务健康异常";
+const CONNECTION_REFETCH_INTERVAL_MS = 12000;
+const CONNECTION_RETRY_COUNT = 2;
+const CONNECTION_RECENT_SUCCESS_GRACE_MS = 60000;
+const CONNECTION_RETRY_BASE_DELAY_MS = 100;
+const HEALTH_REFETCH_INTERVAL_MS = 20000;
 const HEALTH_RETRY_COUNT = 1;
-const HEALTH_RECENT_SUCCESS_GRACE_MS = 45000;
+const HEALTH_STALE_TIME_MS = 10000;
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
 }));
@@ -409,6 +413,10 @@ const TUTORIAL_DELIVERABLE_VALUES = {
 };
 
 const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
+  ping: async () => ({
+    ok: true,
+    serverTime: TUTORIAL_CREATED_AT,
+  }),
   getHealth: async () => ({
     status: "ok",
     ready: true,
@@ -481,7 +489,16 @@ function getTutorialTargetSelector(stepId: TutorialStepId): string {
 }
 
 export function App() {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -540,10 +557,20 @@ function WorkspacePage() {
     [],
   );
 
+  const connectionQuery = useQuery({
+    queryKey: ["connection"],
+    queryFn: () => adapter.ping(),
+    refetchInterval: CONNECTION_REFETCH_INTERVAL_MS,
+    retry: CONNECTION_RETRY_COUNT,
+    retryDelay: (failureCount) =>
+      Math.min(CONNECTION_RETRY_BASE_DELAY_MS * 2 ** failureCount, 1000),
+  });
+
   const healthQuery = useQuery({
     queryKey: ["health"],
     queryFn: () => adapter.getHealth(),
     refetchInterval: HEALTH_REFETCH_INTERVAL_MS,
+    staleTime: HEALTH_STALE_TIME_MS,
     retry: HEALTH_RETRY_COUNT,
     retryDelay: 250,
   });
@@ -554,22 +581,24 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
-  const [lastReadyHealthAt, setLastReadyHealthAt] = useState<number | null>(null);
+  const [lastConnectionSuccessAt, setLastConnectionSuccessAt] = useState<number | null>(null);
 
   useEffect(() => {
-    if (healthQuery.data?.ready) {
-      setLastReadyHealthAt(Date.now());
+    if (connectionQuery.data?.ok) {
+      setLastConnectionSuccessAt(Date.now());
     }
-  }, [healthQuery.data?.ready, healthQuery.data?.serverTime]);
+  }, [connectionQuery.data?.ok, connectionQuery.data?.serverTime]);
 
-  const hasRecentReadyHealth =
-    lastReadyHealthAt !== null && Date.now() - lastReadyHealthAt <= HEALTH_RECENT_SUCCESS_GRACE_MS;
-  const healthRequestFailed = healthQuery.isError;
-  const backendUnavailable =
-    healthQuery.data?.ready === false ||
-    (healthRequestFailed && healthQuery.failureCount > HEALTH_RETRY_COUNT && !hasRecentReadyHealth);
-  const backendConnectionDegraded = healthRequestFailed && !backendUnavailable;
-  const entryActionsDisabled = !actionsReady || backendUnavailable;
+  const hasRecentConnectionSuccess =
+    lastConnectionSuccessAt !== null &&
+    Date.now() - lastConnectionSuccessAt <= CONNECTION_RECENT_SUCCESS_GRACE_MS;
+  const backendConnectionInterrupted =
+    connectionQuery.isError &&
+    connectionQuery.failureCount > CONNECTION_RETRY_COUNT &&
+    !hasRecentConnectionSuccess;
+  const backendBusinessHealthWarning =
+    !backendConnectionInterrupted && (healthQuery.isError || healthQuery.data?.ready === false);
+  const entryActionsDisabled = !actionsReady || backendConnectionInterrupted;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
     ? auditDraftAvailable
@@ -865,7 +894,33 @@ function WorkspacePage() {
                 教程
               </button>
             </div>
-            {healthQuery.data ? (
+            {backendConnectionInterrupted ? (
+              <p className={styles.titleStripHealthWarning}>后台连接不可达</p>
+            ) : backendBusinessHealthWarning ? (
+              <>
+                <p className={styles.titleStripHealthWarning}>
+                  {BACKEND_BUSINESS_HEALTH_WARNING_MESSAGE}
+                </p>
+                {healthQuery.data ? (
+                  <div className={styles.titleStripHealthGrid}>
+                    <StatRow label="服务" value={healthQuery.data.ready ? "就绪" : "异常"} />
+                    <StatRow
+                      label="存储"
+                      value={healthQuery.data.storageWritable ? "正常" : "异常"}
+                    />
+                    <StatRow label="队列" value={`${healthQuery.data.queueDepth} 项`} />
+                    <StatRow
+                      label="AutoCAD"
+                      value={healthQuery.data.autocadReady ? "可用" : "缺失"}
+                    />
+                    <StatRow
+                      label="Office"
+                      value={healthQuery.data.officeReady ? "可用" : "缺失"}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : healthQuery.data ? (
               <div className={styles.titleStripHealthGrid}>
                 <StatRow label="服务" value={healthQuery.data.ready ? "就绪" : "异常"} />
                 <StatRow
@@ -882,18 +937,16 @@ function WorkspacePage() {
                   value={healthQuery.data.officeReady ? "可用" : "缺失"}
                 />
               </div>
-            ) : backendConnectionDegraded ? (
-              <p className={styles.titleStripHealthWarning}>{BACKEND_CONNECTION_DEGRADED_MESSAGE}</p>
-            ) : healthQuery.isError ? (
-              <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
-            ) : (
+            ) : connectionQuery.isLoading || healthQuery.isLoading ? (
               <p className={styles.titleStripHealthLoading}>正在读取</p>
+            ) : (
+              <p className={styles.titleStripHealthWarning}>暂时无法连接后台服务</p>
             )}
           </section>
         </div>
-        {backendUnavailable ? (
+        {backendConnectionInterrupted ? (
           <div className={styles.titleStripMaintenanceBanner} role="alert">
-            {BACKEND_MAINTENANCE_MESSAGE}
+            {BACKEND_CONNECTION_INTERRUPTED_MESSAGE}
           </div>
         ) : null}
       </header>

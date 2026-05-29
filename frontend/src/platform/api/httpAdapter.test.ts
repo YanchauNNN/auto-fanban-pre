@@ -6,6 +6,73 @@ describe("HttpAdapter", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("checks backend process reachability through the lightweight ping endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          ok: true,
+          server_time: "2026-05-29T10:20:30+08:00",
+          version: "dev",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const ping = await adapter.ping();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/system/ping",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(ping).toEqual({
+      ok: true,
+      serverTime: "2026-05-29T10:20:30+08:00",
+      version: "dev",
+    });
+  });
+
+  it("retries idempotent GET requests after transient network failures", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("network reset"))
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            total: 0,
+            items: [],
+          }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const jobsPromise = adapter.listJobs();
+    await vi.runAllTimersAsync();
+    const jobs = await jobsPromise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jobs.items).toEqual([]);
+  });
+
+  it("does not retry mutating POST requests after a network failure", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("network reset"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["dwg"], "upload.dwg", {
+      type: "application/acad",
+    });
+
+    await expect(adapter.createBatch({ project_no: "2026" }, [file])).rejects.toThrow(
+      "network reset",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
@@ -70,7 +137,7 @@ describe("HttpAdapter", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/jobs/job-1",
-      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(detail.artifacts.packageDownloadUrl).toBe(
       "http://127.0.0.1:8000/api/jobs/job-1/download/package",
@@ -203,7 +270,7 @@ describe("HttpAdapter", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:8000/api/jobs?status=running&offset=100&limit=50",
-      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
     expect(jobs.total).toBe(12);
     expect(jobs.items).toHaveLength(0);
