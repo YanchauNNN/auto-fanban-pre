@@ -235,6 +235,17 @@ export function WorkloadPage() {
       return rightTime - leftTime;
     });
   }, [historyQuery.data?.entries]);
+  const cockpitStats = useMemo(() => {
+    const items = monitorQuery.data?.items ?? [];
+    return {
+      totalFlow: items.length,
+      approvable: items.filter((item) => item.canApprove).length,
+      related: items.filter((item) => item.isRelatedToCurrentUser).length,
+      failed: items.filter((item) => item.archiveStatus === "failed").length,
+      historyCount: historyQuery.data?.entries.length ?? 0,
+      totalWorkload: historyQuery.data?.totalWorkloadA1 ?? 0,
+    };
+  }, [historyQuery.data, monitorQuery.data?.items]);
 
   useEffect(() => {
     if (repairTarget && !repairReplaceAccountId) {
@@ -426,7 +437,24 @@ export function WorkloadPage() {
         </p>
       ) : null}
 
-      <section className={styles.section}>
+      <section className={styles.cockpit}>
+        <div className={styles.cockpitHero}>
+          <p className={styles.eyebrow}>Cockpit</p>
+          <h2>流程驾驶舱</h2>
+          <p>审批、归档和结算集中展示，优先暴露当前需要处理的任务。</p>
+        </div>
+        <div className={styles.metricStrip}>
+          <MetricTile label="可见流程" value={`${cockpitStats.totalFlow}`} />
+          <MetricTile label="待我审批" value={`${cockpitStats.approvable}`} tone="hot" />
+          <MetricTile label="相关流程" value={`${cockpitStats.related}`} />
+          <MetricTile label="异常归档" value={`${cockpitStats.failed}`} tone="danger" />
+          <MetricTile label="历史记录" value={`${cockpitStats.historyCount}`} />
+          <MetricTile label="累计 A1" value={`${formatWorkload(cockpitStats.totalWorkload)} A1`} tone="strong" />
+        </div>
+      </section>
+
+      <div className={styles.dashboardGrid}>
+      <section className={styles.sectionPrimary}>
         <div className={styles.sectionHeader}>
           <div>
             <p className={styles.eyebrow}>Current Flow</p>
@@ -472,6 +500,12 @@ export function WorkloadPage() {
                       <dd>{formatWorkload(item.effectiveWorkload)}</dd>
                     </div>
                   </dl>
+                  <WorkflowRail
+                    archiveStatus={item.archiveStatus}
+                    currentNodeKey={item.currentNodeKey}
+                    labels={taskGroupPresentationLabels}
+                    workflowStatus={item.workflowStatus}
+                  />
                   <div className={styles.monitorActions}>
                     <Link className={styles.secondaryLink} to={`/task-groups/${item.groupId}`}>
                       查看任务包
@@ -504,7 +538,7 @@ export function WorkloadPage() {
         )}
       </section>
 
-      <section className={styles.section}>
+      <section className={styles.sectionSecondary}>
         <div className={styles.sectionHeader}>
           <div>
             <p className={styles.eyebrow}>History</p>
@@ -600,6 +634,7 @@ export function WorkloadPage() {
           />
         )}
       </section>
+      </div>
 
       {approvalTarget ? (
         <div
@@ -888,6 +923,73 @@ function HistoryPanel({
         <p className={styles.muted}>当前筛选条件下没有历史记录。</p>
       )}
     </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "hot" | "danger" | "strong";
+}) {
+  return (
+    <article className={styles[`metricTile${capitalize(tone)}`]}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+function WorkflowRail({
+  archiveStatus,
+  currentNodeKey,
+  labels,
+  workflowStatus,
+}: {
+  archiveStatus: string;
+  currentNodeKey: string | null;
+  labels: TaskGroupPresentationLabels;
+  workflowStatus: string;
+}) {
+  const stages = [
+    { key: "one_review", label: labels.nodeLabels?.one_review ?? "一审" },
+    { key: "two_review", label: labels.nodeLabels?.two_review ?? "二审" },
+    { key: "three_review", label: labels.nodeLabels?.three_review ?? "三审" },
+    { key: "archive", label: "归档" },
+  ];
+  const currentIndex = currentNodeKey
+    ? stages.findIndex((stage) => stage.key === currentNodeKey)
+    : -1;
+  const isTerminal =
+    workflowStatus === "three_review_approved" ||
+    workflowStatus === "archived" ||
+    archiveStatus === "succeeded";
+  const hasFailed = archiveStatus === "failed" || workflowStatus === "archive_failed";
+
+  return (
+    <ol className={styles.flowRail} aria-label="任务流程图">
+      {stages.map((stage, index) => {
+        let state = "pending";
+        if (hasFailed && stage.key === "archive") {
+          state = "failed";
+        } else if (isTerminal) {
+          state = "done";
+        } else if (index < currentIndex) {
+          state = "done";
+        } else if (index === currentIndex) {
+          state = "current";
+        }
+        return (
+          <li className={styles[`flowNode${capitalize(state)}`]} key={stage.key}>
+            <span className={styles.flowDot} />
+            <span>{stage.label}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

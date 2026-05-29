@@ -7,15 +7,15 @@
 }
 
 .workspacePage {
-  padding: 0 1.25rem 1.25rem;
+  padding: 0 1rem 1rem;
 }
 
 .titleStrip {
   position: sticky;
   top: 0;
   z-index: 20;
-  margin: 0 -1.25rem 1.1rem;
-  padding: 0.9rem 1.25rem;
+  margin: 0 -1rem 0.65rem;
+  padding: 0.4rem 1rem;
   border-bottom: 1px solid rgba(20, 70, 128, 0.1);
   background: linear-gradient(180deg, rgba(247, 250, 253, 0.97), rgba(241, 246, 252, 0.94));
   -webkit-backdrop-filter: blur(12px);
@@ -32,15 +32,15 @@
 .titleStripBrand {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.8rem;
 }
 
 .titleStripLogo {
-  width: 72px;
-  height: 72px;
+  width: 50px;
+  height: 50px;
   object-fit: contain;
-  border-radius: 20px;
-  padding: 0.55rem;
+  border-radius: 14px;
+  padding: 0.38rem;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(20, 70, 128, 0.12);
   box-shadow: 0 14px 30px rgba(13, 44, 80, 0.08);
@@ -55,8 +55,8 @@
 .titleStripStatus {
   flex-shrink: 0;
   min-width: 288px;
-  padding: 0.75rem 0.9rem;
-  border-radius: 22px;
+  padding: 0.42rem 0.58rem;
+  border-radius: 18px;
   border: 1px solid rgba(20, 70, 128, 0.1);
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 12px 28px rgba(13, 44, 80, 0.06);
@@ -67,7 +67,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.25rem;
 }
 
 .titleStripAccountActions {
@@ -98,7 +98,7 @@
   border: 1px solid rgba(20, 70, 128, 0.16);
   background: rgba(20, 70, 128, 0.05);
   color: #174781;
-  padding: 0.42rem 0.8rem;
+  padding: 0.32rem 0.7rem;
   font-weight: 700;
   font-size: 0.86rem;
 }
@@ -106,7 +106,7 @@
 .titleStripHealthGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.55rem;
+  gap: 0.45rem;
   margin: 0;
 }
 
@@ -115,9 +115,9 @@
   flex-direction: column;
   justify-content: center;
   gap: 0.18rem;
-  min-height: 4.3rem;
-  padding: 0.5rem 0.55rem;
-  border-radius: 16px;
+  min-height: 2.8rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 13px;
   border: 1px solid rgba(20, 70, 128, 0.08);
   background: rgba(20, 70, 128, 0.04);
   text-align: center;
@@ -125,14 +125,14 @@
 
 .titleStripHealthItemLabel {
   color: #6b86a3;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   line-height: 1.2;
 }
 
 .titleStripHealthItemValue {
   color: #14395e;
   font-weight: 700;
-  font-size: 1.05rem;
+  font-size: 0.96rem;
   line-height: 1.2;
 }
 
@@ -165,9 +165,9 @@
 .moduleToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-  padding: 0.45rem 0.2rem 0.1rem;
+  gap: 0.55rem;
+  margin-bottom: 0.65rem;
+  padding: 0.25rem 0.15rem 0.05rem;
 }
 
 .moduleToolbarButton {
@@ -175,7 +175,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
   color: #315880;
-  padding: 0.72rem 1.15rem;
+  padding: 0.58rem 1rem;
   font-weight: 700;
 }
 

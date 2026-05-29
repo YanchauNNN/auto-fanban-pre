@@ -1,18 +1,57 @@
 .page {
-  max-width: 1180px;
+  position: relative;
+  isolation: isolate;
+  min-height: 0;
+  padding: 0.75rem;
+  overflow: hidden;
+  color: #10243d;
+}
+
+.page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    linear-gradient(90deg, rgba(8, 22, 38, 0.76), rgba(17, 52, 86, 0.42) 42%, rgba(240, 246, 252, 0.9)),
+    url("../../assets/nuclear-plant-hero.jpg") center / cover;
+}
+
+.page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(244, 248, 252, 0.86), rgba(231, 239, 247, 0.92));
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
+}
+
+.surface {
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 48px 24px 72px;
+  padding: 0.9rem;
+  border: 1px solid rgba(210, 225, 240, 0.45);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(247, 251, 255, 0.92), rgba(229, 238, 247, 0.82)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: 0 22px 64px rgba(12, 34, 60, 0.18);
 }
 
 .header {
-  margin-bottom: 28px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.7rem;
 }
 
 .eyebrow {
-  margin: 0 0 8px;
-  color: #6287bc;
+  margin: 0 0 0.35rem;
+  color: #5076ae;
   font-family: "Rajdhani", "Noto Sans SC", sans-serif;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -21,90 +60,158 @@
 .header h1,
 .panelHeader h2 {
   margin: 0;
-  color: #163d72;
-  font-size: clamp(1.8rem, 2.1vw, 2.4rem);
+  color: #102f57;
+  letter-spacing: 0;
+}
+
+.header h1 {
+  font-size: 1.85rem;
+}
+
+.panelHeader h2 {
+  font-size: 1.1rem;
 }
 
 .description {
-  max-width: 760px;
-  margin: 12px 0 0;
-  color: #496589;
-  line-height: 1.7;
+  max-width: 720px;
+  margin: 0.25rem 0 0;
+  color: #42617f;
+  line-height: 1.4;
 }
 
-.identityGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
+.headerMetric {
+  min-width: 8.5rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(85, 124, 170, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(230, 239, 248, 0.9));
+  text-align: right;
 }
 
-.infoCard,
-.panel,
-.entryCard {
-  border: 1px solid rgba(72, 110, 161, 0.16);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.94)),
-    rgba(255, 255, 255, 0.92);
-  box-shadow: 0 18px 42px rgba(33, 68, 120, 0.08);
-}
-
-.infoCard {
-  min-height: 140px;
-  padding: 20px 22px;
-}
-
+.headerMetric span,
+.profileLabel,
 .cardLabel,
 .panelHint,
 .label,
 .workloadLabel {
   display: block;
-  color: #6f86aa;
-  font-size: 0.9rem;
+  color: #607c9d;
+  font-size: 0.84rem;
+}
+
+.headerMetric strong {
+  display: block;
+  margin-top: 0.2rem;
+  color: #0e365f;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.accountShell {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.82fr) minmax(16rem, 0.78fr) minmax(22rem, 1.15fr);
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.profilePanel,
+.panel,
+.entryCard {
+  border: 1px solid rgba(86, 122, 168, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(238, 246, 252, 0.88)),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 42px rgba(20, 53, 91, 0.1);
+}
+
+.profilePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 18rem;
+  padding: 0.95rem;
+  background:
+    linear-gradient(180deg, rgba(16, 50, 86, 0.88), rgba(19, 83, 130, 0.78)),
+    rgba(16, 50, 86, 0.86);
+  color: #fff;
+}
+
+.profileLabel {
+  color: rgba(220, 235, 249, 0.78);
+}
+
+.profileName {
+  display: block;
+  margin-top: 0.35rem;
+  color: #fff;
+  font-size: 1.9rem;
+  line-height: 1.15;
+}
+
+.profileMeta {
+  margin: 0.55rem 0 0;
+  color: rgba(232, 242, 252, 0.78);
+  font-family: "JetBrains Mono", "Noto Sans SC", monospace;
+}
+
+.identityGrid {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.infoCard {
+  min-height: 3.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(222, 236, 249, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.infoCard .cardLabel {
+  color: rgba(222, 236, 249, 0.78);
 }
 
 .cardValue {
   display: block;
-  margin-top: 12px;
-  color: #163d72;
-  font-size: 1.22rem;
-  line-height: 1.35;
+  margin-top: 0.35rem;
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.25;
 }
 
 .cardSupporting {
-  margin: 10px 0 0;
-  color: #607899;
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
-
-.panelGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 20px;
+  margin: 0.35rem 0 0;
+  color: rgba(232, 242, 252, 0.72);
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 .panel {
-  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+  padding: 0.85rem;
 }
 
 .panelHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 0.8rem;
+  margin-bottom: 0.65rem;
 }
 
 .panelHint {
-  margin-top: 6px;
+  margin-top: 0.25rem;
   white-space: nowrap;
 }
 
 .form {
   display: grid;
-  gap: 12px;
+  gap: 0.55rem;
+  margin-top: auto;
 }
 
 .label {
@@ -113,17 +220,17 @@
 
 .input {
   width: 100%;
-  min-height: 48px;
-  padding: 0 16px;
-  border: 1px solid rgba(88, 123, 171, 0.32);
-  border-radius: 16px;
+  min-height: 2.45rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgba(82, 122, 170, 0.28);
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
-  color: #163d72;
+  color: #14375f;
   font-size: 1rem;
 }
 
 .input:focus {
-  outline: 2px solid rgba(43, 111, 214, 0.2);
+  outline: 2px solid rgba(43, 111, 214, 0.18);
   border-color: #356fcb;
 }
 
@@ -131,20 +238,21 @@
 .muted,
 .workloadMeta,
 .entryMeta {
-  color: #617998;
-  font-size: 0.93rem;
-  line-height: 1.6;
+  color: #5d7794;
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .primaryButton {
-  min-height: 48px;
+  min-height: 2.45rem;
   border: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, #1b4d91, #2c6fce);
+  background: linear-gradient(135deg, #0f4c83, #238aa5);
   color: #fff;
-  font-size: 1rem;
+  font-size: 0.98rem;
   font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 12px 24px rgba(21, 94, 132, 0.18);
 }
 
 .primaryButton:disabled {
@@ -155,10 +263,10 @@
 .feedbackSuccess,
 .feedbackError {
   margin: 0;
-  padding: 12px 14px;
-  border-radius: 14px;
-  font-size: 0.95rem;
-  line-height: 1.5;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .feedbackSuccess {
@@ -173,66 +281,99 @@
 
 .workloadHero {
   display: grid;
-  gap: 10px;
-  padding: 18px 20px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, rgba(27, 77, 145, 0.1), rgba(44, 111, 206, 0.04));
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: 0.8rem;
+  align-items: end;
+  padding: 0.75rem;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(18, 61, 102, 0.13), rgba(33, 138, 165, 0.06)),
+    rgba(240, 247, 252, 0.78);
 }
 
 .workloadValue {
   display: block;
-  margin-top: 10px;
-  color: #163d72;
-  font-size: clamp(2rem, 4vw, 2.8rem);
+  margin-top: 0.25rem;
+  color: #102f57;
+  font-size: 2rem;
   line-height: 1;
 }
 
 .workloadMeta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .entryList {
   display: grid;
-  gap: 12px;
-  margin-top: 18px;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .entryCard {
-  padding: 16px 18px;
+  padding: 0.65rem 0.75rem;
 }
 
 .entryHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  color: #163d72;
+  gap: 0.8rem;
+  color: #14375f;
+}
+
+.entryHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .entryMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 10px;
+  gap: 0.35rem 0.8rem;
+  margin-top: 0.45rem;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .page {
-    padding: 32px 16px 56px;
+    overflow: visible;
   }
 
-  .panelGrid {
+  .accountShell {
     grid-template-columns: 1fr;
   }
 
-  .panelHeader {
+  .profilePanel,
+  .panel {
+    min-height: auto;
+  }
+
+  .identityGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 0.75rem;
+  }
+
+  .surface {
+    padding: 0.85rem;
+  }
+
+  .header,
+  .workloadHero {
+    grid-template-columns: 1fr;
     flex-direction: column;
   }
 
-  .panelHint {
-    margin-top: 0;
-    white-space: normal;
+  .identityGrid {
+    grid-template-columns: 1fr;
   }
 }

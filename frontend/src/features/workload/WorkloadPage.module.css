@@ -1,48 +1,184 @@
 .page {
-  min-height: 100vh;
-  padding: 32px 40px 48px;
+  position: relative;
+  isolation: isolate;
+  min-height: 0;
+  padding: 0.75rem;
+  overflow: hidden;
+  color: #10243d;
+}
+
+.page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
   background:
-    radial-gradient(circle at top left, rgba(29, 78, 216, 0.1), transparent 28%),
-    linear-gradient(180deg, #f6f8fc 0%, #eef2f8 100%);
-  color: #183153;
+    linear-gradient(90deg, rgba(7, 19, 34, 0.8), rgba(13, 58, 89, 0.5) 42%, rgba(236, 244, 250, 0.9)),
+    url("../../assets/nuclear-plant-hero.jpg") center / cover;
+}
+
+.page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(35, 138, 165, 0.16), transparent 24rem),
+    linear-gradient(180deg, rgba(241, 247, 252, 0.82), rgba(228, 237, 246, 0.92));
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
 }
 
 .header {
-  margin: 0 auto 24px;
-  max-width: 1280px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 1320px;
+  margin: 0 auto 0.6rem;
 }
 
 .eyebrow {
-  margin: 0 0 10px;
-  color: #5070a8;
-  font-size: 0.78rem;
+  margin: 0 0 0.35rem;
+  color: #4f77ae;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 0.76rem;
   font-weight: 700;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .header h1,
+.cockpitHero h2,
 .sectionHeader h2,
 .modalHeader h3,
 .rankHeader strong {
   margin: 0;
+  color: #102f57;
+  letter-spacing: 0;
+}
+
+.header h1 {
+  font-size: 1.8rem;
+}
+
+.cockpitHero h2,
+.sectionHeader h2 {
+  font-size: 1.08rem;
 }
 
 .description {
-  max-width: 760px;
-  margin: 12px 0 0;
-  color: #516887;
-  line-height: 1.7;
+  max-width: 720px;
+  margin: 0.25rem 0 0;
+  color: #42617f;
+  line-height: 1.4;
 }
 
-.section {
-  max-width: 1280px;
-  margin: 0 auto 24px;
-  padding: 24px;
-  border: 1px solid rgba(109, 141, 192, 0.2);
-  border-radius: 28px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 22px 60px rgba(27, 52, 88, 0.1);
+.cockpit,
+.sectionPrimary,
+.sectionSecondary {
+  max-width: 1320px;
+  border: 1px solid rgba(86, 122, 168, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(237, 246, 252, 0.86)),
+    rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 42px rgba(20, 53, 91, 0.1);
+}
+
+.cockpit {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.55fr) minmax(0, 1.45fr);
+  gap: 0.65rem;
+  margin: 0 auto 0.65rem;
+  padding: 0.7rem;
+}
+
+.cockpitHero {
+  min-height: 4.9rem;
+  padding: 0.65rem;
+  border-radius: 14px;
+  background:
+    linear-gradient(90deg, rgba(9, 39, 70, 0.88), rgba(12, 87, 118, 0.64)),
+    url("../../assets/nuclear-plant-hero.jpg") center / cover;
+  color: #fff;
+}
+
+.cockpitHero h2 {
+  color: #fff;
+}
+
+.cockpitHero p {
+  margin: 0.3rem 0 0;
+  color: rgba(232, 242, 252, 0.82);
+  line-height: 1.35;
+}
+
+.metricStrip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.metricTileDefault,
+.metricTileHot,
+.metricTileDanger,
+.metricTileStrong {
+  min-height: 4.9rem;
+  padding: 0.6rem;
+  border: 1px solid rgba(86, 122, 168, 0.16);
+  border-radius: 14px;
+  background: rgba(247, 251, 255, 0.9);
+}
+
+.metricTileHot {
+  background: linear-gradient(180deg, rgba(233, 248, 240, 0.96), rgba(215, 241, 226, 0.9));
+}
+
+.metricTileDanger {
+  background: linear-gradient(180deg, rgba(255, 245, 244, 0.96), rgba(252, 226, 224, 0.9));
+}
+
+.metricTileStrong {
+  background: linear-gradient(180deg, rgba(230, 241, 255, 0.98), rgba(211, 229, 249, 0.92));
+}
+
+.metricTileDefault span,
+.metricTileHot span,
+.metricTileDanger span,
+.metricTileStrong span {
+  display: block;
+  color: #607c9d;
+  font-size: 0.8rem;
+}
+
+.metricTileDefault strong,
+.metricTileHot strong,
+.metricTileDanger strong,
+.metricTileStrong strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #0e365f;
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(23rem, 0.85fr);
+  gap: 0.7rem;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+.sectionPrimary,
+.sectionSecondary {
+  display: flex;
+  flex-direction: column;
+  height: clamp(20rem, calc(100svh - 31rem), 23rem);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.8rem;
 }
 
 .sectionHeader,
@@ -52,7 +188,7 @@
 .rankHeader {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: 0.8rem;
   align-items: flex-start;
 }
 
@@ -60,13 +196,18 @@
 .monitorBadge,
 .panelHint {
   color: #5f7798;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
 }
 
 .monitorGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.6rem;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .monitorCardDefault,
@@ -75,8 +216,8 @@
 .monitorCardFailed,
 .historyCard,
 .rankPanel {
-  padding: 18px;
-  border-radius: 22px;
+  padding: 0.72rem;
+  border-radius: 14px;
   border: 1px solid rgba(113, 142, 187, 0.18);
 }
 
@@ -99,13 +240,13 @@
 }
 
 .monitorHint {
-  margin: 8px 0 0;
+  margin: 0.35rem 0 0;
   color: #546b89;
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .monitorBadge {
-  padding: 6px 10px;
+  padding: 0.35rem 0.55rem;
   border-radius: 999px;
   background: rgba(45, 94, 168, 0.08);
   white-space: nowrap;
@@ -114,28 +255,71 @@
 .monitorMeta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 18px 0;
+  gap: 0.42rem;
+  margin: 0.55rem 0;
 }
 
 .monitorMeta dt,
 .heroLabel,
 .cardLabel {
   color: #5c7393;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .monitorMeta dd {
-  margin: 6px 0 0;
+  margin: 0.25rem 0 0;
   color: #183153;
   font-weight: 600;
+}
+
+.flowRail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin: 0.45rem 0 0.6rem;
+  padding: 0;
+  list-style: none;
+}
+
+.flowNodePending,
+.flowNodeCurrent,
+.flowNodeDone,
+.flowNodeFailed {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: #6b7f98;
+  font-size: 0.8rem;
+}
+
+.flowNodeCurrent {
+  color: #0f5d8a;
+  font-weight: 700;
+}
+
+.flowNodeDone {
+  color: #21764c;
+}
+
+.flowNodeFailed {
+  color: #a64040;
+  font-weight: 700;
+}
+
+.flowDot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 0.22rem rgba(93, 125, 160, 0.09);
 }
 
 .monitorActions,
 .modalActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 0.55rem;
 }
 
 .primaryButton,
@@ -144,9 +328,10 @@
 .scopeTabActive,
 .closeButton,
 .secondaryLink {
-  min-height: 44px;
-  padding: 0 18px;
+  min-height: 2.35rem;
+  padding: 0 0.9rem;
   border-radius: 999px;
+  font-size: 0.9rem;
   font-weight: 700;
   text-decoration: none;
 }
@@ -161,8 +346,9 @@
 }
 
 .primaryButton {
-  background: linear-gradient(135deg, #1f5da8 0%, #123f77 100%);
+  background: linear-gradient(135deg, #0f4c83, #238aa5);
   color: #fff;
+  box-shadow: 0 12px 24px rgba(21, 94, 132, 0.18);
 }
 
 .secondaryButton,
@@ -175,7 +361,7 @@
 }
 
 .scopeTabActive {
-  background: linear-gradient(135deg, #1f5da8 0%, #123f77 100%);
+  background: linear-gradient(135deg, #0f4c83, #238aa5);
   color: #fff;
 }
 
@@ -188,40 +374,40 @@
 .scopeTabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
 }
 
 .filterBar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 0.5rem;
   align-items: end;
-  margin-bottom: 18px;
+  margin-bottom: 0.55rem;
 }
 
 .filterField,
 .label {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0.35rem;
   color: #456384;
-  font-size: 0.94rem;
+  font-size: 0.88rem;
 }
 
 .checkboxField {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-height: 46px;
+  gap: 0.5rem;
+  min-height: 2.5rem;
   color: #456384;
 }
 
 .input {
-  min-height: 46px;
-  padding: 0 16px;
+  min-height: 2.35rem;
+  padding: 0 0.85rem;
   border: 1px solid rgba(102, 133, 179, 0.22);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
   color: #173355;
   font: inherit;
@@ -229,30 +415,35 @@
 
 .historyLayout {
   display: grid;
-  gap: 16px;
+  gap: 0.55rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .historyHero {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 22px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, #eff5ff 0%, #e6eefc 100%);
+  gap: 0.75rem;
+  padding: 0.7rem;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(14, 54, 96, 0.1), rgba(33, 138, 165, 0.05)),
+    rgba(240, 247, 252, 0.86);
 }
 
 .heroValue {
   display: block;
-  margin-top: 6px;
+  margin-top: 0.25rem;
   color: #123f77;
-  font-size: 2rem;
+  font-size: 1.55rem;
 }
 
 .heroMeta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 0.35rem;
   color: #5a7292;
 }
 
@@ -263,15 +454,21 @@
 .rankList,
 .historyList {
   display: grid;
-  gap: 12px;
+  gap: 0.55rem;
+}
+
+.historyList {
+  max-height: none;
+  padding-right: 0.25rem;
 }
 
 .rankItem,
 .historyCardMeta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 14px;
+  gap: 0.35rem 0.7rem;
   color: #57708f;
+  font-size: 0.86rem;
 }
 
 .historyCard {
@@ -289,10 +486,10 @@
 
 .feedbackSuccess,
 .feedbackError {
-  max-width: 1280px;
-  margin: 0 auto 16px;
-  padding: 14px 18px;
-  border-radius: 18px;
+  max-width: 1320px;
+  margin: 0 auto 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
 }
 
 .feedbackSuccess {
@@ -311,15 +508,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 1.2rem;
   background: rgba(14, 31, 55, 0.44);
   z-index: 40;
 }
 
 .modalCard {
   width: min(560px, 100%);
-  padding: 24px;
-  border-radius: 28px;
+  padding: 1.1rem;
+  border-radius: 18px;
   background: #fff;
   box-shadow: 0 28px 60px rgba(14, 31, 55, 0.24);
 }
@@ -327,23 +524,46 @@
 .modalDescription,
 .helpText {
   color: #57708f;
-  line-height: 1.7;
+  line-height: 1.55;
 }
 
 .form {
   display: grid;
-  gap: 12px;
+  gap: 0.65rem;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1120px) {
   .page {
-    padding: 24px 18px 40px;
+    overflow: visible;
   }
 
-  .filterBar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .cockpit,
+  .dashboardGrid {
+    grid-template-columns: 1fr;
   }
 
+  .metricStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .monitorGrid,
+  .historyList {
+    max-height: none;
+  }
+
+  .sectionPrimary,
+  .sectionSecondary {
+    height: auto;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .page {
+    padding: 0.75rem;
+  }
+
+  .header,
   .historyHero,
   .sectionHeader,
   .monitorHeader,
@@ -353,19 +573,19 @@
     flex-direction: column;
   }
 
-  .heroMeta {
-    align-items: flex-start;
-  }
-}
-
-@media (max-width: 640px) {
+  .metricStrip,
   .filterBar,
   .monitorMeta {
     grid-template-columns: 1fr;
   }
 
-  .section,
+  .heroMeta {
+    align-items: flex-start;
+  }
+
+  .sectionPrimary,
+  .sectionSecondary,
   .modalCard {
-    padding: 18px;
+    padding: 0.85rem;
   }
 }
