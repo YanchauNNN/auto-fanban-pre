@@ -132,7 +132,7 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "2");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
-    await user.selectOptions(screen.getByLabelText("目标机组号/岛号"), "3");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
 
     firstRender.unmount();
 
@@ -177,8 +177,12 @@ describe("ReplaceWorkspace", () => {
 
     await user.type(screen.getByLabelText("目标项目号"), "1916");
     expect(screen.getByLabelText("目标机组号/岛号")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "3号机组/岛" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "4号机组/岛" })).toBeInTheDocument();
+    expect(document.querySelector('#replace-target-island-options option[value="3"]')).toHaveTextContent(
+      "3号机组/岛",
+    );
+    expect(document.querySelector('#replace-target-island-options option[value="4"]')).toHaveTextContent(
+      "4号机组/岛",
+    );
 
     await user.clear(screen.getByLabelText("目标项目号"));
     await user.type(screen.getByLabelText("目标项目号"), "1818");
@@ -251,8 +255,12 @@ describe("ReplaceWorkspace", () => {
 
     await user.type(screen.getByLabelText("目标项目号"), "4000");
     expect(screen.getByLabelText("目标机组号/岛号")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "5号机组/岛" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "6号机组/岛" })).toBeInTheDocument();
+    expect(document.querySelector('#replace-target-island-options option[value="5"]')).toHaveTextContent(
+      "5号机组/岛",
+    );
+    expect(document.querySelector('#replace-target-island-options option[value="6"]')).toHaveTextContent(
+      "6号机组/岛",
+    );
   });
 
   it("uses backend unit option labels for replace targets outside factory-index templates", async () => {
@@ -293,7 +301,7 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "1");
     await user.type(screen.getByLabelText("目标项目号"), "1915");
-    await user.selectOptions(screen.getByLabelText("目标机组号/岛号"), "2");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "2");
     await user.upload(
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20161RC-JGS09-A.dwg", { type: "application/acad" }),
@@ -306,6 +314,62 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "1915",
         targetIslandNo: "2",
+        files: expect.any(Array),
+        runDeliverable: false,
+      });
+    });
+  });
+
+  it("submits manually entered target unit numbers outside schema suggestions", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditReplace = vi.fn().mockResolvedValue({
+      batchId: "batch-replace-1907-7",
+      jobs: [],
+    });
+    const schemaWith1907Units = {
+      ...schema,
+      auditReplaceProjectOptions: [...(schema.auditReplaceProjectOptions ?? []), "1907"],
+      auditReplaceProjectUnits: {
+        "1907": ["5", "6"],
+      },
+      auditReplaceTargetUnitOptions: {
+        ...(schema.auditReplaceTargetUnitOptions ?? {}),
+        "1907": [
+          { value: "5", label: "5" },
+          { value: "6", label: "6" },
+        ],
+      },
+    } as unknown as FormSchema;
+
+    const { container } = render(
+      <ReplaceWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWith1907Units}
+      />,
+    );
+
+    await user.type(container.querySelector("#replace-source-project-no") as HTMLInputElement, "2016");
+    await user.selectOptions(container.querySelector("#replace-source-island-no") as HTMLSelectElement, "2");
+    await user.type(container.querySelector("#replace-target-project-no") as HTMLInputElement, "1907");
+    await user.type(container.querySelector("#replace-target-island-no") as HTMLInputElement, "7");
+    await user.upload(
+      screen.getByTestId("replace-file-input"),
+      new File(["dwg"], "20162RC-JGS09-A.dwg", { type: "application/acad" }),
+    );
+    await user.click(container.querySelector('button[type="submit"]') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(adapter.createAuditReplace).toHaveBeenCalledWith({
+        sourceProjectNo: "2016",
+        sourceIslandNo: "2",
+        targetProjectNo: "1907",
+        targetIslandNo: "7",
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -335,7 +399,7 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "2");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
-    await user.selectOptions(screen.getByLabelText("目标机组号/岛号"), "3");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
@@ -451,7 +515,7 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "2");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
-    await user.selectOptions(screen.getByLabelText("目标机组号/岛号"), "3");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
@@ -493,7 +557,7 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "1");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
-    await user.selectOptions(screen.getByLabelText("目标机组号/岛号"), "3");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),

@@ -112,7 +112,7 @@ describe("AuditCheckWorkspace", () => {
       jobs: [],
     });
 
-    render(
+    const { container } = render(
       <AuditCheckWorkspace
         adapter={adapter}
         isOpen
@@ -139,6 +139,42 @@ describe("AuditCheckWorkspace", () => {
         expect.arrayContaining([
           expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
         ]),
+      );
+    });
+  });
+
+  it("allows manually entered unit numbers outside schema suggestions", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditCheck = vi.fn().mockResolvedValue({
+      batchId: "batch-audit-1907-7",
+      jobs: [],
+    });
+
+    const { container } = render(
+      <AuditCheckWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(container.querySelector("#audit-project-no") as HTMLInputElement, "1907");
+    await user.type(container.querySelector("#audit-unit-no") as HTMLInputElement, "7");
+    await user.upload(
+      container.querySelector('input[type="file"]') as HTMLInputElement,
+      new File(["dwg"], "19077NH-JGS01.dwg", { type: "application/acad" }),
+    );
+    await user.click(container.querySelector('button[type="submit"]') as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(adapter.createAuditCheck).toHaveBeenCalledWith(
+        "1907",
+        "7",
+        expect.arrayContaining([expect.objectContaining({ name: "19077NH-JGS01.dwg" })]),
       );
     });
   });

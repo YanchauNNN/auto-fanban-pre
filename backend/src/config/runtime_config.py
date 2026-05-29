@@ -216,6 +216,8 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
 
     enabled: bool = False
     project_units: dict[str, list[str]] = Field(default_factory=dict)
+    allow_unlisted_unit_no: bool = True
+    unit_no_pattern: str = r"^[1-9]$"
     label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"
@@ -232,6 +234,8 @@ class AuditCheckConfig(BaseModel):
     lexicon_path: str = r"documents_bin\词库收集.xlsx"
     project_column_header_pattern: str = r"^\d{4}$"
     include_rows: list[int | str] = Field(default_factory=lambda: [1, 2, "3+"])
+    project_no_context_whitelist_prefixes: list[str] = Field(default_factory=list)
+    project_no_context_whitelist_separator_pattern: str = r"\s*[:：]?\s*"
     generic_identifier_like: AuditCheckGenericIdentifierConfig = Field(
         default_factory=AuditCheckGenericIdentifierConfig,
     )

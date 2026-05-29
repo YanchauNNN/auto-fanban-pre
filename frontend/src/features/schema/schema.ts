@@ -33,6 +33,8 @@ type RawFormSchema = {
     unit_consistency?: {
       enabled?: boolean;
       project_units?: Record<string, readonly string[]>;
+      allow_unlisted_unit_no?: boolean;
+      unit_no_pattern?: string;
     };
   };
   audit_replace?: {
@@ -301,7 +303,7 @@ function normalizeAuditCheckUnitConsistency(
   if (!value) {
     return undefined;
   }
-  return {
+  const normalized: NonNullable<FormSchema["auditCheckUnitConsistency"]> = {
     enabled: Boolean(value.enabled),
     projectUnits: Object.fromEntries(
       Object.entries(value.project_units ?? {}).map(([projectNo, unitNos]) => [
@@ -310,6 +312,13 @@ function normalizeAuditCheckUnitConsistency(
       ]),
     ),
   };
+  if (value.allow_unlisted_unit_no !== undefined) {
+    normalized.allowUnlistedUnitNo = Boolean(value.allow_unlisted_unit_no);
+  }
+  if (value.unit_no_pattern !== undefined) {
+    normalized.unitNoPattern = value.unit_no_pattern;
+  }
+  return normalized;
 }
 
 function normalizeAuditReplaceFactoryIndexMaps(

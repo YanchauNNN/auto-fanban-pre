@@ -151,6 +151,36 @@ def test_match_engine_only_whitelists_exact_three_letters_plus_project_no_plus_o
     assert any(item.raw_text == "12ABC2016X" and item.matched_text == "2016" for item in findings)
 
 
+def test_match_engine_ignores_yaml_project_no_context_whitelist(tmp_path: Path) -> None:
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Sheet1"
+    ws.append(["project", "1907", "2026"])
+    ws.append(["lexicon", "SANMEN", "XUWEI"])
+    ws.append([None, "1907", "2026"])
+    workbook = tmp_path / "lexicon-project-whitelist.xlsx"
+    wb.save(workbook)
+
+    lexicon = AuditLexiconLoader().load(workbook)
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="2026",
+        items=[
+            ScanTextItem(raw_text="资料单1907", entity_type="TEXT"),
+            ScanTextItem(raw_text="提资1907", entity_type="TEXT"),
+            ScanTextItem(raw_text="提资单号1907", entity_type="TEXT"),
+            ScanTextItem(raw_text="提资单号：1907", entity_type="TEXT"),
+            ScanTextItem(raw_text="设计依据1907", entity_type="TEXT"),
+        ],
+    )
+
+    assert [finding.raw_text for finding in findings if finding.matched_text == "1907"] == [
+        "设计依据1907",
+    ]
+
+
 def test_match_engine_ignores_spaces_when_matching_project_name(tmp_path: Path) -> None:
     workbook = _build_project_name_lexicon_workbook(tmp_path / "project-name-lexicon.xlsx")
     lexicon = AuditLexiconLoader().load(workbook)

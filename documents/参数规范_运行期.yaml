@@ -198,6 +198,14 @@ runtime_options:
       type: "list[str|int]"
       default: [1, 2, "3+"]
       desc: "参与词库匹配的数据行：第1行项目号、第2行项目名称/别名、第3行起词条"
+    project_no_context_whitelist_prefixes:
+      type: "list[str]"
+      default: ["资料单", "提资", "提资单号", "提资单号："]
+      desc: "项目号前紧邻这些业务前缀时，不按其他项目号残留报错；用于资料单1907、提资1907、提资单号：1907 等上下文"
+    project_no_context_whitelist_separator_pattern:
+      type: str
+      default: "\\s*[:：]?\\s*"
+      desc: "项目号上下文白名单前缀和项目号之间允许出现的分隔符/空白正则"
     generic_identifier_like:
       regex:
         type: str
@@ -247,6 +255,14 @@ runtime_options:
           "2016": ["1", "2"]
           "2026": ["1", "2"]
         desc: "启用机组号一致性检查的项目及允许机组号"
+      allow_unlisted_unit_no:
+        type: bool
+        default: true
+        desc: "是否允许用户显式输入 project_units 中未登记的机组号；启用后 project_units 仍作为需要机组一致性检查的项目范围和前端建议值"
+      unit_no_pattern:
+        type: str
+        default: "^[1-9]$"
+        desc: "允许显式输入的机组号基础格式；用于放行 1907 的 7 号等未登记机组"
       label_suffix:
         type: str
         default: "号机组/岛"

@@ -116,7 +116,7 @@ export function ReplaceWorkspace({
     }
     if (
       islandSelectionRequired &&
-      !targetIslandOptions.some((option) => option.value === draft.targetIslandNo.trim())
+      !draft.targetIslandNo.trim()
     ) {
       nextFieldErrors.target_island_no = ["required"];
     }
@@ -495,20 +495,23 @@ export function ReplaceWorkspace({
                         <span>{targetIslandLabel}</span>
                       </label>
                     </div>
-                    <select
+                    <input
                       aria-label={targetIslandLabel}
                       className={styles.input}
                       id="replace-target-island-no"
+                      list="replace-target-island-options"
+                      placeholder={`输入或选择${targetIslandLabel}`}
+                      type="text"
                       value={draft.targetIslandNo}
                       onChange={(event) => handleFieldChange("targetIslandNo", event.target.value)}
-                    >
-                      <option value="">{`请选择${targetIslandLabel}`}</option>
+                    />
+                    <datalist id="replace-target-island-options">
                       {targetIslandOptions.map((option) => (
                         <option key={option.value} value={option.value}>
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </datalist>
                     <span className={styles.helperText}>
                       当前目标项目需要区分机组或岛号，提交时会一并发送 <code>target_island_no</code>。
                     </span>
@@ -704,10 +707,5 @@ function normalizeSourceIslandNo(schema: FormSchema, sourceProjectNo: string, so
 }
 
 function normalizeTargetIslandNo(schema: FormSchema, targetProjectNo: string, targetIslandNo: string) {
-  const normalizedIslandNo = targetIslandNo.trim();
-  return getTargetIslandOptions(schema, targetProjectNo).some(
-    (option) => option.value === normalizedIslandNo,
-  )
-    ? normalizedIslandNo
-    : "";
+  return targetIslandNo.trim();
 }

@@ -85,6 +85,26 @@ def test_unit_consistency_supports_project_specific_unit_ranges_and_island_text(
         ]
 
 
+def test_unit_consistency_accepts_unlisted_unit_for_configured_project() -> None:
+    findings = _engine().evaluate(
+        project_no="1907",
+        unit_no="7",
+        items=[
+            ScanTextItem(raw_text="19077NH-JGS01", entity_type="TEXT"),
+            ScanTextItem(raw_text="19076NH-JGS01", entity_type="TEXT"),
+            ScanTextItem(raw_text="7号机组", entity_type="TEXT"),
+            ScanTextItem(raw_text="6号机组", entity_type="TEXT"),
+            ScanTextItem(raw_text="6号岛", entity_type="TEXT"),
+        ],
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("19076NH-JGS01", "unit_consistency"),
+        ("6号机组", "unit_consistency"),
+        ("6号岛", "unit_consistency"),
+    ]
+
+
 def test_unit_consistency_flags_short_unit_factory_code_fragment() -> None:
     findings = _engine().evaluate(
         project_no="2026",

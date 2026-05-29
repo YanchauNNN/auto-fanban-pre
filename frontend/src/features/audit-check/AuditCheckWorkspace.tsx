@@ -262,20 +262,23 @@ export function AuditCheckWorkspace({
                       <span>机组号</span>
                     </label>
                   </div>
-                  <select
+                  <input
                     aria-label="机组号"
                     className={styles.input}
                     id="audit-unit-no"
+                    list="audit-unit-no-options"
+                    placeholder="输入或选择机组号"
+                    type="text"
                     value={draft.unitNo}
                     onChange={(event) => handleUnitNoChange(event.target.value)}
-                  >
-                    <option value="">请选择</option>
+                  />
+                  <datalist id="audit-unit-no-options">
                     {unitOptions.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
                     ))}
-                  </select>
+                  </datalist>
                   <span className={styles.helperText}>用于检查项目号与机组号是否一致。</span>
                   {draft.fieldErrors.unit_no?.[0] ? (
                     <span className={styles.errorText}>{draft.fieldErrors.unit_no[0]}</span>

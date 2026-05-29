@@ -228,6 +228,8 @@ type RawFormSchema = {
     unit_consistency?: {
       enabled?: boolean;
       project_units?: Record<string, string[]>;
+      allow_unlisted_unit_no?: boolean;
+      unit_no_pattern?: string;
     };
   };
   audit_replace?: {

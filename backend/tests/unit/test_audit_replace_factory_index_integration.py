@@ -226,3 +226,103 @@ def test_executor_passes_distinct_source_and_target_factory_index_variants(
     assert len(factory_index.calls) == 1
     assert factory_index.calls[0]["source_variant"] == "1"
     assert factory_index.calls[0]["target_variant"] == "4"
+
+
+def test_executor_skips_factory_index_map_when_target_unit_is_unlisted(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    source_dwg = tmp_path / "20162RC-JGS09-A.dwg"
+    source_dwg.write_bytes(b"original-dwg")
+    dxf_path, text_handle = _build_source_dxf(tmp_path)
+
+    executor = AuditReplaceExecutor()
+    monkeypatch.setattr(executor.oda, "dwg_to_dxf", lambda src, out_dir: dxf_path)
+
+    def _fake_dxf_to_dwg(
+        src: Path,
+        output_dir: Path,
+        target_version_code: str | None = None,
+    ) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "converted.dwg"
+        output_path.write_bytes(b"converted-dwg")
+        return output_path
+
+    class _FakeFactoryIndexReplacement:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def replace_if_configured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                applied=False,
+                output_dwg=Path(kwargs["source_dwg"]),  # type: ignore[index]
+                action_count=0,
+                report_json=None,
+                to_progress_dict=lambda: {
+                    "applied": False,
+                    "action_count": 0,
+                    "message": "unexpected_call",
+                },
+            )
+
+    factory_index = _FakeFactoryIndexReplacement()
+
+    monkeypatch.setattr(executor.oda, "dxf_to_dwg", _fake_dxf_to_dwg)
+    monkeypatch.setattr(executor.frame_detector, "detect_frames", lambda path: [])
+    monkeypatch.setattr(executor.titleblock_extractor, "extract_fields", lambda *args, **kwargs: None)
+    monkeypatch.setattr(executor.a4_grouper, "group_a4_pages", lambda frames: ([], []))
+    monkeypatch.setattr(
+        executor.lexicon_loader,
+        "load",
+        lambda path: AuditLexicon(
+            project_options=["2016", "1907"],
+            allowed_texts={"2016": {"2016"}, "1907": {"1907"}},
+            foreign_texts={"2016": {"1907"}, "1907": {"2016"}},
+            token_projects={"2016": {"2016"}, "1907": {"1907"}},
+        ),
+    )
+    monkeypatch.setattr(
+        executor.mapping_builder,
+        "build",
+        lambda workbook_path, source_project_no, target_project_no: ReplaceMapping(
+            source_project_no="2016",
+            target_project_no="1907",
+            replacements={"2016": "1907"},
+            no_op_tokens=[],
+            missing_target_tokens=[],
+        ),
+    )
+    monkeypatch.setattr(
+        executor.dotnet_scanner,
+        "scan",
+        lambda **kwargs: [
+            ScanTextItem(raw_text="2016", entity_type="DBText", entity_handle=text_handle),
+        ],
+    )
+    executor.factory_index_maps = factory_index
+
+    job = Job(
+        job_id="job-audit-replace-unlisted-unit-skips-factory-index",
+        job_type=JobType.AUDIT_REPLACE,
+        project_no="1907",
+        input_files=[source_dwg],
+        options={"mode": "replace"},
+        params={
+            "source_project_no": "2016",
+            "target_project_no": "1907",
+            "source_island_no": "2",
+            "target_island_no": "7",
+        },
+    )
+
+    executor.execute(job)
+
+    assert factory_index.calls == []
+    assert job.artifacts.replaced_dwg is not None
+    assert job.artifacts.replaced_dwg.name == "19077RC-JGS09-A.dwg"
+    assert job.artifacts.replaced_dwg.read_bytes() == b"converted-dwg"
+    assert job.progress.details["factory_index_map"]["message"] == "factory_index_map_skipped_unlisted_unit"

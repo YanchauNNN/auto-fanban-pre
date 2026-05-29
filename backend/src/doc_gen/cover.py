@@ -32,6 +32,7 @@ from collections.abc import Callable
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from xml.etree import ElementTree as ET
 
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
@@ -49,6 +50,43 @@ if TYPE_CHECKING:
 
 _CELL_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
 _CN_SPLIT_PROTECTED_PHRASES = ("标高", "厂房")
+_XLSX_SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_IGNORED_ERROR_FLAGS = {
+    "evalError": "1",
+    "twoDigitTextYear": "1",
+    "numberStoredAsText": "1",
+    "formula": "1",
+    "formulaRange": "1",
+    "unlockedFormula": "1",
+    "emptyCellReference": "1",
+    "listDataValidation": "1",
+    "calculatedColumn": "1",
+}
+_IGNORED_ERRORS_INSERT_BEFORE = (
+    "smartTags",
+    "drawing",
+    "legacyDrawing",
+    "legacyDrawingHF",
+    "picture",
+    "oleObjects",
+    "controls",
+    "webPublishItems",
+    "tableParts",
+    "extLst",
+)
+_EXCEL_COM_ERROR_CHECKS = tuple(range(1, 10))
+_EXCEL_ERROR_CHECKING_OPTIONS = (
+    "BackgroundChecking",
+    "EvaluateToError",
+    "TextDate",
+    "NumberAsText",
+    "InconsistentFormula",
+    "OmittedCells",
+    "UnlockedFormulaCells",
+    "EmptyCellReferences",
+    "ListDataValidation",
+    "InconsistentTableFormula",
+)
 
 
 class CoverGenerator(ICoverGenerator):
@@ -155,6 +193,7 @@ class CoverGenerator(ICoverGenerator):
                 bindings=bindings,
                 data=data,
             )
+            suppress_cover_excel_error_indicators(output_path)
             return
         except Exception as exc:
             com_error = exc
@@ -213,7 +252,7 @@ class CoverGenerator(ICoverGenerator):
 
         buf = BytesIO()
         wb.save(buf)
-        package[embedded_xlsx_path] = buf.getvalue()
+        package[embedded_xlsx_path] = _suppress_excel_workbook_error_indicators(buf.getvalue())
 
         with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for name, payload in package.items():
@@ -264,6 +303,7 @@ class CoverGenerator(ICoverGenerator):
                         )
 
                     self._apply_bindings(bindings, data, read_cell, write_cell)
+                    self._suppress_cover_error_indicators_via_com(worksheet)
                     self._com_call_with_retry(doc.Save, "Document.Save")
                 finally:
                     ws = None
@@ -355,6 +395,55 @@ class CoverGenerator(ICoverGenerator):
             return ole_obj
 
         return None
+
+    def _suppress_cover_error_indicators_via_com(self, worksheet: Any) -> None:
+        with contextlib.suppress(Exception):
+            excel_app = self._com_call_with_retry(
+                lambda: worksheet.Application,
+                "Worksheet.Application",
+                retries=3,
+            )
+            error_options = self._com_call_with_retry(
+                lambda: excel_app.ErrorCheckingOptions,
+                "Excel.ErrorCheckingOptions",
+                retries=3,
+            )
+            for option_name in _EXCEL_ERROR_CHECKING_OPTIONS:
+                with contextlib.suppress(Exception):
+                    self._com_call_with_retry(
+                        lambda option_name=option_name: setattr(
+                            error_options,
+                            option_name,
+                            False,
+                        ),
+                        f"Excel.ErrorCheckingOptions.{option_name}=False",
+                        retries=3,
+                    )
+
+        with contextlib.suppress(Exception):
+            used_range = self._com_call_with_retry(
+                lambda: worksheet.UsedRange,
+                "Worksheet.UsedRange",
+                retries=3,
+            )
+            for error_check_index in _EXCEL_COM_ERROR_CHECKS:
+                with contextlib.suppress(Exception):
+                    self._com_call_with_retry(
+                        lambda used_range=used_range, error_check_index=error_check_index: setattr(
+                            used_range.Errors(error_check_index),
+                            "Ignore",
+                            True,
+                        ),
+                        f"UsedRange.Errors({error_check_index}).Ignore=True",
+                        retries=3,
+                    )
+        with contextlib.suppress(Exception):
+            workbook = self._com_call_with_retry(
+                lambda: worksheet.Parent,
+                "Worksheet.Parent",
+                retries=3,
+            )
+            self._com_call_with_retry(workbook.Save, "Workbook.Save", retries=3)
 
     def _find_embedded_xlsx(self, docx_path: Path) -> str | None:
         with zipfile.ZipFile(docx_path, "r") as zf:
@@ -627,3 +716,119 @@ class CoverGenerator(ICoverGenerator):
             return True
         msg = str(exc).lower()
         return "call was rejected by callee" in msg or "拒绝接收呼叫" in msg
+
+
+def suppress_cover_excel_error_indicators(docx_path: Path) -> bool:
+    """Persist ignored Excel error indicators in embedded cover workbooks."""
+    docx_path = Path(docx_path)
+    with zipfile.ZipFile(docx_path, "r") as zf:
+        entries = [(info, zf.read(info.filename)) for info in zf.infolist()]
+
+    changed = False
+    updated_entries: list[tuple[zipfile.ZipInfo, bytes]] = []
+    for info, payload in entries:
+        if info.filename.startswith("word/embeddings/") and info.filename.lower().endswith(".xlsx"):
+            updated = _suppress_excel_workbook_error_indicators(payload)
+            changed = changed or updated != payload
+            payload = updated
+        updated_entries.append((info, payload))
+
+    if not changed:
+        return False
+
+    with zipfile.ZipFile(docx_path, "w") as zf:
+        for info, payload in updated_entries:
+            new_info = zipfile.ZipInfo(info.filename, info.date_time)
+            new_info.compress_type = info.compress_type
+            new_info.comment = info.comment
+            new_info.extra = info.extra
+            new_info.internal_attr = info.internal_attr
+            new_info.external_attr = info.external_attr
+            zf.writestr(new_info, payload)
+    return True
+
+
+def _suppress_excel_workbook_error_indicators(workbook_bytes: bytes) -> bytes:
+    with zipfile.ZipFile(BytesIO(workbook_bytes), "r") as zf:
+        entries = [(info, zf.read(info.filename)) for info in zf.infolist()]
+
+    changed = False
+    updated_entries: list[tuple[zipfile.ZipInfo, bytes]] = []
+    for info, payload in entries:
+        if (
+            info.filename.startswith("xl/worksheets/sheet")
+            and info.filename.endswith(".xml")
+        ):
+            updated = _suppress_sheet_error_indicators(payload)
+            changed = changed or updated != payload
+            payload = updated
+        updated_entries.append((info, payload))
+
+    if not changed:
+        return workbook_bytes
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for info, payload in updated_entries:
+            new_info = zipfile.ZipInfo(info.filename, info.date_time)
+            new_info.compress_type = info.compress_type
+            new_info.comment = info.comment
+            new_info.extra = info.extra
+            new_info.internal_attr = info.internal_attr
+            new_info.external_attr = info.external_attr
+            zf.writestr(new_info, payload)
+    return buf.getvalue()
+
+
+def _suppress_sheet_error_indicators(sheet_xml: bytes) -> bytes:
+    ET.register_namespace("", _XLSX_SHEET_NS)
+    root = ET.fromstring(sheet_xml)
+    dimension = root.find(_xlsx_tag("dimension"))
+    sqref = dimension.get("ref") if dimension is not None else None
+    if not sqref:
+        return sheet_xml
+
+    ignored_errors = root.find(_xlsx_tag("ignoredErrors"))
+    changed = False
+    if ignored_errors is None:
+        ignored_errors = ET.Element(_xlsx_tag("ignoredErrors"))
+        root.insert(_ignored_errors_insert_index(root), ignored_errors)
+        changed = True
+
+    ignored_error = None
+    for candidate in ignored_errors.findall(_xlsx_tag("ignoredError")):
+        if candidate.get("sqref") == sqref:
+            ignored_error = candidate
+            break
+
+    if ignored_error is None:
+        ignored_error = ET.SubElement(
+            ignored_errors,
+            _xlsx_tag("ignoredError"),
+            {"sqref": sqref},
+        )
+        changed = True
+
+    for key, value in _IGNORED_ERROR_FLAGS.items():
+        if ignored_error.get(key) != value:
+            ignored_error.set(key, value)
+            changed = True
+
+    if not changed:
+        return sheet_xml
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _ignored_errors_insert_index(root: ET.Element) -> int:
+    for index, child in enumerate(list(root)):
+        if _local_name(child.tag) in _IGNORED_ERRORS_INSERT_BEFORE:
+            return index
+    return len(root)
+
+
+def _xlsx_tag(local_name: str) -> str:
+    return f"{{{_XLSX_SHEET_NS}}}{local_name}"
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag

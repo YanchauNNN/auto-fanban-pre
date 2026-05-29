@@ -30,7 +30,12 @@ class AuditMatchEngine:
             re.compile(pattern)
             for pattern in audit_cfg.generic_identifier_like.exempt_embed_patterns
         ]
+        self._project_no_context_whitelist_re = self._compile_project_no_context_whitelist(
+            audit_cfg.project_no_context_whitelist_prefixes,
+            audit_cfg.project_no_context_whitelist_separator_pattern,
+        )
         self._unit_consistency = audit_cfg.unit_consistency
+        self._unit_no_re = re.compile(self._unit_consistency.unit_no_pattern)
         self._explicit_unit_text_pattern = re.compile(
             self._unit_consistency.explicit_unit_text_pattern,
         )
@@ -161,7 +166,10 @@ class AuditMatchEngine:
             str(value).strip()
             for value in self._unit_consistency.project_units.get(project_no, [])
         ]
-        if unit_no not in allowed_units:
+        if not self._should_check_unit_consistency(
+            unit_no=unit_no,
+            allowed_units=allowed_units,
+        ):
             return []
 
         findings: list[AuditFinding] = []
@@ -382,6 +390,16 @@ class AuditMatchEngine:
         )
         return re.compile(pattern)
 
+    def _should_check_unit_consistency(self, *, unit_no: str, allowed_units: list[str]) -> bool:
+        if not allowed_units:
+            return False
+        if unit_no in allowed_units:
+            return True
+        return bool(
+            self._unit_consistency.allow_unlisted_unit_no
+            and self._unit_no_re.fullmatch(unit_no)
+        )
+
     def _classify_context(self, field_context: str | None, normalized_text: str) -> str:
         if field_context:
             return field_context
@@ -400,6 +418,11 @@ class AuditMatchEngine:
     def _matches_token(self, *, token: str, text: str, context_kind: str) -> bool:
         if self._is_whitelisted_project_identifier(text, token):
             return False
+        if token.isdigit() and not self._contains_project_no_token_outside_context_whitelist(
+            token,
+            text,
+        ):
+            return False
 
         if context_kind.startswith("titleblock_"):
             if self.matching_policy.allow_embedded_match_in_titleblock:
@@ -412,6 +435,38 @@ class AuditMatchEngine:
         if not token.isdigit():
             return False
         return any(pattern.fullmatch(text) for pattern in self._project_identifier_whitelist_patterns)
+
+    def _contains_project_no_token_outside_context_whitelist(self, token: str, text: str) -> bool:
+        start = 0
+        while True:
+            index = text.find(token, start)
+            if index < 0:
+                return False
+            if not self._is_project_no_context_whitelisted_at(text, index):
+                return True
+            start = index + len(token)
+
+    def _is_project_no_context_whitelisted_at(self, text: str, token_index: int) -> bool:
+        if self._project_no_context_whitelist_re is None:
+            return False
+        left_context = text[:token_index]
+        return bool(self._project_no_context_whitelist_re.search(left_context))
+
+    @staticmethod
+    def _compile_project_no_context_whitelist(
+        prefixes: list[str],
+        separator_pattern: str,
+    ) -> re.Pattern[str] | None:
+        normalized_prefixes = sorted(
+            {str(prefix).strip() for prefix in prefixes if str(prefix).strip()},
+            key=len,
+            reverse=True,
+        )
+        if not normalized_prefixes:
+            return None
+        separator = separator_pattern or r"\s*[:：]?\s*"
+        alternatives = "|".join(re.escape(prefix) for prefix in normalized_prefixes)
+        return re.compile(rf"(?:{alternatives}){separator}$")
 
     @staticmethod
     def _is_strong_boundary_match(token: str, text: str) -> bool:

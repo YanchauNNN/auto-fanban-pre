@@ -19,7 +19,7 @@ from ..cad.dwg_version import detect_dwg_version_code_or_none
 from ..config import get_config
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
-from .factory_index_bridge import FactoryIndexMapReplacementService
+from .factory_index_bridge import FactoryIndexMapReplacementService, FactoryIndexReplacementResult
 from .mapping import ReplaceMapping, ReplaceMappingBuilder
 from .reporting import write_replace_report_json, write_replace_report_xlsx
 
@@ -219,19 +219,31 @@ class AuditReplaceExecutor:
 
         converted_dir = replace_dir / "converted"
         converted_dwg = self.oda.dxf_to_dwg(replaced_dxf, converted_dir)
-        factory_result = self.factory_index_maps.replace_if_configured(
-            job_id=job.job_id,
+        if self._should_skip_factory_index_for_unlisted_unit(
             source_project_no=source_project_no,
+            source_unit_no=source_unit_no,
             target_project_no=target_project_no,
-            source_filename=source_display_name,
-            source_variant=source_unit_no,
-            target_variant=target_unit_no,
-            source_dxf=replaced_dxf,
-            source_dwg=converted_dwg,
-            output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
-            workspace_dir=replace_dir / "factory_index",
-            slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
-        )
+            target_unit_no=target_unit_no,
+        ):
+            factory_result = FactoryIndexReplacementResult(
+                applied=False,
+                output_dwg=converted_dwg,
+                message="factory_index_map_skipped_unlisted_unit",
+            )
+        else:
+            factory_result = self.factory_index_maps.replace_if_configured(
+                job_id=job.job_id,
+                source_project_no=source_project_no,
+                target_project_no=target_project_no,
+                source_filename=source_display_name,
+                source_variant=source_unit_no,
+                target_variant=target_unit_no,
+                source_dxf=replaced_dxf,
+                source_dwg=converted_dwg,
+                output_dwg=replace_dir / "factory_index" / "replaced_factory_index.dwg",
+                workspace_dir=replace_dir / "factory_index",
+                slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
+            )
         final_dwg = factory_result.output_dwg if factory_result.applied else converted_dwg
         if factory_result.applied:
             final_dwg = self._rewrite_target_units_in_dwg(
@@ -299,6 +311,45 @@ class AuditReplaceExecutor:
             if legacy_name not in names:
                 names.append(legacy_name)
         return self._factory_index_variant_from_params(params, names)
+
+    def _should_skip_factory_index_for_unlisted_unit(
+        self,
+        *,
+        source_project_no: str,
+        source_unit_no: str | None,
+        target_project_no: str,
+        target_unit_no: str | None,
+    ) -> bool:
+        return self._is_unlisted_unit_for_project(
+            project_no=source_project_no,
+            unit_no=source_unit_no,
+        ) or self._is_unlisted_unit_for_project(
+            project_no=target_project_no,
+            unit_no=target_unit_no,
+        )
+
+    def _is_unlisted_unit_for_project(self, *, project_no: str, unit_no: str | None) -> bool:
+        normalized_project_no = str(project_no or "").strip()
+        normalized_unit_no = normalize_unit_no(unit_no)
+        if not normalized_project_no or not normalized_unit_no:
+            return False
+        configured_units = [
+            str(value).strip()
+            for value in self.config.audit_check.unit_consistency.project_units.get(
+                normalized_project_no,
+                [],
+            )
+            if str(value).strip()
+        ]
+        if not configured_units or normalized_unit_no in configured_units:
+            return False
+        unit_config = self.config.audit_check.unit_consistency
+        if not unit_config.allow_unlisted_unit_no:
+            return False
+        try:
+            return bool(re.fullmatch(str(unit_config.unit_no_pattern or ""), normalized_unit_no))
+        except re.error:
+            return False
 
     @staticmethod
     def _factory_index_variant_from_params(

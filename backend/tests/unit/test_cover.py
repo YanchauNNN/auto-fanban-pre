@@ -51,6 +51,35 @@ def _read_cover_embedded_wb(docx_path: Path) -> Any:
     return ws
 
 
+def _read_cover_embedded_sheet_xmls(docx_path: Path) -> list[str]:
+    with zipfile.ZipFile(docx_path, "r") as zf:
+        embedded_names = [
+            name
+            for name in zf.namelist()
+            if name.startswith("word/embeddings/") and name.lower().endswith(".xlsx")
+        ]
+        assert embedded_names
+        payloads = [zf.read(name) for name in embedded_names]
+
+    sheet_xmls: list[str] = []
+    for payload in payloads:
+        with zipfile.ZipFile(BytesIO(payload), "r") as zf:
+            sheet_xmls.extend(
+                zf.read(name).decode("utf-8")
+                for name in zf.namelist()
+                if name.startswith("xl/worksheets/sheet") and name.endswith(".xml")
+            )
+    assert sheet_xmls
+    return sheet_xmls
+
+
+def _assert_suppresses_excel_error_indicators(docx_path: Path) -> None:
+    sheet_xmls = _read_cover_embedded_sheet_xmls(docx_path)
+    assert any("<ignoredErrors" in xml for xml in sheet_xmls)
+    assert any('numberStoredAsText="1"' in xml for xml in sheet_xmls)
+    assert any('twoDigitTextYear="1"' in xml for xml in sheet_xmls)
+
+
 def test_cover_variant_template_mapping() -> None:
     gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()
@@ -148,6 +177,15 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
 
     chars = [str(ws[f"{col}29"].value or "") for col in "BCDEFGHIJKLMNOPQRST"]
     assert "".join(chars) == "JD1NHT11F01B25C42SD"
+    _assert_suppresses_excel_error_indicators(output_docx)
+
+
+def test_cover_templates_suppress_excel_error_indicators() -> None:
+    templates = sorted(Path("documents_bin").glob("*封面*.docx"))
+    assert templates
+
+    for template in templates:
+        _assert_suppresses_excel_error_indicators(template)
 
 
 def test_write_cover_updates_common_project_name_from_yaml(temp_dir: Path) -> None:

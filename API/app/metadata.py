@@ -57,6 +57,8 @@ class FormMetadataService:
                 "unit_consistency": {
                     "enabled": self.config.audit_check.unit_consistency.enabled,
                     "project_units": self.config.audit_check.unit_consistency.project_units,
+                    "allow_unlisted_unit_no": self.config.audit_check.unit_consistency.allow_unlisted_unit_no,
+                    "unit_no_pattern": self.config.audit_check.unit_consistency.unit_no_pattern,
                 },
             },
             "audit_replace": {

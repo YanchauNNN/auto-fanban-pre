@@ -400,6 +400,21 @@ runtime_options:
         assert unit_consistency.enabled is True
         assert unit_consistency.project_units["2016"] == ["1", "2"]
         assert unit_consistency.project_units["2026"] == ["1", "2"]
+        assert unit_consistency.allow_unlisted_unit_no is True
+        assert unit_consistency.unit_no_pattern == "^[1-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
+
+    def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
+        """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+
+        assert config.audit_check.project_no_context_whitelist_prefixes == [
+            "资料单",
+            "提资",
+            "提资单号",
+            "提资单号：",
+        ]
+        assert config.audit_check.project_no_context_whitelist_separator_pattern == r"\s*[:：]?\s*"
 

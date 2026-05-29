@@ -1172,6 +1172,28 @@ def test_create_audit_check_infers_unit_no_from_filename(
     assert payload["jobs"][0]["project_no"] == "2026"
 
 
+def test_create_audit_check_accepts_unlisted_unit_no_for_configured_project(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps(
+                    {"project_no": "1907", "unit_no": "7"},
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("19077NH-JGS01.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["project_no"] == "1907"
+
+
 def test_create_audit_check_processes_job_and_exposes_report_download(
     monkeypatch,
     tmp_path: Path,

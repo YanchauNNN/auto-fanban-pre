@@ -47,6 +47,8 @@ export type FormSchema = {
   auditCheckUnitConsistency?: {
     enabled: boolean;
     projectUnits: Record<string, readonly string[]>;
+    allowUnlistedUnitNo?: boolean;
+    unitNoPattern?: string;
   };
 };
 

@@ -554,9 +554,31 @@ class DeliverableApiRuntime:
             unit_no = str(params.get("unit_no") or "").strip()
             if not unit_no:
                 merged.setdefault("unit_no", []).append("required_for_unit_consistency")
-            elif unit_no not in allowed_units:
+            elif not self._is_supported_unit_no(
+                unit_no=unit_no,
+                allowed_units=allowed_units,
+                allow_unlisted=bool(unit_config.allow_unlisted_unit_no),
+                unit_no_pattern=str(unit_config.unit_no_pattern or ""),
+            ):
                 merged.setdefault("unit_no", []).append("unsupported_unit_no")
         return merged
+
+    @staticmethod
+    def _is_supported_unit_no(
+        *,
+        unit_no: str,
+        allowed_units: list[str],
+        allow_unlisted: bool,
+        unit_no_pattern: str,
+    ) -> bool:
+        if unit_no in allowed_units:
+            return True
+        if not allow_unlisted:
+            return False
+        try:
+            return bool(re.fullmatch(unit_no_pattern, unit_no))
+        except re.error:
+            return False
 
     def _collect_replace_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
         return self.validator.validate_replace_frontend_params(raw_params)
