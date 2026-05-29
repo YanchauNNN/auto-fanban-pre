@@ -236,6 +236,78 @@ describe("normalizeFormSchema", () => {
     });
   });
 
+  it("normalizes management schema from backend YAML metadata", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [],
+      },
+      management: {
+        account: {
+          valid_roles: ["designer", "admin"],
+          admin_roles: ["admin"],
+          admin_created_default_password: "yaml-pass",
+        },
+        workflow: {
+          terminal_status: "archived",
+          status_labels: {
+            archived: "Archived",
+          },
+          node_labels: {
+            custom_review: "Custom Review",
+          },
+          empty_current_node_label: "No active node",
+          factor: {
+            default: 1.05,
+            min: 0.5,
+            max: 1.3,
+            precision: 3,
+          },
+        },
+        workload: {
+          settlement_trigger: "approval_terminal",
+          scope_roles: {
+            admin: ["admin"],
+          },
+          scope_labels: {
+            me: "Mine",
+            admin: "Admin",
+          },
+          status_options: [
+            { label: "All", value: "" },
+            { label: "Settled", value: "settled" },
+          ],
+        },
+        archive: {
+          status_labels: {
+            succeeded: "Archived",
+          },
+        },
+      },
+    });
+
+    expect(normalized.management?.account.validRoles).toEqual(["designer", "admin"]);
+    expect(normalized.management?.account.adminRoles).toEqual(["admin"]);
+    expect(normalized.management?.account.adminCreatedDefaultPassword).toBe("yaml-pass");
+    expect(normalized.management?.workflow.factor.max).toBe(1.3);
+    expect(normalized.management?.workflow.terminalStatus).toBe("archived");
+    expect(normalized.management?.workflow.statusLabels.archived).toBe("Archived");
+    expect(normalized.management?.workflow.nodeLabels.custom_review).toBe("Custom Review");
+    expect(normalized.management?.workflow.emptyCurrentNodeLabel).toBe("No active node");
+    expect(normalized.management?.workload.scopeRoles.admin).toEqual(["admin"]);
+    expect(normalized.management?.workload.scopeLabels.admin).toBe("Admin");
+    expect(normalized.management?.workload.statusOptions[1]).toEqual({
+      label: "Settled",
+      value: "settled",
+    });
+    expect(normalized.management?.archive?.statusLabels.succeeded).toBe("Archived");
+  });
+
   it("preserves combobox fields from form-schema instead of downgrading them to plain select metadata", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",

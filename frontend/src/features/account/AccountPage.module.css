@@ -1,0 +1,238 @@
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 48px 24px 72px;
+}
+
+.header {
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #6287bc;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.header h1,
+.panelHeader h2 {
+  margin: 0;
+  color: #163d72;
+  font-size: clamp(1.8rem, 2.1vw, 2.4rem);
+}
+
+.description {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: #496589;
+  line-height: 1.7;
+}
+
+.identityGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.infoCard,
+.panel,
+.entryCard {
+  border: 1px solid rgba(72, 110, 161, 0.16);
+  border-radius: 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.94)),
+    rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 42px rgba(33, 68, 120, 0.08);
+}
+
+.infoCard {
+  min-height: 140px;
+  padding: 20px 22px;
+}
+
+.cardLabel,
+.panelHint,
+.label,
+.workloadLabel {
+  display: block;
+  color: #6f86aa;
+  font-size: 0.9rem;
+}
+
+.cardValue {
+  display: block;
+  margin-top: 12px;
+  color: #163d72;
+  font-size: 1.22rem;
+  line-height: 1.35;
+}
+
+.cardSupporting {
+  margin: 10px 0 0;
+  color: #607899;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 20px;
+}
+
+.panel {
+  padding: 24px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.panelHint {
+  margin-top: 6px;
+  white-space: nowrap;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid rgba(88, 123, 171, 0.32);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #163d72;
+  font-size: 1rem;
+}
+
+.input:focus {
+  outline: 2px solid rgba(43, 111, 214, 0.2);
+  border-color: #356fcb;
+}
+
+.helpText,
+.muted,
+.workloadMeta,
+.entryMeta {
+  color: #617998;
+  font-size: 0.93rem;
+  line-height: 1.6;
+}
+
+.primaryButton {
+  min-height: 48px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1b4d91, #2c6fce);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.feedbackSuccess,
+.feedbackError {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.feedbackSuccess {
+  background: rgba(47, 149, 102, 0.12);
+  color: #136947;
+}
+
+.feedbackError {
+  background: rgba(190, 52, 52, 0.12);
+  color: #a22c2c;
+}
+
+.workloadHero {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(27, 77, 145, 0.1), rgba(44, 111, 206, 0.04));
+}
+
+.workloadValue {
+  display: block;
+  margin-top: 10px;
+  color: #163d72;
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  line-height: 1;
+}
+
+.workloadMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+
+.entryList {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.entryCard {
+  padding: 16px 18px;
+}
+
+.entryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #163d72;
+}
+
+.entryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 10px;
+}
+
+@media (max-width: 860px) {
+  .page {
+    padding: 32px 16px 56px;
+  }
+
+  .panelGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .panelHeader {
+    flex-direction: column;
+  }
+
+  .panelHint {
+    margin-top: 0;
+    white-space: normal;
+  }
+}

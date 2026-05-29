@@ -61,6 +61,55 @@ def test_mechanism_spec_loader_uses_env_override(tmp_path: Path, monkeypatch) ->
     assert spec.project_inference.default_project_no == "2026"
 
 
+def test_mechanism_spec_loads_management_runtime_and_ui_config(tmp_path: Path, monkeypatch) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "custom" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "permissions": {
+                    "account_admin_roles": [],
+                    "workflow_admin_roles": [],
+                    "workload_scope_roles": {},
+                },
+                "workflow_runtime": {
+                    "approval_terminal_status": "archived",
+                    "archive_trigger_status": "archived",
+                    "active_conflict_statuses": ["in_review", "archived"],
+                },
+                "workload_runtime": {
+                    "status_options": [
+                        {"label": "All", "value": ""},
+                        {"label": "Settled", "value": "settled"},
+                    ],
+                },
+                "management_ui": {
+                    "workload_scope_labels": {
+                        "me": "Mine",
+                        "admin": "Admin",
+                    },
+                    "workflow_status_labels": {"archived": "Archived"},
+                    "archive_status_labels": {"succeeded": "Archived"},
+                    "empty_current_node_label": "No active node",
+                },
+            },
+        },
+    )
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(spec_path))
+    MechanismSpecLoader.clear_cache()
+
+    spec = load_mechanism_spec()
+
+    assert spec.workflow_runtime.approval_terminal_status == "archived"
+    assert spec.workflow_runtime.archive_trigger_status == "archived"
+    assert spec.workflow_runtime.active_conflict_statuses == ["in_review", "archived"]
+    assert spec.workload_runtime.status_options[1].label == "Settled"
+    assert spec.management_ui.workload_scope_labels["admin"] == "Admin"
+    assert spec.management_ui.workflow_status_labels["archived"] == "Archived"
+    assert spec.management_ui.archive_status_labels["succeeded"] == "Archived"
+    assert spec.management_ui.empty_current_node_label == "No active node"
+
+
 def test_mechanism_spec_rejects_existing_yaml_roots(tmp_path: Path) -> None:
     spec_path = _write_mechanism_spec(
         tmp_path / "documents" / "参数规范-3.yaml",

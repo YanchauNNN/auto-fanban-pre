@@ -18,11 +18,15 @@ const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobDetail = vi.fn();
+const mockListTaskGroups = vi.fn();
+const mockGetTaskGroupDetail = vi.fn();
+const mockSubmitTaskGroup = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
 const mockPdfDocument = vi.fn();
 const mockPdfPage = vi.fn();
+let exposeTaskGroupApis = false;
 
 vi.mock("react-pdf", () => ({
   pdfjs: {
@@ -63,6 +67,13 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
+    ...(exposeTaskGroupApis
+      ? {
+          listTaskGroups: mockListTaskGroups,
+          getTaskGroupDetail: mockGetTaskGroupDetail,
+          submitTaskGroup: mockSubmitTaskGroup,
+        }
+      : {}),
   }),
 }));
 
@@ -78,6 +89,10 @@ beforeEach(() => {
   mockCreateAuditReplace.mockReset();
   mockListJobs.mockReset();
   mockGetJobDetail.mockReset();
+  mockListTaskGroups.mockReset();
+  mockGetTaskGroupDetail.mockReset();
+  mockSubmitTaskGroup.mockReset();
+  exposeTaskGroupApis = false;
 
   mockPing.mockResolvedValue({
     ok: true,
@@ -120,9 +135,64 @@ beforeEach(() => {
       },
     ],
     auditReplaceProjectOptions: ["2026", "1818"],
+    management: {
+      account: {
+        validRoles: ["设计人员", "室主任", "所领导", "管理员"],
+        adminRoles: ["管理员"],
+        adminCreatedDefaultPassword: "password",
+      },
+      workflow: {
+        terminalStatus: "three_review_approved",
+        statusLabels: {
+          in_review: "审批中",
+          three_review_approved: "三审通过",
+        },
+        nodeLabels: {
+          one_review: "一审",
+          two_review: "二审",
+          three_review: "三审",
+        },
+        emptyCurrentNodeLabel: "未进入审批",
+        factor: {
+          default: 1,
+          min: 0.8,
+          max: 1.1,
+          precision: 2,
+        },
+      },
+      workload: {
+        settlementTrigger: "archive_success",
+        scopeRoles: {
+          office: ["室主任", "所领导", "管理员"],
+          institute: ["所领导", "管理员"],
+          admin: ["管理员"],
+        },
+        scopeLabels: {
+          me: "个人",
+          office: "科室",
+          institute: "全所",
+          admin: "管理员",
+        },
+        statusOptions: [
+          { label: "全部状态", value: "" },
+          { label: "已结算", value: "settled" },
+        ],
+      },
+      archive: {
+        statusLabels: {
+          pending: "待归档",
+          succeeded: "已归档",
+          failed: "归档失败",
+        },
+      },
+    },
   });
 
   mockListJobs.mockResolvedValue({
+    total: 0,
+    items: [],
+  });
+  mockListTaskGroups.mockResolvedValue({
     total: 0,
     items: [],
   });
@@ -185,6 +255,47 @@ function makeSingleJob(index: number, sourceFilename: string) {
     },
     retryAvailable: false,
     sharedRunId: null,
+  };
+}
+
+function makeTaskGroup(index: number, sourceFilename: string, status = "succeeded") {
+  return {
+    groupId: `group-${index}`,
+    batchId: `batch-${index}`,
+    projectNo: "2026",
+    status,
+    createdAt: `2026-03-16T11:${String(index).padStart(2, "0")}:30+08:00`,
+    sourceFilenames: [sourceFilename],
+    ownerSnapshot: {
+      creatorAccount: "wangdd",
+      creatorName: "王丹丹",
+      creatorRole: "设计人员",
+      creatorOffice: "河北分公司-建筑结构所",
+      createdByScope: "self",
+      submittedAt: null,
+    },
+    creatorName: "王丹丹",
+    creatorAccount: "wangdd",
+    creatorOffice: "河北分公司-建筑结构所",
+    workflowStatus: "draft",
+    currentNodeKey: null,
+    archiveStatus: "pending",
+    workload: {
+      initialWorkloadA1: 0,
+      finalWorkloadA1: 0,
+      oneReviewFactor: 0,
+      twoReviewFactor: 0,
+      threeReviewFactor: 0,
+      nodeFactors: {},
+      settlementStatus: "pending",
+      settledAt: null,
+      contributorEntries: [],
+    },
+    effectiveWorkload: 0,
+    canViewDetail: true,
+    canSubmit: true,
+    canApprove: false,
+    isRelatedToCurrentUser: true,
   };
 }
 
@@ -427,6 +538,28 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
+  it("uses task-group records when the management API is available", async () => {
+    exposeTaskGroupApis = true;
+    mockListTaskGroups.mockResolvedValue({
+      total: 2,
+      items: [
+        makeTaskGroup(1, "task-group-draft.dwg", "queued"),
+        makeTaskGroup(2, "task-group-ready.dwg", "succeeded"),
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("task-group-ready.dwg")).toBeInTheDocument();
+    expect(screen.getByText("task-group-draft.dwg")).toBeInTheDocument();
+    expect(screen.getAllByText("任务包").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "查看任务包" })[0]).toHaveAttribute(
+      "href",
+      "/task-groups/group-2",
+    );
+    expect(mockListTaskGroups).toHaveBeenCalled();
+  });
+
   it("filters recent jobs by status and refreshes totals from the backend", async () => {
     const allJobs = [
       {

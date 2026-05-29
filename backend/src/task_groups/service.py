@@ -3,7 +3,7 @@ from __future__ import annotations
 from ..accounts.account_registry import AccountRegistry
 from ..accounts.personnel_normalizer import PersonnelNormalizer
 from ..archive.service import ArchiveService
-from ..config import load_spec
+from ..config import load_mechanism_spec, load_spec
 from ..models import AccountSnapshot, TaskGroup
 from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
@@ -118,10 +118,18 @@ class TaskGroupService:
         group = self._require_group(group_id)
         self.workflow_service.approve(group, acting_account, factor, node_key=node_key)
         self._apply_factors(group)
-        if group.workflow.status.value == "three_review_approved":
+        mechanism_spec = load_mechanism_spec()
+        workflow_runtime = mechanism_spec.workflow_runtime
+        workload_cfg = dict(load_spec().get_management_features().get("workload") or {})
+        settlement_trigger = str(workload_cfg["settlement_trigger"]).strip()
+        if group.workflow.status.value == workflow_runtime.archive_trigger_status:
             try:
                 self.archive_service.archive_group(group)
-                self.workload_settlement_service.settle(group)
+                if settlement_trigger == "archive_success":
+                    if group.archive.status.value == "succeeded":
+                        self.workload_settlement_service.settle(group)
+                elif settlement_trigger == "approval_terminal":
+                    self.workload_settlement_service.settle(group)
                 group.mark_succeeded()
             except Exception as exc:  # noqa: BLE001
                 self.archive_service.mark_failed(group, str(exc))
@@ -192,8 +200,10 @@ class TaskGroupService:
         one_review_source = str((workflow_cfg.get("one_review") or {}).get("assignee_source") or "").strip()
         if one_review_source:
             field_names.add(one_review_source)
-        if bool(workflow_cfg.get("preserve_discipline_leader")):
-            field_names.add("ied_discipline_leader")
+        for field_name in workflow_cfg.get("preserve_fields") or []:
+            field_text = str(field_name).strip()
+            if field_text:
+                field_names.add(field_text)
         values = {field_name: primary_job.params.get(field_name) for field_name in sorted(field_names)}
         return self.personnel_normalizer.normalize_fields(values)
 
@@ -203,7 +213,10 @@ class TaskGroupService:
             str(node_cfg.get("key") or ""): str(node_cfg.get("factor_key") or "")
             for node_cfg in workflow_cfg.get("nodes") or []
         }
+        group.workload.node_factors = {}
         for node in group.workflow.nodes:
+            if node.node_key:
+                group.workload.node_factors[node.node_key] = node.factor
             factor_key = factor_keys.get(node.node_key)
             if factor_key and hasattr(group.workload, factor_key):
                 setattr(group.workload, factor_key, node.factor)

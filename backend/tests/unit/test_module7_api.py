@@ -644,6 +644,17 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert payload["audit_check"]["unit_consistency"]["enabled"] is True
     assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == ["1", "2"]
     assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == ["3", "4"]
+    assert payload["management"]["account"]["valid_roles"]
+    assert payload["management"]["account"]["admin_created_default_password"] == "password"
+    assert payload["management"]["workflow"]["factor"]["min"] == 0.8
+    assert payload["management"]["workflow"]["terminal_status"] == "three_review_approved"
+    assert payload["management"]["workflow"]["status_labels"]["three_review_approved"] == "三审通过"
+    assert payload["management"]["workflow"]["node_labels"]["one_review"] == "一审"
+    assert payload["management"]["workflow"]["empty_current_node_label"] == "未进入审批"
+    assert payload["management"]["workload"]["settlement_trigger"] == "archive_success"
+    assert payload["management"]["workload"]["status_options"]
+    assert "admin" in payload["management"]["workload"]["scope_roles"]
+    assert payload["management"]["archive"]["status_labels"]["succeeded"] == "已归档"
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"

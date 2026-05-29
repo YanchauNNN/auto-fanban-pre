@@ -47,6 +47,35 @@ type RawFormSchema = {
       target_variant_options?: Record<string, readonly string[]>;
     };
   };
+  management?: {
+    account?: {
+      valid_roles?: readonly string[];
+      admin_roles?: readonly string[];
+      admin_created_default_password?: string | null;
+    };
+    workflow?: {
+      terminal_status?: string | null;
+      archive_trigger_status?: string | null;
+      status_labels?: Record<string, string>;
+      node_labels?: Record<string, string>;
+      empty_current_node_label?: string | null;
+      factor?: {
+        default?: number | null;
+        min?: number | null;
+        max?: number | null;
+        precision?: number | null;
+      };
+    };
+    workload?: {
+      settlement_trigger?: string | null;
+      scope_roles?: Record<string, readonly string[]>;
+      scope_labels?: Record<string, string>;
+      status_options?: readonly { label?: string | null; value?: string | null }[];
+    };
+    archive?: {
+      status_labels?: Record<string, string>;
+    };
+  };
 };
 
 type RawAuditCheckUnitConsistency = NonNullable<
@@ -224,6 +253,7 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
     auditCheckUnitConsistency: normalizeAuditCheckUnitConsistency(
       payload.audit_check?.unit_consistency,
     ),
+    management: normalizeManagementSchema(payload.management),
   };
 }
 
@@ -333,6 +363,61 @@ function normalizeAuditReplaceFactoryIndexMaps(
   };
 }
 
+function normalizeManagementSchema(
+  value: RawFormSchema["management"],
+): FormSchema["management"] {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    account: {
+      validRoles: normalizeStringList(value.account?.valid_roles),
+      adminRoles: normalizeStringList(value.account?.admin_roles),
+      adminCreatedDefaultPassword: String(value.account?.admin_created_default_password ?? ""),
+    },
+    workflow: {
+      terminalStatus: String(value.workflow?.terminal_status ?? ""),
+      archiveTriggerStatus:
+        value.workflow?.archive_trigger_status == null
+          ? undefined
+          : String(value.workflow.archive_trigger_status),
+      factor: {
+        default: requiredNumber(value.workflow?.factor?.default, "workflow.factor.default"),
+        min: requiredNumber(value.workflow?.factor?.min, "workflow.factor.min"),
+        max: requiredNumber(value.workflow?.factor?.max, "workflow.factor.max"),
+        precision: requiredNumber(value.workflow?.factor?.precision, "workflow.factor.precision"),
+      },
+      statusLabels: normalizeStringMap(value.workflow?.status_labels),
+      nodeLabels: normalizeStringMap(value.workflow?.node_labels),
+      emptyCurrentNodeLabel: String(value.workflow?.empty_current_node_label ?? ""),
+    },
+    workload: {
+      settlementTrigger: String(value.workload?.settlement_trigger ?? ""),
+      scopeRoles: Object.fromEntries(
+        Object.entries(value.workload?.scope_roles ?? {}).map(([scope, roles]) => [
+          scope,
+          normalizeStringList(roles),
+        ]),
+      ),
+      scopeLabels: Object.fromEntries(
+        Object.entries(value.workload?.scope_labels ?? {}).map(([scope, label]) => [
+          scope,
+          String(label),
+        ]),
+      ),
+      statusOptions: (value.workload?.status_options ?? [])
+        .map((option) => ({
+          label: String(option.label ?? "").trim(),
+          value: String(option.value ?? "").trim(),
+        }))
+        .filter((option) => option.label),
+    },
+    archive: {
+      statusLabels: normalizeStringMap(value.archive?.status_labels),
+    },
+  };
+}
+
 function normalizeVariantOptions(value: Record<string, readonly string[]> | undefined) {
   return Object.fromEntries(
     Object.entries(value ?? {}).map(([projectNo, variants]) => [
@@ -340,6 +425,25 @@ function normalizeVariantOptions(value: Record<string, readonly string[]> | unde
       variants.map((variant) => variant.trim()).filter(Boolean),
     ]),
   );
+}
+
+function normalizeStringList(value: readonly string[] | undefined) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
+function normalizeStringMap(value: Record<string, string> | undefined) {
+  return Object.fromEntries(
+    Object.entries(value ?? {})
+      .map(([key, label]) => [key.trim(), String(label).trim()])
+      .filter(([key, label]) => key && label),
+  );
+}
+
+function requiredNumber(value: number | null | undefined, fieldKey: string) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  throw new Error(`management.${fieldKey} is required`);
 }
 
 function normalizeUnitOptionMap(

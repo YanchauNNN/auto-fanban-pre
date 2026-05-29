@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 from .bootstrap import resolve_repo_path
 
-from src.config import get_config, load_spec
+from src.config import get_config, load_mechanism_spec, load_spec
 
 
 _ENUM_RE = re.compile(r"^enum\[(?P<enum_name>[^\]]+)\]$")
@@ -77,6 +77,7 @@ class FormMetadataService:
                     },
                 },
             },
+            "management": self._build_management_schema(),
         }
 
     def _build_field_schema(self, field_key: str, rule: dict[str, Any]) -> dict[str, Any]:
@@ -162,6 +163,61 @@ class FormMetadataService:
                 return [str(item["id"]) for item in enum_values if "id" in item]
             return [str(item) for item in enum_values]
         return []
+
+    def _build_management_schema(self) -> dict[str, Any]:
+        management_cfg = self.spec.get_management_features()
+        account_cfg = dict(management_cfg.get("account") or {})
+        workflow_cfg = dict(management_cfg.get("workflow") or {})
+        workload_cfg = dict(management_cfg.get("workload") or {})
+        factor_cfg = dict(workflow_cfg.get("factor") or {})
+        mechanism = load_mechanism_spec()
+
+        return {
+            "account": {
+                "valid_roles": [
+                    str(role)
+                    for role in account_cfg.get("valid_roles") or []
+                    if str(role).strip()
+                ],
+                "admin_roles": list(mechanism.permissions.account_admin_roles),
+                "admin_created_default_password": str(
+                    account_cfg.get("admin_created_default_password") or ""
+                ),
+            },
+            "workflow": {
+                "terminal_status": mechanism.workflow_runtime.approval_terminal_status,
+                "archive_trigger_status": mechanism.workflow_runtime.archive_trigger_status,
+                "factor": {
+                    "default": float(factor_cfg["default"]),
+                    "min": float(factor_cfg["min"]),
+                    "max": float(factor_cfg["max"]),
+                    "precision": int(factor_cfg["precision"]),
+                },
+                "nodes": list(workflow_cfg.get("nodes") or []),
+                "status_labels": dict(mechanism.management_ui.workflow_status_labels),
+                "node_labels": {
+                    str(node.get("key")): str(node.get("label"))
+                    for node in workflow_cfg.get("nodes") or []
+                    if str(node.get("key") or "").strip()
+                },
+                "empty_current_node_label": mechanism.management_ui.empty_current_node_label,
+            },
+            "workload": {
+                "settlement_trigger": str(workload_cfg["settlement_trigger"]),
+                "scope_roles": {
+                    str(scope): [str(role) for role in roles]
+                    for scope, roles in mechanism.permissions.workload_scope_roles.items()
+                },
+                "scope_labels": dict(mechanism.management_ui.workload_scope_labels),
+                "status_options": [
+                    option.model_dump(mode="json")
+                    for option in mechanism.workload_runtime.status_options
+                ],
+            },
+            "archive": {
+                "status_labels": dict(mechanism.management_ui.archive_status_labels),
+            },
+        }
 
     def _resolve_project_options(self) -> list[str]:
         enum_values = self.spec.enums.get("project_no", [])

@@ -1,5 +1,5 @@
 export const apiProxyTarget =
-  process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8000";
+  process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8010";
 
 export const apiProxyConfig = {
   "/api": {

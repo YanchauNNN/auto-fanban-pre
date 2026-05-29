@@ -19,7 +19,7 @@ class AccountRegistry:
         self.account_cfg = dict(features.get("account") or {})
         self.field_map = dict(self.account_cfg.get("fields") or {})
         self.valid_roles = {str(item) for item in self.account_cfg.get("valid_roles") or []}
-        self.default_password = str(self.account_cfg.get("admin_created_default_password") or "password")
+        self.default_password = str(self.account_cfg["admin_created_default_password"])
 
     def list_accounts(self) -> tuple[list[AccountRecord], list[InvalidAccountRow]]:
         rows, _ = self.store.read_rows()

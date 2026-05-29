@@ -70,6 +70,20 @@
   margin-bottom: 0.45rem;
 }
 
+.titleStripAccountActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.titleStripAccountName {
+  color: #315880;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .titleStripStatusLabel {
   margin: 0;
   font-family: "Rajdhani", sans-serif;
@@ -205,6 +219,250 @@
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 22px 58px rgba(13, 44, 80, 0.08);
   min-height: 320px;
+}
+
+.routePlaceholder {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: #153c66;
+  background: linear-gradient(180deg, #edf3f9, #f7f9fc 52%, #eef4fb);
+  text-align: center;
+}
+
+.routePlaceholder h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+}
+
+.routePlaceholder p {
+  margin: 0;
+}
+
+.loginPage {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(22rem, 28rem);
+  gap: clamp(1.5rem, 3vw, 3rem);
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  overflow: hidden;
+  background: #081523;
+}
+
+.loginPage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  background:
+    linear-gradient(108deg, rgba(4, 15, 28, 0.9) 10%, rgba(8, 27, 50, 0.78) 42%, rgba(12, 40, 70, 0.46) 100%),
+    var(--login-hero);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  transform: scale(1.03);
+}
+
+.loginPage::after {
+  content: "";
+  position: absolute;
+  inset: auto auto -12rem -8rem;
+  z-index: -2;
+  width: 34rem;
+  height: 34rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(70, 140, 220, 0.28), transparent 68%);
+  filter: blur(10px);
+}
+
+.loginHeroPanel,
+.loginCardPanel {
+  position: relative;
+  z-index: 1;
+}
+
+.loginHeroPanel {
+  display: flex;
+  align-items: flex-start;
+}
+
+.loginHeroContent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  max-width: 64rem;
+  padding: clamp(0.75rem, 1.8vw, 1.5rem) clamp(0.4rem, 1vw, 1rem) clamp(1.4rem, 3vw, 2.4rem);
+}
+
+.loginLogoBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 6rem;
+  height: 6rem;
+  border-radius: 1.9rem;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 18px 44px rgba(3, 14, 28, 0.26);
+}
+
+.loginLogo {
+  width: 4.4rem;
+  height: 4.4rem;
+  object-fit: contain;
+}
+
+.loginEyebrow,
+.loginCardEyebrow {
+  margin: 0;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.loginEyebrow {
+  color: rgba(203, 223, 246, 0.92);
+  font-size: 0.95rem;
+}
+
+.loginHeroTitle {
+  margin: 0;
+  max-width: none;
+  color: #f8fbff;
+  font-size: clamp(2rem, 3vw, 2.85rem);
+  line-height: 1.02;
+  white-space: nowrap;
+}
+
+.loginHeroBody {
+  max-width: 34rem;
+  margin: 0;
+  color: rgba(223, 235, 248, 0.9);
+  font-size: 1.02rem;
+  line-height: 1.9;
+}
+
+.loginFeatureList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.loginFeatureList span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #eff6ff;
+  font-weight: 600;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.loginCardPanel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.loginCard {
+  width: min(100%, 28rem);
+  padding: clamp(1.6rem, 2.8vw, 2.2rem);
+  border-radius: 2rem;
+  border: 1px solid rgba(233, 240, 251, 0.34);
+  background:
+    linear-gradient(180deg, rgba(252, 254, 255, 0.94), rgba(240, 246, 252, 0.88)),
+    rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 24px 60px rgba(4, 17, 33, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.loginCardEyebrow {
+  color: #6486af;
+  font-size: 0.88rem;
+}
+
+.loginCard h2 {
+  margin: 0.55rem 0 0;
+  color: #153c66;
+  font-size: clamp(1.9rem, 2.4vw, 2.3rem);
+}
+
+.loginCardBody {
+  margin: 0.8rem 0 1.35rem;
+  color: #5c7697;
+  line-height: 1.7;
+}
+
+.loginField {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+  color: #284f7d;
+  font-weight: 700;
+}
+
+.loginInput {
+  width: 100%;
+  min-height: 3.35rem;
+  padding: 0 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(87, 121, 168, 0.24);
+  background: rgba(255, 255, 255, 0.96);
+  color: #183c67;
+  font-size: 1rem;
+}
+
+.loginInput:focus {
+  outline: none;
+  border-color: rgba(24, 82, 150, 0.54);
+  box-shadow: 0 0 0 4px rgba(37, 106, 184, 0.12);
+}
+
+.loginHelper {
+  margin: 0.85rem 0 0;
+  color: #5e7697;
+  font-size: 0.92rem;
+}
+
+.loginError {
+  margin: 1rem 0 0;
+  padding: 0.85rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(191, 70, 70, 0.18);
+  background: rgba(255, 238, 238, 0.9);
+  color: #9e3333;
+  font-weight: 700;
+}
+
+.loginPrimaryButton {
+  width: 100%;
+  min-height: 3.4rem;
+  margin-top: 1.2rem;
+  border: none;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, #134784, #2671c0);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  box-shadow: 0 18px 30px rgba(17, 70, 129, 0.22);
+}
+
+.loginPrimaryButton:disabled {
+  cursor: progress;
+  opacity: 0.8;
 }
 
 .controlPanel {

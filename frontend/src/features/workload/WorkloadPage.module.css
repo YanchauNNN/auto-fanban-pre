@@ -1,0 +1,371 @@
+.page {
+  min-height: 100vh;
+  padding: 32px 40px 48px;
+  background:
+    radial-gradient(circle at top left, rgba(29, 78, 216, 0.1), transparent 28%),
+    linear-gradient(180deg, #f6f8fc 0%, #eef2f8 100%);
+  color: #183153;
+}
+
+.header {
+  margin: 0 auto 24px;
+  max-width: 1280px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: #5070a8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+
+.header h1,
+.sectionHeader h2,
+.modalHeader h3,
+.rankHeader strong {
+  margin: 0;
+}
+
+.description {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: #516887;
+  line-height: 1.7;
+}
+
+.section {
+  max-width: 1280px;
+  margin: 0 auto 24px;
+  padding: 24px;
+  border: 1px solid rgba(109, 141, 192, 0.2);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 22px 60px rgba(27, 52, 88, 0.1);
+}
+
+.sectionHeader,
+.monitorHeader,
+.modalHeader,
+.historyCardHeader,
+.rankHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.sectionHint,
+.monitorBadge,
+.panelHint {
+  color: #5f7798;
+  font-size: 0.9rem;
+}
+
+.monitorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.monitorCardDefault,
+.monitorCardRelated,
+.monitorCardApprovable,
+.monitorCardFailed,
+.historyCard,
+.rankPanel {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(113, 142, 187, 0.18);
+}
+
+.monitorCardDefault {
+  background: #f8fbff;
+}
+
+.monitorCardRelated {
+  background: linear-gradient(180deg, #f6f8fb 0%, #eef3f8 100%);
+}
+
+.monitorCardApprovable {
+  background: linear-gradient(180deg, #effcf4 0%, #ddf6e6 100%);
+  border-color: rgba(40, 132, 81, 0.24);
+}
+
+.monitorCardFailed {
+  background: linear-gradient(180deg, #fff4f4 0%, #fde5e5 100%);
+  border-color: rgba(193, 69, 69, 0.24);
+}
+
+.monitorHint {
+  margin: 8px 0 0;
+  color: #546b89;
+  line-height: 1.6;
+}
+
+.monitorBadge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(45, 94, 168, 0.08);
+  white-space: nowrap;
+}
+
+.monitorMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.monitorMeta dt,
+.heroLabel,
+.cardLabel {
+  color: #5c7393;
+  font-size: 0.82rem;
+}
+
+.monitorMeta dd {
+  margin: 6px 0 0;
+  color: #183153;
+  font-weight: 600;
+}
+
+.monitorActions,
+.modalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.primaryButton,
+.secondaryButton,
+.scopeTab,
+.scopeTabActive,
+.closeButton,
+.secondaryLink {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.primaryButton,
+.secondaryButton,
+.scopeTab,
+.scopeTabActive,
+.closeButton {
+  border: none;
+  cursor: pointer;
+}
+
+.primaryButton {
+  background: linear-gradient(135deg, #1f5da8 0%, #123f77 100%);
+  color: #fff;
+}
+
+.secondaryButton,
+.scopeTab,
+.closeButton,
+.secondaryLink {
+  border: 1px solid rgba(100, 127, 171, 0.22);
+  background: rgba(255, 255, 255, 0.9);
+  color: #20456e;
+}
+
+.scopeTabActive {
+  background: linear-gradient(135deg, #1f5da8 0%, #123f77 100%);
+  color: #fff;
+}
+
+.secondaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scopeTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.filterBar {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.filterField,
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #456384;
+  font-size: 0.94rem;
+}
+
+.checkboxField {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  color: #456384;
+}
+
+.input {
+  min-height: 46px;
+  padding: 0 16px;
+  border: 1px solid rgba(102, 133, 179, 0.22);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #173355;
+  font: inherit;
+}
+
+.historyLayout {
+  display: grid;
+  gap: 16px;
+}
+
+.historyHero {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #eff5ff 0%, #e6eefc 100%);
+}
+
+.heroValue {
+  display: block;
+  margin-top: 6px;
+  color: #123f77;
+  font-size: 2rem;
+}
+
+.heroMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  color: #5a7292;
+}
+
+.rankPanel {
+  background: #fbfcfe;
+}
+
+.rankList,
+.historyList {
+  display: grid;
+  gap: 12px;
+}
+
+.rankItem,
+.historyCardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  color: #57708f;
+}
+
+.historyCard {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.historyCardHeader strong,
+.rankItem strong {
+  color: #143d6f;
+}
+
+.muted {
+  color: #5e7595;
+}
+
+.feedbackSuccess,
+.feedbackError {
+  max-width: 1280px;
+  margin: 0 auto 16px;
+  padding: 14px 18px;
+  border-radius: 18px;
+}
+
+.feedbackSuccess {
+  background: rgba(35, 143, 86, 0.12);
+  color: #1e7c4a;
+}
+
+.feedbackError {
+  background: rgba(186, 65, 65, 0.12);
+  color: #a13c3c;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(14, 31, 55, 0.44);
+  z-index: 40;
+}
+
+.modalCard {
+  width: min(560px, 100%);
+  padding: 24px;
+  border-radius: 28px;
+  background: #fff;
+  box-shadow: 0 28px 60px rgba(14, 31, 55, 0.24);
+}
+
+.modalDescription,
+.helpText {
+  color: #57708f;
+  line-height: 1.7;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 960px) {
+  .page {
+    padding: 24px 18px 40px;
+  }
+
+  .filterBar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .historyHero,
+  .sectionHeader,
+  .monitorHeader,
+  .modalHeader,
+  .historyCardHeader,
+  .rankHeader {
+    flex-direction: column;
+  }
+
+  .heroMeta {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .filterBar,
+  .monitorMeta {
+    grid-template-columns: 1fr;
+  }
+
+  .section,
+  .modalCard {
+    padding: 18px;
+  }
+}
