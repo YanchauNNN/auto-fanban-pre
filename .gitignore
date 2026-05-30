@@ -15,15 +15,27 @@ test/dist/src/*.pyc
 
 # Runtime artifacts
 .codex-smoke/
+.codex_tmp*/
 storage/
 tmp/
 /build/
 /dist/
 output/
 plot.log
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+
+# Browser automation/debug artifacts
+.playwright-mcp/
+/page-*-snapshot.md
+/*-page.png
+/*-flow.png
+/*-redesign.png
 
 # Local dependency mirrors (do not commit)
 Dependency Library/
+backend/.venv/
 
 # .NET build intermediates (do not commit)
 backend/src/cad/dotnet/Module5CadBridge/obj/
