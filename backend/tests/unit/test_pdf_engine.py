@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -10,6 +11,27 @@ import pytest
 
 from src.doc_gen.pdf_engine import PDFExporter
 from src.interfaces import ExportError
+
+
+def _stub_excel_process_recycle(monkeypatch, exporter: PDFExporter) -> None:
+    monkeypatch.setattr(exporter, "_terminate_stale_excel_automation_processes", lambda: None)
+    monkeypatch.setattr(exporter, "_snapshot_process_ids_by_image", lambda image_name: {100})
+    monkeypatch.setattr(exporter, "_terminate_new_processes", lambda image_name, baseline: None)
+
+
+class _FakeOfficeLimiter:
+    def __init__(self) -> None:
+        self.active = False
+        self.entries = 0
+
+    @contextmanager
+    def excel_session(self):
+        self.entries += 1
+        self.active = True
+        try:
+            yield
+        finally:
+            self.active = False
 
 
 def test_count_pdf_pages_fallback_by_text(monkeypatch, temp_dir: Path) -> None:
@@ -70,10 +92,13 @@ def test_export_xlsx_does_not_fallback_when_disabled(monkeypatch, temp_dir: Path
     output_pdf = temp_dir / "output.pdf"
     exporter = PDFExporter(preferred_engine="office_com")
     exporter.fallback = "disabled"
+    monkeypatch.setattr("src.doc_gen.pdf_engine.time.sleep", lambda _: None)
+    _stub_excel_process_recycle(monkeypatch, exporter)
 
     called = {"fallback": False}
 
-    def fake_com(xlsx_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+    def fake_com(xlsx_path: Path, pdf_path: Path, *, manage_limiter: bool = True) -> None:  # noqa: ARG001
+        assert manage_limiter is False
         raise RuntimeError("excel com boom")
 
     def fake_libreoffice(input_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
@@ -90,6 +115,107 @@ def test_export_xlsx_does_not_fallback_when_disabled(monkeypatch, temp_dir: Path
     assert called["fallback"] is False
 
 
+def test_export_xlsx_retries_office_com_before_reporting_failure(monkeypatch, temp_dir: Path) -> None:
+    input_xlsx = temp_dir / "input.xlsx"
+    input_xlsx.write_bytes(b"dummy")
+    output_pdf = temp_dir / "output.pdf"
+    exporter = PDFExporter(preferred_engine="office_com")
+    exporter.fallback = "disabled"
+    monkeypatch.setattr("src.doc_gen.pdf_engine.time.sleep", lambda _: None)
+    _stub_excel_process_recycle(monkeypatch, exporter)
+    limiter = _FakeOfficeLimiter()
+    monkeypatch.setattr("src.doc_gen.pdf_engine.get_office_automation_limiter", lambda: limiter)
+
+    calls = {"com": 0}
+
+    def fake_com(xlsx_path: Path, pdf_path: Path, *, manage_limiter: bool = True) -> None:  # noqa: ARG001
+        assert manage_limiter is False
+        assert limiter.active is True
+        calls["com"] += 1
+        if calls["com"] == 1:
+            raise RuntimeError("transient Excel COM connection failed")
+        pdf_path.write_bytes(b"%PDF-1.4\n")
+
+    monkeypatch.setattr(exporter, "_export_xlsx_via_com", fake_com)
+
+    exporter.export_xlsx_to_pdf(input_xlsx, output_pdf)
+
+    assert calls["com"] == 2
+    assert limiter.entries == 1
+    assert output_pdf.exists()
+
+
+def test_export_xlsx_recycles_excel_once_for_failed_export(
+    monkeypatch,
+    temp_dir: Path,
+) -> None:
+    input_xlsx = temp_dir / "input.xlsx"
+    input_xlsx.write_bytes(b"dummy")
+    output_pdf = temp_dir / "output.pdf"
+    exporter = PDFExporter(preferred_engine="office_com")
+    exporter.fallback = "disabled"
+    monkeypatch.setattr("src.doc_gen.pdf_engine.time.sleep", lambda _: None)
+
+    calls = {"com": 0}
+    cleaned: list[tuple[str, set[int]]] = []
+
+    def fake_com(xlsx_path: Path, pdf_path: Path, *, manage_limiter: bool = True) -> None:  # noqa: ARG001
+        assert manage_limiter is False
+        calls["com"] += 1
+        raise RuntimeError("无法定位序数10601于动态链接库 C:\\Office\\mso.dll")
+
+    monkeypatch.setattr(exporter, "_export_xlsx_via_com", fake_com)
+    monkeypatch.setattr(exporter, "_snapshot_process_ids_by_image", lambda image_name: {100})
+    monkeypatch.setattr(
+        exporter,
+        "_terminate_new_processes",
+        lambda image_name, baseline: cleaned.append((image_name, baseline)),
+    )
+    monkeypatch.setattr(exporter, "_terminate_stale_excel_automation_processes", lambda: None)
+
+    with pytest.raises(ExportError) as exc_info:
+        exporter.export_xlsx_to_pdf(input_xlsx, output_pdf)
+
+    assert calls["com"] == 2
+    assert cleaned == [("EXCEL.EXE", {100})]
+    assert "无法定位序数10601" in str(exc_info.value)
+
+
+def test_excel_stale_process_detection_only_matches_automation_command_lines() -> None:
+    assert PDFExporter._is_excel_automation_command_line(
+        '"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE" /automation -Embedding'
+    )
+    assert PDFExporter._is_excel_automation_command_line(
+        '"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE" /Embedding'
+    )
+    assert not PDFExporter._is_excel_automation_command_line(
+        '"C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE" "D:\\用户文件.xlsx"'
+    )
+    assert not PDFExporter._is_excel_automation_command_line("")
+
+
+def test_terminate_stale_excel_only_targets_automation_processes(monkeypatch) -> None:
+    killed: list[set[int]] = []
+    monkeypatch.setattr(
+        PDFExporter,
+        "_snapshot_process_command_lines_by_image",
+        staticmethod(lambda image_name: {
+            101: '"C:\\Office\\EXCEL.EXE" /automation -Embedding',
+            102: '"C:\\Office\\EXCEL.EXE" "D:\\用户文件.xlsx"',
+            103: '"C:\\Office\\WINWORD.EXE" /automation',
+        }),
+    )
+    monkeypatch.setattr(
+        PDFExporter,
+        "_terminate_process_ids",
+        staticmethod(lambda pids: killed.append(set(pids))),
+    )
+
+    PDFExporter._terminate_stale_excel_automation_processes()
+
+    assert killed == [{101}]
+
+
 def test_export_xlsx_reports_original_com_error_when_fallback_also_fails(
     monkeypatch,
     temp_dir: Path,
@@ -99,8 +225,11 @@ def test_export_xlsx_reports_original_com_error_when_fallback_also_fails(
     output_pdf = temp_dir / "output.pdf"
     exporter = PDFExporter(preferred_engine="office_com")
     exporter.fallback = "libreoffice"
+    monkeypatch.setattr("src.doc_gen.pdf_engine.time.sleep", lambda _: None)
+    _stub_excel_process_recycle(monkeypatch, exporter)
 
-    def fake_com(xlsx_path: Path, pdf_path: Path) -> None:  # noqa: ARG001
+    def fake_com(xlsx_path: Path, pdf_path: Path, *, manage_limiter: bool = True) -> None:  # noqa: ARG001
+        assert manage_limiter is False
         raise RuntimeError("excel com boom")
 
     def fake_libreoffice(input_path: Path, pdf_path: Path) -> None:  # noqa: ARG001

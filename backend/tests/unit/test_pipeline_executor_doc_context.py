@@ -446,7 +446,7 @@ def test_stage_generate_docs_uses_catalog_page_count_when_catalog_pdf_export_fai
     assert job.artifacts.docs_dir == tmp_path / "output" / "docs"
 
 
-def test_catalog_pdf_export_failure_is_reported_as_document_failure(tmp_path: Path) -> None:
+def test_catalog_pdf_export_failure_is_warning_not_fatal(tmp_path: Path) -> None:
     job = Job(
         job_id="job-doc-export-failure",
         job_type=JobType.DELIVERABLE,
@@ -455,10 +455,39 @@ def test_catalog_pdf_export_failure_is_reported_as_document_failure(tmp_path: Pa
     )
     job.add_flag("目录PDF导出失败: Excel导出PDF失败: 无法创建 Excel.Application")
 
-    with pytest.raises(RuntimeError, match="文档导出失败") as exc_info:
-        PipelineExecutor._raise_if_fatal_export_errors(job)
+    PipelineExecutor._raise_if_fatal_export_errors(job)
 
-    assert "CAD导出失败" not in str(exc_info.value)
+
+def test_catalog_pdf_export_failure_still_allows_package_zip(tmp_path: Path) -> None:
+    output_docs = tmp_path / "output" / "docs"
+    output_drawings = tmp_path / "output" / "drawings"
+    output_docs.mkdir(parents=True)
+    output_drawings.mkdir(parents=True)
+    (output_docs / "catalog.xlsx").write_text("catalog", encoding="utf-8")
+    (output_drawings / "drawing.pdf").write_bytes(b"%PDF-1.4\n")
+
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor._require_work_dir = MagicMock(return_value=tmp_path)
+    executor.packager = Packager()
+    executor._generate_preview_pdf = MagicMock()
+
+    job = Job(
+        job_id="job-doc-export-package",
+        job_type=JobType.DELIVERABLE,
+        project_no="2026",
+        work_dir=tmp_path,
+    )
+    job.add_flag("目录PDF导出失败: Excel导出PDF失败: 无法创建 Excel.Application")
+
+    PipelineExecutor._stage_package(executor, job, {"frames": [], "sheet_sets": []})
+    PipelineExecutor._raise_if_fatal_export_errors(job)
+
+    assert job.artifacts.package_zip is not None
+    assert job.artifacts.package_zip.exists()
+    with zipfile.ZipFile(job.artifacts.package_zip, "r") as zf:
+        assert "catalog.xlsx" in zf.namelist()
+        assert "drawing.pdf" in zf.namelist()
 
 
 def test_stage_split_uses_steel_liner_plot_style_when_two_titles_match(
