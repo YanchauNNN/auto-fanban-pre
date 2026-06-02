@@ -5,10 +5,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
 from openpyxl import load_workbook
 
 from src.doc_gen.cover import CoverGenerator
-from src.interfaces import IPDFExporter
+from src.interfaces import GenerationError, IPDFExporter
 from src.models import DerivedFields, DocContext, GlobalDocParams
 
 
@@ -158,6 +159,8 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
         raise RuntimeError("force embedded fallback")
 
     gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+    refresh_calls: list[Path] = []
+    gen._refresh_cover_ole_preview_via_com = lambda output_path: refresh_calls.append(output_path)  # type: ignore[method-assign]
 
     gen._write_cover(
         template_path="documents_bin/封面模板文件.docx",
@@ -177,6 +180,7 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
 
     chars = [str(ws[f"{col}29"].value or "") for col in "BCDEFGHIJKLMNOPQRST"]
     assert "".join(chars) == "JD1NHT11F01B25C42SD"
+    assert refresh_calls == [output_docx]
     _assert_suppresses_excel_error_indicators(output_docx)
 
 
@@ -200,6 +204,7 @@ def test_write_cover_updates_common_project_name_from_yaml(temp_dir: Path) -> No
         raise RuntimeError("force embedded fallback")
 
     gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+    gen._refresh_cover_ole_preview_via_com = lambda output_path: None  # type: ignore[method-assign]
 
     gen._write_cover(
         template_path="documents_bin/封面模板文件.docx",
@@ -211,6 +216,32 @@ def test_write_cover_updates_common_project_name_from_yaml(temp_dir: Path) -> No
 
     ws = _read_cover_embedded_wb(output_docx)
     assert str(ws["A7"].value or "").strip() == "江苏徐圩核能供热发电厂一期工程"
+
+
+def test_write_cover_embedded_fallback_fails_when_ole_preview_refresh_fails(temp_dir: Path) -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="2026")
+    bindings = gen.spec.get_cover_bindings(ctx.params.project_no)
+    data = gen._prepare_data(ctx)
+    output_docx = temp_dir / "cover-preview-stale.docx"
+
+    def force_embedded_fallback(*, output_path, bindings, data):  # noqa: ANN001
+        raise RuntimeError("word ole write failed")
+
+    def fail_refresh(output_path: Path) -> None:
+        raise RuntimeError("preview cache stayed stale")
+
+    gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+    gen._refresh_cover_ole_preview_via_com = fail_refresh  # type: ignore[method-assign]
+
+    with pytest.raises(GenerationError, match="封面OLE预览刷新失败"):
+        gen._write_cover(
+            template_path="documents_bin/封面模板文件.docx",
+            output_path=output_docx,
+            bindings=bindings,
+            data=data,
+            ctx=ctx,
+        )
 
 
 def test_write_cover_1818_uses_com_when_no_embedded_xlsx(

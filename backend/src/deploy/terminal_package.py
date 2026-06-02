@@ -13,6 +13,8 @@ from ..config.mechanism_spec import (
     MechanismSpecLoader,
     load_mechanism_spec,
 )
+from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
+from ..cad.plot_resource_manager import PDF2_PMP_NAME
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
@@ -247,7 +249,7 @@ def _find_local_managed_pdf2_pc3(pc3_name: str) -> Path | None:
         )
 
     for candidate in preferred_candidates:
-        if candidate.exists() and candidate.is_file():
+        if candidate.exists() and candidate.is_file() and is_valid_pc3_file(candidate):
             return candidate
 
     for base in filter(None, (os.getenv("APPDATA"), os.getenv("LOCALAPPDATA"))):
@@ -255,8 +257,15 @@ def _find_local_managed_pdf2_pc3(pc3_name: str) -> Path | None:
         if not autodesk_root.exists() or not autodesk_root.is_dir():
             continue
         for candidate in sorted(autodesk_root.rglob(pc3_name), reverse=True):
-            if candidate.is_file() and "Plotters" in candidate.parts:
+            if candidate.is_file() and "Plotters" in candidate.parts and is_valid_pc3_file(candidate):
                 return candidate
+    return None
+
+
+def _find_local_managed_pdf2_pmp(plotters_dir: Path, pmp_name: str) -> Path | None:
+    for candidate in (plotters_dir / "PMP Files" / pmp_name, plotters_dir / pmp_name):
+        if candidate.exists() and candidate.is_file() and is_valid_pmp_file(candidate):
+            return candidate
     return None
 
 
@@ -266,9 +275,13 @@ def _overlay_local_managed_plotter_assets(output_root: Path) -> None:
     local_pc3 = _find_local_managed_pdf2_pc3(pc3_name)
     if local_pc3 is None:
         return
-    target = output_root / "documents" / "Resources" / pc3_name
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(local_pc3, target)
+    local_pmp = _find_local_managed_pdf2_pmp(local_pc3.parent, PDF2_PMP_NAME)
+    if local_pmp is None:
+        return
+    resources_dir = output_root / "documents" / "Resources"
+    resources_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(local_pc3, resources_dir / pc3_name)
+    shutil.copy2(local_pmp, resources_dir / PDF2_PMP_NAME)
 
 
 def _timestamp_utc() -> str:

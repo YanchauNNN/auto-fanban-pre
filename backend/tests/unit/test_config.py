@@ -28,6 +28,19 @@ class TestSpecLoader:
             assert a1.H == 594.0
             assert a1.profile == "BASE10"
 
+    def test_a2_plus_half_decimal_plot_media_is_configured(self, spec: BusinessSpec):
+        """A2+0.5 图幅需要显式落盘并指向打印PDF3.pc3中的同名媒体。"""
+        variants = spec.get_paper_variants()
+        assert variants["CNPE_A2+0.5"].W == 891.0
+        assert variants["CNPE_A2+0.5"].H == 420.0
+        assert variants["CNPE_A2+0.5"].profile == "BASE10"
+
+        raw_variant = spec.titleblock_extract["paper_variants"]["CNPE_A2+0.5"]
+        assert raw_variant["打印PDF2.pc3文件中对应纸张"] == "A2+0.5"
+        assert raw_variant["打印PDF3.pc3文件中对应纸张"] == (
+            "UserDefinedMetric (921.00 x 450.00毫米)"
+        )
+
     def test_get_roi_profile(self, spec: BusinessSpec):
         """测试获取ROI配置"""
         profile = spec.get_roi_profile("BASE10")
@@ -123,6 +136,7 @@ class TestRuntimeConfig:
             "review_white": "打白图.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
+        assert runtime_config.module5_export.plot.paper_variant_pc3_overrides == {}
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001
         assert runtime_config.module5_export.plot.plot_window_top_right_expand_ratio == 0.0002
@@ -169,6 +183,16 @@ class TestRuntimeConfig:
         assert runtime_config.deliverable_consistency_fix.source_scope == "staged_source_before_split"
         assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
         assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
+
+    def test_a2_half_pc3_override_is_loaded_from_runtime_yaml(self):
+        """A2+0.5 备用 PC3 映射必须由运行期 YAML 落盘提供。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+
+        assert config.module5_export.plot.paper_variant_pc3_overrides == {
+            "CNPE_A2+1/2": "打印PDF3.pc3",
+            "CNPE_A2+0.5": "打印PDF3.pc3",
+        }
 
     def test_unit_consistency_business_values_are_not_python_defaults(
         self,

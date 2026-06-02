@@ -96,9 +96,11 @@ class CADDXFExecutor:
         requested_task_dir.mkdir(parents=True, exist_ok=True)
 
         resolved_plot_style_key, resolved_ctb_name = self._resolve_plot_style(plot_style_key)
+        effective_pc3_name = self._resolve_pc3_name_for_plot(frames=frames, sheet_sets=sheet_sets)
         plot_resource_context = self._ensure_plot_resources_ready(
             slot_runtime=slot_runtime,
             ctb_name=resolved_ctb_name,
+            pc3_name=effective_pc3_name,
         )
         runtime_context = self._build_runtime_context(
             slot_runtime=slot_runtime,
@@ -127,6 +129,7 @@ class CADDXFExecutor:
             plot_resource_context=plot_resource_context,
             runtime_context=runtime_context,
             plot_style_key=resolved_plot_style_key,
+            pc3_name=effective_pc3_name,
         )
         split_run_meta = self._run_runner_with_engine_fallback(
             source_dxf=staged_source_dxf,
@@ -178,9 +181,14 @@ class CADDXFExecutor:
         plot_resource_context: PlotResourceContext | None = None,
         runtime_context: dict[str, str] | None = None,
         plot_style_key: str | None = None,
+        pc3_name: str | None = None,
     ) -> dict:
         """构建 task.json（Python -> CAD）。"""
         self._validate_duplicate_codes(frames)
+        effective_pc3_name = str(pc3_name or "").strip() or self._resolve_pc3_name_for_plot(
+            frames=frames,
+            sheet_sets=sheet_sets,
+        )
         return self._build_task_json_from_entries(
             job_id=job_id,
             source_dxf=source_dxf,
@@ -191,6 +199,7 @@ class CADDXFExecutor:
             plot_resource_context=plot_resource_context,
             runtime_context=runtime_context,
             plot_style_key=plot_style_key,
+            pc3_name=effective_pc3_name,
         )
 
     def _build_task_json_from_entries(
@@ -207,8 +216,13 @@ class CADDXFExecutor:
         runtime_context: dict[str, str] | None = None,
         plot_style_key: str | None = None,
         ctb_name: str | None = None,
+        pc3_name: str | None = None,
     ) -> dict:
         plot_cfg = self.config.module5_export.plot
+        effective_pc3_name = self._effective_pc3_name(
+            pc3_name=pc3_name,
+            plot_resource_context=plot_resource_context,
+        )
         runtime_plot_style_key = str((runtime_context or {}).get("plot_style_key", "")).strip()
         runtime_ctb_name = str((runtime_context or {}).get("ctb_name", "")).strip()
         resolved_plot_style_key, resolved_ctb_name = self._resolve_plot_style(
@@ -221,8 +235,13 @@ class CADDXFExecutor:
         selection_cfg = self.config.module5_export.selection
         margins_mm = self._resolve_plot_margins_mm()
         pc3_resolved_path, pc3_search_dirs = self._resolve_pc3_runtime_context(
-            plot_cfg.pc3_name,
+            effective_pc3_name,
             plot_resource_context=plot_resource_context,
+        )
+        self._apply_pc3_specific_media_names(
+            frame_entries=frame_entries,
+            sheet_set_entries=sheet_set_entries,
+            pc3_name=effective_pc3_name,
         )
         output_entry = self._build_output_entry()
         if output_override:
@@ -240,7 +259,7 @@ class CADDXFExecutor:
             "source_dwg_version": source_dwg_version,
             "output_dir": str(output_dir),
             "plot": {
-                "pc3_name": plot_cfg.pc3_name,
+                "pc3_name": effective_pc3_name,
                 "pc3_resolved_path": pc3_resolved_path,
                 "pc3_search_dirs": pc3_search_dirs,
                 "plot_style_key": resolved_plot_style_key,
@@ -333,8 +352,27 @@ class CADDXFExecutor:
             if resolved not in search_dirs:
                 search_dirs.append(resolved)
 
+        default_pc3_name = str(self.config.module5_export.plot.pc3_name or "").strip()
+        use_isolated_managed_pc3 = (
+            plot_resource_context is not None
+            and pc3_token
+            and default_pc3_name
+            and pc3_token.lower() != default_pc3_name.lower()
+        )
         if plot_resource_context is not None:
             add_dir(plot_resource_context.plotters_dir)
+        if use_isolated_managed_pc3:
+            resolved_path = None
+            candidate = Path(pc3_token)
+            if candidate.is_absolute():
+                try:
+                    resolved_path = str(candidate.resolve())
+                except Exception:  # noqa: BLE001
+                    resolved_path = str(candidate)
+            elif plot_resource_context is not None and plot_resource_context.pc3_path.name == pc3_token:
+                resolved_path = str(plot_resource_context.pc3_path.resolve())
+            return resolved_path, [str(path) for path in search_dirs]
+
         add_dir(path_info.plotters_dir)
         if path_info.install_dir is not None:
             add_dir(path_info.install_dir / "Plotters")
@@ -372,6 +410,7 @@ class CADDXFExecutor:
         *,
         slot_runtime: dict[str, str] | None = None,
         ctb_name: str | None = None,
+        pc3_name: str | None = None,
     ) -> PlotResourceContext:
         path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
         target_plotters_dirs = self._slot_target_dirs(slot_runtime, "plotters_dir")
@@ -391,7 +430,7 @@ class CADDXFExecutor:
         return ensure_plot_resources(
             path_info=path_info,
             asset_roots=list(plot_assets_cfg.asset_roots),
-            pc3_name=plot_cfg.pc3_name,
+            pc3_name=str(pc3_name or plot_cfg.pc3_name),
             pmp_name=plot_assets_cfg.pmp_name,
             ctb_name=effective_ctb_name,
             managed_ctb_names=managed_ctb_names,
@@ -468,6 +507,65 @@ class CADDXFExecutor:
                 if value:
                     runtime[key] = value
         return runtime
+
+    def _resolve_pc3_name_for_plot(
+        self,
+        *,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> str:
+        plot_cfg = self.config.module5_export.plot
+        default_pc3_name = str(plot_cfg.pc3_name or "").strip()
+        overrides = getattr(plot_cfg, "paper_variant_pc3_overrides", {}) or {}
+        if not isinstance(overrides, dict) or not overrides:
+            return default_pc3_name
+
+        normalized_overrides = {
+            str(variant_id).strip().upper(): str(pc3_name).strip()
+            for variant_id, pc3_name in overrides.items()
+            if str(variant_id).strip() and str(pc3_name).strip()
+        }
+        for variant_id in self._iter_requested_paper_variant_ids(frames, sheet_sets):
+            override = normalized_overrides.get(variant_id.upper())
+            if override:
+                return override
+        return default_pc3_name
+
+    def _iter_requested_paper_variant_ids(
+        self,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> list[str]:
+        variant_ids: list[str] = []
+
+        def add(raw_value: str | None) -> None:
+            variant_id = str(raw_value or "").strip()
+            if variant_id and variant_id not in variant_ids:
+                variant_ids.append(variant_id)
+
+        for frame in frames:
+            add(frame.runtime.paper_variant_id)
+        for sheet_set in sheet_sets:
+            for page in sheet_set.pages:
+                if page.frame_meta is not None:
+                    add(page.frame_meta.runtime.paper_variant_id)
+                add(self._a4_variant_id(page.outer_bbox))
+        return variant_ids
+
+    def _effective_pc3_name(
+        self,
+        *,
+        pc3_name: str | None,
+        plot_resource_context: PlotResourceContext | None,
+    ) -> str:
+        normalized = str(pc3_name or "").strip()
+        if normalized:
+            return normalized
+        if plot_resource_context is not None:
+            context_name = str(plot_resource_context.pc3_path.name or "").strip()
+            if context_name:
+                return context_name
+        return str(self.config.module5_export.plot.pc3_name or "").strip()
 
     def _resolve_plot_style(self, plot_style_key: str | None) -> tuple[str, str]:
         plot_cfg = self.config.module5_export.plot
@@ -1524,6 +1622,14 @@ class CADDXFExecutor:
         return "CNPE_A4"
 
     def _paper_media_name_for_variant(self, variant_id: str | None) -> str | None:
+        return self._paper_media_name_for_variant_and_pc3(variant_id, pc3_name=None)
+
+    def _paper_media_name_for_variant_and_pc3(
+        self,
+        variant_id: str | None,
+        *,
+        pc3_name: str | None,
+    ) -> str | None:
         if not variant_id:
             return None
         titleblock_extract = getattr(self.spec, "titleblock_extract", {})
@@ -1537,7 +1643,13 @@ class CADDXFExecutor:
             variant = raw_variants.get(variant_id[:-1])
         if not isinstance(variant, dict):
             return None
-        media_hint = variant.get("打印PDF2.pc3文件中对应纸张")
+        media_hint = None
+        pc3_file_name = Path(str(pc3_name or "")).name.strip()
+        if pc3_file_name:
+            pc3_specific_key = f"{pc3_file_name}文件中对应纸张"
+            media_hint = variant.get(pc3_specific_key)
+        if not isinstance(media_hint, str):
+            media_hint = variant.get("打印PDF2.pc3文件中对应纸张")
         if not isinstance(media_hint, str):
             return None
         normalized = media_hint.strip()
@@ -1549,6 +1661,37 @@ class CADDXFExecutor:
         normalized = normalized.replace("，", ",")
         normalized = normalized.split(",", 1)[0].strip()
         return normalized or None
+
+    def _apply_pc3_specific_media_names(
+        self,
+        *,
+        frame_entries: list[dict],
+        sheet_set_entries: list[dict],
+        pc3_name: str,
+    ) -> None:
+        for entry in frame_entries:
+            variant_id = str(entry.get("paper_variant_id") or "").strip()
+            media_name = self._paper_media_name_for_variant_and_pc3(
+                variant_id,
+                pc3_name=pc3_name,
+            )
+            if media_name:
+                entry["paper_media_name"] = media_name
+
+        for sheet_set in sheet_set_entries:
+            pages = sheet_set.get("pages")
+            if not isinstance(pages, list):
+                continue
+            for page in pages:
+                if not isinstance(page, dict):
+                    continue
+                variant_id = str(page.get("paper_variant_id") or "").strip()
+                media_name = self._paper_media_name_for_variant_and_pc3(
+                    variant_id,
+                    pc3_name=pc3_name,
+                )
+                if media_name:
+                    page["paper_media_name"] = media_name
 
     def _enrich_dotnet_result_metadata(self, result: dict) -> None:
         errors = result.get("errors")

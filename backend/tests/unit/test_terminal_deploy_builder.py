@@ -24,10 +24,25 @@ SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
+PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 REGISTER_TASK_SCRIPT = "register_backend_task.ps1"
 UNREGISTER_TASK_SCRIPT = "unregister_backend_task.ps1"
+
+
+def _valid_pc3_text(label: str = "pc3") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_pmp_text(label: str = "pmp") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+@pytest.fixture(autouse=True)
+def _isolate_autocad_user_dirs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
 
 
 def _write_file(path: Path, content: str = "x") -> None:
@@ -126,7 +141,8 @@ def _make_fake_repo(repo_root: Path) -> None:
         / "Module5CadBridge.dll",
     )
     _write_file(repo_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe")
-    _write_file(repo_root / "documents" / "Resources" / PC3_NAME)
+    _write_file(repo_root / "documents" / "Resources" / PC3_NAME, _valid_pc3_text("repo-pc3"))
+    _write_file(repo_root / "documents" / "Resources" / PMP_NAME, _valid_pmp_text("repo-pmp"))
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome.ctb")
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
@@ -291,7 +307,7 @@ def test_build_terminal_deploy_package_requires_pdf_preview_worker_asset(tmp_pat
         build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
 
-def test_build_terminal_deploy_package_prefers_local_autocad_pdf2_pc3_when_available(
+def test_build_terminal_deploy_package_prefers_valid_local_autocad_pdf2_pc3_pair_when_available(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -300,18 +316,53 @@ def test_build_terminal_deploy_package_prefers_local_autocad_pdf2_pc3_when_avail
     output_root = tmp_path / "build" / "fanban-terminal-deploy"
 
     managed_pc3 = repo_root / "documents" / "Resources" / PC3_NAME
-    managed_pc3.write_text("repo-pc3", encoding="utf-8")
+    managed_pc3.write_text(_valid_pc3_text("repo-pc3"), encoding="utf-8")
+    managed_pmp = repo_root / "documents" / "Resources" / PMP_NAME
+    managed_pmp.write_text(_valid_pmp_text("repo-pmp"), encoding="utf-8")
 
     appdata = tmp_path / "AppData" / "Roaming"
     local_plotters = appdata / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters"
     local_plotters.mkdir(parents=True, exist_ok=True)
-    (local_plotters / PC3_NAME).write_text("local-pc3", encoding="utf-8")
+    (local_plotters / PC3_NAME).write_text(_valid_pc3_text("local-pc3"), encoding="utf-8")
+    (local_plotters / PMP_NAME).write_text(_valid_pmp_text("local-pmp"), encoding="utf-8")
+    (local_plotters / "PMP Files" / PMP_NAME).parent.mkdir(parents=True, exist_ok=True)
+    (local_plotters / "PMP Files" / PMP_NAME).write_text(_valid_pmp_text("local-pmp"), encoding="utf-8")
     monkeypatch.setenv("APPDATA", str(appdata))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
 
     build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
-    assert (output_root / "documents" / "Resources" / PC3_NAME).read_text(encoding="utf-8") == "local-pc3"
+    assert (output_root / "documents" / "Resources" / PC3_NAME).read_text(
+        encoding="utf-8"
+    ) == _valid_pc3_text("local-pc3")
+    assert (output_root / "documents" / "Resources" / PMP_NAME).read_text(
+        encoding="utf-8"
+    ) == _valid_pmp_text("local-pmp")
+
+
+def test_build_terminal_deploy_package_ignores_invalid_local_autocad_pdf2_pc3(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    managed_pc3 = repo_root / "documents" / "Resources" / PC3_NAME
+    managed_pc3.write_text(_valid_pc3_text("repo-pc3"), encoding="utf-8")
+
+    appdata = tmp_path / "AppData" / "Roaming"
+    local_plotters = appdata / "Autodesk" / "AutoCAD 2022" / "R24.1" / "chs" / "Plotters"
+    local_plotters.mkdir(parents=True, exist_ok=True)
+    (local_plotters / PC3_NAME).write_text("pc3", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    assert (output_root / "documents" / "Resources" / PC3_NAME).read_text(
+        encoding="utf-8"
+    ) == _valid_pc3_text("repo-pc3")
 
 
 def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prepare_scripts(tmp_path: Path) -> None:

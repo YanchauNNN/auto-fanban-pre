@@ -135,6 +135,12 @@ runtime_options:
       db_fallback_to_crossing: { type: bool, default: true, desc: "数据库级选集失败时是否回退到crossing命令选集" }
     plot:
       pc3_name: { type: str, default: "打印PDF2.pc3", desc: "CAD 打印设备 PC3 名称（按图幅匹配规则使用）" }
+      paper_variant_pc3_overrides:
+        type: object
+        default:
+          CNPE_A2+1/2: "打印PDF3.pc3"
+          CNPE_A2+0.5: "打印PDF3.pc3"
+        desc: "特殊图幅到备用 PC3 的映射；命中这些图幅时，本次 CAD 打印任务使用对应 PC3，其余图幅仍使用 pc3_name"
       ctb_name: { type: str, default: "fanban_monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
       default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/review_white/steel_liner" }
       plot_style_profiles:

@@ -21,6 +21,21 @@ from src.cad.plot_resource_manager import (
 from src.config import RuntimeConfig
 from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
+PDF3_PC3_NAME = "打印PDF3.pc3"
+PDF3_A2_HALF_MEDIA = "UserDefinedMetric (921.00 x 450.00毫米)"
+
+
+def _valid_pc3_text(label: str = "pc3") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_pmp_text(label: str = "pmp") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_ctb_text(label: str = "managed-ctb") -> str:
+    return f"PIAFILEVERSION_2.0,CTBVER1,compressed-test,{label}\n" * 64
+
 
 class _SpecStub:
     """最小化 spec stub，仅提供图幅查询。"""
@@ -35,6 +50,14 @@ class _SpecStub:
         self.titleblock_extract = {
             "paper_variants": {
                 "CNPE_A1": {"打印PDF2.pc3文件中对应纸张": "A1"},
+                "CNPE_A2+1/2": {
+                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
+                },
+                "CNPE_A2+0.5": {
+                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
+                },
                 "CNPE_A4": {"打印PDF2.pc3文件中对应纸张": "A4"},
                 "CNPE_A4H": {"打印PDF2.pc3文件中对应纸张": "A4,横向打印"},
             },
@@ -46,20 +69,27 @@ class _SpecStub:
             self.H = h
 
     def get_paper_variants(self):
-        return {"CNPE_A1": self._Variant(841.0, 594.0)}
+        return {
+            "CNPE_A1": self._Variant(841.0, 594.0),
+            "CNPE_A2+1/2": self._Variant(891.0, 420.0),
+            "CNPE_A2+0.5": self._Variant(891.0, 420.0),
+        }
 
 
 @pytest.fixture(autouse=True)
 def _managed_plot_assets(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     asset_root = tmp_path / "assets"
     plotters_asset = asset_root / "plotters"
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True, exist_ok=True)
     plot_styles_asset.mkdir(parents=True, exist_ok=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
-    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text(), encoding="utf-8")
+    (plotters_asset / PDF3_PC3_NAME).write_text(_valid_pc3_text("pdf3"), encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text(_valid_pmp_text(), encoding="utf-8")
     for name in ALL_MANAGED_CTB_NAMES:
-        (plot_styles_asset / name).write_text("managed-ctb" * 128, encoding="utf-8")
+        (plot_styles_asset / name).write_text(_valid_ctb_text(name), encoding="utf-8")
     monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(asset_root))
 
 
@@ -95,6 +125,8 @@ def test_plot_resources_deploy_into_slot_local_dirs_when_runtime_context_present
     plotters_dir = tmp_path / "slot" / "support" / "Plotters"
     plot_styles_dir = plotters_dir / "Plot Styles"
     pmp_dir = plotters_dir / "PMP Files"
+    pmp_dir.mkdir(parents=True, exist_ok=True)
+    plot_styles_dir.mkdir(parents=True, exist_ok=True)
     slot_runtime = {
         "plotters_dir": str(plotters_dir),
         "plot_styles_dir": str(plot_styles_dir),
@@ -832,6 +864,115 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert task["frames"][0]["paper_media_name"] == "A1"
     assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A4H"
     assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A4"
+
+
+def test_a2_half_variant_uses_pdf3_override_for_task_and_plot_resources(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A2+1/2"
+
+    cfg = RuntimeConfig()
+    cfg.module5_export.plot.paper_variant_pc3_overrides = {
+        "CNPE_A2+1/2": PDF3_PC3_NAME,
+        "CNPE_A2+0.5": PDF3_PC3_NAME,
+    }
+    plotters_dir = tmp_path / "slot" / "support" / "Plotters"
+    plot_styles_dir = plotters_dir / "Plot Styles"
+    pmp_dir = plotters_dir / "PMP Files"
+    pmp_dir.mkdir(parents=True, exist_ok=True)
+    plot_styles_dir.mkdir(parents=True, exist_ok=True)
+    slot_runtime = {
+        "plotters_dir": str(plotters_dir),
+        "plot_styles_dir": str(plot_styles_dir),
+        "pmp_dir": str(pmp_dir),
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "src.cad.cad_dxf_executor.resolve_autocad_paths",
+        lambda configured_install_dir=None: cast(
+            Any,
+            SimpleNamespace(
+                install_dir=None,
+                plotters_dir=None,
+                plot_styles_dir=None,
+                monochrome_ctb_path=None,
+                pc3_path=None,
+            ),
+        ),
+    )
+
+    def _fake_ensure_plot_resources(**kwargs):
+        captured.update(kwargs)
+        return cast(
+            Any,
+            SimpleNamespace(
+                plotters_dir=plotters_dir,
+                plot_styles_dir=plot_styles_dir,
+                pc3_path=plotters_dir / str(kwargs["pc3_name"]),
+                pmp_path=pmp_dir / PDF2_PMP_NAME,
+                ctb_path=plot_styles_dir / MANAGED_CTB_NAME,
+            ),
+        )
+
+    runner = _RunnerSuccessStub()
+    monkeypatch.setattr("src.cad.cad_dxf_executor.ensure_plot_resources", _fake_ensure_plot_resources)
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, runner), spec=_SpecStub())
+
+    executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+        task_root=tmp_path / "tasks",
+        slot_runtime=slot_runtime,
+    )
+
+    assert captured["pc3_name"] == PDF3_PC3_NAME
+    assert runner.calls
+    for call in runner.calls:
+        task = json.loads(Path(call["task_json"]).read_text(encoding="utf-8"))
+        assert task["plot"]["pc3_name"] == PDF3_PC3_NAME
+        assert task["plot"]["pc3_resolved_path"].endswith(PDF3_PC3_NAME)
+        assert task["plot"]["pc3_search_dirs"] == [str(plotters_dir.resolve())]
+
+
+def test_a2_half_decimal_variant_uses_pdf3_override_in_task_json(tmp_path: Path):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A2+0.5"
+
+    cfg = RuntimeConfig()
+    cfg.module5_export.plot.paper_variant_pc3_overrides = {"CNPE_A2+0.5": PDF3_PC3_NAME}
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, _RunnerSuccessStub()), spec=_SpecStub())
+
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+    )
+
+    assert task["plot"]["pc3_name"] == PDF3_PC3_NAME
+    assert task["frames"][0]["paper_variant_id"] == "CNPE_A2+0.5"
+    assert task["frames"][0]["paper_media_name"] == PDF3_A2_HALF_MEDIA
 
 
 def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):

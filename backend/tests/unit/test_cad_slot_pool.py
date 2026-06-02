@@ -14,6 +14,23 @@ from src.cad.plot_resource_manager import (
 from src.cad.slot_pool import CADSlotPool
 
 
+def _isolate_autocad_user_dirs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+
+
+def _valid_pc3_text(label: str = "pc3") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_pmp_text(label: str = "pmp") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_ctb_text(label: str = "ctb") -> str:
+    return f"PIAFILEVERSION_2.0,CTBVER1,compressed-test,{label}\n" * 64
+
+
 def _build_slot_pool_config(tmp_path: Path) -> SimpleNamespace:
     return SimpleNamespace(
         storage_dir=tmp_path / "storage",
@@ -42,6 +59,7 @@ def _build_slot_pool_config(tmp_path: Path) -> SimpleNamespace:
 
 
 def test_cad_slot_pool_initializes_four_slots(tmp_path: Path, monkeypatch) -> None:
+    _isolate_autocad_user_dirs(tmp_path, monkeypatch)
     monkeypatch.setattr("src.cad.slot_pool.ensure_plot_resources", lambda **kwargs: None)
     config = _build_slot_pool_config(tmp_path)
     config.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -61,6 +79,7 @@ def test_cad_slot_pool_initializes_four_slots(tmp_path: Path, monkeypatch) -> No
 
 
 def test_cad_slot_pool_acquire_and_release_updates_status(tmp_path: Path, monkeypatch) -> None:
+    _isolate_autocad_user_dirs(tmp_path, monkeypatch)
     monkeypatch.setattr("src.cad.slot_pool.ensure_plot_resources", lambda **kwargs: None)
     config = _build_slot_pool_config(tmp_path)
     config.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -78,19 +97,20 @@ def test_cad_slot_pool_acquire_and_release_updates_status(tmp_path: Path, monkey
 
 
 def test_cad_slot_pool_preloads_all_managed_plot_styles(tmp_path: Path, monkeypatch) -> None:
+    _isolate_autocad_user_dirs(tmp_path, monkeypatch)
     resources_root = tmp_path / "resources"
     plotters_root = resources_root / "plotters"
     plot_styles_root = resources_root / "plot_styles"
     plotters_root.mkdir(parents=True, exist_ok=True)
     plot_styles_root.mkdir(parents=True, exist_ok=True)
-    (plotters_root / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
-    (plotters_root / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plotters_root / PDF2_PC3_NAME).write_text(_valid_pc3_text(), encoding="utf-8")
+    (plotters_root / PDF2_PMP_NAME).write_text(_valid_pmp_text(), encoding="utf-8")
     for name in (
         MANAGED_CTB_NAME,
         MANAGED_SAME_WIDTH_CTB_NAME,
         MANAGED_REVIEW_WHITE_CTB_NAME,
     ):
-        (plot_styles_root / name).write_text(name * 64, encoding="utf-8")
+        (plot_styles_root / name).write_text(_valid_ctb_text(name), encoding="utf-8")
 
     monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(resources_root))
     config = _build_slot_pool_config(tmp_path)
@@ -111,6 +131,7 @@ def test_cad_slot_pool_passes_configured_plot_resource_settings(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    _isolate_autocad_user_dirs(tmp_path, monkeypatch)
     captured: dict[str, Any] = {}
 
     def _fake_ensure_plot_resources(**kwargs):

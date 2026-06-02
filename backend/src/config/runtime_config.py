@@ -90,6 +90,7 @@ class Module5PlotConfig(BaseModel):
     """模块5打印配置"""
 
     pc3_name: str = "打印PDF2.pc3"
+    paper_variant_pc3_overrides: dict[str, str] = Field(default_factory=dict)
     ctb_name: str = "fanban_monochrome.ctb"
     default_plot_style_key: str = "red_wider"
     plot_style_profiles: dict[str, str] = Field(

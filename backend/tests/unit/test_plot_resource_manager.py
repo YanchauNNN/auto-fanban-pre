@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 
@@ -17,9 +18,27 @@ from src.cad.plot_resource_manager import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_autocad_user_dirs(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+
+
+def _valid_pc3_text(label: str = "pc3") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_pmp_text(label: str = "pmp") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_ctb_text(label: str = "managed-ctb") -> str:
+    return f"PIAFILEVERSION_2.0,CTBVER1,compressed-test,{label}\n" * 64
+
+
 def _write_all_managed_ctbs(plot_styles_asset: Path, content: str = "managed-ctb") -> None:
     for name in ALL_MANAGED_CTB_NAMES:
-        (plot_styles_asset / name).write_text(content * 256, encoding="utf-8")
+        (plot_styles_asset / name).write_text(_valid_ctb_text(content), encoding="utf-8")
 
 
 def _path_info(
@@ -46,15 +65,15 @@ def test_ensure_plot_resources_deploys_pdf2_and_pmp_and_ctb(tmp_path: Path):
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("pc3"), encoding="utf-8")
     (plotters_asset / PDF2_PMP_NAME).write_text(
-        "pmp",
+        _valid_pmp_text("pmp"),
         encoding="utf-8",
     )
     _write_all_managed_ctbs(plot_styles_asset)
     system_ctb = tmp_path / "system" / MONOCHROME_CTB_NAME
     system_ctb.parent.mkdir(parents=True)
-    system_ctb.write_text("system-ctb" * 128, encoding="utf-8")
+    system_ctb.write_text(_valid_ctb_text("system-ctb"), encoding="utf-8")
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"
@@ -67,12 +86,12 @@ def test_ensure_plot_resources_deploys_pdf2_and_pmp_and_ctb(tmp_path: Path):
     assert result.pc3_path == target_plotters / PDF2_PC3_NAME
     assert result.pmp_path == target_plotters / "PMP Files" / PDF2_PMP_NAME
     assert result.ctb_path == target_plot_styles / MANAGED_CTB_NAME
-    assert result.pc3_path.read_text(encoding="utf-8") == "pc3"
-    assert result.pmp_path.read_text(encoding="utf-8") == "pmp"
+    assert result.pc3_path.read_text(encoding="utf-8") == _valid_pc3_text("pc3")
+    assert result.pmp_path.read_text(encoding="utf-8") == _valid_pmp_text("pmp")
     assert (
         target_plotters / PDF2_PMP_NAME
-    ).read_text(encoding="utf-8") == "pmp"
-    assert result.ctb_path.read_text(encoding="utf-8") == "managed-ctb" * 256
+    ).read_text(encoding="utf-8") == _valid_pmp_text("pmp")
+    assert result.ctb_path.read_text(encoding="utf-8") == _valid_ctb_text("managed-ctb")
     assert not (target_plot_styles / MONOCHROME_CTB_NAME).exists()
 
 
@@ -82,9 +101,9 @@ def test_ensure_plot_resources_overwrites_stale_pc3_with_bundled_asset(tmp_path:
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("bundled-pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("bundled-pc3"), encoding="utf-8")
     (plotters_asset / PDF2_PMP_NAME).write_text(
-        "bundled-pmp",
+        _valid_pmp_text("bundled-pmp"),
         encoding="utf-8",
     )
     _write_all_managed_ctbs(plot_styles_asset, "bundled-ctb")
@@ -99,7 +118,7 @@ def test_ensure_plot_resources_overwrites_stale_pc3_with_bundled_asset(tmp_path:
         asset_roots=[asset_root],
     )
 
-    assert result.pc3_path.read_text(encoding="utf-8") == "bundled-pc3"
+    assert result.pc3_path.read_text(encoding="utf-8") == _valid_pc3_text("bundled-pc3")
 
 
 def test_ensure_plot_resources_prefers_bundled_pc3_over_existing_system_pc3(tmp_path: Path):
@@ -108,8 +127,8 @@ def test_ensure_plot_resources_prefers_bundled_pc3_over_existing_system_pc3(tmp_
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("bundled-pc3", encoding="utf-8")
-    (plotters_asset / PDF2_PMP_NAME).write_text("bundled-pmp", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("bundled-pc3"), encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text(_valid_pmp_text("bundled-pmp"), encoding="utf-8")
     _write_all_managed_ctbs(plot_styles_asset, "bundled-ctb")
 
     system_root = tmp_path / "system"
@@ -117,7 +136,7 @@ def test_ensure_plot_resources_prefers_bundled_pc3_over_existing_system_pc3(tmp_
     system_plot_styles = system_plotters / "Plot Styles"
     system_plot_styles.mkdir(parents=True)
     system_pc3 = system_plotters / PDF2_PC3_NAME
-    system_pc3.write_text("system-pc3", encoding="utf-8")
+    system_pc3.write_text(_valid_pc3_text("system-pc3"), encoding="utf-8")
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"
@@ -137,7 +156,7 @@ def test_ensure_plot_resources_prefers_bundled_pc3_over_existing_system_pc3(tmp_
         asset_roots=[asset_root],
     )
 
-    assert result.pc3_path.read_text(encoding="utf-8") == "bundled-pc3"
+    assert result.pc3_path.read_text(encoding="utf-8") == _valid_pc3_text("bundled-pc3")
 
 
 def test_ensure_plot_resources_deploys_to_discovered_user_plotters(tmp_path: Path, monkeypatch):
@@ -146,9 +165,9 @@ def test_ensure_plot_resources_deploys_to_discovered_user_plotters(tmp_path: Pat
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("pc3"), encoding="utf-8")
     (plotters_asset / PDF2_PMP_NAME).write_text(
-        "pmp",
+        _valid_pmp_text("pmp"),
         encoding="utf-8",
     )
     _write_all_managed_ctbs(plot_styles_asset, "ctb")
@@ -180,24 +199,24 @@ def test_ensure_plot_resources_preserves_existing_system_monochrome_ctb(tmp_path
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
-    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("pc3"), encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text(_valid_pmp_text("pmp"), encoding="utf-8")
     _write_all_managed_ctbs(plot_styles_asset)
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"
     target_plot_styles.mkdir(parents=True)
     existing_monochrome = target_plot_styles / MONOCHROME_CTB_NAME
-    existing_monochrome.write_text("user-monochrome", encoding="utf-8")
+    existing_monochrome.write_text(_valid_ctb_text("user-monochrome"), encoding="utf-8")
 
     result = ensure_plot_resources(
         path_info=_path_info(target_plotters, target_plot_styles),
         asset_roots=[asset_root],
     )
 
-    assert existing_monochrome.read_text(encoding="utf-8") == "user-monochrome"
+    assert existing_monochrome.read_text(encoding="utf-8") == _valid_ctb_text("user-monochrome")
     assert result.ctb_path == target_plot_styles / MANAGED_CTB_NAME
-    assert result.ctb_path.read_text(encoding="utf-8") == "managed-ctb" * 256
+    assert result.ctb_path.read_text(encoding="utf-8") == _valid_ctb_text("managed-ctb")
 
 
 def test_ensure_plot_resources_raises_when_pdf2_asset_missing(tmp_path: Path):
@@ -211,6 +230,40 @@ def test_ensure_plot_resources_raises_when_pdf2_asset_missing(tmp_path: Path):
             path_info=_path_info(target_plotters, target_plot_styles),
             asset_roots=[asset_root],
         )
+
+
+def test_ensure_plot_resources_restores_invalid_assets_from_backup_zip(tmp_path: Path):
+    asset_root = tmp_path / "assets"
+    plotters_asset = asset_root / "plotters"
+    plot_styles_asset = asset_root / "plot_styles"
+    plotters_asset.mkdir(parents=True)
+    plot_styles_asset.mkdir(parents=True)
+    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plot_styles_asset / MANAGED_CTB_NAME).write_text("bundled-ctb", encoding="utf-8")
+    for name in ALL_MANAGED_CTB_NAMES:
+        (plot_styles_asset / name).write_text("bundled-ctb", encoding="utf-8")
+
+    backup_pc3 = _valid_pc3_text("backup-pc3")
+    backup_pmp = _valid_pmp_text("backup-pmp")
+    backup_ctb = _valid_ctb_text("backup-ctb")
+    with ZipFile(asset_root / "cad_plot_assets_backup.zip", "w", ZIP_DEFLATED) as archive:
+        archive.writestr(PDF2_PC3_NAME, backup_pc3)
+        archive.writestr(PDF2_PMP_NAME, backup_pmp)
+        for name in ALL_MANAGED_CTB_NAMES:
+            archive.writestr(name, backup_ctb)
+
+    target_plotters = tmp_path / "target" / "Plotters"
+    target_plot_styles = target_plotters / "Plot Styles"
+
+    result = ensure_plot_resources(
+        path_info=_path_info(target_plotters, target_plot_styles),
+        asset_roots=[asset_root],
+    )
+
+    assert result.pc3_path.read_text(encoding="utf-8") == backup_pc3
+    assert result.pmp_path.read_text(encoding="utf-8") == backup_pmp
+    assert result.ctb_path.read_text(encoding="utf-8") == backup_ctb
 
 
 def test_default_asset_roots_prefers_documents_resources():
@@ -252,10 +305,10 @@ def test_ensure_plot_resources_preloads_all_managed_ctbs(tmp_path: Path):
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True)
     plot_styles_asset.mkdir(parents=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
-    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text("pc3"), encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text(_valid_pmp_text("pmp"), encoding="utf-8")
     for name in ALL_MANAGED_CTB_NAMES:
-        (plot_styles_asset / name).write_text(name * 64, encoding="utf-8")
+        (plot_styles_asset / name).write_text(_valid_ctb_text(name), encoding="utf-8")
 
     target_plotters = tmp_path / "target" / "Plotters"
     target_plot_styles = target_plotters / "Plot Styles"

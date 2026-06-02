@@ -207,6 +207,12 @@ class CoverGenerator(ICoverGenerator):
                     bindings=bindings,
                     data=data,
                 )
+                try:
+                    self._refresh_cover_ole_preview_via_com(output_path)
+                except Exception as refresh_exc:
+                    raise GenerationError(
+                        f"封面OLE预览刷新失败: COM={com_error}; refresh={refresh_exc}"
+                    ) from refresh_exc
                 return
             except Exception as embedded_exc:
                 raise GenerationError(
@@ -304,6 +310,7 @@ class CoverGenerator(ICoverGenerator):
 
                     self._apply_bindings(bindings, data, read_cell, write_cell)
                     self._suppress_cover_error_indicators_via_com(worksheet)
+                    self._refresh_cover_ole_preview_in_open_doc(doc)
                     self._com_call_with_retry(doc.Save, "Document.Save")
                 finally:
                     ws = None
@@ -321,6 +328,101 @@ class CoverGenerator(ICoverGenerator):
                     if pythoncom is not None:
                         with contextlib.suppress(Exception):
                             pythoncom.CoUninitialize()
+
+    def _refresh_cover_ole_preview_via_com(self, output_path: Path) -> None:
+        pythoncom = None
+        try:
+            import pythoncom  # type: ignore[import]
+            import win32com.client
+        except ImportError as exc:
+            raise GenerationError("缺少 pywin32，无法刷新封面 OLE 预览") from exc
+
+        word = None
+        doc = None
+        limiter = get_office_automation_limiter()
+        with limiter.word_session():
+            with limiter.excel_session():
+                try:
+                    pythoncom.CoInitialize()
+                    word = win32com.client.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    doc = word.Documents.Open(str(output_path.absolute()))
+                    time.sleep(1.0)
+                    self._refresh_cover_ole_preview_in_open_doc(doc)
+                    self._com_call_with_retry(doc.Save, "Document.Save")
+                finally:
+                    if doc is not None:
+                        doc_obj = doc
+                        self._mark_document_saved(doc)
+                        self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
+                    doc = None
+                    if word is not None:
+                        self._close_all_word_documents(word, keep=doc)
+                        self._mark_normal_template_saved(word)
+                        self._close_com_object(word.Quit, "Word.Quit")
+                    word = None
+                    gc.collect()
+                    if pythoncom is not None:
+                        with contextlib.suppress(Exception):
+                            pythoncom.CoUninitialize()
+
+    def _refresh_cover_ole_preview_in_open_doc(self, doc: Any) -> None:
+        refreshed = False
+        for collection_name in ("InlineShapes", "Shapes"):
+            collection = getattr(doc, collection_name, None)
+            if collection is None:
+                continue
+            collection_obj = collection
+            try:
+                count = int(
+                    self._com_call_with_retry(
+                        lambda collection_obj=collection_obj: collection_obj.Count,
+                        f"{collection_name}.Count",
+                    )
+                )
+            except Exception:
+                continue
+
+            for idx in range(1, count + 1):
+                try:
+                    shape = self._com_call_with_retry(
+                        lambda collection_obj=collection_obj, idx=idx: collection_obj.Item(idx),
+                        f"{collection_name}.Item({idx})",
+                    )
+                    ole_format = self._com_call_with_retry(
+                        lambda shape=shape: shape.OLEFormat,
+                        f"{collection_name}.Item({idx}).OLEFormat",
+                    )
+                    with contextlib.suppress(Exception):
+                        self._com_call_with_retry(
+                            lambda ole_format=ole_format: ole_format.DoVerb(0),
+                            f"{collection_name}.Item({idx}).OLEFormat.DoVerb(0)",
+                            retries=2,
+                        )
+                    self._com_call_with_retry(
+                        ole_format.Activate,
+                        f"{collection_name}.Item({idx}).OLEFormat.Activate",
+                    )
+                    time.sleep(0.8)
+                    ole_obj = self._com_call_with_retry(
+                        lambda ole_format=ole_format: ole_format.Object,
+                        f"{collection_name}.Item({idx}).OLEFormat.Object",
+                    )
+                except Exception:
+                    continue
+
+                sheet = self._to_excel_sheet(ole_obj)
+                if sheet is None:
+                    continue
+                self._suppress_cover_error_indicators_via_com(sheet)
+                refreshed = True
+
+        if not refreshed:
+            raise GenerationError("未找到可刷新的封面 OLE 对象")
+
+        with contextlib.suppress(Exception):
+            self._com_call_with_retry(doc.Fields.Update, "Document.Fields.Update", retries=2)
 
     def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
         for collection_name in ("InlineShapes", "Shapes"):

@@ -872,7 +872,8 @@ titleblock_extract:
     CNPE_A1H:      { W: 594.0,  H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1,竖向打印 }
     CNPE_A2:       { W: 594.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2 }
     CNPE_A2H:      { W: 420.0,  H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2,竖向打印 }
-    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5 }
+    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5, 打印PDF3.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
+    CNPE_A2+0.5:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5, 打印PDF3.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
     # 小图幅（使用 SMALL5 ROI profile）
     CNPE_A3:       { W: 420.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A3 }
     CNPE_A4:       { W: 210.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A4,竖向打印 }
