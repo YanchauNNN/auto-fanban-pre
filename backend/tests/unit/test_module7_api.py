@@ -408,6 +408,19 @@ def _configure_api_env(monkeypatch, tmp_path: Path) -> None:
     reload_config()
 
 
+def _authenticate_test_client(client: TestClient, account_id: str = "hbjjswd") -> None:
+    response = client.post("/api/auth/login", json={"account_id": account_id, "password": "password"})
+    assert response.status_code == 200
+    client.headers.update({"Authorization": f"Bearer {response.json()['token']}"})
+
+
+class AuthenticatedTestClient(TestClient):
+    def __enter__(self):
+        client = super().__enter__()
+        _authenticate_test_client(client)
+        return client
+
+
 def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=None) -> TestClient:
     _configure_api_env(monkeypatch, tmp_path)
     repo_root = Path(__file__).resolve().parents[3]
@@ -419,7 +432,7 @@ def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=Non
         job_processor=processor or FakeJobProcessor(),
         font_preflight_service=cast(Any, font_service),
     )
-    return TestClient(app)
+    return AuthenticatedTestClient(app)
 
 
 def _deliverable_params() -> dict[str, str]:
@@ -1474,7 +1487,7 @@ def test_create_audit_replace_with_deliverable_runs_replace_before_deliverable(
 
     params = _deliverable_params()
     params.pop("project_no")
-    with TestClient(
+    with AuthenticatedTestClient(
         create_app(
             job_processor=ReplaceThenDeliverableProcessor(),
             shared_prep_service=FakeSharedPrepService(),
@@ -1714,7 +1727,7 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         sys.path.insert(0, str(repo_root))
     from API.app.main import create_app
 
-    with TestClient(
+    with AuthenticatedTestClient(
         create_app(
             job_processor=FakeJobProcessor(),
             shared_prep_service=FakeSharedPrepService(),
@@ -1810,7 +1823,7 @@ def test_grouped_batches_can_run_children_concurrently(
     params["album_title_en"] = "Example Album"
     params["unit_no"] = "1"
 
-    with TestClient(
+    with AuthenticatedTestClient(
         create_app(
             job_processor=processor,
             shared_prep_service=FakeSharedPrepService(),
@@ -1894,7 +1907,7 @@ def test_multi_file_batch_keeps_backlog_visible_until_worker_capacity_frees(
     from API.app.main import create_app
 
     processor = SlowTrackingProcessor()
-    with TestClient(
+    with AuthenticatedTestClient(
         create_app(
             job_processor=processor,
             font_preflight_service=cast(Any, FakeFontPreflightService()),
@@ -1986,7 +1999,7 @@ def test_slot_bound_phase_allows_next_wave_to_start_before_docs_finish(
     from API.app.main import create_app
 
     processor = PhaseAwareProcessor()
-    with TestClient(create_app(job_processor=processor)) as client:
+    with AuthenticatedTestClient(create_app(job_processor=processor)) as client:
         response = client.post(
             "/api/jobs/batch",
             data={"params_json": json.dumps(_deliverable_params(), ensure_ascii=False)},
@@ -2068,7 +2081,7 @@ def test_grouped_batch_keeps_pending_groups_in_external_queue(
     from API.app.main import create_app
 
     processor = SlowTrackingProcessor()
-    with TestClient(
+    with AuthenticatedTestClient(
         create_app(
             job_processor=processor,
             shared_prep_service=FakeSharedPrepService(),
@@ -2138,7 +2151,7 @@ def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -
         encoding="utf-8",
     )
 
-    with TestClient(create_app(job_processor=FakeJobProcessor())) as client:
+    with AuthenticatedTestClient(create_app(job_processor=FakeJobProcessor())) as client:
         response = client.get(f"/api/jobs/{stale_job.job_id}")
 
     assert response.status_code == 200

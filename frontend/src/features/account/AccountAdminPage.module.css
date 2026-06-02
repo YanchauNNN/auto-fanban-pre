@@ -1,9 +1,10 @@
 .page {
   position: relative;
   isolation: isolate;
-  max-width: 1280px;
+  width: 100%;
+  max-width: none;
   min-height: 0;
-  margin: 0 auto;
+  margin: 0;
   padding: 0.8rem;
   color: #10243d;
 }
@@ -37,6 +38,7 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
+  width: min(1280px, 100%);
   margin-bottom: 0.65rem;
 }
 
@@ -78,7 +80,13 @@
   display: grid;
   grid-template-columns: minmax(18rem, 0.78fr) minmax(30rem, 1.22fr);
   gap: 0.7rem;
+  width: min(1280px, 100%);
   margin-bottom: 0.7rem;
+}
+
+.page > .feedbackSuccess,
+.page > .feedbackError {
+  width: min(1280px, 100%);
 }
 
 .panel,

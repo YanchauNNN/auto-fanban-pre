@@ -259,8 +259,11 @@ function makeSingleJob(index: number, sourceFilename: string) {
 }
 
 function makeTaskGroup(index: number, sourceFilename: string, status = "succeeded") {
+  const displayName = sourceFilename.replace(/\.[^.\\/]+$/, "");
   return {
     groupId: `group-${index}`,
+    displayName,
+    albumInternalCode: displayName,
     batchId: `batch-${index}`,
     projectNo: "2026",
     status,
@@ -550,14 +553,31 @@ describe("recent jobs area", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("task-group-ready.dwg")).toBeInTheDocument();
-    expect(screen.getByText("task-group-draft.dwg")).toBeInTheDocument();
+    expect(await screen.findByText("task-group-ready")).toBeInTheDocument();
+    expect(screen.getByText("task-group-draft")).toBeInTheDocument();
     expect(screen.getAllByText("任务包").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "查看任务包" })[0]).toHaveAttribute(
       "href",
       "/task-groups/group-2",
     );
     expect(mockListTaskGroups).toHaveBeenCalled();
+  });
+
+  it("keeps standalone upload jobs visible when the task-group API is available", async () => {
+    exposeTaskGroupApis = true;
+    mockListTaskGroups.mockResolvedValue({
+      total: 0,
+      items: [],
+    });
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [makeSingleJob(1, "new-upload.dwg")],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("new-upload.dwg")).toBeInTheDocument();
+    expect(screen.queryByText("当前没有任务记录。")).not.toBeInTheDocument();
   });
 
   it("filters recent jobs by status and refreshes totals from the backend", async () => {

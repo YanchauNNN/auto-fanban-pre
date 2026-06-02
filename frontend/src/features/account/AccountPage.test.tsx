@@ -56,6 +56,8 @@ beforeEach(() => {
     entries: [
       {
         groupId: "group-1",
+        groupDisplayName: "2016-JG001",
+        albumInternalCode: "2016-JG001",
         roleKey: "initiator",
         accountId: "wangdd",
         displayName: "王丹丹",
@@ -86,7 +88,8 @@ describe("AccountPage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("3.50").length).toBeGreaterThanOrEqual(1);
     });
-    expect(screen.getByText("group-1")).toBeInTheDocument();
+    expect(screen.getByText("2016-JG001")).toBeInTheDocument();
+    expect(screen.queryByText("group-1")).not.toBeInTheDocument();
   });
 
   it("changes the current user's password", async () => {

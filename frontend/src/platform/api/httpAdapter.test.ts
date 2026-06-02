@@ -276,6 +276,70 @@ describe("HttpAdapter", () => {
     expect(jobs.items).toHaveLength(0);
   });
 
+  it("maps owner snapshot fields in job summaries", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 1,
+          items: [
+            {
+              job_id: "job-owned-1",
+              batch_id: "batch-owned-1",
+              source_filename: "owned.dwg",
+              task_kind: "deliverable",
+              job_mode: "deliverable",
+              project_no: "2016",
+              status: "succeeded",
+              stage: "DONE",
+              percent: 100,
+              message: "done",
+              created_at: "2026-06-01T10:00:00+08:00",
+              finished_at: "2026-06-01T10:01:00+08:00",
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              owner_snapshot: {
+                creator_account: "zhangsan",
+                creator_name: "张三",
+                creator_role: "设计人员",
+                creator_office: "结构一室",
+                created_by_scope: "current_login_user",
+                submitted_at: null,
+              },
+              creator_account: "zhangsan",
+              creator_name: "张三",
+              creator_office: "结构一室",
+              artifacts: {
+                package_available: true,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const jobs = await adapter.listJobs();
+
+    expect(jobs.items[0]).toMatchObject({
+      creatorAccount: "zhangsan",
+      creatorName: "张三",
+      creatorOffice: "结构一室",
+      ownerSnapshot: {
+        creatorAccount: "zhangsan",
+        creatorName: "张三",
+        creatorRole: "设计人员",
+        creatorOffice: "结构一室",
+        createdByScope: "current_login_user",
+        submittedAt: null,
+      },
+    });
+  });
+
   it("maps failure display fields in job summaries", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

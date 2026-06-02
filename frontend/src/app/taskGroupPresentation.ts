@@ -1,4 +1,4 @@
-import type { TaskGroupSummary } from "../platform/api/types";
+import type { TaskGroupSummary, WorkloadScopeEntry } from "../platform/api/types";
 
 export type TaskGroupCardModel = {
   key: string;
@@ -32,7 +32,7 @@ export function buildTaskGroupCardModels(
 ): TaskGroupCardModel[] {
   return [...items]
     .map((item) => {
-      const title = item.sourceFilenames[0] ?? item.groupId;
+      const title = getTaskGroupDisplayTitle(item);
       return {
         key: item.groupId,
         groupId: item.groupId,
@@ -63,6 +63,23 @@ export function getWorkflowStatusLabel(status: string, labels: TaskGroupPresenta
   return labels.workflowStatusLabels?.[status] ?? status;
 }
 
+export function getTaskGroupDisplayTitle(
+  item: Pick<TaskGroupSummary, "displayName" | "albumInternalCode" | "sourceFilenames" | "groupId">,
+) {
+  return (
+    cleanTitle(item.displayName) ??
+    cleanTitle(item.albumInternalCode) ??
+    firstSourceStem(item.sourceFilenames) ??
+    item.groupId
+  );
+}
+
+export function getWorkloadEntryDisplayTitle(
+  entry: Pick<WorkloadScopeEntry, "groupDisplayName" | "albumInternalCode" | "groupId">,
+) {
+  return cleanTitle(entry.groupDisplayName) ?? cleanTitle(entry.albumInternalCode) ?? entry.groupId;
+}
+
 export function getArchiveStatusLabel(status: string, labels: TaskGroupPresentationLabels = {}) {
   return labels.archiveStatusLabels?.[status] ?? status;
 }
@@ -76,4 +93,19 @@ export function getCurrentNodeLabel(nodeKey: string | null, labels: TaskGroupPre
 
 function formatEffectiveWorkload(value: number) {
   return value.toFixed(2);
+}
+
+function firstSourceStem(sourceFilenames: readonly string[]) {
+  for (const filename of sourceFilenames) {
+    const title = cleanTitle(filename.replace(/\.[^.\\/]+$/, ""));
+    if (title) {
+      return title;
+    }
+  }
+  return null;
+}
+
+function cleanTitle(value: string | null | undefined) {
+  const title = String(value ?? "").trim();
+  return title || null;
 }

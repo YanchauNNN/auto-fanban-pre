@@ -175,6 +175,8 @@ def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch
         assert payload["can_submit"] is False
         assert payload["can_approve"] is True
         assert payload["is_related_to_current_user"] is True
+        assert payload["album_internal_code"] == "2016-JG001"
+        assert payload["display_name"] == "2016-JG001"
         assert payload["creator_name"] == "张三"
         assert payload["effective_workload"] == payload["workload"]["initial_workload_a1"]
 
@@ -186,6 +188,7 @@ def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch
         monitor_item = monitor.json()["items"][0]
         assert monitor_item["can_approve"] is True
         assert monitor_item["current_node_key"] == "one_review"
+        assert monitor_item["display_name"] == "2016-JG001"
 
 
 def test_workflow_approve_requires_matching_node_key_when_provided(monkeypatch, tmp_path) -> None:
@@ -257,6 +260,7 @@ def test_jobs_batch_grouped_submission_binds_owner_snapshot_from_login(monkeypat
                 "params_json": json.dumps(
                     {
                         "project_no": "2016",
+                        "unit_no": "1",
                         "classification": "非密",
                         "subitem_name": "测试子项",
                         "album_title_cn": "测试图册",
@@ -289,6 +293,115 @@ def test_jobs_batch_grouped_submission_binds_owner_snapshot_from_login(monkeypat
         assert group.owner_snapshot is not None
         assert group.owner_snapshot.creator_account == "zhangsan"
         assert group.owner_snapshot.creator_name == "张三"
+
+
+def test_jobs_batch_plain_submission_binds_owner_snapshot_from_login(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        runtime = cast(Any, client.app).state.runtime
+        monkeypatch.setattr(runtime, "_enqueue_job", lambda job_id: None)
+
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(
+                    {
+                        "project_no": "2016",
+                        "unit_no": "1",
+                        "classification": "闈炲瘑",
+                        "subitem_name": "娴嬭瘯瀛愰」",
+                        "album_title_cn": "娴嬭瘯鍥惧唽",
+                        "wbs_code": "WBS-001",
+                        "file_category": "1 鎬讳綋鏂囦欢",
+                        "ied_status": "缂栧埗",
+                        "ied_doc_type": "鍥惧唽",
+                        "cover_variant": "閫氱敤",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files={"files[]": ("plain.dwg", b"dwg", "application/acad")},
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["jobs"][0]["job_id"]
+        job = runtime.job_manager.get_job(job_id)
+        assert job is not None
+        assert job.owner_snapshot is not None
+        assert job.owner_snapshot.creator_account == "zhangsan"
+
+
+def test_jobs_list_requires_login_and_filters_by_owner_scope(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        runtime = cast(Any, client.app).state.runtime
+        registry = client.app.state.management.account_registry
+        zhangsan = registry.to_snapshot("zhangsan")
+        lisi = registry.to_snapshot("lisi")
+
+        own_job = runtime.job_manager.create_job(
+            job_type="deliverable",
+            project_no="2016",
+            source_filename="own.dwg",
+            creator_snapshot=zhangsan,
+        )
+        office_job = runtime.job_manager.create_job(
+            job_type="deliverable",
+            project_no="2016",
+            source_filename="office.dwg",
+            creator_snapshot=lisi,
+        )
+        legacy_job = runtime.job_manager.create_job(
+            job_type="deliverable",
+            project_no="2016",
+            source_filename="legacy.dwg",
+        )
+
+        assert client.get("/api/jobs").status_code == 401
+
+        zhangsan_jobs = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+        assert zhangsan_jobs.status_code == 200
+        assert [item["job_id"] for item in zhangsan_jobs.json()["items"]] == [own_job.job_id]
+
+        lisi_jobs = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {_login(client, 'lisi')}"},
+        )
+        assert lisi_jobs.status_code == 200
+        assert {item["job_id"] for item in lisi_jobs.json()["items"]} == {
+            own_job.job_id,
+            office_job.job_id,
+        }
+
+        admin_jobs = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {_login(client, 'admin')}"},
+        )
+        assert admin_jobs.status_code == 200
+        assert {item["job_id"] for item in admin_jobs.json()["items"]} == {
+            own_job.job_id,
+            office_job.job_id,
+            legacy_job.job_id,
+        }
+
+        forbidden_detail = client.get(
+            f"/api/jobs/{office_job.job_id}",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+        assert forbidden_detail.status_code == 403
+
+        visible_detail = client.get(
+            f"/api/jobs/{office_job.job_id}",
+            headers={"Authorization": f"Bearer {_login(client, 'lisi')}"},
+        )
+        assert visible_detail.status_code == 200
+        assert visible_detail.json()["creator_account"] == "lisi"
 
 
 def test_task_group_submit_blocks_archive_conflict_without_explicit_overwrite(monkeypatch, tmp_path) -> None:

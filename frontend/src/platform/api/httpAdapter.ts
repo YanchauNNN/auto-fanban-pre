@@ -86,6 +86,10 @@ type RawJobSummary = {
   is_group?: boolean;
   source_filename?: string | null;
   source_filenames?: string[] | null;
+  owner_snapshot?: RawTaskOwnerSnapshot | null;
+  creator_name?: string | null;
+  creator_account?: string | null;
+  creator_office?: string | null;
   task_kind?: "deliverable" | "audit_check" | "audit_replace" | null;
   job_mode?: string | null;
   project_no: string | null;
@@ -303,6 +307,8 @@ type RawWorkloadScopeEntry = {
   workload_a1?: number | null;
   settled_at?: string | null;
   group_id?: string | null;
+  group_display_name?: string | null;
+  album_internal_code?: string | null;
   settlement_status?: string | null;
 };
 
@@ -445,6 +451,8 @@ type RawLegacyVisibilityState = {
 
 type RawTaskGroupSummary = {
   group_id: string;
+  display_name?: string | null;
+  album_internal_code?: string | null;
   batch_id?: string | null;
   project_no?: string | null;
   status?: string | null;
@@ -996,6 +1004,10 @@ export class HttpAdapter implements ApiAdapter {
       groupId: payload.group_id ?? null,
       sourceFilename,
       sourceFilenames: payload.source_filenames ?? [sourceFilename],
+      ownerSnapshot: this.normalizeTaskOwnerSnapshot(payload.owner_snapshot),
+      creatorName: payload.creator_name ?? null,
+      creatorAccount: payload.creator_account ?? null,
+      creatorOffice: payload.creator_office ?? null,
       taskKind: payload.task_kind ?? null,
       jobMode: payload.job_mode ?? null,
       projectNo: payload.project_no,
@@ -1336,6 +1348,8 @@ export class HttpAdapter implements ApiAdapter {
   private normalizeTaskGroupSummary(payload: RawTaskGroupSummary): TaskGroupSummary {
     return {
       groupId: payload.group_id,
+      displayName: payload.display_name ?? null,
+      albumInternalCode: payload.album_internal_code ?? null,
       batchId: payload.batch_id ?? null,
       projectNo: payload.project_no ?? null,
       status: payload.status ?? "queued",
@@ -1574,6 +1588,8 @@ export class HttpAdapter implements ApiAdapter {
         workloadA1: entry.workload_a1 ?? 0,
         settledAt: entry.settled_at ?? null,
         groupId: entry.group_id ?? "",
+        groupDisplayName: entry.group_display_name ?? null,
+        albumInternalCode: entry.album_internal_code ?? null,
         settlementStatus: entry.settlement_status ?? "pending",
       })),
     };

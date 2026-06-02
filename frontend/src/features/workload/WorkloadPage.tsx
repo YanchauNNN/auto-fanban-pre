@@ -4,6 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import {
   getCurrentNodeLabel,
+  getTaskGroupDisplayTitle,
+  getWorkloadEntryDisplayTitle,
   getWorkflowStatusLabel,
   type TaskGroupPresentationLabels,
 } from "../../app/taskGroupPresentation";
@@ -471,7 +473,7 @@ export function WorkloadPage() {
                 <article className={styles[`monitorCard${capitalize(tone)}`]} key={item.groupId}>
                   <div className={styles.monitorHeader}>
                     <div>
-                      <strong>{item.sourceFilenames[0] ?? item.groupId}</strong>
+                      <strong>{getTaskGroupDisplayTitle(item)}</strong>
                       <p className={styles.monitorHint}>{getMonitorHint(item)}</p>
                     </div>
                     <span className={styles.monitorBadge}>
@@ -651,7 +653,7 @@ export function WorkloadPage() {
             </div>
 
             <p className={styles.modalDescription}>
-              {`${approvalTarget.sourceFilenames[0] ?? approvalTarget.groupId} 当前处于 ${getCurrentNodeLabel(
+              {`${getTaskGroupDisplayTitle(approvalTarget)} 当前处于 ${getCurrentNodeLabel(
                 approvalTarget.currentNodeKey,
                 taskGroupPresentationLabels,
               )}。`}
@@ -710,7 +712,7 @@ export function WorkloadPage() {
             </div>
 
             <p className={styles.modalDescription}>
-              {`${repairTarget.sourceFilenames[0] ?? repairTarget.groupId} 当前卡在 ${getCurrentNodeLabel(
+              {`${getTaskGroupDisplayTitle(repairTarget)} 当前卡在 ${getCurrentNodeLabel(
                 repairTarget.currentNodeKey,
                 taskGroupPresentationLabels,
               )}，请选择修复方式。`}
@@ -903,7 +905,7 @@ function HistoryPanel({
           {entries.map((entry) => (
             <article className={styles.historyCard} key={`${entry.groupId}-${entry.roleKey}`}>
               <div className={styles.historyCardHeader}>
-                <strong>{entry.groupId}</strong>
+                <strong>{getWorkloadEntryDisplayTitle(entry)}</strong>
                 <span>{formatWorkload(entry.workloadA1)}</span>
               </div>
               <div className={styles.historyCardMeta}>

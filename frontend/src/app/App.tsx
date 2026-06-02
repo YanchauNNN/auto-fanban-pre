@@ -71,6 +71,7 @@ import {
   buildTaskGroupCardModels,
   getArchiveStatusLabel,
   getCurrentNodeLabel,
+  getTaskGroupDisplayTitle,
   getWorkflowStatusLabel,
   type TaskGroupCardModel,
   type TaskGroupPresentationLabels,
@@ -89,6 +90,20 @@ const HEALTH_REFETCH_INTERVAL_MS = 20000;
 const HEALTH_RETRY_COUNT = 1;
 const HEALTH_STALE_TIME_MS = 10000;
 
+type RecentRecordCard =
+  | {
+      kind: "task-group";
+      key: string;
+      createdAt: string;
+      card: TaskGroupCardModel;
+    }
+  | {
+      kind: "job";
+      key: string;
+      createdAt: string;
+      card: JobCardModel;
+    };
+
 function buildTaskGroupPresentationLabels(
   management: ManagementSchema | undefined,
 ): TaskGroupPresentationLabels {
@@ -98,6 +113,34 @@ function buildTaskGroupPresentationLabels(
     nodeLabels: management?.workflow.nodeLabels ?? {},
     emptyCurrentNodeLabel: management?.workflow.emptyCurrentNodeLabel ?? "",
   };
+}
+
+function isStandaloneJobRecord(job: JobSummary) {
+  return !job.isGroup && !job.groupId;
+}
+
+function buildRecentRecordCards(
+  taskGroupCards: readonly TaskGroupCardModel[],
+  jobCards: readonly JobCardModel[],
+): RecentRecordCard[] {
+  return [
+    ...taskGroupCards.map((card) => ({
+      kind: "task-group" as const,
+      key: `task-group:${card.key}`,
+      createdAt: card.createdAt,
+      card,
+    })),
+    ...jobCards.map((card) => ({
+      kind: "job" as const,
+      key: `job:${card.key}`,
+      createdAt: card.summary.createdAt,
+      card,
+    })),
+  ].sort((left, right) => {
+    const leftTime = Date.parse(left.createdAt) || 0;
+    const rightTime = Date.parse(right.createdAt) || 0;
+    return rightTime - leftTime;
+  });
 }
 
 const DeliverableWorkspace = lazy(async () => ({
@@ -322,6 +365,8 @@ const TUTORIAL_GROUP_SUMMARY: JobSummary = {
 
 const TUTORIAL_TASK_GROUP_SUMMARY: TaskGroupSummary = {
   groupId: TUTORIAL_GROUP_JOB_ID,
+  displayName: "18185NE-JGS11",
+  albumInternalCode: "18185NE-JGS11",
   batchId: "tutorial-batch",
   projectNo: TUTORIAL_SAMPLE_PROJECT,
   status: "succeeded",
@@ -1085,7 +1130,6 @@ function WorkspacePage() {
   const jobsQuery = useQuery({
     queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
     queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
-    enabled: !taskGroupsSupported,
     placeholderData: (previous) => previous,
     refetchInterval: (query) => {
       const items = (query.state.data as JobList | undefined)?.items ?? [];
@@ -1107,6 +1151,13 @@ function WorkspacePage() {
   const jobCards = useMemo(
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
     [jobsQuery.data?.items],
+  );
+  const standaloneJobCards = useMemo(
+    () =>
+      taskGroupsSupported
+        ? buildJobCardModels((jobsQuery.data?.items ?? []).filter(isStandaloneJobRecord))
+        : [],
+    [jobsQuery.data?.items, taskGroupsSupported],
   );
   const taskGroupPresentationLabels = useMemo(
     () => buildTaskGroupPresentationLabels(schemaQuery.data?.management),
@@ -1143,24 +1194,45 @@ function WorkspacePage() {
       card.searchText.includes(normalizedRecentJobsSearch),
     );
   }, [normalizedRecentJobsSearch, statusFilteredTaskGroupCards]);
+  const filteredStandaloneJobCards = useMemo(() => {
+    if (!normalizedRecentJobsSearch) {
+      return standaloneJobCards;
+    }
+
+    return standaloneJobCards.filter((card) =>
+      card.title.toLowerCase().includes(normalizedRecentJobsSearch),
+    );
+  }, [normalizedRecentJobsSearch, standaloneJobCards]);
+  const combinedRecentRecordCards = useMemo(
+    () => buildRecentRecordCards(filteredTaskGroupCards, filteredStandaloneJobCards),
+    [filteredStandaloneJobCards, filteredTaskGroupCards],
+  );
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
     : taskGroupsSupported
-      ? Math.max(filteredTaskGroupCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0)
+      ? Math.max(combinedRecentRecordCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0)
       : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
-  const visibleTaskGroupCards = normalizedRecentJobsSearch
-    ? filteredTaskGroupCards
-    : filteredTaskGroupCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
+  const visibleRecentRecordCards = normalizedRecentJobsSearch
+    ? combinedRecentRecordCards
+    : combinedRecentRecordCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
   const tutorialShowsRecordPreview = tutorialStep?.id === "record" || tutorialStep?.id === "detail";
   const displayedJobCards = tutorialShowsRecordPreview
     ? [TUTORIAL_RECORD_CARD, ...visibleJobCards]
     : visibleJobCards;
-  const displayedTaskGroupCards = tutorialShowsRecordPreview
-    ? [TUTORIAL_TASK_GROUP_RECORD_CARD, ...visibleTaskGroupCards]
-    : visibleTaskGroupCards;
+  const displayedRecentRecordCards = tutorialShowsRecordPreview
+    ? [
+        {
+          kind: "task-group" as const,
+          key: `tutorial:${TUTORIAL_TASK_GROUP_RECORD_CARD.key}`,
+          createdAt: TUTORIAL_TASK_GROUP_RECORD_CARD.createdAt,
+          card: TUTORIAL_TASK_GROUP_RECORD_CARD,
+        },
+        ...visibleRecentRecordCards,
+      ]
+    : visibleRecentRecordCards;
 
   useEffect(() => {
     if (normalizedRecentJobsSearch) {
@@ -1713,8 +1785,23 @@ function WorkspacePage() {
 
                 <div className={styles.jobsGrid}>
                   {taskGroupsSupported ? (
-                    displayedTaskGroupCards.length > 0 ? (
-                      displayedTaskGroupCards.map((card) => {
+                    displayedRecentRecordCards.length > 0 ? (
+                      displayedRecentRecordCards.map((record) => {
+                        if (record.kind === "job") {
+                          return (
+                            <JobCard
+                              adapter={adapter}
+                              card={record.card}
+                              highlighted={Boolean(
+                                record.card.summary.batchId &&
+                                  record.card.summary.batchId === highlightedBatchId,
+                              )}
+                              key={record.key}
+                            />
+                          );
+                        }
+
+                        const card = record.card;
                         const isTutorialRecordCard = card.key === TUTORIAL_TASK_GROUP_RECORD_CARD.key;
                         const node = (
                           <TaskGroupCard
@@ -1725,7 +1812,7 @@ function WorkspacePage() {
                                 card.summary.batchId === highlightedBatchId,
                             )}
                             isSubmitting={!isTutorialRecordCard && taskGroupSubmittingId === card.groupId}
-                            key={card.key}
+                            key={record.key}
                             onOpenWorkload={() => setActiveModule("workload")}
                             onSubmit={isTutorialRecordCard ? undefined : handleTaskGroupSubmit}
                           />
@@ -1739,7 +1826,7 @@ function WorkspacePage() {
                           <div
                             data-testid="tutorial-record-preview"
                             data-tutorial-target={tutorialStep?.id === "record" ? "record" : undefined}
-                            key={card.key}
+                            key={record.key}
                           >
                             {node}
                           </div>
@@ -1849,6 +1936,7 @@ function WorkspacePage() {
           refreshState={jobsRefreshState}
           searchValue={recentJobsSearch}
           taskGroupCards={taskGroupsSupported ? filteredTaskGroupCards : undefined}
+          standaloneJobCards={taskGroupsSupported ? filteredStandaloneJobCards : undefined}
           onClose={() => setAllJobsModalOpen(false)}
           onFilterChange={setJobsStatusFilter}
           onOpenWorkload={() => {
@@ -1957,6 +2045,7 @@ function JobsBrowserModal({
   refreshState,
   searchValue,
   taskGroupCards,
+  standaloneJobCards,
   onFilterChange,
   onOpenWorkload,
   onRefresh,
@@ -1968,13 +2057,14 @@ function JobsBrowserModal({
   refreshState: "idle" | "refreshing" | "done";
   searchValue: string;
   taskGroupCards?: TaskGroupCardModel[];
+  standaloneJobCards?: JobCardModel[];
   onFilterChange: (value?: string) => void;
   onOpenWorkload: () => void;
   onRefresh: () => void;
   onSearchChange: (value: string) => void;
   onClose: () => void;
 }) {
-  const usingTaskGroups = Boolean(taskGroupCards);
+  const usingTaskGroups = Boolean(taskGroupCards || standaloneJobCards);
   const modalJobsQuery = useInfiniteQuery({
     queryKey: ["jobs-browser", filterValue ?? "__all__"],
     initialPageParam: 0,
@@ -2012,6 +2102,23 @@ function JobsBrowserModal({
 
     return taskGroupCards.filter((card) => card.searchText.includes(normalizedSearchValue));
   }, [normalizedSearchValue, taskGroupCards]);
+  const visibleStandaloneJobCards = useMemo(() => {
+    if (!standaloneJobCards) {
+      return [];
+    }
+
+    if (!normalizedSearchValue) {
+      return standaloneJobCards;
+    }
+
+    return standaloneJobCards.filter((card) =>
+      card.title.toLowerCase().includes(normalizedSearchValue),
+    );
+  }, [normalizedSearchValue, standaloneJobCards]);
+  const visibleTaskGroupRecords = useMemo(
+    () => buildRecentRecordCards(visibleTaskGroupCards, visibleStandaloneJobCards),
+    [visibleStandaloneJobCards, visibleTaskGroupCards],
+  );
   const totalJobs = modalJobsQuery.data?.pages[0]?.total ?? 0;
   const remainingJobs = Math.max(totalJobs - loadedJobs.length, 0);
 
@@ -2101,16 +2208,25 @@ function JobsBrowserModal({
 
         <div className={styles.jobsModalBody}>
           {usingTaskGroups ? (
-            visibleTaskGroupCards.length > 0 ? (
-              visibleTaskGroupCards.map((card) => (
-                <TaskGroupCard
-                  card={card}
-                  highlighted={false}
-                  isSubmitting={false}
-                  key={card.key}
-                  onOpenWorkload={onOpenWorkload}
-                />
-              ))
+            visibleTaskGroupRecords.length > 0 ? (
+              visibleTaskGroupRecords.map((record) =>
+                record.kind === "task-group" ? (
+                  <TaskGroupCard
+                    card={record.card}
+                    highlighted={false}
+                    isSubmitting={false}
+                    key={record.key}
+                    onOpenWorkload={onOpenWorkload}
+                  />
+                ) : (
+                  <JobCard
+                    adapter={adapter}
+                    card={record.card}
+                    highlighted={false}
+                    key={record.key}
+                  />
+                ),
+              )
             ) : (
               <div className={styles.emptyPanel}>
                 <p>没有匹配的任务。</p>
@@ -2578,7 +2694,7 @@ function TaskGroupDetailPanel({
     .filter((child): child is JobDetail => Boolean(child));
   const aggregateArtifacts = deriveTaskGroupArtifacts(childDetails);
   const personnelEntries = Object.values(detail.personnelSnapshot.members);
-  const title = detail.sourceFilenames[0] ?? detail.groupId;
+  const title = getTaskGroupDisplayTitle(detail);
 
   return (
     <section className={styles.detailPanel}>

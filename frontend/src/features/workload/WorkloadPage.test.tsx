@@ -65,6 +65,8 @@ function renderWorkloadPage(initialRoute = "/?scope=admin") {
 function makeMonitorItem() {
   return {
     groupId: "group-1",
+    displayName: "2016-JG001",
+    albumInternalCode: "2016-JG001",
     batchId: "batch-1",
     projectNo: "2016",
     status: "running",
@@ -118,6 +120,8 @@ beforeEach(() => {
     entries: [
       {
         groupId: "group-1",
+        groupDisplayName: "2016-JG001",
+        albumInternalCode: "2016-JG001",
         roleKey: "initiator",
         accountId: "zengtj",
         displayName: "曾添君",
@@ -215,7 +219,8 @@ describe("WorkloadPage", () => {
     renderWorkloadPage();
 
     expect(await screen.findByRole("heading", { name: "工作量模块" })).toBeInTheDocument();
-    expect(await screen.findByText("workflow.dwg")).toBeInTheDocument();
+    expect(await screen.findAllByText("2016-JG001")).toHaveLength(2);
+    expect(screen.queryByText("group-1")).not.toBeInTheDocument();
     expect(screen.getByText("2.84")).toBeInTheDocument();
     expect(screen.getAllByText("曾添君").length).toBeGreaterThanOrEqual(1);
 

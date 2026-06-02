@@ -10,6 +10,7 @@ from typing import Any
 from ..config import get_config
 from ..interfaces import IJobManager
 from ..models import Job, JobStatus, JobType
+from ..models.task_group_management import AccountSnapshot, TaskOwnerSnapshot
 
 
 class JobManager(IJobManager):
@@ -31,6 +32,8 @@ class JobManager(IJobManager):
         group_id: str | None = None,
         task_role: str | None = None,
         shared_run_id: str | None = None,
+        creator_snapshot: AccountSnapshot | None = None,
+        owner_snapshot: TaskOwnerSnapshot | None = None,
         **kwargs: Any,
     ) -> Job:
         """Create a new job and persist its initial metadata."""
@@ -42,6 +45,15 @@ class JobManager(IJobManager):
         group_id = kwargs.get("group_id", group_id)
         task_role = kwargs.get("task_role", task_role)
         shared_run_id = kwargs.get("shared_run_id", shared_run_id)
+        creator_snapshot = kwargs.get("creator_snapshot", creator_snapshot)
+        owner_snapshot = kwargs.get("owner_snapshot", owner_snapshot)
+        if owner_snapshot is None and creator_snapshot is not None:
+            owner_snapshot = TaskOwnerSnapshot(
+                creator_account=creator_snapshot.account_id,
+                creator_name=creator_snapshot.display_name,
+                creator_role=creator_snapshot.role,
+                creator_office=creator_snapshot.office_name,
+            )
 
         job_id = str(uuid.uuid4())
 
@@ -54,6 +66,7 @@ class JobManager(IJobManager):
             group_id=group_id,
             task_role=task_role,
             shared_run_id=shared_run_id,
+            owner_snapshot=owner_snapshot,
             input_files=input_files or [],
             options=options or {},
             params=params or {},

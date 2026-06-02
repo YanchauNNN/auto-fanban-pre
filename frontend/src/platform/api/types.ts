@@ -317,6 +317,8 @@ export type WorkloadScopeEntry = {
   workloadA1: number;
   settledAt: string | null;
   groupId: string;
+  groupDisplayName: string | null;
+  albumInternalCode: string | null;
   settlementStatus: string;
 };
 
@@ -331,6 +333,8 @@ export type WorkloadScopeResponse = {
 
 export type TaskGroupSummary = {
   groupId: string;
+  displayName: string | null;
+  albumInternalCode: string | null;
   batchId: string | null;
   projectNo: string | null;
   status: string;
@@ -525,6 +529,10 @@ export type JobSummary = {
   groupId: string | null;
   sourceFilename: string;
   sourceFilenames: string[];
+  ownerSnapshot?: TaskOwnerSnapshot | null;
+  creatorName?: string | null;
+  creatorAccount?: string | null;
+  creatorOffice?: string | null;
   taskKind: TaskKind | null;
   jobMode: string | null;
   projectNo: string | null;

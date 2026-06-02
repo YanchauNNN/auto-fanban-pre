@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .task_group_management import TaskOwnerSnapshot
+
 
 class JobStatus(StrEnum):
     """任务状态枚举"""
@@ -62,6 +64,7 @@ class Job(BaseModel):
     group_id: str | None = None
     task_role: str | None = None
     shared_run_id: str | None = None
+    owner_snapshot: TaskOwnerSnapshot | None = None
 
     # ????
     slot_id: str | None = None

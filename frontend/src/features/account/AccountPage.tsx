@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 
+import { getWorkloadEntryDisplayTitle } from "../../app/taskGroupPresentation";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
 import { useSession } from "../../shared/session/SessionContext";
 import styles from "./AccountPage.module.css";
@@ -184,7 +185,7 @@ export function AccountPage() {
                     {recentEntries.map((entry) => (
                       <article className={styles.entryCard} key={`${entry.groupId}-${entry.roleKey}`}>
                         <div className={styles.entryHeader}>
-                          <strong>{entry.groupId}</strong>
+                          <strong>{getWorkloadEntryDisplayTitle(entry)}</strong>
                           <span>{formatWorkload(entry.workloadA1)}</span>
                         </div>
                         <div className={styles.entryMeta}>
