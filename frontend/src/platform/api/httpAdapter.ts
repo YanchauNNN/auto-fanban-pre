@@ -995,6 +995,24 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async readArtifact(url: string): Promise<Blob> {
+    const { blob } = await this.fetchArtifact(url);
+    return blob;
+  }
+
+  async downloadArtifact(url: string, fallbackFilename = "download"): Promise<void> {
+    const { blob, filename } = await this.fetchArtifact(url);
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename ?? this.inferFilenameFromUrl(url) ?? fallbackFilename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   private normalizeSummary(payload: RawJobSummary): JobSummary {
     const sourceFilename = payload.source_filename ?? payload.source_filenames?.[0] ?? payload.job_id;
     return {
@@ -1126,6 +1144,35 @@ export class HttpAdapter implements ApiAdapter {
     }
   }
 
+  private async fetchArtifact(path: string): Promise<{ blob: Blob; filename: string | null }> {
+    const response = await fetch(this.buildUrl(path), this.withAuthorization());
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.onUnauthorized?.();
+      }
+      const text = await response.text();
+      const payload = text ? this.parseJsonOrText(text) : null;
+      const error: ApiError = {
+        status: response.status,
+        detail:
+          payload && typeof payload === "object" && "detail" in payload
+            ? (payload as { detail: ApiError["detail"] }).detail
+            : typeof payload === "string"
+              ? payload
+              : null,
+      };
+      throw error;
+    }
+
+    return {
+      blob: await response.blob(),
+      filename: this.parseContentDispositionFilename(
+        response.headers?.get("Content-Disposition") ?? null,
+      ),
+    };
+  }
+
   private withAuthorization(init?: RequestInit): RequestInit | undefined {
     const accessToken = this.getAccessToken?.();
     if (!accessToken) {
@@ -1163,6 +1210,35 @@ export class HttpAdapter implements ApiAdapter {
       return path;
     }
     return this.buildUrl(path);
+  }
+
+  private parseContentDispositionFilename(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    const encodedMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (encodedMatch?.[1]) {
+      try {
+        return decodeURIComponent(encodedMatch[1]);
+      } catch {
+        return encodedMatch[1];
+      }
+    }
+
+    const quotedMatch = value.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) {
+      return quotedMatch[1];
+    }
+
+    const plainMatch = value.match(/filename=([^;]+)/i);
+    return plainMatch?.[1]?.trim() || null;
+  }
+
+  private inferFilenameFromUrl(url: string) {
+    const normalized = url.split("?")[0]?.split("#")[0] ?? "";
+    const segment = normalized.split("/").filter(Boolean).pop();
+    return segment || null;
   }
 
   private isRetryableError(error: unknown) {

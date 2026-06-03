@@ -75,6 +75,78 @@ describe("HttpAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reads artifact blobs with the current bearer token", async () => {
+    const artifactBlob = new Blob(["report"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => artifactBlob,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
+      getAccessToken: () => "session-token",
+    });
+    const blob = await adapter.readArtifact("/api/jobs/job-1/download/report");
+
+    expect(blob).toBe(artifactBlob);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/job-1/download/report",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+      }),
+    );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer session-token");
+  });
+
+  it("downloads artifacts through an authenticated blob request", async () => {
+    const artifactBlob = new Blob(["report"], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({
+        "Content-Disposition": 'attachment; filename="report.xlsx"',
+      }),
+      blob: async () => artifactBlob,
+    });
+    const anchor = {
+      href: "",
+      download: "",
+      style: { display: "" },
+      click: vi.fn(),
+      remove: vi.fn(),
+    } as unknown as HTMLAnchorElement;
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(document, "createElement").mockReturnValue(anchor);
+    vi.spyOn(document.body, "appendChild").mockImplementation((node) => node);
+    const createObjectURLMock = vi.fn().mockReturnValue("blob:report");
+    const revokeObjectURLMock = vi.fn();
+    URL.createObjectURL = createObjectURLMock;
+    URL.revokeObjectURL = revokeObjectURLMock;
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
+      getAccessToken: () => "session-token",
+    });
+    await adapter.downloadArtifact("/api/jobs/job-1/download/report", "fallback.xlsx");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/job-1/download/report",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+      }),
+    );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer session-token");
+    expect(createObjectURLMock).toHaveBeenCalledWith(artifactBlob);
+    expect(anchor.href).toBe("blob:report");
+    expect(anchor.download).toBe("report.xlsx");
+    expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:report");
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-query";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useDeferredValue,
   useLayoutEffect,
@@ -143,6 +144,22 @@ function buildRecentRecordCards(
   });
 }
 
+function useArtifactDownload(adapter: ApiAdapter): ArtifactDownloadHandler {
+  return useCallback(
+    (url, label) => {
+      if (adapter.downloadArtifact) {
+        void adapter.downloadArtifact(url, label).catch((error: unknown) => {
+          console.error("Failed to download job artifact", error);
+        });
+        return;
+      }
+
+      window.location.href = url;
+    },
+    [adapter],
+  );
+}
+
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
 }));
@@ -187,6 +204,7 @@ type PreviewRequest = {
   title: string;
   url: string;
 };
+type ArtifactDownloadHandler = (url: string, label: string) => void;
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   queued: { label: "排队中", tone: "queued" },
@@ -2510,6 +2528,7 @@ function TutorialGroupDetailPreview() {
       <div className={styles.tutorialDetailPreview} data-tutorial-target="detail">
         <div className={styles.detailPage}>
           <TaskGroupDetailPanel
+            adapter={TUTORIAL_PREVIEW_ADAPTER}
             childDetailsById={childDetailsById}
             detail={TUTORIAL_TASK_GROUP_DETAIL}
           />
@@ -2663,6 +2682,7 @@ function TaskGroupDetailPage() {
         </section>
       ) : detailQuery.data ? (
         <TaskGroupDetailPanel
+          adapter={adapter}
           childDetailsById={childDetailsById}
           detail={detailQuery.data}
           labels={taskGroupPresentationLabels}
@@ -2681,10 +2701,12 @@ function TaskGroupDetailPage() {
 }
 
 function TaskGroupDetailPanel({
+  adapter,
   detail,
   childDetailsById,
   labels = {},
 }: {
+  adapter: ApiAdapter;
   detail: TaskGroupDetail;
   childDetailsById: Map<string, JobDetail>;
   labels?: TaskGroupPresentationLabels;
@@ -2695,6 +2717,7 @@ function TaskGroupDetailPanel({
   const aggregateArtifacts = deriveTaskGroupArtifacts(childDetails);
   const personnelEntries = Object.values(detail.personnelSnapshot.members);
   const title = getTaskGroupDisplayTitle(detail);
+  const handleArtifactDownload = useArtifactDownload(adapter);
 
   return (
     <section className={styles.detailPanel}>
@@ -2772,12 +2795,25 @@ function TaskGroupDetailPanel({
       <section className={styles.quickDownloadSection}>
         <h2>快捷下载</h2>
         <div className={styles.downloadGrid}>
-          <ArtifactButton href={aggregateArtifacts.packageDownloadUrl ?? undefined} label="下载任务包" />
-          <ArtifactButton href={aggregateArtifacts.iedDownloadUrl ?? undefined} label="下载 IED" />
-          <ArtifactButton href={aggregateArtifacts.reportDownloadUrl ?? undefined} label="下载 report.xlsx" />
+          <ArtifactButton
+            href={aggregateArtifacts.packageDownloadUrl ?? undefined}
+            label="下载任务包"
+            onDownload={handleArtifactDownload}
+          />
+          <ArtifactButton
+            href={aggregateArtifacts.iedDownloadUrl ?? undefined}
+            label="下载 IED"
+            onDownload={handleArtifactDownload}
+          />
+          <ArtifactButton
+            href={aggregateArtifacts.reportDownloadUrl ?? undefined}
+            label="下载 report.xlsx"
+            onDownload={handleArtifactDownload}
+          />
           <ArtifactButton
             href={aggregateArtifacts.replacedDwgDownloadUrl ?? undefined}
             label="下载替换后 DWG"
+            onDownload={handleArtifactDownload}
           />
         </div>
       </section>
@@ -2883,7 +2919,7 @@ function JobDetailPage() {
         detail.isGroup ? (
           <GroupDetailPanel adapter={adapter} detail={detail} />
         ) : (
-          <SingleJobDetailPanel detail={detail} hasWarnings={hasWarnings} />
+          <SingleJobDetailPanel adapter={adapter} detail={detail} hasWarnings={hasWarnings} />
         )
       ) : (
         <section className={styles.detailPanel}>
@@ -2895,16 +2931,19 @@ function JobDetailPage() {
 }
 
 function SingleJobDetailPanel({
+  adapter,
   detail,
   hasWarnings,
 }: {
+  adapter: ApiAdapter;
   detail: JobDetail;
   hasWarnings: boolean;
 }) {
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const handleArtifactDownload = useArtifactDownload(adapter);
+  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
 
   return (
     <section className={styles.detailPanel}>
@@ -3029,6 +3068,8 @@ function SingleJobDetailPanel({
           <PreviewPdfModal
             title={previewRequest.title}
             url={previewRequest.url}
+            readArtifact={adapter.readArtifact}
+            onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />
         </Suspense>
@@ -3042,7 +3083,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const handleArtifactDownload = useArtifactDownload(adapter);
+  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -3162,6 +3204,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
           <PreviewPdfModal
             title={previewRequest.title}
             url={previewRequest.url}
+            readArtifact={adapter.readArtifact}
+            onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />
         </Suspense>
@@ -3403,7 +3447,15 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ArtifactButton({ href, label }: { href?: string; label: string }) {
+function ArtifactButton({
+  href,
+  label,
+  onDownload,
+}: {
+  href?: string;
+  label: string;
+  onDownload?: ArtifactDownloadHandler;
+}) {
   if (!href) {
     return (
       <button className={styles.disabledAction} disabled type="button">
@@ -3413,9 +3465,19 @@ function ArtifactButton({ href, label }: { href?: string; label: string }) {
   }
 
   return (
-    <a className={styles.downloadButton} href={href}>
+    <button
+      className={styles.downloadButton}
+      onClick={() => {
+        if (onDownload) {
+          onDownload(href, label);
+          return;
+        }
+        window.location.href = href;
+      }}
+      type="button"
+    >
       {label}
-    </a>
+    </button>
   );
 }
 
@@ -3607,7 +3669,11 @@ function formatUnitOrIslandLabel(unitOrIslandNo: string) {
   return `${normalizedIslandNo}号机组/岛`;
 }
 
-function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: PreviewRequest) => void) {
+function renderArtifactButtons(
+  job: JobSummary,
+  onOpenPreview?: (request: PreviewRequest) => void,
+  onDownload?: ArtifactDownloadHandler,
+) {
   const labels = {
     package: "下载 package.zip",
     ied: "下载 IED计划.xlsx",
@@ -3651,6 +3717,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.previewDownloadUrl}
               key="merged-preview-pdf"
               label="下载合并版PDF"
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -3658,6 +3725,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
         label="下载任务包"
+        onDownload={onDownload}
       />,
       ...(job.artifacts.iedAvailable
         ? [
@@ -3665,6 +3733,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.iedDownloadUrl ?? undefined}
               key="ied"
               label="下载 IED"
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -3672,11 +3741,13 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
         label="下载 report.xlsx"
+        onDownload={onDownload}
       />,
       <ArtifactButton
         href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
         key="replaced-dwg"
         label="下载替换后 DWG"
+        onDownload={onDownload}
       />,
     ];
   }
@@ -3688,6 +3759,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
         label={labels.package}
+        onDownload={onDownload}
       />,
       ...(job.artifacts.iedAvailable
         ? [
@@ -3695,6 +3767,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.iedDownloadUrl ?? undefined}
               key="ied"
               label={labels.ied}
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -3708,6 +3781,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
         label={labels.report}
+        onDownload={onDownload}
       />,
     ];
   }
@@ -3722,11 +3796,13 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
       href={job.artifacts.reportDownloadUrl ?? undefined}
       key="report"
       label={labels.report}
+      onDownload={onDownload}
     />,
     <ArtifactButton
       href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
       key="replaced-dwg"
       label={labels.replacedDwg}
+      onDownload={onDownload}
     />,
   ];
 }

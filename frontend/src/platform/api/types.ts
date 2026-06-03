@@ -697,4 +697,6 @@ export type ApiAdapter = {
   ) => Promise<TaskGroupDetail>;
   listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
+  readArtifact?: (url: string) => Promise<Blob>;
+  downloadArtifact?: (url: string, fallbackFilename?: string) => Promise<void>;
 };

@@ -21,6 +21,8 @@ const mockGetJobDetail = vi.fn();
 const mockListTaskGroups = vi.fn();
 const mockGetTaskGroupDetail = vi.fn();
 const mockSubmitTaskGroup = vi.fn();
+const mockReadArtifact = vi.fn();
+const mockDownloadArtifact = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
@@ -67,6 +69,8 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
+    readArtifact: mockReadArtifact,
+    downloadArtifact: mockDownloadArtifact,
     ...(exposeTaskGroupApis
       ? {
           listTaskGroups: mockListTaskGroups,
@@ -92,6 +96,8 @@ beforeEach(() => {
   mockListTaskGroups.mockReset();
   mockGetTaskGroupDetail.mockReset();
   mockSubmitTaskGroup.mockReset();
+  mockReadArtifact.mockReset();
+  mockDownloadArtifact.mockReset();
   exposeTaskGroupApis = false;
 
   mockPing.mockResolvedValue({
@@ -201,6 +207,10 @@ beforeEach(() => {
     replacementOptions: [],
     requiresConfirmation: false,
   });
+  mockReadArtifact.mockResolvedValue({
+    arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
+  } as Blob);
+  mockDownloadArtifact.mockResolvedValue(undefined);
 
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
@@ -510,7 +520,7 @@ describe("homepage shell", () => {
     expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
     expect(screen.getByText("快捷下载")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
 
@@ -1032,17 +1042,19 @@ describe("job detail pages", () => {
       return Promise.resolve(groupDetail);
     });
 
+    const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
-    const mergedPdfDownload = screen.getByRole("link", { name: "下载合并版PDF" });
-    expect(mergedPdfDownload).toHaveAttribute(
-      "href",
+    const mergedPdfDownload = screen.getByRole("button", { name: "下载合并版PDF" });
+    await user.click(mergedPdfDownload);
+    expect(mockDownloadArtifact).toHaveBeenCalledWith(
       "/api/jobs/group-downloads/download/preview",
+      "下载合并版PDF",
     );
     expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载 IED" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "查看子任务 deliverable_main" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toBeInTheDocument();
 
@@ -1050,9 +1062,9 @@ describe("job detail pages", () => {
     expect(
       screen.queryByRole("button", { name: "预览子任务 PDF（纠错标注）" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
   });
 
   it("shows a clean font summary when no missing fonts were detected for deliverable jobs", async () => {
@@ -1316,10 +1328,14 @@ describe("job detail pages", () => {
     await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
 
     expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
-    const downloadLink = screen.getByRole("link", { name: "下载预览 PDF" });
-    expect(downloadLink).toHaveAttribute("href", "/api/jobs/audit-preview/download/preview");
-    expect(downloadLink).toHaveAttribute("download");
-    expect(mockFetch).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview", expect.any(Object));
+    const downloadButton = screen.getByRole("button", { name: "下载预览 PDF" });
+    expect(mockReadArtifact).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview");
+    expect(mockFetch).not.toHaveBeenCalled();
+    await user.click(downloadButton);
+    expect(mockDownloadArtifact).toHaveBeenCalledWith(
+      "/api/jobs/audit-preview/download/preview",
+      "下载预览 PDF",
+    );
     expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
     expect(mockPdfDocument).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1427,11 +1443,7 @@ describe("job detail pages", () => {
         },
       ],
     });
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      blob: () => Promise.resolve(new Blob()),
-    });
+    mockReadArtifact.mockRejectedValue(new Error("preview failed"));
 
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1587,8 +1599,7 @@ describe("job detail pages", () => {
     const resultHeading = await screen.findByRole("heading", { level: 2, name: "出图结果" });
 
     expect(quickDownloadHeading.compareDocumentPosition(resultHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载 package.zip" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
   });
 
@@ -1709,8 +1720,8 @@ describe("job detail pages", () => {
     expect(screen.getByText("3号机组/岛")).toBeInTheDocument();
     expect(screen.getByText("厂房索引图替换")).toBeInTheDocument();
     expect(screen.getByText("是")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });
 
   it("shows aggregate replaced dwg downloads for replace-plus-deliverable groups", async () => {
@@ -1846,6 +1857,6 @@ describe("job detail pages", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });
 });
