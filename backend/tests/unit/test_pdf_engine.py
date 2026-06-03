@@ -216,6 +216,58 @@ def test_terminate_stale_excel_only_targets_automation_processes(monkeypatch) ->
     assert killed == [{101}]
 
 
+def test_excel_process_snapshot_tolerates_none_stdout(monkeypatch) -> None:
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+    monkeypatch.setattr(
+        "src.doc_gen.pdf_engine.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=None),
+    )
+
+    assert PDFExporter._snapshot_process_ids_by_image("EXCEL.EXE") == set()
+
+
+def test_excel_process_snapshot_uses_safe_output_decoding(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+
+    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.run", fake_run)
+
+    PDFExporter._snapshot_process_ids_by_image("EXCEL.EXE")
+
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+
+
+def test_excel_command_line_snapshot_tolerates_none_stdout(monkeypatch) -> None:
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+    monkeypatch.setattr(
+        "src.doc_gen.pdf_engine.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=None),
+    )
+
+    assert PDFExporter._snapshot_process_command_lines_by_image("EXCEL.EXE") == {}
+
+
+def test_excel_command_line_snapshot_uses_safe_output_decoding(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+
+    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.run", fake_run)
+
+    PDFExporter._snapshot_process_command_lines_by_image("EXCEL.EXE")
+
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
+
+
 def test_export_xlsx_reports_original_com_error_when_fallback_also_fails(
     monkeypatch,
     temp_dir: Path,

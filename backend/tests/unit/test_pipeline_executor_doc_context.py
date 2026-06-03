@@ -443,6 +443,9 @@ def test_stage_generate_docs_uses_catalog_page_count_when_catalog_pdf_export_fai
         for flag in job.flags
     )
     assert job.progress.details["catalog_pdf_export_error"] == "Workbook.ExportAsFixedFormat failed"
+    assert "RuntimeError: Workbook.ExportAsFixedFormat failed" in job.progress.details[
+        "catalog_pdf_export_traceback"
+    ]
     assert job.artifacts.docs_dir == tmp_path / "output" / "docs"
 
 

@@ -73,6 +73,13 @@ class JobManager(IJobManager):
             self._jobs[job_id] = job
         return job
 
+    def reload_job(self, job_id: str) -> Job | None:
+        """Reload a job from disk and refresh the in-memory cache."""
+        job = self._load_job(job_id)
+        if job is not None:
+            self._jobs[job.job_id] = job
+        return job
+
     def update_job(self, job: Job) -> None:
         """Persist updated job state."""
         self._jobs[job.job_id] = job

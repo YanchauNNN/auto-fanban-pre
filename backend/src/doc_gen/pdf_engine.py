@@ -220,6 +220,8 @@ class PDFExporter(IPDFExporter):
                 ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=8,
                 check=False,
             )
@@ -229,7 +231,8 @@ class PDFExporter(IPDFExporter):
             return set()
 
         pids: set[int] = set()
-        for line in completed.stdout.splitlines():
+        stdout = completed.stdout or ""
+        for line in stdout.splitlines():
             line = line.strip()
             if not line or line.upper().startswith("INFO:"):
                 continue
@@ -257,16 +260,19 @@ class PDFExporter(IPDFExporter):
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
                 check=False,
             )
         except Exception:
             return {}
-        if completed.returncode != 0 or not completed.stdout.strip():
+        stdout = completed.stdout or ""
+        if completed.returncode != 0 or not stdout.strip():
             return {}
 
         try:
-            payload = json.loads(completed.stdout)
+            payload = json.loads(stdout)
         except json.JSONDecodeError:
             return {}
         if isinstance(payload, dict):

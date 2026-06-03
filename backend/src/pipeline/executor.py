@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import traceback
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -863,6 +864,13 @@ class PipelineExecutor:
                 error_text = str(catalog_result.pdf_export_error)
                 job.add_flag(f"目录PDF导出失败: {error_text}")
                 job.progress.details["catalog_pdf_export_error"] = error_text
+                job.progress.details["catalog_pdf_export_traceback"] = "".join(
+                    traceback.format_exception(
+                        type(catalog_result.pdf_export_error),
+                        catalog_result.pdf_export_error,
+                        catalog_result.pdf_export_error.__traceback__,
+                    )
+                )
         except Exception as e:
             logger.error(f"目录生成失败: {e}")
             job.add_flag("目录生成失败")

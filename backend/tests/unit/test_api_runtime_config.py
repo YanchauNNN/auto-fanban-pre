@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +12,8 @@ import yaml
 from src.config import SpecLoader, reload_config
 from src.config.mechanism_spec import MechanismSpecLoader
 from src.config.runtime_config import RuntimeConfig
+from src.models import JobStatus
+from src.pipeline.job_manager import JobManager
 
 
 def test_runtime_config_defaults_align_with_eight_slot_baseline(
@@ -165,6 +169,64 @@ def test_runtime_storage_health_probe_is_safe_under_concurrent_calls(tmp_path: P
         results = list(executor.map(lambda _: runtime._storage_writable(), range(1000)))
 
     assert all(results)
+
+
+def test_doc_phase_does_not_overwrite_newer_persisted_job_state(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    monkeypatch.setenv("FANBAN_STORAGE_DIR", str(tmp_path / "storage"))
+    SpecLoader.clear_cache()
+    reload_config()
+
+    import API.app.runtime as runtime_mod
+
+    job_manager = JobManager()
+    job = job_manager.create_job(
+        job_type="deliverable",
+        project_no="2026",
+        options={"enabled": True},
+        params={},
+    )
+    job.mark_running(stage="EXPORT_PDF_AND_DWG")
+    job.progress.percent = 85
+    job_manager.update_job(job)
+
+    stale_job = job.model_copy(deep=True)
+    job_manager._jobs[job.job_id] = stale_job
+
+    def _write_current_success() -> None:
+        current = stale_job.model_copy(deep=True)
+        current.progress.stage = "PACKAGE_ZIP"
+        current.mark_succeeded()
+        job_file = tmp_path / "storage" / "jobs" / job.job_id / "job.json"
+        job_file.write_text(
+            json.dumps(current.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    runtime = object.__new__(runtime_mod.DeliverableApiRuntime)
+    runtime.job_manager = job_manager
+    runtime._future_lock = threading.Lock()
+    runtime._running_doc_job_ids = set()
+    runtime._job_completion_lock = threading.Lock()
+    runtime._job_completion_events = {}
+
+    runtime_mod.DeliverableApiRuntime._run_doc_job(
+        runtime,
+        job.job_id,
+        _write_current_success,
+    )
+
+    persisted = json.loads(
+        (tmp_path / "storage" / "jobs" / job.job_id / "job.json").read_text(encoding="utf-8")
+    )
+    assert persisted["status"] == JobStatus.SUCCEEDED
+    assert persisted["progress"]["stage"] == "PACKAGE_ZIP"
+    assert persisted["finished_at"] is not None
 
 
 def test_runtime_stage_labels_read_from_mechanism_yaml(monkeypatch, tmp_path: Path) -> None:

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import shutil
+import sys
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
 
 from src.doc_gen.catalog import CatalogGenerator
+from src.doc_gen.pdf_engine import PDFExporter
 from src.interfaces import IPDFExporter
 from src.models import (
     BBox,
@@ -48,6 +54,71 @@ class MismatchedPageCountPDFExporter:
 
     def count_pdf_pages(self, pdf_path: Path) -> int:
         return 16
+
+
+class _FakeOfficeLimiter:
+    def __init__(self) -> None:
+        self.entries = 0
+        self.active = False
+
+    @contextmanager
+    def excel_session(self):
+        self.entries += 1
+        self.active = True
+        try:
+            yield
+        finally:
+            self.active = False
+
+
+class _FakeExcelRange:
+    def __init__(self, sheet: "_FakeExcelWorksheet", cell: str) -> None:
+        self._sheet = sheet
+        self._cell = cell
+
+    @property
+    def Value(self) -> object | None:  # noqa: N802 - COM API spelling
+        return self._sheet.cells.get(self._cell)
+
+    @Value.setter
+    def Value(self, value: object) -> None:  # noqa: N802 - COM API spelling
+        self._sheet.cells[self._cell] = value
+
+
+class _FakeExcelWorksheet:
+    def __init__(self) -> None:
+        self.cells: dict[str, object] = {}
+
+    def Range(self, cell: str) -> _FakeExcelRange:  # noqa: N802 - COM API spelling
+        return _FakeExcelRange(self, cell)
+
+
+class _FakeExcelWorkbook:
+    def __init__(self, workbook_path: Path) -> None:
+        self.workbook_path = workbook_path
+        self.sheet = _FakeExcelWorksheet()
+        self.exports: list[Path] = []
+        self.saved = 0
+        self.closed = False
+
+    def Worksheets(self, index: int) -> _FakeExcelWorksheet:  # noqa: N802 - COM API spelling, ARG002
+        return self.sheet
+
+    def ExportAsFixedFormat(self, export_type: int, pdf_path: str) -> None:  # noqa: N802 - COM API spelling
+        self.exports.append(Path(pdf_path))
+        Path(pdf_path).write_bytes(b"%PDF-1.4\n%fake catalog pdf\n")
+
+    def Save(self) -> None:  # noqa: N802 - COM API spelling
+        self.saved += 1
+        wb = load_workbook(self.workbook_path)
+        ws = wb.active
+        assert ws is not None
+        for cell, value in self.sheet.cells.items():
+            ws[cell] = value
+        wb.save(self.workbook_path)
+
+    def Close(self, save_changes: bool) -> None:  # noqa: N802 - COM API spelling, ARG002
+        self.closed = True
 
 
 def _make_frame(seq: int) -> FrameMeta:
@@ -319,6 +390,81 @@ def test_catalog_generate_reconciles_page_count_with_exported_pdf(
     ws = load_workbook(output_xlsx).active
     assert ws is not None
     assert ws["H10"].value == 16
+
+
+def test_catalog_single_excel_session_exports_probe_and_final_pdf(
+    temp_dir: Path,
+    monkeypatch,
+) -> None:
+    exporter = PDFExporter(preferred_engine="office_com")
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, exporter))
+    ctx = _build_context()
+    bindings = gen.spec.get_catalog_bindings()
+    output_xlsx = temp_dir / "catalog.xlsx"
+    output_pdf = temp_dir / "catalog.pdf"
+    gen._write_catalog(
+        template_path="documents_bin/目录模板文件.xlsx",
+        output_path=output_xlsx,
+        bindings=bindings,
+        ctx=ctx,
+    )
+    limiter = _FakeOfficeLimiter()
+    fake_pythoncom = SimpleNamespace(CoInitialize=lambda: None, CoUninitialize=lambda: None)
+    fake_win32com = SimpleNamespace(client=SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+    monkeypatch.setitem(sys.modules, "win32com.client", fake_win32com.client)
+    monkeypatch.setitem(sys.modules, "win32com", fake_win32com)
+    monkeypatch.setattr("src.doc_gen.catalog.get_office_automation_limiter", lambda: limiter)
+    monkeypatch.setattr(PDFExporter, "_terminate_stale_excel_automation_processes", classmethod(lambda cls: None))
+    monkeypatch.setattr(PDFExporter, "_snapshot_process_ids_by_image", staticmethod(lambda image_name: {100}))
+    recycled: list[tuple[str, set[int]]] = []
+    monkeypatch.setattr(
+        PDFExporter,
+        "_terminate_new_processes",
+        classmethod(lambda cls, image_name, baseline: recycled.append((image_name, set(baseline)))),
+    )
+    monkeypatch.setattr(PDFExporter, "_create_excel_application", classmethod(lambda cls, module: (object(), True)))
+    monkeypatch.setattr(PDFExporter, "_prepare_excel_for_headless_run", staticmethod(lambda excel: None))
+
+    temp_dirs: list[Path] = []
+
+    def fake_prepare_path(xlsx_path: Path, *, label: str) -> tuple[Path, Path]:  # noqa: ARG001
+        temp_root = Path(tempfile.mkdtemp(prefix="catalog-single-session-", dir=temp_dir))
+        temp_dirs.append(temp_root)
+        working_copy = temp_root / xlsx_path.name
+        shutil.copy2(xlsx_path, working_copy)
+        return working_copy, temp_root
+
+    workbooks: list[_FakeExcelWorkbook] = []
+
+    def fake_open_workbook(excel: object, workbook_path: Path, *, read_only: bool) -> _FakeExcelWorkbook:  # noqa: ARG001
+        assert read_only is False
+        workbook = _FakeExcelWorkbook(workbook_path)
+        workbooks.append(workbook)
+        return workbook
+
+    monkeypatch.setattr(PDFExporter, "_prepare_excel_path_for_com", classmethod(lambda cls, *args, **kwargs: fake_prepare_path(*args, **kwargs)))
+    monkeypatch.setattr(PDFExporter, "_open_excel_workbook", classmethod(lambda cls, *args, **kwargs: fake_open_workbook(*args, **kwargs)))
+    monkeypatch.setattr(PDFExporter, "_retry_excel_com_call", classmethod(lambda cls, fn, desc, retries=10: fn()))
+    monkeypatch.setattr(exporter, "count_pdf_pages", lambda pdf_path: 4)
+
+    page_count = gen._export_catalog_pdf_via_single_excel_session(output_xlsx, output_pdf, bindings)
+
+    assert page_count == 4
+    assert limiter.entries == 1
+    assert recycled == []
+    assert len(workbooks) == 1
+    workbook = workbooks[0]
+    assert workbook.saved == 1
+    assert workbook.closed is True
+    assert len(workbook.exports) == 2
+    assert workbook.exports[0].name.endswith(".probe.pdf")
+    assert workbook.exports[1] == output_pdf
+    assert output_pdf.exists()
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+    assert ws["H10"].value == 4
+    assert all(not temp_path.exists() for temp_path in temp_dirs)
 
 
 def test_catalog_writes_album_code_into_merged_title_cell_and_includes_sheet_set_001(
