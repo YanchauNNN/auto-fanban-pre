@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 from openpyxl import load_workbook
 
+import src.doc_gen.cover as cover_module
 from src.doc_gen.cover import CoverGenerator
 from src.interfaces import GenerationError, IPDFExporter
 from src.models import DerivedFields, DocContext, GlobalDocParams
@@ -79,6 +80,11 @@ def _assert_suppresses_excel_error_indicators(docx_path: Path) -> None:
     assert any("<ignoredErrors" in xml for xml in sheet_xmls)
     assert any('numberStoredAsText="1"' in xml for xml in sheet_xmls)
     assert any('twoDigitTextYear="1"' in xml for xml in sheet_xmls)
+
+
+def _assert_keeps_source_template_error_indicators_unpersisted(docx_path: Path) -> None:
+    sheet_xmls = _read_cover_embedded_sheet_xmls(docx_path)
+    assert all("<ignoredErrors" not in xml for xml in sheet_xmls)
 
 
 def test_cover_variant_template_mapping() -> None:
@@ -184,12 +190,41 @@ def test_write_cover_with_embedded_xlsx(temp_dir: Path) -> None:
     _assert_suppresses_excel_error_indicators(output_docx)
 
 
-def test_cover_templates_suppress_excel_error_indicators() -> None:
+def test_write_cover_via_com_does_not_reopen_ole_after_zip_error_indicator_suppression(
+    temp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no="2026")
+    bindings = gen.spec.get_cover_bindings(ctx.params.project_no)
+    data = gen._prepare_data(ctx)
+    output_docx = temp_dir / "cover-com-refresh.docx"
+    refresh_calls: list[Path] = []
+
+    def fake_write_via_com(*, output_path, bindings, data):  # noqa: ANN001
+        return None
+
+    gen._write_cover_via_com = fake_write_via_com  # type: ignore[method-assign]
+    gen._refresh_cover_ole_preview_via_com = lambda output_path: refresh_calls.append(output_path)  # type: ignore[method-assign]
+    monkeypatch.setattr(cover_module, "suppress_cover_excel_error_indicators", lambda output_path: True)
+
+    gen._write_cover(
+        template_path="documents_bin/封面模板文件.docx",
+        output_path=output_docx,
+        bindings=bindings,
+        data=data,
+        ctx=ctx,
+    )
+
+    assert refresh_calls == []
+
+
+def test_cover_templates_keep_error_indicator_suppression_out_of_source_templates() -> None:
     templates = sorted(Path("documents_bin").glob("*封面*.docx"))
     assert templates
 
     for template in templates:
-        _assert_suppresses_excel_error_indicators(template)
+        _assert_keeps_source_template_error_indicators_unpersisted(template)
 
 
 def test_write_cover_updates_common_project_name_from_yaml(temp_dir: Path) -> None:
@@ -260,6 +295,7 @@ def test_write_cover_1818_uses_com_when_no_embedded_xlsx(
         called["hit"] = True
 
     monkeypatch.setattr(CoverGenerator, "_write_cover_via_com", fake_write_cover_via_com)
+    monkeypatch.setattr(cover_module, "suppress_cover_excel_error_indicators", lambda output_path: False)
 
     gen._write_cover(
         template_path="documents_bin/1818图册封面模板.docx",
