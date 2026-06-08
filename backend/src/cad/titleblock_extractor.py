@@ -695,14 +695,12 @@ class TitleblockExtractor(ITitleblockExtractor):
         best_match = None
         best_score = None
         for candidate in self._external_code_candidates(items, header_hint):
-            for i in range(max(0, len(candidate) - fixed_len + 1)):
-                sub = candidate[i : i + fixed_len]
-                if len(sub) != fixed_len or not self._is_valid_external_code(sub):
-                    continue
-                score = (0 if sub[:1].isalpha() else 1, i, len(candidate) - fixed_len)
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best_match = sub
+            if len(candidate) != fixed_len or not self._is_valid_external_code(candidate):
+                continue
+            score = (0 if candidate[:1].isalpha() else 1,)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_match = candidate
         if best_match:
             return best_match
 
@@ -714,6 +712,7 @@ class TitleblockExtractor(ITitleblockExtractor):
 
     def _external_code_candidates(self, items: list[TextItem], header_hint: str) -> list[str]:
         candidates: list[str] = []
+        items = self._dedupe_external_code_items(items, header_hint)
 
         ordered_items = sorted(items, key=lambda t: (t.x, t.y))
         joined_all = "".join((t.text or "") for t in ordered_items)
@@ -741,6 +740,86 @@ class TitleblockExtractor(ITitleblockExtractor):
             seen.add(candidate)
             deduped.append(candidate)
         return deduped
+
+    def _dedupe_external_code_items(
+        self,
+        items: list[TextItem],
+        header_hint: str,
+    ) -> list[TextItem]:
+        selected: list[TextItem] = []
+        for item in items:
+            if not self._normalize_external_candidate(item.text or "", header_hint):
+                selected.append(item)
+                continue
+            duplicate_index = next(
+                (
+                    idx
+                    for idx, existing in enumerate(selected)
+                    if self._external_code_items_overlap_duplicate(
+                        existing,
+                        item,
+                        header_hint,
+                    )
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                selected.append(item)
+                continue
+            if self._prefer_external_code_item(item, selected[duplicate_index]):
+                selected[duplicate_index] = item
+        return selected
+
+    def _external_code_items_overlap_duplicate(
+        self,
+        left: TextItem,
+        right: TextItem,
+        header_hint: str,
+    ) -> bool:
+        left_text = self._normalize_external_candidate(left.text or "", header_hint)
+        right_text = self._normalize_external_candidate(right.text or "", header_hint)
+        if not left_text or left_text != right_text:
+            return False
+        left_x, left_y = self._item_center(left)
+        right_x, right_y = self._item_center(right)
+        tol = max(
+            0.5,
+            (left.text_height or 0.0) * 0.05,
+            (right.text_height or 0.0) * 0.05,
+        )
+        if abs(left_x - right_x) > tol or abs(left_y - right_y) > tol:
+            return False
+        if left.bbox is None or right.bbox is None:
+            return True
+        return self._bbox_overlap_ratio(left.bbox, right.bbox) >= 0.80
+
+    @staticmethod
+    def _prefer_external_code_item(candidate: TextItem, existing: TextItem) -> bool:
+        candidate_virtual = ":virtual" in candidate.source
+        existing_virtual = ":virtual" in existing.source
+        if candidate_virtual != existing_virtual:
+            return not candidate_virtual
+        return (candidate.text_height or 0.0) > (existing.text_height or 0.0)
+
+    @staticmethod
+    def _item_center(item: TextItem) -> tuple[float, float]:
+        if item.bbox is None:
+            return item.x, item.y
+        return (
+            (item.bbox.xmin + item.bbox.xmax) / 2.0,
+            (item.bbox.ymin + item.bbox.ymax) / 2.0,
+        )
+
+    @staticmethod
+    def _bbox_overlap_ratio(left: BBox, right: BBox) -> float:
+        x_overlap = max(0.0, min(left.xmax, right.xmax) - max(left.xmin, right.xmin))
+        y_overlap = max(0.0, min(left.ymax, right.ymax) - max(left.ymin, right.ymin))
+        overlap_area = x_overlap * y_overlap
+        if overlap_area <= 0.0:
+            return 0.0
+        left_area = max((left.xmax - left.xmin) * (left.ymax - left.ymin), 1e-6)
+        right_area = max((right.xmax - right.xmin) * (right.ymax - right.ymin), 1e-6)
+        return overlap_area / min(left_area, right_area)
 
     def _normalize_external_candidate(self, text: str, header_hint: str) -> str:
         cleaned = self._clean_alnum(self._normalize_spaces(text).upper())
@@ -829,15 +908,18 @@ class TitleblockExtractor(ITitleblockExtractor):
                 [self._normalize_spaces(line) for line in lines if line]
             ).strip()
             return (title_cn or None), None
+        normalized_lines = [self._normalize_spaces(line) for line in lines if line]
         cn_lines: list[str] = []
         en_lines: list[str] = []
-        for line in lines:
-            normalized = self._normalize_spaces(line)
-            if self._looks_like_compact_cn_title_token(normalized):
-                cn_lines.append(normalized)
-            elif self._looks_like_english_title_line(normalized):
-                en_lines.append(normalized)
-            elif self._has_cjk(normalized):
+        for idx, normalized in enumerate(normalized_lines):
+            language = self._classify_title_line(normalized)
+            if self._looks_like_title_scope_line(normalized):
+                for following in normalized_lines[idx + 1 :]:
+                    if self._looks_like_title_scope_line(following):
+                        continue
+                    language = self._classify_title_line(following)
+                    break
+            if language == "cn":
                 cn_lines.append(normalized)
             else:
                 en_lines.append(normalized)
@@ -974,6 +1056,28 @@ class TitleblockExtractor(ITitleblockExtractor):
             text,
         )
         return not cls._has_cjk(stripped)
+
+    @classmethod
+    def _classify_title_line(cls, text: str) -> str:
+        if cls._looks_like_compact_cn_title_token(text):
+            return "cn"
+        if cls._looks_like_english_title_line(text):
+            return "en"
+        if cls._has_cjk(text):
+            return "cn"
+        return "en"
+
+    @staticmethod
+    def _looks_like_title_scope_line(text: str) -> bool:
+        normalized = text.strip().upper().replace("\uff5e", "~")
+        return (
+            re.fullmatch(
+                r"[0-9]{1,2}[A-Z]{1,4}\s+[-+]?[0-9]+(?:\.[0-9]+)?"
+                r"(?:\s*~\s*[-+]?[0-9]+(?:\.[0-9]+)?)?(?:\s*M)?",
+                normalized,
+            )
+            is not None
+        )
 
     @staticmethod
     def _looks_like_compact_cn_title_token(text: str) -> bool:
@@ -1386,6 +1490,7 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _rebuild_fixed19_from_single_chars(
         self, items: list[TextItem], fixed_len: int, header_hint: str
     ) -> str | None:
+        items = self._dedupe_external_code_items(items, header_hint)
         tokens: list[tuple[float, float, str]] = []
         for it in items:
             s = self._normalize_external_candidate(it.text or "", header_hint)
