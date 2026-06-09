@@ -18,6 +18,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from src.cad.splitter import output_name_for_sheet_set
 from src.models import BBox, FrameMeta, FrameRuntime, TitleblockFields
 
 # ---------------------------------------------------------------------------
@@ -112,6 +113,45 @@ def make_non_a4_frame(frame_id: str | None = None) -> FrameMeta:
     return FrameMeta(runtime=runtime, titleblock=TitleblockFields())
 
 
+def make_non_a4_001_family_frame(
+    *,
+    internal_code: str,
+    external_code: str | None,
+    page_index: int,
+    page_total: int,
+    paper_variant_id: str = "CNPE_A0",
+    revision: str | None = "A",
+    status: str | None = "CFC",
+    frame_id: str | None = None,
+) -> FrameMeta:
+    fid = frame_id or str(uuid.uuid4())
+    bbox = BBox(
+        xmin=page_index * 1000.0,
+        ymin=0.0,
+        xmax=page_index * 1000.0 + 1189.0,
+        ymax=841.0,
+    )
+    runtime = FrameRuntime(
+        frame_id=fid,
+        source_file=Path("test.dxf"),
+        outer_bbox=bbox,
+        paper_variant_id=paper_variant_id,
+        sx=1.0,
+        sy=1.0,
+    )
+    titleblock = TitleblockFields(
+        page_total=page_total,
+        page_index=page_index,
+        revision=revision,
+        internal_code=internal_code,
+        external_code=external_code,
+        engineering_no="1818",
+        title_cn="测试图纸标题" if external_code else None,
+        status=status,
+    )
+    return FrameMeta(runtime=runtime, titleblock=titleblock)
+
+
 # ---------------------------------------------------------------------------
 # Master 模板：A4 主帧（完整图签字段）
 # ---------------------------------------------------------------------------
@@ -169,6 +209,55 @@ class TestNoA4Frames:
 
         assert len(remaining) == 2
         assert sheet_sets == []
+
+    def test_non_a4_001_marker_family_becomes_single_sheet_set(self):
+        grouper = _make_grouper()
+        sibling = make_non_a4_001_family_frame(
+            internal_code="18185NF-JGS19-002",
+            external_code="PC5NFZ31002B25C42SD",
+            page_index=1,
+            page_total=1,
+        )
+        master = make_non_a4_001_family_frame(
+            internal_code="18185NF-JGS19-001",
+            external_code="PC5NFZ31002B25C42SD",
+            page_index=1,
+            page_total=1,
+            revision=None,
+            status="CFC",
+        )
+        marker_page = make_non_a4_001_family_frame(
+            internal_code="18185NF-JGS19-001",
+            external_code=None,
+            page_index=2,
+            page_total=2,
+            paper_variant_id="CNPE_A0+1/2",
+            revision="A",
+            status=None,
+        )
+        marker_page.raw_extracts["A4_page_marker_meta"] = {
+            "internal_code": "18185NF-JGS19-001",
+            "revision": "A",
+        }
+
+        remaining, sheet_sets = grouper.group_a4_pages([sibling, master, marker_page])
+
+        assert remaining == [sibling]
+        assert len(sheet_sets) == 1
+        sheet_set = sheet_sets[0]
+        assert sheet_set.sheet_set_type == "NON_A4_001_MARKER_FAMILY"
+        assert sheet_set.paper == "CNPE_A0"
+        assert sheet_set.page_total == 2
+        assert [page.page_index for page in sheet_set.pages] == [1, 2]
+        assert sheet_set.master_page is not None
+        assert sheet_set.master_page.frame_meta is master
+        assert sibling.titleblock.external_code == "PC5NFZ31002B25C42SD"
+        assert master.titleblock.external_code == "PC5NFZ31001B25C42SD"
+        assert marker_page.titleblock.external_code == "PC5NFZ31001B25C42SD"
+        assert marker_page.titleblock.status == "CFC"
+        assert output_name_for_sheet_set(sheet_set) == (
+            "PC5NFZ31001B25C42SDACFC (18185NF-JGS19-001)"
+        )
 
 
 class TestSingleA4Frame:

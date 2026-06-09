@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -328,6 +329,14 @@ class AnchorFirstLocator:
             for cand in cluster:
                 self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
 
+        marker_only_001_hits = self._append_marker_only_001_candidates(
+            text_items=text_items,
+            candidates=[*candidates, *self._build_marker_candidates(msp, text_items)],
+            dxf_path=dxf_path,
+            frames=frames,
+            used_candidates=used_candidates,
+        )
+
         self.logger.info(
             "锚点定位完成: dxf=%s frames=%d",
             dxf_path.name,
@@ -341,6 +350,7 @@ class AnchorFirstLocator:
             "local_window_hits_by_layer": local_window_hits_by_layer,
             "used_local_only_layers": used_local_only_layers,
             "used_dynamic_layers": used_dynamic_layers,
+            "marker_only_001_hits": marker_only_001_hits,
         }
         return frames
 
@@ -457,6 +467,24 @@ class AnchorFirstLocator:
         )
         return candidates
 
+    def _build_marker_candidates(self, msp, text_items: list[TextItem]) -> list[CandidateFrame]:
+        candidates: list[CandidateFrame] = []
+        layers = self.global_layers + self.local_only_layers
+        if not layers:
+            return candidates
+        for window in self._marker_search_windows(text_items):
+            candidates.extend(
+                self._build_candidates_for_layers(
+                    msp,
+                    layers,
+                    window=window,
+                    localize_line_rebuild=True,
+                    apply_max_candidates=False,
+                )
+            )
+        candidates.sort(key=lambda c: c.area, reverse=True)
+        return candidates
+
     def _build_candidates_for_layers(
         self,
         msp,
@@ -464,6 +492,7 @@ class AnchorFirstLocator:
         *,
         window: BBox | None = None,
         localize_line_rebuild: bool = False,
+        apply_max_candidates: bool = True,
     ) -> list[CandidateFrame]:
         candidates: list[CandidateFrame] = []
         if hasattr(self.candidate_finder, "find_rectangles_in_layers"):
@@ -486,7 +515,7 @@ class AnchorFirstLocator:
             )
 
         candidates.sort(key=lambda c: c.area, reverse=True)
-        if self.max_candidates:
+        if apply_max_candidates and self.max_candidates:
             top_keys = {
                 self._bbox_key(b)
                 for b in sorted(bboxes, key=lambda b: b.width * b.height, reverse=True)[
@@ -949,6 +978,148 @@ class AnchorFirstLocator:
             return
         used_candidates.add(key)
         frames.append(self._to_frame_meta(cand, dxf_path))
+
+    def _append_marker_only_001_candidates(
+        self,
+        *,
+        text_items: list[TextItem],
+        candidates: list[CandidateFrame],
+        dxf_path: Path,
+        frames: list[FrameMeta],
+        used_candidates: set[tuple[float, float, float, float]],
+    ) -> int:
+        hits = 0
+        for cand in self._select_best_candidates(candidates):
+            if self._candidate_key(cand) in used_candidates:
+                continue
+            if self._is_a4_candidate(cand):
+                continue
+            if not self._candidate_has_marker_only_001_text(cand, text_items):
+                continue
+            self._append_candidate_frame(cand, dxf_path, frames, used_candidates)
+            hits += 1
+        return hits
+
+    def _candidate_has_marker_only_001_text(
+        self,
+        cand: CandidateFrame,
+        text_items: list[TextItem],
+    ) -> bool:
+        marker_texts = self._top_right_texts(cand.bbox, text_items)
+        if not marker_texts:
+            return False
+
+        has_001_code = False
+        has_later_page_marker = False
+        for text in marker_texts:
+            compact = self._normalize_anchor(text).upper()
+            if re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact):
+                has_001_code = True
+
+            spaced = " ".join(str(text or "").upper().split())
+            match = re.search(r"PAGE\s*(\d+)\s*OF\s*(\d+)", spaced)
+            if match:
+                page_index = int(match.group(1))
+                page_total = int(match.group(2))
+                if page_index > 1 and page_total >= page_index:
+                    has_later_page_marker = True
+
+        return has_001_code and has_later_page_marker
+
+    def _marker_search_windows(self, text_items: list[TextItem]) -> list[BBox]:
+        page_items = [
+            item for item in text_items
+            if self._is_later_page_marker_text(item.text)
+        ]
+        if not page_items:
+            return []
+
+        windows: list[BBox] = []
+        seen: set[tuple[float, float, float, float]] = set()
+        scale = self._marker_search_scale()
+        max_w = max((variant.W for variant in self.paper_variants.values()), default=1784.0) * scale
+        max_h = max((variant.H for variant in self.paper_variants.values()), default=1189.0) * scale
+        for code_item in text_items:
+            if not self._is_001_marker_code_text(code_item.text):
+                continue
+            nearby_page = self._nearest_marker_page_item(code_item, page_items)
+            if nearby_page is None:
+                continue
+            marker_x = max(code_item.x, nearby_page.x)
+            marker_y = max(code_item.y, nearby_page.y)
+            window = BBox(
+                xmin=marker_x - max_w * 1.15,
+                ymin=marker_y - max_h * 1.15,
+                xmax=marker_x + max_w * 0.15,
+                ymax=marker_y + max_h * 0.15,
+            )
+            key = self._bbox_key(window)
+            if key in seen:
+                continue
+            seen.add(key)
+            windows.append(window)
+        return windows
+
+    @staticmethod
+    def _is_001_marker_code_text(text: str) -> bool:
+        compact = AnchorFirstLocator._normalize_anchor(text).upper()
+        return bool(re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact))
+
+    @staticmethod
+    def _is_later_page_marker_text(text: str) -> bool:
+        spaced = " ".join(str(text or "").upper().split())
+        match = re.search(r"PAGE\s*(\d+)\s*OF\s*(\d+)", spaced)
+        if not match:
+            return False
+        page_index = int(match.group(1))
+        page_total = int(match.group(2))
+        return page_index > 1 and page_total >= page_index
+
+    def _nearest_marker_page_item(
+        self,
+        code_item: TextItem,
+        page_items: list[TextItem],
+    ) -> TextItem | None:
+        code_height = float(code_item.text_height or 1.0)
+        max_dx = max(code_height * 80.0, 500.0)
+        max_dy = max(code_height * 40.0, 500.0)
+        candidates = [
+            item for item in page_items
+            if abs(item.x - code_item.x) <= max_dx
+            and abs(item.y - code_item.y) <= max_dy
+        ]
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda item: (abs(item.y - code_item.y), abs(item.x - code_item.x)),
+        )
+
+    def _marker_search_scale(self) -> float:
+        if self._anchor_scale_range:
+            return max(self._anchor_scale_range) * 1.2
+        if self.anchor_scale_candidates:
+            return max(float(value) for value in self.anchor_scale_candidates)
+        return 200.0
+
+    @staticmethod
+    def _top_right_texts(bbox: BBox, text_items: list[TextItem]) -> list[str]:
+        width = max(1e-6, bbox.width)
+        height = max(1e-6, bbox.height)
+        matches: list[tuple[float, float, str]] = []
+        for item in text_items:
+            text = str(item.text or "").strip()
+            if not text:
+                continue
+            if not (bbox.xmin <= item.x <= bbox.xmax and bbox.ymin <= item.y <= bbox.ymax):
+                continue
+            xnorm = (item.x - bbox.xmin) / width
+            ynorm = (item.y - bbox.ymin) / height
+            if xnorm < 0.55 or ynorm < 0.85:
+                continue
+            matches.append((-item.y, item.x, text))
+        matches.sort()
+        return [text for _, _, text in matches]
 
     def _to_frame_meta(self, cand: CandidateFrame, dxf_path: Path) -> FrameMeta:
         bbox = cand.bbox

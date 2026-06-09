@@ -111,6 +111,9 @@ class TitleblockExtractor(ITitleblockExtractor):
         elif self.anchor_texts and not self._frame_has_anchor_text(
             text_items, frame, profile, profile_id
         ):
+            self._extract_a4_page_marker(frame, text_items)
+            if frame.titleblock.internal_code and frame.titleblock.page_index:
+                return frame
             frame.add_flag("未命中锚点文本")
             return frame
 
@@ -177,6 +180,12 @@ class TitleblockExtractor(ITitleblockExtractor):
                 external_code = self._parse_external_code(roi_items, parse_cfg)
                 if external_code:
                     fields.external_code = external_code
+                continue
+
+            if field_key == "subitem_no":
+                value = self._parse_subitem_no(roi_items, internal_code=fields.internal_code)
+                if value:
+                    fields.subitem_no = value
                 continue
 
             if parse_type == "regex":
@@ -302,7 +311,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         return (dx * dx + dy * dy) ** 0.5
 
     def _extract_a4_page_marker(self, frame: FrameMeta, items: list[TextItem]) -> None:
-        """仅提取A4右上角页码，不做titleblock字段解析"""
+        """提取无完整图签页面右上角页码/001标记，不做完整titleblock字段解析。"""
         rb_offset = [0.0, 120.0, 255.0, 295.0]
         roi = self._restore_roi(
             frame.runtime.outer_bbox,
@@ -311,22 +320,45 @@ class TitleblockExtractor(ITitleblockExtractor):
             frame.runtime.sy or 1.0,
         )
         roi_items = [t for t in items if self._item_in_roi(t, roi)]
+        marker_items = self._dedupe_text_items(
+            [*roi_items, *self._fallback_page_marker_items(frame, items)]
+        )
         frame.raw_extracts = {
-            "A4_page_marker": [self._text_item_to_dict(t) for t in roi_items]
+            "A4_page_marker": [self._text_item_to_dict(t) for t in marker_items]
         }
-        page_total, page_index = self._parse_page_marker_from_text(roi_items)
-        marker_internal_code, marker_revision = self._parse_a4_marker_identity(roi_items)
+        page_total, page_index = self._parse_page_marker_from_text(marker_items)
+        marker_internal_code, marker_revision = self._parse_a4_marker_identity(marker_items)
         if page_index is None:
             page_total, page_index = self._fallback_a4_page_marker(frame, items)
         if page_total is not None:
             frame.titleblock.page_total = page_total
         if page_index is not None:
             frame.titleblock.page_index = page_index
+        if marker_internal_code:
+            frame.titleblock.internal_code = marker_internal_code
+        if marker_revision:
+            frame.titleblock.revision = marker_revision
         if marker_internal_code or marker_revision:
             frame.raw_extracts["A4_page_marker_meta"] = {
                 "internal_code": marker_internal_code,
                 "revision": marker_revision,
             }
+
+    @staticmethod
+    def _dedupe_text_items(items: list[TextItem]) -> list[TextItem]:
+        deduped: list[TextItem] = []
+        seen: set[tuple[str, float, float]] = set()
+        for item in items:
+            key = (
+                str(item.text or ""),
+                round(float(item.x), 3),
+                round(float(item.y), 3),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def _match_joined_anchor_text(self, items: list[TextItem]) -> bool:
         if len(items) < 2 or not self.anchor_texts:
@@ -529,6 +561,38 @@ class TitleblockExtractor(ITitleblockExtractor):
         if cleaned.isdigit():
             return None, int(cleaned)
         return None, None
+
+    def _fallback_page_marker_items(
+        self,
+        frame: FrameMeta,
+        items: list[TextItem],
+    ) -> list[TextItem]:
+        outer = frame.runtime.outer_bbox
+        width = max(1e-6, outer.width)
+        height = max(1e-6, outer.height)
+        marker_items: list[TextItem] = []
+        for item in items:
+            text = self._normalize_spaces(item.text or "")
+            if not text:
+                continue
+            if not (outer.xmin <= item.x <= outer.xmax and outer.ymin <= item.y <= outer.ymax):
+                continue
+            xnorm = (item.x - outer.xmin) / width
+            ynorm = (item.y - outer.ymin) / height
+            if xnorm < 0.55 or ynorm < 0.85:
+                continue
+            compact = self._strip_all_whitespace(text).upper()
+            if (
+                re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001", compact, flags=re.IGNORECASE)
+                or "PAGE" in compact
+                or "OF" in compact
+                or "第" in compact
+                or "共" in compact
+                or "张" in compact
+            ):
+                marker_items.append(item)
+        marker_items.sort(key=lambda item: (-item.y, item.x))
+        return marker_items
 
     def _check_scale_mismatch(self, frame: FrameMeta) -> None:
         geom = frame.runtime.geom_scale_factor
@@ -930,6 +994,59 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _parse_text(self, items: list[TextItem]) -> str | None:
         joined = self._join_text(items)
         return joined or None
+
+    def _parse_subitem_no(
+        self,
+        items: list[TextItem],
+        *,
+        internal_code: str | None = None,
+    ) -> str | None:
+        expected = self._subitem_no_from_internal_code(internal_code)
+        candidates: list[str] = []
+
+        for item in items:
+            text = str(item.text or "")
+            candidates.extend(part.strip() for part in text.splitlines() if part.strip())
+
+        joined = self._join_text(items)
+        if joined:
+            candidates.append(joined)
+            candidates.extend(part.strip() for part in joined.splitlines() if part.strip())
+
+        normalized_candidates = [self._normalize_subitem_candidate(value) for value in candidates]
+        normalized_candidates = [value for value in normalized_candidates if value]
+
+        if expected and expected in normalized_candidates:
+            return expected
+
+        for value in normalized_candidates:
+            if self._is_clean_subitem_no(value):
+                return value
+
+        return expected
+
+    @staticmethod
+    def _subitem_no_from_internal_code(internal_code: str | None) -> str | None:
+        text = str(internal_code or "").strip().upper()
+        match = re.match(r"^\d{4}\d(?P<subitem>[A-Z]{2,4})-", text)
+        if not match:
+            return None
+        return match.group("subitem")
+
+    @staticmethod
+    def _normalize_subitem_candidate(value: str) -> str:
+        text = re.sub(r"\s+", "", str(value or "").strip().upper())
+        if not text:
+            return ""
+        noise_tokens = ("图号", "圖號", "DOC.NO", "DOCNO", "DOCUMENTNO", "NO.", "NO")
+        for token in noise_tokens:
+            text = text.replace(token, "")
+        text = re.sub(r"[^A-Z0-9]", "", text)
+        return text
+
+    @staticmethod
+    def _is_clean_subitem_no(value: str) -> bool:
+        return bool(re.fullmatch(r"[A-Z]{1,4}", value or ""))
 
     def _pick_top_by_y(self, items: list[TextItem]) -> str | None:
         if not items:

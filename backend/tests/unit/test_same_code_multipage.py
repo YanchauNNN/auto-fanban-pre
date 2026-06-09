@@ -16,6 +16,8 @@ from src.models import (
     FrameMeta,
     FrameRuntime,
     GlobalDocParams,
+    PageInfo,
+    SheetSet,
     TitleblockFields,
 )
 
@@ -23,10 +25,12 @@ from src.models import (
 def _make_frame(
     *,
     internal_code: str,
-    external_code: str,
+    external_code: str | None,
     page_index: int,
     page_total: int,
     paper_variant_id: str = "CNPE_A0",
+    revision: str | None = "A",
+    status: str | None = "CFC",
 ) -> FrameMeta:
     runtime = FrameRuntime(
         frame_id=str(uuid4()),
@@ -39,8 +43,8 @@ def _make_frame(
     titleblock = TitleblockFields(
         internal_code=internal_code,
         external_code=external_code,
-        revision="A",
-        status="CFC",
+        revision=revision,
+        status=status,
         title_cn="测试图纸",
         title_en="Test Drawing",
         page_index=page_index,
@@ -101,6 +105,80 @@ def test_group_frames_accepts_total_then_index_page_markers_for_same_code_family
     assert meta2["page_total"] == 2
     assert output_name_for_frame(page1) == "JD2SDH11002B25C42SDA1@2CFC (20162SD-JGS03-002)"
     assert output_name_for_frame(page2) == "JD2SDH11002B25C42SDA2@2CFC (20162SD-JGS03-002)"
+
+
+def test_group_frames_does_not_pair_001_marker_family() -> None:
+    grouper = SameCodeMultipageGrouper()
+    master = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31001B25C42SD",
+        page_index=1,
+        page_total=1,
+        paper_variant_id="CNPE_A0",
+        revision=None,
+        status="CFC",
+    )
+    marker_page = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code=None,
+        page_index=2,
+        page_total=2,
+        paper_variant_id="CNPE_A0+1/2",
+        revision="A",
+        status=None,
+    )
+    marker_page.raw_extracts["A4_page_marker_meta"] = {
+        "internal_code": "18185NF-JGS19-001",
+        "revision": "A",
+    }
+
+    families = grouper.group_frames([master, marker_page])
+
+    assert families == []
+    assert "same_code_multipage" not in master.raw_extracts
+    assert "same_code_multipage" not in marker_page.raw_extracts
+    assert output_name_for_frame(master) == "PC5NFZ31001B25C42SD (18185NF-JGS19-001)"
+
+
+def test_group_frames_leaves_001_external_sequence_correction_to_sheet_set_grouping() -> None:
+    grouper = SameCodeMultipageGrouper()
+    sibling = _make_frame(
+        internal_code="18185NF-JGS19-002",
+        external_code="PC5NFZ31002B25C42SD",
+        page_index=1,
+        page_total=1,
+        paper_variant_id="CNPE_A0",
+    )
+    master = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31002B25C42SD",
+        page_index=1,
+        page_total=1,
+        paper_variant_id="CNPE_A0",
+        revision=None,
+        status="CFC",
+    )
+    marker_page = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code=None,
+        page_index=2,
+        page_total=2,
+        paper_variant_id="CNPE_A0+1/2",
+        revision="A",
+        status=None,
+    )
+    marker_page.raw_extracts["A4_page_marker_meta"] = {
+        "internal_code": "18185NF-JGS19-001",
+        "revision": "A",
+    }
+
+    families = grouper.group_frames([sibling, master, marker_page])
+
+    assert families == []
+    assert sibling.titleblock.external_code == "PC5NFZ31002B25C42SD"
+    assert master.titleblock.external_code == "PC5NFZ31002B25C42SD"
+    assert not marker_page.titleblock.external_code
+    assert output_name_for_frame(master) == "PC5NFZ31002B25C42SD (18185NF-JGS19-001)"
 
 
 def test_group_frames_skips_a4_pages() -> None:
@@ -180,6 +258,53 @@ def test_cad_executor_allows_same_code_family_and_suffixes_names() -> None:
     assert CADDXFExecutor._name_for_frame(page2) == "JD2RSG11005B25C42SDA2@2CFC (20162RS-JGS03-005)"
     assert output_name_for_frame(page1) == "JD2RSG11005B25C42SDA1@2CFC (20162RS-JGS03-005)"
     assert output_name_for_frame(page2) == "JD2RSG11005B25C42SDA2@2CFC (20162RS-JGS03-005)"
+
+
+def test_cad_executor_sheet_set_entry_keeps_non_a4_page_media() -> None:
+    master = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31001B25C42SD",
+        page_index=1,
+        page_total=2,
+        paper_variant_id="CNPE_A0",
+    )
+    marker_page = _make_frame(
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31001B25C42SD",
+        page_index=2,
+        page_total=2,
+        paper_variant_id="CNPE_A0+1/2",
+    )
+    pages = [
+        PageInfo(page_index=1, outer_bbox=master.runtime.outer_bbox, has_titleblock=True, frame_meta=master),
+        PageInfo(page_index=2, outer_bbox=marker_page.runtime.outer_bbox, has_titleblock=False, frame_meta=marker_page),
+    ]
+    sheet_set = SheetSet(
+        sheet_set_type="NON_A4_001_MARKER_FAMILY",
+        paper="CNPE_A0",
+        cluster_id="cluster-001",
+        page_total=2,
+        pages=pages,
+        master_page=pages[0],
+    )
+
+    executor = object.__new__(CADDXFExecutor)
+    executor.spec = cast(Any, SimpleNamespace(
+        get_paper_variants=lambda: {
+            "CNPE_A0": SimpleNamespace(W=1189.0, H=841.0),
+            "CNPE_A0+1/2": SimpleNamespace(W=1486.0, H=841.0),
+        },
+    ))
+    executor._paper_media_name_for_variant = lambda variant_id: f"media:{variant_id}"  # type: ignore[method-assign]
+
+    entry = executor._build_sheet_set_entry(sheet_set)
+
+    assert [page["paper_variant_id"] for page in entry["pages"]] == ["CNPE_A0", "CNPE_A0+1/2"]
+    assert [page["paper_size_mm"] for page in entry["pages"]] == [[1189.0, 841.0], [1486.0, 841.0]]
+    assert [page["paper_media_name"] for page in entry["pages"]] == [
+        "media:CNPE_A0",
+        "media:CNPE_A0+1/2",
+    ]
 
 
 def test_cad_executor_keeps_duplicate_code_error_for_unmarked_frames() -> None:

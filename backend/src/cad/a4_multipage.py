@@ -20,6 +20,8 @@ A4多页成组器 - 处理001说明图
 
 from __future__ import annotations
 
+from collections import defaultdict
+import re
 import uuid
 
 from ..config import load_spec
@@ -49,7 +51,7 @@ class A4MultipageGrouper(IA4MultipageGrouper):
 
         # 2. 如果A4图框少于2个，无需成组
         if len(a4_frames) < 2:
-            return frames, []
+            return self._group_non_a4_001_marker_pages(frames)
 
         # 3. 构建A4簇
         clusters = self._build_clusters(a4_frames)
@@ -82,6 +84,10 @@ class A4MultipageGrouper(IA4MultipageGrouper):
 
         # 5. 返回未成组的图框（含回退帧） + 成组结果
         remaining_frames = [f for f in frames if f.frame_id not in processed_frame_ids]
+        remaining_frames, marker_sheet_sets = self._group_non_a4_001_marker_pages(
+            remaining_frames,
+        )
+        sheet_sets.extend(marker_sheet_sets)
 
         return remaining_frames, sheet_sets
 
@@ -89,6 +95,242 @@ class A4MultipageGrouper(IA4MultipageGrouper):
         """判断是否为A4图框"""
         paper_id = frame.runtime.paper_variant_id
         return paper_id is not None and "A4" in paper_id
+
+    def _group_non_a4_001_marker_pages(
+        self,
+        frames: list[FrameMeta],
+    ) -> tuple[list[FrameMeta], list[SheetSet]]:
+        grouped: dict[str, list[FrameMeta]] = defaultdict(list)
+        for frame in frames:
+            if not self._is_non_a4_001_marker_candidate(frame):
+                continue
+            internal = str(frame.titleblock.internal_code or "").strip()
+            grouped[internal].append(frame)
+
+        sheet_sets: list[SheetSet] = []
+        processed_frame_ids: set[str] = set()
+        for internal_code, items in grouped.items():
+            sheet_set = self._build_non_a4_001_marker_sheet_set(
+                internal_code=internal_code,
+                frames=items,
+                all_frames=frames,
+            )
+            if sheet_set is None:
+                continue
+            sheet_sets.append(sheet_set)
+            processed_frame_ids.update(frame.frame_id for frame in items)
+
+        remaining = [frame for frame in frames if frame.frame_id not in processed_frame_ids]
+        return remaining, sheet_sets
+
+    def _is_non_a4_001_marker_candidate(self, frame: FrameMeta) -> bool:
+        if self._is_a4_frame(frame):
+            return False
+
+        internal = str(frame.titleblock.internal_code or "").strip()
+        if not re.search(r"-001$", internal):
+            return False
+
+        page_index = int(frame.titleblock.page_index or 0)
+        page_total = int(frame.titleblock.page_total or 0)
+        if page_index <= 0:
+            return False
+
+        has_complete_code = bool(str(frame.titleblock.external_code or "").strip())
+        has_marker_meta = isinstance(frame.raw_extracts.get("A4_page_marker_meta"), dict)
+        return has_complete_code or has_marker_meta or page_total > 1
+
+    def _build_non_a4_001_marker_sheet_set(
+        self,
+        *,
+        internal_code: str,
+        frames: list[FrameMeta],
+        all_frames: list[FrameMeta],
+    ) -> SheetSet | None:
+        if len(frames) < 2:
+            return None
+
+        marker_pages = [
+            frame for frame in frames if isinstance(frame.raw_extracts.get("A4_page_marker_meta"), dict)
+        ]
+        if not marker_pages:
+            return None
+
+        master = self._pick_non_a4_001_master(frames)
+        if master is None:
+            return None
+
+        page_total = max(
+            [len(frames)]
+            + [int(frame.titleblock.page_total or 0) for frame in frames]
+        )
+        if page_total < 2 or len(frames) != page_total:
+            return None
+
+        seen_indices: set[int] = set()
+        pages: list[PageInfo] = []
+        for frame in frames:
+            page_index = int(frame.titleblock.page_index or 0)
+            if page_index <= 0 or page_index in seen_indices:
+                return None
+            seen_indices.add(page_index)
+            pages.append(
+                PageInfo(
+                    page_index=page_index,
+                    outer_bbox=frame.runtime.outer_bbox,
+                    has_titleblock=frame.frame_id == master.frame_id,
+                    frame_meta=frame,
+                ),
+            )
+
+        pages.sort(key=lambda item: item.page_index)
+        if [page.page_index for page in pages] != list(range(1, page_total + 1)):
+            return None
+
+        external_code = str(master.titleblock.external_code or "").strip()
+        if not external_code:
+            return None
+        external_code = self._correct_001_family_external_code(
+            internal_code=internal_code,
+            external_code=external_code,
+            family_frames=frames,
+            all_frames=all_frames,
+        )
+        revision = self._first_value(
+            [master.titleblock.revision, *(frame.titleblock.revision for frame in frames)]
+        )
+        status = self._first_value(
+            [master.titleblock.status, *(frame.titleblock.status for frame in frames)]
+        )
+        self._backfill_001_marker_pages(
+            frames,
+            master,
+            external_code=external_code,
+            revision=revision,
+            status=status,
+        )
+
+        master_page = next((page for page in pages if page.has_titleblock), None)
+        if master_page is None:
+            return None
+
+        return SheetSet(
+            sheet_set_type="NON_A4_001_MARKER_FAMILY",
+            paper=str(master.runtime.paper_variant_id or "NON_A4"),
+            cluster_id=str(uuid.uuid4()),
+            page_total=page_total,
+            pages=pages,
+            master_page=master_page,
+            flags=[],
+        )
+
+    @staticmethod
+    def _pick_non_a4_001_master(frames: list[FrameMeta]) -> FrameMeta | None:
+        with_external = [
+            frame for frame in frames if str(frame.titleblock.external_code or "").strip()
+        ]
+        page1 = [
+            frame
+            for frame in with_external
+            if int(frame.titleblock.page_index or 0) == 1
+        ]
+        if page1:
+            return page1[0]
+        if with_external:
+            return with_external[0]
+        return None
+
+    @staticmethod
+    def _backfill_001_marker_pages(
+        frames: list[FrameMeta],
+        master: FrameMeta,
+        *,
+        external_code: str,
+        revision: str,
+        status: str,
+    ) -> None:
+        master_tb = master.titleblock
+        for frame in frames:
+            tb = frame.titleblock
+            if external_code:
+                tb.external_code = external_code
+            elif not str(tb.external_code or "").strip():
+                tb.external_code = master_tb.external_code
+            if not str(tb.revision or "").strip():
+                tb.revision = revision or master_tb.revision
+            if not str(tb.status or "").strip():
+                tb.status = status or master_tb.status
+            if not str(tb.title_cn or "").strip():
+                tb.title_cn = master_tb.title_cn
+            if not str(tb.title_en or "").strip():
+                tb.title_en = master_tb.title_en
+            if not str(tb.engineering_no or "").strip():
+                tb.engineering_no = master_tb.engineering_no
+            if not str(tb.subitem_no or "").strip():
+                tb.subitem_no = master_tb.subitem_no
+            if not str(tb.discipline or "").strip():
+                tb.discipline = master_tb.discipline
+
+    @staticmethod
+    def _correct_001_family_external_code(
+        *,
+        internal_code: str,
+        external_code: str,
+        family_frames: list[FrameMeta],
+        all_frames: list[FrameMeta],
+    ) -> str:
+        target_seq = A4MultipageGrouper._internal_sequence(internal_code)
+        parsed = A4MultipageGrouper._split_external_sequence(external_code)
+        if target_seq is None or parsed is None:
+            return external_code
+
+        prefix, external_seq, suffix = parsed
+        if external_seq == target_seq:
+            return external_code
+
+        family_ids = {frame.frame_id for frame in family_frames}
+        duplicate_outside_family = any(
+            frame.frame_id not in family_ids
+            and str(frame.titleblock.external_code or "").strip() == external_code
+            for frame in all_frames
+        )
+        if not duplicate_outside_family:
+            return external_code
+
+        corrected = f"{prefix}{target_seq}{suffix}"
+        corrected_used_outside_family = any(
+            frame.frame_id not in family_ids
+            and str(frame.titleblock.external_code or "").strip() == corrected
+            for frame in all_frames
+        )
+        if corrected_used_outside_family:
+            return external_code
+        return corrected
+
+    @staticmethod
+    def _internal_sequence(internal_code: str) -> str | None:
+        match = re.search(r"-(\d{3})$", str(internal_code or "").strip())
+        if not match:
+            return None
+        return match.group(1)
+
+    @staticmethod
+    def _split_external_sequence(external_code: str) -> tuple[str, str, str] | None:
+        match = re.match(
+            r"^(?P<prefix>.+?)(?P<seq>\d{3})(?P<suffix>B\d{2}C\d{2}[A-Z]{2})$",
+            str(external_code or "").strip(),
+        )
+        if not match:
+            return None
+        return match.group("prefix"), match.group("seq"), match.group("suffix")
+
+    @staticmethod
+    def _first_value(values) -> str:
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
 
     def _build_clusters(self, a4_frames: list[FrameMeta]) -> list[list[FrameMeta]]:
         """

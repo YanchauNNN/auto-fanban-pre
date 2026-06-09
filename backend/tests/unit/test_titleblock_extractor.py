@@ -218,6 +218,19 @@ def test_parse_external_code_keeps_leading_letter_close_to_docno_header() -> Non
     assert code == expected
 
 
+def test_parse_subitem_no_ignores_label_noise_and_prefers_internal_code_hint() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("ND", x=-106557.78, y=-138782.61),
+        _item("图号", x=-105863.39, y=-138693.00),
+        _item("No.", x=-105852.45, y=-138900.45),
+    ]
+
+    value = extractor._parse_subitem_no(items, internal_code="18185ND-JGS10-001")
+
+    assert value == "ND"
+
+
 def test_parse_external_code_prefers_x_order_when_characters_have_y_jitter() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse
@@ -812,6 +825,35 @@ def test_parse_a4_page_marker_reads_index_then_total_full_chinese_line() -> None
 
     assert page_total == 10
     assert page_index == 2
+
+
+def test_extract_page_marker_from_non_a4_top_right_marker() -> None:
+    extractor = TitleblockExtractor()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="marker-page",
+            source_file=Path("marker.dxf"),
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=1784.0, ymax=841.0),
+            paper_variant_id="CNPE_A0+1/2",
+            sx=1.0,
+            sy=1.0,
+        ),
+    )
+    items = [
+        _item("18185NF-JGS19-001(A)", x=1700.0, y=815.0),
+        _item("PAGE 2 OF 2", x=1700.0, y=800.0),
+    ]
+
+    extractor._extract_a4_page_marker(frame, items)
+
+    assert frame.titleblock.internal_code == "18185NF-JGS19-001"
+    assert frame.titleblock.revision == "A"
+    assert frame.titleblock.page_total == 2
+    assert frame.titleblock.page_index == 2
+    assert frame.raw_extracts["A4_page_marker_meta"] == {
+        "internal_code": "18185NF-JGS19-001",
+        "revision": "A",
+    }
 
 
 def test_parse_page_info_prefers_primary_row_and_reads_index_total_from_same_row() -> None:

@@ -862,8 +862,8 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert task["frames"][0]["frame_id"] == "f-1"
     assert task["frames"][0]["paper_variant_id"] == "CNPE_A1"
     assert task["frames"][0]["paper_media_name"] == "A1"
-    assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A4H"
-    assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A4"
+    assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A1"
+    assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A1"
 
 
 def test_a2_half_variant_uses_pdf3_override_for_task_and_plot_resources(
@@ -1397,7 +1397,8 @@ def test_execute_source_dxf_ensures_plot_resources_before_building_task(
     order: list[str] = []
     original_build = CADDXFExecutor.build_task_json
 
-    def _ensure(self, *, slot_runtime=None, ctb_name=None):
+    def _ensure(self, *, slot_runtime=None, ctb_name=None, pc3_name=None):
+        _ = pc3_name
         order.append("ensure")
         return cast(
             Any,
@@ -1574,6 +1575,112 @@ def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):
     assert "plot_from_split_dwg" in stages
     assert result["sheet_sets"][0]["status"] == "ok"
     assert "PLOT_FROM_SPLIT_FALLBACK" in result["sheet_sets"][0]["flags"]
+
+
+def test_sheet_set_split_fallback_merges_page_dwgs_when_multipage_plot_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31001B25C42SD",
+    )
+    sheet_set = _make_sheet_set_two_pages("cluster-001", frame)
+    executor = _make_executor(config=_config_with_split_dwg_plot())
+
+    output_dir = tmp_path / "drawings"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    union_dwg = output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}.dwg"
+    union_dwg.write_bytes(b"AC1027union")
+    page_dwgs = [
+        output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}__p1.dwg",
+        output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}__p2.dwg",
+    ]
+    for path in page_dwgs:
+        path.write_bytes(b"AC1027page")
+
+    calls: list[dict] = []
+
+    def fake_run_plot_task_from_dwg(*, source_dwg, runtime_task_dir, task_data):  # noqa: ANN001
+        _ = runtime_task_dir
+        calls.append({"source_dwg": source_dwg, "task": task_data})
+        if task_data.get("sheet_sets"):
+            return {
+                "frames": [],
+                "sheet_sets": [
+                    {
+                        "cluster_id": sheet_set.cluster_id,
+                        "status": "failed",
+                        "pdf_path": str(output_dir / "failed-multipage.pdf"),
+                        "dwg_path": str(union_dwg),
+                        "page_count": 2,
+                        "flags": ["PLOT_ERROR:eInvalidPlotInfo"],
+                        "page_pdf_paths": [],
+                    },
+                ],
+                "errors": [],
+            }
+
+        frame_entry = task_data["frames"][0]
+        page_pdf = output_dir / f"{frame_entry['name']}.pdf"
+        _write_dummy_pdf(page_pdf, page_sizes_mm=[(841.0, 594.0)])
+        return {
+            "frames": [
+                {
+                    "frame_id": frame_entry["frame_id"],
+                    "status": "ok",
+                    "pdf_path": str(page_pdf),
+                    "dwg_path": str(source_dwg),
+                    "selection_count": 1,
+                    "flags": [],
+                },
+            ],
+            "sheet_sets": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(executor, "_run_plot_task_from_dwg", fake_run_plot_task_from_dwg)
+    result = executor._plot_sheet_set_from_split_dwgs(
+        job_id="job-1",
+        runtime_task_dir=tmp_path / "tasks",
+        staged_output_dir=output_dir,
+        split_item={
+            "cluster_id": sheet_set.cluster_id,
+            "status": "ok",
+            "dwg_path": str(union_dwg),
+            "page_dwg_paths": [str(path) for path in page_dwgs],
+            "page_count": 2,
+            "flags": [],
+        },
+        sheet_set=sheet_set,
+        plot_resource_context=None,
+        runtime_context={},
+    )
+
+    assert result["status"] == "ok"
+    assert result["dwg_path"] == str(union_dwg)
+    assert Path(result["pdf_path"]).exists()
+    assert len(result["page_pdf_paths"]) == 2
+    assert "PLOT_PAGE_BY_PAGE_MERGED" in result["flags"]
+    assert [call["task"]["workflow_stage"] for call in calls] == [
+        "plot_from_split_dwg",
+        "plot_from_split_dwg",
+        "plot_from_split_dwg",
+    ]
+    assert [call["task"]["output"]["plot_preferred_area"] for call in calls] == [
+        "window",
+        "extents",
+        "extents",
+    ]
+    page_ok, page_reason = executor._validate_pdf_page_count(
+        pdf_path=Path(result["pdf_path"]),
+        expected_pages=2,
+    )
+    assert page_ok, page_reason
 
 
 def test_window_success_with_missing_split_dwg_still_marks_ok(tmp_path: Path):
