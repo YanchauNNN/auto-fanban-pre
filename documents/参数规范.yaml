@@ -484,7 +484,7 @@ doc_generation:
         建筑: "JZ"
         总图运输: "ZY"
       discipline_to_en:
-        结构: "Structural Engineering"
+        结构: "Structural"
         建筑: "Architectural"
         总图运输: "Site & Transportation"
       status_to_design_phase:
