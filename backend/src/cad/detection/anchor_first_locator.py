@@ -1016,13 +1016,8 @@ class AnchorFirstLocator:
             if re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact):
                 has_001_code = True
 
-            spaced = " ".join(str(text or "").upper().split())
-            match = re.search(r"PAGE\s*(\d+)\s*OF\s*(\d+)", spaced)
-            if match:
-                page_index = int(match.group(1))
-                page_total = int(match.group(2))
-                if page_index > 1 and page_total >= page_index:
-                    has_later_page_marker = True
+            if self._is_later_page_marker_text(text):
+                has_later_page_marker = True
 
         return has_001_code and has_later_page_marker
 
@@ -1067,13 +1062,46 @@ class AnchorFirstLocator:
 
     @staticmethod
     def _is_later_page_marker_text(text: str) -> bool:
+        page_total, page_index = AnchorFirstLocator._parse_later_page_marker_text(text)
+        return (
+            page_index is not None
+            and page_total is not None
+            and page_index > 1
+            and page_total >= page_index
+        )
+
+    @staticmethod
+    def _parse_later_page_marker_text(text: str) -> tuple[int | None, int | None]:
         spaced = " ".join(str(text or "").upper().split())
         match = re.search(r"PAGE\s*(\d+)\s*OF\s*(\d+)", spaced)
-        if not match:
-            return False
-        page_index = int(match.group(1))
-        page_total = int(match.group(2))
-        return page_index > 1 and page_total >= page_index
+        if match:
+            page_index = int(match.group(1))
+            page_total = int(match.group(2))
+            return page_total, page_index
+
+        compact = AnchorFirstLocator._normalize_anchor(str(text or ""))
+        # Chinese markers appear on non-titleblock 001 continuation pages.
+        # Typical forms: "共4张第2张" and "第2张共4张".
+        match = re.search(r"\u5171([0-9Xx]+)\u5f20\u7b2c([0-9Xx]+)\u5f20", compact)
+        if match:
+            page_total = AnchorFirstLocator._page_marker_number(match.group(1))
+            page_index = AnchorFirstLocator._page_marker_number(match.group(2))
+            return page_total, page_index
+        match = re.search(r"\u7b2c([0-9Xx]+)\u5f20\u5171([0-9Xx]+)\u5f20", compact)
+        if match:
+            page_index = AnchorFirstLocator._page_marker_number(match.group(1))
+            page_total = AnchorFirstLocator._page_marker_number(match.group(2))
+            return page_total, page_index
+        return None, None
+
+    @staticmethod
+    def _page_marker_number(value: str) -> int | None:
+        token = str(value or "").strip().upper()
+        if token == "X":
+            return 1
+        if token.isdigit():
+            return int(token)
+        return None
 
     def _nearest_marker_page_item(
         self,

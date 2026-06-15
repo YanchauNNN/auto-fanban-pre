@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from ..config import get_config
+from ..config import get_config, load_spec
+from ..models import BBox, FrameMeta
 from .font_inventory import InstalledFontInventory
 from .font_mapping_runtime import (
     build_font_runtime_plan,
@@ -132,6 +133,7 @@ class FontPreflightService:
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
         font_compatibility_mode: bool = False,
+        frames: list[FrameMeta] | None = None,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -145,6 +147,14 @@ class FontPreflightService:
             if font_compatibility_mode
             else {}
         )
+        empty_style_replacement = (
+            self._resolve_empty_style_replacement()
+            if font_compatibility_mode
+            else {}
+        )
+        empty_style_target_regions = self._build_empty_style_target_regions(frames or [])
+        if empty_style_replacement and not empty_style_target_regions:
+            empty_style_replacement = {}
         base_runtime = dict(slot_runtime or {})
         base_runtime.update(
             build_font_search_runtime_overrides(
@@ -182,6 +192,7 @@ class FontPreflightService:
             and bool(list(preflight_result.get("missing_fonts") or []))
         )
         should_run_replace_pass = should_replace_missing or bool(font_compatibility_replacements)
+        should_run_replace_pass = should_run_replace_pass or bool(empty_style_replacement)
         if should_replace_missing:
             effective_replacements = self.resolve_replacement_fonts(
                 missing_kinds=self._collect_missing_kinds(preflight_result.get("missing_fonts")),
@@ -209,6 +220,8 @@ class FontPreflightService:
                 replacement_fonts=effective_replacements,
                 replacement_targets=replacement_targets,
                 font_compatibility_replacements=font_compatibility_replacements,
+                empty_style_replacement=empty_style_replacement,
+                empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
                 slot_runtime=replace_runtime or None,
             )
@@ -222,6 +235,8 @@ class FontPreflightService:
                 replacement_fonts={},
                 replacement_targets=[],
                 font_compatibility_replacements=font_compatibility_replacements,
+                empty_style_replacement=empty_style_replacement,
+                empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
                 slot_runtime=base_runtime or None,
             )
@@ -242,6 +257,19 @@ class FontPreflightService:
         normalized_result["font_compatibility_replacements"] = dict(
             raw.get("font_compatibility_replacements") or font_compatibility_replacements
         )
+        normalized_result["empty_style_replacement"] = dict(
+            raw.get("empty_style_replacement") or empty_style_replacement
+        )
+        normalized_result["empty_style_target_regions_count"] = int(
+            raw.get("empty_style_target_regions_count", len(empty_style_target_regions)) or 0
+        )
+        normalized_result["empty_style_global_replaced_count"] = int(
+            raw.get("empty_style_global_replaced_count", 0) or 0
+        )
+        if raw.get("empty_style_target_regions"):
+            normalized_result["empty_style_target_regions"] = list(
+                raw.get("empty_style_target_regions") or []
+            )
         if font_runtime_plan is not None:
             if font_runtime_plan.font_map_path is not None:
                 normalized_result["font_map_path"] = str(font_runtime_plan.font_map_path)
@@ -300,6 +328,112 @@ class FontPreflightService:
                 )
             replacements[source_name] = target_name
         return replacements
+
+    def _resolve_empty_style_replacement(self) -> dict[str, str]:
+        configured = getattr(
+            self.config.font_preflight,
+            "empty_style_replacement",
+            {},
+        )
+        if not isinstance(configured, dict):
+            return {}
+        font_name = Path(str(configured.get("font") or "").strip()).name
+        bigfont_name = Path(str(configured.get("bigfont") or "").strip()).name
+        if not font_name and not bigfont_name:
+            return {}
+        for label, target_name in (("font", font_name), ("bigfont", bigfont_name)):
+            if not target_name:
+                continue
+            if not self._is_runtime_font_available(target_name):
+                raise ValueError(
+                    f"empty_style_replacement {label} is unavailable: {target_name}"
+                )
+        replacement: dict[str, str] = {}
+        if font_name:
+            replacement["font"] = font_name
+        if bigfont_name:
+            replacement["bigfont"] = bigfont_name
+        return replacement
+
+    def _build_empty_style_target_regions(
+        self,
+        frames: list[FrameMeta],
+    ) -> list[dict[str, Any]]:
+        if not frames:
+            return []
+        configured_fields = getattr(
+            self.config.font_preflight,
+            "empty_style_target_fields",
+            [],
+        )
+        field_keys = [
+            str(item or "").strip()
+            for item in configured_fields
+            if str(item or "").strip()
+        ]
+        if not field_keys:
+            return []
+
+        spec = load_spec()
+        field_defs = spec.get_field_definitions()
+        regions: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, float, float, float, float]] = set()
+        for frame in frames:
+            profile_id = frame.runtime.roi_profile_id or "BASE10"
+            profile = spec.get_roi_profile(profile_id)
+            if profile is None:
+                continue
+            sx = float(frame.runtime.sx or 1.0)
+            sy = float(frame.runtime.sy or 1.0)
+            for field_key in field_keys:
+                field_def = field_defs.get(field_key)
+                if field_def is None:
+                    continue
+                roi_name = str(field_def.roi or "").strip()
+                rb_offset = profile.fields.get(roi_name)
+                if not roi_name or rb_offset is None:
+                    continue
+                bbox = self._restore_roi(frame.runtime.outer_bbox, rb_offset, sx, sy)
+                key = (
+                    frame.frame_id,
+                    field_key,
+                    round(bbox.xmin, 6),
+                    round(bbox.ymin, 6),
+                    round(bbox.xmax, 6),
+                    round(bbox.ymax, 6),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                regions.append(
+                    {
+                        "frame_id": frame.frame_id,
+                        "field_key": field_key,
+                        "roi_name": roi_name,
+                        "bbox": {
+                            "xmin": bbox.xmin,
+                            "ymin": bbox.ymin,
+                            "xmax": bbox.xmax,
+                            "ymax": bbox.ymax,
+                        },
+                    }
+                )
+        return regions
+
+    @staticmethod
+    def _restore_roi(
+        outer_bbox: BBox,
+        rb_offset: list[float],
+        sx: float,
+        sy: float,
+    ) -> BBox:
+        dx_right, dx_left, dy_bottom, dy_top = rb_offset
+        return BBox(
+            xmin=outer_bbox.xmax - float(dx_left) * sx,
+            xmax=outer_bbox.xmax - float(dx_right) * sx,
+            ymin=outer_bbox.ymin + float(dy_bottom) * sy,
+            ymax=outer_bbox.ymin + float(dy_top) * sy,
+        )
 
     def _is_runtime_font_available(self, font_name: str) -> bool:
         normalized = str(font_name or "").strip()

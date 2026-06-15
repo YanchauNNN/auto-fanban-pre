@@ -104,6 +104,7 @@ class FakeFontPreflightService:
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
         font_compatibility_mode: bool = False,
+        frames: list[object] | None = None,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -114,6 +115,7 @@ class FakeFontPreflightService:
                 "replacement_font": replacement_font,
                 "replacement_fonts": replacement_fonts,
                 "font_compatibility_mode": font_compatibility_mode,
+                "frames": frames,
                 "workspace_dir": workspace_dir,
                 "slot_runtime": slot_runtime,
             }

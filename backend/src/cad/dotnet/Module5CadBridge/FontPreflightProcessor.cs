@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Drawing.Text;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.GraphicsInterface;
+using Autodesk.AutoCAD.Geometry;
 
 namespace Module5CadBridge;
 
@@ -43,6 +45,8 @@ internal sealed class FontPreflightProcessor
         Dictionary<ObjectId, FontStyleUsage> usageByStyle;
         var missingFonts = new List<Dictionary<string, object>>();
         var replacedStyleCount = 0;
+        var replacedEntityCount = 0;
+        var emptyStyleGlobalReplacedCount = 0;
         var detectedStyleCount = 0;
         var replaceMissing = _task.WorkflowStage.Equals("font_replace_missing", StringComparison.OrdinalIgnoreCase);
         var targetByStyleName = BuildReplacementTargetMap(_task.ReplacementTargets);
@@ -117,6 +121,11 @@ internal sealed class FontPreflightProcessor
                 );
             }
 
+            if (replaceMissing)
+            {
+                replacedEntityCount = ApplyEmptyStyleEntityReplacements(db, tr, result);
+            }
+
             tr.Commit();
         }
 
@@ -148,13 +157,18 @@ internal sealed class FontPreflightProcessor
         result.AdditionalData["detected_style_count"] = detectedStyleCount;
         result.AdditionalData["missing_style_count"] = missingFonts.Count;
         result.AdditionalData["missing_fonts"] = missingFonts;
-        result.AdditionalData["font_replacement_applied"] = replaceMissing && replacedStyleCount > 0;
+        result.AdditionalData["font_replacement_applied"] = replaceMissing && (replacedStyleCount > 0 || replacedEntityCount > 0);
         result.AdditionalData["replacement_font"] = string.IsNullOrWhiteSpace(_task.ReplacementFont)
             ? string.Empty
             : _task.ReplacementFont;
         result.AdditionalData["replacement_fonts"] = new Dictionary<string, string>(_task.ReplacementFonts);
         result.AdditionalData["font_compatibility_replacements"] =
             new Dictionary<string, string>(_task.FontCompatibilityReplacements);
+        result.AdditionalData["empty_style_replacement"] =
+            new Dictionary<string, string>(_task.EmptyStyleReplacement);
+        result.AdditionalData["empty_style_target_regions_count"] = _task.EmptyStyleTargetRegions.Count;
+        result.AdditionalData["empty_style_entity_replaced_count"] = replacedEntityCount;
+        result.AdditionalData["empty_style_global_replaced_count"] = emptyStyleGlobalReplacedCount;
         result.AdditionalData["replaced_style_count"] = replacedStyleCount;
         result.AdditionalData["skipped_invalid_object_count"] = _skippedInvalidObjectCount;
         _trace.Log(
@@ -372,6 +386,593 @@ internal sealed class FontPreflightProcessor
         return !IsFontResourceAvailable(fontName, db);
     }
 
+    private static bool IsEmptyFontStyle(TextStyleTableRecord styleRecord)
+    {
+        return string.IsNullOrWhiteSpace(styleRecord.FileName)
+            && string.IsNullOrWhiteSpace(styleRecord.BigFontFileName);
+    }
+
+    private bool HasEmptyStyleReplacement()
+    {
+        return _task.EmptyStyleReplacement.TryGetValue("font", out var fontName)
+                && !string.IsNullOrWhiteSpace(fontName)
+            || _task.EmptyStyleReplacement.TryGetValue("bigfont", out var bigfontName)
+                && !string.IsNullOrWhiteSpace(bigfontName);
+    }
+
+    private bool ApplyEmptyStyleReplacement(
+        TextStyleTableRecord styleRecord,
+        BridgeResultEnvelope result
+    )
+    {
+        _task.EmptyStyleReplacement.TryGetValue("font", out var fontName);
+        _task.EmptyStyleReplacement.TryGetValue("bigfont", out var bigfontName);
+        fontName = (fontName ?? string.Empty).Trim();
+        bigfontName = (bigfontName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(fontName) && string.IsNullOrWhiteSpace(bigfontName))
+        {
+            result.Errors.Add($"FONT_EMPTY_STYLE_REPLACEMENT_MISSING:{styleRecord.Name}");
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fontName))
+        {
+            styleRecord.FileName = fontName;
+            if (IsTrueTypeFont(fontName))
+            {
+                TryUpdateTextStyleFontDescriptor(styleRecord, fontName);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(bigfontName))
+        {
+            styleRecord.BigFontFileName = bigfontName;
+        }
+
+        return true;
+    }
+
+    private int ApplyEmptyStyleEntityReplacements(
+        Database db,
+        Transaction tr,
+        BridgeResultEnvelope result
+    )
+    {
+        if (!HasEmptyStyleReplacement() || _task.EmptyStyleTargetRegions.Count == 0)
+        {
+            return 0;
+        }
+
+        var replaced = 0;
+        var replacedObjectIds = new HashSet<ObjectId>();
+        var cloneBySourceStyle = new Dictionary<ObjectId, ObjectId>();
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId recordId in blockTable)
+        {
+            if (!TryGetObject(tr, recordId, OpenMode.ForRead, out BlockTableRecord record, "empty_style_layout_record"))
+            {
+                continue;
+            }
+
+            if (!TryRead(() => record.IsLayout, "empty_style_layout_record.IsLayout", out var isLayout) || !isLayout)
+            {
+                continue;
+            }
+
+            replaced += ApplyEmptyStyleEntityReplacementsInRecord(
+                db,
+                tr,
+                record,
+                Matrix3d.Identity,
+                result,
+                cloneBySourceStyle,
+                replacedObjectIds,
+                depth: 0
+            );
+        }
+
+        return replaced;
+    }
+
+    private int ApplyEmptyStyleEntityReplacementsInRecord(
+        Database db,
+        Transaction tr,
+        BlockTableRecord record,
+        Matrix3d worldTransform,
+        BridgeResultEnvelope result,
+        Dictionary<ObjectId, ObjectId> cloneBySourceStyle,
+        HashSet<ObjectId> replacedObjectIds,
+        int depth
+    )
+    {
+        if (depth > 12)
+        {
+            return 0;
+        }
+
+        var replaced = 0;
+        foreach (ObjectId entityId in record)
+        {
+            if (!TryGetObject(tr, entityId, OpenMode.ForRead, out Entity entity, "empty_style_entity"))
+            {
+                continue;
+            }
+
+            if (entity is BlockReference blockReference)
+            {
+                replaced += ApplyEmptyStyleEntityReplacementsInBlockReference(
+                    db,
+                    tr,
+                    blockReference,
+                    worldTransform,
+                    result,
+                    cloneBySourceStyle,
+                    replacedObjectIds,
+                    depth + 1
+                );
+                continue;
+            }
+
+            if (TryApplyEmptyStyleToTextEntity(
+                db,
+                tr,
+                entity,
+                worldTransform,
+                result,
+                cloneBySourceStyle,
+                replacedObjectIds
+            ))
+            {
+                replaced += 1;
+            }
+        }
+
+        return replaced;
+    }
+
+    private int ApplyEmptyStyleEntityReplacementsInBlockReference(
+        Database db,
+        Transaction tr,
+        BlockReference blockReference,
+        Matrix3d parentTransform,
+        BridgeResultEnvelope result,
+        Dictionary<ObjectId, ObjectId> cloneBySourceStyle,
+        HashSet<ObjectId> replacedObjectIds,
+        int depth
+    )
+    {
+        var replaced = 0;
+
+        List<ObjectId> attributeIds;
+        try
+        {
+            attributeIds = blockReference.AttributeCollection.Cast<ObjectId>().ToList();
+        }
+        catch (Exception ex)
+        {
+            RegisterSkippedObject("empty_style_block_reference.AttributeCollection", ex);
+            attributeIds = new List<ObjectId>();
+        }
+
+        foreach (ObjectId attributeId in attributeIds)
+        {
+            if (!TryGetObject(tr, attributeId, OpenMode.ForRead, out AttributeReference attributeReference, "empty_style_block_attribute"))
+            {
+                continue;
+            }
+
+            if (TryApplyEmptyStyleToTextEntity(
+                db,
+                tr,
+                attributeReference,
+                parentTransform,
+                result,
+                cloneBySourceStyle,
+                replacedObjectIds
+            ))
+            {
+                replaced += 1;
+            }
+        }
+
+        if (!TryRead(() => blockReference.BlockTableRecord, "empty_style_block_reference.BlockTableRecord", out var blockRecordId))
+        {
+            return replaced;
+        }
+
+        if (!TryGetObject(tr, blockRecordId, OpenMode.ForRead, out BlockTableRecord record, "empty_style_block_definition"))
+        {
+            return replaced;
+        }
+
+        if (TryRead(() => record.IsFromExternalReference, "empty_style_block_definition.IsFromExternalReference", out var isXref) && isXref)
+        {
+            return replaced;
+        }
+
+        var childTransform = parentTransform * blockReference.BlockTransform;
+        replaced += ApplyEmptyStyleEntityReplacementsInRecord(
+            db,
+            tr,
+            record,
+            childTransform,
+            result,
+            cloneBySourceStyle,
+            replacedObjectIds,
+            depth
+        );
+        return replaced;
+    }
+
+    private bool TryApplyEmptyStyleToTextEntity(
+        Database db,
+        Transaction tr,
+        Entity entity,
+        Matrix3d worldTransform,
+        BridgeResultEnvelope result,
+        Dictionary<ObjectId, ObjectId> cloneBySourceStyle,
+        HashSet<ObjectId> replacedObjectIds
+    )
+    {
+        if (!TryGetTextStyleId(entity, out var styleId) || styleId.IsNull)
+        {
+            return false;
+        }
+
+        if (replacedObjectIds.Contains(entity.ObjectId))
+        {
+            return false;
+        }
+
+        if (!TryGetObject(tr, styleId, OpenMode.ForRead, out TextStyleTableRecord styleRecord, "empty_style_source_style"))
+        {
+            return false;
+        }
+
+        if (!IsEmptyFontStyle(styleRecord))
+        {
+            return false;
+        }
+
+        var text = GetEntityText(entity);
+        if (!TryMatchEmptyStyleRegion(entity, worldTransform, text, out _))
+        {
+            return false;
+        }
+
+        if (!TryGetWorldCenter(entity, worldTransform, out var beforeCenter))
+        {
+            return false;
+        }
+
+        var cloneStyleId = GetOrCreateEmptyStyleClone(
+            db,
+            tr,
+            styleRecord,
+            result,
+            cloneBySourceStyle
+        );
+        if (cloneStyleId.IsNull)
+        {
+            return false;
+        }
+
+        EnsureWriteEnabled(entity);
+        SetTextStyleId(entity, cloneStyleId);
+        AdjustTextEntityAlignment(entity, db);
+
+        if (TryGetWorldCenter(entity, worldTransform, out var afterCenter))
+        {
+            var worldDelta = beforeCenter - afterCenter;
+            if (worldDelta.Length > 1e-6)
+            {
+                var localDelta = worldDelta.TransformBy(worldTransform.Inverse());
+                entity.TransformBy(Matrix3d.Displacement(localDelta));
+                AdjustTextEntityAlignment(entity, db);
+            }
+        }
+
+        replacedObjectIds.Add(entity.ObjectId);
+        _trace.Log(
+            $"[DOTNET][FONT][REPLACE_EMPTY_ENTITY] id={entity.ObjectId.Handle} style={styleRecord.Name} text={TruncateTraceText(text)}"
+        );
+        return true;
+    }
+
+    private bool TryMatchEmptyStyleRegion(
+        Entity entity,
+        Matrix3d worldTransform,
+        string text,
+        out BridgeEmptyStyleTargetRegion? matchedRegion
+    )
+    {
+        matchedRegion = null;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (!TryGetWorldCenter(entity, worldTransform, out var center))
+        {
+            return false;
+        }
+
+        foreach (var region in _task.EmptyStyleTargetRegions)
+        {
+            if (!PointInside(region.BBox, center))
+            {
+                continue;
+            }
+
+            if (!ShouldReplaceEmptyStyleText(region.FieldKey, text))
+            {
+                continue;
+            }
+
+            matchedRegion = region;
+            return true;
+        }
+
+        return false;
+    }
+
+    private ObjectId GetOrCreateEmptyStyleClone(
+        Database db,
+        Transaction tr,
+        TextStyleTableRecord sourceStyle,
+        BridgeResultEnvelope result,
+        Dictionary<ObjectId, ObjectId> cloneBySourceStyle
+    )
+    {
+        if (cloneBySourceStyle.TryGetValue(sourceStyle.ObjectId, out var cached))
+        {
+            return cached;
+        }
+
+        _task.EmptyStyleReplacement.TryGetValue("font", out var fontName);
+        _task.EmptyStyleReplacement.TryGetValue("bigfont", out var bigfontName);
+        fontName = (fontName ?? string.Empty).Trim();
+        bigfontName = (bigfontName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(fontName) && string.IsNullOrWhiteSpace(bigfontName))
+        {
+            result.Errors.Add($"FONT_EMPTY_STYLE_REPLACEMENT_MISSING:{sourceStyle.Name}");
+            return ObjectId.Null;
+        }
+
+        var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+        var cloneName = BuildEmptyStyleCloneName(sourceStyle.Name ?? string.Empty);
+        if (styleTable.Has(cloneName))
+        {
+            var existingId = styleTable[cloneName];
+            cloneBySourceStyle[sourceStyle.ObjectId] = existingId;
+            return existingId;
+        }
+
+        EnsureWriteEnabled(styleTable);
+        var clone = new TextStyleTableRecord
+        {
+            Name = cloneName,
+            FileName = fontName,
+            BigFontFileName = bigfontName,
+        };
+        CopyTextStyleMetrics(sourceStyle, clone);
+        if (!string.IsNullOrWhiteSpace(fontName) && IsTrueTypeFont(fontName))
+        {
+            TryUpdateTextStyleFontDescriptor(clone, fontName);
+        }
+
+        var cloneId = styleTable.Add(clone);
+        tr.AddNewlyCreatedDBObject(clone, true);
+        cloneBySourceStyle[sourceStyle.ObjectId] = cloneId;
+        return cloneId;
+    }
+
+    private static void CopyTextStyleMetrics(TextStyleTableRecord source, TextStyleTableRecord target)
+    {
+        TryWrite(() => target.TextSize = source.TextSize);
+        TryWrite(() => target.XScale = source.XScale);
+        TryWrite(() => target.ObliquingAngle = source.ObliquingAngle);
+        TryWrite(() => target.PriorSize = source.PriorSize);
+        TryWrite(() => target.IsVertical = source.IsVertical);
+    }
+
+    private static string BuildEmptyStyleCloneName(string sourceName)
+    {
+        var normalized = Regex.Replace(sourceName.Trim(), @"[^\p{L}\p{N}_-]+", "_");
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = "STYLE";
+        }
+
+        var candidate = $"AFB_EMPTY_{normalized}";
+        return candidate.Length <= 255 ? candidate : candidate.Substring(0, 255);
+    }
+
+    private static bool TryGetTextStyleId(Entity entity, out ObjectId styleId)
+    {
+        styleId = ObjectId.Null;
+        switch (entity)
+        {
+            case AttributeReference attributeReference:
+                styleId = attributeReference.TextStyleId;
+                return true;
+            case AttributeDefinition attributeDefinition:
+                styleId = attributeDefinition.TextStyleId;
+                return true;
+            case DBText dbText:
+                styleId = dbText.TextStyleId;
+                return true;
+            case MText mText:
+                styleId = mText.TextStyleId;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static void SetTextStyleId(Entity entity, ObjectId styleId)
+    {
+        switch (entity)
+        {
+            case AttributeReference attributeReference:
+                attributeReference.TextStyleId = styleId;
+                return;
+            case AttributeDefinition attributeDefinition:
+                attributeDefinition.TextStyleId = styleId;
+                return;
+            case DBText dbText:
+                dbText.TextStyleId = styleId;
+                return;
+            case MText mText:
+                mText.TextStyleId = styleId;
+                return;
+        }
+    }
+
+    private static string GetEntityText(Entity entity)
+    {
+        return entity switch
+        {
+            AttributeReference attributeReference => attributeReference.TextString ?? string.Empty,
+            AttributeDefinition attributeDefinition => attributeDefinition.TextString ?? string.Empty,
+            DBText dbText => dbText.TextString ?? string.Empty,
+            MText mText => mText.Contents ?? string.Empty,
+            _ => string.Empty,
+        };
+    }
+
+    private static void AdjustTextEntityAlignment(Entity entity, Database db)
+    {
+        try
+        {
+            if (entity is DBText dbText)
+            {
+                dbText.AdjustAlignment(db);
+            }
+            else if (entity is AttributeReference attributeReference)
+            {
+                attributeReference.AdjustAlignment(db);
+            }
+            else if (entity is AttributeDefinition attributeDefinition)
+            {
+                attributeDefinition.AdjustAlignment(db);
+            }
+        }
+        catch
+        {
+            // Some legacy text objects cannot adjust alignment until a regen; position compensation is best-effort.
+        }
+    }
+
+    private static bool TryGetWorldCenter(Entity entity, Matrix3d transform, out Point3d center)
+    {
+        center = Point3d.Origin;
+        try
+        {
+            var extents = entity.GeometricExtents;
+            extents.TransformBy(transform);
+            center = new Point3d(
+                (extents.MinPoint.X + extents.MaxPoint.X) / 2.0,
+                (extents.MinPoint.Y + extents.MaxPoint.Y) / 2.0,
+                (extents.MinPoint.Z + extents.MaxPoint.Z) / 2.0
+            );
+            return true;
+        }
+        catch
+        {
+            if (TryGetEntityReferencePoint(entity, out var point))
+            {
+                center = point.TransformBy(transform);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetEntityReferencePoint(Entity entity, out Point3d point)
+    {
+        point = Point3d.Origin;
+        switch (entity)
+        {
+            case AttributeReference attributeReference:
+                point = attributeReference.Position;
+                return true;
+            case AttributeDefinition attributeDefinition:
+                point = attributeDefinition.Position;
+                return true;
+            case DBText dbText:
+                point = dbText.Position;
+                return true;
+            case MText mText:
+                point = mText.Location;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static bool PointInside(BridgeBBox bbox, Point3d point)
+    {
+        return point.X >= bbox.Xmin
+            && point.X <= bbox.Xmax
+            && point.Y >= bbox.Ymin
+            && point.Y <= bbox.Ymax;
+    }
+
+    private static bool ShouldReplaceEmptyStyleText(string fieldKey, string text)
+    {
+        var normalized = Regex.Replace(text ?? string.Empty, @"\s+", string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        var field = (fieldKey ?? string.Empty).Trim().ToLowerInvariant();
+        if (field == "page_info")
+        {
+            return Regex.IsMatch(normalized, @"[0-9Xx]");
+        }
+
+        if (field == "external_code")
+        {
+            var compact = normalized.Replace(".", string.Empty).Replace("-", string.Empty);
+            if (compact.Equals("DOCNO", StringComparison.OrdinalIgnoreCase)
+                || compact.Equals("NO", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(compact, @"^[A-Za-z0-9]+$");
+        }
+
+        if (field == "internal_code")
+        {
+            return Regex.IsMatch(normalized, @"^[A-Za-z0-9-]+$")
+                && Regex.IsMatch(normalized, @"[0-9]");
+        }
+
+        return Regex.IsMatch(normalized, @"[A-Za-z0-9]");
+    }
+
+    private static string TruncateTraceText(string text)
+    {
+        var normalized = Regex.Replace(text ?? string.Empty, @"\s+", " ").Trim();
+        return normalized.Length <= 40 ? normalized : normalized.Substring(0, 40);
+    }
+
+    private static void TryWrite(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch
+        {
+            // Preserve best-effort clone creation across legacy styles.
+        }
+    }
+
     private bool IsFontResourceAvailable(string fontName, Database db)
     {
         var normalized = Path.GetFileName(fontName).Trim().ToLowerInvariant();
@@ -500,6 +1101,12 @@ internal sealed class FontPreflightProcessor
         }
 
         return "unknown";
+    }
+
+    private static bool IsTrueTypeFont(string fontName)
+    {
+        var extension = Path.GetExtension(fontName).ToLowerInvariant();
+        return extension is ".ttf" or ".ttc" or ".otf";
     }
 
     private static Dictionary<string, BridgeReplacementTarget> BuildReplacementTargetMap(

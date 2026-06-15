@@ -175,6 +175,9 @@ internal sealed class BridgeTask
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> FontCompatibilityReplacements { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> EmptyStyleReplacement { get; private set; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public List<BridgeEmptyStyleTargetRegion> EmptyStyleTargetRegions { get; private set; } = new();
 
     public static BridgeTask Load(string taskPath)
     {
@@ -200,6 +203,9 @@ internal sealed class BridgeTask
             ),
             FontCompatibilityReplacements = BridgeValue.GetStringMap(
                 root.TryGetValue("font_compatibility_replacements", out var compatibilityObj) ? compatibilityObj : null
+            ),
+            EmptyStyleReplacement = BridgeValue.GetStringMap(
+                root.TryGetValue("empty_style_replacement", out var emptyStyleObj) ? emptyStyleObj : null
             ),
             Plot = BridgePlotConfig.FromObject(root.TryGetValue("plot", out var plotObj) ? plotObj : null),
             Selection = BridgeSelectionConfig.FromObject(root.TryGetValue("selection", out var selectionObj) ? selectionObj : null),
@@ -242,6 +248,15 @@ internal sealed class BridgeTask
             if (targetDict != null)
             {
                 task.ReplacementTargets.Add(BridgeReplacementTarget.FromDictionary(targetDict));
+            }
+        }
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(root.TryGetValue("empty_style_target_regions", out var emptyRegionsObj) ? emptyRegionsObj : null))
+        {
+            var regionDict = BridgeValue.AsDictionary(item);
+            if (regionDict != null)
+            {
+                task.EmptyStyleTargetRegions.Add(BridgeEmptyStyleTargetRegion.FromDictionary(regionDict));
             }
         }
 
@@ -422,6 +437,25 @@ internal sealed class BridgeReplacementTarget
             BigFontName = BridgeValue.GetString(data, "bigfont_name", string.Empty),
             Kind = BridgeValue.GetString(data, "kind", string.Empty),
             UsedInBlock = BridgeValue.GetBool(data, "used_in_block", false),
+        };
+    }
+}
+
+internal sealed class BridgeEmptyStyleTargetRegion
+{
+    public string FrameId { get; private set; } = string.Empty;
+    public string FieldKey { get; private set; } = string.Empty;
+    public string RoiName { get; private set; } = string.Empty;
+    public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+
+    public static BridgeEmptyStyleTargetRegion FromDictionary(Dictionary<string, object> data)
+    {
+        return new BridgeEmptyStyleTargetRegion
+        {
+            FrameId = BridgeValue.GetString(data, "frame_id", string.Empty),
+            FieldKey = BridgeValue.GetString(data, "field_key", string.Empty),
+            RoiName = BridgeValue.GetString(data, "roi_name", string.Empty),
+            BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
         };
     }
 }

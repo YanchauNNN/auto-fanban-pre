@@ -404,6 +404,39 @@ runtime_options:
             "hztxt.shx": "tssdchn.shx",
         }
 
+    def test_runtime_config_reads_empty_style_replacement(
+        self,
+        tmp_path: Path,
+    ):
+        """空字体实体修复策略应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    empty_style_replacement:
+      type: object
+      default: { "font": "tssdeng.shx", "bigfont": "tssdchn.shx" }
+    empty_style_target_fields:
+      type: "list[str]"
+      default: ["external_code", "internal_code", "page_info"]
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.empty_style_replacement == {
+            "font": "tssdeng.shx",
+            "bigfont": "tssdchn.shx",
+        }
+        assert config.font_preflight.empty_style_target_fields == [
+            "external_code",
+            "internal_code",
+            "page_info",
+        ]
+
     def test_runtime_factory_index_maps_include_1915_target_template(self):
         """1915 作为翻版目标项目时应有无需岛号的厂房索引图模板。"""
         repo_root = Path(__file__).resolve().parents[3]

@@ -383,12 +383,18 @@ class PipelineExecutor:
                 current_file=dwg_file.name,
                 message="DWG?????",
             )
+            target_frames = (
+                self._detect_frames_for_font_preflight(job, dwg_file)
+                if font_compatibility_mode
+                else []
+            )
             result = self.font_preflight_service.inspect_dwg(
                 source_dwg=dwg_file,
                 replacement_policy=policy,
                 replacement_font=replacement_font,
                 replacement_fonts=replacement_fonts,
                 font_compatibility_mode=font_compatibility_mode,
+                frames=target_frames,
                 workspace_dir=input_dir / ".font-preflight",
                 slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
             )
@@ -433,6 +439,25 @@ class PipelineExecutor:
             raise RuntimeError("font preflight failed: " + "; ".join(errors))
         if missing_detected and policy != "replace_missing":
             raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
+
+    def _detect_frames_for_font_preflight(self, job: Job, dwg_file: Path) -> list[FrameMeta]:
+        try:
+            probe_dir = self._require_work_dir(job) / "input" / ".font-preflight-probe"
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            dxf_path = self.oda.dwg_to_dxf(dwg_file, probe_dir)
+            self.frame_detector.set_project_no(job.project_no)
+            frames = self.frame_detector.detect_frames(dxf_path)
+            for frame in frames:
+                frame.runtime.cad_source_file = dwg_file
+            return frames
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[%s] font preflight target frame probe failed for %s: %s",
+                job.job_id,
+                dwg_file,
+                exc,
+            )
+            return []
 
     def _stage_convert(self, job: Job, context: dict) -> None:
         work_dir = self._require_work_dir(job)

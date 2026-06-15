@@ -365,6 +365,10 @@ class FontPreflightRuntimeConfig(BaseModel):
         default_factory=lambda: ["gbcbig.shx", "hztxt.shx", "txt.shx"],
     )
     font_compatibility_replacements: dict[str, str] = Field(default_factory=dict)
+    empty_style_replacement: dict[str, str] = Field(default_factory=dict)
+    empty_style_target_fields: list[str] = Field(
+        default_factory=lambda: ["external_code", "internal_code", "page_info"],
+    )
     enable_fontmap: bool = True
     verify_after_replace: bool = True
     default_fontalt_by_kind: dict[str, str] = Field(

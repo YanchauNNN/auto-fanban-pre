@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from src.cad.detection.anchor_first_locator import CandidateFrame, TextItem
 from src.cad import FrameDetector
 from src.interfaces import DetectionError
+from src.models import BBox
 
 
 @pytest.mark.parametrize(
@@ -72,3 +74,42 @@ def test_frame_detector_set_project_no_propagates_to_locators() -> None:
     assert detector.project_no == "1818"
     assert detector.anchor_locator.project_no == "1818"
     assert detector.anchor_calibrated_locator.project_no == "1818"
+
+
+def test_marker_only_001_page_marker_accepts_chinese_total_then_index() -> None:
+    locator = FrameDetector().anchor_locator
+
+    assert locator._is_later_page_marker_text("共 4 张第 2 张")
+
+
+def test_marker_only_001_candidate_accepts_chinese_page_marker() -> None:
+    locator = FrameDetector().anchor_locator
+    cand = CandidateFrame(
+        bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=700),
+        paper_variant_id="CNPE_A0",
+        sx=1.0,
+        sy=1.0,
+        roi_profile_id="BASE10",
+        anchor_roi=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+        fit_error=0.0,
+    )
+    text_items = [
+        TextItem(
+            x=760,
+            y=650,
+            text="18185NR-JGS50-001(A)",
+            bbox=BBox(xmin=760, ymin=645, xmax=930, ymax=665),
+            text_height=20,
+            source="test",
+        ),
+        TextItem(
+            x=800,
+            y=625,
+            text="共 4 张第 2 张",
+            bbox=BBox(xmin=800, ymin=620, xmax=900, ymax=640),
+            text_height=20,
+            source="test",
+        ),
+    ]
+
+    assert locator._candidate_has_marker_only_001_text(cand, text_items)
