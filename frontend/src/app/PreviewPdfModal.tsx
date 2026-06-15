@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-import { TaskConfigModal } from "../features/deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../shared/ui/TaskConfigModal";
 import { ensurePromiseWithResolvers } from "../shared/pdfPreviewCompat";
 import styles from "./App.module.css";
 

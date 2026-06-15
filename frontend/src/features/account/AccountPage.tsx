@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 
-import { getWorkloadEntryDisplayTitle } from "../../app/taskGroupPresentation";
+import { getWorkloadEntryDisplayTitle } from "../../shared/task-groups/taskGroupPresentation";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
 import { useSession } from "../../shared/session/SessionContext";
 import styles from "./AccountPage.module.css";

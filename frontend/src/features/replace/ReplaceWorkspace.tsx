@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 
 import type { ApiAdapter, CreateBatchPayload, FormSchema } from "../../platform/api/types";
-import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import { inferProjectNumbers } from "../deliverable/uploadInference";
 import styles from "../audit-check/AuditCheckWorkspace.module.css";
 

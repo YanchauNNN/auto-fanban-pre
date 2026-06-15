@@ -59,6 +59,8 @@ import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
 import { SessionProvider, useSession } from "../shared/session/SessionContext";
 import styles from "./App.module.css";
+import { AccountModulePanel, WorkloadModulePanel, type AccountPanelMode } from "./ModulePanels";
+import { RoutePlaceholder } from "./RoutePlaceholder";
 import { TaskGroupConflictDialog } from "./TaskGroupConflictDialog";
 import {
   buildJobCardModels,
@@ -76,7 +78,7 @@ import {
   getWorkflowStatusLabel,
   type TaskGroupCardModel,
   type TaskGroupPresentationLabels,
-} from "./taskGroupPresentation";
+} from "../shared/task-groups/taskGroupPresentation";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
@@ -160,6 +162,18 @@ function useArtifactDownload(adapter: ApiAdapter): ArtifactDownloadHandler {
   );
 }
 
+function useArtifactReader(adapter: ApiAdapter) {
+  return useCallback(
+    (url: string) => {
+      if (!adapter.readArtifact) {
+        throw new Error("PDF preview reader is not available.");
+      }
+      return adapter.readArtifact(url);
+    },
+    [adapter],
+  );
+}
+
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
 }));
@@ -174,15 +188,6 @@ const AuditCheckSummaryModal = lazy(async () => ({
 }));
 const PreviewPdfModal = lazy(async () => ({
   default: (await import("./PreviewPdfModal")).PreviewPdfModal,
-}));
-const AccountPage = lazy(async () => ({
-  default: (await import("../features/account/AccountPage")).AccountPage,
-}));
-const AccountAdminPage = lazy(async () => ({
-  default: (await import("../features/account/AccountAdminPage")).AccountAdminPage,
-}));
-const WorkloadPage = lazy(async () => ({
-  default: (await import("../features/workload/WorkloadPage")).WorkloadPage,
 }));
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
@@ -909,16 +914,6 @@ function ProtectedPage({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function RoutePlaceholder({ description, title }: { description: string; title: string }) {
-  return (
-    <main className={styles.routePlaceholder}>
-      <p className={styles.brandTop}>Loading</p>
-      <h1>{title}</h1>
-      <p>{description}</p>
-    </main>
-  );
-}
-
 function LoginPage() {
   const navigate = useNavigate();
   const adapter = useApiAdapter();
@@ -1043,7 +1038,7 @@ function WorkspacePage() {
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
   const [activeModule, setActiveModule] = useState<HomeModule>("business");
-  const [accountPanelMode, setAccountPanelMode] = useState<"self" | "admin">("self");
+  const [accountPanelMode, setAccountPanelMode] = useState<AccountPanelMode>("self");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
   const [taskGroupActionError, setTaskGroupActionError] = useState<string | null>(null);
   const [taskGroupSubmittingId, setTaskGroupSubmittingId] = useState<string | null>(null);
@@ -1894,55 +1889,13 @@ function WorkspacePage() {
               </section>
             </section>
           ) : activeModule === "account" ? (
-            <section className={styles.modulePanel} data-testid="module-account-panel">
-              <div className={styles.filterRow}>
-                <button
-                  aria-pressed={accountPanelMode === "self"}
-                  className={`${styles.filterButton} ${
-                    accountPanelMode === "self" ? styles.filterButtonActive : ""
-                  }`}
-                  type="button"
-                  onClick={() => setAccountPanelMode("self")}
-                >
-                  账号信息
-                </button>
-                {isAdmin ? (
-                  <button
-                    aria-pressed={accountPanelMode === "admin"}
-                    className={`${styles.filterButton} ${
-                      accountPanelMode === "admin" ? styles.filterButtonActive : ""
-                    }`}
-                    type="button"
-                    onClick={() => setAccountPanelMode("admin")}
-                  >
-                    管理员配置
-                  </button>
-                ) : null}
-              </div>
-              <Suspense
-                fallback={
-                  <RoutePlaceholder
-                    description="正在加载账号信息..."
-                    title="账号模块"
-                  />
-                }
-              >
-                {accountPanelMode === "admin" && isAdmin ? <AccountAdminPage /> : <AccountPage />}
-              </Suspense>
-            </section>
+            <AccountModulePanel
+              isAdmin={isAdmin}
+              mode={accountPanelMode}
+              onModeChange={setAccountPanelMode}
+            />
           ) : (
-            <section className={styles.modulePanel} data-testid="module-workload-panel">
-              <Suspense
-                fallback={
-                  <RoutePlaceholder
-                    description="正在加载工作量模块..."
-                    title="工作量模块"
-                  />
-                }
-              >
-                <WorkloadPage />
-              </Suspense>
-            </section>
+            <WorkloadModulePanel />
           )}
         </main>
       </div>
@@ -2943,6 +2896,7 @@ function SingleJobDetailPanel({
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const handleArtifactDownload = useArtifactDownload(adapter);
+  const readArtifact = useArtifactReader(adapter);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
 
   return (
@@ -3068,7 +3022,7 @@ function SingleJobDetailPanel({
           <PreviewPdfModal
             title={previewRequest.title}
             url={previewRequest.url}
-            readArtifact={adapter.readArtifact}
+            readArtifact={readArtifact}
             onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />
@@ -3084,6 +3038,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const handleArtifactDownload = useArtifactDownload(adapter);
+  const readArtifact = useArtifactReader(adapter);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
@@ -3204,7 +3159,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
           <PreviewPdfModal
             title={previewRequest.title}
             url={previewRequest.url}
-            readArtifact={adapter.readArtifact}
+            readArtifact={readArtifact}
             onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />

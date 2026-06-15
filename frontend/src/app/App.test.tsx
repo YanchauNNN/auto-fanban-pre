@@ -69,7 +69,10 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
     getJobDetail: mockGetJobDetail,
-    readArtifact: mockReadArtifact,
+    __readArtifact: mockReadArtifact,
+    readArtifact(this: { __readArtifact: typeof mockReadArtifact }, url: string) {
+      return this.__readArtifact(url);
+    },
     downloadArtifact: mockDownloadArtifact,
     ...(exposeTaskGroupApis
       ? {

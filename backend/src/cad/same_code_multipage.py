@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import re
 from uuid import uuid4
 
 from ..config import BusinessSpec, load_spec
@@ -106,6 +107,8 @@ class SameCodeMultipageGrouper:
         if not str(tb.internal_code or "").strip():
             return False
         if not str(tb.external_code or "").strip():
+            return False
+        if re.search(r"-001$", str(tb.internal_code or "").strip()):
             return False
         page_index = int(tb.page_index or 0)
         page_total = int(tb.page_total or 0)

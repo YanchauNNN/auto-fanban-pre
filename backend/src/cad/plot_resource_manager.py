@@ -13,9 +13,20 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
+from zipfile import BadZipFile, ZipFile
 
 from .autocad_path_resolver import AutoCADPathInfo
+from .plot_asset_validation import (
+    CAD_PLOT_ASSETS_BACKUP_ZIP,
+    MIN_VALID_CTB_BYTES,
+    is_valid_ctb_bytes,
+    is_valid_ctb_file,
+    is_valid_pc3_bytes,
+    is_valid_pc3_file,
+    is_valid_pmp_bytes,
+    is_valid_pmp_file,
+)
 
 PDF2_PC3_NAME = "\u6253\u5370PDF2.pc3"
 PDF2_PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
@@ -30,7 +41,6 @@ ALL_MANAGED_CTB_NAMES = (
     MANAGED_REVIEW_WHITE_CTB_NAME,
     MANAGED_STEEL_LINER_CTB_NAME,
 )
-MIN_VALID_CTB_BYTES = 512
 DEFAULT_PLOT_ASSET_ROOT_ENV_VAR = "FANBAN_PLOT_ASSET_ROOT"
 
 
@@ -65,6 +75,8 @@ def ensure_plot_resources(
             Path(pmp_name),
         ],
         missing_message=f"????PMP??: {pmp_name}",
+        validator=is_valid_pmp_file,
+        backup_validator=is_valid_pmp_bytes,
     )
     ctb_names_to_deploy = _resolve_managed_ctb_names(
         ctb_name=ctb_name,
@@ -263,10 +275,17 @@ def _pick_pc3_source(
             Path("plotters") / pc3_name,
             Path(pc3_name),
         ],
+        validator=is_valid_pc3_file,
+        backup_validator=is_valid_pc3_bytes,
+        backup_asset_name=pc3_name,
     )
     if source is not None:
         return source
-    if path_info.pc3_path is not None and Path(path_info.pc3_path).name == pc3_name:
+    if (
+        path_info.pc3_path is not None
+        and Path(path_info.pc3_path).name == pc3_name
+        and is_valid_pc3_file(Path(path_info.pc3_path))
+    ):
         return Path(path_info.pc3_path)
     raise FileNotFoundError(f"????PC3??: {pc3_name}")
 
@@ -284,13 +303,16 @@ def _pick_ctb_source(
             Path("plot_styles") / ctb_name,
             Path(ctb_name),
         ],
+        validator=lambda path: is_valid_ctb_file(path, min_valid_bytes=min_valid_ctb_bytes),
+        backup_validator=lambda data: is_valid_ctb_bytes(data, min_valid_bytes=min_valid_ctb_bytes),
+        backup_asset_name=ctb_name,
     )
-    if source is not None and _is_valid_ctb_file(source, min_valid_bytes=min_valid_ctb_bytes):
+    if source is not None:
         return source
     if (
         path_info.monochrome_ctb_path is not None
         and Path(path_info.monochrome_ctb_path).exists()
-        and _is_valid_ctb_file(
+        and is_valid_ctb_file(
             Path(path_info.monochrome_ctb_path),
             min_valid_bytes=min_valid_ctb_bytes,
         )
@@ -304,20 +326,79 @@ def _pick_required_asset_source(
     relative_candidates: list[Path],
     *,
     missing_message: str,
+    validator: Callable[[Path], bool] | None = None,
+    backup_validator: Callable[[bytes], bool] | None = None,
 ) -> Path:
-    source = _pick_asset_source(roots, relative_candidates)
+    source = _pick_asset_source(
+        roots,
+        relative_candidates,
+        validator=validator,
+        backup_validator=backup_validator,
+    )
     if source is None:
         raise FileNotFoundError(missing_message)
     return source
 
 
-def _pick_asset_source(roots: list[Path], relative_candidates: list[Path]) -> Path | None:
+def _pick_asset_source(
+    roots: list[Path],
+    relative_candidates: list[Path],
+    *,
+    validator: Callable[[Path], bool] | None = None,
+    backup_validator: Callable[[bytes], bool] | None = None,
+    backup_asset_name: str | None = None,
+) -> Path | None:
     for root in roots:
         for relative in relative_candidates:
             candidate = root / relative
-            if candidate.exists() and candidate.is_file():
+            if candidate.exists() and candidate.is_file() and (
+                validator is None or validator(candidate)
+            ):
                 return candidate
+    if backup_validator is None:
+        return None
+    for root in roots:
+        restored = _extract_backup_asset(
+            root,
+            backup_asset_name or relative_candidates[0].name,
+            backup_validator,
+        )
+        if restored is not None and (validator is None or validator(restored)):
+            return restored
     return None
+
+
+def _extract_backup_asset(
+    root: Path,
+    asset_name: str,
+    validator: Callable[[bytes], bool],
+) -> Path | None:
+    archive_path = root / CAD_PLOT_ASSETS_BACKUP_ZIP
+    if not archive_path.exists() or not archive_path.is_file():
+        return None
+    member_names = (
+        asset_name,
+        f"plotters/{asset_name}",
+        f"plot_styles/{asset_name}",
+        f"Plotters/{asset_name}",
+        f"Plot Styles/{asset_name}",
+    )
+    try:
+        with ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+            member = next((name for name in member_names if name in names), None)
+            if member is None:
+                return None
+            data = archive.read(member)
+    except (BadZipFile, OSError, KeyError):
+        return None
+    if not validator(data):
+        return None
+    cache_dir = root / ".cad_plot_assets_backup_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    target = cache_dir / asset_name
+    target.write_bytes(data)
+    return target
 
 
 def _copy_managed_file(*, source: Path, target: Path, deployed: list[Path]) -> Path:
@@ -346,16 +427,6 @@ def _extract_year_hint(path_info: AutoCADPathInfo) -> str | None:
             if token.isdigit() and len(token) == 4:
                 return token
     return None
-
-
-def _is_valid_ctb_file(path: Path, *, min_valid_bytes: int = MIN_VALID_CTB_BYTES) -> bool:
-    try:
-        data = path.read_bytes()
-    except OSError:
-        return False
-    if len(data) < min_valid_bytes:
-        return False
-    return data != b"bundled-ctb"
 
 
 def _load_plot_assets_config():

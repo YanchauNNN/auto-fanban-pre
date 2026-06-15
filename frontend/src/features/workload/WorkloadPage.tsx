@@ -8,7 +8,7 @@ import {
   getWorkloadEntryDisplayTitle,
   getWorkflowStatusLabel,
   type TaskGroupPresentationLabels,
-} from "../../app/taskGroupPresentation";
+} from "../../shared/task-groups/taskGroupPresentation";
 import type {
   AccountCreatePayload,
   TaskGroupSummary,

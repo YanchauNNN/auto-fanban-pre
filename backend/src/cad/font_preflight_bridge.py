@@ -40,6 +40,8 @@ class FontPreflightBridge:
         replacement_fonts: dict[str, str] | None,
         replacement_targets: list[dict[str, Any]] | None,
         font_compatibility_replacements: dict[str, str] | None = None,
+        empty_style_replacement: dict[str, str] | None = None,
+        empty_style_target_regions: list[dict[str, Any]] | None = None,
         workspace_dir: Path,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -52,6 +54,8 @@ class FontPreflightBridge:
             replacement_fonts=replacement_fonts,
             replacement_targets=replacement_targets,
             font_compatibility_replacements=font_compatibility_replacements,
+            empty_style_replacement=empty_style_replacement,
+            empty_style_target_regions=empty_style_target_regions,
         )
 
     def _run(
@@ -65,6 +69,8 @@ class FontPreflightBridge:
         replacement_fonts: dict[str, str] | None = None,
         replacement_targets: list[dict[str, Any]] | None = None,
         font_compatibility_replacements: dict[str, str] | None = None,
+        empty_style_replacement: dict[str, str] | None = None,
+        empty_style_target_regions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         task_json = workspace_dir / "font_preflight_task.json"
@@ -74,6 +80,7 @@ class FontPreflightBridge:
             bool(replacement_font)
             or bool(replacement_fonts)
             or bool(font_compatibility_replacements)
+            or bool(empty_style_replacement)
         )
 
         payload: dict[str, Any] = {
@@ -88,6 +95,8 @@ class FontPreflightBridge:
             "replacement_fonts": replacement_fonts or {},
             "replacement_targets": replacement_targets or [],
             "font_compatibility_replacements": font_compatibility_replacements or {},
+            "empty_style_replacement": empty_style_replacement or {},
+            "empty_style_target_regions": empty_style_target_regions or [],
             "engines": {
                 "dotnet_bridge": {
                     "enabled": bool(self.config.module5_export.dotnet_bridge.enabled),

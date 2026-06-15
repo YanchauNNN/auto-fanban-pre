@@ -35,7 +35,7 @@ import {
 } from "./taskPresets";
 import { createTaskConfigDraft, getDefaultTaskValues, syncTaskConfigDraft } from "./taskDraft";
 import { inferProjectNumbers } from "./uploadInference";
-import { TaskConfigModal } from "./TaskConfigModal";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import styles from "./DeliverableWorkspace.module.css";
 
 type DeliverableWorkspaceProps = {

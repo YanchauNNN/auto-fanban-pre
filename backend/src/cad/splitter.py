@@ -340,7 +340,15 @@ class FrameSplitter(IFrameSplitter):
         name = output_name_for_sheet_set(sheet_set)
         pdf_path = output_dir / f"{name}.pdf"
         page_bboxes = [page.outer_bbox for page in sheet_set.pages]
-        paper_size_mm = self._get_a4_paper_size(page_bboxes[0]) if page_bboxes else None
+        paper_size_mm = None
+        if sheet_set.pages:
+            first_page = sheet_set.pages[0]
+            if first_page.frame_meta is not None:
+                paper_size_mm = self._get_paper_size_mm(
+                    first_page.frame_meta.runtime.paper_variant_id,
+                )
+            if paper_size_mm is None and page_bboxes:
+                paper_size_mm = self._get_a4_paper_size(page_bboxes[0])
 
         is_fallback = self._export_multipage_routed(
             split_dxf, pdf_path, page_bboxes,

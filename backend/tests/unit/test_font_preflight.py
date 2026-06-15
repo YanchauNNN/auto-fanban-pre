@@ -8,7 +8,7 @@ import pytest
 
 from src.cad.font_inventory import InstalledFontInventory
 from src.cad.font_preflight import FontPreflightService
-from src.models import Job, JobType
+from src.models import BBox, FrameMeta, FrameRuntime, Job, JobType
 from src.pipeline.executor import PipelineExecutor
 
 
@@ -115,6 +115,10 @@ class _OkBridge:
             "font_replacement_applied": True,
             "replacement_fonts": kwargs.get("replacement_fonts") or {},
             "font_compatibility_replacements": kwargs.get("font_compatibility_replacements") or {},
+            "empty_style_replacement": kwargs.get("empty_style_replacement") or {},
+            "empty_style_target_regions": kwargs.get("empty_style_target_regions") or [],
+            "empty_style_target_regions_count": len(kwargs.get("empty_style_target_regions") or []),
+            "empty_style_global_replaced_count": 0,
             "replaced_style_count": 1,
         }
 
@@ -279,6 +283,133 @@ def test_font_preflight_service_runs_compatibility_replacement_without_missing_f
     assert result["font_compatibility_replacements"] == {
         "hztxt.shx": "tssdchn.shx",
     }
+
+
+def test_font_preflight_service_skips_empty_style_replacement_without_target_regions(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdeng.shx",
+                        "value": "tssdeng.shx",
+                        "family": "tssdeng",
+                        "path": r"D:\AutoCAD\Fonts\tssdeng.shx",
+                        "kind": "shx",
+                    },
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.empty_style_replacement = {
+        "font": "tssdeng.shx",
+        "bigfont": "tssdchn.shx",
+    }
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert [call["method"] for call in bridge.calls] == ["preflight", "replace_missing"]
+    assert bridge.calls[1]["empty_style_replacement"] == {}
+    assert bridge.calls[1]["empty_style_target_regions"] == []
+    assert result["empty_style_replacement"] == {}
+    assert result["empty_style_target_regions_count"] == 0
+    assert result["empty_style_global_replaced_count"] == 0
+
+
+def test_font_preflight_service_builds_empty_style_target_regions_from_frames(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdeng.shx",
+                        "value": "tssdeng.shx",
+                        "family": "tssdeng",
+                        "path": r"D:\AutoCAD\Fonts\tssdeng.shx",
+                        "kind": "shx",
+                    },
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.empty_style_replacement = {
+        "font": "tssdeng.shx",
+        "bigfont": "tssdchn.shx",
+    }
+    service.config.font_preflight.empty_style_target_fields = [
+        "external_code",
+        "internal_code",
+        "page_info",
+    ]
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-1",
+            source_file=tmp_path / "sample.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1189, ymax=841),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        ),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+        frames=[frame],
+    )
+
+    replace_call = bridge.calls[1]
+    regions = replace_call["empty_style_target_regions"]
+    assert [region["field_key"] for region in regions] == [
+        "external_code",
+        "internal_code",
+        "page_info",
+    ]
+    assert regions[0]["roi_name"] == "外部编码"
+    assert regions[0]["bbox"] == {
+        "xmin": pytest.approx(998.8),
+        "ymin": pytest.approx(84.0),
+        "xmax": pytest.approx(1178.8),
+        "ymax": pytest.approx(94.0),
+    }
+    assert result["empty_style_target_regions_count"] == 3
 
 
 def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -> None:
@@ -629,3 +760,67 @@ def test_stage_font_preflight_updates_job_summary_after_replacement(tmp_path: Pa
     assert job.font_replacement_applied is True
     assert job.replacement_font == "simplex.shx"
     assert job.replaced_style_count == 1
+
+
+def test_stage_font_preflight_passes_detected_frames_for_empty_style_targets(
+    tmp_path: Path,
+) -> None:
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-font-stage",
+            source_file=tmp_path / "probe.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        ),
+    )
+
+    class _StageFakeOda:
+        def dwg_to_dxf(self, source_dwg: Path, output_dir: Path) -> Path:
+            dxf = output_dir / f"{source_dwg.stem}.dxf"
+            dxf.write_text("0\nEOF\n", encoding="utf-8")
+            return dxf
+
+    class _StageFakeDetector:
+        def __init__(self) -> None:
+            self.project_no: str | None = None
+
+        def set_project_no(self, project_no: str | None) -> None:
+            self.project_no = project_no
+
+        def detect_frames(self, dxf_path: Path) -> list[FrameMeta]:
+            return [frame]
+
+    executor = object.__new__(PipelineExecutor)
+    executor._update_progress = MagicMock()
+    executor.oda = _StageFakeOda()
+    executor.frame_detector = _StageFakeDetector()
+    executor.font_preflight_service = MagicMock()
+    executor.font_preflight_service.inspect_dwg.return_value = {
+        "filename": "sample.dwg",
+        "status": "ok",
+        "missing_fonts": [],
+        "detected_style_count": 2,
+        "missing_style_count": 0,
+        "font_replacement_applied": True,
+        "replacement_font": None,
+        "replaced_style_count": 1,
+    }
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    (input_dir / "sample.dwg").write_text("dwg", encoding="utf-8")
+
+    job = Job(
+        job_id="job-font-stage-targets",
+        job_type=JobType.DELIVERABLE,
+        project_no="2016",
+        work_dir=tmp_path,
+        params={"font_compatibility_mode": True},
+    )
+
+    PipelineExecutor._stage_font_preflight_and_replace(executor, job, {})
+
+    call = executor.font_preflight_service.inspect_dwg.call_args.kwargs
+    assert call["frames"] == [frame]

@@ -218,6 +218,19 @@ def test_parse_external_code_keeps_leading_letter_close_to_docno_header() -> Non
     assert code == expected
 
 
+def test_parse_subitem_no_ignores_label_noise_and_prefers_internal_code_hint() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("ND", x=-106557.78, y=-138782.61),
+        _item("图号", x=-105863.39, y=-138693.00),
+        _item("No.", x=-105852.45, y=-138900.45),
+    ]
+
+    value = extractor._parse_subitem_no(items, internal_code="18185ND-JGS10-001")
+
+    assert value == "ND"
+
+
 def test_parse_external_code_prefers_x_order_when_characters_have_y_jitter() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse
@@ -254,6 +267,69 @@ def test_parse_external_code_prefers_x_order_when_characters_have_y_jitter() -> 
             bbox=BBox(xmin=200.0, ymin=0.0, xmax=202.0, ymax=2.0),
         )
     )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
+def test_parse_external_code_deduplicates_overlapping_virtual_text() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "JD1NHM11003B25C42SD"
+    items = [
+        _item(
+            "DOC.NO",
+            x=0.0,
+            y=0.0,
+            bbox=BBox(xmin=0.0, ymin=0.0, xmax=12.0, ymax=2.0),
+        )
+    ]
+    for idx, char in enumerate(expected):
+        x = 12.0 + idx * 8.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=0.0,
+                bbox=BBox(xmin=x, ymin=0.0, xmax=x + 2.0, ymax=2.0),
+            )
+        )
+    duplicate_x = 12.0 + 17 * 8.0
+    items.append(
+        _item(
+            "S",
+            x=duplicate_x + 0.02,
+            y=0.01,
+            bbox=BBox(
+                xmin=duplicate_x + 0.02,
+                ymin=0.01,
+                xmax=duplicate_x + 2.02,
+                ymax=2.01,
+            ),
+        )
+    )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
+def test_parse_external_code_keeps_legitimate_adjacent_repeated_characters() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "JD1NHM11003B25C42SD"
+    items = [_item("DOC.NO", x=0.0, y=0.0)]
+    for idx, char in enumerate(expected):
+        x = 12.0 + idx * 8.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=0.0,
+                bbox=BBox(xmin=x, ymin=0.0, xmax=x + 2.0, ymax=2.0),
+            )
+        )
 
     code = extractor._parse_external_code(items, parse_cfg)
 
@@ -361,6 +437,23 @@ def test_parse_title_bilingual_treats_compact_alnum_prefix_as_chinese_title() ->
 
     assert title_cn == "2KA\n\u6a21\u677f\u56fe"
     assert title_en is None
+
+
+def test_parse_title_bilingual_assigns_scope_line_by_next_title_language() -> None:
+    extractor = TitleblockExtractor()
+    extractor.set_project_no("1818")
+    items = [
+        _item("5NE 8.450~12.950", x=10.0, y=140.0),
+        _item("墙 NE5055、NE5056立面  模板图", x=10.0, y=130.0),
+        _item("5NE 8.450~12.950", x=10.0, y=120.0),
+        _item("WALL NE5055、NE5056", x=10.0, y=110.0),
+        _item("ELEVATION VIEW FORMWORK", x=10.0, y=100.0),
+    ]
+
+    title_cn, title_en = extractor._parse_title_bilingual(items)
+
+    assert title_cn == "5NE 8.450~12.950\n墙 NE5055、NE5056立面 模板图"
+    assert title_en == "5NE 8.450~12.950\nWALL NE5055、NE5056\nELEVATION VIEW FORMWORK"
 
 
 def test_parse_page_info_with_x() -> None:
@@ -732,6 +825,35 @@ def test_parse_a4_page_marker_reads_index_then_total_full_chinese_line() -> None
 
     assert page_total == 10
     assert page_index == 2
+
+
+def test_extract_page_marker_from_non_a4_top_right_marker() -> None:
+    extractor = TitleblockExtractor()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="marker-page",
+            source_file=Path("marker.dxf"),
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=1784.0, ymax=841.0),
+            paper_variant_id="CNPE_A0+1/2",
+            sx=1.0,
+            sy=1.0,
+        ),
+    )
+    items = [
+        _item("18185NF-JGS19-001(A)", x=1700.0, y=815.0),
+        _item("PAGE 2 OF 2", x=1700.0, y=800.0),
+    ]
+
+    extractor._extract_a4_page_marker(frame, items)
+
+    assert frame.titleblock.internal_code == "18185NF-JGS19-001"
+    assert frame.titleblock.revision == "A"
+    assert frame.titleblock.page_total == 2
+    assert frame.titleblock.page_index == 2
+    assert frame.raw_extracts["A4_page_marker_meta"] == {
+        "internal_code": "18185NF-JGS19-001",
+        "revision": "A",
+    }
 
 
 def test_parse_page_info_prefers_primary_row_and_reads_index_total_from_same_row() -> None:

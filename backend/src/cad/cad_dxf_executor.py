@@ -96,9 +96,11 @@ class CADDXFExecutor:
         requested_task_dir.mkdir(parents=True, exist_ok=True)
 
         resolved_plot_style_key, resolved_ctb_name = self._resolve_plot_style(plot_style_key)
+        effective_pc3_name = self._resolve_pc3_name_for_plot(frames=frames, sheet_sets=sheet_sets)
         plot_resource_context = self._ensure_plot_resources_ready(
             slot_runtime=slot_runtime,
             ctb_name=resolved_ctb_name,
+            pc3_name=effective_pc3_name,
         )
         runtime_context = self._build_runtime_context(
             slot_runtime=slot_runtime,
@@ -127,6 +129,7 @@ class CADDXFExecutor:
             plot_resource_context=plot_resource_context,
             runtime_context=runtime_context,
             plot_style_key=resolved_plot_style_key,
+            pc3_name=effective_pc3_name,
         )
         split_run_meta = self._run_runner_with_engine_fallback(
             source_dxf=staged_source_dxf,
@@ -178,9 +181,14 @@ class CADDXFExecutor:
         plot_resource_context: PlotResourceContext | None = None,
         runtime_context: dict[str, str] | None = None,
         plot_style_key: str | None = None,
+        pc3_name: str | None = None,
     ) -> dict:
         """构建 task.json（Python -> CAD）。"""
         self._validate_duplicate_codes(frames)
+        effective_pc3_name = str(pc3_name or "").strip() or self._resolve_pc3_name_for_plot(
+            frames=frames,
+            sheet_sets=sheet_sets,
+        )
         return self._build_task_json_from_entries(
             job_id=job_id,
             source_dxf=source_dxf,
@@ -191,6 +199,7 @@ class CADDXFExecutor:
             plot_resource_context=plot_resource_context,
             runtime_context=runtime_context,
             plot_style_key=plot_style_key,
+            pc3_name=effective_pc3_name,
         )
 
     def _build_task_json_from_entries(
@@ -207,8 +216,13 @@ class CADDXFExecutor:
         runtime_context: dict[str, str] | None = None,
         plot_style_key: str | None = None,
         ctb_name: str | None = None,
+        pc3_name: str | None = None,
     ) -> dict:
         plot_cfg = self.config.module5_export.plot
+        effective_pc3_name = self._effective_pc3_name(
+            pc3_name=pc3_name,
+            plot_resource_context=plot_resource_context,
+        )
         runtime_plot_style_key = str((runtime_context or {}).get("plot_style_key", "")).strip()
         runtime_ctb_name = str((runtime_context or {}).get("ctb_name", "")).strip()
         resolved_plot_style_key, resolved_ctb_name = self._resolve_plot_style(
@@ -221,8 +235,13 @@ class CADDXFExecutor:
         selection_cfg = self.config.module5_export.selection
         margins_mm = self._resolve_plot_margins_mm()
         pc3_resolved_path, pc3_search_dirs = self._resolve_pc3_runtime_context(
-            plot_cfg.pc3_name,
+            effective_pc3_name,
             plot_resource_context=plot_resource_context,
+        )
+        self._apply_pc3_specific_media_names(
+            frame_entries=frame_entries,
+            sheet_set_entries=sheet_set_entries,
+            pc3_name=effective_pc3_name,
         )
         output_entry = self._build_output_entry()
         if output_override:
@@ -240,7 +259,7 @@ class CADDXFExecutor:
             "source_dwg_version": source_dwg_version,
             "output_dir": str(output_dir),
             "plot": {
-                "pc3_name": plot_cfg.pc3_name,
+                "pc3_name": effective_pc3_name,
                 "pc3_resolved_path": pc3_resolved_path,
                 "pc3_search_dirs": pc3_search_dirs,
                 "plot_style_key": resolved_plot_style_key,
@@ -333,8 +352,27 @@ class CADDXFExecutor:
             if resolved not in search_dirs:
                 search_dirs.append(resolved)
 
+        default_pc3_name = str(self.config.module5_export.plot.pc3_name or "").strip()
+        use_isolated_managed_pc3 = (
+            plot_resource_context is not None
+            and pc3_token
+            and default_pc3_name
+            and pc3_token.lower() != default_pc3_name.lower()
+        )
         if plot_resource_context is not None:
             add_dir(plot_resource_context.plotters_dir)
+        if use_isolated_managed_pc3:
+            resolved_path = None
+            candidate = Path(pc3_token)
+            if candidate.is_absolute():
+                try:
+                    resolved_path = str(candidate.resolve())
+                except Exception:  # noqa: BLE001
+                    resolved_path = str(candidate)
+            elif plot_resource_context is not None and plot_resource_context.pc3_path.name == pc3_token:
+                resolved_path = str(plot_resource_context.pc3_path.resolve())
+            return resolved_path, [str(path) for path in search_dirs]
+
         add_dir(path_info.plotters_dir)
         if path_info.install_dir is not None:
             add_dir(path_info.install_dir / "Plotters")
@@ -372,6 +410,7 @@ class CADDXFExecutor:
         *,
         slot_runtime: dict[str, str] | None = None,
         ctb_name: str | None = None,
+        pc3_name: str | None = None,
     ) -> PlotResourceContext:
         path_info = resolve_autocad_paths(configured_install_dir=self.config.autocad.install_dir)
         target_plotters_dirs = self._slot_target_dirs(slot_runtime, "plotters_dir")
@@ -391,7 +430,7 @@ class CADDXFExecutor:
         return ensure_plot_resources(
             path_info=path_info,
             asset_roots=list(plot_assets_cfg.asset_roots),
-            pc3_name=plot_cfg.pc3_name,
+            pc3_name=str(pc3_name or plot_cfg.pc3_name),
             pmp_name=plot_assets_cfg.pmp_name,
             ctb_name=effective_ctb_name,
             managed_ctb_names=managed_ctb_names,
@@ -468,6 +507,65 @@ class CADDXFExecutor:
                 if value:
                     runtime[key] = value
         return runtime
+
+    def _resolve_pc3_name_for_plot(
+        self,
+        *,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> str:
+        plot_cfg = self.config.module5_export.plot
+        default_pc3_name = str(plot_cfg.pc3_name or "").strip()
+        overrides = getattr(plot_cfg, "paper_variant_pc3_overrides", {}) or {}
+        if not isinstance(overrides, dict) or not overrides:
+            return default_pc3_name
+
+        normalized_overrides = {
+            str(variant_id).strip().upper(): str(pc3_name).strip()
+            for variant_id, pc3_name in overrides.items()
+            if str(variant_id).strip() and str(pc3_name).strip()
+        }
+        for variant_id in self._iter_requested_paper_variant_ids(frames, sheet_sets):
+            override = normalized_overrides.get(variant_id.upper())
+            if override:
+                return override
+        return default_pc3_name
+
+    def _iter_requested_paper_variant_ids(
+        self,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> list[str]:
+        variant_ids: list[str] = []
+
+        def add(raw_value: str | None) -> None:
+            variant_id = str(raw_value or "").strip()
+            if variant_id and variant_id not in variant_ids:
+                variant_ids.append(variant_id)
+
+        for frame in frames:
+            add(frame.runtime.paper_variant_id)
+        for sheet_set in sheet_sets:
+            for page in sheet_set.pages:
+                if page.frame_meta is not None:
+                    add(page.frame_meta.runtime.paper_variant_id)
+                add(self._a4_variant_id(page.outer_bbox))
+        return variant_ids
+
+    def _effective_pc3_name(
+        self,
+        *,
+        pc3_name: str | None,
+        plot_resource_context: PlotResourceContext | None,
+    ) -> str:
+        normalized = str(pc3_name or "").strip()
+        if normalized:
+            return normalized
+        if plot_resource_context is not None:
+            context_name = str(plot_resource_context.pc3_path.name or "").strip()
+            if context_name:
+                return context_name
+        return str(self.config.module5_export.plot.pc3_name or "").strip()
 
     def _resolve_plot_style(self, plot_style_key: str | None) -> tuple[str, str]:
         plot_cfg = self.config.module5_export.plot
@@ -1113,10 +1211,226 @@ class CADDXFExecutor:
             result_item["page_pdf_paths"] = []
             return result_item
 
+        page_fallback = self._plot_sheet_set_pages_from_split_dwgs(
+            job_id=job_id,
+            runtime_task_dir=runtime_task_dir,
+            staged_output_dir=staged_output_dir,
+            split_item=split_item,
+            sheet_set=sheet_set,
+            expected_pages=expected_pages,
+            plot_resource_context=plot_resource_context,
+            runtime_context=runtime_context,
+        )
+        for flag in self._normalize_flag_list(page_fallback.get("flags")):
+            self._append_flag(flags, flag)
+        if str(page_fallback.get("status", "failed")).lower() == "ok":
+            result_item["status"] = "ok"
+            result_item["pdf_path"] = str(page_fallback.get("pdf_path", ""))
+            result_item["page_pdf_paths"] = list(page_fallback.get("page_pdf_paths", []))
+            self._append_flag(flags, "PLOT_FROM_PAGE_DWG_FALLBACK")
+            return result_item
+
         self._append_flag(flags, "PLOT_FAILED")
         if pdf_path is not None:
             result_item["pdf_path"] = str(pdf_path)
         return result_item
+
+    def _plot_sheet_set_pages_from_split_dwgs(
+        self,
+        *,
+        job_id: str,
+        runtime_task_dir: Path,
+        staged_output_dir: Path,
+        split_item: dict,
+        sheet_set: SheetSet,
+        expected_pages: int,
+        plot_resource_context: PlotResourceContext | None,
+        runtime_context: dict[str, str],
+    ) -> dict:
+        flags: list[str] = []
+        result_item = {
+            "cluster_id": sheet_set.cluster_id,
+            "status": "failed",
+            "pdf_path": "",
+            "page_pdf_paths": [],
+            "flags": flags,
+        }
+        raw_page_paths = split_item.get("page_dwg_paths")
+        if not isinstance(raw_page_paths, list) or not raw_page_paths:
+            self._append_flag(flags, "PAGE_DWG_PATHS_MISSING")
+            return result_item
+
+        page_dwgs = [
+            path
+            for raw in raw_page_paths
+            if (path := self._resolve_existing_path(raw, staged_output_dir)) is not None
+            and path.exists()
+        ]
+        page_dwgs.sort(key=self._page_index_sort_key)
+        if len(page_dwgs) != expected_pages:
+            self._append_flag(
+                flags,
+                f"PAGE_DWG_COUNT_MISMATCH:{len(page_dwgs)}/{expected_pages}",
+            )
+            return result_item
+
+        pages_sorted = sorted(sheet_set.pages, key=lambda p: p.page_index)
+        if len(pages_sorted) != expected_pages:
+            self._append_flag(
+                flags,
+                f"SHEET_SET_PAGE_COUNT_MISMATCH:{len(pages_sorted)}/{expected_pages}",
+            )
+            return result_item
+
+        base_name = self._name_for_sheet_set(sheet_set)
+        page_pdf_paths: list[Path] = []
+        for page, page_dwg in zip(pages_sorted, page_dwgs, strict=True):
+            page_name = f"{base_name}__p{page.page_index}"
+            page_entry = self._build_sheet_page_frame_entry(
+                sheet_set=sheet_set,
+                page=page,
+                page_name=page_name,
+                page_dwg=page_dwg,
+            )
+            plot_task = self._build_task_json_from_entries(
+                job_id=job_id,
+                source_dxf=page_dwg,
+                output_dir=staged_output_dir,
+                workflow_stage="plot_from_split_dwg",
+                frame_entries=[page_entry],
+                sheet_set_entries=[],
+                output_override={"plot_preferred_area": "extents", "plot_fallback_area": "none"},
+                plot_resource_context=plot_resource_context,
+                runtime_context=runtime_context,
+            )
+            try:
+                plot_result = self._run_plot_task_from_dwg(
+                    source_dwg=page_dwg,
+                    runtime_task_dir=runtime_task_dir,
+                    task_data=plot_task,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._append_flag(flags, f"PAGE_PLOT_EXCEPTION:{page.page_index}:{exc}")
+                return result_item
+
+            plot_item = next(
+                (
+                    item
+                    for item in plot_result.get("frames", [])
+                    if isinstance(item, dict)
+                    and str(item.get("frame_id", "")) == page_entry["frame_id"]
+                ),
+                None,
+            )
+            if plot_item is None:
+                self._append_flag(flags, f"PAGE_PLOT_RESULT_MISSING:{page.page_index}")
+                return result_item
+            for flag in self._normalize_flag_list(plot_item.get("flags")):
+                self._append_flag(flags, f"PAGE_{page.page_index}:{flag}")
+            page_pdf = self._resolve_existing_path(plot_item.get("pdf_path"), staged_output_dir)
+            if (
+                str(plot_item.get("status", "failed")).lower() != "ok"
+                or page_pdf is None
+                or not page_pdf.exists()
+            ):
+                self._append_flag(flags, f"PAGE_PLOT_FAILED:{page.page_index}")
+                return result_item
+            valid_pdf, invalid_reason = self._validate_pdf_output(page_pdf)
+            if not valid_pdf:
+                self._append_flag(
+                    flags,
+                    f"PAGE_PLOT_INVALID_PDF:{page.page_index}:{invalid_reason}",
+                )
+                return result_item
+            page_ok, page_reason = self._validate_pdf_page_count(
+                pdf_path=page_pdf,
+                expected_pages=1,
+            )
+            if not page_ok:
+                self._append_flag(
+                    flags,
+                    f"PAGE_PDF_PAGE_CHECK_FAILED:{page.page_index}:{page_reason}",
+                )
+                return result_item
+            page_pdf_paths.append(page_pdf)
+
+        merged_pdf = staged_output_dir / f"{base_name}.pdf"
+        merge_error = self._merge_page_pdfs(page_pdf_paths, merged_pdf)
+        if merge_error:
+            self._append_flag(flags, f"PDF_PAGE_MERGE_FAILED:{merge_error}")
+            return result_item
+
+        page_ok, page_reason = self._validate_pdf_page_count(
+            pdf_path=merged_pdf,
+            expected_pages=expected_pages,
+        )
+        if not page_ok:
+            self._append_flag(flags, f"MERGED_PDF_PAGE_CHECK_FAILED:{page_reason}")
+            return result_item
+
+        result_item["status"] = "ok"
+        result_item["pdf_path"] = str(merged_pdf)
+        result_item["page_pdf_paths"] = [str(path) for path in page_pdf_paths]
+        self._append_flag(flags, "PLOT_PAGE_BY_PAGE_MERGED")
+        return result_item
+
+    def _build_sheet_page_frame_entry(
+        self,
+        *,
+        sheet_set: SheetSet,
+        page,
+        page_name: str,
+        page_dwg: Path,
+    ) -> dict:
+        frame_id = f"{sheet_set.cluster_id}__p{page.page_index}"
+        return {
+            "frame_id": frame_id,
+            "name": page_name,
+            "cad_source_file": str(page_dwg),
+            "bbox": self._bbox_to_dict(page.outer_bbox),
+            "vertices": (
+                self._vertices_for_frame(
+                    page.outer_bbox,
+                    page.frame_meta.runtime.outer_vertices,
+                )
+                if page.frame_meta
+                else self._vertices_from_bbox(page.outer_bbox)
+            ),
+            "paper_size_mm": self._paper_size_for_sheet_page(page),
+            "paper_variant_id": self._paper_variant_id_for_sheet_page(page),
+            "paper_media_name": self._paper_media_name_for_variant(
+                self._paper_variant_id_for_sheet_page(page),
+            ),
+            "sx": (
+                float(page.frame_meta.runtime.sx)
+                if page.frame_meta and page.frame_meta.runtime.sx is not None
+                else None
+            ),
+            "sy": (
+                float(page.frame_meta.runtime.sy)
+                if page.frame_meta and page.frame_meta.runtime.sy is not None
+                else None
+            ),
+            "kind": "sheet_set_page",
+        }
+
+    @staticmethod
+    def _merge_page_pdfs(page_pdf_paths: list[Path], merged_pdf: Path) -> str | None:
+        try:
+            from pypdf import PdfWriter
+        except ImportError as exc:
+            return f"pypdf_not_available:{exc}"
+
+        try:
+            merged_pdf.parent.mkdir(parents=True, exist_ok=True)
+            writer = PdfWriter()
+            for page_pdf in page_pdf_paths:
+                writer.append(str(page_pdf))
+            with merged_pdf.open("wb") as handle:
+                writer.write(handle)
+        except Exception as exc:  # noqa: BLE001
+            return str(exc)
+        return None
 
     @staticmethod
     def _resolve_existing_path(raw: object, staged_output_dir: Path) -> Path | None:
@@ -1436,10 +1750,10 @@ class CADDXFExecutor:
                     if page.frame_meta
                     else self._vertices_from_bbox(page.outer_bbox)
                 ),
-                "paper_size_mm": self._a4_paper_size(page.outer_bbox),
-                "paper_variant_id": self._a4_variant_id(page.outer_bbox),
+                "paper_size_mm": self._paper_size_for_sheet_page(page),
+                "paper_variant_id": self._paper_variant_id_for_sheet_page(page),
                 "paper_media_name": self._paper_media_name_for_variant(
-                    self._a4_variant_id(page.outer_bbox),
+                    self._paper_variant_id_for_sheet_page(page),
                 ),
                 "sx": (
                     float(page.frame_meta.runtime.sx)
@@ -1466,6 +1780,20 @@ class CADDXFExecutor:
             ),
             "pages": pages,
         }
+
+    def _paper_size_for_sheet_page(self, page) -> list[float] | None:
+        if page.frame_meta is not None:
+            frame_size = self._paper_size_for_frame(page.frame_meta)
+            if frame_size is not None:
+                return frame_size
+        return self._a4_paper_size(page.outer_bbox)
+
+    def _paper_variant_id_for_sheet_page(self, page) -> str:
+        if page.frame_meta is not None:
+            variant_id = str(page.frame_meta.runtime.paper_variant_id or "").strip()
+            if variant_id:
+                return variant_id
+        return self._a4_variant_id(page.outer_bbox)
 
     @staticmethod
     def _vertices_for_frame(
@@ -1524,6 +1852,14 @@ class CADDXFExecutor:
         return "CNPE_A4"
 
     def _paper_media_name_for_variant(self, variant_id: str | None) -> str | None:
+        return self._paper_media_name_for_variant_and_pc3(variant_id, pc3_name=None)
+
+    def _paper_media_name_for_variant_and_pc3(
+        self,
+        variant_id: str | None,
+        *,
+        pc3_name: str | None,
+    ) -> str | None:
         if not variant_id:
             return None
         titleblock_extract = getattr(self.spec, "titleblock_extract", {})
@@ -1537,7 +1873,13 @@ class CADDXFExecutor:
             variant = raw_variants.get(variant_id[:-1])
         if not isinstance(variant, dict):
             return None
-        media_hint = variant.get("打印PDF2.pc3文件中对应纸张")
+        media_hint = None
+        pc3_file_name = Path(str(pc3_name or "")).name.strip()
+        if pc3_file_name:
+            pc3_specific_key = f"{pc3_file_name}文件中对应纸张"
+            media_hint = variant.get(pc3_specific_key)
+        if not isinstance(media_hint, str):
+            media_hint = variant.get("打印PDF2.pc3文件中对应纸张")
         if not isinstance(media_hint, str):
             return None
         normalized = media_hint.strip()
@@ -1549,6 +1891,37 @@ class CADDXFExecutor:
         normalized = normalized.replace("，", ",")
         normalized = normalized.split(",", 1)[0].strip()
         return normalized or None
+
+    def _apply_pc3_specific_media_names(
+        self,
+        *,
+        frame_entries: list[dict],
+        sheet_set_entries: list[dict],
+        pc3_name: str,
+    ) -> None:
+        for entry in frame_entries:
+            variant_id = str(entry.get("paper_variant_id") or "").strip()
+            media_name = self._paper_media_name_for_variant_and_pc3(
+                variant_id,
+                pc3_name=pc3_name,
+            )
+            if media_name:
+                entry["paper_media_name"] = media_name
+
+        for sheet_set in sheet_set_entries:
+            pages = sheet_set.get("pages")
+            if not isinstance(pages, list):
+                continue
+            for page in pages:
+                if not isinstance(page, dict):
+                    continue
+                variant_id = str(page.get("paper_variant_id") or "").strip()
+                media_name = self._paper_media_name_for_variant_and_pc3(
+                    variant_id,
+                    pc3_name=pc3_name,
+                )
+                if media_name:
+                    page["paper_media_name"] = media_name
 
     def _enrich_dotnet_result_metadata(self, result: dict) -> None:
         errors = result.get("errors")

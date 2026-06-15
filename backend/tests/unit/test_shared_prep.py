@@ -72,6 +72,9 @@ def _make_frame(frame_id: str) -> FrameMeta:
             frame_id=frame_id,
             source_file=Path("sample.dxf"),
             outer_bbox=BBox(xmin=0, ymin=0, xmax=100, ymax=100),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
         ),
     )
 
@@ -145,6 +148,34 @@ def test_shared_prep_passes_font_compatibility_mode_to_preflight(tmp_path: Path)
     )
 
     assert service.font_preflight_service.calls[0]["font_compatibility_mode"] is True
+
+
+def test_shared_prep_passes_detected_frames_to_font_preflight(tmp_path: Path) -> None:
+    service = _make_service(
+        {
+            "status": "ok",
+            "missing_fonts": [],
+            "detected_style_count": 3,
+            "missing_style_count": 0,
+            "font_replacement_applied": True,
+            "replacement_font": None,
+            "font_compatibility_mode": True,
+            "replaced_style_count": 1,
+        }
+    )
+    frame = _make_frame("frame-font-target")
+    service.frame_detector = cast(Any, _FakeFrameDetector([frame]))
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    service.prepare(
+        group_id="g1",
+        source_dwg=source,
+        shared_dir=tmp_path / "shared",
+        font_compatibility_mode=True,
+    )
+
+    assert service.font_preflight_service.calls[0]["frames"] == [frame]
 
 
 def test_shared_prep_sets_project_no_before_detection(tmp_path: Path) -> None:

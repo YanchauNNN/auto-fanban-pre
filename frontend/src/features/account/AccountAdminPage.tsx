@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AccountRecord, InvalidAccountRow, ManagementSchema } from "../../platform/api/types";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
 import { useSession } from "../../shared/session/SessionContext";
-import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import styles from "./AccountAdminPage.module.css";
 
 function buildEmptyAccountForm(role: string, password: string) {

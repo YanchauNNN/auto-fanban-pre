@@ -1,6 +1,6 @@
 import type { JobDetail } from "../../platform/api/types";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
-import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import styles from "./AuditCheckSummaryModal.module.css";
 
 type AuditCheckSummaryModalProps = {

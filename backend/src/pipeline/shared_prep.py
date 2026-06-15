@@ -69,12 +69,18 @@ class SharedPrepService:
                 f"font_replacement_font unavailable: {font_replacement_font}"
             )
 
+        dxf_path = self.oda.dwg_to_dxf(staged_source, shared_dir)
+        self.frame_detector.set_project_no(project_no)
+        self.titleblock_extractor.set_project_no(project_no)
+        frames = self.frame_detector.detect_frames(dxf_path)
+
         font_preflight_summary = self.font_preflight_service.inspect_dwg(
             source_dwg=staged_source,
             replacement_policy=policy,
             replacement_font=font_replacement_font,
             replacement_fonts=font_replacement_fonts,
             font_compatibility_mode=font_compatibility_mode,
+            frames=frames,
             workspace_dir=shared_dir / "font_preflight",
             slot_runtime=slot_runtime,
         )
@@ -87,10 +93,6 @@ class SharedPrepService:
         if missing_fonts and policy != "replace_missing":
             raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
 
-        dxf_path = self.oda.dwg_to_dxf(staged_source, shared_dir)
-        self.frame_detector.set_project_no(project_no)
-        self.titleblock_extractor.set_project_no(project_no)
-        frames = self.frame_detector.detect_frames(dxf_path)
         for frame in frames:
             frame.runtime.cad_source_file = staged_source
             self.titleblock_extractor.extract_fields(dxf_path, frame)

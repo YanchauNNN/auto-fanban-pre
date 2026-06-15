@@ -1,4 +1,4 @@
-import type { TaskGroupSummary, WorkloadScopeEntry } from "../platform/api/types";
+import type { TaskGroupSummary, WorkloadScopeEntry } from "../../platform/api/types";
 
 export type TaskGroupCardModel = {
   key: string;

@@ -1039,8 +1039,8 @@ class DeliverableApiRuntime:
                 if post_slot_work is not None:
                     self.cad_slot_pool.release(slot.slot_id)
                     slot = None
-                    completion_deferred = True
                     self._submit_doc_job(job.job_id, cast(Callable[[], None], post_slot_work))
+                    completion_deferred = True
                     return
             else:
                 self.job_processor(job)
@@ -1048,7 +1048,8 @@ class DeliverableApiRuntime:
             if job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
                 job.mark_failed(str(exc))
         finally:
-            self.job_manager.update_job(job)
+            if not completion_deferred:
+                self.job_manager.update_job(job)
             if slot is not None:
                 self.cad_slot_pool.release(slot.slot_id)
             if not completion_deferred:
@@ -1095,14 +1096,24 @@ class DeliverableApiRuntime:
         try:
             post_slot_work()
         except Exception as exc:  # noqa: BLE001
-            if job is not None and job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
-                job.mark_failed(str(exc))
+            latest = self._latest_doc_phase_job(job_id, fallback=job)
+            if latest is not None and latest.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
+                latest.mark_failed(str(exc))
+                job = latest
         finally:
             with self._future_lock:
                 self._running_doc_job_ids.discard(job_id)
-            if job is not None:
-                self.job_manager.update_job(job)
+            latest = self._latest_doc_phase_job(job_id, fallback=job)
+            if latest is not None:
+                self.job_manager.update_job(latest)
             self._signal_job_completion(job_id)
+
+    def _latest_doc_phase_job(self, job_id: str, *, fallback: Job | None) -> Job | None:
+        terminal_statuses = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+        if fallback is not None and fallback.status in terminal_statuses:
+            return fallback
+        latest = self.job_manager.reload_job(job_id)
+        return latest or fallback
 
     def _wait_for_job_completion(self, job_id: str, timeout_sec: float | None = None) -> Job | None:
         wait_timeout = (

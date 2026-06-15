@@ -111,6 +111,9 @@ class TitleblockExtractor(ITitleblockExtractor):
         elif self.anchor_texts and not self._frame_has_anchor_text(
             text_items, frame, profile, profile_id
         ):
+            self._extract_a4_page_marker(frame, text_items)
+            if frame.titleblock.internal_code and frame.titleblock.page_index:
+                return frame
             frame.add_flag("未命中锚点文本")
             return frame
 
@@ -177,6 +180,12 @@ class TitleblockExtractor(ITitleblockExtractor):
                 external_code = self._parse_external_code(roi_items, parse_cfg)
                 if external_code:
                     fields.external_code = external_code
+                continue
+
+            if field_key == "subitem_no":
+                value = self._parse_subitem_no(roi_items, internal_code=fields.internal_code)
+                if value:
+                    fields.subitem_no = value
                 continue
 
             if parse_type == "regex":
@@ -302,7 +311,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         return (dx * dx + dy * dy) ** 0.5
 
     def _extract_a4_page_marker(self, frame: FrameMeta, items: list[TextItem]) -> None:
-        """仅提取A4右上角页码，不做titleblock字段解析"""
+        """提取无完整图签页面右上角页码/001标记，不做完整titleblock字段解析。"""
         rb_offset = [0.0, 120.0, 255.0, 295.0]
         roi = self._restore_roi(
             frame.runtime.outer_bbox,
@@ -311,22 +320,45 @@ class TitleblockExtractor(ITitleblockExtractor):
             frame.runtime.sy or 1.0,
         )
         roi_items = [t for t in items if self._item_in_roi(t, roi)]
+        marker_items = self._dedupe_text_items(
+            [*roi_items, *self._fallback_page_marker_items(frame, items)]
+        )
         frame.raw_extracts = {
-            "A4_page_marker": [self._text_item_to_dict(t) for t in roi_items]
+            "A4_page_marker": [self._text_item_to_dict(t) for t in marker_items]
         }
-        page_total, page_index = self._parse_page_marker_from_text(roi_items)
-        marker_internal_code, marker_revision = self._parse_a4_marker_identity(roi_items)
+        page_total, page_index = self._parse_page_marker_from_text(marker_items)
+        marker_internal_code, marker_revision = self._parse_a4_marker_identity(marker_items)
         if page_index is None:
             page_total, page_index = self._fallback_a4_page_marker(frame, items)
         if page_total is not None:
             frame.titleblock.page_total = page_total
         if page_index is not None:
             frame.titleblock.page_index = page_index
+        if marker_internal_code:
+            frame.titleblock.internal_code = marker_internal_code
+        if marker_revision:
+            frame.titleblock.revision = marker_revision
         if marker_internal_code or marker_revision:
             frame.raw_extracts["A4_page_marker_meta"] = {
                 "internal_code": marker_internal_code,
                 "revision": marker_revision,
             }
+
+    @staticmethod
+    def _dedupe_text_items(items: list[TextItem]) -> list[TextItem]:
+        deduped: list[TextItem] = []
+        seen: set[tuple[str, float, float]] = set()
+        for item in items:
+            key = (
+                str(item.text or ""),
+                round(float(item.x), 3),
+                round(float(item.y), 3),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def _match_joined_anchor_text(self, items: list[TextItem]) -> bool:
         if len(items) < 2 or not self.anchor_texts:
@@ -530,6 +562,38 @@ class TitleblockExtractor(ITitleblockExtractor):
             return None, int(cleaned)
         return None, None
 
+    def _fallback_page_marker_items(
+        self,
+        frame: FrameMeta,
+        items: list[TextItem],
+    ) -> list[TextItem]:
+        outer = frame.runtime.outer_bbox
+        width = max(1e-6, outer.width)
+        height = max(1e-6, outer.height)
+        marker_items: list[TextItem] = []
+        for item in items:
+            text = self._normalize_spaces(item.text or "")
+            if not text:
+                continue
+            if not (outer.xmin <= item.x <= outer.xmax and outer.ymin <= item.y <= outer.ymax):
+                continue
+            xnorm = (item.x - outer.xmin) / width
+            ynorm = (item.y - outer.ymin) / height
+            if xnorm < 0.55 or ynorm < 0.85:
+                continue
+            compact = self._strip_all_whitespace(text).upper()
+            if (
+                re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001", compact, flags=re.IGNORECASE)
+                or "PAGE" in compact
+                or "OF" in compact
+                or "第" in compact
+                or "共" in compact
+                or "张" in compact
+            ):
+                marker_items.append(item)
+        marker_items.sort(key=lambda item: (-item.y, item.x))
+        return marker_items
+
     def _check_scale_mismatch(self, frame: FrameMeta) -> None:
         geom = frame.runtime.geom_scale_factor
         scale_den = frame.titleblock.scale_denominator
@@ -695,14 +759,12 @@ class TitleblockExtractor(ITitleblockExtractor):
         best_match = None
         best_score = None
         for candidate in self._external_code_candidates(items, header_hint):
-            for i in range(max(0, len(candidate) - fixed_len + 1)):
-                sub = candidate[i : i + fixed_len]
-                if len(sub) != fixed_len or not self._is_valid_external_code(sub):
-                    continue
-                score = (0 if sub[:1].isalpha() else 1, i, len(candidate) - fixed_len)
-                if best_score is None or score < best_score:
-                    best_score = score
-                    best_match = sub
+            if len(candidate) != fixed_len or not self._is_valid_external_code(candidate):
+                continue
+            score = (0 if candidate[:1].isalpha() else 1,)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_match = candidate
         if best_match:
             return best_match
 
@@ -714,6 +776,7 @@ class TitleblockExtractor(ITitleblockExtractor):
 
     def _external_code_candidates(self, items: list[TextItem], header_hint: str) -> list[str]:
         candidates: list[str] = []
+        items = self._dedupe_external_code_items(items, header_hint)
 
         ordered_items = sorted(items, key=lambda t: (t.x, t.y))
         joined_all = "".join((t.text or "") for t in ordered_items)
@@ -741,6 +804,86 @@ class TitleblockExtractor(ITitleblockExtractor):
             seen.add(candidate)
             deduped.append(candidate)
         return deduped
+
+    def _dedupe_external_code_items(
+        self,
+        items: list[TextItem],
+        header_hint: str,
+    ) -> list[TextItem]:
+        selected: list[TextItem] = []
+        for item in items:
+            if not self._normalize_external_candidate(item.text or "", header_hint):
+                selected.append(item)
+                continue
+            duplicate_index = next(
+                (
+                    idx
+                    for idx, existing in enumerate(selected)
+                    if self._external_code_items_overlap_duplicate(
+                        existing,
+                        item,
+                        header_hint,
+                    )
+                ),
+                None,
+            )
+            if duplicate_index is None:
+                selected.append(item)
+                continue
+            if self._prefer_external_code_item(item, selected[duplicate_index]):
+                selected[duplicate_index] = item
+        return selected
+
+    def _external_code_items_overlap_duplicate(
+        self,
+        left: TextItem,
+        right: TextItem,
+        header_hint: str,
+    ) -> bool:
+        left_text = self._normalize_external_candidate(left.text or "", header_hint)
+        right_text = self._normalize_external_candidate(right.text or "", header_hint)
+        if not left_text or left_text != right_text:
+            return False
+        left_x, left_y = self._item_center(left)
+        right_x, right_y = self._item_center(right)
+        tol = max(
+            0.5,
+            (left.text_height or 0.0) * 0.05,
+            (right.text_height or 0.0) * 0.05,
+        )
+        if abs(left_x - right_x) > tol or abs(left_y - right_y) > tol:
+            return False
+        if left.bbox is None or right.bbox is None:
+            return True
+        return self._bbox_overlap_ratio(left.bbox, right.bbox) >= 0.80
+
+    @staticmethod
+    def _prefer_external_code_item(candidate: TextItem, existing: TextItem) -> bool:
+        candidate_virtual = ":virtual" in candidate.source
+        existing_virtual = ":virtual" in existing.source
+        if candidate_virtual != existing_virtual:
+            return not candidate_virtual
+        return (candidate.text_height or 0.0) > (existing.text_height or 0.0)
+
+    @staticmethod
+    def _item_center(item: TextItem) -> tuple[float, float]:
+        if item.bbox is None:
+            return item.x, item.y
+        return (
+            (item.bbox.xmin + item.bbox.xmax) / 2.0,
+            (item.bbox.ymin + item.bbox.ymax) / 2.0,
+        )
+
+    @staticmethod
+    def _bbox_overlap_ratio(left: BBox, right: BBox) -> float:
+        x_overlap = max(0.0, min(left.xmax, right.xmax) - max(left.xmin, right.xmin))
+        y_overlap = max(0.0, min(left.ymax, right.ymax) - max(left.ymin, right.ymin))
+        overlap_area = x_overlap * y_overlap
+        if overlap_area <= 0.0:
+            return 0.0
+        left_area = max((left.xmax - left.xmin) * (left.ymax - left.ymin), 1e-6)
+        right_area = max((right.xmax - right.xmin) * (right.ymax - right.ymin), 1e-6)
+        return overlap_area / min(left_area, right_area)
 
     def _normalize_external_candidate(self, text: str, header_hint: str) -> str:
         cleaned = self._clean_alnum(self._normalize_spaces(text).upper())
@@ -829,15 +972,18 @@ class TitleblockExtractor(ITitleblockExtractor):
                 [self._normalize_spaces(line) for line in lines if line]
             ).strip()
             return (title_cn or None), None
+        normalized_lines = [self._normalize_spaces(line) for line in lines if line]
         cn_lines: list[str] = []
         en_lines: list[str] = []
-        for line in lines:
-            normalized = self._normalize_spaces(line)
-            if self._looks_like_compact_cn_title_token(normalized):
-                cn_lines.append(normalized)
-            elif self._looks_like_english_title_line(normalized):
-                en_lines.append(normalized)
-            elif self._has_cjk(normalized):
+        for idx, normalized in enumerate(normalized_lines):
+            language = self._classify_title_line(normalized)
+            if self._looks_like_title_scope_line(normalized):
+                for following in normalized_lines[idx + 1 :]:
+                    if self._looks_like_title_scope_line(following):
+                        continue
+                    language = self._classify_title_line(following)
+                    break
+            if language == "cn":
                 cn_lines.append(normalized)
             else:
                 en_lines.append(normalized)
@@ -848,6 +994,59 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _parse_text(self, items: list[TextItem]) -> str | None:
         joined = self._join_text(items)
         return joined or None
+
+    def _parse_subitem_no(
+        self,
+        items: list[TextItem],
+        *,
+        internal_code: str | None = None,
+    ) -> str | None:
+        expected = self._subitem_no_from_internal_code(internal_code)
+        candidates: list[str] = []
+
+        for item in items:
+            text = str(item.text or "")
+            candidates.extend(part.strip() for part in text.splitlines() if part.strip())
+
+        joined = self._join_text(items)
+        if joined:
+            candidates.append(joined)
+            candidates.extend(part.strip() for part in joined.splitlines() if part.strip())
+
+        normalized_candidates = [self._normalize_subitem_candidate(value) for value in candidates]
+        normalized_candidates = [value for value in normalized_candidates if value]
+
+        if expected and expected in normalized_candidates:
+            return expected
+
+        for value in normalized_candidates:
+            if self._is_clean_subitem_no(value):
+                return value
+
+        return expected
+
+    @staticmethod
+    def _subitem_no_from_internal_code(internal_code: str | None) -> str | None:
+        text = str(internal_code or "").strip().upper()
+        match = re.match(r"^\d{4}\d(?P<subitem>[A-Z]{2,4})-", text)
+        if not match:
+            return None
+        return match.group("subitem")
+
+    @staticmethod
+    def _normalize_subitem_candidate(value: str) -> str:
+        text = re.sub(r"\s+", "", str(value or "").strip().upper())
+        if not text:
+            return ""
+        noise_tokens = ("图号", "圖號", "DOC.NO", "DOCNO", "DOCUMENTNO", "NO.", "NO")
+        for token in noise_tokens:
+            text = text.replace(token, "")
+        text = re.sub(r"[^A-Z0-9]", "", text)
+        return text
+
+    @staticmethod
+    def _is_clean_subitem_no(value: str) -> bool:
+        return bool(re.fullmatch(r"[A-Z]{1,4}", value or ""))
 
     def _pick_top_by_y(self, items: list[TextItem]) -> str | None:
         if not items:
@@ -974,6 +1173,28 @@ class TitleblockExtractor(ITitleblockExtractor):
             text,
         )
         return not cls._has_cjk(stripped)
+
+    @classmethod
+    def _classify_title_line(cls, text: str) -> str:
+        if cls._looks_like_compact_cn_title_token(text):
+            return "cn"
+        if cls._looks_like_english_title_line(text):
+            return "en"
+        if cls._has_cjk(text):
+            return "cn"
+        return "en"
+
+    @staticmethod
+    def _looks_like_title_scope_line(text: str) -> bool:
+        normalized = text.strip().upper().replace("\uff5e", "~")
+        return (
+            re.fullmatch(
+                r"[0-9]{1,2}[A-Z]{1,4}\s+[-+]?[0-9]+(?:\.[0-9]+)?"
+                r"(?:\s*~\s*[-+]?[0-9]+(?:\.[0-9]+)?)?(?:\s*M)?",
+                normalized,
+            )
+            is not None
+        )
 
     @staticmethod
     def _looks_like_compact_cn_title_token(text: str) -> bool:
@@ -1386,6 +1607,7 @@ class TitleblockExtractor(ITitleblockExtractor):
     def _rebuild_fixed19_from_single_chars(
         self, items: list[TextItem], fixed_len: int, header_hint: str
     ) -> str | None:
+        items = self._dedupe_external_code_items(items, header_hint)
         tokens: list[tuple[float, float, str]] = []
         for it in items:
             s = self._normalize_external_candidate(it.text or "", header_hint)

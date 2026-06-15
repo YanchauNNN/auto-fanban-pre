@@ -21,6 +21,21 @@ from src.cad.plot_resource_manager import (
 from src.config import RuntimeConfig
 from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
+PDF3_PC3_NAME = "打印PDF3.pc3"
+PDF3_A2_HALF_MEDIA = "UserDefinedMetric (921.00 x 450.00毫米)"
+
+
+def _valid_pc3_text(label: str = "pc3") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_pmp_text(label: str = "pmp") -> str:
+    return f"PIAFILEVERSION_2.0,PC3VER1,compressed-test,{label}\n" * 8
+
+
+def _valid_ctb_text(label: str = "managed-ctb") -> str:
+    return f"PIAFILEVERSION_2.0,CTBVER1,compressed-test,{label}\n" * 64
+
 
 class _SpecStub:
     """最小化 spec stub，仅提供图幅查询。"""
@@ -35,6 +50,14 @@ class _SpecStub:
         self.titleblock_extract = {
             "paper_variants": {
                 "CNPE_A1": {"打印PDF2.pc3文件中对应纸张": "A1"},
+                "CNPE_A2+1/2": {
+                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
+                },
+                "CNPE_A2+0.5": {
+                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
+                },
                 "CNPE_A4": {"打印PDF2.pc3文件中对应纸张": "A4"},
                 "CNPE_A4H": {"打印PDF2.pc3文件中对应纸张": "A4,横向打印"},
             },
@@ -46,20 +69,27 @@ class _SpecStub:
             self.H = h
 
     def get_paper_variants(self):
-        return {"CNPE_A1": self._Variant(841.0, 594.0)}
+        return {
+            "CNPE_A1": self._Variant(841.0, 594.0),
+            "CNPE_A2+1/2": self._Variant(891.0, 420.0),
+            "CNPE_A2+0.5": self._Variant(891.0, 420.0),
+        }
 
 
 @pytest.fixture(autouse=True)
 def _managed_plot_assets(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "AppData" / "Roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     asset_root = tmp_path / "assets"
     plotters_asset = asset_root / "plotters"
     plot_styles_asset = asset_root / "plot_styles"
     plotters_asset.mkdir(parents=True, exist_ok=True)
     plot_styles_asset.mkdir(parents=True, exist_ok=True)
-    (plotters_asset / PDF2_PC3_NAME).write_text("pc3", encoding="utf-8")
-    (plotters_asset / PDF2_PMP_NAME).write_text("pmp", encoding="utf-8")
+    (plotters_asset / PDF2_PC3_NAME).write_text(_valid_pc3_text(), encoding="utf-8")
+    (plotters_asset / PDF3_PC3_NAME).write_text(_valid_pc3_text("pdf3"), encoding="utf-8")
+    (plotters_asset / PDF2_PMP_NAME).write_text(_valid_pmp_text(), encoding="utf-8")
     for name in ALL_MANAGED_CTB_NAMES:
-        (plot_styles_asset / name).write_text("managed-ctb" * 128, encoding="utf-8")
+        (plot_styles_asset / name).write_text(_valid_ctb_text(name), encoding="utf-8")
     monkeypatch.setenv("FANBAN_PLOT_ASSET_ROOT", str(asset_root))
 
 
@@ -95,6 +125,8 @@ def test_plot_resources_deploy_into_slot_local_dirs_when_runtime_context_present
     plotters_dir = tmp_path / "slot" / "support" / "Plotters"
     plot_styles_dir = plotters_dir / "Plot Styles"
     pmp_dir = plotters_dir / "PMP Files"
+    pmp_dir.mkdir(parents=True, exist_ok=True)
+    plot_styles_dir.mkdir(parents=True, exist_ok=True)
     slot_runtime = {
         "plotters_dir": str(plotters_dir),
         "plot_styles_dir": str(plot_styles_dir),
@@ -830,8 +862,117 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert task["frames"][0]["frame_id"] == "f-1"
     assert task["frames"][0]["paper_variant_id"] == "CNPE_A1"
     assert task["frames"][0]["paper_media_name"] == "A1"
-    assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A4H"
-    assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A4"
+    assert task["sheet_sets"][0]["pages"][0]["paper_variant_id"] == "CNPE_A1"
+    assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A1"
+
+
+def test_a2_half_variant_uses_pdf3_override_for_task_and_plot_resources(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A2+1/2"
+
+    cfg = RuntimeConfig()
+    cfg.module5_export.plot.paper_variant_pc3_overrides = {
+        "CNPE_A2+1/2": PDF3_PC3_NAME,
+        "CNPE_A2+0.5": PDF3_PC3_NAME,
+    }
+    plotters_dir = tmp_path / "slot" / "support" / "Plotters"
+    plot_styles_dir = plotters_dir / "Plot Styles"
+    pmp_dir = plotters_dir / "PMP Files"
+    pmp_dir.mkdir(parents=True, exist_ok=True)
+    plot_styles_dir.mkdir(parents=True, exist_ok=True)
+    slot_runtime = {
+        "plotters_dir": str(plotters_dir),
+        "plot_styles_dir": str(plot_styles_dir),
+        "pmp_dir": str(pmp_dir),
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "src.cad.cad_dxf_executor.resolve_autocad_paths",
+        lambda configured_install_dir=None: cast(
+            Any,
+            SimpleNamespace(
+                install_dir=None,
+                plotters_dir=None,
+                plot_styles_dir=None,
+                monochrome_ctb_path=None,
+                pc3_path=None,
+            ),
+        ),
+    )
+
+    def _fake_ensure_plot_resources(**kwargs):
+        captured.update(kwargs)
+        return cast(
+            Any,
+            SimpleNamespace(
+                plotters_dir=plotters_dir,
+                plot_styles_dir=plot_styles_dir,
+                pc3_path=plotters_dir / str(kwargs["pc3_name"]),
+                pmp_path=pmp_dir / PDF2_PMP_NAME,
+                ctb_path=plot_styles_dir / MANAGED_CTB_NAME,
+            ),
+        )
+
+    runner = _RunnerSuccessStub()
+    monkeypatch.setattr("src.cad.cad_dxf_executor.ensure_plot_resources", _fake_ensure_plot_resources)
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, runner), spec=_SpecStub())
+
+    executor.execute_source_dxf(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+        task_root=tmp_path / "tasks",
+        slot_runtime=slot_runtime,
+    )
+
+    assert captured["pc3_name"] == PDF3_PC3_NAME
+    assert runner.calls
+    for call in runner.calls:
+        task = json.loads(Path(call["task_json"]).read_text(encoding="utf-8"))
+        assert task["plot"]["pc3_name"] == PDF3_PC3_NAME
+        assert task["plot"]["pc3_resolved_path"].endswith(PDF3_PC3_NAME)
+        assert task["plot"]["pc3_search_dirs"] == [str(plotters_dir.resolve())]
+
+
+def test_a2_half_decimal_variant_uses_pdf3_override_in_task_json(tmp_path: Path):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A2+0.5"
+
+    cfg = RuntimeConfig()
+    cfg.module5_export.plot.paper_variant_pc3_overrides = {"CNPE_A2+0.5": PDF3_PC3_NAME}
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, _RunnerSuccessStub()), spec=_SpecStub())
+
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+    )
+
+    assert task["plot"]["pc3_name"] == PDF3_PC3_NAME
+    assert task["frames"][0]["paper_variant_id"] == "CNPE_A2+0.5"
+    assert task["frames"][0]["paper_media_name"] == PDF3_A2_HALF_MEDIA
 
 
 def test_build_task_json_contains_split_dwg_output_strategy(tmp_path: Path):
@@ -1256,7 +1397,8 @@ def test_execute_source_dxf_ensures_plot_resources_before_building_task(
     order: list[str] = []
     original_build = CADDXFExecutor.build_task_json
 
-    def _ensure(self, *, slot_runtime=None, ctb_name=None):
+    def _ensure(self, *, slot_runtime=None, ctb_name=None, pc3_name=None):
+        _ = pc3_name
         order.append("ensure")
         return cast(
             Any,
@@ -1433,6 +1575,112 @@ def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):
     assert "plot_from_split_dwg" in stages
     assert result["sheet_sets"][0]["status"] == "ok"
     assert "PLOT_FROM_SPLIT_FALLBACK" in result["sheet_sets"][0]["flags"]
+
+
+def test_sheet_set_split_fallback_merges_page_dwgs_when_multipage_plot_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="18185NF-JGS19-001",
+        external_code="PC5NFZ31001B25C42SD",
+    )
+    sheet_set = _make_sheet_set_two_pages("cluster-001", frame)
+    executor = _make_executor(config=_config_with_split_dwg_plot())
+
+    output_dir = tmp_path / "drawings"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    union_dwg = output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}.dwg"
+    union_dwg.write_bytes(b"AC1027union")
+    page_dwgs = [
+        output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}__p1.dwg",
+        output_dir / f"{CADDXFExecutor._name_for_sheet_set(sheet_set)}__p2.dwg",
+    ]
+    for path in page_dwgs:
+        path.write_bytes(b"AC1027page")
+
+    calls: list[dict] = []
+
+    def fake_run_plot_task_from_dwg(*, source_dwg, runtime_task_dir, task_data):  # noqa: ANN001
+        _ = runtime_task_dir
+        calls.append({"source_dwg": source_dwg, "task": task_data})
+        if task_data.get("sheet_sets"):
+            return {
+                "frames": [],
+                "sheet_sets": [
+                    {
+                        "cluster_id": sheet_set.cluster_id,
+                        "status": "failed",
+                        "pdf_path": str(output_dir / "failed-multipage.pdf"),
+                        "dwg_path": str(union_dwg),
+                        "page_count": 2,
+                        "flags": ["PLOT_ERROR:eInvalidPlotInfo"],
+                        "page_pdf_paths": [],
+                    },
+                ],
+                "errors": [],
+            }
+
+        frame_entry = task_data["frames"][0]
+        page_pdf = output_dir / f"{frame_entry['name']}.pdf"
+        _write_dummy_pdf(page_pdf, page_sizes_mm=[(841.0, 594.0)])
+        return {
+            "frames": [
+                {
+                    "frame_id": frame_entry["frame_id"],
+                    "status": "ok",
+                    "pdf_path": str(page_pdf),
+                    "dwg_path": str(source_dwg),
+                    "selection_count": 1,
+                    "flags": [],
+                },
+            ],
+            "sheet_sets": [],
+            "errors": [],
+        }
+
+    monkeypatch.setattr(executor, "_run_plot_task_from_dwg", fake_run_plot_task_from_dwg)
+    result = executor._plot_sheet_set_from_split_dwgs(
+        job_id="job-1",
+        runtime_task_dir=tmp_path / "tasks",
+        staged_output_dir=output_dir,
+        split_item={
+            "cluster_id": sheet_set.cluster_id,
+            "status": "ok",
+            "dwg_path": str(union_dwg),
+            "page_dwg_paths": [str(path) for path in page_dwgs],
+            "page_count": 2,
+            "flags": [],
+        },
+        sheet_set=sheet_set,
+        plot_resource_context=None,
+        runtime_context={},
+    )
+
+    assert result["status"] == "ok"
+    assert result["dwg_path"] == str(union_dwg)
+    assert Path(result["pdf_path"]).exists()
+    assert len(result["page_pdf_paths"]) == 2
+    assert "PLOT_PAGE_BY_PAGE_MERGED" in result["flags"]
+    assert [call["task"]["workflow_stage"] for call in calls] == [
+        "plot_from_split_dwg",
+        "plot_from_split_dwg",
+        "plot_from_split_dwg",
+    ]
+    assert [call["task"]["output"]["plot_preferred_area"] for call in calls] == [
+        "window",
+        "extents",
+        "extents",
+    ]
+    page_ok, page_reason = executor._validate_pdf_page_count(
+        pdf_path=Path(result["pdf_path"]),
+        expected_pages=2,
+    )
+    assert page_ok, page_reason
 
 
 def test_window_success_with_missing_split_dwg_still_marks_ok(tmp_path: Path):
