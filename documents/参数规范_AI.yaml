@@ -1,0 +1,311 @@
+# ============================================================================
+# CNPE 图纸处理系统 - AI 层参数规范 v0.1
+# ============================================================================
+# 说明：
+# - 本文件用于描述 AI 辅助层的模型、知识库、图纸元素理解、问答和安全边界参数。
+# - 与 documents/参数规范.yaml、documents/参数规范_运行期.yaml 分离，避免 AI 配置与
+#   既有业务字段、CAD/Office 运行参数耦合。
+# - 实机环境默认处于内部局域网；外部互联网能力默认禁用。
+# - 大模型服务必须通过内部 OpenAI-compatible API 网关访问，不在前端直连模型。
+# ============================================================================
+
+schema_version: "0.1"
+last_updated: "2026-06-16"
+
+ai_layer:
+  enabled:
+    type: bool
+    default: false
+    desc: "AI 辅助层总开关；默认关闭，避免部署机未配置模型网关时影响主流程"
+
+  deployment_profile:
+    network_mode:
+      type: enum
+      default: "intranet_only"
+      options: ["intranet_only", "restricted_proxy", "internet_allowed"]
+      desc: "部署网络模式；实机默认内部局域网"
+    allow_external_network:
+      type: bool
+      default: false
+      desc: "是否允许 AI 层访问外部互联网；实机默认禁止"
+    frontend_direct_model_access:
+      type: bool
+      default: false
+      desc: "前端是否允许直连模型；必须保持 false，由后端统一代理"
+
+  bootstrap_contract:
+    ai_spec_path_env_var:
+      type: str
+      default: "FANBAN_AI_SPEC_PATH"
+      desc: "AI 参数规范文件路径的启动期环境变量"
+    api_key_env_var:
+      type: str
+      default: "FANBAN_AI_API_KEY"
+      desc: "内部模型网关 API key 环境变量；不得写入 YAML 明文"
+    base_url_env_var:
+      type: str
+      default: "FANBAN_AI_BASE_URL"
+      desc: "内部 OpenAI-compatible 网关地址环境变量；优先级高于 YAML 默认值"
+
+  model_gateway:
+    provider:
+      type: enum
+      default: "openai_compatible"
+      options: ["openai_compatible"]
+      desc: "模型网关协议；当前只接受 OpenAI-compatible API"
+    base_url:
+      type: str
+      default: "http://127.0.0.1:8001/v1"
+      desc: "内部模型网关地址；部署时建议用 FANBAN_AI_BASE_URL 覆盖"
+    api_key_policy:
+      type: enum
+      default: "env_only"
+      options: ["env_only"]
+      desc: "API key 只允许从环境变量读取"
+    timeout_sec:
+      type: int
+      default: 60
+      desc: "单次模型请求超时"
+    max_retries:
+      type: int
+      default: 1
+      desc: "模型请求失败后的重试次数"
+    retry_backoff_ms:
+      type: int
+      default: 800
+      desc: "模型请求重试退避间隔"
+
+  models:
+    chat:
+      model:
+        type: str
+        default: "internal-chat"
+        desc: "内部对话模型名称"
+      temperature:
+        type: float
+        default: 0.1
+        desc: "默认低温度，优先稳定、可复核输出"
+      max_output_tokens:
+        type: int
+        default: 2048
+        desc: "默认回答最大输出 token"
+    structured:
+      model:
+        type: str
+        default: "internal-chat"
+        desc: "结构化 JSON 输出使用的模型"
+      require_json_schema:
+        type: bool
+        default: true
+        desc: "要求后端用 JSON Schema 校验模型输出；模型不支持强约束时由后端重试/降级"
+    embedding:
+      model:
+        type: str
+        default: "internal-embedding"
+        desc: "内部向量模型名称"
+      dimensions:
+        type: int
+        default: 1024
+        desc: "向量维度；需与实际内部模型一致"
+      batch_size:
+        type: int
+        default: 64
+        desc: "知识库入库时的 embedding 批大小"
+
+  drawing_understanding:
+    element_package:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否启用图纸元素包生成"
+      input_extensions:
+        type: "list[str]"
+        default: [".dwg", ".dxf"]
+        desc: "图纸元素包支持的输入扩展名"
+      output_root:
+        type: str
+        default: "outputs/drawing-understanding"
+        desc: "元素包默认输出目录；属于生成产物，不建议提交 git"
+      dxf_cache_dir_name:
+        type: str
+        default: "dxf"
+        desc: "元素包输出目录中的 DXF 缓存子目录"
+      max_geometry_elements_per_drawing:
+        type: int
+        default: 200000
+        desc: "单张图写入元素包的几何元素上限；超限必须标记 truncated"
+      include_text_elements:
+        type: bool
+        default: true
+        desc: "是否写入普通文本、块内文本、属性文本等文本元素"
+      include_geometry_elements:
+        type: bool
+        default: true
+        desc: "是否写入 LINE/LWPOLYLINE/POLYLINE/CIRCLE/ARC/INSERT/DIMENSION 等几何元素"
+      include_titleblock_frames:
+        type: bool
+        default: true
+        desc: "是否写入现有图框检测和图签提取结果"
+      infer_identity_from_titleblock:
+        type: bool
+        default: true
+        desc: "文件名无法推断项目号/机组号时，是否从图签内部编码多数前缀回填"
+
+    semantic_tags:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否启用第一版规则语义标签"
+      tag_set:
+        type: "list[str]"
+        default:
+          - "internal_code"
+          - "external_code"
+          - "project_no"
+          - "unit_no"
+          - "drawing_title_candidate"
+          - "wall_mark"
+          - "scale"
+          - "page_marker"
+          - "grid_or_revision_marker"
+        desc: "第一版语义标签集合"
+      internal_code_pattern:
+        type: str
+        default: "\\b(?P<project_no>\\d{4})(?P<unit_no>[1-9])?[A-Z]{2,4}-[A-Z]{2,5}\\d{2}-\\d{3}\\b"
+        desc: "内部编码识别正则；后续应迁入代码读取"
+      external_code_pattern:
+        type: str
+        default: "\\b[A-Z0-9]{19}\\b"
+        desc: "19 位外部编码识别正则"
+      known_project_nos:
+        type: "list[str]"
+        default: ["1818", "1907", "1915", "1916", "2016", "2026", "2035", "1418"]
+        desc: "AI 层辅助识别项目号时使用的已知项目号；应与业务参数保持一致"
+      title_keywords:
+        type: "list[str]"
+        default: ["图", "平面", "剖面", "模板", "配筋", "布置", "详图", "索引", "节点"]
+        desc: "图纸标题候选关键词"
+      wall_keywords:
+        type: "list[str]"
+        default: ["墙", "WALL"]
+        desc: "墙编号候选关键词"
+
+  knowledge_base:
+    enabled:
+      type: bool
+      default: false
+      desc: "是否启用本地知识库/RAG"
+    source_roots:
+      type: "list[str]"
+      default:
+        - "documents"
+        - "documents_bin"
+        - "storage/jobs"
+        - "storage/groups"
+      desc: "知识库默认索引来源；storage 来源需要按权限与脱敏策略过滤"
+    vector_store:
+      backend:
+        type: enum
+        default: "local_jsonl"
+        options: ["local_jsonl", "qdrant", "chroma", "faiss"]
+        desc: "向量存储后端；第一版可用 local_jsonl，部署后再切 qdrant/chroma/faiss"
+      path:
+        type: str
+        default: "storage/ai/vector-store"
+        desc: "本地向量库存储路径"
+      collection_name:
+        type: str
+        default: "fanban_documents"
+        desc: "向量集合名称"
+    chunking:
+      max_chars:
+        type: int
+        default: 1800
+        desc: "知识片段最大字符数"
+      overlap_chars:
+        type: int
+        default: 200
+        desc: "知识片段重叠字符数"
+      preserve_headings:
+        type: bool
+        default: true
+        desc: "切片时是否保留标题路径"
+
+  qa_assistant:
+    enabled:
+      type: bool
+      default: false
+      desc: "是否启用图纸问答助手"
+    mode:
+      type: enum
+      default: "rule_based_seed"
+      options: ["rule_based_seed", "rag_llm"]
+      desc: "问答模式；第一版规则种子，后续接入 RAG + 内网模型"
+    max_evidence_items:
+      type: int
+      default: 20
+      desc: "单次回答返回的证据条数上限"
+    max_context_chars:
+      type: int
+      default: 12000
+      desc: "传入模型的元素包上下文最大字符数"
+    unsupported_question_policy:
+      type: enum
+      default: "explicit_refusal"
+      options: ["explicit_refusal", "fallback_to_rag"]
+      desc: "规则问答不支持的问题如何处理"
+
+  safety:
+    model_output_must_be_grounded:
+      type: bool
+      default: true
+      desc: "模型回答必须引用元素包、知识库或任务记录证据"
+    allow_model_to_modify_dwg:
+      type: bool
+      default: false
+      desc: "是否允许模型直接修改 DWG；必须保持 false"
+    allow_model_to_modify_yaml:
+      type: bool
+      default: false
+      desc: "是否允许模型直接改 YAML；必须保持 false，改动应走人工确认和代码审查"
+    allow_model_to_submit_workflow:
+      type: bool
+      default: false
+      desc: "是否允许模型提交/审批/归档流程；必须保持 false"
+    sensitive_paths:
+      type: "list[str]"
+      default:
+        - "documents_bin/姓名角色表.csv"
+        - "storage"
+      desc: "AI 层读取时需要权限控制或脱敏的路径"
+    prompt_injection_guard:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否启用提示注入防护"
+      untrusted_content_fields:
+        type: "list[str]"
+        default: ["raw_text", "text", "title_cn", "title_en"]
+        desc: "来自图纸/文档的非可信文本字段"
+
+  audit_and_cache:
+    request_log_enabled:
+      type: bool
+      default: true
+      desc: "是否记录 AI 请求审计日志"
+    request_log_dir:
+      type: str
+      default: "storage/ai/logs"
+      desc: "AI 请求审计日志目录"
+    cache_enabled:
+      type: bool
+      default: true
+      desc: "是否启用 AI 响应缓存"
+    cache_dir:
+      type: str
+      default: "storage/ai/cache"
+      desc: "AI 响应缓存目录"
+    redact_api_key_in_logs:
+      type: bool
+      default: true
+      desc: "日志中必须隐藏 API key"
