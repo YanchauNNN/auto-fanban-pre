@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 import traceback
 from collections.abc import Callable
@@ -384,7 +385,7 @@ class PipelineExecutor:
                 message="DWG?????",
             )
             target_frames = (
-                self._detect_frames_for_font_preflight(job, dwg_file)
+                self._detect_frames_for_font_preflight(job, dwg_file, context)
                 if font_compatibility_mode
                 else []
             )
@@ -440,11 +441,19 @@ class PipelineExecutor:
         if missing_detected and policy != "replace_missing":
             raise RuntimeError("missing fonts detected but no replacement policy was confirmed")
 
-    def _detect_frames_for_font_preflight(self, job: Job, dwg_file: Path) -> list[FrameMeta]:
+    def _detect_frames_for_font_preflight(
+        self,
+        job: Job,
+        dwg_file: Path,
+        context: dict[str, Any],
+    ) -> list[FrameMeta]:
         try:
             probe_dir = self._require_work_dir(job) / "input" / ".font-preflight-probe"
             probe_dir.mkdir(parents=True, exist_ok=True)
             dxf_path = self.oda.dwg_to_dxf(dwg_file, probe_dir)
+            context.setdefault("font_preflight_source_dxf_by_dwg", {})[
+                str(dwg_file.resolve())
+            ] = dxf_path
             self.frame_detector.set_project_no(job.project_no)
             frames = self.frame_detector.detect_frames(dxf_path)
             for frame in frames:
@@ -474,7 +483,16 @@ class PipelineExecutor:
                     message="DWG转DXF中",
                     details={"dwg_current": dwg_file.name},
                 )
-                dxf_path = self.oda.dwg_to_dxf(dwg_file, dxf_dir)
+                preflight_dxf_by_dwg = context.get("font_preflight_source_dxf_by_dwg")
+                preflight_dxf = None
+                if isinstance(preflight_dxf_by_dwg, dict):
+                    preflight_dxf = preflight_dxf_by_dwg.get(str(dwg_file.resolve()))
+                if preflight_dxf is not None and Path(preflight_dxf).exists():
+                    dxf_path = dxf_dir / Path(preflight_dxf).name
+                    if Path(preflight_dxf).resolve() != dxf_path.resolve():
+                        shutil.copy2(preflight_dxf, dxf_path)
+                else:
+                    dxf_path = self.oda.dwg_to_dxf(dwg_file, dxf_dir)
                 context["dxf_files"].append(dxf_path)
                 context["dxf_to_dwg"][str(dxf_path.resolve())] = dwg_file.resolve()
                 job.progress.details["dwg_converted"] = (

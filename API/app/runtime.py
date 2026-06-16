@@ -22,6 +22,7 @@ from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
+from src.cad import FrameDetector, ODAConverter
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
@@ -105,6 +106,8 @@ class DeliverableApiRuntime:
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
+        self.font_preflight_oda = ODAConverter()
+        self.font_preflight_frame_detector = FrameDetector()
         self.job_processor = job_processor or PipelineJobProcessor(
             font_preflight_service=self.font_preflight_service
         )
@@ -236,6 +239,12 @@ class DeliverableApiRuntime:
                     replacement_fonts=None,
                     workspace_dir=workspace_dir,
                 )
+                result = self._augment_font_preflight_with_compatibility_probe(
+                    result=result,
+                    source_path=source_path,
+                    workspace_dir=workspace_dir,
+                    original_filename=original_filename,
+                )
                 result["filename"] = original_filename
                 results.append(result)
             except Exception as exc:  # noqa: BLE001
@@ -285,9 +294,140 @@ class DeliverableApiRuntime:
             "replacement_options_by_kind": replacement_options_by_kind,
             "default_replacement_fonts": default_replacement_fonts,
             "requires_confirmation": any(
-                str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
+                self._font_preflight_requires_confirmation(item) for item in results
             ),
         }
+
+    def _augment_font_preflight_with_compatibility_probe(
+        self,
+        *,
+        result: dict[str, Any],
+        source_path: Path,
+        workspace_dir: Path,
+        original_filename: str,
+    ) -> dict[str, Any]:
+        if str(result.get("status") or "").strip().lower() != "ok":
+            return result
+        if list(result.get("missing_fonts") or []):
+            return result
+        if not self._font_compatibility_probe_enabled():
+            return result
+
+        frames = self._detect_font_preflight_target_frames(
+            source_path=source_path,
+            workspace_dir=workspace_dir,
+            original_filename=original_filename,
+        )
+        if not frames:
+            return result
+
+        compat_source_dir = workspace_dir / "compatibility_input"
+        compat_source_dir.mkdir(parents=True, exist_ok=True)
+        compat_source = compat_source_dir / source_path.name
+        try:
+            compat_source.write_bytes(source_path.read_bytes())
+            compat = self.font_preflight_service.inspect_dwg(
+                source_dwg=compat_source,
+                replacement_policy="none",
+                replacement_font=None,
+                replacement_fonts=None,
+                font_compatibility_mode=True,
+                frames=frames,
+                workspace_dir=workspace_dir / "compatibility_probe",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "font compatibility preflight probe failed for %s: %s",
+                original_filename,
+                exc,
+            )
+            result["font_compatibility_probe_errors"] = [str(exc)]
+            return result
+
+        empty_style_entity_count = _summary_int(compat, "empty_style_entity_replaced_count")
+        empty_style_style_patched_count = _summary_int(
+            compat,
+            "empty_style_style_patched_count",
+        )
+        empty_style_shared_skipped_count = _summary_int(
+            compat,
+            "empty_style_shared_skipped_count",
+        )
+        empty_style_target_count = _summary_int(compat, "empty_style_target_regions_count")
+        result["font_compatibility_mode"] = True
+        result["font_compatibility_required"] = (
+            empty_style_entity_count > 0
+            or empty_style_style_patched_count > 0
+            or empty_style_shared_skipped_count > 0
+        )
+        result["empty_style_entity_replaced_count"] = empty_style_entity_count
+        result["empty_style_style_patched_count"] = empty_style_style_patched_count
+        result["empty_style_shared_skipped_count"] = empty_style_shared_skipped_count
+        result["empty_style_shared_styles"] = list(
+            compat.get("empty_style_shared_styles") or []
+        )
+        result["empty_style_target_regions_count"] = empty_style_target_count
+        result["empty_style_global_replaced_count"] = _summary_int(
+            compat,
+            "empty_style_global_replaced_count",
+        )
+        if isinstance(compat.get("empty_style_replacement"), dict):
+            result["empty_style_replacement"] = dict(compat["empty_style_replacement"])
+        return result
+
+    def _detect_font_preflight_target_frames(
+        self,
+        *,
+        source_path: Path,
+        workspace_dir: Path,
+        original_filename: str,
+    ) -> list[Any]:
+        try:
+            probe_dir = workspace_dir / "frame_probe"
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            dxf_path = self.font_preflight_oda.dwg_to_dxf(source_path, probe_dir)
+            project_no = infer_project_no_from_path(original_filename) or infer_project_no_from_path(
+                source_path.name
+            )
+            self.font_preflight_frame_detector.set_project_no(project_no)
+            frames = self.font_preflight_frame_detector.detect_frames(dxf_path)
+            for frame in frames:
+                runtime = getattr(frame, "runtime", None)
+                if runtime is not None:
+                    runtime.cad_source_file = source_path
+            return list(frames)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "font preflight target frame probe failed for %s: %s",
+                original_filename,
+                exc,
+            )
+            return []
+
+    def _font_compatibility_probe_enabled(self) -> bool:
+        font_cfg = self.config.font_preflight
+        replacement = getattr(font_cfg, "empty_style_replacement", {})
+        fields = getattr(font_cfg, "empty_style_target_fields", [])
+        if not isinstance(replacement, dict):
+            return False
+        has_replacement = any(
+            str(replacement.get(key) or "").strip()
+            for key in ("font", "bigfont")
+        )
+        has_fields = any(str(item or "").strip() for item in fields or [])
+        return has_replacement and has_fields
+
+    @staticmethod
+    def _font_preflight_requires_confirmation(item: dict[str, Any]) -> bool:
+        if str(item.get("status") or "").strip().lower() == "missing_fonts":
+            return True
+        if bool(item.get("font_compatibility_required")):
+            return True
+        return (
+            _summary_int(item, "empty_style_entity_replaced_count") > 0
+            or _summary_int(item, "empty_style_style_patched_count") > 0
+            or _summary_int(item, "empty_style_shared_skipped_count") > 0
+        )
 
     @staticmethod
     def _collect_missing_font_kinds(results: list[dict[str, Any]]) -> list[str]:

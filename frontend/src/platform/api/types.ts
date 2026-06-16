@@ -167,6 +167,13 @@ export type FontPreflightFileResult = {
   replacementFonts: FontReplacementMap;
   fontCompatibilityMode?: boolean;
   fontCompatibilityReplacements?: FontReplacementMap;
+  fontCompatibilityRequired?: boolean;
+  emptyStyleEntityReplacedCount?: number;
+  emptyStyleStylePatchedCount?: number;
+  emptyStyleSharedSkippedCount?: number;
+  emptyStyleSharedStyles?: string[];
+  emptyStyleTargetRegionsCount?: number;
+  emptyStyleGlobalReplacedCount?: number;
   replacedStyleCount: number;
   verifyAfterReplace: FontVerifyAfterReplaceResult | null;
   fontReplacementIncomplete: boolean;

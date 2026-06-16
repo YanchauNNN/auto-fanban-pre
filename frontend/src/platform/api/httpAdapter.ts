@@ -160,6 +160,13 @@ type RawFontPreflightResult = {
     replacement_fonts?: Record<string, string | null> | null;
     font_compatibility_mode?: boolean | null;
     font_compatibility_replacements?: Record<string, string | null> | null;
+    font_compatibility_required?: boolean | null;
+    empty_style_entity_replaced_count?: number | null;
+    empty_style_style_patched_count?: number | null;
+    empty_style_shared_skipped_count?: number | null;
+    empty_style_shared_styles?: string[] | null;
+    empty_style_target_regions_count?: number | null;
+    empty_style_global_replaced_count?: number | null;
     replaced_style_count?: number | null;
     verify_after_replace?: {
       status?: string | null;
@@ -775,6 +782,13 @@ export class HttpAdapter implements ApiAdapter {
       fontCompatibilityReplacements: this.normalizeFontReplacementMap(
         file.font_compatibility_replacements,
       ),
+      fontCompatibilityRequired: Boolean(file.font_compatibility_required),
+      emptyStyleEntityReplacedCount: file.empty_style_entity_replaced_count ?? 0,
+      emptyStyleStylePatchedCount: file.empty_style_style_patched_count ?? 0,
+      emptyStyleSharedSkippedCount: file.empty_style_shared_skipped_count ?? 0,
+      emptyStyleSharedStyles: file.empty_style_shared_styles ?? [],
+      emptyStyleTargetRegionsCount: file.empty_style_target_regions_count ?? 0,
+      emptyStyleGlobalReplacedCount: file.empty_style_global_replaced_count ?? 0,
       replacedStyleCount: file.replaced_style_count ?? 0,
       verifyAfterReplace: file.verify_after_replace
         ? {

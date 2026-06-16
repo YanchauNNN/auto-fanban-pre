@@ -126,6 +126,7 @@ export function DeliverableWorkspace({
   const [fontReplacementError, setFontReplacementError] = useState<string | null>(null);
   const [fontReplacementDialogMode, setFontReplacementDialogMode] =
     useState<FontReplacementDialogMode | null>(null);
+  const [fontRiskConfirmation, setFontRiskConfirmation] = useState<FontPreflightResult | null>(null);
   const [fontCompatibilityMode, setFontCompatibilityMode] = useState(true);
   const [pendingSubmitMode, setPendingSubmitMode] = useState<SubmitMode>("deliverable");
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
@@ -241,6 +242,7 @@ export function DeliverableWorkspace({
     setSelectedReplacementFonts({});
     setFontReplacementError(null);
     setFontReplacementDialogMode(null);
+    setFontRiskConfirmation(null);
     setPendingSubmitMode("deliverable");
   }
 
@@ -376,7 +378,7 @@ export function DeliverableWorkspace({
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
-      setFontCompatibilityMode(false);
+      setFontCompatibilityMode(true);
       resetFontPreflightState();
       onDraftAvailabilityChange(false);
       onClearPendingReplaceFlow?.();
@@ -498,6 +500,13 @@ export function DeliverableWorkspace({
         return;
       }
 
+      const compatibilityRiskFiles = getFontCompatibilityRiskFiles(preflight);
+      if (compatibilityRiskFiles.length > 0) {
+        setFontPreflightResult(preflight);
+        setFontRiskConfirmation(preflight);
+        return;
+      }
+
       await submitDeliverable(
         { fontReplacePolicy: "none", fontCompatibilityMode },
         submitMode,
@@ -535,6 +544,13 @@ export function DeliverableWorkspace({
       fontReplacementFonts: selectedFonts,
       fontCompatibilityMode,
     }, pendingSubmitMode);
+  }
+
+  async function handleConfirmFontRisk() {
+    await submitDeliverable(
+      { fontReplacePolicy: "none", fontCompatibilityMode },
+      pendingSubmitMode,
+    );
   }
 
   async function handleOpenFontReplacementReview() {
@@ -1237,6 +1253,76 @@ export function DeliverableWorkspace({
           </form>
         </div>
       </TaskConfigModal>
+
+      {fontRiskConfirmation ? (
+        <TaskConfigModal title="字体风险确认" onRequestClose={resetFontPreflightState}>
+          <div className={styles.fontModalBody}>
+            <header className={styles.modalHeader}>
+              <div>
+                <p className={styles.kicker}>Font Preflight</p>
+                <h2>字体风险确认</h2>
+                <p className={styles.description}>
+                  预检发现当前 DWG 存在字体显示风险。继续出图会保留原始上传文件，只在任务工作副本中处理。
+                </p>
+              </div>
+            </header>
+
+            <section className={styles.section}>
+              <header className={styles.sectionHeader}>
+                <h3>风险文件</h3>
+              </header>
+              <div className={styles.fontFileList}>
+                {getFontCompatibilityRiskFiles(fontRiskConfirmation).map((file) => {
+                  const targetTextCount = Number(file.emptyStyleEntityReplacedCount ?? 0);
+                  const patchedStyleCount = Number(file.emptyStyleStylePatchedCount ?? 0);
+                  const sharedCount = Number(file.emptyStyleSharedSkippedCount ?? 0);
+                  return (
+                    <article className={styles.fontFileCard} key={file.filename}>
+                      <div className={styles.summaryHeaderRow}>
+                        <h3>{file.filename}</h3>
+                        <span>
+                          {sharedCount > 0
+                            ? `${targetTextCount} 处待处理，${sharedCount} 类共享样式`
+                            : `${patchedStyleCount} 类样式，${targetTextCount} 处文字`}
+                        </span>
+                      </div>
+                      <p className={styles.emptyState}>
+                        检测到图签关键区域存在空字体样式文字，建议使用当前勾选的字体兼容模式打印。
+                      </p>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className={styles.fontReplacementPreview}>
+                <strong>
+                  {fontCompatibilityMode
+                    ? "当前已启用字体兼容模式。"
+                    : "当前未启用字体兼容模式。"}
+                </strong>
+                <span>
+                  {fontCompatibilityMode
+                    ? "继续后会在任务副本中按目标 ROI 修复空字体样式，不会全局改写字体样式。"
+                    : "继续后不会执行空字体兼容修复，PDF 仍可能出现文字不可见或错位。"}
+                </span>
+              </div>
+            </section>
+
+            <footer className={styles.actions}>
+              <button className={styles.ghostButton} type="button" onClick={resetFontPreflightState}>
+                取消
+              </button>
+              <button
+                className={styles.primaryButton}
+                disabled={isSubmitting}
+                type="button"
+                onClick={handleConfirmFontRisk}
+              >
+                {isSubmitting ? "提交中..." : "继续出图"}
+              </button>
+            </footer>
+          </div>
+        </TaskConfigModal>
+      ) : null}
 
       {fontPreflightResult && fontReplacementDialogMode ? (
         <TaskConfigModal title={fontDialogTitle} onRequestClose={resetFontPreflightState}>
@@ -2240,6 +2326,16 @@ function normalizeFontPreflightStatus(status: string) {
 function buildFontPreflightFailureMessages(files: FontPreflightResult["files"]) {
   return files.flatMap((file) =>
     file.errors.length > 0 ? file.errors : [`${file.filename}：字体预检失败`],
+  );
+}
+
+function getFontCompatibilityRiskFiles(result: FontPreflightResult | null) {
+  return (result?.files ?? []).filter(
+    (file) =>
+      Boolean(file.fontCompatibilityRequired) ||
+      Number(file.emptyStyleEntityReplacedCount ?? 0) > 0 ||
+      Number(file.emptyStyleStylePatchedCount ?? 0) > 0 ||
+      Number(file.emptyStyleSharedSkippedCount ?? 0) > 0,
   );
 }
 

@@ -121,6 +121,68 @@ class FakeFontPreflightService:
             }
         )
         filename = source_dwg.name
+        if filename.startswith("empty-style"):
+            if font_compatibility_mode:
+                return {
+                    "filename": filename,
+                    "status": "ok",
+                    "missing_fonts": [],
+                    "detected_style_count": 4,
+                    "missing_style_count": 0,
+                    "font_replacement_applied": False,
+                    "replacement_font": None,
+                    "replacement_fonts": {},
+                    "replaced_style_count": 0,
+                    "font_compatibility_mode": True,
+                    "empty_style_entity_replaced_count": 2,
+                    "empty_style_target_regions_count": 3,
+                    "empty_style_global_replaced_count": 0,
+                }
+            return {
+                "filename": filename,
+                "status": "ok",
+                "missing_fonts": [],
+                "detected_style_count": 4,
+                "missing_style_count": 0,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
+        if filename.startswith("patched-empty-style"):
+            if font_compatibility_mode:
+                return {
+                    "filename": filename,
+                    "status": "ok",
+                    "missing_fonts": [],
+                    "detected_style_count": 4,
+                    "missing_style_count": 0,
+                    "font_replacement_applied": False,
+                    "replacement_font": None,
+                    "replacement_fonts": {},
+                    "replaced_style_count": 0,
+                    "font_compatibility_mode": True,
+                    "font_compatibility_required": True,
+                    "empty_style_entity_replaced_count": 2,
+                    "empty_style_style_patched_count": 1,
+                    "empty_style_shared_skipped_count": 0,
+                    "empty_style_shared_styles": [],
+                    "empty_style_target_regions_count": 3,
+                    "empty_style_global_replaced_count": 0,
+                }
+            return {
+                "filename": filename,
+                "status": "ok",
+                "missing_fonts": [],
+                "detected_style_count": 4,
+                "missing_style_count": 0,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
         if filename.startswith("missing-font"):
             return {
                 "filename": filename,
@@ -882,6 +944,97 @@ def test_preflight_fonts_keeps_file_results_when_replacement_inventory_fails(
     assert payload["replacement_options_by_kind"] == {}
     assert payload["default_replacement_fonts"] == {}
     assert payload["files"][0]["status"] == "missing_fonts"
+
+
+def test_preflight_fonts_reports_empty_style_compatibility_risk(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        runtime = client.app.state.runtime
+
+        class FakeOda:
+            def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                dxf_path = output_dir / f"{dwg_path.stem}.dxf"
+                dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+                return dxf_path
+
+        class FakeFrameDetector:
+            def __init__(self) -> None:
+                self.project_no: str | None = None
+
+            def set_project_no(self, project_no: str | None) -> None:
+                self.project_no = project_no
+
+            def detect_frames(self, dxf_path: Path) -> list[object]:
+                return [SimpleNamespace(frame_id="frame-1")]
+
+        runtime.font_preflight_oda = FakeOda()
+        runtime.font_preflight_frame_detector = FakeFrameDetector()
+
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[("files[]", ("empty-style-font.dwg", b"dwg-a", "application/acad"))],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["files"][0]["status"] == "ok"
+    assert payload["files"][0]["font_compatibility_required"] is True
+    assert payload["files"][0]["empty_style_entity_replaced_count"] == 2
+    assert payload["files"][0]["empty_style_target_regions_count"] == 3
+    assert [call["font_compatibility_mode"] for call in font_service.inspect_calls] == [False, True]
+
+
+def test_preflight_fonts_reports_empty_style_patch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        runtime = client.app.state.runtime
+
+        class FakeOda:
+            def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                dxf_path = output_dir / f"{dwg_path.stem}.dxf"
+                dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+                return dxf_path
+
+        class FakeFrameDetector:
+            def set_project_no(self, project_no: str | None) -> None:
+                self.project_no = project_no
+
+            def detect_frames(self, dxf_path: Path) -> list[object]:
+                return [SimpleNamespace(frame_id="frame-1")]
+
+        runtime.font_preflight_oda = FakeOda()
+        runtime.font_preflight_frame_detector = FakeFrameDetector()
+
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[
+                (
+                    "files[]",
+                    ("patched-empty-style-font.dwg", b"dwg-a", "application/acad"),
+                )
+            ],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["files"][0]["status"] == "ok"
+    assert payload["files"][0]["font_compatibility_required"] is True
+    assert payload["files"][0]["empty_style_entity_replaced_count"] == 2
+    assert payload["files"][0]["empty_style_style_patched_count"] == 1
+    assert payload["files"][0]["empty_style_shared_skipped_count"] == 0
+    assert payload["files"][0]["empty_style_shared_styles"] == []
 
 
 def test_preflight_fonts_uses_ascii_working_copy_for_non_ascii_upload_names(

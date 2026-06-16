@@ -123,6 +123,43 @@ class _OkBridge:
         }
 
 
+class _PatchedEmptyStyleBridge(_OkBridge):
+    def replace_missing(self, **kwargs: Any) -> dict[str, Any]:
+        result = super().replace_missing(**kwargs)
+        result.update(
+            {
+                "empty_style_entity_replaced_count": 2,
+                "empty_style_style_patched_count": 1,
+                "empty_style_shared_skipped_count": 0,
+                "empty_style_shared_styles": [],
+            }
+        )
+        return result
+
+
+def test_dotnet_empty_style_compatibility_does_not_mutate_text_entities() -> None:
+    source_path = (
+        Path(__file__).parents[2]
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "FontPreflightProcessor.cs"
+    )
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index("private int ApplyEmptyStyleEntityReplacements(")
+    end = source.index("private bool TryMatchEmptyStyleRegion", start)
+    empty_style_section = source[start:end]
+
+    assert "SetTextStyleId(" not in empty_style_section
+    assert "TransformBy(Matrix3d.Displacement" not in empty_style_section
+    assert "AdjustTextEntityAlignment" not in empty_style_section
+    assert "GetOrCreateEmptyStyleClone" not in empty_style_section
+    assert "EMPTY_STYLE_SHARED_SKIP" not in empty_style_section
+    assert "OutsideTargetCount > 0" not in empty_style_section
+    assert "TargetMatchedCount <= 0" not in empty_style_section
+
+
 def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) -> None:
     service = FontPreflightService(
         inventory=cast(
@@ -410,6 +447,66 @@ def test_font_preflight_service_builds_empty_style_target_regions_from_frames(
         "ymax": pytest.approx(94.0),
     }
     assert result["empty_style_target_regions_count"] == 3
+
+
+def test_font_preflight_service_reports_empty_style_patch(tmp_path: Path) -> None:
+    bridge = _PatchedEmptyStyleBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdeng.shx",
+                        "value": "tssdeng.shx",
+                        "family": "tssdeng",
+                        "path": r"D:\AutoCAD\Fonts\tssdeng.shx",
+                        "kind": "shx",
+                    },
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.empty_style_replacement = {
+        "font": "tssdeng.shx",
+        "bigfont": "tssdchn.shx",
+    }
+    service.config.font_preflight.empty_style_target_fields = ["external_code"]
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-1",
+            source_file=tmp_path / "sample.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1189, ymax=841),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        ),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+        frames=[frame],
+    )
+
+    assert result["empty_style_entity_replaced_count"] == 2
+    assert result["empty_style_style_patched_count"] == 1
+    assert result["empty_style_shared_skipped_count"] == 0
+    assert result["empty_style_shared_styles"] == []
+    assert result["font_compatibility_required"] is True
 
 
 def test_font_preflight_service_uses_staged_copy_for_preflight(tmp_path: Path) -> None:
@@ -777,7 +874,11 @@ def test_stage_font_preflight_passes_detected_frames_for_empty_style_targets(
     )
 
     class _StageFakeOda:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, Path]] = []
+
         def dwg_to_dxf(self, source_dwg: Path, output_dir: Path) -> Path:
+            self.calls.append((source_dwg, output_dir))
             dxf = output_dir / f"{source_dwg.stem}.dxf"
             dxf.write_text("0\nEOF\n", encoding="utf-8")
             return dxf
@@ -794,7 +895,8 @@ def test_stage_font_preflight_passes_detected_frames_for_empty_style_targets(
 
     executor = object.__new__(PipelineExecutor)
     executor._update_progress = MagicMock()
-    executor.oda = _StageFakeOda()
+    fake_oda = _StageFakeOda()
+    executor.oda = fake_oda
     executor.frame_detector = _StageFakeDetector()
     executor.font_preflight_service = MagicMock()
     executor.font_preflight_service.inspect_dwg.return_value = {
@@ -820,7 +922,19 @@ def test_stage_font_preflight_passes_detected_frames_for_empty_style_targets(
         params={"font_compatibility_mode": True},
     )
 
-    PipelineExecutor._stage_font_preflight_and_replace(executor, job, {})
+    context: dict[str, Any] = {
+        "dxf_files": [],
+        "dxf_to_dwg": {},
+        "frames": [],
+        "sheet_sets": [],
+        "cad_dxf_results": {},
+    }
+
+    PipelineExecutor._stage_font_preflight_and_replace(executor, job, context)
+    PipelineExecutor._stage_convert(executor, job, context)
 
     call = executor.font_preflight_service.inspect_dwg.call_args.kwargs
     assert call["frames"] == [frame]
+    assert len(fake_oda.calls) == 1
+    assert context["dxf_files"] == [tmp_path / "work" / "dxf" / "sample.dxf"]
+    assert context["dxf_files"][0].exists()

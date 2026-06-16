@@ -263,8 +263,25 @@ class FontPreflightService:
         normalized_result["empty_style_target_regions_count"] = int(
             raw.get("empty_style_target_regions_count", len(empty_style_target_regions)) or 0
         )
+        normalized_result["empty_style_entity_replaced_count"] = int(
+            raw.get("empty_style_entity_replaced_count", 0) or 0
+        )
+        normalized_result["empty_style_style_patched_count"] = int(
+            raw.get("empty_style_style_patched_count", 0) or 0
+        )
+        normalized_result["empty_style_shared_skipped_count"] = int(
+            raw.get("empty_style_shared_skipped_count", 0) or 0
+        )
+        normalized_result["empty_style_shared_styles"] = list(
+            raw.get("empty_style_shared_styles") or []
+        )
         normalized_result["empty_style_global_replaced_count"] = int(
             raw.get("empty_style_global_replaced_count", 0) or 0
+        )
+        normalized_result["font_compatibility_required"] = (
+            int(normalized_result["empty_style_entity_replaced_count"]) > 0
+            or int(normalized_result["empty_style_style_patched_count"]) > 0
+            or int(normalized_result["empty_style_shared_skipped_count"]) > 0
         )
         if raw.get("empty_style_target_regions"):
             normalized_result["empty_style_target_regions"] = list(
