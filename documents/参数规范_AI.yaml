@@ -190,6 +190,56 @@ ai_layer:
         default: ["墙", "WALL"]
         desc: "墙编号候选关键词"
 
+  template_understanding:
+    enabled:
+      type: bool
+      default: true
+      desc: "是否启用模板文件解析和规则提炼；用于 AI 层理解现有交付模板结构"
+    output_root:
+      type: str
+      default: "outputs/template-understanding"
+      desc: "模板解析结果默认输出目录；属于生成产物，不建议提交 git"
+    office:
+      parse_docx_embedded_xlsx:
+        type: bool
+        default: true
+        desc: "封面 docx 模板采用嵌入 Excel OLE，解析时必须读取 word/embeddings/*.xlsx"
+      parse_excel_headers:
+        type: bool
+        default: true
+        desc: "解析目录、设计文件、IED 等 xlsx 模板时提取 sheet、表头、合并单元格和非空单元格"
+      max_preview_cells:
+        type: int
+        default: 220
+        desc: "模板结构预览写入 JSON 的单表最大非空单元格数量"
+    factory_index_maps:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否解析厂房索引图 DWG 模板"
+      source_root:
+        type: str
+        default: "documents_bin/factory_index_maps"
+        desc: "厂房索引图模板目录"
+      required_anchor_types:
+        type: "list[str]"
+        default: ["angle_text", "compass"]
+        desc: "厂房索引图替换候选需要同时具备的锚点类型"
+      variant_discriminators:
+        type: object
+        default:
+          "2016":
+            "1":
+              required_texts: ["QF"]
+            "2":
+              forbidden_texts: ["QF"]
+          "1916":
+            "3":
+              required_texts: ["KP"]
+            "4":
+              forbidden_texts: ["KP"]
+        desc: "岛号/机组号模板区分文字规则；来自运行期 factory_index_maps.source_variant_rules"
+
   knowledge_base:
     enabled:
       type: bool

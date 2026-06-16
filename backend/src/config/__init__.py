@@ -7,8 +7,9 @@
 - 提供类型安全的配置访问接口
 """
 
-from .runtime_config import RuntimeConfig, get_config, reload_config
+from .ai_spec import AiSpec, AiSpecLoader, load_ai_spec, reload_ai_spec
 from .mechanism_spec import MechanismSpec, MechanismSpecLoader, load_mechanism_spec
+from .runtime_config import RuntimeConfig, get_config, reload_config
 from .spec_loader import BusinessSpec, SpecLoader, load_spec
 
 __all__ = [
@@ -18,6 +19,10 @@ __all__ = [
     "MechanismSpec",
     "MechanismSpecLoader",
     "load_mechanism_spec",
+    "AiSpec",
+    "AiSpecLoader",
+    "load_ai_spec",
+    "reload_ai_spec",
     "RuntimeConfig",
     "get_config",
     "reload_config",

@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from src.config.runtime_config import RuntimeConfig
+
+
+def test_load_ai_spec_reads_defaults_from_yaml() -> None:
+    from src.config.ai_spec import AiSpecLoader
+
+    repo_root = Path(__file__).resolve().parents[3]
+    spec = AiSpecLoader.load(repo_root / "documents" / "参数规范_AI.yaml")
+
+    assert spec.schema_version == "0.1"
+    assert spec.ai_layer.enabled is False
+    assert spec.model_gateway.provider == "openai_compatible"
+    assert spec.model_gateway.base_url == "http://127.0.0.1:8001/v1"
+    assert spec.model_gateway.api_key_env_var == "FANBAN_AI_API_KEY"
+    assert spec.models.chat.model == "internal-chat"
+    assert spec.drawing_understanding.element_package.output_root == (
+        "outputs/drawing-understanding"
+    )
+    assert spec.template_understanding.enabled is True
+    assert spec.template_understanding.output_root == "outputs/template-understanding"
+    assert spec.template_understanding.office.parse_docx_embedded_xlsx is True
+    assert spec.template_understanding.factory_index_maps.source_root == (
+        "documents_bin/factory_index_maps"
+    )
+
+
+def test_load_ai_spec_default_path_resolves_from_backend_cwd(monkeypatch) -> None:
+    from src.config.ai_spec import AiSpecLoader, load_ai_spec
+
+    repo_root = Path(__file__).resolve().parents[3]
+    monkeypatch.chdir(repo_root / "backend")
+    AiSpecLoader.clear_cache()
+
+    spec = load_ai_spec()
+
+    assert spec.source_path == (repo_root / "documents" / "参数规范_AI.yaml").resolve()
+
+
+def test_load_ai_spec_uses_env_override_when_default_path_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.config.ai_spec import AiSpecLoader, load_ai_spec
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    spec_file = tmp_path / "bundle" / "documents" / "参数规范_AI.yaml"
+    spec_file.parent.mkdir(parents=True)
+    spec_file.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "9.9",
+                "ai_layer": {
+                    "enabled": {"type": "bool", "default": True},
+                    "model_gateway": {
+                        "base_url": {"type": "str", "default": "https://api.example/v1"},
+                    },
+                    "models": {
+                        "chat": {
+                            "model": {"type": "str", "default": "chat-test"},
+                        },
+                    },
+                },
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(run_dir)
+    monkeypatch.setenv("FANBAN_AI_SPEC_PATH", str(spec_file))
+    AiSpecLoader.clear_cache()
+
+    spec = load_ai_spec()
+
+    assert spec.schema_version == "9.9"
+    assert spec.ai_layer.enabled is True
+    assert spec.model_gateway.base_url == "https://api.example/v1"
+    assert spec.models.chat.model == "chat-test"
+
+
+def test_gateway_runtime_overrides_and_redacts_api_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from src.config.ai_spec import AiSpecLoader
+
+    spec_file = tmp_path / "参数规范_AI.yaml"
+    spec_file.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": "0.1",
+                "ai_layer": {
+                    "bootstrap_contract": {
+                        "api_key_env_var": {
+                            "type": "str",
+                            "default": "MINIMAX_API_KEY",
+                        },
+                        "base_url_env_var": {
+                            "type": "str",
+                            "default": "MINIMAX_BASE_URL",
+                        },
+                    },
+                    "model_gateway": {
+                        "base_url": {"type": "str", "default": "https://yaml.example/v1"},
+                    },
+                },
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MINIMAX_API_KEY", "secret-for-test")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://env.example/v1")
+    AiSpecLoader.clear_cache()
+
+    spec = AiSpecLoader.load(spec_file)
+    gateway = spec.resolve_gateway()
+    public_dict = gateway.safe_public_dict()
+
+    assert gateway.base_url == "https://env.example/v1"
+    assert gateway.api_key == "secret-for-test"
+    assert public_dict["api_key"] == "s***t"
+    assert "secret-for-test" not in repr(gateway)
+    assert "secret-for-test" not in repr(public_dict)
+
+
+def test_runtime_config_tracks_ai_spec_path(tmp_path: Path) -> None:
+    runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+    runtime_spec.parent.mkdir(parents=True)
+    runtime_spec.write_text(
+        """
+runtime_options:
+  paths:
+    ai_spec_path:
+      type: str
+      default: "documents/参数规范_AI.yaml"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.from_yaml(runtime_spec)
+
+    assert config.ai_spec_path == (tmp_path / "documents" / "参数规范_AI.yaml").resolve()
