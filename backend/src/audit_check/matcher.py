@@ -214,7 +214,7 @@ class AuditMatchEngine:
     def _should_cluster_external_code_char_item(self, item: ScanTextItem) -> bool:
         if not self._unit_consistency.external_code_requires_titleblock_roi_context:
             return True
-        return item.field_context in (None, "titleblock_external_code")
+        return item.field_context == "titleblock_external_code"
 
     def _build_external_code_unit_items(self, items: list[ScanTextItem]) -> list[ScanTextItem]:
         grouped_items: list[ScanTextItem] = []

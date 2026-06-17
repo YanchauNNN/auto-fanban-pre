@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from ..audit_check.matcher import AuditMatchEngine
 from ..audit_check.roi_mapper import AuditFieldContextMapper
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
 from ..cad.dwg_version import detect_dwg_version_code_or_none
-from ..config import get_config
+from ..config import get_config, load_spec
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
 from .factory_index_bridge import FactoryIndexMapReplacementService, FactoryIndexReplacementResult
@@ -117,6 +118,7 @@ class AuditReplaceExecutor:
 
     def __init__(self) -> None:
         self.config = get_config()
+        self.spec = load_spec()
         self.oda = ODAConverter()
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
@@ -203,6 +205,28 @@ class AuditReplaceExecutor:
                 existing_entries=replace_entries,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+            )
+        )
+        postprocess_config = self._replace_postprocess_config()
+        replace_entries.extend(
+            self._build_titleblock_standardization_entries(
+                items=annotated_items,
+                existing_entries=replace_entries,
+                issue_month_text=self._current_issue_month_text(
+                    str(postprocess_config.get("issue_month_format") or "%Y.%m"),
+                ),
+                target_revision=str(postprocess_config.get("target_revision") or "A"),
+                target_revision_description=str(
+                    postprocess_config.get("target_revision_description") or "首次出版",
+                ),
+                revision_description_keywords=[
+                    str(value)
+                    for value in postprocess_config.get("revision_description_keywords", ["出版", "升版"])
+                    if str(value)
+                ],
+                date_pattern=str(postprocess_config.get("date_pattern") or r"\d{4}\.\d{2}"),
+                source_project_no=mapping.source_project_no,
+                target_project_no=mapping.target_project_no,
             )
         )
         replace_dir = job.work_dir / "work" / "replace"
@@ -396,6 +420,14 @@ class AuditReplaceExecutor:
                 return FactoryIndexMapReplacementService._normalize_variant(str(value))
         return None
 
+    def _replace_postprocess_config(self) -> dict[str, Any]:
+        config = self.spec.titleblock_extract.get("replace_postprocess", {})
+        return config if isinstance(config, dict) else {}
+
+    @staticmethod
+    def _current_issue_month_text(format_text: str = "%Y.%m") -> str:
+        return date.today().strftime(format_text or "%Y.%m")
+
     @staticmethod
     def _build_replace_entries(
         findings: list[Any],
@@ -490,44 +522,54 @@ class AuditReplaceExecutor:
         for group in cls._cluster_external_code_char_items(items):
             ordered = sorted(group, key=cls._item_x)
             chars = [cls._single_alnum(item.raw_text) for item in ordered]
-            code = "".join(chars)
+            if any(char is None for char in chars):
+                continue
+            normalized_chars = [str(char) for char in chars]
+            code = "".join(normalized_chars)
             if not cls._looks_like_external_code(code):
                 continue
 
             upper_code = code.upper()
-            for source_prefix, target_prefix in prefix_pairs:
-                if not upper_code.startswith(source_prefix):
+            matched_pair = next(
+                (
+                    (source_prefix, target_prefix)
+                    for source_prefix, target_prefix in prefix_pairs
+                    if upper_code.startswith(source_prefix)
+                ),
+                None,
+            )
+            if matched_pair is None:
+                continue
+            source_prefix, target_prefix = matched_pair
+            for index, target_char in enumerate(target_prefix):
+                item = ordered[index]
+                source_char = normalized_chars[index].upper()
+                handle = str(item.entity_handle or "")
+                if not handle or handle in existing_handles or source_char == target_char:
                     continue
-                for index, target_char in enumerate(target_prefix):
-                    item = ordered[index]
-                    source_char = chars[index].upper()
-                    handle = str(item.entity_handle or "")
-                    if not handle or handle in existing_handles or source_char == target_char:
-                        continue
-                    existing_handles.add(handle)
-                    entries.append(
-                        {
-                            "status": "pending",
-                            "matched_text": source_char,
-                            "replacement_text": target_char,
-                            "raw_text": item.raw_text,
-                            "new_text": item.raw_text,
-                            "source_project_no": mapping.source_project_no,
-                            "target_project_no": mapping.target_project_no,
-                            "matched_project_nos": [mapping.source_project_no],
-                            "context_kind": "code_like",
-                            "internal_code": item.internal_code,
-                            "layout_name": item.layout_name,
-                            "entity_type": item.entity_type,
-                            "entity_handle": item.entity_handle,
-                            "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
-                            "block_path": item.block_path,
-                            "position_x": item.position_x,
-                            "position_y": item.position_y,
-                            "message": "external_code_prefix",
-                        }
-                    )
-                break
+                existing_handles.add(handle)
+                entries.append(
+                    {
+                        "status": "pending",
+                        "matched_text": source_char,
+                        "replacement_text": target_char,
+                        "raw_text": item.raw_text,
+                        "new_text": item.raw_text,
+                        "source_project_no": mapping.source_project_no,
+                        "target_project_no": mapping.target_project_no,
+                        "matched_project_nos": [mapping.source_project_no],
+                        "context_kind": "code_like",
+                        "internal_code": item.internal_code,
+                        "layout_name": item.layout_name,
+                        "entity_type": item.entity_type,
+                        "entity_handle": item.entity_handle,
+                        "field_context": item.field_context,
+                        "block_path": item.block_path,
+                        "position_x": item.position_x,
+                        "position_y": item.position_y,
+                        "message": "external_code_prefix",
+                    }
+                )
         return entries
 
     @classmethod
@@ -554,7 +596,10 @@ class AuditReplaceExecutor:
         for group in cls._cluster_external_code_char_items(items):
             ordered = sorted(group, key=cls._item_x)
             chars = [cls._single_alnum(item.raw_text) for item in ordered]
-            code = "".join(chars)
+            if any(char is None for char in chars):
+                continue
+            normalized_chars = [str(char) for char in chars]
+            code = "".join(normalized_chars)
             if not cls._looks_like_external_code(code):
                 continue
 
@@ -564,11 +609,11 @@ class AuditReplaceExecutor:
                 source_unit_no=source_unit,
                 target_unit_no=target_unit,
             ).upper()
-            if rewritten_code == code.upper() or len(rewritten_code) != len(chars):
+            if rewritten_code == code.upper() or len(rewritten_code) != len(normalized_chars):
                 continue
 
             for index, target_char in enumerate(rewritten_code):
-                source_char = chars[index].upper()
+                source_char = normalized_chars[index].upper()
                 if source_char == target_char:
                     continue
                 item = ordered[index]
@@ -591,7 +636,7 @@ class AuditReplaceExecutor:
                         "layout_name": item.layout_name,
                         "entity_type": item.entity_type,
                         "entity_handle": item.entity_handle,
-                        "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
+                        "field_context": item.field_context,
                         "block_path": item.block_path,
                         "position_x": item.position_x,
                         "position_y": item.position_y,
@@ -599,6 +644,154 @@ class AuditReplaceExecutor:
                     }
                 )
         return entries
+
+    @classmethod
+    def _build_titleblock_standardization_entries(
+        cls,
+        *,
+        items: list[Any],
+        existing_entries: list[dict[str, Any]],
+        issue_month_text: str,
+        target_revision: str,
+        target_revision_description: str,
+        date_pattern: str,
+        revision_description_keywords: list[str] | None = None,
+        source_project_no: str = "",
+        target_project_no: str = "",
+    ) -> list[dict[str, Any]]:
+        existing_handles = {
+            str(entry.get("entity_handle"))
+            for entry in existing_entries
+            if entry.get("entity_handle") and entry.get("status") == "pending"
+        }
+        entries: list[dict[str, Any]] = []
+
+        try:
+            compiled_date_pattern = re.compile(date_pattern)
+        except re.error:
+            compiled_date_pattern = re.compile(r"\d{4}\.\d{2}")
+
+        for item in items:
+            if item.field_context != "titleblock_date":
+                continue
+            handle = str(item.entity_handle or "")
+            if not handle or handle in existing_handles:
+                continue
+            match = compiled_date_pattern.search(str(item.raw_text or ""))
+            if match is None or match.group(0) == issue_month_text:
+                continue
+            entries.append(
+                cls._make_standardization_entry(
+                    item,
+                    matched_text=match.group(0),
+                    replacement_text=issue_month_text,
+                    message="titleblock_date_month",
+                    source_project_no=source_project_no,
+                    target_project_no=target_project_no,
+                )
+            )
+            existing_handles.add(handle)
+
+        for field_context, target_text, message in (
+            ("titleblock_revision", target_revision, "titleblock_revision_target_a"),
+            (
+                "titleblock_revision_description",
+                target_revision_description,
+                "titleblock_revision_description_target_a",
+            ),
+        ):
+            grouped = cls._group_items_by_frame_and_context(
+                items,
+                field_context=field_context,
+                revision_description_keywords=revision_description_keywords,
+            )
+            for group in grouped:
+                sorted_group = sorted(group, key=lambda item: cls._item_y(item) or 0.0)
+                keep = sorted_group[0] if sorted_group else None
+                for item in sorted_group:
+                    handle = str(item.entity_handle or "")
+                    if not handle or handle in existing_handles:
+                        continue
+                    raw_text = str(item.raw_text or "")
+                    if item is keep:
+                        if target_text and raw_text.strip() != target_text:
+                            entries.append(
+                                cls._make_standardization_entry(
+                                    item,
+                                    matched_text=raw_text,
+                                    replacement_text=target_text,
+                                    message=message,
+                                    source_project_no=source_project_no,
+                                    target_project_no=target_project_no,
+                                )
+                            )
+                            existing_handles.add(handle)
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            item,
+                            matched_text=raw_text,
+                            replacement_text="",
+                            message=message,
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                    existing_handles.add(handle)
+
+        return entries
+
+    @staticmethod
+    def _group_items_by_frame_and_context(
+        items: list[Any],
+        *,
+        field_context: str,
+        revision_description_keywords: list[str] | None = None,
+    ) -> list[list[Any]]:
+        grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
+        for item in items:
+            if item.field_context != field_context or not item.entity_handle:
+                continue
+            if AuditReplaceExecutor._item_y(item) is None:
+                continue
+            if field_context == "titleblock_revision_description":
+                raw_text = str(item.raw_text or "")
+                keywords = revision_description_keywords or ["出版", "升版"]
+                if not any(keyword and keyword in raw_text for keyword in keywords):
+                    continue
+            grouped[(str(item.internal_code or ""), str(item.layout_name or ""))].append(item)
+        return list(grouped.values())
+
+    @staticmethod
+    def _make_standardization_entry(
+        item: Any,
+        *,
+        matched_text: str,
+        replacement_text: str,
+        message: str,
+        source_project_no: str = "",
+        target_project_no: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "status": "pending",
+            "matched_text": matched_text,
+            "replacement_text": replacement_text,
+            "raw_text": item.raw_text,
+            "new_text": item.raw_text,
+            "source_project_no": source_project_no,
+            "target_project_no": target_project_no,
+            "matched_project_nos": [],
+            "context_kind": "titleblock_standardization",
+            "internal_code": item.internal_code,
+            "layout_name": item.layout_name,
+            "entity_type": item.entity_type,
+            "entity_handle": item.entity_handle,
+            "field_context": item.field_context,
+            "block_path": item.block_path,
+            "position_x": item.position_x,
+            "position_y": item.position_y,
+            "message": message,
+        }
 
     @staticmethod
     def _external_code_prefix_pairs(mapping: ReplaceMapping) -> list[tuple[str, str]]:
@@ -620,7 +813,7 @@ class AuditReplaceExecutor:
     def _cluster_external_code_char_items(cls, items: list[Any]) -> list[list[Any]]:
         keyed: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for item in items:
-            if item.field_context not in (None, cls._EXTERNAL_CODE_CONTEXT):
+            if item.field_context != cls._EXTERNAL_CODE_CONTEXT:
                 continue
             if not item.entity_handle:
                 continue
