@@ -198,6 +198,16 @@ export type FontPreflightSummary = {
   fontAlt: string | null;
 };
 
+export type WorkloadSummary = {
+  initialWorkloadA1: number;
+  finalWorkloadA1: number;
+  oneReviewFactor: number;
+  twoReviewFactor: number;
+  threeReviewFactor: number;
+  settlementStatus: string;
+  settledAt: string | null;
+};
+
 export type SubmissionParams = Record<string, unknown>;
 
 export type CreateAuditReplaceParams = {
@@ -251,6 +261,8 @@ export type JobSummary = {
   replacementFont?: string | null;
   replacementFonts?: FontReplacementMap;
   replacedStyleCount?: number;
+  workload?: WorkloadSummary | null;
+  effectiveWorkload?: number;
   children?: JobSummary[];
 };
 

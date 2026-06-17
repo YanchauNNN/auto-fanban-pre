@@ -455,10 +455,12 @@ runtime_options:
         unit_consistency = config.audit_check.unit_consistency
 
         assert unit_consistency.enabled is True
-        assert unit_consistency.project_units["2016"] == ["1", "2"]
-        assert unit_consistency.project_units["2026"] == ["1", "2"]
+        assert unit_consistency.project_units["2016"] == ["0", "1", "2", "7", "9"]
+        assert unit_consistency.project_units["2026"] == ["0", "1", "2", "7", "9"]
+        assert unit_consistency.project_units["1907"] == ["0", "5", "6", "7", "9"]
         assert unit_consistency.allow_unlisted_unit_no is True
-        assert unit_consistency.unit_no_pattern == "^[1-9]$"
+        assert unit_consistency.universal_units == ["0", "7", "9"]
+        assert unit_consistency.unit_no_pattern == "^[0-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
 

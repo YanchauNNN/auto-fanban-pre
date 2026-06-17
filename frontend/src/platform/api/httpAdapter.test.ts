@@ -100,6 +100,16 @@ describe("HttpAdapter", () => {
           affected_drawings_count: 0,
           top_wrong_texts: [],
           top_internal_codes: [],
+          workload: {
+            initial_workload_a1: 2.5,
+            final_workload_a1: 2.7,
+            one_review_factor: 1,
+            two_review_factor: 1.08,
+            three_review_factor: 1,
+            settlement_status: "pending",
+            settled_at: null,
+          },
+          effective_workload: 2.7,
           deliverable_outputs: {
             dwg_count: 1,
             pdf_count: 1,
@@ -154,6 +164,13 @@ describe("HttpAdapter", () => {
       dwgName: "A01.dwg",
       pageTotal: 2,
     });
+    expect(detail.workload).toMatchObject({
+      initialWorkloadA1: 2.5,
+      finalWorkloadA1: 2.7,
+      twoReviewFactor: 1.08,
+      settlementStatus: "pending",
+    });
+    expect(detail.effectiveWorkload).toBe(2.7);
   });
 
   it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {

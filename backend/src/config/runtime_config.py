@@ -218,7 +218,8 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     enabled: bool = False
     project_units: dict[str, list[str]] = Field(default_factory=dict)
     allow_unlisted_unit_no: bool = True
-    unit_no_pattern: str = r"^[1-9]$"
+    universal_units: list[str] = Field(default_factory=lambda: ["0", "7", "9"])
+    unit_no_pattern: str = r"^[0-9]$"
     label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"

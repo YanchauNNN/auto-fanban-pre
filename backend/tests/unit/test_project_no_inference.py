@@ -30,3 +30,7 @@ def test_project_no_inference_reads_defaults_and_patterns_from_mechanism_yaml(tm
     assert resolve_project_no(None, "no-project.dwg") == "2026"
     assert resolve_project_no(None, "FB-1818-U3-JG001.dwg") == "1818"
     assert infer_unit_no_from_path("FB-1818-U3-JG001.dwg", "1818") == "3"
+
+
+def test_project_no_inference_default_pattern_accepts_zero_unit() -> None:
+    assert infer_unit_no_from_path("20260RB-JGS11-A.dwg", "2026") == "0"

@@ -375,6 +375,9 @@ function createEmptyStyleFontPreflightResult(filename = "A12.dwg"): FontPrefligh
         fontCompatibilityReplacements: {},
         fontCompatibilityRequired: true,
         emptyStyleEntityReplacedCount: 2,
+        emptyStyleStylePatchedCount: 2,
+        emptyStyleSharedSkippedCount: 1,
+        emptyStyleSharedStyles: ["汉字"],
         emptyStyleTargetRegionsCount: 3,
         emptyStyleGlobalReplacedCount: 0,
         replacedStyleCount: 0,
@@ -1000,6 +1003,11 @@ describe("DeliverableWorkspace", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "字体风险确认" });
     expect(within(dialog).getByText(/A12\.dwg/)).toBeInTheDocument();
+    expect(within(dialog).getByText("请出图后进行人工核查")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/空字体样式：2 类样式，2 处文字，3 个目标区域/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/共享空字体样式：汉字/)).toBeInTheDocument();
     expect(adapter.createBatch).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "继续出图" }));

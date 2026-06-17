@@ -40,6 +40,7 @@ from src.pipeline.project_no_inference import (
 )
 from src.pipeline.shared_prep import SharedPrepService
 from src.result_views import normalize_user_flags
+from src.workload.calculator import WorkloadCalculator
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,7 @@ class DeliverableApiRuntime:
         self.shared_prep_service = shared_prep_service or SharedPrepService(
             font_preflight_service=self.font_preflight_service
         )
+        self.workload_calculator = WorkloadCalculator()
         self.cad_slot_pool = CADSlotPool(
             config=self.config,
             slot_count=max(int(self.config.cad_runtime.slot_count), 1),
@@ -989,6 +991,7 @@ class DeliverableApiRuntime:
                 font_compatibility_mode=self._coerce_bool(font_params.get("font_compatibility_mode")),
             )
             group.shared_dir = prep.shared_dir
+            group.workload = self.workload_calculator.build_from_shared_prep(prep)
             group.progress.percent = 35
             group.progress.message = '共享前处理完成'
             self.group_manager.update_group(group)
@@ -1077,6 +1080,9 @@ class DeliverableApiRuntime:
                 deliverable_job.params.get("font_compatibility_mode")
             ),
         )
+
+        group.workload = self.workload_calculator.build_from_shared_prep(deliverable_prep)
+        self.group_manager.update_group(group)
 
         deliverable_job.input_files = [replaced_dwg]
         deliverable_job.params['shared_prep_dir'] = str(deliverable_prep.shared_dir)
@@ -1528,6 +1534,11 @@ class DeliverableApiRuntime:
             message=group.progress.message,
             errors=list(group.errors),
         )
+        effective_workload = float(
+            group.workload.final_workload_a1
+            or group.workload.initial_workload_a1
+            or 0.0
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
@@ -1549,6 +1560,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_group_artifacts(group),
             'findings_count': findings_count,
             'affected_drawings_count': affected_drawings_count,
+            'workload': group.workload.model_dump(mode='json'),
+            'effective_workload': round(effective_workload, 2),
             'retry_available': False,
         }
 

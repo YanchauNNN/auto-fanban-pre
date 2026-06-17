@@ -169,8 +169,8 @@ doc_generation:
         required: false
         source: frontend
         default: ""
-        desc: "机组号；用于纠错机组/岛号一致性检查，可从DWG文件名自动推断；项目允许范围以运行期 audit_check.unit_consistency.project_units 为准"
-        options: ["1", "2", "3", "4", "5", "6"]
+        desc: "机组号；用于纠错机组/岛号一致性检查，可从DWG文件名自动推断；0/7/9 为通用机组，项目允许范围以运行期 audit_check.unit_consistency.project_units 为准"
+        options: ["0", "1", "2", "3", "4", "5", "6", "7", "9"]
       
       cover_variant:
         type: enum[cover_variant]
@@ -1388,7 +1388,7 @@ submission_contracts:
             target_project_no:
               type: str
               required: true
-              desc: "目标项目号，决定替换输出列；必须与 source_project_no 不同"
+              desc: "目标项目号，决定替换输出列；允许与 source_project_no 相同，但 source_project_no/source_island_no 与 target_project_no/target_island_no 组合必须不同"
             run_deliverable:
               type: bool
               required: true
@@ -1397,12 +1397,12 @@ submission_contracts:
           optional_fields:
             source_island_no:
               type: str
-              required_when: "source_project_no in ['2016','1916']"
-              desc: "来源厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于区分同角度源索引图块"
+              required_when: "source_project_no in audit_check.unit_consistency.project_units 或 factory_index_maps.source_variant_rules"
+              desc: "来源机组/岛号；用于同项目不同机组翻版、机组文字替换和厂房索引图源块区分；0/7/9 为通用机组"
             target_island_no:
               type: str
-              required_when: "target_project_no in ['2016','1916']"
-              desc: "目标厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于选择目标模板"
+              required_when: "target_project_no in audit_check.unit_consistency.project_units 或 factory_index_maps.island_templates"
+              desc: "目标机组/岛号；用于同项目不同机组翻版、机组文字替换和目标厂房索引图模板选择；0/7/9 为通用机组，未配置专用索引图模板时只执行通用文本替换"
             deliverable_params:
               type: object
               required_when: "run_deliverable == true"

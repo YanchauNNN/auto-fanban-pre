@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from src.config import SpecLoader, reload_config
-from src.models import Job, JobStatus, JobType
+from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
 
 
@@ -688,26 +688,50 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "3",
         "4",
     ]
-    assert payload["audit_replace"]["project_units"]["1915"] == ["1", "2"]
+    assert payload["audit_replace"]["project_units"]["1915"] == ["0", "1", "2", "7", "9"]
     assert payload["audit_replace"]["source_unit_options"]["2016"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["source_unit_options"]["1916"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "3", "label": "3号机组/岛"},
         {"value": "4", "label": "4号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["target_unit_options"]["1915"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["target_unit_options"]["2016"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_check"]["unit_consistency"]["enabled"] is True
-    assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == ["1", "2"]
-    assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == ["3", "4"]
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == [
+        "0",
+        "1",
+        "2",
+        "7",
+        "9",
+    ]
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == [
+        "0",
+        "3",
+        "4",
+        "7",
+        "9",
+    ]
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"
@@ -751,7 +775,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert "DWG" in project_no["desc"]
     assert "2016" in project_no["desc"]
     assert unit_no["required"] is False
-    assert unit_no["options"] == ["1", "2", "3", "4", "5", "6"]
+    assert unit_no["options"] == ["0", "1", "2", "3", "4", "5", "6", "7", "9"]
     assert "1 总体文件" in file_category["options"]
     assert ied_design_type["required_when"] == "ied_status == '发布'"
     assert ied_design_type["type"] == "combobox"
@@ -1480,6 +1504,34 @@ def test_create_audit_replace_rejects_missing_or_same_project_pair(
     ]
 
 
+def test_create_audit_replace_allows_same_project_when_unit_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2026",
+                        "source_island_no": "1",
+                        "target_project_no": "2026",
+                        "target_island_no": "2",
+                        "run_deliverable": False,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("20261RB-JGS11-A.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["task_kind"] == "audit_replace"
+
+
 def test_create_audit_replace_processes_job_without_deliverable(
     monkeypatch,
     tmp_path: Path,
@@ -1848,6 +1900,94 @@ class FakeSharedPrepService(SharedPrepService):
         )
 
 
+class FakeSharedPrepServiceWithWorkload(FakeSharedPrepService):
+    def prepare(self, **kwargs: Any) -> SharedPrepArtifacts:
+        artifacts = super().prepare(**kwargs)
+        bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        frame = FrameMeta(
+            runtime=FrameRuntime(
+                frame_id="frame-a1",
+                source_file=artifacts.source_converted_dxf,
+                cad_source_file=artifacts.source_input_dwg,
+                outer_bbox=bbox,
+                paper_variant_id="CNPE_A1",
+            ),
+        )
+        sheet_frame = FrameMeta(
+            runtime=FrameRuntime(
+                frame_id="frame-a4-master",
+                source_file=artifacts.source_converted_dxf,
+                cad_source_file=artifacts.source_input_dwg,
+                outer_bbox=bbox,
+                paper_variant_id="CNPE_A4",
+            ),
+        )
+        pages = [
+            PageInfo(page_index=1, outer_bbox=bbox, has_titleblock=True, frame_meta=sheet_frame),
+            PageInfo(page_index=2, outer_bbox=bbox, has_titleblock=False, frame_meta=None),
+        ]
+        sheet_set = SheetSet(
+            cluster_id="sheet-a4",
+            paper="A4",
+            page_total=2,
+            pages=pages,
+            master_page=pages[0],
+        )
+        (artifacts.shared_dir / "frames.json").write_text(
+            json.dumps([frame.model_dump(mode="json")], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (artifacts.shared_dir / "sheet_sets.json").write_text(
+            json.dumps([sheet_set.model_dump(mode="json")], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return SharedPrepArtifacts(
+            shared_dir=artifacts.shared_dir,
+            source_input_dwg=artifacts.source_input_dwg,
+            source_converted_dxf=artifacts.source_converted_dxf,
+            font_preflight_summary=artifacts.font_preflight_summary,
+            frames=[frame],
+            sheet_sets=[sheet_set],
+        )
+
+
+def test_grouped_batch_exposes_workload_from_shared_prep(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    with TestClient(
+        create_app(
+            job_processor=FakeJobProcessor(),
+            shared_prep_service=FakeSharedPrepServiceWithWorkload(),
+        ),
+    ) as client:
+        params = _deliverable_params()
+        params["unit_no"] = "1"
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[("files[]", ("20261RS-JGS65.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        group_summary = response.json()["jobs"][0]
+        detail = _poll_job(client, group_summary["job_id"], timeout_sec=5.0)
+
+        assert detail["status"] == "succeeded"
+        assert detail["workload"]["initial_workload_a1"] == 1.25
+        assert detail["workload"]["final_workload_a1"] == 1.25
+        assert detail["effective_workload"] == 1.25
+
+
 def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
     monkeypatch,
     tmp_path: Path,
@@ -1887,6 +2027,9 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         assert detail["is_group"] is True
         assert detail["run_audit_check"] is True
         assert detail["flags"] == ["[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED"]
+        assert detail["workload"]["initial_workload_a1"] == 0.0
+        assert detail["workload"]["final_workload_a1"] == 0.0
+        assert detail["effective_workload"] == 0.0
         assert detail["artifacts"]["preview_available"] is True
         assert detail["artifacts"]["preview_mode"] == "annotated"
         assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{group_summary['job_id']}/download/preview"

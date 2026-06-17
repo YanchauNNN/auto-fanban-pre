@@ -120,12 +120,32 @@ export function ReplaceWorkspace({
     ) {
       nextFieldErrors.target_island_no = ["required"];
     }
+    const normalizedSourceProjectNo = draft.sourceProjectNo.trim();
+    const normalizedTargetProjectNo = draft.targetProjectNo.trim();
+    const normalizedSourceIslandNo = normalizeSourceIslandNo(
+      schema,
+      draft.sourceProjectNo,
+      draft.sourceIslandNo,
+    );
+    const normalizedTargetIslandNo = normalizeTargetIslandNo(
+      schema,
+      draft.targetProjectNo,
+      draft.targetIslandNo,
+    );
     if (
-      draft.sourceProjectNo.trim() &&
-      draft.targetProjectNo.trim() &&
-      draft.sourceProjectNo.trim() === draft.targetProjectNo.trim()
+      normalizedSourceProjectNo &&
+      normalizedTargetProjectNo &&
+      normalizedSourceProjectNo === normalizedTargetProjectNo
     ) {
-      nextFieldErrors.target_project_no = ["must_differ_from_source_project_no"];
+      if (!normalizedSourceIslandNo && !normalizedTargetIslandNo) {
+        nextFieldErrors.target_project_no = ["must_differ_from_source_project_no"];
+      } else if (
+        normalizedSourceIslandNo &&
+        normalizedTargetIslandNo &&
+        normalizedSourceIslandNo === normalizedTargetIslandNo
+      ) {
+        nextFieldErrors.target_island_no = ["must_differ_from_source_island_no"];
+      }
     }
     if (draft.files.length === 0) {
       nextFormErrors.push("请至少上传一个 DWG 文件。");
@@ -665,6 +685,10 @@ function getTargetIslandOptions(schema: FormSchema, targetProjectNo: string) {
   if (configuredOptions) {
     return normalizeUnitOptions(configuredOptions);
   }
+  const projectUnits = schema.auditReplaceProjectUnits?.[normalizedProjectNo];
+  if (projectUnits) {
+    return buildVariantOptions(projectUnits);
+  }
   return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.targetVariantOptions[normalizedProjectNo]);
 }
 
@@ -673,6 +697,10 @@ function getSourceIslandOptions(schema: FormSchema, sourceProjectNo: string) {
   const configuredOptions = schema.auditReplaceSourceUnitOptions?.[normalizedProjectNo];
   if (configuredOptions) {
     return normalizeUnitOptions(configuredOptions);
+  }
+  const projectUnits = schema.auditReplaceProjectUnits?.[normalizedProjectNo];
+  if (projectUnits) {
+    return buildVariantOptions(projectUnits);
   }
   return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.sourceVariantOptions[normalizedProjectNo]);
 }

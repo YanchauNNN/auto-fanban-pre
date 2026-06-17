@@ -785,6 +785,11 @@ describe("job cards", () => {
 describe("job detail pages", () => {
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
     window.history.pushState({}, "", "/jobs/group-downloads");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
     const groupDetail = {
       jobId: "group-downloads",
       batchId: "batch-downloads",
@@ -822,6 +827,16 @@ describe("job detail pages", () => {
       },
       retryAvailable: false,
       sharedRunId: null,
+      workload: {
+        initialWorkloadA1: 3.25,
+        finalWorkloadA1: 3.25,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 3.25,
       flags: [],
       errors: [],
       topWrongTexts: [],
@@ -890,6 +905,11 @@ describe("job detail pages", () => {
     expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("3.25")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("3.25");
+    expect(screen.getByRole("button", { name: "已复制" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "查看子任务 deliverable_main" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toBeInTheDocument();
 

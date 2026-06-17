@@ -209,3 +209,51 @@ def test_validate_replace_frontend_params_accepts_source_and_target_islands() ->
     )
 
     assert errors == {}
+
+
+def test_validate_replace_frontend_params_allows_same_project_different_unit() -> None:
+    validator = _validator()
+
+    errors = validator.validate_replace_frontend_params(
+        {
+            "source_project_no": "2026",
+            "source_island_no": "1",
+            "target_project_no": "2026",
+            "target_island_no": "2",
+            "run_deliverable": "false",
+        }
+    )
+
+    assert errors == {}
+
+
+def test_validate_replace_frontend_params_rejects_same_project_same_unit() -> None:
+    validator = _validator()
+
+    errors = validator.validate_replace_frontend_params(
+        {
+            "source_project_no": "2026",
+            "source_island_no": "2号机组",
+            "target_project_no": "2026",
+            "target_island_no": "2号岛",
+            "run_deliverable": "false",
+        }
+    )
+
+    assert errors["target_island_no"] == ["must_differ_from_source_island_no"]
+
+
+def test_validate_replace_frontend_params_accepts_universal_units_without_factory_template() -> None:
+    validator = _validator()
+
+    errors = validator.validate_replace_frontend_params(
+        {
+            "source_project_no": "2016",
+            "source_island_no": "7",
+            "target_project_no": "2016",
+            "target_island_no": "9",
+            "run_deliverable": "false",
+        }
+    )
+
+    assert errors == {}

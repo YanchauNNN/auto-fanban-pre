@@ -19,11 +19,13 @@ import {
   useEffect,
   useDeferredValue,
   useLayoutEffect,
+  isValidElement,
   lazy,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import {
   BrowserRouter,
@@ -1878,6 +1880,14 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const drawingQuantityText = formatWorkloadQuantity(detail.workload?.initialWorkloadA1);
+  const quickDownloadItems = drawingQuantityText
+    ? insertAfterArtifactKey(
+        artifactButtons,
+        "ied",
+        <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
+      )
+    : artifactButtons;
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -1906,7 +1916,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       {artifactButtons.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -2003,6 +2013,43 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       ) : null}
     </section>
   );
+}
+
+function DrawingQuantityCopy({ value }: { value: string }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  const handleCopy = async () => {
+    try {
+      await copyPlainText(value);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+  };
+
+  return (
+    <div className={styles.drawingQuantityCopy}>
+      <div>
+        <span>图纸量（A1等效）</span>
+        <strong>{value}</strong>
+      </div>
+      <button type="button" onClick={handleCopy}>
+        {copyStatus === "copied" ? "已复制" : copyStatus === "failed" ? "复制失败" : "复制张数"}
+      </button>
+    </div>
+  );
+}
+
+function insertAfterArtifactKey(
+  items: ReactNode[],
+  key: string,
+  insertedItem: ReactNode,
+) {
+  const insertIndex = items.findIndex((item) => isValidElement(item) && item.key === key);
+  if (insertIndex < 0) {
+    return [...items, insertedItem];
+  }
+  return [...items.slice(0, insertIndex + 1), insertedItem, ...items.slice(insertIndex + 1)];
 }
 
 function DeliverableResultCard({
@@ -2567,6 +2614,33 @@ function formatTimestamp(value: string) {
     second: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatWorkloadQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return String(Number(value.toFixed(4)));
+}
+
+async function copyPlainText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
 }
 
 function formatPageTotal(pageTotal: number) {

@@ -90,6 +90,16 @@ type RawJobSummary = {
   replacement_font?: string | null;
   replacement_fonts?: Record<string, string | null> | null;
   replaced_style_count?: number | null;
+  workload?: {
+    initial_workload_a1?: number | null;
+    final_workload_a1?: number | null;
+    one_review_factor?: number | null;
+    two_review_factor?: number | null;
+    three_review_factor?: number | null;
+    settlement_status?: string | null;
+    settled_at?: string | null;
+  } | null;
+  effective_workload?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
   children?: RawJobSummary[] | null;
@@ -565,7 +575,25 @@ export class HttpAdapter implements ApiAdapter {
       replacementFont: payload.replacement_font ?? null,
       replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       replacedStyleCount: payload.replaced_style_count ?? 0,
+      workload: this.normalizeWorkloadSummary(payload.workload),
+      effectiveWorkload: payload.effective_workload ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
+    };
+  }
+
+  private normalizeWorkloadSummary(payload: RawJobSummary["workload"]): JobSummary["workload"] {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      initialWorkloadA1: payload.initial_workload_a1 ?? 0,
+      finalWorkloadA1: payload.final_workload_a1 ?? 0,
+      oneReviewFactor: payload.one_review_factor ?? 1,
+      twoReviewFactor: payload.two_review_factor ?? 1,
+      threeReviewFactor: payload.three_review_factor ?? 1,
+      settlementStatus: payload.settlement_status ?? "pending",
+      settledAt: payload.settled_at ?? null,
     };
   }
 

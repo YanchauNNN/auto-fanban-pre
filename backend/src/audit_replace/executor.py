@@ -51,7 +51,7 @@ def derive_replaced_dwg_filename(
 
 
 def normalize_unit_no(value: object) -> str:
-    match = re.search(r"[1-9]", str(value or ""))
+    match = re.search(r"[0-9]", str(value or ""))
     return match.group(0) if match else ""
 
 
@@ -219,7 +219,7 @@ class AuditReplaceExecutor:
 
         converted_dir = replace_dir / "converted"
         converted_dwg = self.oda.dxf_to_dwg(replaced_dxf, converted_dir)
-        if self._should_skip_factory_index_for_unlisted_unit(
+        if self._should_skip_factory_index_for_unit_without_template(
             source_project_no=source_project_no,
             source_unit_no=source_unit_no,
             target_project_no=target_project_no,
@@ -228,7 +228,7 @@ class AuditReplaceExecutor:
             factory_result = FactoryIndexReplacementResult(
                 applied=False,
                 output_dwg=converted_dwg,
-                message="factory_index_map_skipped_unlisted_unit",
+                message="factory_index_map_skipped_unit_without_template",
             )
         else:
             factory_result = self.factory_index_maps.replace_if_configured(
@@ -312,7 +312,7 @@ class AuditReplaceExecutor:
                 names.append(legacy_name)
         return self._factory_index_variant_from_params(params, names)
 
-    def _should_skip_factory_index_for_unlisted_unit(
+    def _should_skip_factory_index_for_unit_without_template(
         self,
         *,
         source_project_no: str,
@@ -320,13 +320,47 @@ class AuditReplaceExecutor:
         target_project_no: str,
         target_unit_no: str | None,
     ) -> bool:
-        return self._is_unlisted_unit_for_project(
+        if self._is_unlisted_unit_for_project(
             project_no=source_project_no,
             unit_no=source_unit_no,
         ) or self._is_unlisted_unit_for_project(
             project_no=target_project_no,
             unit_no=target_unit_no,
+        ):
+            return True
+
+        source_rules = self.config.factory_index_maps.source_variant_rules.get(
+            str(source_project_no or "").strip(),
         )
+        normalized_source_unit = normalize_unit_no(source_unit_no)
+        if source_rules and normalized_source_unit and normalized_source_unit not in source_rules:
+            return True
+
+        target_templates = self.config.factory_index_maps.island_templates.get(
+            str(target_project_no or "").strip(),
+        )
+        normalized_target_unit = normalize_unit_no(target_unit_no)
+        if target_templates and normalized_target_unit and normalized_target_unit not in target_templates:
+            return True
+        if (
+            normalized_target_unit
+            and self._is_universal_unit(normalized_target_unit)
+            and target_templates is None
+            and str(target_project_no or "").strip() in self.config.factory_index_maps.templates
+        ):
+            return True
+
+        return False
+
+    def _is_universal_unit(self, unit_no: str | None) -> bool:
+        normalized_unit_no = normalize_unit_no(unit_no)
+        if not normalized_unit_no:
+            return False
+        return normalized_unit_no in {
+            str(value).strip()
+            for value in self.config.audit_check.unit_consistency.universal_units
+            if str(value).strip()
+        }
 
     def _is_unlisted_unit_for_project(self, *, project_no: str, unit_no: str | None) -> bool:
         normalized_project_no = str(project_no or "").strip()

@@ -180,7 +180,11 @@ class FormMetadataService:
 
     def _resolve_source_unit_options(self) -> dict[str, list[dict[str, str]]]:
         factory_config = self.config.factory_index_maps
-        return self._build_unit_option_map(
+        unit_options = self._build_unit_option_map(
+            self.config.audit_check.unit_consistency.project_units,
+            default_suffix=self.config.audit_check.unit_consistency.label_suffix,
+        )
+        factory_options = self._build_unit_option_map(
             {
                 str(project_no): list(variant_rules.keys())
                 for project_no, variant_rules in factory_config.source_variant_rules.items()
@@ -188,6 +192,7 @@ class FormMetadataService:
             },
             default_suffix=factory_config.variant_label_suffix,
         )
+        return self._merge_unit_option_maps(unit_options, factory_options)
 
     def _resolve_target_unit_options(self) -> dict[str, list[dict[str, str]]]:
         factory_config = self.config.factory_index_maps

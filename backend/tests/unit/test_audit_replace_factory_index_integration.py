@@ -325,4 +325,7 @@ def test_executor_skips_factory_index_map_when_target_unit_is_unlisted(
     assert job.artifacts.replaced_dwg is not None
     assert job.artifacts.replaced_dwg.name == "19077RC-JGS09-A.dwg"
     assert job.artifacts.replaced_dwg.read_bytes() == b"converted-dwg"
-    assert job.progress.details["factory_index_map"]["message"] == "factory_index_map_skipped_unlisted_unit"
+    assert (
+        job.progress.details["factory_index_map"]["message"]
+        == "factory_index_map_skipped_unit_without_template"
+    )
