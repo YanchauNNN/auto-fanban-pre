@@ -110,6 +110,18 @@ type RawJobDetail = RawJobSummary & {
   current_file?: string | null;
   flags?: string[];
   errors?: string[];
+  diagnostics?: Array<{
+    kind?: string | null;
+    severity?: string | null;
+    title?: string | null;
+    summary?: string | null;
+    suggestion?: string | null;
+    details?: Array<{
+      label?: string | null;
+      items?: string[] | null;
+    }> | null;
+    raw_items?: string[] | null;
+  }> | null;
   top_wrong_texts?: string[] | null;
   top_internal_codes?: string[] | null;
   shared_dir?: string | null;
@@ -510,6 +522,7 @@ export class HttpAdapter implements ApiAdapter {
       currentFile: payload.current_file ?? null,
       flags: payload.flags ?? [],
       errors: payload.errors ?? [],
+      diagnostics: this.normalizeDiagnostics(payload.diagnostics),
       topWrongTexts: payload.top_wrong_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
       sharedDir: payload.shared_dir ?? null,
@@ -726,6 +739,26 @@ export class HttpAdapter implements ApiAdapter {
         pageTotal: drawing.page_total ?? 0,
       })),
     };
+  }
+
+  private normalizeDiagnostics(payload: RawJobDetail["diagnostics"]) {
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+    return payload.map((item) => ({
+      kind: item.kind ?? "other",
+      severity: item.severity ?? "warning",
+      title: item.title ?? "未命名问题",
+      summary: item.summary ?? "",
+      suggestion: item.suggestion ?? "",
+      details: Array.isArray(item.details)
+        ? item.details.map((detail) => ({
+            label: detail.label ?? "具体信息",
+            items: detail.items ?? [],
+          }))
+        : [],
+      rawItems: item.raw_items ?? [],
+    }));
   }
 
   private normalizeFindingGroups(payload: RawJobDetail["finding_groups"]): FindingGroup[] | undefined {

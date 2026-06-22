@@ -318,6 +318,17 @@ class FakeJobProcessor:
             job.progress.details["affected_drawings_count"] = 1
             job.progress.details["top_wrong_texts"] = ["2016", "JD"]
             job.progress.details["top_internal_codes"] = ["1234567-JGS01-001"]
+            job.progress.details["workload"] = {
+                "initial_workload_a1": 1.0,
+                "final_workload_a1": 1.0,
+                "one_review_factor": 1.0,
+                "two_review_factor": 1.0,
+                "three_review_factor": 1.0,
+                "settlement_status": "pending",
+                "settled_at": None,
+                "contributor_entries": [],
+            }
+            job.progress.details["effective_workload"] = 1.0
             job.mark_succeeded()
             return
 
@@ -354,6 +365,17 @@ class FakeJobProcessor:
             )
             job.artifacts.package_zip = package_zip
             job.artifacts.drawings_dir = drawings_dir
+            job.progress.details["workload"] = {
+                "initial_workload_a1": 0.25,
+                "final_workload_a1": 0.25,
+                "one_review_factor": 1.0,
+                "two_review_factor": 1.0,
+                "three_review_factor": 1.0,
+                "settlement_status": "pending",
+                "settled_at": None,
+                "contributor_entries": [],
+            }
+            job.progress.details["effective_workload"] = 0.25
             job.mark_succeeded()
             return
 
@@ -454,6 +476,17 @@ class FakeJobProcessor:
             "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_MISMATCH",
             "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED",
         ]
+        job.progress.details["workload"] = {
+            "initial_workload_a1": 2.0,
+            "final_workload_a1": 2.0,
+            "one_review_factor": 1.0,
+            "two_review_factor": 1.0,
+            "three_review_factor": 1.0,
+            "settlement_status": "pending",
+            "settled_at": None,
+            "contributor_entries": [],
+        }
+        job.progress.details["effective_workload"] = 2.0
         job.mark_succeeded()
 
 
@@ -1099,6 +1132,9 @@ def test_create_batch_preserves_source_filename_but_stores_ascii_upload_copy(
         assert payload["jobs"][0]["source_filename"] == "20261NH-JGS51-B合并版.dwg"
 
         detail = _poll_job(client, job_id)
+        assert detail["workload"]["initial_workload_a1"] == 2.0
+        assert detail["workload"]["final_workload_a1"] == 2.0
+        assert detail["effective_workload"] == 2.0
         assert detail["source_filename"] == "20261NH-JGS51-B合并版.dwg"
 
     uploads_dir = tmp_path / "storage" / "jobs" / job_id / "uploads"
@@ -1232,6 +1268,9 @@ def test_create_batch_split_only_skips_document_param_validation(
     assert job_payload["project_no"] == "2026"
     assert job_payload["options"]["split_only"] is True
     assert detail["artifacts"]["package_available"] is True
+    assert detail["workload"]["initial_workload_a1"] == 0.25
+    assert detail["workload"]["final_workload_a1"] == 0.25
+    assert detail["effective_workload"] == 0.25
 
 
 def test_create_batch_infers_project_no_from_uploaded_filename_when_blank(
@@ -1403,6 +1442,9 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{job_id}/download/preview"
         assert detail["findings_count"] == 2
         assert detail["affected_drawings_count"] == 1
+        assert detail["workload"]["initial_workload_a1"] == 1.0
+        assert detail["workload"]["final_workload_a1"] == 1.0
+        assert detail["effective_workload"] == 1.0
         assert detail["top_wrong_texts"] == ["2016", "JD"]
         assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
         assert detail["finding_groups"] == [

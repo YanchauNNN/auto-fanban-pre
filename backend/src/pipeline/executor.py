@@ -64,6 +64,7 @@ from .packager import Packager
 from .preview_pdf_service import PreviewPdfService
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
+from ..workload.calculator import WorkloadCalculator
 
 if TYPE_CHECKING:
     from ..models import Job
@@ -100,6 +101,7 @@ class PipelineExecutor:
         self.ied_gen = IEDGenerator()
         self.packager = Packager()
         self.preview_pdf_service = PreviewPdfService()
+        self.workload_calculator = WorkloadCalculator()
 
     def execute(self, job: Job) -> None:
         """?????"""
@@ -1101,11 +1103,23 @@ class PipelineExecutor:
         job.artifacts.docs_dir = docs_dir if docs_dir.exists() else None
         job.artifacts.package_zip = work_dir / "package.zip"
 
+        self._record_workload(job, context)
         self.packager.generate_manifest(job, context=context)
         zip_path = self.packager.package(job)
         job.artifacts.package_zip = zip_path
         if not bool(job.options.get("split_only", False)):
             self._generate_preview_pdf(job, context)
+
+    def _record_workload(self, job: Job, context: dict) -> None:
+        summary = self.workload_calculator.build_from_frame_sets(
+            list(context.get("frames") or []),
+            list(context.get("sheet_sets") or []),
+        )
+        job.progress.details["workload"] = summary.model_dump(mode="json")
+        job.progress.details["effective_workload"] = round(
+            float(summary.final_workload_a1 or summary.initial_workload_a1 or 0.0),
+            self.workload_calculator.precision,
+        )
 
     def _generate_preview_pdf(self, job: Job, context: dict) -> None:
         try:

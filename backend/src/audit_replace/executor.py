@@ -20,6 +20,7 @@ from ..cad.dwg_version import detect_dwg_version_code_or_none
 from ..config import get_config, load_spec
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
+from ..workload.calculator import WorkloadCalculator
 from .factory_index_bridge import FactoryIndexMapReplacementService, FactoryIndexReplacementResult
 from .mapping import ReplaceMapping, ReplaceMappingBuilder
 from .reporting import write_replace_report_json, write_replace_report_xlsx
@@ -127,6 +128,7 @@ class AuditReplaceExecutor:
         self.dotnet_scanner = AuditDotNetScanner()
         self.mapping_builder = ReplaceMappingBuilder()
         self.factory_index_maps = FactoryIndexMapReplacementService()
+        self.workload_calculator = WorkloadCalculator()
 
     def execute(self, job: Job) -> None:
         if not job.input_files:
@@ -321,7 +323,16 @@ class AuditReplaceExecutor:
         job.progress.details["top_replaced_texts"] = list(summary["top_replaced_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
         job.progress.details["factory_index_map"] = factory_result.to_progress_dict()
+        self._record_workload(job, remaining_frames, sheet_sets)
         job.mark_succeeded()
+
+    def _record_workload(self, job: Job, frames: list, sheet_sets: list) -> None:
+        summary = self.workload_calculator.build_from_frame_sets(frames, sheet_sets)
+        job.progress.details["workload"] = summary.model_dump(mode="json")
+        job.progress.details["effective_workload"] = round(
+            float(summary.final_workload_a1 or summary.initial_workload_a1 or 0.0),
+            self.workload_calculator.precision,
+        )
 
     def _factory_index_source_variant(self, params: dict[str, Any]) -> str | None:
         return self._factory_index_variant_from_params(

@@ -14,6 +14,7 @@ from ..config import get_config
 from ..models import Job
 from ..pipeline.preview_pdf_service import PreviewPdfService
 from ..pipeline.shared_prep import SharedPrepService
+from ..workload.calculator import WorkloadCalculator
 from .bridge import AuditDotNetScanner
 from .lexicon import AuditLexiconLoader
 from .matcher import AuditMatchEngine
@@ -34,6 +35,7 @@ class AuditCheckExecutor:
         self.preview_pdf_service = PreviewPdfService()
         self.lexicon_loader = AuditLexiconLoader()
         self.dotnet_scanner = AuditDotNetScanner()
+        self.workload_calculator = WorkloadCalculator()
 
     def execute(self, job: Job) -> None:
         if not job.input_files:
@@ -112,6 +114,7 @@ class AuditCheckExecutor:
         job.progress.details["affected_drawings_count"] = int(summary["affected_drawings_count"])
         job.progress.details["top_wrong_texts"] = list(summary["top_wrong_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
+        self._record_workload(job, remaining_frames, sheet_sets)
         self._generate_preview_pdf(
             job,
             source_dwg=preview_source,
@@ -120,6 +123,14 @@ class AuditCheckExecutor:
             findings=findings,
         )
         job.mark_succeeded()
+
+    def _record_workload(self, job: Job, frames: list, sheet_sets: list) -> None:
+        summary = self.workload_calculator.build_from_frame_sets(frames, sheet_sets)
+        job.progress.details["workload"] = summary.model_dump(mode="json")
+        job.progress.details["effective_workload"] = round(
+            float(summary.final_workload_a1 or summary.initial_workload_a1 or 0.0),
+            self.workload_calculator.precision,
+        )
 
     def _generate_preview_pdf(
         self,

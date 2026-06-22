@@ -1742,6 +1742,7 @@ function SingleJobDetailPanel({
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
 
   return (
     <section className={styles.detailPanel}>
@@ -1766,10 +1767,10 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -1842,11 +1843,8 @@ function SingleJobDetailPanel({
       ) : null}
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       <section className={styles.detailSection}>
@@ -1880,14 +1878,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
-  const drawingQuantityText = formatWorkloadQuantity(detail.workload?.initialWorkloadA1);
-  const quickDownloadItems = drawingQuantityText
-    ? insertAfterArtifactKey(
-        artifactButtons,
-        "ied",
-        <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
-      )
-    : artifactButtons;
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -1913,7 +1904,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <StatusPill status={detail.status} />
       </header>
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
           <div className={styles.downloadGrid}>{quickDownloadItems}</div>
@@ -1995,11 +1986,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       </section>
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       {previewRequest ? (
@@ -2037,6 +2025,18 @@ function DrawingQuantityCopy({ value }: { value: string }) {
         {copyStatus === "copied" ? "已复制" : copyStatus === "failed" ? "复制失败" : "复制张数"}
       </button>
     </div>
+  );
+}
+
+function buildQuickDownloadItems(job: JobSummary, artifactButtons: ReactNode[]) {
+  const drawingQuantityText = formatWorkloadQuantity(job.workload?.initialWorkloadA1);
+  if (!drawingQuantityText) {
+    return artifactButtons;
+  }
+  return insertAfterArtifactKey(
+    artifactButtons,
+    "ied",
+    <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
   );
 }
 
@@ -2419,6 +2419,90 @@ function ListBlock({
       )}
     </div>
   );
+}
+
+function DiagnosticPanel({ detail }: { detail: JobDetail }) {
+  const diagnostics = detail.diagnostics ?? [];
+
+  if (diagnostics.length === 0) {
+    return (
+      <div className={styles.columns}>
+        <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+        <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.diagnosticPanel}>
+      <div className={styles.diagnosticList}>
+        {diagnostics.map((diagnostic, index) => (
+          <article
+            className={`${styles.diagnosticCard} ${diagnosticSeverityClass(diagnostic.severity)}`}
+            key={`${diagnostic.kind}-${diagnostic.title}-${index}`}
+          >
+            <div className={styles.diagnosticHeader}>
+              <span className={styles.diagnosticSeverity}>
+                {diagnosticSeverityLabel(diagnostic.severity)}
+              </span>
+              <h3>{diagnostic.title}</h3>
+            </div>
+            {diagnostic.summary ? <p className={styles.diagnosticSummary}>{diagnostic.summary}</p> : null}
+            {diagnostic.suggestion ? (
+              <p className={styles.diagnosticSuggestion}>{diagnostic.suggestion}</p>
+            ) : null}
+            {diagnostic.details.length > 0 ? (
+              <div className={styles.diagnosticDetails}>
+                {diagnostic.details.map((detailItem) => (
+                  <div className={styles.diagnosticDetailGroup} key={detailItem.label}>
+                    <strong>{detailItem.label}</strong>
+                    <div className={styles.diagnosticChips}>
+                      {detailItem.items.map((item) => (
+                        <span className={styles.diagnosticChip} key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <details className={styles.rawDiagnosticDetails}>
+        <summary>展开原始诊断信息</summary>
+        <div className={styles.columns}>
+          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function hasStructuredDiagnostics(detail: JobDetail) {
+  return Boolean(detail.diagnostics && detail.diagnostics.length > 0);
+}
+
+function diagnosticSeverityLabel(severity: string) {
+  if (severity === "error") {
+    return "错误";
+  }
+  if (severity === "info") {
+    return "提示";
+  }
+  return "警告";
+}
+
+function diagnosticSeverityClass(severity: string) {
+  if (severity === "error") {
+    return styles.diagnosticError;
+  }
+  if (severity === "info") {
+    return styles.diagnosticInfo;
+  }
+  return styles.diagnosticWarning;
 }
 
 function TaskKindBadge({ kind, jobMode }: { kind: TaskKind; jobMode?: string | null }) {

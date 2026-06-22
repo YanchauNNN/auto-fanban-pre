@@ -746,6 +746,75 @@ describe("job cards", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("renders categorized diagnostics on task group detail pages", async () => {
+    window.history.pushState({}, "", "/jobs/group-diagnostics");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "group-diagnostics",
+      batchId: "batch-diagnostics",
+      groupId: "group-diagnostics",
+      isGroup: true,
+      sourceFilename: "18185NP-JGS44仅拆图.dwg",
+      sourceFilenames: ["18185NP-JGS44仅拆图.dwg"],
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      projectNo: "1818",
+      status: "failed",
+      stage: "GROUP_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-06-17T17:46:26+08:00",
+      finishedAt: "2026-06-17T17:47:34+08:00",
+      startedAt: "2026-06-17T17:46:26+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: ["CAD结果错误:检测到重复编码"],
+      errors: [],
+      diagnostics: [
+        {
+          kind: "duplicate_code",
+          severity: "error",
+          title: "检测到重复编码",
+          summary: "发现 0 个重复内部编码、2 个重复外部编码。",
+          suggestion: "请检查图签中的内部编码/外部编码。",
+          details: [
+            {
+              label: "外部编码 PC5NPM12004B25C42SD",
+              items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+            },
+            {
+              label: "外部编码 PC5NPM12004B25C42MD",
+              items: ["18185NP-JGS44-025", "18185NP-JGS44-027"],
+            },
+          ],
+          rawItems: ["CAD结果错误:检测到重复编码"],
+        },
+      ],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      children: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "问题原因" })).toBeInTheDocument();
+    expect(screen.getByText("检测到重复编码")).toBeInTheDocument();
+    expect(screen.getByText("外部编码 PC5NPM12004B25C42SD")).toBeInTheDocument();
+    expect(screen.getByText("18185NP-JGS44-024")).toBeInTheDocument();
+    expect(screen.getByText("18185NP-JGS44-026")).toBeInTheDocument();
+  });
+
   it("shows a completed single deliverable job with a detail link", async () => {
     mockListJobs.mockResolvedValue({
       total: 1,
@@ -920,6 +989,116 @@ describe("job detail pages", () => {
     expect(screen.queryByRole("link", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
+  });
+
+  it("shows drawing quantity in single split-only job quick downloads", async () => {
+    window.history.pushState({}, "", "/jobs/split-only-quantity");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+    mockGetJobDetail.mockResolvedValue({
+      ...makeSingleJob(1, "18185NF-JGS19-A.dwg"),
+      jobId: "split-only-quantity",
+      batchId: "batch-split-only-quantity",
+      taskKind: "deliverable",
+      jobMode: "split_only",
+      taskRole: "仅拆图",
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/split-only-quantity/download/package",
+      },
+      workload: {
+        initialWorkloadA1: 6.5,
+        finalWorkloadA1: 6.5,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 6.5,
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [],
+        drawings: [
+          {
+            name: "18185NF-JGS19-001",
+            internalCode: "18185NF-JGS19-001",
+            dwgName: "18185NF-JGS19-001.dwg",
+            pdfName: "18185NF-JGS19-001.pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("6.5")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("6.5");
+  });
+
+  it("shows drawing quantity in single audit-check job quick downloads", async () => {
+    window.history.pushState({}, "", "/jobs/audit-check-quantity");
+    mockGetJobDetail.mockResolvedValue({
+      ...makeSingleJob(2, "18185NF-JGS19-A.dwg"),
+      jobId: "audit-check-quantity",
+      batchId: "batch-audit-check-quantity",
+      taskKind: "audit_check",
+      jobMode: "check",
+      taskRole: "audit_check",
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: true,
+        previewMode: "annotated",
+        previewDownloadUrl: "/api/jobs/audit-check-quantity/download/preview",
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/audit-check-quantity/download/report",
+        replacedDwgAvailable: false,
+      },
+      workload: {
+        initialWorkloadA1: 1,
+        finalWorkloadA1: 1,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 1,
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      findingGroups: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
   });
 
   it("shows a clean font summary when no missing fonts were detected for deliverable jobs", async () => {

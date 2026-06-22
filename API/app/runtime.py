@@ -29,6 +29,7 @@ from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
+from src.job_diagnostics import build_job_diagnostics
 from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
@@ -41,6 +42,7 @@ from src.pipeline.project_no_inference import (
 from src.pipeline.shared_prep import SharedPrepService
 from src.result_views import normalize_user_flags
 from src.workload.calculator import WorkloadCalculator
+from src.workload.models import WorkloadSummary
 
 
 logger = logging.getLogger(__name__)
@@ -1387,6 +1389,22 @@ class DeliverableApiRuntime:
             return value
         return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
+    @staticmethod
+    def _serialize_workload_from_details(details: dict[str, Any]) -> tuple[dict[str, Any] | None, float | None]:
+        raw_workload = details.get("workload")
+        if not isinstance(raw_workload, dict):
+            return None, None
+        try:
+            workload = WorkloadSummary.model_validate(raw_workload)
+        except Exception:  # noqa: BLE001
+            return None, None
+        effective_raw = details.get("effective_workload")
+        try:
+            effective = float(effective_raw)
+        except (TypeError, ValueError):
+            effective = float(workload.final_workload_a1 or workload.initial_workload_a1 or 0.0)
+        return workload.model_dump(mode="json"), round(effective, 2)
+
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
         task_kind = 'deliverable'
         job_mode = 'deliverable'
@@ -1406,6 +1424,7 @@ class DeliverableApiRuntime:
             message=job.progress.message,
             errors=job.errors,
         )
+        workload_payload, effective_workload = self._serialize_workload_from_details(job.progress.details)
         return {
             'job_id': job.job_id,
             'batch_id': job.batch_id,
@@ -1443,6 +1462,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_job_artifacts(job),
             'findings_count': int(job.progress.details.get('findings_count', 0) or 0),
             'affected_drawings_count': int(job.progress.details.get('affected_drawings_count', 0) or 0),
+            'workload': workload_payload,
+            'effective_workload': effective_workload,
             'retry_available': False,
         }
 
@@ -1455,6 +1476,12 @@ class DeliverableApiRuntime:
             'current_file': job.progress.current_file,
             'flags': normalize_user_flags(job.flags),
             'errors': job.errors,
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(job.flags),
+                errors=job.errors,
+                progress_details=job.progress.details,
+                font_preflight_summary=job.font_preflight_summary,
+            ),
             'top_wrong_texts': list(job.progress.details.get('top_wrong_texts', []) or []),
             'top_internal_codes': list(job.progress.details.get('top_internal_codes', []) or []),
             'artifacts': self._serialize_job_artifacts(job, include_urls=True, job_id=job.job_id),
@@ -1571,6 +1598,11 @@ class DeliverableApiRuntime:
             'started_at': group.started_at.isoformat() if group.started_at else None,
             'flags': normalize_user_flags(group.flags),
             'errors': list(group.errors),
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(group.flags),
+                errors=list(group.errors),
+                progress_details=group.progress.details,
+            ),
             'shared_run_id': group.shared_run_id,
             'shared_dir': str(group.shared_dir) if group.shared_dir else None,
             'children': [self._serialize_job_summary(child) for child in self._iter_group_children(group)],

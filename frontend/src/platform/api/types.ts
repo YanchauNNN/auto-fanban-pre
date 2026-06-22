@@ -266,11 +266,27 @@ export type JobSummary = {
   children?: JobSummary[];
 };
 
+export type JobDiagnosticDetail = {
+  label: string;
+  items: string[];
+};
+
+export type JobDiagnostic = {
+  kind: string;
+  severity: "error" | "warning" | "info" | string;
+  title: string;
+  summary: string;
+  suggestion: string;
+  details: JobDiagnosticDetail[];
+  rawItems: string[];
+};
+
 export type JobDetail = JobSummary & {
   startedAt: string | null;
   currentFile: string | null;
   flags: string[];
   errors: string[];
+  diagnostics?: JobDiagnostic[];
   topWrongTexts: string[];
   topInternalCodes: string[];
   sharedDir?: string | null;

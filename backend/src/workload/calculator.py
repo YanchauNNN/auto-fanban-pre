@@ -15,10 +15,13 @@ class WorkloadCalculator:
         self.precision = int(workload_cfg.get('precision') or 2)
 
     def build_from_shared_prep(self, prep: SharedPrepArtifacts) -> WorkloadSummary:
+        return self.build_from_frame_sets(prep.frames, prep.sheet_sets)
+
+    def build_from_frame_sets(self, frames: list, sheet_sets: list) -> WorkloadSummary:
         initial = 0.0
-        for frame in prep.frames:
+        for frame in frames:
             initial += self._value_for_variant(frame.runtime.paper_variant_id)
-        for sheet_set in prep.sheet_sets:
+        for sheet_set in sheet_sets:
             initial += float(sheet_set.page_total) * self._value_for_variant(sheet_set.paper)
         initial = round(initial, self.precision)
         return WorkloadSummary(initial_workload_a1=initial, final_workload_a1=initial)

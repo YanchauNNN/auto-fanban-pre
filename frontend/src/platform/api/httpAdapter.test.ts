@@ -125,6 +125,22 @@ describe("HttpAdapter", () => {
             ],
           },
           retry_available: false,
+          diagnostics: [
+            {
+              kind: "duplicate_code",
+              severity: "error",
+              title: "检测到重复编码",
+              summary: "发现 0 个重复内部编码、1 个重复外部编码。",
+              suggestion: "请检查图签中的内部编码/外部编码。",
+              details: [
+                {
+                  label: "外部编码 PC5NPM12004B25C42SD",
+                  items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+                },
+              ],
+              raw_items: ["检测到重复编码"],
+            },
+          ],
           artifacts: {
             package_available: true,
             ied_available: true,
@@ -171,6 +187,18 @@ describe("HttpAdapter", () => {
       settlementStatus: "pending",
     });
     expect(detail.effectiveWorkload).toBe(2.7);
+    expect((detail as any).diagnostics?.[0]).toMatchObject({
+      kind: "duplicate_code",
+      severity: "error",
+      title: "检测到重复编码",
+      details: [
+        {
+          label: "外部编码 PC5NPM12004B25C42SD",
+          items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+        },
+      ],
+      rawItems: ["检测到重复编码"],
+    });
   });
 
   it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {
