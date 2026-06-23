@@ -40,6 +40,7 @@ class FontPreflightBridge:
         replacement_fonts: dict[str, str] | None,
         replacement_targets: list[dict[str, Any]] | None,
         font_compatibility_replacements: dict[str, str] | None = None,
+        font_compatibility_exempt_style_names: list[str] | None = None,
         empty_style_replacement: dict[str, str] | None = None,
         empty_style_target_regions: list[dict[str, Any]] | None = None,
         workspace_dir: Path,
@@ -54,6 +55,7 @@ class FontPreflightBridge:
             replacement_fonts=replacement_fonts,
             replacement_targets=replacement_targets,
             font_compatibility_replacements=font_compatibility_replacements,
+            font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
             empty_style_replacement=empty_style_replacement,
             empty_style_target_regions=empty_style_target_regions,
         )
@@ -69,6 +71,7 @@ class FontPreflightBridge:
         replacement_fonts: dict[str, str] | None = None,
         replacement_targets: list[dict[str, Any]] | None = None,
         font_compatibility_replacements: dict[str, str] | None = None,
+        font_compatibility_exempt_style_names: list[str] | None = None,
         empty_style_replacement: dict[str, str] | None = None,
         empty_style_target_regions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -95,6 +98,7 @@ class FontPreflightBridge:
             "replacement_fonts": replacement_fonts or {},
             "replacement_targets": replacement_targets or [],
             "font_compatibility_replacements": font_compatibility_replacements or {},
+            "font_compatibility_exempt_style_names": font_compatibility_exempt_style_names or [],
             "empty_style_replacement": empty_style_replacement or {},
             "empty_style_target_regions": empty_style_target_regions or [],
             "engines": {

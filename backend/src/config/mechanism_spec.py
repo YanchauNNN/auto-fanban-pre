@@ -70,9 +70,12 @@ class AuditDisplayConfig(BaseModel):
 
 
 class ProjectInferenceConfig(BaseModel):
-    project_no_prefix_regex: str = r"^(\d{4})"
+    project_no_prefix_regex: str = (
+        r"(?P<project_no>\d{4})(?=[0-9][A-Z0-9]{2,4}-[A-Z]{3}\d{2})"
+        r"|^(\d{4})(?=[-_A-Z0-9]|$)"
+    )
     unit_no_by_project_prefix_regex: str = (
-        r"^(?P<project_no>\d{4})(?P<unit_no>[0-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})"
+        r"(?P<project_no>\d{4})(?P<unit_no>[0-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})"
     )
     default_project_no: str = "2016"
 

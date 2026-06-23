@@ -56,6 +56,8 @@ def write_report_json(
                 {
                     "matched_text": finding.matched_text,
                     "internal_code": finding.internal_code,
+                    "context_kind": finding.context_kind,
+                    "details": finding.details or {},
                 }
                 for finding in findings
             ]
@@ -76,6 +78,7 @@ def write_report_json(
                 "position_x": finding.position_x,
                 "position_y": finding.position_y,
                 "text_bbox": finding.text_bbox.model_dump() if finding.text_bbox else None,
+                "details": finding.details or {},
                 "context_excerpt": finding.raw_text[:120],
             }
             for finding in findings
@@ -123,6 +126,7 @@ def write_report_xlsx(
             "position_x",
             "position_y",
             "text_bbox",
+            "details",
         ]
     )
     for finding in findings:
@@ -147,6 +151,7 @@ def write_report_xlsx(
                 json.dumps(finding.text_bbox.model_dump(), ensure_ascii=False)
                 if finding.text_bbox
                 else "",
+                json.dumps(finding.details or {}, ensure_ascii=False),
             ]
         )
 

@@ -147,6 +147,11 @@ class FontPreflightService:
             if font_compatibility_mode
             else {}
         )
+        font_compatibility_exempt_style_names = (
+            self._resolve_font_compatibility_exempt_style_names()
+            if font_compatibility_mode
+            else []
+        )
         empty_style_replacement = (
             self._resolve_empty_style_replacement()
             if font_compatibility_mode
@@ -220,6 +225,7 @@ class FontPreflightService:
                 replacement_fonts=effective_replacements,
                 replacement_targets=replacement_targets,
                 font_compatibility_replacements=font_compatibility_replacements,
+                font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
                 empty_style_replacement=empty_style_replacement,
                 empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
@@ -235,6 +241,7 @@ class FontPreflightService:
                 replacement_fonts={},
                 replacement_targets=[],
                 font_compatibility_replacements=font_compatibility_replacements,
+                font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
                 empty_style_replacement=empty_style_replacement,
                 empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
@@ -256,6 +263,10 @@ class FontPreflightService:
         normalized_result["font_compatibility_mode"] = bool(font_compatibility_mode)
         normalized_result["font_compatibility_replacements"] = dict(
             raw.get("font_compatibility_replacements") or font_compatibility_replacements
+        )
+        normalized_result["font_compatibility_exempt_style_names"] = list(
+            raw.get("font_compatibility_exempt_style_names")
+            or font_compatibility_exempt_style_names
         )
         normalized_result["empty_style_replacement"] = dict(
             raw.get("empty_style_replacement") or empty_style_replacement
@@ -371,6 +382,27 @@ class FontPreflightService:
         if bigfont_name:
             replacement["bigfont"] = bigfont_name
         return replacement
+
+    def _resolve_font_compatibility_exempt_style_names(self) -> list[str]:
+        configured = getattr(
+            self.config.font_preflight,
+            "font_compatibility_exempt_style_names",
+            [],
+        )
+        if not isinstance(configured, list):
+            return []
+        results: list[str] = []
+        seen: set[str] = set()
+        for raw_name in configured:
+            style_name = str(raw_name or "").strip()
+            if not style_name:
+                continue
+            key = style_name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(style_name)
+        return results
 
     def _build_empty_style_target_regions(
         self,

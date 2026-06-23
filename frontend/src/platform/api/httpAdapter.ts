@@ -144,6 +144,11 @@ type RawJobDetail = RawJobSummary & {
     matched_text?: string | null;
     count?: number | null;
     internal_codes?: string[] | null;
+    category?: string | null;
+    context_kind?: string | null;
+    issue_type?: string | null;
+    summary?: string | null;
+    details?: string[] | null;
   }> | null;
   replace_summary?: {
     replacement_count?: number | null;
@@ -770,6 +775,11 @@ export class HttpAdapter implements ApiAdapter {
       matchedText: group.matched_text ?? "",
       count: group.count ?? 0,
       internalCodes: group.internal_codes ?? [],
+      category: group.category ?? undefined,
+      contextKind: group.context_kind ?? undefined,
+      issueType: group.issue_type ?? undefined,
+      summary: group.summary ?? undefined,
+      details: group.details ?? undefined,
     }));
   }
 

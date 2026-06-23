@@ -2029,7 +2029,7 @@ function DrawingQuantityCopy({ value }: { value: string }) {
 }
 
 function buildQuickDownloadItems(job: JobSummary, artifactButtons: ReactNode[]) {
-  const drawingQuantityText = formatWorkloadQuantity(job.workload?.initialWorkloadA1);
+  const drawingQuantityText = formatWorkloadQuantity(resolveDrawingQuantity(job));
   if (!drawingQuantityText) {
     return artifactButtons;
   }
@@ -2038,6 +2038,50 @@ function buildQuickDownloadItems(job: JobSummary, artifactButtons: ReactNode[]) 
     "ied",
     <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
   );
+}
+
+function resolveDrawingQuantity(job: JobSummary) {
+  const ownQuantity = readJobDrawingQuantity(job);
+  if (ownQuantity !== null) {
+    return ownQuantity;
+  }
+
+  if (!job.isGroup || !job.children?.length) {
+    return null;
+  }
+
+  const childrenByPriority = [
+    ...job.children.filter((child) => child.taskKind === "deliverable"),
+    ...job.children.filter((child) => child.taskKind === "audit_check"),
+    ...job.children.filter((child) => child.taskKind === "audit_replace"),
+    ...job.children,
+  ];
+  for (const child of childrenByPriority) {
+    const childQuantity = readJobDrawingQuantity(child);
+    if (childQuantity !== null) {
+      return childQuantity;
+    }
+  }
+
+  return null;
+}
+
+function readJobDrawingQuantity(job: JobSummary) {
+  const candidates = [
+    job.workload?.initialWorkloadA1,
+    job.workload?.finalWorkloadA1,
+    job.effectiveWorkload,
+  ];
+  for (const candidate of candidates) {
+    if (isUsableDrawingQuantity(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function isUsableDrawingQuantity(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function insertAfterArtifactKey(
@@ -2239,9 +2283,22 @@ function AuditResultCard({
             {groups.map((group) => (
               <div className={styles.findingGroupCard} key={group.matchedText}>
                 <div className={styles.findingGroupHeader}>
-                  <strong>{group.matchedText}</strong>
+                  <div>
+                    {group.category ? (
+                      <span className={styles.findingCodePill}>{group.category}</span>
+                    ) : null}
+                    <strong>{group.matchedText}</strong>
+                  </div>
                   <span className={styles.jobMetric}>命中 {group.count}</span>
                 </div>
+                {group.summary ? <p className={styles.muted}>{group.summary}</p> : null}
+                {group.details?.length ? (
+                  <ul className={styles.outputMetaList}>
+                    {group.details.map((item) => (
+                      <li key={`${group.matchedText}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className={styles.findingCodeList}>
                   {group.internalCodes.map((internalCode) => (
                     <span className={styles.findingCodePill} key={`${group.matchedText}-${internalCode}`}>

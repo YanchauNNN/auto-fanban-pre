@@ -122,7 +122,7 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
 
-        assert derived.discipline_en == "Structural Engineering"
+        assert derived.discipline_en == "Structure"
         assert derived.design_phase_en == "Constructing Design"
         assert derived.cover_title_en == "Test Album Cover"
         assert derived.catalog_title_en == "Test Album Contents"
@@ -139,7 +139,7 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
 
-        assert derived.discipline_en == "Structural Engineering"
+        assert derived.discipline_en == "Structure"
 
     def test_derive_cover_catalog_revision_is_independent_from_highest_drawing_revision(
         self,

@@ -1390,6 +1390,63 @@ def test_create_audit_check_infers_unit_no_from_filename(
     assert payload["jobs"][0]["project_no"] == "2026"
 
 
+def test_create_batch_with_audit_check_infers_project_and_unit_per_upload(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    with TestClient(
+        create_app(
+            job_processor=FakeJobProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+        ),
+    ) as client:
+        params = _deliverable_params()
+        params["project_no"] = ""
+        params["unit_no"] = ""
+        params["subitem_name_en"] = "NR Building"
+        params["album_title_en"] = "Test Album"
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[
+                ("files[]", ("20261NS-JGS01.dwg", b"dwg", "application/acad")),
+                ("files[]", ("出图版--18185NR-JGS50-A.dwg", b"dwg", "application/acad")),
+            ],
+        )
+
+        assert response.status_code == 201, response.json()
+        payload = response.json()
+        projects = [job["project_no"] for job in payload["jobs"]]
+        assert projects == ["2026", "1818"]
+
+        stored_params = []
+        for group in payload["jobs"]:
+            group_json = json.loads(
+                (tmp_path / "storage" / "groups" / group["job_id"] / "group.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            child_job_id = group_json["child_job_ids"][0]
+            child_json = (
+                tmp_path / "storage" / "jobs" / child_job_id / "job.json"
+            ).read_text(encoding="utf-8")
+            stored_params.append(json.loads(child_json)["params"])
+
+    assert [(item["project_no"], item["unit_no"]) for item in stored_params] == [
+        ("2026", "1"),
+        ("1818", "5"),
+    ]
+
+
 def test_create_audit_check_accepts_unlisted_unit_no_for_configured_project(
     monkeypatch,
     tmp_path: Path,
@@ -1472,6 +1529,67 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
         assert preview_download.status_code == 200
         assert preview_download.content == b"%PDF-annotated"
+
+
+def test_audit_check_detail_preserves_standard_review_finding_group(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeStandardReviewProcessor(FakeJobProcessor):
+        def __call__(self, job: Job) -> None:
+            super().__call__(job)
+            if job.job_type != JobType.AUDIT_REPLACE or str(job.options.get("mode", "")).lower() != "check":
+                return
+            assert job.artifacts.report_json is not None
+            payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+            payload["finding_groups"].append(
+                {
+                    "matched_text": "GB 51058-2011",
+                    "count": 1,
+                    "internal_codes": ["18185NF-JGS19-003"],
+                    "category": "规范审查",
+                    "context_kind": "standard_review_year",
+                    "issue_type": "year_mismatch",
+                    "summary": "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+                    "details": [
+                        "实际标准号：GB 51058-2011",
+                        "期望标准号：GB 51058-2014",
+                        "期望标准名称：核电厂抗震设计标准",
+                    ],
+                }
+            )
+            job.artifacts.report_json.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+    with _create_client(monkeypatch, tmp_path, processor=FakeStandardReviewProcessor()) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps({"project_no": "2016", "unit_no": "1"}, ensure_ascii=False),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert detail["finding_groups"][-1] == {
+            "matched_text": "GB 51058-2011",
+            "count": 1,
+            "internal_codes": ["18185NF-JGS19-003"],
+            "category": "规范审查",
+            "context_kind": "standard_review_year",
+            "issue_type": "year_mismatch",
+            "summary": "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+            "details": [
+                "实际标准号：GB 51058-2011",
+                "期望标准号：GB 51058-2014",
+                "期望标准名称：核电厂抗震设计标准",
+            ],
+        }
 
 
 def test_create_audit_check_reuses_explicit_batch_id_when_provided(

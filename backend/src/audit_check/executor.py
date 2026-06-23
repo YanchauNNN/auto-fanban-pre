@@ -21,6 +21,7 @@ from .matcher import AuditMatchEngine
 from .models import AuditFinding
 from .reporting import write_report_json, write_report_xlsx
 from .roi_mapper import AuditFieldContextMapper
+from .standard_review import StandardLibraryLoader, StandardReviewEngine
 
 
 class AuditCheckExecutor:
@@ -34,6 +35,7 @@ class AuditCheckExecutor:
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.preview_pdf_service = PreviewPdfService()
         self.lexicon_loader = AuditLexiconLoader()
+        self.standard_library_loader = StandardLibraryLoader()
         self.dotnet_scanner = AuditDotNetScanner()
         self.workload_calculator = WorkloadCalculator()
 
@@ -87,6 +89,7 @@ class AuditCheckExecutor:
             unit_no=str(job.params.get("unit_no") or "").strip() or None,
             items=annotated_items,
         )
+        findings.extend(self._standard_review_findings(annotated_items))
 
         reports_dir = job.work_dir / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -187,3 +190,16 @@ class AuditCheckExecutor:
 
         job.artifacts.preview_pdf = preview_result.pdf_path
         job.artifacts.preview_mode = preview_result.mode
+
+    def _standard_review_findings(self, items: list) -> list[AuditFinding]:
+        standard_cfg = self.config.audit_check.standard_review
+        if not standard_cfg.enabled:
+            return []
+        entries = self.standard_library_loader.load(
+            standard_cfg.library_path,
+            sheet_name=standard_cfg.sheet_name,
+        )
+        return StandardReviewEngine(
+            entries,
+            same_line_y_tolerance=standard_cfg.same_line_y_tolerance,
+        ).evaluate(items)

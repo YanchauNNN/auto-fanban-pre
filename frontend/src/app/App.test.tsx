@@ -991,6 +991,80 @@ describe("job detail pages", () => {
     expect(screen.queryByRole("link", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
   });
 
+  it("shows drawing quantity for deliverable-only groups from child workload", async () => {
+    window.history.pushState({}, "", "/jobs/group-deliverable-quantity");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+
+    const deliverableChild = {
+      ...makeSingleJob(11, "18185NF-JGS19-A.dwg"),
+      jobId: "deliverable-only-child",
+      batchId: "batch-deliverable-only",
+      groupId: "group-deliverable-quantity",
+      taskKind: "deliverable" as const,
+      taskRole: "deliverable_main",
+      workload: {
+        initialWorkloadA1: 6.5,
+        finalWorkloadA1: 6.5,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 6.5,
+    };
+
+    const groupDetail = {
+      ...makeSingleJob(10, "18185NF-JGS19-A.dwg"),
+      jobId: "group-deliverable-quantity",
+      batchId: "batch-deliverable-only",
+      groupId: "group-deliverable-quantity",
+      isGroup: true,
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      stage: "GROUP_COMPLETE",
+      runAuditCheck: false,
+      childJobIds: ["deliverable-only-child"],
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        previewAvailable: false,
+        packageDownloadUrl: "/api/jobs/group-deliverable-quantity/download/package",
+        iedDownloadUrl: "/api/jobs/group-deliverable-quantity/download/ied",
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+      },
+      workload: null,
+      effectiveWorkload: 0,
+      children: [deliverableChild],
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+    };
+
+    mockGetJobDetail.mockImplementation((jobId: string) =>
+      Promise.resolve(jobId === "deliverable-only-child" ? deliverableChild : groupDetail),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("6.5")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("6.5");
+  });
+
   it("shows drawing quantity in single split-only job quick downloads", async () => {
     window.history.pushState({}, "", "/jobs/split-only-quantity");
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);
@@ -1492,6 +1566,74 @@ describe("job detail pages", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("shows standard review category, summary, and details in audit results", async () => {
+    window.history.pushState({}, "", "/jobs/audit-standard-review");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "audit-standard-review",
+      batchId: "batch-audit-standard-review",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "audit_check",
+      taskRole: null,
+      jobMode: "check",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-17T10:00:00+08:00",
+      finishedAt: "2026-04-17T10:03:00+08:00",
+      startedAt: "2026-04-17T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 1,
+      affectedDrawingsCount: 1,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: false,
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/audit-standard-review/download/report",
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: ["GB 51058-2011"],
+      topInternalCodes: ["18185NF-JGS19-003"],
+      findingGroups: [
+        {
+          matchedText: "GB 51058-2011",
+          count: 1,
+          internalCodes: ["18185NF-JGS19-003"],
+          category: "规范审查",
+          contextKind: "standard_review_year",
+          issueType: "year_mismatch",
+          summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+          details: [
+            "实际标准号：GB 51058-2011",
+            "期望标准号：GB 51058-2014",
+            "期望标准名称：核电厂抗震设计标准",
+          ],
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 3, name: "错误与图纸编号" })).toBeInTheDocument();
+    expect(screen.getByText("规范审查")).toBeInTheDocument();
+    expect(screen.getByText("标准号年限不一致：GB 51058-2011 应为 GB 51058-2014")).toBeInTheDocument();
+    expect(screen.getByText("实际标准号：GB 51058-2011")).toBeInTheDocument();
+    expect(screen.getByText("期望标准号：GB 51058-2014")).toBeInTheDocument();
+    expect(screen.getByText("期望标准名称：核电厂抗震设计标准")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "规范审查" })).not.toBeInTheDocument();
   });
 
   it("shows same-code multipage guidance and preserves X@Y filenames in deliverable results", async () => {

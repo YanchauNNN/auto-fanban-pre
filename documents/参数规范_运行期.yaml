@@ -301,6 +301,23 @@ runtime_options:
         type: bool
         default: true
         desc: "短厂房码检查是否必须依赖本次扫描中已出现的完整图册编码厂房码；开启后只有先识别到 20261RB-JGS11，才会检查独立文本 2RB，避免 6mm/800x 等尺寸误报"
+    standard_review:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否在纠错任务中启用规范审查；复用现有 DWG 文字扫描结果，不新增独立入口"
+      library_path:
+        type: str
+        default: "documents_bin\\规范库.xlsx"
+        desc: "规范库 Excel 路径；读取第二张工作表 DatStdItem 的标准号、标准名称、版本关系；相对 base_dir 解析"
+      sheet_name:
+        type: str
+        default: "DatStdItem"
+        desc: "规范库工作表名称；不存在时后端回退读取第二张工作表"
+      same_line_y_tolerance:
+        type: float
+        default: 5.0
+        desc: "标准号与标准名称判定为同一行/附近文本的 y 坐标容差；单位沿用 CAD 扫描坐标"
 
   # --------------------------------------------------------------------------
   # 5) 翻版厂房索引图模板映射
@@ -505,6 +522,10 @@ runtime_options:
       type: "list[str]"
       default: ["external_code", "internal_code", "page_info"]
       desc: "空字体样式兼容探测使用的目标字段；用于判断是否需要提示用户启用兼容模式，实际修复为样式级写入字体文件，不做实体级替换"
+    font_compatibility_exempt_style_names:
+      type: "list[str]"
+      default: ["宋体", "ST"]
+      desc: "字体兼容模式启用时的文字样式名豁免列表；命中后不执行 hztxt 等兼容映射，也不执行空 FileName 样式兜底写入"
     enable_fontmap:
       type: bool
       default: true

@@ -72,10 +72,13 @@ internal sealed class FontPreflightProcessor
                 }
 
                 var styleName = styleRecord.Name ?? string.Empty;
-                var hasExplicitTarget = targetByStyleName.TryGetValue(styleName, out var explicitTarget);
-                var compatibilityMatch = ResolveCompatibilityMatch(styleRecord);
+                var isExemptStyle = IsFontCompatibilityExemptStyle(styleName);
+                BridgeReplacementTarget? explicitTarget = null;
+                var hasExplicitTarget = !isExemptStyle && targetByStyleName.TryGetValue(styleName, out explicitTarget);
+                var compatibilityMatch = isExemptStyle ? null : ResolveCompatibilityMatch(styleRecord);
                 var hasCompatibilityTarget = compatibilityMatch != null;
-                if (!hasExplicitTarget && !hasCompatibilityTarget && !IsStyleMissing(styleRecord, db))
+                var isMissing = IsStyleMissing(styleRecord, db);
+                if (!hasExplicitTarget && !hasCompatibilityTarget && !isMissing)
                 {
                     continue;
                 }
@@ -83,6 +86,12 @@ internal sealed class FontPreflightProcessor
                 if (!replaceMissing)
                 {
                     missingFonts.Add(BuildMissingFontPayload(styleRecord, usage));
+                    continue;
+                }
+
+                if (isExemptStyle)
+                {
+                    _trace.Log($"[DOTNET][FONT][EXEMPT_STYLE_SKIP] style={styleName}");
                     continue;
                 }
 
@@ -95,7 +104,7 @@ internal sealed class FontPreflightProcessor
                 var replacementKind = hasCompatibilityTarget
                     ? compatibilityMatch!.Kind
                     : hasExplicitTarget
-                        ? explicitTarget.Kind
+                        ? explicitTarget!.Kind
                         : DetectKind(styleRecord.FileName ?? string.Empty, styleRecord.BigFontFileName ?? string.Empty);
                 var replacementFont = hasCompatibilityTarget
                     ? compatibilityMatch!.ReplacementFont
@@ -174,6 +183,8 @@ internal sealed class FontPreflightProcessor
         result.AdditionalData["replacement_fonts"] = new Dictionary<string, string>(_task.ReplacementFonts);
         result.AdditionalData["font_compatibility_replacements"] =
             new Dictionary<string, string>(_task.FontCompatibilityReplacements);
+        result.AdditionalData["font_compatibility_exempt_style_names"] =
+            _task.FontCompatibilityExemptStyleNames.ToList();
         result.AdditionalData["empty_style_replacement"] =
             new Dictionary<string, string>(_task.EmptyStyleReplacement);
         result.AdditionalData["empty_style_target_regions_count"] = _task.EmptyStyleTargetRegions.Count;
@@ -405,6 +416,23 @@ internal sealed class FontPreflightProcessor
             && string.IsNullOrWhiteSpace(styleRecord.BigFontFileName);
     }
 
+    private bool IsFontCompatibilityExemptStyle(string styleName)
+    {
+        var normalized = (styleName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return _task.FontCompatibilityExemptStyleNames.Any(
+            item => string.Equals(
+                normalized,
+                (item ?? string.Empty).Trim(),
+                StringComparison.OrdinalIgnoreCase
+            )
+        );
+    }
+
     private bool HasEmptyStyleReplacement()
     {
         return _task.EmptyStyleReplacement.TryGetValue("font", out var fontName)
@@ -488,6 +516,12 @@ internal sealed class FontPreflightProcessor
         var patchedTextCount = 0;
         foreach (var usage in usageByStyle.Values)
         {
+            if (IsFontCompatibilityExemptStyle(usage.StyleName))
+            {
+                _trace.Log($"[DOTNET][FONT][EMPTY_STYLE_EXEMPT_SKIP] style={usage.StyleName}");
+                continue;
+            }
+
             if (!TryGetObject(
                 tr,
                 usage.StyleId,

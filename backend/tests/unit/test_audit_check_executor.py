@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_check.models import AuditLexicon, ScanTextItem
 from src.audit_check.roi_mapper import AuditFieldContextMapper
+from src.audit_check.standard_review import StandardEntry
 from src.config import SpecLoader, reload_config
 from src.models import (
     BBox,
@@ -52,6 +53,7 @@ def test_audit_check_executor_writes_reports_and_summary(monkeypatch, tmp_path: 
     monkeypatch.setattr(executor.titleblock_extractor, "extract_fields", lambda *args, **kwargs: None)
     monkeypatch.setattr(executor.a4_grouper, "group_a4_pages", lambda frames: ([], []))
     monkeypatch.setattr(executor.lexicon_loader, "load", lambda path: lexicon)
+    monkeypatch.setattr(executor.standard_library_loader, "load", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         executor.dotnet_scanner,
         "scan",
@@ -103,6 +105,88 @@ def test_audit_check_executor_writes_reports_and_summary(monkeypatch, tmp_path: 
     assert job.progress.details["findings_count"] == 2
     assert job.progress.details["affected_drawings_count"] == 1
     assert job.progress.details["top_wrong_texts"] == ["1418", "JD"]
+
+
+def test_audit_check_executor_appends_standard_review_findings(monkeypatch, tmp_path: Path) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    source_dwg = tmp_path / "2016-std.dwg"
+    source_dwg.write_bytes(b"dwg")
+    dxf_path = tmp_path / "converted.dxf"
+    dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+
+    executor = AuditCheckExecutor()
+    monkeypatch.setattr(executor.oda, "dwg_to_dxf", lambda src, out_dir: dxf_path)
+    monkeypatch.setattr(executor.frame_detector, "detect_frames", lambda path: [])
+    monkeypatch.setattr(executor.titleblock_extractor, "extract_fields", lambda *args, **kwargs: None)
+    monkeypatch.setattr(executor.a4_grouper, "group_a4_pages", lambda frames: ([], []))
+    monkeypatch.setattr(
+        executor.lexicon_loader,
+        "load",
+        lambda path: AuditLexicon(
+            project_options=["2016"],
+            allowed_texts={"2016": set()},
+            foreign_texts={"2016": set()},
+            token_projects={},
+        ),
+    )
+    monkeypatch.setattr(
+        executor.standard_library_loader,
+        "load",
+        lambda *args, **kwargs: [
+            StandardEntry(
+                canonical_code="GB 51058-2014",
+                code_without_year="GB 51058",
+                expected_year="2014",
+                expected_name="核电厂抗震设计标准",
+                source_sheet="DatStdItem",
+                source_row=3,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        executor.dotnet_scanner,
+        "scan",
+        lambda **kwargs: [
+            ScanTextItem(raw_text="GB 51058-2011", entity_type="DBText", position_x=10.0, position_y=100.0),
+            ScanTextItem(raw_text="核电厂抗震设计标准", entity_type="DBText", position_x=120.0, position_y=100.0),
+        ],
+    )
+
+    job = Job(
+        job_id="job-audit-standard-review",
+        job_type=JobType.AUDIT_REPLACE,
+        project_no="2016",
+        input_files=[source_dwg],
+        options={"mode": "check"},
+    )
+
+    executor.execute(job)
+
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.progress.details["findings_count"] == 1
+    assert job.artifacts.report_json
+    report_payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+    assert report_payload["finding_groups"] == [
+        {
+            "matched_text": "GB 51058-2011",
+            "count": 1,
+            "internal_codes": ["未归属"],
+            "category": "规范审查",
+            "context_kind": "standard_review_year",
+            "issue_type": "year_mismatch",
+            "summary": "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+            "details": [
+                "实际标准号：GB 51058-2011",
+                "期望标准号：GB 51058-2014",
+                "实际年限：2011",
+                "期望年限：2014",
+                "期望标准名称：核电厂抗震设计标准",
+            ],
+        }
+    ]
+    assert report_payload["findings"][0]["context_kind"] == "standard_review_year"
+    assert report_payload["findings"][0]["details"]["expected_code"] == "GB 51058-2014"
 
 
 def test_audit_field_context_mapper_initializes_roi_margin_before_building_regions(
@@ -235,6 +319,7 @@ def test_audit_check_executor_reuses_shared_prep_without_rerunning_oda_or_detect
         lambda frames: (_ for _ in ()).throw(AssertionError("should not regroup a4 pages")),
     )
     monkeypatch.setattr(executor.lexicon_loader, "load", lambda path: lexicon)
+    monkeypatch.setattr(executor.standard_library_loader, "load", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         executor.dotnet_scanner,
         "scan",

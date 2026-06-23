@@ -100,6 +100,18 @@ describe("HttpAdapter", () => {
           affected_drawings_count: 0,
           top_wrong_texts: [],
           top_internal_codes: [],
+          finding_groups: [
+            {
+              matched_text: "GB 51058-2011",
+              count: 1,
+              internal_codes: ["18185NF-JGS19-003"],
+              category: "规范审查",
+              context_kind: "standard_review_year",
+              issue_type: "year_mismatch",
+              summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+              details: ["实际标准号：GB 51058-2011", "期望标准号：GB 51058-2014"],
+            },
+          ],
           workload: {
             initial_workload_a1: 2.5,
             final_workload_a1: 2.7,
@@ -187,6 +199,14 @@ describe("HttpAdapter", () => {
       settlementStatus: "pending",
     });
     expect(detail.effectiveWorkload).toBe(2.7);
+    expect(detail.findingGroups?.[0]).toMatchObject({
+      matchedText: "GB 51058-2011",
+      category: "规范审查",
+      contextKind: "standard_review_year",
+      issueType: "year_mismatch",
+      summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+      details: ["实际标准号：GB 51058-2011", "期望标准号：GB 51058-2014"],
+    });
     expect((detail as any).diagnostics?.[0]).toMatchObject({
       kind: "duplicate_code",
       severity: "error",

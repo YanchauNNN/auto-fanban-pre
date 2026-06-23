@@ -19,3 +19,17 @@ def test_lisp_plot_fallback_regenerates_before_pdf_plotting() -> None:
 
     assert "(m5-regen-before-plot)" in source
     assert "\"_.REGENALL\"" in source
+
+
+def test_font_preflight_bridge_honors_exempt_style_names() -> None:
+    commands_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/Commands.cs"
+    ).read_text(encoding="utf-8")
+    processor_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/FontPreflightProcessor.cs"
+    ).read_text(encoding="utf-8")
+
+    assert "font_compatibility_exempt_style_names" in commands_source
+    assert "FontCompatibilityExemptStyleNames" in commands_source
+    assert "IsFontCompatibilityExemptStyle(styleName)" in processor_source
+    assert "IsFontCompatibilityExemptStyle(usage.StyleName)" in processor_source

@@ -437,6 +437,31 @@ runtime_options:
             "page_info",
         ]
 
+    def test_runtime_config_reads_font_compatibility_exempt_style_names(
+        self,
+        tmp_path: Path,
+    ):
+        """字体兼容豁免样式名应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    font_compatibility_exempt_style_names:
+      type: "list[str]"
+      default: ["宋体", "ST"]
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.font_compatibility_exempt_style_names == [
+            "宋体",
+            "ST",
+        ]
+
     def test_runtime_factory_index_maps_include_1915_target_template(self):
         """1915 作为翻版目标项目时应有无需岛号的厂房索引图模板。"""
         repo_root = Path(__file__).resolve().parents[3]
@@ -463,6 +488,17 @@ runtime_options:
         assert unit_consistency.unit_no_pattern == "^[0-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
+
+    def test_runtime_standard_review_reads_values_from_yaml(self):
+        """规范审查的开关、规范库路径和 y 容差应由运行期 YAML 提供。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+        standard_review = config.audit_check.standard_review
+
+        assert standard_review.enabled is True
+        assert Path(standard_review.library_path) == repo_root / "documents_bin" / "规范库.xlsx"
+        assert standard_review.sheet_name == "DatStdItem"
+        assert standard_review.same_line_y_tolerance == 5.0
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""

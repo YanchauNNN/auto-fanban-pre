@@ -35,6 +35,8 @@ def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str
         matched_text = str(finding.get("matched_text") or "").strip()
         if not matched_text:
             continue
+        context_kind = str(finding.get("context_kind") or "")
+        details = finding.get("details") if isinstance(finding.get("details"), Mapping) else {}
         internal_code = str(finding.get("internal_code") or "未归属").strip() or "未归属"
         bucket = grouped.setdefault(
             matched_text,
@@ -44,6 +46,8 @@ def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str
                 "internal_codes": [],
             },
         )
+        if context_kind.startswith("standard_review") and "category" not in bucket:
+            bucket.update(_standard_review_group_fields(context_kind, details))
         bucket["count"] += 1
         if internal_code not in bucket["internal_codes"]:
             bucket["internal_codes"].append(internal_code)
@@ -55,6 +59,48 @@ def build_finding_groups(findings: Sequence[Mapping[str, Any]]) -> list[dict[str
             str(item["matched_text"]),
         ),
     )
+
+
+def _standard_review_group_fields(
+    context_kind: str,
+    details: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "category": "规范审查",
+        "context_kind": context_kind,
+        "issue_type": str(details.get("issue_type") or ""),
+        "summary": _standard_review_summary(context_kind, details),
+        "details": _standard_review_detail_items(details),
+    }
+
+
+def _standard_review_summary(context_kind: str, details: Mapping[str, Any]) -> str:
+    actual_code = str(details.get("actual_code") or "").strip()
+    expected_code = str(details.get("expected_code") or "").strip()
+    expected_name = str(details.get("expected_name") or "").strip()
+    if context_kind == "standard_review_year":
+        return f"标准号年限不一致：{actual_code} 应为 {expected_code}"
+    if context_kind == "standard_review_name":
+        actual_name = str(details.get("actual_name") or "").strip()
+        return f"标准号与标准名称不对应：{actual_code} 附近为 {actual_name or '未识别名称'}，应为 {expected_name}"
+    return f"规范审查问题：{actual_code or expected_code}"
+
+
+def _standard_review_detail_items(details: Mapping[str, Any]) -> list[str]:
+    items: list[str] = []
+    labels = [
+        ("actual_code", "实际标准号"),
+        ("expected_code", "期望标准号"),
+        ("actual_year", "实际年限"),
+        ("expected_year", "期望年限"),
+        ("actual_name", "实际标准名称"),
+        ("expected_name", "期望标准名称"),
+    ]
+    for key, label in labels:
+        value = str(details.get(key) or "").strip()
+        if value:
+            items.append(f"{label}：{value}")
+    return items
 
 
 def build_deliverable_outputs(

@@ -110,6 +110,11 @@ export type FindingGroup = {
   matchedText: string;
   count: number;
   internalCodes: string[];
+  category?: string;
+  contextKind?: string;
+  issueType?: string;
+  summary?: string;
+  details?: string[];
 };
 
 export type ReplaceSummary = {
