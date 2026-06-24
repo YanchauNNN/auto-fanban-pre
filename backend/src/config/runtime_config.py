@@ -425,7 +425,7 @@ class RuntimeConfig(BaseSettings):
     spec_path: Path = Path("documents/参数规范.yaml")
     runtime_spec_path: Path = Path("documents/参数规范_运行期.yaml")
     mechanism_spec_path: Path = Path("documents/参数规范-3.yaml")
-    ai_spec_path: Path = Path("documents/参数规范_AI.yaml")
+    ai_spec_path: Path = Path("documents/AI/参数规范_AI.yaml")
 
     # 各子配置
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)

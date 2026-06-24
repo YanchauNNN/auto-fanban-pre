@@ -1,5 +1,5 @@
 """
-AI layer configuration loader for documents/参数规范_AI.yaml.
+AI layer configuration loader for documents/AI/参数规范_AI.yaml.
 
 This module keeps AI/runtime parameters separate from the business spec and
 the CAD/Office runtime spec. API keys are resolved at runtime and are never
@@ -16,8 +16,12 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-DEFAULT_AI_SPEC_PATH = Path("documents") / "参数规范_AI.yaml"
-FALLBACK_AI_SPEC_PATH = Path("config") / "参数规范_AI.yaml"
+DEFAULT_AI_SPEC_PATH = Path("documents") / "AI" / "参数规范_AI.yaml"
+FALLBACK_AI_SPEC_PATH = Path("config") / "AI" / "参数规范_AI.yaml"
+LEGACY_AI_SPEC_PATHS = (
+    Path("documents") / "参数规范_AI.yaml",
+    Path("config") / "参数规范_AI.yaml",
+)
 AI_SPEC_PATH_ENV_VAR = "FANBAN_AI_SPEC_PATH"
 
 
@@ -306,6 +310,10 @@ def _resolve_ai_spec_path(spec_path: str | Path) -> Path:
         fallback_path = _find_relative_path(FALLBACK_AI_SPEC_PATH)
         if fallback_path is not None:
             return fallback_path
+        for legacy_path in LEGACY_AI_SPEC_PATHS:
+            resolved_legacy_path = _find_relative_path(legacy_path)
+            if resolved_legacy_path is not None:
+                return resolved_legacy_path
     return path
 
 
@@ -314,7 +322,7 @@ def _find_relative_path(relative_path: Path) -> Path | None:
     cwd = Path.cwd()
     search_roots.extend([cwd, *cwd.parents])
     try:
-        module_repo_root = Path(__file__).resolve().parents[3]
+        module_repo_root = Path(__file__).resolve().parents[4]
         search_roots.append(module_repo_root)
     except IndexError:
         pass

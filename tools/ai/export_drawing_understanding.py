@@ -9,7 +9,7 @@ from typing import Any
 
 
 def _setup_imports() -> Path:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(root / "backend"))
     return root
 
@@ -19,7 +19,7 @@ ROOT = _setup_imports()
 import ezdxf  # noqa: E402
 
 from src.cad import FrameDetector, ODAConverter, TitleblockExtractor  # noqa: E402
-from src.cad.drawing_understanding import (  # noqa: E402
+from src.cad.ai.drawing_understanding import (  # noqa: E402
     answer_package_question,
     classify_text_semantics,
     derive_project_unit_from_internal_codes,

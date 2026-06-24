@@ -7,14 +7,14 @@ from pathlib import Path
 
 
 def _setup_imports() -> Path:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     sys.path.insert(0, str(root / "backend"))
     return root
 
 
 ROOT = _setup_imports()
 
-from src.cad.drawing_understanding import answer_package_question  # noqa: E402
+from src.cad.ai.drawing_understanding import answer_package_question  # noqa: E402
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.cad.drawing_understanding import (
+from src.cad.ai.drawing_understanding import (
     answer_package_question,
     classify_text_semantics,
     derive_project_unit_from_internal_codes,

@@ -8,10 +8,10 @@ from src.config.runtime_config import RuntimeConfig
 
 
 def test_load_ai_spec_reads_defaults_from_yaml() -> None:
-    from src.config.ai_spec import AiSpecLoader
+    from src.config.ai.ai_spec import AiSpecLoader
 
-    repo_root = Path(__file__).resolve().parents[3]
-    spec = AiSpecLoader.load(repo_root / "documents" / "参数规范_AI.yaml")
+    repo_root = Path(__file__).resolve().parents[4]
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / "参数规范_AI.yaml")
 
     assert spec.schema_version == "0.1"
     assert spec.ai_layer.enabled is False
@@ -31,22 +31,22 @@ def test_load_ai_spec_reads_defaults_from_yaml() -> None:
 
 
 def test_load_ai_spec_default_path_resolves_from_backend_cwd(monkeypatch) -> None:
-    from src.config.ai_spec import AiSpecLoader, load_ai_spec
+    from src.config.ai.ai_spec import AiSpecLoader, load_ai_spec
 
-    repo_root = Path(__file__).resolve().parents[3]
+    repo_root = Path(__file__).resolve().parents[4]
     monkeypatch.chdir(repo_root / "backend")
     AiSpecLoader.clear_cache()
 
     spec = load_ai_spec()
 
-    assert spec.source_path == (repo_root / "documents" / "参数规范_AI.yaml").resolve()
+    assert spec.source_path == (repo_root / "documents" / "AI" / "参数规范_AI.yaml").resolve()
 
 
 def test_load_ai_spec_uses_env_override_when_default_path_missing(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.config.ai_spec import AiSpecLoader, load_ai_spec
+    from src.config.ai.ai_spec import AiSpecLoader, load_ai_spec
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -90,7 +90,7 @@ def test_gateway_runtime_overrides_and_redacts_api_key(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    from src.config.ai_spec import AiSpecLoader
+    from src.config.ai.ai_spec import AiSpecLoader
 
     spec_file = tmp_path / "参数规范_AI.yaml"
     spec_file.write_text(
@@ -142,11 +142,11 @@ runtime_options:
   paths:
     ai_spec_path:
       type: str
-      default: "documents/参数规范_AI.yaml"
+      default: "documents/AI/参数规范_AI.yaml"
 """.strip(),
         encoding="utf-8",
     )
 
     config = RuntimeConfig.from_yaml(runtime_spec)
 
-    assert config.ai_spec_path == (tmp_path / "documents" / "参数规范_AI.yaml").resolve()
+    assert config.ai_spec_path == (tmp_path / "documents" / "AI" / "参数规范_AI.yaml").resolve()
