@@ -218,7 +218,8 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     enabled: bool = False
     project_units: dict[str, list[str]] = Field(default_factory=dict)
     allow_unlisted_unit_no: bool = True
-    unit_no_pattern: str = r"^[1-9]$"
+    universal_units: list[str] = Field(default_factory=lambda: ["0", "7", "9"])
+    unit_no_pattern: str = r"^[0-9]$"
     label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"
@@ -226,6 +227,15 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     external_code_requires_titleblock_roi_context: bool = True
     short_factory_code_pattern: str = r"a^"
     short_factory_code_requires_observed_album_factory: bool = True
+
+
+class AuditCheckStandardReviewConfig(BaseModel):
+    """纠错规范审查配置"""
+
+    enabled: bool = True
+    library_path: str = r"documents_bin\规范库.xlsx"
+    sheet_name: str = "DatStdItem"
+    same_line_y_tolerance: float = 5.0
 
 
 class AuditCheckConfig(BaseModel):
@@ -246,6 +256,9 @@ class AuditCheckConfig(BaseModel):
     )
     unit_consistency: AuditCheckUnitConsistencyConfig = Field(
         default_factory=AuditCheckUnitConsistencyConfig,
+    )
+    standard_review: AuditCheckStandardReviewConfig = Field(
+        default_factory=AuditCheckStandardReviewConfig,
     )
 
 
@@ -368,6 +381,9 @@ class FontPreflightRuntimeConfig(BaseModel):
     empty_style_replacement: dict[str, str] = Field(default_factory=dict)
     empty_style_target_fields: list[str] = Field(
         default_factory=lambda: ["external_code", "internal_code", "page_info"],
+    )
+    font_compatibility_exempt_style_names: list[str] = Field(
+        default_factory=lambda: ["宋体", "ST"],
     )
     enable_fontmap: bool = True
     verify_after_replace: bool = True
@@ -631,6 +647,12 @@ class RuntimeConfig(BaseSettings):
             lexicon_path = Path(self.audit_check.lexicon_path)
             if not lexicon_path.is_absolute():
                 self.audit_check.lexicon_path = str((self.base_dir / lexicon_path).resolve())
+        if self.audit_check.standard_review.library_path:
+            library_path = Path(self.audit_check.standard_review.library_path)
+            if not library_path.is_absolute():
+                self.audit_check.standard_review.library_path = str(
+                    (self.base_dir / library_path).resolve(),
+                )
         if self.factory_index_maps.template_dir:
             template_dir = Path(self.factory_index_maps.template_dir)
             if not template_dir.is_absolute():

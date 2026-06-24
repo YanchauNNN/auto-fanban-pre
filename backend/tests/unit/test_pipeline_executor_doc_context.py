@@ -25,6 +25,7 @@ from src.models import (
 )
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.packager import Packager
+from src.workload.calculator import WorkloadCalculator
 
 
 def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> None:
@@ -473,6 +474,7 @@ def test_catalog_pdf_export_failure_still_allows_package_zip(tmp_path: Path) -> 
     executor._update_progress = MagicMock()
     executor._require_work_dir = MagicMock(return_value=tmp_path)
     executor.packager = Packager()
+    executor.workload_calculator = WorkloadCalculator()
     executor._generate_preview_pdf = MagicMock()
 
     job = Job(
@@ -540,6 +542,7 @@ def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path
     executor = object.__new__(PipelineExecutor)
     executor._update_progress = MagicMock()
     executor.packager = Packager()
+    executor.workload_calculator = WorkloadCalculator()
 
     job = Job(
         job_id="job-package-stage",

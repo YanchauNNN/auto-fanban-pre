@@ -175,12 +175,12 @@ class CatalogGenerator(ICatalogGenerator):
         # 动态设置打印区域，保证目录计页与实际行数一致
         last_row = max(start_row, current_row - 1)
         ws.print_area = f"$A$1:$I${last_row}"
-        self._apply_detail_layout(ws, start_row, last_row)
+        self._apply_detail_layout(ws, start_row, last_row, bindings)
         self._repair_detail_grid_border_holes(ws, start_row, last_row)
 
         # 保存
         wb.save(output_path)
-        self._refine_detail_layout_via_com(output_path, start_row, last_row)
+        self._refine_detail_layout_via_com(output_path, start_row, last_row, bindings)
 
     def _write_header(self, ws, bindings: dict, ctx: DocContext) -> None:
         """写入表头"""
@@ -528,12 +528,27 @@ class CatalogGenerator(ICatalogGenerator):
         if "I" in columns:
             ws[f"I{row}"] = data.get("upgrade_note", "")
 
-    def _apply_detail_layout(self, ws, start_row: int, last_row: int) -> None:
-        column_width = ws.column_dimensions["E"].width or 30
+    def _apply_detail_layout(
+        self,
+        ws,
+        start_row: int,
+        last_row: int,
+        bindings: dict | None = None,
+    ) -> None:
+        row_height_config = self._get_title_row_height_config(bindings)
+        title_column = str(row_height_config.get("title_column") or "E")
+        column_width = ws.column_dimensions[title_column].width or 30
         for row in range(start_row, last_row + 1):
-            text = str(ws[f"E{row}"].value or "")
-            line_count = self._estimate_wrapped_line_count(text, column_width)
-            ws.row_dimensions[row].height = self._bucket_row_height_for_line_count(line_count)
+            text = str(ws[f"{title_column}{row}"].value or "")
+            line_count = self._estimate_wrapped_line_count(
+                text,
+                column_width,
+                row_height_config,
+            )
+            ws.row_dimensions[row].height = self._bucket_row_height_for_line_count(
+                line_count,
+                row_height_config,
+            )
 
     def _repair_detail_grid_border_holes(self, ws, start_row: int, last_row: int) -> None:
         if last_row <= start_row:
@@ -602,6 +617,7 @@ class CatalogGenerator(ICatalogGenerator):
         xlsx_path: Path,
         start_row: int,
         last_row: int,
+        bindings: dict | None = None,
     ) -> None:
         if not self._should_use_excel_com():
             return
@@ -621,6 +637,13 @@ class CatalogGenerator(ICatalogGenerator):
         temp_dir = None
         working_copy = xlsx_path
         should_copy_back = False
+        row_height_config = self._get_title_row_height_config(bindings)
+        expected_row_heights = self._expected_detail_row_heights(
+            xlsx_path,
+            start_row,
+            last_row,
+            row_height_config,
+        )
         with get_office_automation_limiter().excel_session():
             try:
                 pythoncom.CoInitialize()
@@ -661,7 +684,11 @@ class CatalogGenerator(ICatalogGenerator):
                             f"Rows({row}).RowHeight",
                         )
                     )
-                    bucket_height = self._bucket_row_height_from_measured_height(auto_height)
+                    bucket_height = self._bucket_row_height_from_measured_height(
+                        auto_height,
+                        row_height_config,
+                    )
+                    bucket_height = max(bucket_height, expected_row_heights.get(row, 0))
                     if bucket_height:
                         PDFExporter._retry_excel_com_call(
                             lambda row_ref_com=row_ref_com, bucket_height=bucket_height: setattr(
@@ -700,31 +727,93 @@ class CatalogGenerator(ICatalogGenerator):
                     with contextlib.suppress(Exception):
                         pythoncom.CoUninitialize()
 
-    def _estimate_wrapped_line_count(self, text: str, column_width: float) -> int:
+    def _expected_detail_row_heights(
+        self,
+        xlsx_path: Path,
+        start_row: int,
+        last_row: int,
+        row_height_config: dict | None,
+    ) -> dict[int, float]:
+        expected: dict[int, float] = {}
+        wb = None
+        try:
+            wb = load_workbook(xlsx_path)
+            ws = wb.active
+            if ws is None:
+                return expected
+            title_column = str((row_height_config or {}).get("title_column") or "E")
+            column_width = ws.column_dimensions[title_column].width or 30
+            for row in range(start_row, last_row + 1):
+                text = str(ws[f"{title_column}{row}"].value or "")
+                line_count = self._estimate_wrapped_line_count(
+                    text,
+                    column_width,
+                    row_height_config,
+                )
+                expected[row] = self._bucket_row_height_for_line_count(
+                    line_count,
+                    row_height_config,
+                )
+            return expected
+        except Exception:
+            return expected
+        finally:
+            if wb is not None:
+                with contextlib.suppress(Exception):
+                    wb.close()
+
+    def _estimate_wrapped_line_count(
+        self,
+        text: str,
+        column_width: float,
+        row_height_config: dict | None = None,
+    ) -> int:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
         if not normalized:
             return 1
 
-        effective_width = max(8.0, float(column_width) * 0.9)
+        wrap_width_ratio = self._float_config_value(
+            row_height_config,
+            "wrap_width_ratio",
+            0.9,
+        )
+        effective_width = max(8.0, float(column_width) * wrap_width_ratio)
         total_lines = 0
         for raw_line in normalized.split("\n"):
-            display_width = sum(self._char_display_width(ch) for ch in raw_line)
+            display_width = sum(
+                self._char_display_width(ch, row_height_config) for ch in raw_line
+            )
             wrapped_lines = max(1, math.ceil(display_width / effective_width))
             total_lines += wrapped_lines
         return max(1, total_lines)
 
-    def _char_display_width(self, char: str) -> float:
+    def _char_display_width(self, char: str, row_height_config: dict | None = None) -> float:
         if not char:
             return 0
+        display_width_config = {}
+        if isinstance(row_height_config, dict):
+            candidate = row_height_config.get("display_width")
+            if isinstance(candidate, dict):
+                display_width_config = candidate
         if char.isspace():
-            return 0.35
+            return self._float_config_value(display_width_config, "space", 0.35)
         if ord(char) > 127:
-            return 1.0
+            return self._float_config_value(display_width_config, "cjk", 1.0)
         if char.isalnum():
-            return 0.55
-        return 0.65
+            return self._float_config_value(display_width_config, "ascii_alnum", 0.55)
+        return self._float_config_value(display_width_config, "ascii_symbol", 0.65)
 
-    def _bucket_row_height_for_line_count(self, line_count: int) -> int:
+    def _bucket_row_height_for_line_count(
+        self,
+        line_count: int,
+        row_height_config: dict | None = None,
+    ) -> float:
+        configured_height = self._configured_row_height_for_line_count(
+            line_count,
+            row_height_config,
+        )
+        if configured_height is not None:
+            return configured_height
         if line_count <= 2:
             return self.BODY_ROW_HEIGHT
         if line_count == 3:
@@ -733,7 +822,17 @@ class CatalogGenerator(ICatalogGenerator):
             return self.FOUR_LINE_HEIGHT
         return self.FOUR_LINE_HEIGHT + (line_count - 4) * self.EXTRA_LINE_STEP
 
-    def _bucket_row_height_from_measured_height(self, measured_height: float) -> int:
+    def _bucket_row_height_from_measured_height(
+        self,
+        measured_height: float,
+        row_height_config: dict | None = None,
+    ) -> float:
+        configured_height = self._configured_row_height_from_measured_height(
+            measured_height,
+            row_height_config,
+        )
+        if configured_height is not None:
+            return configured_height
         if measured_height <= 0:
             return self.BODY_ROW_HEIGHT
         if measured_height <= self.BODY_ROW_HEIGHT:
@@ -744,6 +843,101 @@ class CatalogGenerator(ICatalogGenerator):
             return self.FOUR_LINE_HEIGHT
         extra_steps = math.ceil((measured_height - self.FOUR_LINE_HEIGHT) / self.EXTRA_LINE_STEP)
         return self.FOUR_LINE_HEIGHT + max(1, extra_steps) * self.EXTRA_LINE_STEP
+
+    @staticmethod
+    def _get_title_row_height_config(bindings: dict | None) -> dict:
+        if not isinstance(bindings, dict):
+            return {}
+        detail = bindings.get("detail")
+        if not isinstance(detail, dict):
+            return {}
+        config = detail.get("title_row_height")
+        return config if isinstance(config, dict) else {}
+
+    def _configured_row_height_for_line_count(
+        self,
+        line_count: int,
+        row_height_config: dict | None,
+    ) -> float | None:
+        if not isinstance(row_height_config, dict) or not row_height_config:
+            return None
+        by_line_count = row_height_config.get("by_line_count")
+        if not isinstance(by_line_count, dict) or not by_line_count:
+            return None
+        normalized_buckets = self._normalize_row_height_buckets(by_line_count)
+        if not normalized_buckets:
+            return None
+
+        line_count = max(1, int(line_count))
+        min_height = self._float_config_value(row_height_config, "min_height_points", 0)
+        if line_count in normalized_buckets:
+            return max(min_height, normalized_buckets[line_count])
+
+        max_bucket_line = max(normalized_buckets)
+        if line_count > max_bucket_line:
+            extra_step = self._float_config_value(
+                row_height_config,
+                "extra_line_step_points",
+                float(self.EXTRA_LINE_STEP),
+            )
+            return normalized_buckets[max_bucket_line] + (line_count - max_bucket_line) * extra_step
+
+        return max(min_height, normalized_buckets[min(normalized_buckets)])
+
+    def _configured_row_height_from_measured_height(
+        self,
+        measured_height: float,
+        row_height_config: dict | None,
+    ) -> float | None:
+        if not isinstance(row_height_config, dict) or not row_height_config:
+            return None
+        by_line_count = row_height_config.get("by_line_count")
+        if not isinstance(by_line_count, dict) or not by_line_count:
+            return None
+        normalized_buckets = self._normalize_row_height_buckets(by_line_count)
+        if not normalized_buckets:
+            return None
+
+        min_height = self._float_config_value(row_height_config, "min_height_points", 0)
+        if measured_height <= 0:
+            return max(min_height, normalized_buckets[min(normalized_buckets)])
+
+        for _, bucket_height in sorted(normalized_buckets.items()):
+            if measured_height <= bucket_height:
+                return max(min_height, bucket_height)
+
+        max_bucket_line = max(normalized_buckets)
+        max_bucket_height = normalized_buckets[max_bucket_line]
+        extra_step = self._float_config_value(
+            row_height_config,
+            "extra_line_step_points",
+            float(self.EXTRA_LINE_STEP),
+        )
+        extra_steps = math.ceil((measured_height - max_bucket_height) / extra_step)
+        return max_bucket_height + max(1, extra_steps) * extra_step
+
+    @staticmethod
+    def _normalize_row_height_buckets(by_line_count: dict) -> dict[int, float]:
+        normalized: dict[int, float] = {}
+        for key, value in by_line_count.items():
+            try:
+                line_count = int(key)
+                height = float(value)
+            except (TypeError, ValueError):
+                continue
+            if line_count <= 0 or height <= 0:
+                continue
+            normalized[line_count] = height
+        return normalized
+
+    @staticmethod
+    def _float_config_value(config: dict | None, key: str, default: float) -> float:
+        if not isinstance(config, dict):
+            return default
+        try:
+            return float(config.get(key, default))
+        except (TypeError, ValueError):
+            return default
 
     def _export_catalog_pdf_with_backfilled_page_count(
         self,
