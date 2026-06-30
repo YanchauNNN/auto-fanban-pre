@@ -236,6 +236,8 @@ class AuditCheckStandardReviewConfig(BaseModel):
     library_path: str = r"documents_bin\规范库.xlsx"
     sheet_name: str = "DatStdItem"
     same_line_y_tolerance: float = 5.0
+    same_text_pairing_enabled: bool = True
+    format_variant_compatibility_enabled: bool = True
 
 
 class AuditCheckConfig(BaseModel):

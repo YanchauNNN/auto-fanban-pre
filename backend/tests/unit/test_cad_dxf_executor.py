@@ -22,7 +22,8 @@ from src.config import RuntimeConfig
 from src.models import BBox, FrameMeta, FrameRuntime, PageInfo, SheetSet, TitleblockFields
 
 PDF3_PC3_NAME = "打印PDF3.pc3"
-PDF3_A2_HALF_MEDIA = "UserDefinedMetric (921.00 x 450.00毫米)"
+A2_HALF_MEDIA = "UserDefinedMetric (921.00 x 450.00毫米)"
+PDF3_A2_HALF_MEDIA = A2_HALF_MEDIA
 
 
 def _valid_pc3_text(label: str = "pc3") -> str:
@@ -51,11 +52,11 @@ class _SpecStub:
             "paper_variants": {
                 "CNPE_A1": {"打印PDF2.pc3文件中对应纸张": "A1"},
                 "CNPE_A2+1/2": {
-                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF2.pc3文件中对应纸张": A2_HALF_MEDIA,
                     "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
                 },
                 "CNPE_A2+0.5": {
-                    "打印PDF2.pc3文件中对应纸张": "A2+0.5",
+                    "打印PDF2.pc3文件中对应纸张": A2_HALF_MEDIA,
                     "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
                 },
                 "CNPE_A4": {"打印PDF2.pc3文件中对应纸张": "A4"},
@@ -945,6 +946,33 @@ def test_a2_half_variant_uses_pdf3_override_for_task_and_plot_resources(
         assert task["plot"]["pc3_name"] == PDF3_PC3_NAME
         assert task["plot"]["pc3_resolved_path"].endswith(PDF3_PC3_NAME)
         assert task["plot"]["pc3_search_dirs"] == [str(plotters_dir.resolve())]
+
+
+def test_a2_half_decimal_variant_uses_pdf2_media_by_default(tmp_path: Path):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="20161NH-JGS03-001",
+        external_code="JD1NHH11001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A2+0.5"
+
+    cfg = RuntimeConfig()
+    executor = CADDXFExecutor(config=cfg, runner=cast(Any, _RunnerSuccessStub()), spec=_SpecStub())
+
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=tmp_path / "out",
+    )
+
+    assert task["plot"]["pc3_name"] == PDF2_PC3_NAME
+    assert task["frames"][0]["paper_variant_id"] == "CNPE_A2+0.5"
+    assert task["frames"][0]["paper_media_name"] == A2_HALF_MEDIA
 
 
 def test_a2_half_decimal_variant_uses_pdf3_override_in_task_json(tmp_path: Path):

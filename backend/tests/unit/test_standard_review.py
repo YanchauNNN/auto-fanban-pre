@@ -5,7 +5,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from src.audit_check.models import ScanTextItem
-from src.audit_check.standard_review import StandardLibraryLoader, StandardReviewEngine
+from src.audit_check.standard_review import StandardEntry, StandardLibraryLoader, StandardReviewEngine
 from src.models import BBox
 
 
@@ -162,6 +162,116 @@ def test_standard_review_normalizes_fullwidth_punctuation_and_hyphens(tmp_path: 
         [
             _item("ＧＢ ５１０５８—２０１４", x=10.0, y=100.0),
             _item("核电厂抗震设计标准", x=120.0, y=100.0),
+        ]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_accepts_code_and_name_in_same_text_box_without_y_matching() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50496-2018",
+            code_without_year="GB 50496",
+            expected_year="2018",
+            expected_name="大体积混凝土施工标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        ),
+        StandardEntry(
+            canonical_code="GB 50204-2015",
+            code_without_year="GB 50204",
+            expected_year="2015",
+            expected_name="混凝土结构工程施工质量验收规范",
+            source_sheet="DatStdItem",
+            source_row=2,
+        ),
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [
+            _item(
+                "GB 50496-2018:大体积混凝土施工标准；\n"
+                "GB 50204-2015:混凝土结构工程施工质量验收规范。",
+                x=10.0,
+                y=100.0,
+            )
+        ]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_flags_wrong_name_in_same_text_box() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50496-2018",
+            code_without_year="GB 50496",
+            expected_year="2018",
+            expected_name="大体积混凝土施工标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("GB 50496-2018:混凝土结构工程施工规范；", x=10.0, y=100.0)]
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("GB 50496-2018", "standard_review_name"),
+    ]
+    assert findings[0].details is not None
+    assert findings[0].details["issue_type"] == "name_mismatch"
+    assert findings[0].details["actual_name"] == "混凝土结构工程施工规范"
+    assert findings[0].details["expected_name"] == "大体积混凝土施工标准"
+
+
+def test_standard_review_flags_wrong_year_in_same_text_box() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 51058-2014",
+            code_without_year="GB 51058",
+            expected_year="2014",
+            expected_name="精神专科医院建筑设计规范",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("GB 51058-2011:精神专科医院建筑设计规范；", x=10.0, y=100.0)]
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("GB 51058-2011", "standard_review_year"),
+    ]
+    assert findings[0].details is not None
+    assert findings[0].details["actual_year"] == "2011"
+    assert findings[0].details["expected_year"] == "2014"
+
+
+def test_standard_review_accepts_standard_code_format_variants() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB/T 51058-2014",
+            code_without_year="GB/T 51058",
+            expected_year="2014",
+            expected_name="精神专科医院建筑设计规范",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [
+            _item("GB／T51058—2014：精神专科医院建筑设计规范", x=10.0, y=100.0),
+            _item("GBT 51058 2014：精神专科医院建筑设计规范", x=10.0, y=120.0),
+            _item("GB/T\n51058（2014）：精神专科医院建筑设计规范", x=10.0, y=140.0),
         ]
     )
 

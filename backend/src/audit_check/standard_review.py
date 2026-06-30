@@ -11,8 +11,29 @@ from openpyxl import load_workbook
 from .models import AuditFinding, ScanTextItem
 
 _SPACE_RE = re.compile(r"\s+")
-_YEAR_SUFFIX_RE = re.compile(r"^(?P<base>.+?)[\s\-—–－]+(?P<year>\d{4})$")
-_HYPHEN_TRANSLATION = str.maketrans({"—": "-", "–": "-", "－": "-", "﹣": "-", "‐": "-"})
+_YEAR_SUFFIX_RE = re.compile(r"^(?P<base>.+?)(?:\s*-\s*|\s+)(?P<year>\d{4})$")
+_HYPHEN_TRANSLATION = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2212": "-",
+        "\uff0d": "-",
+        "\ufe58": "-",
+        "\ufe63": "-",
+        "\u2043": "-",
+        "\uff0f": "/",
+        "\u2215": "/",
+        "\u2044": "/",
+    }
+)
+_NAME_LEADING_SEPARATORS = " \t\r\n:：,，、;-－–—"
+_NAME_TRAILING_SEPARATORS = " \t\r\n:：,，、;-－–—.。"
+_SAME_TEXT_NAME_END_RE = re.compile(r"[;；\r\n]+")
+_YEAR_CAPTURE_PATTERN = r"[\(\[（【]?\s*(?P<year>\d{4})\s*[\)\]）】]?"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,14 +161,29 @@ class StandardLibraryLoader:
 
 
 class StandardReviewEngine:
-    def __init__(self, entries: list[StandardEntry], *, same_line_y_tolerance: float) -> None:
+    def __init__(
+        self,
+        entries: list[StandardEntry],
+        *,
+        same_line_y_tolerance: float,
+        same_text_pairing_enabled: bool = True,
+        format_variant_compatibility_enabled: bool = True,
+    ) -> None:
         self.entries = entries
         self.same_line_y_tolerance = float(same_line_y_tolerance)
+        self.same_text_pairing_enabled = bool(same_text_pairing_enabled)
+        self.format_variant_compatibility_enabled = bool(format_variant_compatibility_enabled)
         self._base_entries: dict[str, list[StandardEntry]] = {}
         for entry in entries:
             self._base_entries.setdefault(_normalize_code_key(entry.code_without_year), []).append(entry)
         self._base_patterns = [
-            (entry, self._compile_code_pattern(entry.code_without_year))
+            (
+                entry,
+                self._compile_code_pattern(
+                    entry.code_without_year,
+                    format_variant_compatibility_enabled=self.format_variant_compatibility_enabled,
+                ),
+            )
             for entry in entries
             if entry.expected_year
         ]
@@ -216,6 +252,25 @@ class StandardReviewEngine:
         ]
 
     def _name_findings(self, candidate: _CodeCandidate, items: list[ScanTextItem]) -> list[AuditFinding]:
+        if self.same_text_pairing_enabled:
+            same_item_name = self._same_item_name(candidate)
+            if same_item_name is not None:
+                if _name_matches(same_item_name, candidate.entry.expected_name):
+                    return []
+                return [
+                    self._finding(
+                        candidate=candidate,
+                        context_kind="standard_review_name",
+                        details={
+                            "issue_type": "name_mismatch",
+                            "actual_code": candidate.actual_code,
+                            "expected_code": candidate.entry.canonical_code,
+                            "actual_name": same_item_name,
+                            "expected_name": candidate.entry.expected_name,
+                        },
+                    )
+                ]
+
         name_item = self._nearest_name_item(candidate, items)
         if name_item is None:
             return [
@@ -282,11 +337,52 @@ class StandardReviewEngine:
         return any(pattern.search(normalized) for _, pattern in self._base_patterns)
 
     @staticmethod
-    def _compile_code_pattern(code_without_year: str) -> re.Pattern[str]:
+    def _compile_code_pattern(
+        code_without_year: str,
+        *,
+        format_variant_compatibility_enabled: bool,
+    ) -> re.Pattern[str]:
         normalized = _normalize_standard_code_display(code_without_year)
-        escaped = re.escape(normalized)
-        escaped = escaped.replace(r"\ ", r"\s*")
-        return re.compile(rf"(?<![A-Z0-9]){escaped}\s*-\s*(?P<year>\d{{4}})(?!\d)")
+        if not format_variant_compatibility_enabled:
+            escaped = re.escape(normalized).replace(r"\ ", r"\s*")
+            return re.compile(rf"(?<![A-Z0-9]){escaped}\s*-\s*{_YEAR_CAPTURE_PATTERN}(?!\d)")
+        parts = _split_standard_code_without_year(normalized)
+        if parts is None:
+            escaped = re.escape(normalized).replace(r"\ ", r"\s*")
+            return re.compile(rf"(?<![A-Z0-9]){escaped}\s*-\s*{_YEAR_CAPTURE_PATTERN}(?!\d)")
+        prefix, number = parts
+        prefix_pattern = _standard_prefix_pattern(prefix)
+        number_pattern = _loose_literal_pattern(number)
+        separator_pattern = r"(?:\s*-\s*|\s+|/|\s*)"
+        return re.compile(
+            rf"(?<![A-Z0-9]){prefix_pattern}{number_pattern}{separator_pattern}{_YEAR_CAPTURE_PATTERN}(?!\d)"
+        )
+
+    def _same_item_name(self, candidate: _CodeCandidate) -> str | None:
+        normalized = _normalize_code_text(candidate.item.raw_text)
+        if candidate.end >= len(normalized):
+            return None
+        tail = normalized[candidate.end :]
+        if not tail or tail[0] not in _NAME_LEADING_SEPARATORS:
+            return None
+        tail = tail.lstrip(_NAME_LEADING_SEPARATORS)
+        if not tail:
+            return ""
+
+        next_code_start: int | None = None
+        for _, pattern in self._base_patterns:
+            next_match = pattern.search(tail)
+            if next_match is None:
+                continue
+            if next_code_start is None or next_match.start() < next_code_start:
+                next_code_start = next_match.start()
+        if next_code_start is not None:
+            tail = tail[:next_code_start]
+
+        end_match = _SAME_TEXT_NAME_END_RE.search(tail)
+        if end_match is not None:
+            tail = tail[: end_match.start()]
+        return tail.strip(_NAME_TRAILING_SEPARATORS)
 
     @staticmethod
     def _finding(
@@ -325,6 +421,29 @@ def _canonicalize_standard_code(raw_code: str, raw_version: str) -> tuple[str, s
     if version and re.fullmatch(r"\d{4}", version):
         return code, version, f"{code}-{version}"
     return code, None, code
+
+
+def _split_standard_code_without_year(value: str) -> tuple[str, str] | None:
+    compact = re.sub(r"\s+", "", value or "")
+    match = re.fullmatch(r"(?P<prefix>[A-Z]+(?:/[A-Z]+)?)(?P<number>\d[\dA-Z.]*)", compact)
+    if match is None:
+        return None
+    return match.group("prefix"), match.group("number")
+
+
+def _standard_prefix_pattern(prefix: str) -> str:
+    pieces: list[str] = []
+    for char in prefix:
+        if char == "/":
+            pieces.append(r"(?:\s*/\s*)?")
+        else:
+            pieces.append(re.escape(char) + r"\s*")
+    return "".join(pieces)
+
+
+def _loose_literal_pattern(value: str) -> str:
+    compact = re.sub(r"\s+", "", value or "")
+    return r"\s*".join(re.escape(char) for char in compact)
 
 
 def _normalize_code_text(value: str) -> str:

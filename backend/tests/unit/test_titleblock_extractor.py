@@ -231,6 +231,15 @@ def test_parse_subitem_no_ignores_label_noise_and_prefers_internal_code_hint() -
     assert value == "ND"
 
 
+def test_parse_subitem_no_accepts_zero_zero_from_roi() -> None:
+    extractor = TitleblockExtractor()
+    items = [_item("00", x=-106557.78, y=-138782.61)]
+
+    value = extractor._parse_subitem_no(items, internal_code="1916800-JGS01-001")
+
+    assert value == "00"
+
+
 def test_parse_external_code_prefers_x_order_when_characters_have_y_jitter() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["external_code"].parse
@@ -483,6 +492,46 @@ def test_parse_page_info_001_homepage_reads_total_then_index_tokens() -> None:
     assert idx == 1
 
 
+def test_001_homepage_total_then_index_fallback_applies_to_non_a4_frames() -> None:
+    extractor = TitleblockExtractor()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="a1-001-homepage",
+            source_file=Path("sample.dxf"),
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=841.0, ymax=594.0),
+            paper_variant_id="CNPE_A1",
+        )
+    )
+    frame.titleblock.internal_code = "20169DY-JGS03-001"
+
+    assert extractor._uses_001_homepage_page_info_order(frame, frame.titleblock) is True
+
+
+def test_parse_page_info_respects_chinese_label_order_with_001_fallback() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    total_then_index_items = [
+        _item("\u5171     \u5f20 \u7b2c     \u5f20", x=10.0, y=100.0),
+        _item("3", x=36.0, y=100.0),
+        _item("1", x=86.0, y=100.0),
+    ]
+    index_then_total_items = [
+        _item("\u7b2c     \u5f20 \u5171     \u5f20", x=10.0, y=100.0),
+        _item("1", x=36.0, y=100.0),
+        _item("3", x=86.0, y=100.0),
+    ]
+
+    assert extractor._parse_page_info(total_then_index_items, parse_cfg) == (3, 1)
+    assert (
+        extractor._parse_page_info(
+            index_then_total_items,
+            parse_cfg,
+            total_then_index_tokens=True,
+        )
+        == (3, 1)
+    )
+
+
 def test_parse_page_info_full_index_then_total_line_overrides_001_fallback_order() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse
@@ -533,6 +582,16 @@ def test_pick_top_by_y() -> None:
     extractor = TitleblockExtractor()
     items = [_item("A", y=10.0), _item("B", y=5.0)]
     assert extractor._pick_top_by_y(items) == "A"
+
+
+def test_pick_top_by_y_respects_candidate_pattern() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item("Detailed Dimensional Plan", y=20.0),
+        _item("A", y=10.0),
+    ]
+
+    assert extractor._pick_top_by_y(items, candidate_pattern=r"^[A-Z]$") == "A"
 
 
 def test_parse_text_decodes_autocad_control_codes() -> None:
@@ -748,6 +807,50 @@ def test_extract_fields_keeps_page_fragments_out_of_title_roi(tmp_path, monkeypa
         "NB level 16.50m Doors Numbering Plan",
     ]
     assert [item["text"] for item in page_items] == ["Page", "第"]
+
+
+def test_parse_1818_title_splits_scope_token_from_mixed_chinese_line() -> None:
+    extractor = TitleblockExtractor()
+    extractor.set_project_no("1818")
+
+    title_cn, title_en = extractor._parse_title_bilingual(
+        [
+            _item("洗衣房", x=10.0, y=40.0, bbox=BBox(xmin=10.0, ymin=39.0, xmax=20.0, ymax=43.0)),
+            _item("HL", x=10.0, y=30.0, bbox=BBox(xmin=10.0, ymin=29.0, xmax=18.0, ymax=33.0)),
+            _item(
+                "4.200m标高板配筋图",
+                x=25.0,
+                y=28.0,
+                bbox=BBox(xmin=25.0, ymin=28.0, xmax=70.0, ymax=32.0),
+            ),
+            _item(
+                "Reinforcement drawing of slab at elevation 4.200m",
+                x=10.0,
+                y=18.0,
+                bbox=BBox(xmin=10.0, ymin=17.0, xmax=90.0, ymax=21.0),
+            ),
+        ]
+    )
+
+    assert title_cn == "洗衣房\n4.200m标高板配筋图"
+    assert title_en == "HL\nReinforcement drawing of slab at elevation 4.200m"
+
+
+def test_parse_non_1818_title_keeps_all_lines_as_chinese_title() -> None:
+    extractor = TitleblockExtractor()
+    extractor.set_project_no("2016")
+
+    title_cn, title_en = extractor._parse_title_bilingual(
+        [
+            _item("反应堆厂房", x=10.0, y=40.0),
+            _item("RB", x=10.0, y=30.0),
+            _item("4.200m标高板配筋图", x=25.0, y=28.0),
+            _item("Reinforcement drawing of slab at elevation 4.200m", x=10.0, y=18.0),
+        ]
+    )
+
+    assert title_cn == "反应堆厂房\nRB\n4.200m标高板配筋图\nReinforcement drawing of slab at elevation 4.200m"
+    assert title_en is None
 
 
 def test_parse_a4_page_marker_from_fragmented_coordinate_tokens() -> None:

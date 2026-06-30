@@ -202,4 +202,6 @@ class AuditCheckExecutor:
         return StandardReviewEngine(
             entries,
             same_line_y_tolerance=standard_cfg.same_line_y_tolerance,
+            same_text_pairing_enabled=standard_cfg.same_text_pairing_enabled,
+            format_variant_compatibility_enabled=standard_cfg.format_variant_compatibility_enabled,
         ).evaluate(items)

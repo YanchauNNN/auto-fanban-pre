@@ -87,6 +87,25 @@ def _assert_keeps_source_template_error_indicators_unpersisted(docx_path: Path) 
     assert all("<ignoredErrors" not in xml for xml in sheet_xmls)
 
 
+def test_suppress_sheet_error_indicators_preserves_excel_namespace_prefixes() -> None:
+    sheet_xml = b'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac xr xr2 xr3" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision" xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2" xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3" xr:uid="{00000000-0001-0000-0000-000000000000}"><dimension ref="A1:B2"/><sheetFormatPr x14ac:dyDescent="0.15"/><sheetData><row r="1" x14ac:dyDescent="0.25"><c r="A1" t="s"><v>0</v></c></row></sheetData><pageSetup r:id="rId1"/></worksheet>'''
+
+    updated = cover_module._suppress_sheet_error_indicators(sheet_xml).decode("utf-8")
+
+    assert "<ignoredErrors>" in updated
+    assert 'numberStoredAsText="1"' in updated
+    assert 'mc:Ignorable="x14ac xr xr2 xr3"' in updated
+    assert 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"' in updated
+    assert 'xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac"' in updated
+    assert 'xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2"' in updated
+    assert 'x14ac:dyDescent="0.15"' in updated
+    assert 'xr:uid="{00000000-0001-0000-0000-000000000000}"' in updated
+    assert "ns1:" not in updated
+    assert "ns2:" not in updated
+    assert "ns3:" not in updated
+
+
 def test_cover_variant_template_mapping() -> None:
     gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
     ctx = _build_context()

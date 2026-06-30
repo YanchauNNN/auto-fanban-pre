@@ -200,7 +200,10 @@ class TitleblockExtractor(ITitleblockExtractor):
                 continue
 
             if parse_type == "pick_top_by_y":
-                value = self._pick_top_by_y(roi_items)
+                value = self._pick_top_by_y(
+                    roi_items,
+                    candidate_pattern=parse_cfg.get("candidate_pattern"),
+                )
                 if value and hasattr(fields, field_key):
                     setattr(fields, field_key, value)
                 continue
@@ -976,6 +979,13 @@ class TitleblockExtractor(ITitleblockExtractor):
         cn_lines: list[str] = []
         en_lines: list[str] = []
         for idx, normalized in enumerate(normalized_lines):
+            scope_token, cn_remainder = self._split_leading_scope_token_from_cn_line(normalized)
+            if scope_token:
+                en_lines.append(scope_token)
+                if cn_remainder:
+                    cn_lines.append(cn_remainder)
+                continue
+
             language = self._classify_title_line(normalized)
             if self._looks_like_title_scope_line(normalized):
                 for following in normalized_lines[idx + 1 :]:
@@ -1046,14 +1056,22 @@ class TitleblockExtractor(ITitleblockExtractor):
 
     @staticmethod
     def _is_clean_subitem_no(value: str) -> bool:
-        return bool(re.fullmatch(r"[A-Z]{1,4}", value or ""))
+        return bool(re.fullmatch(r"(?:[A-Z]{1,4}|00)", value or ""))
 
-    def _pick_top_by_y(self, items: list[TextItem]) -> str | None:
+    def _pick_top_by_y(
+        self,
+        items: list[TextItem],
+        *,
+        candidate_pattern: str | None = None,
+    ) -> str | None:
         if not items:
             return None
         ordered = sorted(items, key=lambda t: (-t.y, t.x))
+        regex = re.compile(str(candidate_pattern)) if candidate_pattern else None
         for item in ordered:
             text = (item.text or "").strip()
+            if regex and not regex.fullmatch(text):
+                continue
             if text:
                 return text
         return None
@@ -1195,6 +1213,22 @@ class TitleblockExtractor(ITitleblockExtractor):
             )
             is not None
         )
+
+    @classmethod
+    def _split_leading_scope_token_from_cn_line(cls, text: str) -> tuple[str | None, str | None]:
+        normalized = cls._normalize_spaces(text)
+        if not cls._has_cjk(normalized):
+            return None, None
+        match = re.match(r"^(?P<scope>[A-Z]{1,4})\s+(?P<rest>.+)$", normalized)
+        if not match:
+            return None, None
+        scope = match.group("scope").strip()
+        rest = match.group("rest").strip()
+        if not rest or not cls._has_cjk(rest):
+            return None, None
+        if cls._looks_like_english_title_line(rest):
+            return None, None
+        return scope, rest
 
     @staticmethod
     def _looks_like_compact_cn_title_token(text: str) -> bool:
@@ -1383,7 +1417,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         code = (fields.internal_code or frame.titleblock.internal_code or "").strip().upper()
         if not code.endswith("-001"):
             return False
-        return TitleblockExtractor._is_a4_frame(frame)
+        return True
 
     def _parse_labeled_page_info_from_lines(
         self,

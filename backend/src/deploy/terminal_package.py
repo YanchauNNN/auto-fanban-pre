@@ -478,60 +478,109 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $root "python-runtime\python.exe"
 $runtimeEnv = Join-Path $PSScriptRoot "runtime.env.ps1"
+$logsDir = Join-Path $root "logs"
+$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$stdoutLog = Join-Path $logsDir ("backend-stdout-{0}.log" -f $runStamp)
+$stderrLog = Join-Path $logsDir ("backend-stderr-{0}.log" -f $runStamp)
+$latestStdoutLog = Join-Path $logsDir "backend-latest-stdout.log"
+$latestStderrLog = Join-Path $logsDir "backend-latest-stderr.log"
+$script:backendExitCode = 0
 
-if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-    throw "Python 运行环境不存在: $python"
-}
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
-if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
-    . $runtimeEnv
-}
-
-$managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
-$managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
-$managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
-$managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
-
-if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $managedSpecPath
+function Update-LatestBackendLogs {
+    if (Test-Path -LiteralPath $stdoutLog -PathType Leaf) {
+        Copy-Item -LiteralPath $stdoutLog -Destination $latestStdoutLog -Force
+    }
+    if (Test-Path -LiteralPath $stderrLog -PathType Leaf) {
+        Copy-Item -LiteralPath $stderrLog -Destination $latestStderrLog -Force
     }
 }
 
-if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
-    }
+function Write-BackendLogHeader {
+    $header = @(
+        "FanBanBackend start: " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"),
+        "Root: $root",
+        "Listen: $ListenHost`:$Port",
+        "Python: $python",
+        ""
+    ) -join [Environment]::NewLine
+    $header | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+    $header | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 }
 
-if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedMechanismSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $managedMechanismSpecPath
-    }
-}
+Write-BackendLogHeader
 
-if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
-    Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
-}
-
-$previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
-$previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
-$previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
-$previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
-
-Push-Location (Join-Path $root "backend-runtime")
 try {
-    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
-    & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $ListenHost --port $Port
-} finally {
-    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
-    Pop-Location
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "Python 运行环境不存在: $python"
+    }
+
+    if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
+        . $runtimeEnv
+    }
+
+    $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
+    $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
+    $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
+
+    if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $managedSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $managedMechanismSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $managedMechanismSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
+    }
+
+    $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
+    $previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
+    $previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+    $previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+
+    Push-Location (Join-Path $root "backend-runtime")
+    try {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
+        "Starting uvicorn..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+        $quotedPython = '"' + $python + '"'
+        $quotedStdoutLog = '"' + $stdoutLog + '"'
+        $quotedStderrLog = '"' + $stderrLog + '"'
+        $cmdLine = "{0} -X utf8 -m uvicorn API.app.main:create_app --factory --host {1} --port {2} 1>> {3} 2>> {4}" -f $quotedPython, $ListenHost, $Port, $quotedStdoutLog, $quotedStderrLog
+        & cmd.exe /d /c $cmdLine
+        $script:backendExitCode = $LASTEXITCODE
+        $exitMessage = "uvicorn exited unexpectedly. exit_code=$script:backendExitCode"
+        $exitMessage | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        throw $exitMessage
+    } finally {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
+        Pop-Location
+        Update-LatestBackendLogs
+    }
+} catch {
+    ("FanBanBackend startup/runtime failure: " + $_.Exception.Message) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ($_ | Out-String) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    Update-LatestBackendLogs
+    throw
 }
 '''
     start_backend = (
@@ -671,7 +720,11 @@ $apiHealthStatus = "fail"
 $apiHealthError = ""
 $apiHealthResponse = $null
 $taskStatus = "skip"
+$taskSettingsStatus = "skip"
+$taskEventStatus = "skip"
+$taskEventError = ""
 $taskDetails = [ordered]@{}
+$recentTaskEvents = @()
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
     & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
@@ -703,6 +756,20 @@ try {
         [uint64]$lastTaskResultInt64
     }
     $lastTaskResultHex = "0x{0:X8}" -f ($lastTaskResultUnsigned -band 0xffffffff)
+    $executionTimeLimit = [string]$task.Settings.ExecutionTimeLimit
+    $restartCount = [int]$task.Settings.RestartCount
+    $restartInterval = if ($null -ne $task.Settings.RestartInterval) { [string]$task.Settings.RestartInterval } else { "" }
+    $multipleInstances = [string]$task.Settings.MultipleInstances
+    $stopIfGoingOnBatteries = [bool]$task.Settings.StopIfGoingOnBatteries
+    $executionTimeLimitUnlimited = ($executionTimeLimit -eq "" -or $executionTimeLimit -eq "PT0S" -or $executionTimeLimit -eq "P0D")
+    $taskSettingsProblems = @()
+    if (-not $executionTimeLimitUnlimited) {
+        $taskSettingsProblems += ("ExecutionTimeLimit is " + $executionTimeLimit + ", expected PT0S/unlimited")
+    }
+    if ($restartCount -lt 1) {
+        $taskSettingsProblems += ("RestartCount is " + $restartCount + ", expected >= 1")
+    }
+    $taskSettingsStatus = if ($taskSettingsProblems.Count -eq 0) { "pass" } else { "fail" }
     $taskStatus = "pass"
     $taskDetails = [ordered]@{
         state = [string]$task.State
@@ -711,12 +778,39 @@ try {
         last_task_result_hex = $lastTaskResultHex
         last_task_result_ok = ($lastTaskResultInt64 -eq 0)
         next_run_time = if ($taskInfo.NextRunTime) { [string]$taskInfo.NextRunTime } else { "" }
+        settings = [ordered]@{
+            status = $taskSettingsStatus
+            problems = $taskSettingsProblems
+            execution_time_limit = $executionTimeLimit
+            execution_time_limit_unlimited = $executionTimeLimitUnlimited
+            restart_count = $restartCount
+            restart_interval = $restartInterval
+            multiple_instances = $multipleInstances
+            stop_if_going_on_batteries = $stopIfGoingOnBatteries
+        }
     }
 } catch {
     $taskStatus = "fail"
     $taskDetails = [ordered]@{
         error = $_.Exception.Message
     }
+}
+
+try {
+    $recentTaskEvents = @(
+        Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 200 -ErrorAction Stop |
+            Where-Object { $_.Message -match "\\FanBanBackend|FanBanBackend" } |
+            Select-Object -First 12 `
+                @{Name = "time_created"; Expression = { if ($_.TimeCreated) { $_.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss") } else { "" } } },
+                Id,
+                LevelDisplayName,
+                ProviderName,
+                Message
+    )
+    $taskEventStatus = "pass"
+} catch {
+    $taskEventStatus = "warn"
+    $taskEventError = $_.Exception.Message
 }
 
 try {
@@ -743,7 +837,7 @@ if ($null -ne $selectedProbe) {
 }
 
 $overallStatus = "pass"
-if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass") {
+if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail") {
     $overallStatus = "fail"
 } elseif ($proxyStatus -eq "warn") {
     $overallStatus = "warn"
@@ -763,6 +857,8 @@ $summary = [ordered]@{
     api_health_status = $apiHealthStatus
     api_health_url = $Url
     task_status = $taskStatus
+    task_settings_status = $taskSettingsStatus
+    task_event_status = $taskEventStatus
     proxy_status = $proxyStatus
     summary_json = $summaryJson
     full_json = $fullJson
@@ -776,6 +872,11 @@ $fullReport = [ordered]@{
         selected = $selectedProbe
     }
     scheduled_task = $taskDetails
+    scheduled_task_events = [ordered]@{
+        status = $taskEventStatus
+        error = $taskEventError
+        recent_task_events = $recentTaskEvents
+    }
     api = [ordered]@{
         status = $apiPingStatus
         url = $PingUrl
@@ -810,6 +911,8 @@ Write-Host ("Overall status: " + $overallStatus)
 Write-Host ("Blocking issues: " + $blockingIssues.Count)
 Write-Host ("Warnings: " + $warnings.Count)
 Write-Host ("Scheduled task: " + $taskStatus)
+Write-Host ("Scheduled task settings: " + $taskSettingsStatus)
+Write-Host ("Scheduled task recent events: " + $taskEventStatus)
 Write-Host ("API ping: " + $apiPingStatus)
 Write-Host ("API health: " + $apiHealthStatus)
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
@@ -1369,7 +1472,15 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (Build-TaskActionArguments)
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
 $principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -Hidden
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -Hidden `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+    -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host ("已注册登录触发任务: " + $TaskName)

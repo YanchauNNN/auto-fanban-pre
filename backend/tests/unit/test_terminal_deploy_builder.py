@@ -421,6 +421,14 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert '[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")' in start_backend
+    assert '$logsDir = Join-Path $root "logs"' in start_backend
+    assert 'backend-stdout-' in start_backend
+    assert 'backend-stderr-' in start_backend
+    assert '$script:backendExitCode = $LASTEXITCODE' in start_backend
+    assert 'backend-latest-stderr.log' in start_backend
+    assert '$cmdLine = ' in start_backend
+    assert '& cmd.exe /d /c $cmdLine' in start_backend
+    assert '& $python -X utf8 -m uvicorn' not in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Set-Item -Path 'Env:{0}' -Value '{1}'" in prepare_terminal
@@ -442,6 +450,13 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "[int]$taskInfo.LastTaskResult" not in check_health
     assert "[int64]$taskInfo.LastTaskResult" in check_health
     assert "last_task_result_hex" in check_health
+    assert "task_settings_status" in check_health
+    assert "execution_time_limit" in check_health
+    assert "restart_count" in check_health
+    assert "restart_interval" in check_health
+    assert "recent_task_events" in check_health
+    assert "Get-WinEvent" in check_health
+    assert "Microsoft-Windows-TaskScheduler/Operational" in check_health
     assert 'ValidateSet("full", "deep")' in check_health
     assert "check_health.summary.json" in check_health
     assert "check_health.full.json" in check_health
@@ -490,6 +505,11 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Interactive" in register_task
     assert "InteractiveToken" not in register_task
     assert "WindowStyle Hidden" in register_task
+    assert "-ExecutionTimeLimit (New-TimeSpan -Seconds 0)" in register_task
+    assert "-RestartCount 999" in register_task
+    assert "-RestartInterval (New-TimeSpan -Minutes 1)" in register_task
+    assert "-MultipleInstances IgnoreNew" in register_task
+    assert "-DontStopIfGoingOnBatteries" in register_task
     assert "Start-ScheduledTask -TaskName $TaskName" in register_task
     assert "nssm" not in register_task.lower()
     assert "$UserName" in register_task

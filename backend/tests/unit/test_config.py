@@ -4,6 +4,7 @@
 每个模块完成后必须运行：pytest tests/unit/test_config.py -v
 """
 
+import zlib
 from pathlib import Path
 
 from src.config import BusinessSpec, RuntimeConfig, SpecLoader, get_config, load_spec, reload_config
@@ -29,17 +30,35 @@ class TestSpecLoader:
             assert a1.profile == "BASE10"
 
     def test_a2_plus_half_decimal_plot_media_is_configured(self, spec: BusinessSpec):
-        """A2+0.5 图幅需要显式落盘并指向打印PDF3.pc3中的同名媒体。"""
+        """A2+0.5 图幅应在打印PDF2.pc3关联PMP中落盘为921x450媒体。"""
         variants = spec.get_paper_variants()
         assert variants["CNPE_A2+0.5"].W == 891.0
         assert variants["CNPE_A2+0.5"].H == 420.0
         assert variants["CNPE_A2+0.5"].profile == "BASE10"
 
         raw_variant = spec.titleblock_extract["paper_variants"]["CNPE_A2+0.5"]
-        assert raw_variant["打印PDF2.pc3文件中对应纸张"] == "A2+0.5"
-        assert raw_variant["打印PDF3.pc3文件中对应纸张"] == (
-            "UserDefinedMetric (921.00 x 450.00毫米)"
-        )
+        assert raw_variant["打印PDF2.pc3文件中对应纸张"] == "UserDefinedMetric (921.00 x 450.00毫米)"
+
+    def test_managed_pdf2_pmp_contains_a2_plus_half_media(self):
+        """托管打印PDF2资源必须包含A2+0.5(921x450)自定义媒体。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        pmp_path = repo_root / "documents" / "Resources" / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
+        data = pmp_path.read_bytes()
+        compressed_offset = data.find(b"\x78\xda")
+        assert compressed_offset >= 0
+        payload = zlib.decompress(data[compressed_offset:]).decode("latin1")
+
+        assert "name=\"UserDefinedMetric (921.00 x 450.00" in payload
+        localized_label = "localized_name=\"A2+0.5(921.00 x 450.00 毫米)".encode(
+            "gbk"
+        ).decode("latin1")
+        assert localized_label in payload
+        assert "media_bounds_urx=921.0" in payload
+        assert "media_bounds_ury=450.0" in payload
+        assert "printable_bounds_llx=10.0" in payload
+        assert "printable_bounds_lly=10.0" in payload
+        assert "printable_bounds_urx=911.0" in payload
+        assert "printable_bounds_ury=440.0" in payload
 
     def test_get_roi_profile(self, spec: BusinessSpec):
         """测试获取ROI配置"""
@@ -184,15 +203,12 @@ class TestRuntimeConfig:
         assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
         assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
 
-    def test_a2_half_pc3_override_is_loaded_from_runtime_yaml(self):
-        """A2+0.5 备用 PC3 映射必须由运行期 YAML 落盘提供。"""
+    def test_a2_half_uses_default_pdf2_pc3_from_runtime_yaml(self):
+        """A2+0.5 媒体已进入打印PDF2后，运行期不应再切换到打印PDF3。"""
         repo_root = Path(__file__).resolve().parents[3]
         config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
 
-        assert config.module5_export.plot.paper_variant_pc3_overrides == {
-            "CNPE_A2+1/2": "打印PDF3.pc3",
-            "CNPE_A2+0.5": "打印PDF3.pc3",
-        }
+        assert config.module5_export.plot.paper_variant_pc3_overrides == {}
 
     def test_unit_consistency_business_values_are_not_python_defaults(
         self,
@@ -499,6 +515,8 @@ runtime_options:
         assert Path(standard_review.library_path) == repo_root / "documents_bin" / "规范库.xlsx"
         assert standard_review.sheet_name == "DatStdItem"
         assert standard_review.same_line_y_tolerance == 5.0
+        assert standard_review.same_text_pairing_enabled is True
+        assert standard_review.format_variant_compatibility_enabled is True
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""

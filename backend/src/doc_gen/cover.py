@@ -33,6 +33,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree as ET
+from xml.sax.saxutils import quoteattr
 
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from ..models import DocContext
 
 _CELL_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
+_XML_NAME_RE = r"[A-Za-z_][\w.-]*"
 _CN_SPLIT_PROTECTED_PHRASES = ("标高", "厂房")
 _XLSX_SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _IGNORED_ERROR_FLAGS = {
@@ -883,7 +885,6 @@ def _suppress_excel_workbook_error_indicators(workbook_bytes: bytes) -> bytes:
 
 
 def _suppress_sheet_error_indicators(sheet_xml: bytes) -> bytes:
-    ET.register_namespace("", _XLSX_SHEET_NS)
     root = ET.fromstring(sheet_xml)
     dimension = root.find(_xlsx_tag("dimension"))
     sqref = dimension.get("ref") if dimension is not None else None
@@ -918,7 +919,112 @@ def _suppress_sheet_error_indicators(sheet_xml: bytes) -> bytes:
 
     if not changed:
         return sheet_xml
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return _persist_ignored_errors_in_sheet_xml(sheet_xml, sqref)
+
+
+def _persist_ignored_errors_in_sheet_xml(sheet_xml: bytes, sqref: str) -> bytes:
+    text = sheet_xml.decode("utf-8")
+    block_match = re.search(
+        rf"(?P<open><(?P<prefix>{_XML_NAME_RE}:)?ignoredErrors\b[^>]*>)"
+        rf"(?P<body>.*?)"
+        rf"(?P<close></(?P=prefix)ignoredErrors\s*>)",
+        text,
+        flags=re.DOTALL,
+    )
+    if block_match:
+        prefix = block_match.group("prefix") or ""
+        body = block_match.group("body")
+        ignored_error = _build_ignored_error_xml(prefix, sqref)
+        updated_body = _replace_matching_ignored_error(body, sqref, ignored_error)
+        if updated_body is None:
+            updated_body = f"{body}{ignored_error}"
+        updated = (
+            text[: block_match.start("body")]
+            + updated_body
+            + text[block_match.end("body") :]
+        )
+        return updated.encode("utf-8")
+
+    self_closing_match = re.search(
+        rf"<(?P<prefix>{_XML_NAME_RE}:)?ignoredErrors\b(?P<attrs>[^>]*)\s*/>",
+        text,
+        flags=re.DOTALL,
+    )
+    if self_closing_match:
+        prefix = self_closing_match.group("prefix") or ""
+        block = _build_ignored_errors_xml(prefix, sqref)
+        updated = (
+            text[: self_closing_match.start()]
+            + block
+            + text[self_closing_match.end() :]
+        )
+        return updated.encode("utf-8")
+
+    prefix = _find_sheet_child_prefix(text)
+    block = _build_ignored_errors_xml(prefix, sqref)
+    insert_at = _ignored_errors_insert_offset(text)
+    updated = text[:insert_at] + block + text[insert_at:]
+    return updated.encode("utf-8")
+
+
+def _replace_matching_ignored_error(
+    ignored_errors_body: str,
+    sqref: str,
+    replacement: str,
+) -> str | None:
+    tag_pattern = re.compile(
+        rf"<(?P<prefix>{_XML_NAME_RE}:)?ignoredError\b(?P<attrs>[^>]*)\s*/>",
+        flags=re.DOTALL,
+    )
+    for match in tag_pattern.finditer(ignored_errors_body):
+        if _xml_attr_value(match.group("attrs"), "sqref") == sqref:
+            return (
+                ignored_errors_body[: match.start()]
+                + replacement
+                + ignored_errors_body[match.end() :]
+            )
+    return None
+
+
+def _build_ignored_errors_xml(prefix: str, sqref: str) -> str:
+    ignored_error = _build_ignored_error_xml(prefix, sqref)
+    return f"<{prefix}ignoredErrors>{ignored_error}</{prefix}ignoredErrors>"
+
+
+def _build_ignored_error_xml(prefix: str, sqref: str) -> str:
+    attrs = {"sqref": sqref, **_IGNORED_ERROR_FLAGS}
+    attr_text = " ".join(f"{key}={quoteattr(value)}" for key, value in attrs.items())
+    return f"<{prefix}ignoredError {attr_text} />"
+
+
+def _xml_attr_value(attrs: str, name: str) -> str | None:
+    match = re.search(
+        rf"(?:^|\s){re.escape(name)}\s*=\s*(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
+        attrs,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group("value")
+
+
+def _find_sheet_child_prefix(sheet_xml_text: str) -> str:
+    for local_name in ("dimension", "sheetViews", "sheetData"):
+        match = re.search(rf"<(?P<prefix>{_XML_NAME_RE}:)?{local_name}\b", sheet_xml_text)
+        if match:
+            return match.group("prefix") or ""
+    return ""
+
+
+def _ignored_errors_insert_offset(sheet_xml_text: str) -> int:
+    for local_name in _IGNORED_ERRORS_INSERT_BEFORE:
+        match = re.search(rf"<(?:{_XML_NAME_RE}:)?{local_name}\b", sheet_xml_text)
+        if match:
+            return match.start()
+    match = re.search(rf"</(?:{_XML_NAME_RE}:)?worksheet\s*>", sheet_xml_text)
+    if match:
+        return match.start()
+    return len(sheet_xml_text)
 
 
 def _ignored_errors_insert_index(root: ET.Element) -> int:
