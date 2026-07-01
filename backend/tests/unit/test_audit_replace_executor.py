@@ -10,7 +10,11 @@ from openpyxl import load_workbook
 from src.audit_check.lexicon import AuditLexiconLoader
 from src.audit_check.matcher import AuditMatchEngine
 from src.audit_check.models import AuditLexicon, ScanTextItem
-from src.audit_replace.executor import AuditReplaceExecutor, derive_replaced_dwg_filename
+from src.audit_replace.executor import (
+    AuditReplaceExecutor,
+    derive_replaced_dwg_filename,
+    rewrite_target_unit_text,
+)
 from src.audit_replace.mapping import ReplaceMapping, ReplaceMappingBuilder
 from src.config import SpecLoader, reload_config
 from src.models import BBox, Job, JobStatus, JobType
@@ -214,8 +218,6 @@ def test_derive_replaced_dwg_filename_rewrites_target_unit_when_explicit() -> No
 
 
 def test_rewrite_target_unit_text_rewrites_embedded_factory_code_prefix() -> None:
-    from src.audit_replace.executor import rewrite_target_unit_text
-
     assert (
         rewrite_target_unit_text(
             "例如：08ZZ0089N实际应为2RC08ZZ0089N.",
@@ -233,6 +235,59 @@ def test_rewrite_target_unit_text_rewrites_embedded_factory_code_prefix() -> Non
             target_unit_no="1",
         )
         == "HP1RCG11001B25C42SD"
+    )
+
+
+def test_rewrite_target_unit_text_limits_short_factory_codes_to_whitelist() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "16mm",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "16mm"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1HL",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "2HL"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1RC",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "1RC"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1HL",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=[],
+        )
+        == "1HL"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "20261HL-JGS01",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "20262HL-JGS01"
     )
 
 

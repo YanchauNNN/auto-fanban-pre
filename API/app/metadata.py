@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 from .bootstrap import resolve_repo_path
 
-from src.config import get_config, load_spec
+from src.config import get_config, load_mechanism_spec, load_spec, normalize_audit_replace_factory_codes
 
 
 _ENUM_RE = re.compile(r"^enum\[(?P<enum_name>[^\]]+)\]$")
@@ -66,6 +66,9 @@ class FormMetadataService:
                 "project_units": self._resolve_project_units(),
                 "source_unit_options": self._resolve_source_unit_options(),
                 "target_unit_options": self._resolve_target_unit_options(),
+                "unit_factory_codes": normalize_audit_replace_factory_codes(
+                    load_mechanism_spec().audit_replace.unit_factory_codes,
+                ),
                 "factory_index_maps": {
                     "source_variant_options": {
                         project_no: list(variants.keys())

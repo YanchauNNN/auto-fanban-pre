@@ -56,12 +56,13 @@ export function syncTaskConfigDraft(
       ...defaultValues,
       ...currentDraft.values,
     },
-    replaceConfig: {
-      sourceProjectNo: currentDraft.replaceConfig?.sourceProjectNo ?? "",
-      sourceIslandNo: currentDraft.replaceConfig?.sourceIslandNo ?? "",
-      targetProjectNo: currentDraft.replaceConfig?.targetProjectNo ?? "",
-      targetIslandNo: currentDraft.replaceConfig?.targetIslandNo ?? "",
-    },
+    replaceConfig: buildReplaceConfig(
+      currentDraft.replaceConfig?.sourceProjectNo,
+      currentDraft.replaceConfig?.sourceIslandNo,
+      currentDraft.replaceConfig?.targetProjectNo,
+      currentDraft.replaceConfig?.targetIslandNo,
+      currentDraft.replaceConfig?.unitFactoryCodes,
+    ),
   };
 }
 
@@ -87,4 +88,30 @@ export function isAutoTodayField(fieldKey: string) {
 
 export function getTodayValue() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeFactoryCodes(values: readonly string[] | undefined) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values
+    .map((value) => value.trim().toUpperCase())
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+}
+
+function buildReplaceConfig(
+  sourceProjectNo: string | undefined,
+  sourceIslandNo: string | undefined,
+  targetProjectNo: string | undefined,
+  targetIslandNo: string | undefined,
+  unitFactoryCodes: readonly string[] | undefined,
+) {
+  const normalizedFactoryCodes = normalizeFactoryCodes(unitFactoryCodes);
+  return {
+    sourceProjectNo: sourceProjectNo ?? "",
+    sourceIslandNo: sourceIslandNo ?? "",
+    targetProjectNo: targetProjectNo ?? "",
+    targetIslandNo: targetIslandNo ?? "",
+    ...(normalizedFactoryCodes.length > 0 ? { unitFactoryCodes: normalizedFactoryCodes } : {}),
+  };
 }

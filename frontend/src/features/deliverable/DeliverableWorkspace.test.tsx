@@ -270,6 +270,7 @@ function createAdapter(): ApiAdapter {
     preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    rememberAuditReplaceFactoryCodes: vi.fn().mockResolvedValue({ factoryCodes: [] }),
     createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
@@ -2598,6 +2599,7 @@ describe("DeliverableWorkspace", () => {
         sourceIslandNo: "3",
         targetProjectNo: "2016",
         targetIslandNo: "1",
+        unitFactoryCodes: [],
         files: expect.arrayContaining([
           expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
         ]),

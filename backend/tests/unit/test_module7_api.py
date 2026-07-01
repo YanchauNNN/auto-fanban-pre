@@ -12,7 +12,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
-from src.config import SpecLoader, reload_config
+from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
 
@@ -1739,6 +1739,37 @@ def test_create_audit_replace_processes_job_without_deliverable(
         replaced_download = client.get(f"/api/jobs/{job_id}/download/replaced")
         assert replaced_download.status_code == 200
         assert replaced_download.content == b"dwg-replaced"
+
+
+def test_meta_remembers_audit_replace_factory_codes_in_mechanism_yaml(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    mechanism_spec = tmp_path / "documents" / "参数规范-3.yaml"
+    mechanism_spec.parent.mkdir(parents=True, exist_ok=True)
+    mechanism_spec.write_text(
+        "schema_version: '1.0'\n"
+        "backend_mechanism:\n"
+        "  audit_replace:\n"
+        "    unit_factory_codes:\n"
+        "      - RC\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(mechanism_spec))
+    MechanismSpecLoader.clear_cache()
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/meta/audit-replace/factory-codes",
+            json={"codes": ["hl", "RC", "16mm"]},
+        )
+        schema_response = client.get("/api/meta/form-schema")
+
+    assert response.status_code == 200
+    assert response.json()["factory_codes"] == ["RC", "HL"]
+    assert schema_response.status_code == 200
+    assert schema_response.json()["audit_replace"]["unit_factory_codes"] == ["RC", "HL"]
+    assert "HL" in mechanism_spec.read_text(encoding="utf-8")
 
 
 def test_create_audit_replace_creates_group_when_run_deliverable_enabled(

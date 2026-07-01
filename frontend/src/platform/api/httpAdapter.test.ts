@@ -450,10 +450,69 @@ describe("HttpAdapter", () => {
         source_island_no: "2",
         target_project_no: "2016",
         target_island_no: "1",
+        unit_factory_codes: [],
         run_deliverable: false,
       }),
     );
     expect(created.jobs[0]?.taskKind).toBe("audit_replace");
+  });
+
+  it("sends factory-code unit replacement whitelist for replace jobs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-replace-2",
+          jobs: [
+            {
+              job_id: "job-replace-2",
+              batch_id: "batch-replace-2",
+              source_filename: "sample.dwg",
+              project_no: "2016",
+              task_kind: "audit_replace",
+              status: "queued",
+              stage: "PREP_SOURCE",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-24T09:01:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    await adapter.createAuditReplace({
+      sourceProjectNo: "2016",
+      sourceIslandNo: "1",
+      targetProjectNo: "2026",
+      targetIslandNo: "2",
+      unitFactoryCodes: ["hl", "HL", "RX"],
+      files: [new File(["dwg"], "sample.dwg")],
+      runDeliverable: false,
+    });
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("params_json")).toBe(
+      JSON.stringify({
+        source_project_no: "2016",
+        source_island_no: "1",
+        target_project_no: "2026",
+        target_island_no: "2",
+        unit_factory_codes: ["HL", "RX"],
+        run_deliverable: false,
+      }),
+    );
   });
 
   it("creates replace-plus-deliverable groups with deliverable_params", async () => {
@@ -519,6 +578,7 @@ describe("HttpAdapter", () => {
         source_island_no: "2",
         target_project_no: "2016",
         target_island_no: "1",
+        unit_factory_codes: [],
         run_deliverable: true,
         deliverable_params: {
           project_no: "2016",

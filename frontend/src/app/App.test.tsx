@@ -266,12 +266,13 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
   });
 
-  it("keeps entries enabled when a health probe fails but ping still succeeds", async () => {
+  it("does not escalate a health probe failure while ping still succeeds", async () => {
     mockGetHealth.mockRejectedValue(new Error("health probe reset"));
 
     render(<App />);
 
-    expect(await screen.findByText("后台业务健康异常")).toBeInTheDocument();
+    expect(await screen.findByText("后台健康检查重试中")).toBeInTheDocument();
+    expect(screen.queryByText("后台业务健康异常")).not.toBeInTheDocument();
     expect(
       screen.queryByText("后台服务连接中断，请检查后端服务或代理配置。"),
     ).not.toBeInTheDocument();

@@ -471,7 +471,10 @@ def _write_support_files(
 
     start_backend = r'''param(
     [string]$ListenHost = "127.0.0.1",
-    [int]$Port = __DEFAULT_FRONTEND_API_PORT__
+    [int]$Port = __DEFAULT_FRONTEND_API_PORT__,
+    [int]$StartupGraceSeconds = 60,
+    [int]$SupervisorIntervalSeconds = 15,
+    [int]$SupervisorFailureThreshold = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -507,6 +510,98 @@ function Write-BackendLogHeader {
     ) -join [Environment]::NewLine
     $header | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
     $header | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Get-BackendProbeHost {
+    param([string]$HostValue)
+
+    if ([string]::IsNullOrWhiteSpace($HostValue) -or $HostValue -eq "0.0.0.0" -or $HostValue -eq "::") {
+        return "127.0.0.1"
+    }
+    return $HostValue
+}
+
+function Test-BackendPing {
+    param([string]$PingUrl)
+
+    try {
+        $response = Invoke-RestMethod -Uri $PingUrl -Method Get -TimeoutSec 5 -ErrorAction Stop
+        return ($null -ne $response -and $response.ok -eq $true)
+    } catch {
+        return $false
+    }
+}
+
+function Get-BackendListenerSnapshot {
+    param([int]$BackendPort)
+
+    try {
+        $connections = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction Stop)
+    } catch {
+        return [ordered]@{
+            status = "error"
+            error = $_.Exception.Message
+            count = 0
+            listeners = @()
+        }
+    }
+
+    $listeners = @()
+    foreach ($connection in $connections) {
+        $processId = [int]$connection.OwningProcess
+        $processName = ""
+        $commandLine = ""
+        try {
+            $processInfo = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId) -ErrorAction Stop
+            $processName = [string]$processInfo.Name
+            $commandLine = [string]$processInfo.CommandLine
+        } catch {
+            $processName = ""
+            $commandLine = ""
+        }
+
+        $listeners += [ordered]@{
+            local_address = [string]$connection.LocalAddress
+            local_port = [int]$connection.LocalPort
+            process_id = $processId
+            process_name = $processName
+            command_line = $commandLine
+        }
+    }
+
+    return [ordered]@{
+        status = if ($listeners.Count -gt 0) { "pass" } else { "fail" }
+        error = ""
+        count = $listeners.Count
+        listeners = $listeners
+    }
+}
+
+function Stop-BackendProcessTree {
+    param(
+        [object]$BackendProcess,
+        [object]$ListenerSnapshot
+    )
+
+    if ($null -ne $ListenerSnapshot -and $null -ne $ListenerSnapshot.listeners) {
+        foreach ($listener in @($ListenerSnapshot.listeners)) {
+            $processId = [int]$listener.process_id
+            $commandLine = [string]$listener.command_line
+            if ($processId -gt 0 -and ($commandLine -match "API\.app\.main:create_app" -or $commandLine -match "uvicorn")) {
+                try {
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                } catch {
+                }
+            }
+        }
+    }
+
+    if ($null -ne $BackendProcess -and -not $BackendProcess.HasExited) {
+        try {
+            Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
 }
 
 Write-BackendLogHeader
@@ -559,12 +654,47 @@ try {
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
         "Starting uvicorn..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+
+        $probeHost = Get-BackendProbeHost -HostValue $ListenHost
+        $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
         $quotedPython = '"' + $python + '"'
         $quotedStdoutLog = '"' + $stdoutLog + '"'
         $quotedStderrLog = '"' + $stderrLog + '"'
         $cmdLine = "{0} -X utf8 -m uvicorn API.app.main:create_app --factory --host {1} --port {2} 1>> {3} 2>> {4}" -f $quotedPython, $ListenHost, $Port, $quotedStdoutLog, $quotedStderrLog
-        & cmd.exe /d /c $cmdLine
-        $script:backendExitCode = $LASTEXITCODE
+        $backendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", $cmdLine) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
+        ("backend-supervisor: launcher_pid={0} ping_url={1}" -f $backendProcess.Id, $pingUrl) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+
+        $failureCount = 0
+        $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
+        while (-not $backendProcess.HasExited) {
+            Start-Sleep -Seconds $SupervisorIntervalSeconds
+            if (Test-BackendPing -PingUrl $pingUrl) {
+                $failureCount = 0
+                continue
+            }
+            if ((Get-Date) -lt $startupDeadline) {
+                continue
+            }
+
+            $failureCount += 1
+            $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+            ("backend-supervisor: ping_failed count={0}/{1} listener_status={2} listener_count={3}" -f `
+                $failureCount,
+                $SupervisorFailureThreshold,
+                $listenerSnapshot.status,
+                $listenerSnapshot.count) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+
+            if ($failureCount -ge $SupervisorFailureThreshold) {
+                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
+                throw ("backend-supervisor unhealthy: ping_url={0}; consecutive_failures={1}" -f $pingUrl, $failureCount)
+            }
+        }
+
+        $script:backendExitCode = $backendProcess.ExitCode
         $exitMessage = "uvicorn exited unexpectedly. exit_code=$script:backendExitCode"
         $exitMessage | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
         throw $exitMessage
@@ -693,6 +823,7 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
     check_health = r'''param(
     [string]$Url = "http://127.0.0.1:8000/api/system/health",
     [string]$PingUrl = "http://127.0.0.1:8000/api/system/ping",
+    [int]$ApiPort = __DEFAULT_FRONTEND_API_PORT__,
     [ValidateSet("full", "deep")]
     [string]$Mode = "full"
 )
@@ -707,6 +838,77 @@ $summaryJson = Join-Path $logsDir "check_health.summary.json"
 $fullJson = Join-Path $logsDir "check_health.full.json"
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+
+function Get-BackendListenerSnapshot {
+    param([int]$BackendPort)
+
+    try {
+        $connections = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction Stop)
+    } catch {
+        return [ordered]@{
+            status = "error"
+            error = $_.Exception.Message
+            count = 0
+            listeners = @()
+        }
+    }
+
+    $listeners = @()
+    foreach ($connection in $connections) {
+        $processId = [int]$connection.OwningProcess
+        $processName = ""
+        $commandLine = ""
+        try {
+            $processInfo = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId) -ErrorAction Stop
+            $processName = [string]$processInfo.Name
+            $commandLine = [string]$processInfo.CommandLine
+        } catch {
+            $processName = ""
+            $commandLine = ""
+        }
+
+        $listeners += [ordered]@{
+            local_address = [string]$connection.LocalAddress
+            local_port = [int]$connection.LocalPort
+            process_id = $processId
+            process_name = $processName
+            command_line = $commandLine
+        }
+    }
+
+    return [ordered]@{
+        status = if ($listeners.Count -gt 0) { "pass" } else { "fail" }
+        error = ""
+        count = $listeners.Count
+        listeners = $listeners
+    }
+}
+
+function Get-BackendFailureClassification {
+    param(
+        [string]$PingStatus,
+        [string]$TaskState,
+        [object]$ListenerSnapshot
+    )
+
+    if ($PingStatus -eq "pass") {
+        return "ok"
+    }
+
+    $listenerCount = 0
+    if ($null -ne $ListenerSnapshot -and $null -ne $ListenerSnapshot.count) {
+        $listenerCount = [int]$ListenerSnapshot.count
+    }
+
+    if ($listenerCount -eq 0) {
+        if ($TaskState -eq "Running") {
+            return "task_running_but_no_backend_listener"
+        }
+        return "backend_not_listening"
+    }
+
+    return "listener_present_but_api_unreachable"
+}
 
 $deepProbe = $null
 $selectedProbe = $null
@@ -725,6 +927,14 @@ $taskEventStatus = "skip"
 $taskEventError = ""
 $taskDetails = [ordered]@{}
 $recentTaskEvents = @()
+$backendListener = [ordered]@{
+    status = "skip"
+    error = ""
+    count = 0
+    listeners = @()
+}
+$backendListenerStatus = "skip"
+$backendFailureClassification = "unknown"
 
 if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
     & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
@@ -829,6 +1039,14 @@ try {
     $apiHealthError = $_.Exception.Message
 }
 
+$backendListener = Get-BackendListenerSnapshot -BackendPort $ApiPort
+$backendListenerStatus = [string]$backendListener.status
+$taskStateForDiagnosis = if ($taskDetails.Contains("state")) { [string]$taskDetails.state } else { "" }
+$backendFailureClassification = Get-BackendFailureClassification `
+    -PingStatus $apiPingStatus `
+    -TaskState $taskStateForDiagnosis `
+    -ListenerSnapshot $backendListener
+
 $blockingIssues = @()
 $warnings = @()
 if ($null -ne $selectedProbe) {
@@ -859,6 +1077,9 @@ $summary = [ordered]@{
     task_status = $taskStatus
     task_settings_status = $taskSettingsStatus
     task_event_status = $taskEventStatus
+    backend_listener_status = $backendListenerStatus
+    backend_listener_count = $backendListener.count
+    backend_failure_classification = $backendFailureClassification
     proxy_status = $proxyStatus
     summary_json = $summaryJson
     full_json = $fullJson
@@ -877,6 +1098,11 @@ $fullReport = [ordered]@{
         error = $taskEventError
         recent_task_events = $recentTaskEvents
     }
+    backend_runtime = [ordered]@{
+        status = if ($apiPingStatus -eq "pass" -and $backendListenerStatus -eq "pass") { "pass" } else { "fail" }
+        failure_classification = $backendFailureClassification
+    }
+    backend_listener = $backendListener
     api = [ordered]@{
         status = $apiPingStatus
         url = $PingUrl
@@ -913,6 +1139,8 @@ Write-Host ("Warnings: " + $warnings.Count)
 Write-Host ("Scheduled task: " + $taskStatus)
 Write-Host ("Scheduled task settings: " + $taskSettingsStatus)
 Write-Host ("Scheduled task recent events: " + $taskEventStatus)
+Write-Host ("Backend listener: " + $backendListenerStatus + " (" + $backendListener.count + ")")
+Write-Host ("Backend failure classification: " + $backendFailureClassification)
 Write-Host ("API ping: " + $apiPingStatus)
 Write-Host ("API health: " + $apiHealthStatus)
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
@@ -934,6 +1162,9 @@ if ($apiHealthStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiHealt
 Write-Host ("Summary JSON: " + $summaryJson)
 Write-Host ("Full JSON: " + $fullJson)
 '''
+    check_health = check_health.replace(
+        "__DEFAULT_FRONTEND_API_PORT__", str(int(deployment.default_frontend_api_port))
+    )
     _write_text(output_root / "scripts" / "check_health.ps1", check_health)
 
     install_runtime = r'''$ErrorActionPreference = "Stop"

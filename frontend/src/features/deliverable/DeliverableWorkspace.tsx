@@ -49,6 +49,7 @@ type DeliverableWorkspaceProps = {
     sourceIslandNo: string;
     targetProjectNo: string;
     targetIslandNo: string;
+    unitFactoryCodes?: readonly string[];
     runDeliverable: boolean;
   } | null;
   onBatchCreated: (payload: CreateBatchPayload) => void;
@@ -354,6 +355,7 @@ export function DeliverableWorkspace({
                 sourceIslandNo: pendingReplaceConfig.sourceIslandNo,
                 targetProjectNo: pendingReplaceConfig.targetProjectNo,
                 targetIslandNo: pendingReplaceConfig.targetIslandNo,
+                unitFactoryCodes: pendingReplaceConfig.unitFactoryCodes ?? [],
                 files: draft.files,
                 runDeliverable: true,
                 deliverableParams: submissionValues,
@@ -2223,6 +2225,7 @@ function applyFilesToDraft(
   const replaceTargetProjectNo = pendingReplaceConfig?.runDeliverable
     ? pendingReplaceConfig.targetProjectNo.trim()
     : "";
+  const unitFactoryCodes = pendingReplaceConfig?.unitFactoryCodes ?? draft.replaceConfig.unitFactoryCodes;
   const shouldAutofillProjectNo =
     !currentProjectNo ||
     currentProjectNo === draft.inference.primaryProjectNo ||
@@ -2261,6 +2264,7 @@ function applyFilesToDraft(
       sourceIslandNo: pendingReplaceConfig?.sourceIslandNo ?? draft.replaceConfig.sourceIslandNo,
       targetProjectNo: replaceTargetProjectNo,
       targetIslandNo: pendingReplaceConfig?.targetIslandNo ?? draft.replaceConfig.targetIslandNo,
+      ...(unitFactoryCodes ? { unitFactoryCodes } : {}),
     },
   };
 }

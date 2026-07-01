@@ -17,7 +17,7 @@ from ..audit_check.matcher import AuditMatchEngine
 from ..audit_check.roi_mapper import AuditFieldContextMapper
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
 from ..cad.dwg_version import detect_dwg_version_code_or_none
-from ..config import get_config, load_spec
+from ..config import get_config, load_mechanism_spec, load_spec, normalize_audit_replace_factory_codes
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
 from ..workload.calculator import WorkloadCalculator
@@ -33,6 +33,7 @@ def derive_replaced_dwg_filename(
     target_project_no: str,
     source_unit_no: str | None = None,
     target_unit_no: str | None = None,
+    unit_factory_codes: list[str] | None = None,
 ) -> str:
     path = Path(str(source_name or "").strip() or "replaced.dwg")
     suffix = path.suffix or ".dwg"
@@ -47,6 +48,7 @@ def derive_replaced_dwg_filename(
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         return f"{replaced_stem}{suffix}"
     return f"{stem}——{target_project_no}{suffix}"
@@ -63,6 +65,7 @@ def rewrite_target_unit_text(
     target_project_no: str,
     source_unit_no: str | None,
     target_unit_no: str | None,
+    unit_factory_codes: list[str] | None = None,
 ) -> str:
     source_unit = normalize_unit_no(source_unit_no)
     target_unit = normalize_unit_no(target_unit_no)
@@ -71,13 +74,17 @@ def rewrite_target_unit_text(
 
     updated = text
     target_project_no = str(target_project_no or "").strip()
-    if target_project_no:
+    factory_code_alternation = _factory_code_alternation(unit_factory_codes)
+    if target_project_no and factory_code_alternation:
         code_pattern = re.compile(
             rf"(?<!\d)({re.escape(target_project_no)}){re.escape(source_unit)}"
-            r"(?P<rest>[A-Z0-9]{2,4}-[A-Z]{3}\d{2}(?:-\d{3})?)",
+            rf"(?P<factory_code>{factory_code_alternation})(?P<rest>-[A-Z]{{3}}\d{{2}}(?:-\d{{3}})?)",
             re.IGNORECASE,
         )
-        updated = code_pattern.sub(lambda match: f"{match.group(1)}{target_unit}{match.group('rest')}", updated)
+        updated = code_pattern.sub(
+            lambda match: f"{match.group(1)}{target_unit}{match.group('factory_code')}{match.group('rest')}",
+            updated,
+        )
 
     explicit_unit_pattern = re.compile(
         rf"{re.escape(source_unit)}(?P<suffix>\s*号\s*(?:机\s*组|岛))",
@@ -85,16 +92,17 @@ def rewrite_target_unit_text(
     )
     updated = explicit_unit_pattern.sub(lambda match: f"{target_unit}{match.group('suffix')}", updated)
 
+    if not factory_code_alternation:
+        return updated
+
     short_factory_pattern = re.compile(
-        rf"(?<![A-Z0-9]){re.escape(source_unit)}"
-        r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
-        r"(?![A-Z0-9])",
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>{factory_code_alternation})(?![A-Z0-9])",
         re.IGNORECASE,
     )
     updated = short_factory_pattern.sub(lambda match: f"{target_unit}{match.group('factory_code')}", updated)
 
     embedded_factory_prefix_pattern = re.compile(
-        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>[A-Z]{{2}})(?=\d)",
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>{factory_code_alternation})(?=\d)",
         re.IGNORECASE,
     )
     updated = embedded_factory_prefix_pattern.sub(
@@ -104,13 +112,22 @@ def rewrite_target_unit_text(
 
     prefixed_external_code_pattern = re.compile(
         rf"(?<![A-Z0-9])(?P<prefix>[A-Z]{{1,4}}){re.escape(source_unit)}"
-        r"(?P<factory_code>[A-Z]{2})(?=[A-Z0-9])",
+        rf"(?P<factory_code>{factory_code_alternation})(?=[A-Z0-9])",
         re.IGNORECASE,
     )
     return prefixed_external_code_pattern.sub(
         lambda match: f"{match.group('prefix')}{target_unit}{match.group('factory_code')}",
         updated,
     )
+
+
+def _factory_code_alternation(unit_factory_codes: list[str] | None) -> str:
+    codes = normalize_audit_replace_factory_codes(
+        unit_factory_codes
+        if unit_factory_codes is not None
+        else load_mechanism_spec().audit_replace.unit_factory_codes,
+    )
+    return "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
 
 
 class AuditReplaceExecutor:
@@ -142,6 +159,7 @@ class AuditReplaceExecutor:
             raise ValueError("source_project_no and target_project_no are required for replace")
         source_unit_no = self._factory_index_source_variant(job.params)
         target_unit_no = self._factory_index_target_variant(job.params)
+        unit_factory_codes = self._unit_factory_codes(job.params)
 
         job.mark_running(stage="AUDIT_REPLACE")
         job.progress.message = "replacing"
@@ -192,6 +210,7 @@ class AuditReplaceExecutor:
             mapping,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         replace_entries.extend(
             self._build_external_code_prefix_entries(
@@ -207,6 +226,7 @@ class AuditReplaceExecutor:
                 existing_entries=replace_entries,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
         )
         postprocess_config = self._replace_postprocess_config()
@@ -241,6 +261,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
 
         converted_dir = replace_dir / "converted"
@@ -278,6 +299,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
         replaced_dwg = job.work_dir / derive_replaced_dwg_filename(
             source_name=source_display_name,
@@ -285,6 +307,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         replaced_dwg.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(final_dwg, replaced_dwg)
@@ -346,6 +369,21 @@ class AuditReplaceExecutor:
             if legacy_name not in names:
                 names.append(legacy_name)
         return self._factory_index_variant_from_params(params, names)
+
+    @staticmethod
+    def _unit_factory_codes(params: dict[str, Any]) -> list[str]:
+        if "unit_factory_codes" not in params:
+            return normalize_audit_replace_factory_codes(
+                load_mechanism_spec().audit_replace.unit_factory_codes,
+            )
+        raw = params.get("unit_factory_codes")
+        if isinstance(raw, str):
+            values = re.split(r"[\s,，;；、]+", raw)
+        elif isinstance(raw, (list, tuple, set)):
+            values = list(raw)
+        else:
+            values = []
+        return normalize_audit_replace_factory_codes(values)
 
     def _should_skip_factory_index_for_unit_without_template(
         self,
@@ -446,6 +484,7 @@ class AuditReplaceExecutor:
         *,
         source_unit_no: str | None = None,
         target_unit_no: str | None = None,
+        unit_factory_codes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         seen_pairs: set[tuple[str | None, str]] = set()
@@ -467,6 +506,7 @@ class AuditReplaceExecutor:
                     target_project_no=mapping.target_project_no,
                     source_unit_no=source_unit_no,
                     target_unit_no=target_unit_no,
+                    unit_factory_codes=unit_factory_codes,
                 )
                 if replacement_text == finding.matched_text:
                     status = "skipped_unmapped"
@@ -592,6 +632,7 @@ class AuditReplaceExecutor:
         existing_entries: list[dict[str, Any]],
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         source_unit = normalize_unit_no(source_unit_no)
         target_unit = normalize_unit_no(target_unit_no)
@@ -619,6 +660,7 @@ class AuditReplaceExecutor:
                 target_project_no=mapping.target_project_no,
                 source_unit_no=source_unit,
                 target_unit_no=target_unit,
+                unit_factory_codes=unit_factory_codes,
             ).upper()
             if rewritten_code == code.upper() or len(rewritten_code) != len(normalized_chars):
                 continue
@@ -902,6 +944,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None = None,
         target_unit_no: str | None = None,
+        unit_factory_codes: list[str] | None = None,
     ) -> None:
         doc = ezdxf.readfile(source_dxf)
         pending_by_handle: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -933,6 +976,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
 
             if updated_text == current_text:
@@ -953,6 +997,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
 
         output_dxf.parent.mkdir(parents=True, exist_ok=True)
@@ -966,6 +1011,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> Path:
         source_unit = normalize_unit_no(source_unit_no)
         target_unit = normalize_unit_no(target_unit_no)
@@ -980,6 +1026,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit,
             target_unit_no=target_unit,
+            unit_factory_codes=unit_factory_codes,
         )
 
         output_source_dxf = source_dxf
@@ -1004,6 +1051,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> int:
         changed_count = 0
         for entity in list(doc.entitydb.values()):
@@ -1015,6 +1063,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
             if updated_text != current_text:
                 self._set_entity_text(entity, updated_text)

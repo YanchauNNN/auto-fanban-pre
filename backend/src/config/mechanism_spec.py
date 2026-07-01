@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ _FORBIDDEN_TOP_LEVEL_KEYS = {
     "doc_generation",
     "titleblock_extract",
 }
+_FACTORY_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]{1,3}$")
 
 
 class PermissionsConfig(BaseModel):
@@ -78,6 +80,10 @@ class ProjectInferenceConfig(BaseModel):
         r"(?P<project_no>\d{4})(?P<unit_no>[0-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})"
     )
     default_project_no: str = "2016"
+
+
+class AuditReplaceMechanismConfig(BaseModel):
+    unit_factory_codes: list[str] = Field(default_factory=list)
 
 
 class ApiRuntimeMechanismConfig(BaseModel):
@@ -189,6 +195,7 @@ class BackendMechanismConfig(BaseModel):
     archive_defaults: ArchiveDefaultsConfig = Field(default_factory=ArchiveDefaultsConfig)
     workload_settlement: WorkloadSettlementConfig = Field(default_factory=WorkloadSettlementConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
+    audit_replace: AuditReplaceMechanismConfig = Field(default_factory=AuditReplaceMechanismConfig)
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
     api_runtime: ApiRuntimeMechanismConfig = Field(default_factory=ApiRuntimeMechanismConfig)
     cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(default_factory=CadRuntimeMechanismConfig)
@@ -215,6 +222,10 @@ class MechanismSpec(BaseModel):
     @property
     def audit_display(self) -> AuditDisplayConfig:
         return self.backend_mechanism.audit_display
+
+    @property
+    def audit_replace(self) -> AuditReplaceMechanismConfig:
+        return self.backend_mechanism.audit_replace
 
     @property
     def project_inference(self) -> ProjectInferenceConfig:
@@ -269,6 +280,32 @@ def load_mechanism_spec(spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH) -> 
     return MechanismSpecLoader.load(spec_path)
 
 
+def normalize_audit_replace_factory_codes(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        code = str(value or "").strip().upper()
+        if not code or code in seen or not _FACTORY_CODE_RE.fullmatch(code):
+            continue
+        seen.add(code)
+        normalized.append(code)
+    return normalized
+
+
+def append_audit_replace_factory_codes(
+    values: list[str] | tuple[str, ...] | set[str],
+    *,
+    spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH,
+) -> list[str]:
+    path = _resolve_mechanism_spec_path(spec_path)
+    existing = normalize_audit_replace_factory_codes(load_mechanism_spec(path).audit_replace.unit_factory_codes)
+    updated = normalize_audit_replace_factory_codes([*existing, *values])
+    if updated != existing:
+        _write_audit_replace_factory_codes(path, updated)
+        MechanismSpecLoader.clear_cache()
+    return updated
+
+
 def _resolve_mechanism_spec_path(spec_path: str | Path) -> Path:
     path = Path(spec_path)
     if path == DEFAULT_MECHANISM_SPEC_PATH:
@@ -286,6 +323,97 @@ def _resolve_mechanism_spec_path(spec_path: str | Path) -> Path:
         except Exception:
             pass
     return path
+
+
+def _write_audit_replace_factory_codes(path: Path, values: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(
+            "schema_version: '1.0'\n"
+            "backend_mechanism:\n"
+            "  audit_replace:\n"
+            "    unit_factory_codes:\n"
+            + "".join(f'      - "{value}"\n' for value in values),
+            encoding="utf-8",
+        )
+        return
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    backend_index = _find_yaml_key(lines, "backend_mechanism", 0, 0, len(lines))
+    if backend_index is None:
+        lines.extend(["backend_mechanism:"])
+        backend_index = len(lines) - 1
+
+    backend_end = _find_yaml_block_end(lines, backend_index, 0)
+    audit_index = _find_yaml_key(lines, "audit_replace", 2, backend_index + 1, backend_end)
+    if audit_index is None:
+        insert_at = backend_index + 1
+        lines[insert_at:insert_at] = _factory_code_yaml_block(values, include_parent=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+
+    audit_end = _find_yaml_block_end(lines, audit_index, 2)
+    codes_index = _find_yaml_key(lines, "unit_factory_codes", 4, audit_index + 1, audit_end)
+    replacement = _factory_code_yaml_block(values, include_parent=False)
+    if codes_index is None:
+        lines[audit_index + 1:audit_index + 1] = replacement
+    else:
+        codes_end = _find_yaml_sequence_block_end(lines, codes_index, 4)
+        lines[codes_index:codes_end] = replacement
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _factory_code_yaml_block(values: list[str], *, include_parent: bool) -> list[str]:
+    lines = ["  audit_replace:"] if include_parent else []
+    lines.append("    unit_factory_codes:")
+    lines.extend(f'      - "{value}"' for value in values)
+    return lines
+
+
+def _find_yaml_key(
+    lines: list[str],
+    key: str,
+    indent: int,
+    start: int,
+    end: int,
+) -> int | None:
+    prefix = " " * indent + f"{key}:"
+    for index in range(start, min(end, len(lines))):
+        stripped = lines[index].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if lines[index].startswith(prefix):
+            return index
+    return None
+
+
+def _find_yaml_block_end(lines: list[str], start_index: int, indent: int) -> int:
+    for index in range(start_index + 1, len(lines)):
+        stripped = lines[index].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if _yaml_indent(lines[index]) <= indent:
+            return index
+    return len(lines)
+
+
+def _find_yaml_sequence_block_end(lines: list[str], start_index: int, indent: int) -> int:
+    for index in range(start_index + 1, len(lines)):
+        stripped = lines[index].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        current_indent = _yaml_indent(lines[index])
+        if current_indent < indent:
+            return index
+        if current_indent == indent and stripped.startswith("- "):
+            continue
+        if current_indent <= indent:
+            return index
+    return len(lines)
+
+
+def _yaml_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
 
 
 def _cache_key(path: Path) -> str:

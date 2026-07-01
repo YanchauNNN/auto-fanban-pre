@@ -72,6 +72,7 @@ function createAdapter(): ApiAdapter {
     createBatch: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    rememberAuditReplaceFactoryCodes: vi.fn().mockResolvedValue({ factoryCodes: [] }),
     createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
     getJobDetail: vi.fn(),
@@ -334,6 +335,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "1915",
         targetIslandNo: "2",
+        unitFactoryCodes: [],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -376,6 +378,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "2026",
         targetIslandNo: "2",
+        unitFactoryCodes: [],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -463,9 +466,65 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "2",
         targetProjectNo: "1907",
         targetIslandNo: "7",
+        unitFactoryCodes: [],
         files: expect.any(Array),
         runDeliverable: false,
       });
+    });
+  });
+
+  it("remembers typed factory codes and submits them with replace params", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditReplace = vi.fn().mockResolvedValue({
+      batchId: "batch-replace-factory-codes",
+      jobs: [],
+    });
+    adapter.rememberAuditReplaceFactoryCodes = vi.fn().mockResolvedValue({
+      factoryCodes: ["RC", "HL", "RX"],
+    });
+    const schemaWithFactoryCodes = {
+      ...schema,
+      auditReplaceUnitFactoryCodes: ["RC"],
+    } as unknown as FormSchema;
+
+    render(
+      <ReplaceWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithFactoryCodes}
+      />,
+    );
+
+    expect(screen.getByLabelText("涉及厂房代码")).toBeInTheDocument();
+    expect(screen.getByText("RC")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("原始项目号"), "2026");
+    await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "1");
+    await user.type(screen.getByLabelText("目标项目号"), "2026");
+    await user.type(screen.getByLabelText("目标机组号/岛号"), "2");
+    await user.type(screen.getByLabelText("涉及厂房代码"), "HL, RX");
+    await user.upload(
+      screen.getByTestId("replace-file-input"),
+      new File(["dwg"], "20261HL-JGS01-A.dwg", { type: "application/acad" }),
+    );
+    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+
+    await waitFor(() => {
+      expect(adapter.rememberAuditReplaceFactoryCodes).toHaveBeenCalledWith(["HL", "RX"]);
+    });
+    expect(adapter.createAuditReplace).toHaveBeenCalledWith({
+      sourceProjectNo: "2026",
+      sourceIslandNo: "1",
+      targetProjectNo: "2026",
+      targetIslandNo: "2",
+      unitFactoryCodes: ["HL", "RX"],
+      files: expect.any(Array),
+      runDeliverable: false,
     });
   });
 
@@ -622,6 +681,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "2",
         targetProjectNo: "1916",
         targetIslandNo: "3",
+        unitFactoryCodes: [],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -666,6 +726,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "1916",
         targetIslandNo: "3",
+        unitFactoryCodes: [],
         runDeliverable: true,
       },
     });

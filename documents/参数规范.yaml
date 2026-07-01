@@ -424,10 +424,11 @@ doc_generation:
       desc: "目录外部编码(第9-11位替换为T01)"
     
     # === 标题派生 ===
-    cover_title_cn:   { from: album_title_cn, transform: "append('封面')" }
+    cover_title_cn:   { from: album_title_cn, transform: "append('图册封面')" }
     catalog_title_cn: { from: album_title_cn, transform: "append('目录')" }
     cover_title_en:   { from: album_title_en, transform: "append(' Cover')", when: "project_no == '1818'" }
     catalog_title_en: { from: album_title_en, transform: "append(' Contents')", when: "project_no == '1818'" }
+    cover_file_stem_fallback: { value: "图册封面", desc: "封面 Word/PDF 在缺少内外部编码时使用的文件名主干" }
     
     # === 阶段派生 ===
     design_phase:

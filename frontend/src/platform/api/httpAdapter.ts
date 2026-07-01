@@ -271,6 +271,7 @@ type RawFormSchema = {
     project_units?: Record<string, string[]>;
     source_unit_options?: Record<string, { value: string; label: string }[]>;
     target_unit_options?: Record<string, { value: string; label: string }[]>;
+    unit_factory_codes?: string[];
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;
@@ -339,6 +340,20 @@ export class HttpAdapter implements ApiAdapter {
       retry: true,
     });
     return normalizeFormSchema(payload);
+  }
+
+  async rememberAuditReplaceFactoryCodes(
+    codes: readonly string[],
+  ): Promise<{ factoryCodes: readonly string[] }> {
+    const payload = await this.fetchJson<{ factory_codes: string[] }>(
+      "/api/meta/audit-replace/factory-codes",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codes }),
+      },
+    );
+    return { factoryCodes: payload.factory_codes ?? [] };
   }
 
   async preflightFonts(files: File[]): Promise<FontPreflightResult> {
@@ -461,11 +476,17 @@ export class HttpAdapter implements ApiAdapter {
     sourceIslandNo,
     targetProjectNo,
     targetIslandNo,
+    unitFactoryCodes,
     files,
     runDeliverable,
     deliverableParams,
   }: CreateAuditReplaceParams): Promise<CreateBatchPayload> {
     const formData = new FormData();
+    const normalizedUnitFactoryCodes = [...new Set(
+      (unitFactoryCodes ?? [])
+        .map((code) => code.trim().toUpperCase())
+        .filter((code) => /^[A-Z][A-Z0-9]{1,3}$/.test(code)),
+    )];
     formData.append("mode", "replace");
     formData.append(
       "params_json",
@@ -474,6 +495,7 @@ export class HttpAdapter implements ApiAdapter {
         ...(sourceIslandNo ? { source_island_no: sourceIslandNo } : {}),
         target_project_no: targetProjectNo,
         ...(targetIslandNo ? { target_island_no: targetIslandNo } : {}),
+        unit_factory_codes: normalizedUnitFactoryCodes,
         run_deliverable: runDeliverable,
         ...(runDeliverable && deliverableParams
           ? { deliverable_params: deliverableParams }

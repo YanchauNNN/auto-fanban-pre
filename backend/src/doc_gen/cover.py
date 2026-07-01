@@ -134,8 +134,13 @@ class CoverGenerator(ICoverGenerator):
             revision=ctx.get_cover_catalog_revision(),
             status=ctx.params.doc_status,
             internal_code=ctx.derived.cover_internal_code,
-            fallback_name="封面",
+            fallback_name=self._fallback_output_stem(),
         )
+
+    def _fallback_output_stem(self) -> str:
+        rule = self.spec.get_derivation_rules().get("cover_file_stem_fallback", {})
+        value = str(rule.get("value") or "").strip() if isinstance(rule, dict) else ""
+        return value or "图册封面"
 
     def _get_template_path(self, ctx: DocContext) -> str:
         """获取模板路径"""

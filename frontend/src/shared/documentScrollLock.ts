@@ -1,5 +1,6 @@
 let bodyLockCount = 0;
 let previousBodyOverflow: string | null = null;
+let previousDocumentElementOverflow: string | null = null;
 
 export function lockBodyScroll() {
   if (typeof document === "undefined") {
@@ -8,7 +9,9 @@ export function lockBodyScroll() {
 
   if (bodyLockCount === 0) {
     previousBodyOverflow = document.body.style.overflow;
+    previousDocumentElementOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
   }
 
   bodyLockCount += 1;
@@ -24,7 +27,9 @@ export function lockBodyScroll() {
 
     if (bodyLockCount === 0) {
       document.body.style.overflow = previousBodyOverflow ?? "";
+      document.documentElement.style.overflow = previousDocumentElementOverflow ?? "";
       previousBodyOverflow = null;
+      previousDocumentElementOverflow = null;
     }
   };
 }

@@ -259,3 +259,34 @@ def test_generate_cover_uses_external_code_revision_status_filename(
     assert output_pdf == temp_dir / f"{expected_stem}.pdf"
     assert recorded["docx"] == output_docx
     assert recorded["pdf"] == output_pdf
+
+
+def test_generate_cover_uses_configured_album_cover_fallback_filename(
+    temp_dir: Path,
+    monkeypatch,
+) -> None:
+    gen = CoverGenerator()
+    ctx = _build_cover_context()
+    ctx.derived.cover_external_code = None
+    ctx.derived.cover_internal_code = None
+    recorded: dict[str, Path] = {}
+
+    def fake_write_cover(self, template_path, output_path, bindings, data, ctx):  # noqa: ANN001
+        output_path.write_bytes(b"docx")
+        recorded["docx"] = output_path
+
+    monkeypatch.setattr(CoverGenerator, "_write_cover", fake_write_cover)
+
+    class FakePDFExporter:
+        def export_docx_to_pdf(self, docx_path: Path, pdf_path: Path) -> None:
+            pdf_path.write_bytes(b"pdf")
+            recorded["pdf"] = pdf_path
+
+    gen.pdf_exporter = cast(IPDFExporter, FakePDFExporter())
+
+    output_docx, output_pdf = gen.generate(ctx, temp_dir)
+
+    assert output_docx == temp_dir / "\u56fe\u518c\u5c01\u9762.docx"
+    assert output_pdf == temp_dir / "\u56fe\u518c\u5c01\u9762.pdf"
+    assert recorded["docx"] == output_docx
+    assert recorded["pdf"] == output_pdf

@@ -67,6 +67,7 @@ const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const JOBS_MODAL_PAGE_SIZE = 50;
 const BACKEND_CONNECTION_INTERRUPTED_MESSAGE = "后台服务连接中断，请检查后端服务或代理配置。";
 const BACKEND_BUSINESS_HEALTH_WARNING_MESSAGE = "后台业务健康异常";
+const BACKEND_HEALTH_PROBE_RETRYING_MESSAGE = "后台健康检查重试中";
 const CONNECTION_REFETCH_INTERVAL_MS = 12000;
 const CONNECTION_RETRY_COUNT = 2;
 const CONNECTION_RECENT_SUCCESS_GRACE_MS = 60000;
@@ -452,6 +453,7 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  rememberAuditReplaceFactoryCodes: async () => ({ factoryCodes: [] }),
   listJobs: async () => ({
     total: 1,
     items: [TUTORIAL_GROUP_SUMMARY],
@@ -598,8 +600,10 @@ function WorkspacePage() {
     connectionQuery.isError &&
     connectionQuery.failureCount > CONNECTION_RETRY_COUNT &&
     !hasRecentConnectionSuccess;
+  const backendHealthProbeRetrying =
+    !backendConnectionInterrupted && healthQuery.isError && hasRecentConnectionSuccess;
   const backendBusinessHealthWarning =
-    !backendConnectionInterrupted && (healthQuery.isError || healthQuery.data?.ready === false);
+    !backendConnectionInterrupted && healthQuery.data?.ready === false;
   const entryActionsDisabled = !actionsReady || backendConnectionInterrupted;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
@@ -898,6 +902,10 @@ function WorkspacePage() {
             </div>
             {backendConnectionInterrupted ? (
               <p className={styles.titleStripHealthWarning}>后台连接不可达</p>
+            ) : backendHealthProbeRetrying ? (
+              <p className={styles.titleStripHealthLoading}>
+                {BACKEND_HEALTH_PROBE_RETRYING_MESSAGE}
+              </p>
             ) : backendBusinessHealthWarning ? (
               <>
                 <p className={styles.titleStripHealthWarning}>

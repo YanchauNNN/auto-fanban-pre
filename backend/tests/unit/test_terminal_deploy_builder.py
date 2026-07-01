@@ -424,10 +424,15 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert '$logsDir = Join-Path $root "logs"' in start_backend
     assert 'backend-stdout-' in start_backend
     assert 'backend-stderr-' in start_backend
-    assert '$script:backendExitCode = $LASTEXITCODE' in start_backend
     assert 'backend-latest-stderr.log' in start_backend
-    assert '$cmdLine = ' in start_backend
-    assert '& cmd.exe /d /c $cmdLine' in start_backend
+    assert "Start-Process" in start_backend
+    assert 'Start-Process -FilePath "cmd.exe"' in start_backend
+    assert "Test-BackendPing" in start_backend
+    assert "Get-BackendListenerSnapshot" in start_backend
+    assert "Stop-BackendProcessTree" in start_backend
+    assert "SupervisorFailureThreshold" in start_backend
+    assert "backend-supervisor" in start_backend
+    assert '& cmd.exe /d /c $cmdLine' not in start_backend
     assert '& $python -X utf8 -m uvicorn' not in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
@@ -454,6 +459,11 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "execution_time_limit" in check_health
     assert "restart_count" in check_health
     assert "restart_interval" in check_health
+    assert "backend_listener_status" in check_health
+    assert "backend_failure_classification" in check_health
+    assert "task_running_but_no_backend_listener" in check_health
+    assert "Get-NetTCPConnection" in check_health
+    assert "Win32_Process" in check_health
     assert "recent_task_events" in check_health
     assert "Get-WinEvent" in check_health
     assert "Microsoft-Windows-TaskScheduler/Operational" in check_health

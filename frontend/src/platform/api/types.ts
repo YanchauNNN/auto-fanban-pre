@@ -40,6 +40,7 @@ export type FormSchema = {
   auditReplaceProjectUnits?: Record<string, readonly string[]>;
   auditReplaceSourceUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
   auditReplaceTargetUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
+  auditReplaceUnitFactoryCodes?: readonly string[];
   auditReplaceFactoryIndexMaps?: {
     sourceVariantOptions: Record<string, readonly string[]>;
     targetVariantOptions: Record<string, readonly string[]>;
@@ -220,6 +221,7 @@ export type CreateAuditReplaceParams = {
   sourceIslandNo?: string | null;
   targetProjectNo: string;
   targetIslandNo?: string | null;
+  unitFactoryCodes?: readonly string[];
   files: File[];
   runDeliverable: boolean;
   deliverableParams?: SubmissionParams;
@@ -325,6 +327,7 @@ export type ReplaceTaskConfig = {
   sourceIslandNo: string;
   targetProjectNo: string;
   targetIslandNo: string;
+  unitFactoryCodes?: readonly string[];
 };
 
 export type TaskConfigPreset = {
@@ -380,6 +383,9 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
+  rememberAuditReplaceFactoryCodes: (
+    codes: readonly string[],
+  ) => Promise<{ factoryCodes: readonly string[] }>;
   listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };
