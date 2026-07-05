@@ -284,6 +284,124 @@ runtime_options:
 
         assert restored.concurrency.max_workers == 2
 
+    def test_runtime_spec_path_resolves_from_backend_runtime_cwd(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """部署环境手动启动 uvicorn 时，应从 backend-runtime 上一级读取 documents。"""
+        from src.config.runtime_config import _resolve_runtime_spec_path
+
+        deploy_root = tmp_path / "FanBanServer"
+        backend_runtime = deploy_root / "backend-runtime"
+        backend_runtime.mkdir(parents=True)
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text("runtime_options: {}\n", encoding="utf-8")
+
+        monkeypatch.chdir(backend_runtime)
+        monkeypatch.delenv("FANBAN_RUNTIME_SPEC_PATH", raising=False)
+
+        assert _resolve_runtime_spec_path().resolve() == runtime_spec.resolve()
+
+    def test_runtime_config_prefers_backend_runtime_cad_paths_in_deploy_layout(
+        self,
+        tmp_path: Path,
+    ):
+        """部署包中 CAD 脚本和 Bridge DLL 应优先解析到 backend-runtime。"""
+        deploy_root = tmp_path / "FanBanServer"
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        script_dir = deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "scripts"
+        script_dir.mkdir(parents=True)
+        bridge_dll = (
+            deploy_root
+            / "backend-runtime"
+            / "backend"
+            / "src"
+            / "cad"
+            / "dotnet"
+            / "Module5CadBridge"
+            / "bin"
+            / "Release"
+            / "net48"
+            / "Module5CadBridge.dll"
+        )
+        bridge_dll.parent.mkdir(parents=True)
+        bridge_dll.write_bytes(b"fake")
+        runtime_spec.write_text(
+            r"""
+runtime_options:
+  module5_export:
+    cad_runner:
+      script_dir:
+        type: str
+        default: '..\backend\src\cad\scripts'
+    dotnet_bridge:
+      dll_path:
+        type: str
+        default: '..\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll'
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert Path(config.module5_export.cad_runner.script_dir) == script_dir.resolve()
+        assert Path(config.module5_export.dotnet_bridge.dll_path) == bridge_dll.resolve()
+
+    def test_runtime_config_corrects_stale_absolute_backend_src_cad_env(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """旧 runtime.env 写死 backend/src/cad 时，应改用部署包 backend-runtime 资源。"""
+        deploy_root = tmp_path / "FanBanServer"
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        script_dir = deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "scripts"
+        script_dir.mkdir(parents=True)
+        bridge_dll = (
+            deploy_root
+            / "backend-runtime"
+            / "backend"
+            / "src"
+            / "cad"
+            / "dotnet"
+            / "Module5CadBridge"
+            / "bin"
+            / "Release"
+            / "net48"
+            / "Module5CadBridge.dll"
+        )
+        bridge_dll.parent.mkdir(parents=True)
+        bridge_dll.write_bytes(b"fake")
+        runtime_spec.write_text("runtime_options: {}\n", encoding="utf-8")
+        monkeypatch.setenv(
+            "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR",
+            str(deploy_root / "backend" / "src" / "cad" / "scripts"),
+        )
+        monkeypatch.setenv(
+            "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH",
+            str(
+                deploy_root
+                / "backend"
+                / "src"
+                / "cad"
+                / "dotnet"
+                / "Module5CadBridge"
+                / "bin"
+                / "Release"
+                / "net48"
+                / "Module5CadBridge.dll",
+            ),
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert Path(config.module5_export.cad_runner.script_dir) == script_dir.resolve()
+        assert Path(config.module5_export.dotnet_bridge.dll_path) == bridge_dll.resolve()
+
     def test_runtime_config_resolves_audit_lexicon_path_from_repo_root_sibling(
         self,
         tmp_path: Path,

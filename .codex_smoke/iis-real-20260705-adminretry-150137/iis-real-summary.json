@@ -1,0 +1,79 @@
+﻿{
+    "generated_at":  "2026-07-05T15:05:20",
+    "target_root":  "D:\\FanBanServer",
+    "run_root":  "E:\\project\\auto-fanban-pre\\.codex_smoke\\iis-real-20260705-adminretry-150137",
+    "steps":  [
+                  {
+                      "name":  "admin_check",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:03:24"
+                  },
+                  {
+                      "name":  "validate_target",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:03:24"
+                  },
+                  {
+                      "name":  "enable_iis_features",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:17"
+                  },
+                  {
+                      "name":  "import_webadministration",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:17"
+                  },
+                  {
+                      "name":  "install_url_rewrite_arr",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:24"
+                  },
+                  {
+                      "name":  "check_iis_prereqs_after_install",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:24"
+                  },
+                  {
+                      "name":  "free_default_port80_binding",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:24"
+                  },
+                  {
+                      "name":  "configure_fanban_iis_site_port80",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:27"
+                  },
+                  {
+                      "name":  "open_firewall_port80",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:29"
+                  },
+                  {
+                      "name":  "ensure_backend_task_running",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:31"
+                  },
+                  {
+                      "name":  "iis_http_smoke",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:04:33"
+                  },
+                  {
+                      "name":  "check_health_after_iis",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-05T15:05:20"
+                  }
+              ]
+}

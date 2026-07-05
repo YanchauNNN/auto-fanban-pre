@@ -28,6 +28,14 @@ STALE_RUNTIME_PTH_FILES = (
     "_editable_impl_auto_fanban.pth",
     "a1_coverage.pth",
 )
+DEPLOY_IGNORE_PATTERNS = (
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    "*.lscache",
+    ".build_packages",
+    "~$*",
+)
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
 DELTA_MANIFEST = "delta-manifest.json"
@@ -190,7 +198,7 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
             shutil.rmtree(target)
         ignore = None
         if entry.destination != PYTHON_PACKAGES_DEST:
-            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.lscache", ".build_packages")
+            ignore = shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS)
         shutil.copytree(
             entry.source,
             target,
@@ -474,7 +482,8 @@ def _write_support_files(
     [int]$Port = __DEFAULT_FRONTEND_API_PORT__,
     [int]$StartupGraceSeconds = 60,
     [int]$SupervisorIntervalSeconds = 15,
-    [int]$SupervisorFailureThreshold = 3
+    [int]$SupervisorFailureThreshold = 3,
+    [int]$RestartDelaySeconds = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -488,6 +497,7 @@ $stderrLog = Join-Path $logsDir ("backend-stderr-{0}.log" -f $runStamp)
 $latestStdoutLog = Join-Path $logsDir "backend-latest-stdout.log"
 $latestStderrLog = Join-Path $logsDir "backend-latest-stderr.log"
 $script:backendExitCode = 0
+$script:stopSupervisor = $false
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
@@ -501,15 +511,145 @@ function Update-LatestBackendLogs {
 }
 
 function Write-BackendLogHeader {
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $scriptHash = ""
+    if ($scriptPath -and (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        try {
+            $scriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash
+        } catch {
+            $scriptHash = "<hash-error: $($_.Exception.Message)>"
+        }
+    }
     $header = @(
         "FanBanBackend start: " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"),
         "Root: $root",
         "Listen: $ListenHost`:$Port",
         "Python: $python",
+        "backend-start-script: path=$scriptPath sha256=$scriptHash",
         ""
     ) -join [Environment]::NewLine
     $header | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
     $header | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Set-BackendRuntimeEnvironment {
+    param(
+        [string]$SpecPath,
+        [string]$RuntimeSpecPath,
+        [string]$MechanismSpecPath,
+        [string]$CadScriptDir,
+        [string]$DotNetBridgeDllPath,
+        [string]$CtbName
+    )
+
+    if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $SpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $SpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $RuntimeSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $RuntimeSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $MechanismSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $MechanismSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
+    }
+
+    if (Test-Path -LiteralPath $CadScriptDir -PathType Container) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" -Value $CadScriptDir
+    }
+
+    if (Test-Path -LiteralPath $DotNetBridgeDllPath -PathType Leaf) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" -Value $DotNetBridgeDllPath
+    }
+
+    $requiredEnv = @(
+        @("FANBAN_SPEC_PATH", $env:FANBAN_SPEC_PATH),
+        @("FANBAN_RUNTIME_SPEC_PATH", $env:FANBAN_RUNTIME_SPEC_PATH),
+        @("FANBAN_MECHANISM_SPEC_PATH", $env:FANBAN_MECHANISM_SPEC_PATH),
+        @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
+        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
+    )
+    foreach ($entry in $requiredEnv) {
+        $name = [string]$entry[0]
+        $value = [string]$entry[1]
+        $pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR") { "Container" } else { "Leaf" }
+        if ([string]::IsNullOrWhiteSpace($value) -or -not (Test-Path -LiteralPath $value -PathType $pathType)) {
+            throw ("后端启动环境变量无效: {0}={1}" -f $name, $value)
+        }
+        ("backend-env: {0}={1}" -f $name, $value) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    }
+    ("backend-env: FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME={0}" -f $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Test-BackendImportPreflight {
+    param(
+        [string]$PythonPath,
+        [string]$BackendRuntimeRoot
+    )
+
+    $preflightCode = @'
+import os
+import sys
+from pathlib import Path
+
+backend_runtime_root = str(Path.cwd())
+if backend_runtime_root not in sys.path:
+    sys.path.insert(0, backend_runtime_root)
+
+required = ("FANBAN_SPEC_PATH", "FANBAN_RUNTIME_SPEC_PATH", "FANBAN_MECHANISM_SPEC_PATH")
+for name in required:
+    value = os.environ.get(name, "")
+    if not value or not Path(value).is_file():
+        raise SystemExit(f"{name} invalid: {value}")
+
+import API.app.main as main
+print("backend-import-preflight-ok", main.create_app)
+'@
+
+    $preflightPrefix = "fanban_backend_import_preflight_" + [guid]::NewGuid().ToString("N")
+    $preflightScript = Join-Path $BackendRuntimeRoot ($preflightPrefix + ".py")
+    $preflightStdout = Join-Path ([System.IO.Path]::GetTempPath()) ($preflightPrefix + ".stdout.log")
+    $preflightStderr = Join-Path ([System.IO.Path]::GetTempPath()) ($preflightPrefix + ".stderr.log")
+
+    try {
+        Set-Content -LiteralPath $preflightScript -Value $preflightCode -Encoding utf8
+        $preflightProcess = Start-Process `
+            -FilePath $PythonPath `
+            -ArgumentList @("-X", "utf8", $preflightScript) `
+            -WorkingDirectory $BackendRuntimeRoot `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $preflightStdout `
+            -RedirectStandardError $preflightStderr
+
+        foreach ($outputPath in @($preflightStdout, $preflightStderr)) {
+            if (Test-Path -LiteralPath $outputPath -PathType Leaf) {
+                Get-Content -LiteralPath $outputPath -Encoding utf8 |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+        }
+        if ($preflightProcess.ExitCode -ne 0) {
+            throw ("后端导入预检失败: exit_code={0}; cwd={1}" -f $preflightProcess.ExitCode, $BackendRuntimeRoot)
+        }
+    } finally {
+        foreach ($tempPath in @($preflightScript, $preflightStdout, $preflightStderr)) {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
 
 function Get-BackendProbeHost {
@@ -532,15 +672,45 @@ function Test-BackendPing {
     }
 }
 
+function Append-UvicornProcessLogs {
+    param(
+        [string]$UvicornStdoutLog,
+        [string]$UvicornStderrLog
+    )
+
+    foreach ($entry in @(@("stdout", $UvicornStdoutLog), @("stderr", $UvicornStderrLog))) {
+        $label = [string]$entry[0]
+        $path = [string]$entry[1]
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            ("----- uvicorn-{0}: {1} -----" -f $label, $path) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            Get-Content -LiteralPath $path -Encoding utf8 |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        } else {
+            ("----- uvicorn-{0}: missing {1} -----" -f $label, $path) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        }
+    }
+}
+
 function Get-BackendListenerSnapshot {
     param([int]$BackendPort)
 
     try {
         $connections = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction Stop)
     } catch {
+        $message = $_.Exception.Message
+        if ($message -match "找不到任何匹配|No matching|No MSFT_NetTCPConnection objects found") {
+            return [ordered]@{
+                status = "fail"
+                error = ""
+                count = 0
+                listeners = @()
+            }
+        }
         return [ordered]@{
             status = "error"
-            error = $_.Exception.Message
+            error = $message
             count = 0
             listeners = @()
         }
@@ -604,6 +774,149 @@ function Stop-BackendProcessTree {
     }
 }
 
+$script:backendProcessJobHandle = [IntPtr]::Zero
+$script:backendProcessJobTypeLoaded = $false
+
+function Ensure-BackendChildProcessJobType {
+    if ($script:backendProcessJobTypeLoaded) {
+        return
+    }
+
+    if ($null -ne ("FanBanBackendJobObject" -as [type])) {
+        $script:backendProcessJobTypeLoaded = $true
+        return
+    }
+
+    $source = @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class FanBanBackendJobObject {
+    public const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        public Int64 PerProcessUserTimeLimit;
+        public Int64 PerJobUserTimeLimit;
+        public UInt32 LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public UInt32 ActiveProcessLimit;
+        public IntPtr Affinity;
+        public UInt32 PriorityClass;
+        public UInt32 SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS {
+        public UInt64 ReadOperationCount;
+        public UInt64 WriteOperationCount;
+        public UInt64 OtherOperationCount;
+        public UInt64 ReadTransferCount;
+        public UInt64 WriteTransferCount;
+        public UInt64 OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetInformationJobObject(
+        IntPtr hJob,
+        int JobObjectInfoClass,
+        IntPtr lpJobObjectInfo,
+        UInt32 cbJobObjectInfoLength
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+}
+"@
+
+    Add-Type -TypeDefinition $source -ErrorAction Stop
+    $script:backendProcessJobTypeLoaded = $true
+}
+
+function New-BackendChildProcessJob {
+    if ($script:backendProcessJobHandle -ne [IntPtr]::Zero) {
+        return
+    }
+
+    Ensure-BackendChildProcessJobType
+    $jobName = "FanBanBackend-{0}-{1}" -f $PID, $runStamp
+    $handle = [FanBanBackendJobObject]::CreateJobObject([IntPtr]::Zero, $jobName)
+    if ($handle -eq [IntPtr]::Zero) {
+        $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw ("backend-job-object create failed: win32_error={0}" -f $err)
+    }
+
+    $info = New-Object FanBanBackendJobObject+JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info.BasicLimitInformation.LimitFlags = [FanBanBackendJobObject]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+    $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+    try {
+        [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false)
+        $ok = [FanBanBackendJobObject]::SetInformationJobObject($handle, 9, $ptr, [UInt32]$size)
+        if (-not $ok) {
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            [FanBanBackendJobObject]::CloseHandle($handle) | Out-Null
+            throw ("backend-job-object configure failed: win32_error={0}" -f $err)
+        }
+        $script:backendProcessJobHandle = $handle
+    } finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
+    }
+}
+
+function Register-BackendChildProcessForTaskStop {
+    param([object]$BackendProcess)
+
+    if ($null -eq $BackendProcess) {
+        return
+    }
+
+    try {
+        New-BackendChildProcessJob
+        $ok = [FanBanBackendJobObject]::AssignProcessToJobObject(
+            $script:backendProcessJobHandle,
+            $BackendProcess.Handle
+        )
+        if ($ok) {
+            ("backend-job-object: assigned_pid={0} kill_on_job_close=true" -f $BackendProcess.Id) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        } else {
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            ("backend-job-object-warning: assign failed pid={0} win32_error={1}" -f $BackendProcess.Id, $err) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        }
+    } catch {
+        ("backend-job-object-warning: " + $_.Exception.Message) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    }
+}
+
+function Close-BackendChildProcessJob {
+    if ($script:backendProcessJobHandle -eq [IntPtr]::Zero) {
+        return
+    }
+
+    [FanBanBackendJobObject]::CloseHandle($script:backendProcessJobHandle) | Out-Null
+    $script:backendProcessJobHandle = [IntPtr]::Zero
+}
+
 Write-BackendLogHeader
 
 try {
@@ -618,29 +931,17 @@ try {
     $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
     $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
     $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
+    $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
     $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
 
-    if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
-        if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
-            Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $managedSpecPath
-        }
-    }
-
-    if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
-        if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
-            Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
-        }
-    }
-
-    if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
-        if (Test-Path -LiteralPath $managedMechanismSpecPath -PathType Leaf) {
-            Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $managedMechanismSpecPath
-        }
-    }
-
-    if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
-        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
-    }
+    Set-BackendRuntimeEnvironment `
+        -SpecPath $managedSpecPath `
+        -RuntimeSpecPath $managedRuntimeSpecPath `
+        -MechanismSpecPath $managedMechanismSpecPath `
+        -CadScriptDir $managedCadScriptDir `
+        -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
+        -CtbName $managedCtbName
 
     $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
     $previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
@@ -653,56 +954,129 @@ try {
         [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
-        "Starting uvicorn..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+        ("backend-start-cwd: " + (Get-Location).Path) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        Test-BackendImportPreflight -PythonPath $python -BackendRuntimeRoot (Get-Location).Path
+        "Starting backend supervisor..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
 
         $probeHost = Get-BackendProbeHost -HostValue $ListenHost
         $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
-        $quotedPython = '"' + $python + '"'
-        $quotedStdoutLog = '"' + $stdoutLog + '"'
-        $quotedStderrLog = '"' + $stderrLog + '"'
-        $cmdLine = "{0} -X utf8 -m uvicorn API.app.main:create_app --factory --host {1} --port {2} 1>> {3} 2>> {4}" -f $quotedPython, $ListenHost, $Port, $quotedStdoutLog, $quotedStderrLog
-        $backendProcess = Start-Process -FilePath "cmd.exe" -ArgumentList @("/d", "/c", $cmdLine) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
-        ("backend-supervisor: launcher_pid={0} ping_url={1}" -f $backendProcess.Id, $pingUrl) |
-            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-
-        $failureCount = 0
-        $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
-        while (-not $backendProcess.HasExited) {
-            Start-Sleep -Seconds $SupervisorIntervalSeconds
-            if (Test-BackendPing -PingUrl $pingUrl) {
-                $failureCount = 0
-                continue
-            }
-            if ((Get-Date) -lt $startupDeadline) {
-                continue
-            }
-
-            $failureCount += 1
-            $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
-            ("backend-supervisor: ping_failed count={0}/{1} listener_status={2} listener_count={3}" -f `
-                $failureCount,
-                $SupervisorFailureThreshold,
-                $listenerSnapshot.status,
-                $listenerSnapshot.count) |
+        $backendArgs = @(
+            "-X",
+            "utf8",
+            "-m",
+            "uvicorn",
+            "API.app.main:create_app",
+            "--factory",
+            "--host",
+            $ListenHost,
+            "--port",
+            [string]$Port
+        )
+        $cmdLine = ('"{0}" {1}' -f $python, ($backendArgs -join " "))
+        ("backend-command: " + $cmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        $restartAttempt = 0
+        while (-not $script:stopSupervisor) {
+            $restartAttempt += 1
+            $attemptStamp = "{0}-{1:D4}" -f $runStamp, $restartAttempt
+            $uvicornStdoutLog = Join-Path $logsDir ("uvicorn-stdout-{0}.log" -f $attemptStamp)
+            $uvicornStderrLog = Join-Path $logsDir ("uvicorn-stderr-{0}.log" -f $attemptStamp)
+            ("backend-supervisor: launching uvicorn attempt={0}" -f $restartAttempt) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            ("backend-uvicorn-logs: stdout={0} stderr={1}" -f $uvicornStdoutLog, $uvicornStderrLog) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            $backendProcess = Start-Process `
+                -FilePath $python `
+                -ArgumentList $backendArgs `
+                -WorkingDirectory (Get-Location).Path `
+                -WindowStyle Hidden `
+                -PassThru `
+                -RedirectStandardOutput $uvicornStdoutLog `
+                -RedirectStandardError $uvicornStderrLog
+            Register-BackendChildProcessForTaskStop -BackendProcess $backendProcess
+            ("backend-supervisor: backend_pid={0} ping_url={1}" -f $backendProcess.Id, $pingUrl) |
                 Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 
-            if ($failureCount -ge $SupervisorFailureThreshold) {
-                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
-                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-                Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
-                throw ("backend-supervisor unhealthy: ping_url={0}; consecutive_failures={1}" -f $pingUrl, $failureCount)
-            }
-        }
+            $failureCount = 0
+            $restartReason = ""
+            $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
+            while (-not $backendProcess.HasExited -and -not $script:stopSupervisor) {
+                Start-Sleep -Seconds $SupervisorIntervalSeconds
+                if (Test-BackendPing -PingUrl $pingUrl) {
+                    $failureCount = 0
+                    continue
+                }
+                if ((Get-Date) -lt $startupDeadline) {
+                    continue
+                }
 
-        $script:backendExitCode = $backendProcess.ExitCode
-        $exitMessage = "uvicorn exited unexpectedly. exit_code=$script:backendExitCode"
-        $exitMessage | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-        throw $exitMessage
+                $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+                $failureCount += 1
+                if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
+                    ("backend-supervisor: ping_failed_listener_alive count={0}/{1} listener_status={2} listener_count={3}" -f `
+                        $failureCount,
+                        $SupervisorFailureThreshold,
+                        $listenerSnapshot.status,
+                        $listenerSnapshot.count) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                    if ($failureCount -ge $SupervisorFailureThreshold) {
+                        ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                        Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
+                        try {
+                            $backendProcess.WaitForExit(5000) | Out-Null
+                        } catch {
+                        }
+                        $restartReason = "ping_failed_listener_alive"
+                        break
+                    }
+                    continue
+                }
+
+                ("backend-supervisor: ping_failed_no_listener count={0}/{1} listener_status={2} listener_count={3}" -f `
+                    $failureCount,
+                    $SupervisorFailureThreshold,
+                    $listenerSnapshot.status,
+                    $listenerSnapshot.count) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                if ($failureCount -ge $SupervisorFailureThreshold) {
+                    ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                    Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
+                    try {
+                        $backendProcess.WaitForExit(5000) | Out-Null
+                    } catch {
+                    }
+                    $restartReason = "ping_failed_no_listener"
+                    break
+                }
+            }
+
+            if ($script:stopSupervisor) {
+                $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+                Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
+                break
+            }
+
+            $backendProcess.WaitForExit()
+            $backendProcess.Refresh()
+            $script:backendExitCode = $backendProcess.ExitCode
+            if ([string]::IsNullOrWhiteSpace($restartReason)) {
+                $restartReason = "process_exited"
+            }
+            Append-UvicornProcessLogs -UvicornStdoutLog $uvicornStdoutLog -UvicornStderrLog $uvicornStderrLog
+            ("backend-supervisor: restarting uvicorn reason={0} exit_code={1} delay_seconds={2}" -f `
+                $restartReason,
+                $script:backendExitCode,
+                $RestartDelaySeconds) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            Start-Sleep -Seconds $RestartDelaySeconds
+        }
     } finally {
         [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
+        Close-BackendChildProcessJob
         Pop-Location
         Update-LatestBackendLogs
     }
@@ -1304,8 +1678,9 @@ function Sync-PythonSitePackages {
         Remove-Item -LiteralPath (Join-Path $targetRoot $stalePth) -Force -ErrorAction SilentlyContinue
     }
 
-    $backendRoot = Join-Path $packageRoot "backend-runtime\backend"
-    Set-Content -LiteralPath (Join-Path $targetRoot "fanban_backend_runtime.pth") -Value $backendRoot -Encoding utf8
+    $backendRuntimeRoot = Join-Path $packageRoot "backend-runtime"
+    $backendRoot = Join-Path $backendRuntimeRoot "backend"
+    Set-Content -LiteralPath (Join-Path $targetRoot "fanban_backend_runtime.pth") -Value @($backendRuntimeRoot, $backendRoot) -Encoding utf8
 }
 
 $dotnet = Get-ChildItem -Path (Join-Path $root "dotnet") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1

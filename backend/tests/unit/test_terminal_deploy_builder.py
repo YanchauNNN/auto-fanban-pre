@@ -148,6 +148,7 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
+    _write_file(repo_root / "documents_bin" / "~$规范库.xlsx", "office lock")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
@@ -182,6 +183,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert 'url="http://127.0.0.1:8000/api/{R:1}"' in frontend_web_config
     assert 'url="/index.html"' in frontend_web_config
     assert (output_root / "backend-runtime" / "API" / "app" / "main.py").exists()
+    assert not (output_root / "documents_bin" / "~$规范库.xlsx").exists()
     assert (output_root / "python-packages" / "Lib" / "site-packages" / "demo_pkg" / "__init__.py").exists()
     assert not (
         output_root
@@ -412,6 +414,33 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'Join-Path $root "documents\\参数规范.yaml"' in start_backend
     assert 'Join-Path $root "documents\\参数规范_运行期.yaml"' in start_backend
     assert 'Join-Path $root "documents\\参数规范-3.yaml"' in start_backend
+    assert 'Join-Path $root "backend-runtime\\backend\\src\\cad\\scripts"' in start_backend
+    assert (
+        'Join-Path $root "backend-runtime\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll"'
+        in start_backend
+    )
+    assert "Set-BackendRuntimeEnvironment" in start_backend
+    assert "Test-BackendImportPreflight" in start_backend
+    assert "后端启动环境变量无效" in start_backend
+    assert "后端导入预检失败" in start_backend
+    assert "backend-start-script: path=$scriptPath sha256=$scriptHash" in start_backend
+    assert "Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256" in start_backend
+    assert "backend-import-preflight-ok" in start_backend
+    assert "sys.path.insert(0, backend_runtime_root)" in start_backend
+    assert "backend-import-preflight-warning:" not in start_backend
+    assert "backend-start-cwd:" in start_backend
+    assert "backend-command:" in start_backend
+    assert "backend-env: {0}={1}" in start_backend
+    assert "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" in start_backend
+    assert "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" in start_backend
+    assert '$pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR")' in start_backend
+    assert "fanban_backend_import_preflight_" in start_backend
+    assert 'Join-Path $BackendRuntimeRoot ($preflightPrefix + ".py")' in start_backend
+    assert "Set-Content -LiteralPath $preflightScript" in start_backend
+    assert 'Start-Process `\n            -FilePath $PythonPath' in start_backend
+    assert "-RedirectStandardOutput $preflightStdout" in start_backend
+    assert "-RedirectStandardError $preflightStderr" in start_backend
+    assert "-c $preflightCode" not in start_backend
     assert 'Set-Item -Path "Env:FANBAN_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH"' in start_backend
@@ -424,14 +453,38 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert '$logsDir = Join-Path $root "logs"' in start_backend
     assert 'backend-stdout-' in start_backend
     assert 'backend-stderr-' in start_backend
+    assert 'uvicorn-stdout-' in start_backend
+    assert 'uvicorn-stderr-' in start_backend
+    assert 'Append-UvicornProcessLogs' in start_backend
+    assert 'backend-uvicorn-logs:' in start_backend
     assert 'backend-latest-stderr.log' in start_backend
     assert "Start-Process" in start_backend
-    assert 'Start-Process -FilePath "cmd.exe"' in start_backend
+    assert '-FilePath $python' in start_backend
+    assert '-ArgumentList $backendArgs' in start_backend
+    assert '-RedirectStandardOutput $uvicornStdoutLog' in start_backend
+    assert '-RedirectStandardError $uvicornStderrLog' in start_backend
+    assert 'Start-Process -FilePath "cmd.exe"' not in start_backend
     assert "Test-BackendPing" in start_backend
     assert "Get-BackendListenerSnapshot" in start_backend
     assert "Stop-BackendProcessTree" in start_backend
     assert "SupervisorFailureThreshold" in start_backend
     assert "backend-supervisor" in start_backend
+    assert "[int]$RestartDelaySeconds = 10" in start_backend
+    assert '$script:stopSupervisor = $false' in start_backend
+    assert 'while (-not $script:stopSupervisor)' in start_backend
+    assert "backend-supervisor: launching uvicorn attempt=" in start_backend
+    assert '$restartReason = "process_exited"' in start_backend
+    assert '$restartReason = "ping_failed_no_listener"' in start_backend
+    assert '$restartReason = "ping_failed_listener_alive"' in start_backend
+    assert "backend-supervisor: restarting uvicorn reason={0}" in start_backend
+    assert "Start-Sleep -Seconds $RestartDelaySeconds" in start_backend
+    assert "ping_failed_listener_alive" in start_backend
+    assert "ping_failed_but_listener_alive" not in start_backend
+    assert "ping_failed_no_listener" in start_backend
+    assert '$listenerSnapshot.status -eq "pass"' in start_backend
+    assert "$backendProcess.WaitForExit()" in start_backend
+    assert "$backendProcess.Refresh()" in start_backend
+    assert "backend-supervisor unhealthy: ping_url=" not in start_backend
     assert '& cmd.exe /d /c $cmdLine' not in start_backend
     assert '& $python -X utf8 -m uvicorn' not in start_backend
     assert "probe_target_env.ps1" in prepare_terminal
@@ -487,6 +540,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "python-packages\\Lib\\site-packages" in install_runtime
     assert "NSSM" not in install_runtime
     assert "fanban_backend_runtime.pth" in install_runtime
+    assert '$backendRuntimeRoot = Join-Path $packageRoot "backend-runtime"' in install_runtime
+    assert '$backendRoot = Join-Path $backendRuntimeRoot "backend"' in install_runtime
+    assert "Value @($backendRuntimeRoot, $backendRoot)" in install_runtime
     assert "_editable_impl_auto_fanban.pth" in install_runtime
     assert ".NET Framework 4.8" in install_runtime
     assert "New-Website" in configure_iis or "Set-ItemProperty" in configure_iis
@@ -800,6 +856,22 @@ def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(
 
     assert "VariableNotWritable" not in merged
     assert "Python 运行环境不存在" in merged
+
+
+def test_generated_start_backend_ties_uvicorn_to_task_lifetime(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
+
+    assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in start_backend
+    assert "CreateJobObject" in start_backend
+    assert "AssignProcessToJobObject" in start_backend
+    assert "Register-BackendChildProcessForTaskStop -BackendProcess $backendProcess" in start_backend
+    assert "Close-BackendChildProcessJob" in start_backend
 
 
 

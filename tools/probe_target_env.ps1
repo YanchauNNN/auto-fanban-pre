@@ -485,11 +485,54 @@ function Get-PlotterFacts {
 function Select-BestAccoreconsole {
     param([array]$InstallFacts)
 
+    function Get-AutoCADInstallYearFromFact {
+        param([object]$InstallFact)
+
+        $bestYear = 0
+        foreach ($raw in @(
+            $InstallFact.install_dir,
+            $InstallFact.acad_exe,
+            $InstallFact.accoreconsole_exe
+        )) {
+            $value = [string]$raw
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+            foreach ($match in [regex]::Matches($value, '(?<!\d)(19\d{2}|20\d{2})(?!\d)')) {
+                $year = [int]$match.Groups[1].Value
+                if ($year -gt $bestYear) {
+                    $bestYear = $year
+                }
+            }
+        }
+
+        return $bestYear
+    }
+
     $withAccore = @($InstallFacts | Where-Object { $_.accoreconsole_exe_exists -eq $true })
     if ($withAccore.Count -eq 0) {
         return ""
     }
-    return [string]$withAccore[0].accoreconsole_exe
+
+    $ranked = @()
+    for ($i = 0; $i -lt $withAccore.Count; $i += 1) {
+        $fact = $withAccore[$i]
+        $ranked += [pscustomobject]@{
+            fact = $fact
+            year = Get-AutoCADInstallYearFromFact -InstallFact $fact
+            original_index = $i
+        }
+    }
+
+    $best = @(
+        $ranked |
+            Sort-Object -Property @{ Expression = "year"; Descending = $true }, @{ Expression = "original_index"; Ascending = $true } |
+            Select-Object -First 1
+    )
+    if ($best.Count -eq 0) {
+        return ""
+    }
+    return [string]$best[0].fact.accoreconsole_exe
 }
 
 function Select-BestPlotterDir {
@@ -716,12 +759,12 @@ function Get-RepoFacts {
         business_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范.yaml"))
         mechanism_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范-3.yaml"))
         cad_scripts_dir = (Resolve-PreferredPath -Candidates @(
-            (Join-Path $ActualRepoRoot "backend\src\cad\scripts"),
-            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts")
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts"),
+            (Join-Path $ActualRepoRoot "backend\src\cad\scripts")
         ) -Container)
         dotnet_bridge_dll = (Resolve-PreferredPath -Candidates @(
-            (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"),
-            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll")
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"),
+            (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll")
         ))
         oda_exe = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "bin\ODAFileConverter 25.12.0\ODAFileConverter.exe"))
         common_cover_template = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents_bin\封面模板文件.docx"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -92,6 +93,23 @@ def test_probe_target_env_prefers_package_python_runtime() -> None:
 
     assert "python-runtime\\python.exe" in script_text
     assert 'Label "package_runtime"' in script_text
+
+
+def test_probe_target_env_prefers_terminal_backend_runtime_layout() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    runtime_scripts = 'backend-runtime\\backend\\src\\cad\\scripts'
+    dev_scripts = 'backend\\src\\cad\\scripts'
+    runtime_bridge = (
+        'backend-runtime\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll'
+    )
+    dev_bridge = 'backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll'
+
+    assert script_text.index(runtime_scripts) < script_text.index(dev_scripts)
+    assert script_text.index(runtime_bridge) < script_text.index(dev_bridge)
 
 
 def test_probe_target_env_downgrades_windows_store_python_alias() -> None:
@@ -217,6 +235,58 @@ def test_probe_target_env_checks_required_cad_fonts() -> None:
     assert "windows_fonts_dir" in script_text
     assert "missing_required_fonts" in script_text
     assert 'code = "required_fonts"' in script_text
+
+
+def test_probe_target_env_prefers_highest_autocad_version_with_accoreconsole(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8-sig",
+    )
+    start = script_text.index("function Select-BestAccoreconsole")
+    end = script_text.index("function Select-BestPlotterDir")
+    function_text = script_text[start:end]
+    probe_script = tmp_path / "select_best_accore.ps1"
+    probe_script.write_text(
+        function_text
+        + r'''
+$facts = @(
+    [pscustomobject]@{
+        install_dir = "D:\Program Files\Autodesk\AutoCAD 2014"
+        acad_exe = "D:\Program Files\Autodesk\AutoCAD 2014\acad.exe"
+        accoreconsole_exe = "D:\Program Files\Autodesk\AutoCAD 2014\accoreconsole.exe"
+        accoreconsole_exe_exists = $true
+    },
+    [pscustomobject]@{
+        install_dir = "D:\AUTOCAD\AutoCAD 2022"
+        acad_exe = "D:\AUTOCAD\AutoCAD 2022\acad.exe"
+        accoreconsole_exe = "D:\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
+        accoreconsole_exe_exists = $true
+    }
+)
+$actual = Select-BestAccoreconsole -InstallFacts $facts
+$expected = "D:\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
+if ($actual -ne $expected) {
+    throw "expected $expected but got $actual"
+}
+''',
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(probe_script),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_probe_target_env_uses_openpyxl_for_excel_template_validation() -> None:

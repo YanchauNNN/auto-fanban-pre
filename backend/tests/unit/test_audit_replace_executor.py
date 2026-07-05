@@ -921,6 +921,62 @@ def test_audit_replace_executor_builds_titleblock_standardization_entries() -> N
     ]
 
 
+def test_audit_replace_executor_clears_date_on_non_target_revision_row() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="2024.04",
+            entity_type="DBText",
+            entity_handle="DATE_A",
+            field_context="titleblock_date",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="2024.05",
+            entity_type="DBText",
+            entity_handle="DATE_B",
+            field_context="titleblock_date",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="B",
+            entity_type="DBText",
+            entity_handle="REV_B",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.06",
+        target_revision="A",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+
+    assert by_handle["DATE_A"]["replacement_text"] == "2026.06"
+    assert by_handle["DATE_B"]["replacement_text"] == ""
+    assert by_handle["REV_B"]["replacement_text"] == ""
+
+
 def test_derive_replaced_dwg_filename_appends_target_project_when_source_project_absent() -> None:
     assert (
         derive_replaced_dwg_filename(

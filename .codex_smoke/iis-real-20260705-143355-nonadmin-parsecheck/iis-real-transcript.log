@@ -1,0 +1,27 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260705143630
+Username: DESKTOP-LQJC0UJ\Yan
+RunAs User: DESKTOP-LQJC0UJ\Yan
+Configuration Name: 
+Machine: DESKTOP-LQJC0UJ (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Yan\AppData\Local\Temp\codex_fanban_enable_iis_20260705-143355.ps1 -TargetRoot D:\FanBanServer -RunRoot E:\project\auto-fanban-pre\.codex_smoke\iis-real-20260705-143355-nonadmin-parsecheck
+Process ID: 21336
+PSVersion: 5.1.26100.8655
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8655
+BuildVersion: 10.0.26100.8655
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+=== admin_check ===
+{"User":"DESKTOP-LQJC0UJ\\Yan","IsAdmin":false,"Cwd":"E:\\project\\auto-fanban-pre"}
+PS>TerminatingError(): "not running as admin"
+STEP fail: admin_check not running as admin
+PS>TerminatingError(): "not running as admin"
+**********************
+Windows PowerShell transcript end
+End time: 20260705143630
+**********************

@@ -724,11 +724,64 @@ class AuditReplaceExecutor:
         except re.error:
             compiled_date_pattern = re.compile(r"\d{4}\.\d{2}")
 
+        revision_groups_by_frame = cls._group_items_by_frame_key_and_context(
+            items,
+            field_context="titleblock_revision",
+        )
+        date_groups_by_frame = cls._group_items_by_frame_key_and_context(
+            items,
+            field_context="titleblock_date",
+        )
+        handled_date_handles: set[str] = set()
+        for frame_key, revision_group in revision_groups_by_frame.items():
+            sorted_revisions = sorted(revision_group, key=lambda item: cls._item_y(item) or 0.0)
+            keep_revision = sorted_revisions[0] if sorted_revisions else None
+            if keep_revision is None:
+                continue
+            for date_item in date_groups_by_frame.get(frame_key, []):
+                handle = str(date_item.entity_handle or "")
+                if not handle or handle in existing_handles:
+                    continue
+                paired_revision = cls._nearest_same_row_item(date_item, sorted_revisions)
+                if paired_revision is None:
+                    continue
+                raw_text = str(date_item.raw_text or "")
+                match = compiled_date_pattern.search(raw_text)
+                if paired_revision is keep_revision:
+                    if match is None or match.group(0) == issue_month_text:
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            date_item,
+                            matched_text=match.group(0),
+                            replacement_text=issue_month_text,
+                            message="titleblock_date_month",
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                else:
+                    matched_text = match.group(0) if match is not None else raw_text
+                    if not matched_text:
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            date_item,
+                            matched_text=matched_text,
+                            replacement_text="",
+                            message="titleblock_date_clear_non_target_revision",
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                existing_handles.add(handle)
+                handled_date_handles.add(handle)
+
         for item in items:
             if item.field_context != "titleblock_date":
                 continue
             handle = str(item.entity_handle or "")
-            if not handle or handle in existing_handles:
+            if not handle or handle in existing_handles or handle in handled_date_handles:
                 continue
             match = compiled_date_pattern.search(str(item.raw_text or ""))
             if match is None or match.group(0) == issue_month_text:
@@ -801,6 +854,20 @@ class AuditReplaceExecutor:
         field_context: str,
         revision_description_keywords: list[str] | None = None,
     ) -> list[list[Any]]:
+        grouped = AuditReplaceExecutor._group_items_by_frame_key_and_context(
+            items,
+            field_context=field_context,
+            revision_description_keywords=revision_description_keywords,
+        )
+        return list(grouped.values())
+
+    @staticmethod
+    def _group_items_by_frame_key_and_context(
+        items: list[Any],
+        *,
+        field_context: str,
+        revision_description_keywords: list[str] | None = None,
+    ) -> dict[tuple[str, str], list[Any]]:
         grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for item in items:
             if item.field_context != field_context or not item.entity_handle:
@@ -813,7 +880,34 @@ class AuditReplaceExecutor:
                 if not any(keyword and keyword in raw_text for keyword in keywords):
                     continue
             grouped[(str(item.internal_code or ""), str(item.layout_name or ""))].append(item)
-        return list(grouped.values())
+        return grouped
+
+    @classmethod
+    def _nearest_same_row_item(cls, item: Any, candidates: list[Any]) -> Any | None:
+        item_y = cls._item_y(item)
+        if item_y is None:
+            return None
+        nearby: list[tuple[float, Any]] = []
+        for candidate in candidates:
+            candidate_y = cls._item_y(candidate)
+            if candidate_y is None:
+                continue
+            distance = abs(candidate_y - item_y)
+            if distance <= cls._same_titleblock_row_y_tolerance(item, candidate):
+                nearby.append((distance, candidate))
+        if not nearby:
+            return None
+        nearby.sort(key=lambda pair: pair[0])
+        return nearby[0][1]
+
+    @staticmethod
+    def _same_titleblock_row_y_tolerance(*items: Any) -> float:
+        heights = [
+            float(item.text_bbox.height)
+            for item in items
+            if getattr(item, "text_bbox", None) is not None and item.text_bbox.height > 0
+        ]
+        return max([5.0, *(height * 0.75 for height in heights)])
 
     @staticmethod
     def _make_standardization_entry(

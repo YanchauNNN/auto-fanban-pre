@@ -1,0 +1,18 @@
+{
+  "schema_version": "audit-check-task@1.0",
+  "workflow_stage": "audit_check_scan",
+  "job_id": "codex-final-scan",
+  "source_dxf": "E:\\project\\auto-fanban-pre\\.codex_smoke\\version-date-rerun-20260702-011335\\downloads\\downloaded-replaced.dwg",
+  "output_dir": "E:\\project\\auto-fanban-pre\\.codex_smoke\\version-date-rerun-20260702-011335\\final_scan\\audit_scan",
+  "engines": {
+    "selection_engine": "dotnet",
+    "plot_engine": "dotnet",
+    "dotnet_bridge": {
+      "enabled": true,
+      "dll_path": "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll",
+      "command_name": "M5BRIDGE_RUN",
+      "netload_each_run": true,
+      "fallback_to_lisp_on_error": false
+    }
+  }
+}

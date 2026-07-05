@@ -1,0 +1,33 @@
+[CAD_ENV_PROBE][pre] getvar FONTMAP=E:\project\auto-fanban-pre\storage\tmp-smoke\20260623-20169dy-pageorder-fix\storage\jobs\3d304df4-f07f-431d-9679-741364f9ca63\input\.font-preflight\20169DY-JGS03-ct6_23-a07f7bc2-11086afa\fanban.fontmap.fmp
+[CAD_ENV_PROBE][pre] getvar FONTALT=@Malgun Gothic
+[CAD_ENV_PROBE][pre] getvar ACADPREFIX=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\support;D:\Program Files\AUTOCAD\AutoCAD 2022\support;D:\Program Files\AUTOCAD\AutoCAD 2022\support\zh-CN;D:\Program Files\AUTOCAD\AutoCAD 2022\fonts;D:\Program Files\AUTOCAD\AutoCAD 2022\Express;D:\Program Files\AUTOCAD\AutoCAD 2022\support\color;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk AppManager.bundle\Contents\Windows;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk AppManager.bundle\Contents\Windows\2022;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk FeaturedApps.bundle\Contents\Resources;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk FeaturedApps.bundle\Contents\Windows\2022\Win64;E:\project\auto-fanban-pre\.worktrees\codex-cad-font-sync\storage\font-sync-managed\d18ea85d1e7c\fonts;D:\Program Files\AUTOCAD\AutoCAD 2022\drv;
+[CAD_ENV_PROBE][pre] getvar ROAMABLEROOTPREFIX=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\
+[CAD_ENV_PROBE][pre] getvar LOCALROOTPREFIX=C:\Users\Yan\AppData\Local\Autodesk\AutoCAD 2022\R24.1\chs\
+[CAD_ENV_PROBE][pre] getvar BACKGROUNDPLOT=2
+[CAD_ENV_PROBE][pre] getvar PDFSHX=1
+[CAD_ENV_PROBE][pre] getvar EPDFSHX=nil
+[CAD_ENV_PROBE][pre] findfile tssdeng.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\tssdeng.shx
+[CAD_ENV_PROBE][pre] findfile hztxt.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\hztxt.shx
+[CAD_ENV_PROBE][pre] findfile tssdchn.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\tssdchn.shx
+[CAD_ENV_PROBE][pre] findfile simplex.shx=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\support\simplex.shx
+[CAD_ENV_PROBE][pre] findfile gbcbig.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\gbcbig.shx
+[CAD_ENV_PROBE][pre] findfile simsun.ttc=
+[CAD_ENV_PROBE][pre] findfile 鎵撳嵃PDF2.pc3=
+2026-07-02 01:18:51.358 [DOTNET] stage=audit_check_scan source=E:\project\auto-fanban-pre\.codex_smoke\version-date-rerun-20260702-011335\downloads\downloaded-replaced.dwg
+2026-07-02 01:18:51.579 [DOTNET][AUDIT] scanned_texts=1142 source=E:\project\auto-fanban-pre\.codex_smoke\version-date-rerun-20260702-011335\downloads\downloaded-replaced.dwg
+2026-07-02 01:18:51.617 [DOTNET] result written: E:/project/auto-fanban-pre/.codex_smoke/version-date-rerun-20260702-011335/final_scan/audit_scan/result.json
+[CAD_ENV_PROBE][post] getvar FONTMAP=E:\project\auto-fanban-pre\storage\tmp-smoke\20260623-20169dy-pageorder-fix\storage\jobs\3d304df4-f07f-431d-9679-741364f9ca63\input\.font-preflight\20169DY-JGS03-ct6_23-a07f7bc2-11086afa\fanban.fontmap.fmp
+[CAD_ENV_PROBE][post] getvar FONTALT=@Malgun Gothic
+[CAD_ENV_PROBE][post] getvar ACADPREFIX=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\support;D:\Program Files\AUTOCAD\AutoCAD 2022\support;D:\Program Files\AUTOCAD\AutoCAD 2022\support\zh-CN;D:\Program Files\AUTOCAD\AutoCAD 2022\fonts;D:\Program Files\AUTOCAD\AutoCAD 2022\Express;D:\Program Files\AUTOCAD\AutoCAD 2022\support\color;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk AppManager.bundle\Contents\Windows;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk AppManager.bundle\Contents\Windows\2022;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk FeaturedApps.bundle\Contents\Resources;C:\Program Files (x86)\Autodesk\ApplicationPlugins\Autodesk FeaturedApps.bundle\Contents\Windows\2022\Win64;E:\project\auto-fanban-pre\.worktrees\codex-cad-font-sync\storage\font-sync-managed\d18ea85d1e7c\fonts;D:\Program Files\AUTOCAD\AutoCAD 2022\drv;
+[CAD_ENV_PROBE][post] getvar ROAMABLEROOTPREFIX=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\
+[CAD_ENV_PROBE][post] getvar LOCALROOTPREFIX=C:\Users\Yan\AppData\Local\Autodesk\AutoCAD 2022\R24.1\chs\
+[CAD_ENV_PROBE][post] getvar BACKGROUNDPLOT=0
+[CAD_ENV_PROBE][post] getvar PDFSHX=1
+[CAD_ENV_PROBE][post] getvar EPDFSHX=nil
+[CAD_ENV_PROBE][post] findfile tssdeng.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\tssdeng.shx
+[CAD_ENV_PROBE][post] findfile hztxt.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\hztxt.shx
+[CAD_ENV_PROBE][post] findfile tssdchn.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\tssdchn.shx
+[CAD_ENV_PROBE][post] findfile simplex.shx=C:\Users\Yan\AppData\Roaming\Autodesk\AutoCAD 2022\R24.1\chs\support\simplex.shx
+[CAD_ENV_PROBE][post] findfile gbcbig.shx=D:\Program Files\AUTOCAD\AutoCAD 2022\fonts\gbcbig.shx
+[CAD_ENV_PROBE][post] findfile simsun.ttc=
+[CAD_ENV_PROBE][post] findfile 鎵撳嵃PDF2.pc3=
