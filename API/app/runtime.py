@@ -40,6 +40,7 @@ from src.pipeline.project_no_inference import (
     resolve_project_no,
 )
 from src.pipeline.shared_prep import SharedPrepService
+from src.pipeline.sqlite_queue import SQLiteQueueStore
 from src.result_views import normalize_user_flags
 from src.workload.calculator import WorkloadCalculator
 from src.workload.models import WorkloadSummary
@@ -101,9 +102,16 @@ class DeliverableApiRuntime:
         job_processor: Callable[[Job], None] | None = None,
         shared_prep_service: SharedPrepService | None = None,
         font_preflight_service: FontPreflightService | None = None,
+        process_jobs_in_api: bool = True,
+        worker_process_mode: bool = False,
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
+        self.process_jobs_in_api = process_jobs_in_api
+        self.worker_process_mode = worker_process_mode
+        self.queue_store = SQLiteQueueStore(
+            self.config.storage_dir / "runtime" / "fanban_queue.sqlite3"
+        )
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
         self.validator = DocParamValidator()
@@ -156,6 +164,10 @@ class DeliverableApiRuntime:
         self._job_completion_lock = threading.Lock()
 
     def start(self) -> None:
+        self.queue_store.initialize()
+        if not self.process_jobs_in_api:
+            self._backfill_summary_index()
+            return
         self._recover_groups_and_jobs()
         if self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive():
             return
@@ -175,8 +187,9 @@ class DeliverableApiRuntime:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._group_queue.put(None)
-        self._job_queue.put(None)
+        if self.process_jobs_in_api:
+            self._group_queue.put(None)
+            self._job_queue.put(None)
         if self._group_dispatcher_thread:
             self._group_dispatcher_thread.join(timeout=3)
         if self._job_dispatcher_thread:
@@ -187,6 +200,26 @@ class DeliverableApiRuntime:
 
     def health(self) -> dict[str, Any]:
         storage_writable = self._storage_writable()
+        if not self.process_jobs_in_api:
+            worker_status = self.queue_store.worker_status()
+            queue_depth = self.queue_store.queue_depth()
+            return {
+                'status': 'ok',
+                'server_time': datetime.now().astimezone().isoformat(),
+                'ready': storage_writable and bool(worker_status["alive"]),
+                'storage_writable': storage_writable,
+                'worker_alive': bool(worker_status["alive"]),
+                'queue_depth': queue_depth,
+                'autocad_ready': self._autocad_ready(),
+                'office_ready': importlib.util.find_spec('win32com.client') is not None,
+                'active_groups': 0,
+                'active_jobs': 0,
+                'active_doc_jobs': 0,
+                'pending_doc_jobs': 0,
+                'active_total_jobs': 0,
+                'worker_count': int(worker_status["count"]),
+                'worker_last_seen_at': worker_status["last_seen_at"],
+            }
         group_alive = bool(self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive())
         job_alive = bool(self._job_dispatcher_thread and self._job_dispatcher_thread.is_alive())
         active_doc_jobs = self._active_doc_count()
@@ -521,8 +554,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     def create_audit_batch(
@@ -591,8 +625,9 @@ class DeliverableApiRuntime:
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
+                summary = self._index_job_summary(job)
                 self._enqueue_job(job.job_id)
-                jobs.append(self._serialize_job_summary(job))
+                jobs.append(summary)
             return {'batch_id': batch_id, 'jobs': jobs}
 
         for upload, resolved_params in resolved_submissions:
@@ -608,8 +643,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     @staticmethod
@@ -761,6 +797,12 @@ class DeliverableApiRuntime:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
+        if not self.process_jobs_in_api:
+            return self.queue_store.list_summaries(
+                status=status_filter,
+                limit=max(limit, 0),
+                offset=max(offset, 0),
+            )
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
@@ -777,24 +819,27 @@ class DeliverableApiRuntime:
         items = all_items[normalized_offset:normalized_offset + normalized_limit]
         return {'items': items, 'total': len(all_items)}
 
+    def jobs_activity(self) -> dict[str, Any]:
+        return self.queue_store.activity()
+
     def get_job_detail(self, job_id: str) -> dict[str, Any]:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             return self._serialize_group_detail(group)
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         return self._serialize_job_detail(job)
 
     def get_artifact_path(self, job_id: str, artifact: str) -> Path:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             owner_job = self._resolve_group_artifact_owner(group, artifact)
             if owner_job is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
             return self.get_artifact_path(owner_job.job_id, artifact)
 
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         path = {
@@ -807,6 +852,16 @@ class DeliverableApiRuntime:
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
         return Path(path)
+
+    def _get_job_for_read(self, job_id: str) -> Job | None:
+        if self.process_jobs_in_api:
+            return self.job_manager.get_job(job_id)
+        return self.job_manager.reload_job(job_id) or self.job_manager.get_job(job_id)
+
+    def _get_group_for_read(self, group_id: str) -> TaskGroup | None:
+        if self.process_jobs_in_api:
+            return self.group_manager.get_group(group_id)
+        return self.group_manager.reload_group(group_id) or self.group_manager.get_group(group_id)
 
     def _create_grouped_submission(
         self,
@@ -856,8 +911,9 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [deliverable_job.job_id, audit_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
 
     def _create_replace_grouped_submission(
         self,
@@ -909,8 +965,47 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [replace_job.job_id, deliverable_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
+
+    def refresh_summary_index(self, item_type: str, item_id: str) -> None:
+        if item_type == "group":
+            group = self.group_manager.get_group(item_id)
+            if group is not None:
+                self._index_group_summary(group)
+            return
+        if item_type == "job":
+            job = self.job_manager.get_job(item_id)
+            if job is not None and job.group_id is None:
+                self._index_job_summary(job)
+
+    def _backfill_summary_index(self) -> None:
+        for group in self.group_manager.load_all_groups():
+            self._index_group_summary(group)
+        for job in self.job_manager.load_all_jobs():
+            if job.group_id is None:
+                self._index_job_summary(job)
+
+    def _index_job_summary(self, job: Job) -> dict[str, Any]:
+        summary = self._serialize_job_summary(job)
+        self._upsert_summary_index(summary)
+        return summary
+
+    def _index_group_summary(self, group: TaskGroup) -> dict[str, Any]:
+        summary = self._serialize_group_summary(group)
+        self._upsert_summary_index(summary)
+        return summary
+
+    def _upsert_summary_index(self, summary: dict[str, Any]) -> None:
+        item_id = str(summary.get("job_id") or summary.get("group_id") or "").strip()
+        if not item_id:
+            return
+        payload = dict(summary)
+        payload["item_id"] = item_id
+        payload["updated_at"] = datetime.now().astimezone().isoformat()
+        payload["artifact_flags"] = dict(summary.get("artifacts") or {})
+        self.queue_store.upsert_summary(payload)
 
     def _recover_groups_and_jobs(self) -> None:
         for job in self.job_manager.load_all_jobs():
@@ -1179,15 +1274,24 @@ class DeliverableApiRuntime:
                 self._signal_job_completion(job.job_id)
 
     def _enqueue_group(self, group_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("group", group_id)
+            return
         self._group_queue.put(group_id)
 
     def _enqueue_job(self, job_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("job", job_id)
+            return
         with self._job_completion_lock:
             event = self._job_completion_events.get(job_id)
             if event is None:
                 event = threading.Event()
                 self._job_completion_events[job_id] = event
             event.clear()
+        if self.worker_process_mode:
+            self._submit_heavy_job(job_id)
+            return
         self._job_queue.put(job_id)
 
     def _submit_heavy_job(self, job_id: str) -> Future[None]:
@@ -1753,7 +1857,7 @@ class DeliverableApiRuntime:
     def _iter_group_children(self, group: TaskGroup) -> list[Job]:
         children: list[Job] = []
         for child_job_id in group.child_job_ids:
-            child = self.job_manager.get_job(child_job_id)
+            child = self._get_job_for_read(child_job_id)
             if child is not None:
                 children.append(child)
         return children

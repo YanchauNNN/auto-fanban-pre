@@ -140,6 +140,19 @@ def _make_fake_repo(repo_root: Path) -> None:
         / "net48"
         / "Module5CadBridge.dll",
     )
+    _write_file(
+        repo_root
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "Release"
+        / "net48"
+        / "Module5CadBridge.pdb",
+        "E:\\project\\auto-fanban-pre\\backend\\src\\cad\\dotnet\\Module5CadBridge\\Commands.cs",
+    )
     _write_file(repo_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe")
     _write_file(repo_root / "documents" / "Resources" / PC3_NAME, _valid_pc3_text("repo-pc3"))
     _write_file(repo_root / "documents" / "Resources" / PMP_NAME, _valid_pmp_text("repo-pmp"))
@@ -271,6 +284,19 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "net48"
         / "Module5CadBridge.dll"
     ).exists()
+    assert not (
+        output_root
+        / "backend-runtime"
+        / "backend"
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "Release"
+        / "net48"
+        / "Module5CadBridge.pdb"
+    ).exists()
     assert (output_root / "bin" / "ODAFileConverter 25.12.0" / "ODAFileConverter.exe").exists()
     assert (output_root / "documents" / "Resources" / PC3_NAME).exists()
     assert (output_root / "documents" / SPEC_NAME).exists()
@@ -286,6 +312,9 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     deploy_readme = (output_root / DEPLOY_README).read_text(encoding="utf-8")
     assert "install\\check_iis_proxy_prereqs.ps1" in deploy_readme
     assert "一致性边界" in deploy_readme
+    assert "API 与 worker 分离" in deploy_readme
+    assert "不需要单独启动 worker" in deploy_readme
+    assert "Stop-ScheduledTask -TaskName FanBanBackend" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -438,6 +467,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'Join-Path $BackendRuntimeRoot ($preflightPrefix + ".py")' in start_backend
     assert "Set-Content -LiteralPath $preflightScript" in start_backend
     assert 'Start-Process `\n            -FilePath $PythonPath' in start_backend
+    assert "-WindowStyle Hidden" in start_backend
+    assert "-NoNewWindow" not in start_backend
     assert "-RedirectStandardOutput $preflightStdout" in start_backend
     assert "-RedirectStandardError $preflightStderr" in start_backend
     assert "-c $preflightCode" not in start_backend
@@ -453,37 +484,52 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert '$logsDir = Join-Path $root "logs"' in start_backend
     assert 'backend-stdout-' in start_backend
     assert 'backend-stderr-' in start_backend
-    assert 'uvicorn-stdout-' in start_backend
-    assert 'uvicorn-stderr-' in start_backend
+    assert 'api-stdout-' in start_backend
+    assert 'api-stderr-' in start_backend
+    assert 'worker-stdout-' in start_backend
+    assert 'worker-stderr-' in start_backend
     assert 'Append-UvicornProcessLogs' in start_backend
-    assert 'backend-uvicorn-logs:' in start_backend
+    assert 'backend-api-logs:' in start_backend
+    assert 'backend-worker-logs:' in start_backend
     assert 'backend-latest-stderr.log' in start_backend
     assert "Start-Process" in start_backend
     assert '-FilePath $python' in start_backend
-    assert '-ArgumentList $backendArgs' in start_backend
-    assert '-RedirectStandardOutput $uvicornStdoutLog' in start_backend
-    assert '-RedirectStandardError $uvicornStderrLog' in start_backend
+    assert '-ArgumentList $ArgumentList' in start_backend
+    assert '-RedirectStandardOutput $childStdoutLog' in start_backend
+    assert '-RedirectStandardError $childStderrLog' in start_backend
     assert 'Start-Process -FilePath "cmd.exe"' not in start_backend
     assert "Test-BackendPing" in start_backend
     assert "Get-BackendListenerSnapshot" in start_backend
     assert "Stop-BackendProcessTree" in start_backend
     assert "SupervisorFailureThreshold" in start_backend
+    assert "ListenerAliveFailureThreshold" in start_backend
+    assert "PingTimeoutSeconds" in start_backend
     assert "backend-supervisor" in start_backend
     assert "[int]$RestartDelaySeconds = 10" in start_backend
     assert '$script:stopSupervisor = $false' in start_backend
     assert 'while (-not $script:stopSupervisor)' in start_backend
-    assert "backend-supervisor: launching uvicorn attempt=" in start_backend
-    assert '$restartReason = "process_exited"' in start_backend
-    assert '$restartReason = "ping_failed_no_listener"' in start_backend
-    assert '$restartReason = "ping_failed_listener_alive"' in start_backend
-    assert "backend-supervisor: restarting uvicorn reason={0}" in start_backend
+    assert "backend-supervisor: launching api attempt=" in start_backend
+    assert "backend-supervisor: launching worker attempt=" in start_backend
+    assert '$apiRestartReason = "api_process_exited"' in start_backend
+    assert '$workerRestartReason = "worker_process_exited"' in start_backend
+    assert '$apiRestartReason = "api_ping_failed_no_listener"' in start_backend
+    assert '$apiRestartReason = "api_ping_failed_listener_alive"' in start_backend
+    assert "backend-supervisor: restarting api reason={0}" in start_backend
+    assert "backend-supervisor: restarting worker reason={0}" in start_backend
     assert "Start-Sleep -Seconds $RestartDelaySeconds" in start_backend
-    assert "ping_failed_listener_alive" in start_backend
+    assert "Test-BackendPing -PingUrl $pingUrl -TimeoutSeconds $PingTimeoutSeconds" in start_backend
+    assert "elapsed_ms" in start_backend
+    assert "error = $_.Exception.Message" in start_backend
+    assert "api_ping_failed_listener_alive" in start_backend
+    assert "api_ping_failed_listener_alive count={0}/{1}" in start_backend
+    assert "ping_elapsed_ms={4}" in start_backend
+    assert "ping_error={5}" in start_backend
+    assert "$listenerAliveThreshold = [Math]::Max" in start_backend
     assert "ping_failed_but_listener_alive" not in start_backend
-    assert "ping_failed_no_listener" in start_backend
+    assert "api_ping_failed_no_listener" in start_backend
     assert '$listenerSnapshot.status -eq "pass"' in start_backend
-    assert "$backendProcess.WaitForExit()" in start_backend
-    assert "$backendProcess.Refresh()" in start_backend
+    assert "$apiChild.process.WaitForExit(5000)" in start_backend
+    assert "$apiChild.process.Refresh()" in start_backend
     assert "backend-supervisor unhealthy: ping_url=" not in start_backend
     assert '& cmd.exe /d /c $cmdLine' not in start_backend
     assert '& $python -X utf8 -m uvicorn' not in start_backend
@@ -521,6 +567,10 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "Get-WinEvent" in check_health
     assert "Microsoft-Windows-TaskScheduler/Operational" in check_health
     assert 'ValidateSet("full", "deep")' in check_health
+    assert 'if ($Mode -eq "deep" -and (Test-Path -LiteralPath $probeScript -PathType Leaf))' in check_health
+    assert '$probeRequiredForOverall = ($Mode -eq "deep")' in check_health
+    assert '$null -eq $selectedProbe -or' not in check_health
+    assert 'selected_probe_json = $selectedProbeJson' in check_health
     assert "check_health.summary.json" in check_health
     assert "check_health.full.json" in check_health
     assert "==== FanBan Health Summary ====" in check_health
@@ -870,8 +920,63 @@ def test_generated_start_backend_ties_uvicorn_to_task_lifetime(tmp_path: Path) -
     assert "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in start_backend
     assert "CreateJobObject" in start_backend
     assert "AssignProcessToJobObject" in start_backend
-    assert "Register-BackendChildProcessForTaskStop -BackendProcess $backendProcess" in start_backend
+    assert "$basicLimitInformation.LimitFlags = [FanBanBackendJobObject]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE" in start_backend
+    assert "$info.BasicLimitInformation = $basicLimitInformation" in start_backend
+    assert "$info.BasicLimitInformation.LimitFlags =" not in start_backend
+    assert "Register-BackendChildProcessForTaskStop -BackendProcess $apiProcess" in start_backend
+    assert "Register-BackendChildProcessForTaskStop -BackendProcess $workerProcess" in start_backend
+    assert "backend-job-object-fatal:" in start_backend
+    assert 'throw ("backend-job-object assign failed pid={0} win32_error={1}"' in start_backend
+    assert "Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue" in start_backend
+    assert "backend-job-object-warning" not in start_backend
     assert "Close-BackendChildProcessJob" in start_backend
+
+    register_task = (output_root / "install" / REGISTER_TASK_SCRIPT).read_text(encoding="utf-8")
+    assert "$settings.AllowHardTerminate = $true" in register_task
+    assert "-DisallowHardTerminate" not in register_task
+
+
+def test_generated_start_backend_appends_child_logs_to_supervisor_stderr(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
+
+    assert "[string]$SupervisorStderrLog" in start_backend
+    assert "-ChildStderrLog $apiChild.stderr" in start_backend
+    assert "-ChildStderrLog $workerChild.stderr" in start_backend
+    assert "-SupervisorStderrLog $stderrLog" in start_backend
+    assert "[string]$StderrLog" not in start_backend
+    assert "Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append" in start_backend
+    assert "Get-Content -LiteralPath $path -Encoding utf8 -Tail $MaxTailLines" in start_backend
+
+
+def test_generated_start_backend_runs_api_and_worker_as_separate_children(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
+
+    assert '"API.app.main:create_app"' in start_backend
+    assert '"API.app.worker"' in start_backend
+    assert "api-stdout-" in start_backend
+    assert "api-stderr-" in start_backend
+    assert "worker-stdout-" in start_backend
+    assert "worker-stderr-" in start_backend
+    assert "backend-supervisor: launching api attempt=" in start_backend
+    assert "backend-supervisor: launching worker attempt=" in start_backend
+    assert "backend-supervisor: restarting api reason={0}" in start_backend
+    assert "backend-supervisor: restarting worker reason={0}" in start_backend
+    assert '$apiRestartReason = "api_ping_failed_listener_alive"' in start_backend
+    assert '$workerRestartReason = "worker_process_exited"' in start_backend
+    assert "Register-BackendChildProcessForTaskStop -BackendProcess $apiProcess" in start_backend
+    assert "Register-BackendChildProcessForTaskStop -BackendProcess $workerProcess" in start_backend
 
 
 

@@ -131,6 +131,11 @@ def list_jobs(
     return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset)
 
 
+@router.get("/activity")
+def jobs_activity(request: Request) -> dict:
+    return request.app.state.runtime.jobs_activity()
+
+
 @router.get("/{job_id}")
 def get_job_detail(request: Request, job_id: str) -> dict:
     return request.app.state.runtime.get_job_detail(job_id)

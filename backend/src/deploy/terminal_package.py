@@ -247,6 +247,18 @@ def _prune_development_artifacts(output_root: Path) -> None:
     for target in removable_dirs:
         if target.exists():
             shutil.rmtree(target)
+    bridge_release_dir = (
+        backend_src_root
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "Release"
+        / "net48"
+    )
+    if bridge_release_dir.exists():
+        for pdb_file in bridge_release_dir.glob("*.pdb"):
+            pdb_file.unlink()
 
 
 def _find_local_managed_pdf2_pc3(pc3_name: str) -> Path | None:
@@ -483,7 +495,9 @@ def _write_support_files(
     [int]$StartupGraceSeconds = 60,
     [int]$SupervisorIntervalSeconds = 15,
     [int]$SupervisorFailureThreshold = 3,
-    [int]$RestartDelaySeconds = 10
+    [int]$ListenerAliveFailureThreshold = 6,
+    [int]$RestartDelaySeconds = 10,
+    [int]$PingTimeoutSeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -628,7 +642,7 @@ print("backend-import-preflight-ok", main.create_app)
             -FilePath $PythonPath `
             -ArgumentList @("-X", "utf8", $preflightScript) `
             -WorkingDirectory $BackendRuntimeRoot `
-            -NoNewWindow `
+            -WindowStyle Hidden `
             -Wait `
             -PassThru `
             -RedirectStandardOutput $preflightStdout `
@@ -662,13 +676,34 @@ function Get-BackendProbeHost {
 }
 
 function Test-BackendPing {
-    param([string]$PingUrl)
+    param(
+        [string]$PingUrl,
+        [int]$TimeoutSeconds = 5
+    )
 
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
     try {
-        $response = Invoke-RestMethod -Uri $PingUrl -Method Get -TimeoutSec 5 -ErrorAction Stop
-        return ($null -ne $response -and $response.ok -eq $true)
+        $response = Invoke-RestMethod -Uri $PingUrl -Method Get -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+        $timer.Stop()
+        $ok = ($null -ne $response -and $response.ok -eq $true)
+        $status = if ($ok) { "pass" } else { "fail" }
+        $error = if ($ok) { "" } else { "unexpected ping response" }
+        return [ordered]@{
+            ok = $ok
+            status = $status
+            error = $error
+            elapsed_ms = [int64]$timer.ElapsedMilliseconds
+            response = $response
+        }
     } catch {
-        return $false
+        $timer.Stop()
+        return [ordered]@{
+            ok = $false
+            status = "fail"
+            error = $_.Exception.Message
+            elapsed_ms = [int64]$timer.ElapsedMilliseconds
+            response = $null
+        }
     }
 }
 
@@ -863,8 +898,10 @@ function New-BackendChildProcessJob {
         throw ("backend-job-object create failed: win32_error={0}" -f $err)
     }
 
+    $basicLimitInformation = New-Object FanBanBackendJobObject+JOBOBJECT_BASIC_LIMIT_INFORMATION
+    $basicLimitInformation.LimitFlags = [FanBanBackendJobObject]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
     $info = New-Object FanBanBackendJobObject+JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-    $info.BasicLimitInformation.LimitFlags = [FanBanBackendJobObject]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $info.BasicLimitInformation = $basicLimitInformation
     $size = [Runtime.InteropServices.Marshal]::SizeOf($info)
     $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
     try {
@@ -899,12 +936,19 @@ function Register-BackendChildProcessForTaskStop {
                 Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
         } else {
             $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-            ("backend-job-object-warning: assign failed pid={0} win32_error={1}" -f $BackendProcess.Id, $err) |
-                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            throw ("backend-job-object assign failed pid={0} win32_error={1}" -f $BackendProcess.Id, $err)
         }
     } catch {
-        ("backend-job-object-warning: " + $_.Exception.Message) |
+        ("backend-job-object-fatal: " + $_.Exception.Message) |
             Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        try {
+            if ($null -ne $BackendProcess -and -not $BackendProcess.HasExited) {
+                Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+        Close-BackendChildProcessJob
+        throw
     }
 }
 
@@ -960,7 +1004,7 @@ try {
 
         $probeHost = Get-BackendProbeHost -HostValue $ListenHost
         $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
-        $backendArgs = @(
+        $apiArgs = @(
             "-X",
             "utf8",
             "-m",
@@ -972,103 +1016,256 @@ try {
             "--port",
             [string]$Port
         )
-        $cmdLine = ('"{0}" {1}' -f $python, ($backendArgs -join " "))
-        ("backend-command: " + $cmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-        $restartAttempt = 0
-        while (-not $script:stopSupervisor) {
-            $restartAttempt += 1
-            $attemptStamp = "{0}-{1:D4}" -f $runStamp, $restartAttempt
-            $uvicornStdoutLog = Join-Path $logsDir ("uvicorn-stdout-{0}.log" -f $attemptStamp)
-            $uvicornStderrLog = Join-Path $logsDir ("uvicorn-stderr-{0}.log" -f $attemptStamp)
-            ("backend-supervisor: launching uvicorn attempt={0}" -f $restartAttempt) |
-                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-            ("backend-uvicorn-logs: stdout={0} stderr={1}" -f $uvicornStdoutLog, $uvicornStderrLog) |
-                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-            $backendProcess = Start-Process `
+        $workerArgs = @(
+            "-X",
+            "utf8",
+            "-m",
+            "API.app.worker"
+        )
+        $apiCmdLine = ('"{0}" {1}' -f $python, ($apiArgs -join " "))
+        $workerCmdLine = ('"{0}" {1}' -f $python, ($workerArgs -join " "))
+        ("backend-command: " + $apiCmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        ("backend-worker-command: " + $workerCmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+
+        function Start-BackendManagedProcess {
+            param(
+                [string]$Label,
+                [object[]]$ArgumentList,
+                [int]$Attempt
+            )
+
+            $attemptStamp = "{0}-{1}-{2:D4}" -f $runStamp, $Label, $Attempt
+            if ($Label -eq "api") {
+                $childStdoutLog = Join-Path $logsDir ("api-stdout-{0}.log" -f $attemptStamp)
+                $childStderrLog = Join-Path $logsDir ("api-stderr-{0}.log" -f $attemptStamp)
+            } else {
+                $childStdoutLog = Join-Path $logsDir ("worker-stdout-{0}.log" -f $attemptStamp)
+                $childStderrLog = Join-Path $logsDir ("worker-stderr-{0}.log" -f $attemptStamp)
+            }
+            if ($Label -eq "api") {
+                ("backend-supervisor: launching api attempt={0}" -f $Attempt) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            } else {
+                ("backend-supervisor: launching worker attempt={0}" -f $Attempt) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+            if ($Label -eq "api") {
+                ("backend-api-logs: stdout={0} stderr={1}" -f $childStdoutLog, $childStderrLog) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            } else {
+                ("backend-worker-logs: stdout={0} stderr={1}" -f $childStdoutLog, $childStderrLog) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+            $childProcess = Start-Process `
                 -FilePath $python `
-                -ArgumentList $backendArgs `
+                -ArgumentList $ArgumentList `
                 -WorkingDirectory (Get-Location).Path `
                 -WindowStyle Hidden `
                 -PassThru `
-                -RedirectStandardOutput $uvicornStdoutLog `
-                -RedirectStandardError $uvicornStderrLog
-            Register-BackendChildProcessForTaskStop -BackendProcess $backendProcess
-            ("backend-supervisor: backend_pid={0} ping_url={1}" -f $backendProcess.Id, $pingUrl) |
+                -RedirectStandardOutput $childStdoutLog `
+                -RedirectStandardError $childStderrLog
+            if ($Label -eq "api") {
+                $apiProcess = $childProcess
+                Register-BackendChildProcessForTaskStop -BackendProcess $apiProcess
+            } else {
+                $workerProcess = $childProcess
+                Register-BackendChildProcessForTaskStop -BackendProcess $workerProcess
+            }
+            ("backend-supervisor: {0}_pid={1}" -f $Label, $childProcess.Id) |
                 Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            return [ordered]@{
+                process = $childProcess
+                stdout = $childStdoutLog
+                stderr = $childStderrLog
+            }
+        }
 
-            $failureCount = 0
-            $restartReason = ""
-            $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
-            while (-not $backendProcess.HasExited -and -not $script:stopSupervisor) {
-                Start-Sleep -Seconds $SupervisorIntervalSeconds
-                if (Test-BackendPing -PingUrl $pingUrl) {
-                    $failureCount = 0
-                    continue
-                }
-                if ((Get-Date) -lt $startupDeadline) {
-                    continue
-                }
+        function Append-ManagedProcessLogs {
+            param(
+                [string]$Label,
+                [string]$StdoutLog,
+                [string]$ChildStderrLog,
+                [string]$SupervisorStderrLog,
+                [int]$MaxTailLines = 400
+            )
 
-                $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
-                $failureCount += 1
-                if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
-                    ("backend-supervisor: ping_failed_listener_alive count={0}/{1} listener_status={2} listener_count={3}" -f `
-                        $failureCount,
-                        $SupervisorFailureThreshold,
-                        $listenerSnapshot.status,
-                        $listenerSnapshot.count) |
-                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-                    if ($failureCount -ge $SupervisorFailureThreshold) {
-                        ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
-                            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-                        Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
-                        try {
-                            $backendProcess.WaitForExit(5000) | Out-Null
-                        } catch {
-                        }
-                        $restartReason = "ping_failed_listener_alive"
-                        break
+            foreach ($entry in @(@("stdout", $StdoutLog), @("stderr", $ChildStderrLog))) {
+                $streamLabel = [string]$entry[0]
+                $path = [string]$entry[1]
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    $sourceFullPath = [System.IO.Path]::GetFullPath($path)
+                    $targetFullPath = [System.IO.Path]::GetFullPath($SupervisorStderrLog)
+                    if ($sourceFullPath -eq $targetFullPath) {
+                        ("----- {0}-{1}: skipped self-reference {2} -----" -f $Label, $streamLabel, $path) |
+                            Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                        continue
                     }
-                    continue
+                    ("----- {0}-{1}: {2} -----" -f $Label, $streamLabel, $path) |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                    Get-Content -LiteralPath $path -Encoding utf8 -Tail $MaxTailLines |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                } else {
+                    ("----- {0}-{1}: missing {2} -----" -f $Label, $streamLabel, $path) |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
                 }
+            }
+        }
 
-                ("backend-supervisor: ping_failed_no_listener count={0}/{1} listener_status={2} listener_count={3}" -f `
-                    $failureCount,
-                    $SupervisorFailureThreshold,
-                    $listenerSnapshot.status,
-                    $listenerSnapshot.count) |
-                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-                if ($failureCount -ge $SupervisorFailureThreshold) {
-                    ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
-                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
-                    Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
-                    try {
-                        $backendProcess.WaitForExit(5000) | Out-Null
-                    } catch {
-                    }
-                    $restartReason = "ping_failed_no_listener"
-                    break
+        function Stop-ManagedProcess {
+            param([object]$ManagedProcess)
+
+            if ($null -ne $ManagedProcess -and $null -ne $ManagedProcess.process -and -not $ManagedProcess.process.HasExited) {
+                try {
+                    Stop-Process -Id $ManagedProcess.process.Id -Force -ErrorAction SilentlyContinue
+                } catch {
                 }
+            }
+        }
+
+        $apiAttempt = 0
+        $workerAttempt = 0
+        $apiChild = $null
+        $workerChild = $null
+        $failureCount = 0
+        $startupDeadline = Get-Date
+        while (-not $script:stopSupervisor) {
+            if ($null -eq $apiChild) {
+                $apiAttempt += 1
+                $apiChild = Start-BackendManagedProcess -Label "api" -ArgumentList $apiArgs -Attempt $apiAttempt
+                $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
+                $failureCount = 0
+            }
+            if ($null -eq $workerChild) {
+                $workerAttempt += 1
+                $workerChild = Start-BackendManagedProcess -Label "worker" -ArgumentList $workerArgs -Attempt $workerAttempt
             }
 
             if ($script:stopSupervisor) {
                 $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
-                Stop-BackendProcessTree -BackendProcess $backendProcess -ListenerSnapshot $listenerSnapshot
+                if ($null -ne $apiChild) {
+                    Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                }
+                if ($null -ne $workerChild) {
+                    Stop-ManagedProcess -ManagedProcess $workerChild
+                }
                 break
             }
 
-            $backendProcess.WaitForExit()
-            $backendProcess.Refresh()
-            $script:backendExitCode = $backendProcess.ExitCode
-            if ([string]::IsNullOrWhiteSpace($restartReason)) {
-                $restartReason = "process_exited"
+            Start-Sleep -Seconds $SupervisorIntervalSeconds
+
+            if ($null -ne $workerChild -and $workerChild.process.HasExited) {
+                $workerChild.process.Refresh()
+                $workerExitCode = $workerChild.process.ExitCode
+                $workerRestartReason = "worker_process_exited"
+                Append-ManagedProcessLogs `
+                    -Label "worker" `
+                    -StdoutLog $workerChild.stdout `
+                    -ChildStderrLog $workerChild.stderr `
+                    -SupervisorStderrLog $stderrLog
+                ("backend-supervisor: restarting worker reason={0} exit_code={1} delay_seconds={2}" -f `
+                    $workerRestartReason,
+                    $workerExitCode,
+                    $RestartDelaySeconds) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                $workerChild = $null
+                Start-Sleep -Seconds $RestartDelaySeconds
+                continue
             }
-            Append-UvicornProcessLogs -UvicornStdoutLog $uvicornStdoutLog -UvicornStderrLog $uvicornStderrLog
-            ("backend-supervisor: restarting uvicorn reason={0} exit_code={1} delay_seconds={2}" -f `
-                $restartReason,
+
+            if ($null -ne $apiChild -and $apiChild.process.HasExited) {
+                $apiChild.process.Refresh()
+                $script:backendExitCode = $apiChild.process.ExitCode
+                $apiRestartReason = "api_process_exited"
+                Append-ManagedProcessLogs `
+                    -Label "api" `
+                    -StdoutLog $apiChild.stdout `
+                    -ChildStderrLog $apiChild.stderr `
+                    -SupervisorStderrLog $stderrLog
+                ("backend-supervisor: restarting api reason={0} exit_code={1} delay_seconds={2}" -f `
+                    $apiRestartReason,
+                    $script:backendExitCode,
+                    $RestartDelaySeconds) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                $apiChild = $null
+                Start-Sleep -Seconds $RestartDelaySeconds
+                continue
+            }
+
+            $pingResult = Test-BackendPing -PingUrl $pingUrl -TimeoutSeconds $PingTimeoutSeconds
+            if ([bool]$pingResult.ok) {
+                if ($failureCount -gt 0) {
+                    ("backend-supervisor: api_ping_recovered_after_failures count={0} ping_elapsed_ms={1}" -f `
+                        $failureCount,
+                        $pingResult.elapsed_ms) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                }
+                $failureCount = 0
+                continue
+            }
+            if ((Get-Date) -lt $startupDeadline) {
+                continue
+            }
+
+            $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+            $failureCount += 1
+            $pingElapsedMs = if ($null -ne $pingResult.elapsed_ms) { [int64]$pingResult.elapsed_ms } else { -1 }
+            $pingError = if ($null -ne $pingResult.error) { [string]$pingResult.error } else { "" }
+            $listenerAliveThreshold = [Math]::Max($SupervisorFailureThreshold, $ListenerAliveFailureThreshold)
+            if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
+                ("backend-supervisor: api_ping_failed_listener_alive count={0}/{1} listener_status={2} listener_count={3} ping_elapsed_ms={4} ping_error={5}" -f `
+                    $failureCount,
+                    $listenerAliveThreshold,
+                    $listenerSnapshot.status,
+                    $listenerSnapshot.count,
+                    $pingElapsedMs,
+                    $pingError) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                if ($failureCount -lt $listenerAliveThreshold) {
+                    continue
+                }
+                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                try {
+                    $apiChild.process.WaitForExit(5000) | Out-Null
+                } catch {
+                }
+                $apiRestartReason = "api_ping_failed_listener_alive"
+            } else {
+                ("backend-supervisor: api_ping_failed_no_listener count={0}/{1} listener_status={2} listener_count={3} ping_elapsed_ms={4} ping_error={5}" -f `
+                    $failureCount,
+                    $SupervisorFailureThreshold,
+                    $listenerSnapshot.status,
+                    $listenerSnapshot.count,
+                    $pingElapsedMs,
+                    $pingError) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                if ($failureCount -lt $SupervisorFailureThreshold) {
+                    continue
+                }
+                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                try {
+                    $apiChild.process.WaitForExit(5000) | Out-Null
+                } catch {
+                }
+                $apiRestartReason = "api_ping_failed_no_listener"
+            }
+
+            $apiChild.process.Refresh()
+            $script:backendExitCode = $apiChild.process.ExitCode
+            Append-ManagedProcessLogs `
+                -Label "api" `
+                -StdoutLog $apiChild.stdout `
+                -ChildStderrLog $apiChild.stderr `
+                -SupervisorStderrLog $stderrLog
+            ("backend-supervisor: restarting api reason={0} exit_code={1} delay_seconds={2}" -f `
+                $apiRestartReason,
                 $script:backendExitCode,
                 $RestartDelaySeconds) |
                 Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            $apiChild = $null
             Start-Sleep -Seconds $RestartDelaySeconds
         }
     } finally {
@@ -1286,6 +1483,7 @@ function Get-BackendFailureClassification {
 
 $deepProbe = $null
 $selectedProbe = $null
+$selectedProbeJson = ""
 $proxyOutput = ""
 $proxyStatus = "skip"
 $proxyError = ""
@@ -1310,10 +1508,11 @@ $backendListener = [ordered]@{
 $backendListenerStatus = "skip"
 $backendFailureClassification = "unknown"
 
-if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
+if ($Mode -eq "deep" -and (Test-Path -LiteralPath $probeScript -PathType Leaf)) {
     & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
     $deepProbe = Get-Content -LiteralPath $deepProbeJson -Raw | ConvertFrom-Json
     $selectedProbe = $deepProbe
+    $selectedProbeJson = $deepProbeJson
 }
 
 if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
@@ -1429,17 +1628,20 @@ if ($null -ne $selectedProbe) {
 }
 
 $overallStatus = "pass"
-if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail") {
+$probeRequiredForOverall = ($Mode -eq "deep")
+if (($probeRequiredForOverall -and $null -eq $selectedProbe) -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail") {
     $overallStatus = "fail"
 } elseif ($proxyStatus -eq "warn") {
     $overallStatus = "warn"
 }
 
+$reportedDeepProbeJson = if ($Mode -eq "deep") { $deepProbeJson } else { "" }
+
 $summary = [ordered]@{
     generated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     mode = $Mode
     overall_status = $overallStatus
-    selected_probe_json = $deepProbeJson
+    selected_probe_json = $selectedProbeJson
     blocking_issue_count = $blockingIssues.Count
     warning_count = $warnings.Count
     api_status = $apiPingStatus
@@ -1463,7 +1665,7 @@ $fullReport = [ordered]@{
     summary = $summary
     probe = [ordered]@{
         quick_json = ""
-        deep_json = $deepProbeJson
+        deep_json = $reportedDeepProbeJson
         selected = $selectedProbe
     }
     scheduled_task = $taskDetails
@@ -2087,6 +2289,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
     -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1)
+$settings.AllowHardTerminate = $true
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host ("已注册登录触发任务: " + $TaskName)
@@ -2155,6 +2358,12 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 7. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
 8. 执行 `scripts\check_health.ps1`
 9. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+
+## 后端启动模型
+
+- 当前部署包采用 API 与 worker 分离：API 进程只负责网页接口和队列入库，worker 进程负责 CAD/文档长任务。
+- 正常安装命令不需要变化，也不需要单独启动 worker；`scripts\start_backend.ps1` 会同时托管 API 和 worker。
+- `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
 
 ## 一致性边界
 
