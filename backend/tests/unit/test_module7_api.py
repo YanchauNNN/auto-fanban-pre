@@ -961,6 +961,64 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
     ]
 
 
+def test_preflight_fonts_does_not_block_system_ping(monkeypatch, tmp_path: Path) -> None:
+    import threading
+
+    class SlowFontPreflightService(FakeFontPreflightService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+
+        def inspect_dwg(self, **kwargs: Any) -> dict[str, object]:
+            self.started.set()
+            time.sleep(0.45)
+            return {
+                "filename": Path(kwargs["source_dwg"]).name,
+                "status": "missing_fonts",
+                "missing_fonts": [
+                    {
+                        "style_name": "STYLE1",
+                        "font_name": "missing.shx",
+                        "bigfont_name": "",
+                        "kind": "shx",
+                        "used_in_block": True,
+                    }
+                ],
+                "detected_style_count": 1,
+                "missing_style_count": 1,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
+    font_service = SlowFontPreflightService()
+    result: dict[str, Any] = {}
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        def run_preflight() -> None:
+            result["response"] = client.post(
+                "/api/jobs/preflight-fonts",
+                files=[("files[]", ("slow-font.dwg", b"dwg-a", "application/acad"))],
+            )
+
+        thread = threading.Thread(target=run_preflight, name="slow-preflight-test")
+        thread.start()
+        assert font_service.started.wait(timeout=1.0)
+
+        ping_started = time.perf_counter()
+        ping_response = client.get("/api/system/ping")
+        ping_elapsed = time.perf_counter() - ping_started
+
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+    preflight_response = result["response"]
+    assert preflight_response.status_code == 200
+    assert ping_response.status_code == 200
+    assert ping_elapsed < 0.25
+
+
 def test_preflight_fonts_keeps_file_results_when_replacement_inventory_fails(
     monkeypatch,
     tmp_path: Path,

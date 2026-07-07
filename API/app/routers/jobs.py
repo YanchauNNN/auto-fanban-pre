@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..runtime import UploadedFilePayload
@@ -35,7 +36,7 @@ async def preflight_fonts(
         )
         for upload in files
     ]
-    payload = request.app.state.runtime.preflight_fonts(files=uploads)
+    payload = await run_in_threadpool(request.app.state.runtime.preflight_fonts, files=uploads)
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 
 
