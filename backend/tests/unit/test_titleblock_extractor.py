@@ -1021,6 +1021,26 @@ def test_parse_page_info_fragmented_index_then_total_allows_baseline_offset() ->
     assert idx == 1
 
 
+def test_parse_page_info_numeric_only_001_homepage_keeps_index_total_when_tokens_ascend() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["page_info"].parse
+    items = [
+        _item("1", x=214643.7846724047, y=11090.14056189875, height=125.01412281225),
+        _item("2", x=215192.8679049898, y=11088.85742002148, height=125.01412281225),
+        _item("2", x=215189.3575005715, y=11291.22185644908, height=125.01412281225),
+        _item("1", x=214561.5340778686, y=11283.93957538197, height=125.01412281225),
+    ]
+
+    total, idx = extractor._parse_page_info(
+        items,
+        parse_cfg,
+        total_then_index_tokens=True,
+    )
+
+    assert total == 2
+    assert idx == 1
+
+
 def test_parse_page_info_fragmented_total_then_index_page_unit() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["page_info"].parse

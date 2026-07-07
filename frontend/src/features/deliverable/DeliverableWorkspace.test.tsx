@@ -273,6 +273,7 @@ function createAdapter(): ApiAdapter {
     rememberAuditReplaceFactoryCodes: vi.fn().mockResolvedValue({ factoryCodes: [] }),
     createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
+    getJobsActivity: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
   };

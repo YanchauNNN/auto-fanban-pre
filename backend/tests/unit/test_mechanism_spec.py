@@ -84,6 +84,25 @@ def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> Non
     assert spec.audit_replace.unit_factory_codes == ["RC", "HL"]
 
 
+def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "鍙傛暟瑙勮寖-3.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "api_runtime": {},
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(spec_path)
+
+    assert spec.api_runtime.job_summary_sync_interval_sec == 3.0
+    assert spec.api_runtime.jobs_activity_stream_poll_interval_sec == 2.0
+    assert spec.api_runtime.jobs_activity_stream_keepalive_sec == 15.0
+
+
 def test_append_audit_replace_factory_codes_updates_yaml_and_cache(tmp_path: Path) -> None:
     spec_path = _write_mechanism_spec(
         tmp_path / "documents" / "参数规范-3.yaml",

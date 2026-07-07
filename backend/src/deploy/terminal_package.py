@@ -1481,12 +1481,37 @@ function Get-BackendFailureClassification {
     return "listener_present_but_api_unreachable"
 }
 
+function Convert-FirstJsonObjectFromText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+
+    $start = $Text.IndexOf("{")
+    $end = $Text.LastIndexOf("}")
+    if ($start -lt 0 -or $end -lt $start) {
+        return $null
+    }
+
+    $jsonText = $Text.Substring($start, $end - $start + 1)
+    try {
+        return ($jsonText | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
 $deepProbe = $null
 $selectedProbe = $null
 $selectedProbeJson = ""
 $proxyOutput = ""
 $proxyStatus = "skip"
 $proxyError = ""
+$proxyDetails = $null
+$proxyTimeoutStatus = "skip"
+$proxyTimeoutSeconds = $null
+$proxyMinimumTimeoutSeconds = 600
 $apiPingStatus = "fail"
 $apiPingError = ""
 $apiPingResponse = $null
@@ -1518,7 +1543,22 @@ if ($Mode -eq "deep" -and (Test-Path -LiteralPath $probeScript -PathType Leaf)) 
 if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
     try {
         $proxyOutput = (& $iisProxyScript 2>&1 | Out-String).Trim()
-        if ($proxyOutput -match '"missing"' -or $proxyOutput -match '未检测到') {
+        $proxyDetails = Convert-FirstJsonObjectFromText -Text $proxyOutput
+        if ($null -ne $proxyDetails -and $null -ne $proxyDetails.arr) {
+            if ($null -ne $proxyDetails.arr.timeout_status) {
+                $proxyTimeoutStatus = [string]$proxyDetails.arr.timeout_status
+            }
+            if ($null -ne $proxyDetails.arr.timeout_seconds) {
+                $proxyTimeoutSeconds = [int]$proxyDetails.arr.timeout_seconds
+            }
+            if ($null -ne $proxyDetails.arr.minimum_timeout_seconds) {
+                $proxyMinimumTimeoutSeconds = [int]$proxyDetails.arr.minimum_timeout_seconds
+            }
+        }
+
+        $proxyMissing = ($proxyOutput -match '"missing"' -or $proxyOutput -match '未检测到')
+        $proxyTimeoutUnsafe = ($proxyTimeoutStatus -eq "warn" -or $proxyTimeoutStatus -eq "unknown")
+        if ($proxyMissing -or $proxyTimeoutUnsafe) {
             $proxyStatus = "warn"
         } else {
             $proxyStatus = "pass"
@@ -1657,6 +1697,9 @@ $summary = [ordered]@{
     backend_listener_count = $backendListener.count
     backend_failure_classification = $backendFailureClassification
     proxy_status = $proxyStatus
+    proxy_timeout_status = $proxyTimeoutStatus
+    proxy_timeout_seconds = $proxyTimeoutSeconds
+    proxy_minimum_timeout_seconds = $proxyMinimumTimeoutSeconds
     summary_json = $summaryJson
     full_json = $fullJson
 }
@@ -1701,6 +1744,10 @@ $fullReport = [ordered]@{
         status = $proxyStatus
         error = $proxyError
         output = $proxyOutput
+        details = $proxyDetails
+        timeout_status = $proxyTimeoutStatus
+        timeout_seconds = $proxyTimeoutSeconds
+        minimum_timeout_seconds = $proxyMinimumTimeoutSeconds
     }
 }
 
@@ -1720,6 +1767,7 @@ Write-Host ("Backend failure classification: " + $backendFailureClassification)
 Write-Host ("API ping: " + $apiPingStatus)
 Write-Host ("API health: " + $apiHealthStatus)
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
+Write-Host ("IIS proxy timeout: " + $proxyTimeoutStatus + " (" + $proxyTimeoutSeconds + "s, minimum " + $proxyMinimumTimeoutSeconds + "s)")
 if ($blockingIssues.Count -gt 0) {
     Write-Host "Top blocking issues:"
     foreach ($issue in $blockingIssues) {
@@ -1995,6 +2043,38 @@ try {
 
 $rewriteInstalled = $false
 $arrInstalled = $false
+$minimumProxyTimeoutSeconds = 600
+$proxyTimeoutRaw = ""
+$proxyTimeoutSeconds = $null
+$proxyTimeoutStatus = "skip"
+
+function Convert-ArrTimeoutToSeconds {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [TimeSpan]) {
+        return [int][Math]::Round($Value.TotalSeconds)
+    }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $null
+    }
+
+    $parsedTimeSpan = [TimeSpan]::Zero
+    if ([TimeSpan]::TryParse($text, [ref]$parsedTimeSpan)) {
+        return [int][Math]::Round($parsedTimeSpan.TotalSeconds)
+    }
+
+    $parsedSeconds = 0
+    if ([int]::TryParse($text, [ref]$parsedSeconds)) {
+        return $parsedSeconds
+    }
+
+    return $null
+}
 
 if ($iisInstalled) {
     $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
@@ -2005,6 +2085,25 @@ if ($iisInstalled) {
     $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
     if ($null -ne $proxySection) {
         $arrInstalled = $true
+        $proxyTimeoutValue = $null
+        try {
+            $proxyTimeoutValue = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "timeout" -ErrorAction SilentlyContinue
+        } catch {
+            $proxyTimeoutValue = $null
+        }
+        if ($null -eq $proxyTimeoutValue -and $null -ne $proxySection.timeout) {
+            $proxyTimeoutValue = $proxySection.timeout
+        }
+
+        $proxyTimeoutRaw = if ($null -ne $proxyTimeoutValue) { [string]$proxyTimeoutValue } else { "" }
+        $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutValue
+        if ($null -eq $proxyTimeoutSeconds) {
+            $proxyTimeoutStatus = "unknown"
+        } elseif ([int]$proxyTimeoutSeconds -lt $minimumProxyTimeoutSeconds) {
+            $proxyTimeoutStatus = "warn"
+        } else {
+            $proxyTimeoutStatus = "pass"
+        }
     }
 
     if (-not $arrInstalled) {
@@ -2031,6 +2130,10 @@ $result = [ordered]@{
         installed = $arrInstalled
         status = if ($arrInstalled) { "pass" } else { "missing" }
         product_name = "Application Request Routing"
+        timeout = $proxyTimeoutRaw
+        timeout_seconds = $proxyTimeoutSeconds
+        timeout_status = $proxyTimeoutStatus
+        minimum_timeout_seconds = $minimumProxyTimeoutSeconds
     }
 }
 
@@ -2044,6 +2147,12 @@ if (-not $rewriteInstalled) {
 }
 if (-not $arrInstalled) {
     Write-Warning "未检测到 ARR（Application Request Routing）。"
+}
+if ($arrInstalled -and $proxyTimeoutStatus -eq "warn") {
+    Write-Warning ("ARR proxy timeout 低于 10 分钟，当前为 " + $proxyTimeoutSeconds + " 秒。请执行 configure_iis_site.ps1 或手动设置为 00:10:00。")
+}
+if ($arrInstalled -and $proxyTimeoutStatus -eq "unknown") {
+    Write-Warning "ARR proxy timeout 无法解析，请检查 system.webServer/proxy timeout 设置。"
 }
 '''
     _write_text(output_root / "install" / "check_iis_proxy_prereqs.ps1", check_iis_proxy)
@@ -2168,7 +2277,7 @@ $staticContentConfig
     } else {
         $appcmd = Join-Path $env:WinDir "System32\inetsrv\appcmd.exe"
         if (Test-Path -LiteralPath $appcmd -PathType Leaf) {
-            & $appcmd set config -section:system.webServer/proxy /enabled:"True" /commit:apphost | Out-Null
+            & $appcmd set config -section:system.webServer/proxy /enabled:"True" /timeout:"00:10:00" /commit:apphost | Out-Null
         }
         $webConfigContent = @"
 <?xml version="1.0" encoding="utf-8"?>

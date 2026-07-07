@@ -33,3 +33,13 @@ def test_font_preflight_bridge_honors_exempt_style_names() -> None:
     assert "FontCompatibilityExemptStyleNames" in commands_source
     assert "IsFontCompatibilityExemptStyle(styleName)" in processor_source
     assert "IsFontCompatibilityExemptStyle(usage.StyleName)" in processor_source
+
+
+def test_release_bridge_build_disables_debug_symbols() -> None:
+    project_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/Module5CadBridge.csproj"
+    ).read_text(encoding="utf-8")
+
+    assert 'Condition="\'$(Configuration)\' == \'Release\'"' in project_source
+    assert "<DebugType>none</DebugType>" in project_source
+    assert "<DebugSymbols>false</DebugSymbols>" in project_source

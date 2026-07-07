@@ -573,6 +573,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'selected_probe_json = $selectedProbeJson' in check_health
     assert "check_health.summary.json" in check_health
     assert "check_health.full.json" in check_health
+    assert "proxy_timeout_status" in check_health
+    assert "proxy_timeout_seconds" in check_health
+    assert "IIS proxy timeout" in check_health
     assert "==== FanBan Health Summary ====" in check_health
     assert 'Get-Content -LiteralPath $probeJson' not in check_health
     assert 'OfficeProbeMode = "deep"' in deep_check
@@ -598,6 +601,7 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "New-Website" in configure_iis or "Set-ItemProperty" in configure_iis
     assert "HostName" in configure_iis
     assert "system.webServer/proxy" in configure_iis
+    assert '/timeout:"00:10:00"' in configure_iis
     assert "ARR" in configure_iis
     assert '<remove fileExtension=".mjs" />' in configure_iis
     assert '<mimeMap fileExtension=".mjs" mimeType="text/javascript" />' in configure_iis
@@ -610,6 +614,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "不会自动创建 DNS 或 hosts 解析" in configure_iis
     assert "RewriteModule" in check_iis_proxy
     assert "Application Request Routing" in check_iis_proxy
+    assert "$minimumProxyTimeoutSeconds = 600" in check_iis_proxy
+    assert "timeout_status" in check_iis_proxy
+    assert "timeout_seconds" in check_iis_proxy
     assert "msiexec.exe" in install_iis_proxy
     assert "url_rewrite" in install_iis_proxy
     assert "requestRouter_amd64.msi" in install_iis_proxy or "arr" in install_iis_proxy

@@ -1593,9 +1593,11 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         if len(best_line_tokens) >= 2:
             best_line_tokens.sort(key=lambda t: t[0])
-            if total_then_index_tokens:
-                return best_line_tokens[0][1], best_line_tokens[-1][1]
-            return best_line_tokens[-1][1], best_line_tokens[0][1]
+            return self._page_info_ordered_tokens(
+                best_line_tokens[0][1],
+                best_line_tokens[-1][1],
+                total_then_index_tokens=total_then_index_tokens,
+            )
 
         tokens: list[tuple[float, str]] = []
         for it in items:
@@ -1605,9 +1607,32 @@ class TitleblockExtractor(ITitleblockExtractor):
         tokens.sort(key=lambda t: t[0])
         if len(tokens) < 2:
             return None, None
-        if total_then_index_tokens:
-            return tokens[0][1], tokens[-1][1]
-        return tokens[-1][1], tokens[0][1]
+        return self._page_info_ordered_tokens(
+            tokens[0][1],
+            tokens[-1][1],
+            total_then_index_tokens=total_then_index_tokens,
+        )
+
+    @classmethod
+    def _page_info_ordered_tokens(
+        cls,
+        first: str,
+        second: str,
+        *,
+        total_then_index_tokens: bool,
+    ) -> tuple[str, str]:
+        if not total_then_index_tokens:
+            return second, first
+
+        first_as_index = cls._page_info_token_to_int(first, is_index=True)
+        second_as_total = cls._page_info_token_to_int(second, is_index=False)
+        if (
+            first_as_index is not None
+            and second_as_total is not None
+            and first_as_index <= second_as_total
+        ):
+            return second, first
+        return first, second
 
     @classmethod
     def _page_info_line_priority(cls, text: str) -> int:

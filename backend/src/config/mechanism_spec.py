@@ -114,6 +114,9 @@ class ApiRuntimeMechanismConfig(BaseModel):
         },
     )
     job_completion_wait_timeout_sec: float = 3600.0
+    job_summary_sync_interval_sec: float = 3.0
+    jobs_activity_stream_poll_interval_sec: float = 2.0
+    jobs_activity_stream_keepalive_sec: float = 15.0
 
 
 class CadRuntimeMechanismConfig(BaseModel):

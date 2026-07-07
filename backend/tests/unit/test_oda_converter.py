@@ -63,3 +63,32 @@ def test_dwg_to_dxf_subprocess_uses_safe_output_decoding(
     assert result == output_dir / "sample.dxf"
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
+
+
+def test_dwg_to_dxf_hides_converter_subprocess_window_on_windows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    exe_path = tmp_path / "ODAFileConverter.exe"
+    exe_path.write_text("stub", encoding="utf-8")
+    dwg_path = tmp_path / "sample.dwg"
+    dwg_path.write_text("dwg", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "sample.dxf").write_text("0\nEOF\n", encoding="utf-8")
+    monkeypatch.setattr("src.cad.oda_converter.os.name", "nt")
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    converter = ODAConverter(exe_path=str(exe_path), timeout=1)
+    result = converter.dwg_to_dxf(dwg_path, output_dir)
+
+    assert result == output_dir / "sample.dxf"
+    assert captured["creationflags"] == 0x08000000

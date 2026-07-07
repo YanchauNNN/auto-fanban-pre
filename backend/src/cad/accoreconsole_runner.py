@@ -25,6 +25,13 @@ from .autocad_path_resolver import resolve_autocad_paths
 logger = logging.getLogger(__name__)
 
 
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name != "nt":
+        return {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": creationflags} if creationflags else {}
+
+
 def _cad_mechanism() -> CadRuntimeMechanismConfig:
     try:
         return load_mechanism_spec().cad_runtime_mechanism
@@ -137,6 +144,7 @@ class AcCoreConsoleRunner:
                     timeout=self.task_timeout_sec,
                     env=runtime_env,
                     cwd=self.backend_cwd,
+                    **_hidden_subprocess_kwargs(),
                 )
                 elapsed = time.monotonic() - t0
                 result = AcCoreConsoleRunResult(

@@ -341,6 +341,107 @@ describe("HttpAdapter", () => {
     expect(jobs.items).toHaveLength(0);
   });
 
+  it("fetches lightweight jobs activity marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 12,
+          active: 2,
+          last_changed_at: "2026-07-05T12:34:56+08:00",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const activity = await adapter.getJobsActivity();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/activity",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(activity).toEqual({
+      total: 12,
+      active: 2,
+      lastChangedAt: "2026-07-05T12:34:56+08:00",
+    });
+  });
+
+  it("subscribes to jobs activity SSE and closes cleanly", () => {
+    const instances: FakeEventSource[] = [];
+
+    class FakeEventSource {
+      readonly url: string;
+      onerror: ((event: Event) => void) | null = null;
+      closed = false;
+      private readonly listeners = new Map<string, EventListener[]>();
+
+      constructor(url: string) {
+        this.url = url;
+        instances.push(this);
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.set(
+          type,
+          (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener),
+        );
+      }
+
+      close() {
+        this.closed = true;
+      }
+
+      emit(type: string, data: string) {
+        const event = new MessageEvent(type, { data });
+        for (const listener of this.listeners.get(type) ?? []) {
+          listener(event);
+        }
+      }
+    }
+
+    vi.stubGlobal("EventSource", FakeEventSource);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const onActivity = vi.fn();
+    const unsubscribe = adapter.subscribeJobsActivity(onActivity);
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].url).toBe("http://127.0.0.1:8000/api/jobs/activity/stream");
+
+    instances[0].emit(
+      "jobs_activity",
+      JSON.stringify({
+        total: 12,
+        active: 2,
+        last_changed_at: "2026-07-05T12:34:56+08:00",
+      }),
+    );
+
+    expect(onActivity).toHaveBeenCalledWith({
+      total: 12,
+      active: 2,
+      lastChangedAt: "2026-07-05T12:34:56+08:00",
+    });
+
+    unsubscribe();
+
+    expect(instances[0].closed).toBe(true);
+    instances[0].emit(
+      "jobs_activity",
+      JSON.stringify({
+        total: 13,
+        active: 0,
+        last_changed_at: "2026-07-05T12:35:00+08:00",
+      }),
+    );
+    expect(onActivity).toHaveBeenCalledTimes(1);
+  });
+
   it("maps failure display fields in job summaries", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

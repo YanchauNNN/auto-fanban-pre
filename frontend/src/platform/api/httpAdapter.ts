@@ -15,6 +15,7 @@ import type {
   JobDetail,
   JobList,
   JobSummary,
+  JobsActivity,
   PingStatus,
   SubmissionParams,
 } from "./types";
@@ -538,6 +539,61 @@ export class HttpAdapter implements ApiAdapter {
       items: payload.items.map((job) => this.normalizeSummary(job)),
     };
   }
+
+  async getJobsActivity(): Promise<JobsActivity> {
+    const payload = await this.fetchJson<{
+      total: number;
+      active: number;
+      last_changed_at: string | null;
+    }>("/api/jobs/activity", undefined, { retry: true });
+
+    return {
+      total: payload.total,
+      active: payload.active,
+      lastChangedAt: payload.last_changed_at,
+    };
+  }
+
+  subscribeJobsActivity = (
+    onActivity: (activity: JobsActivity) => void,
+    onError?: (event: Event) => void,
+  ): (() => void) => {
+    if (typeof window === "undefined" || typeof window.EventSource === "undefined") {
+      return () => {};
+    }
+
+    const source = new window.EventSource(this.buildUrl("/api/jobs/activity/stream"));
+    const handleActivity = (event: MessageEvent<string>) => {
+      const payload = this.parseJsonOrText(event.data);
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+      const raw = payload as {
+        total?: number;
+        active?: number;
+        last_changed_at?: string | null;
+      };
+
+      onActivity({
+        total: Number(raw.total ?? 0),
+        active: Number(raw.active ?? 0),
+        lastChangedAt: typeof raw.last_changed_at === "string" ? raw.last_changed_at : null,
+      });
+    };
+    const handleError = (event: Event) => {
+      onError?.(event);
+      source.close();
+    };
+
+    source.addEventListener("jobs_activity", handleActivity as EventListener);
+    source.onerror = handleError;
+
+    return () => {
+      source.removeEventListener("jobs_activity", handleActivity as EventListener);
+      source.onerror = null;
+      source.close();
+    };
+  };
 
   async getJobDetail(jobId: string): Promise<JobDetail> {
     const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`, undefined, {

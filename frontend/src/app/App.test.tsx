@@ -17,6 +17,8 @@ const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
 const mockListJobs = vi.fn();
+const mockGetJobsActivity = vi.fn();
+const mockSubscribeJobsActivity = vi.fn();
 const mockGetJobDetail = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
@@ -62,6 +64,8 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
+    getJobsActivity: mockGetJobsActivity,
+    subscribeJobsActivity: mockSubscribeJobsActivity,
     getJobDetail: mockGetJobDetail,
   }),
 }));
@@ -77,6 +81,8 @@ beforeEach(() => {
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
   mockListJobs.mockReset();
+  mockGetJobsActivity.mockReset();
+  mockSubscribeJobsActivity.mockReset();
   mockGetJobDetail.mockReset();
 
   mockPing.mockResolvedValue({
@@ -126,6 +132,12 @@ beforeEach(() => {
     total: 0,
     items: [],
   });
+  mockGetJobsActivity.mockResolvedValue({
+    total: 0,
+    active: 0,
+    lastChangedAt: null,
+  });
+  mockSubscribeJobsActivity.mockReturnValue(() => {});
   mockPreflightFonts.mockResolvedValue({
     files: [],
     replacementOptions: [],
@@ -428,6 +440,43 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
+  it("refreshes recent jobs after receiving a jobs activity SSE event", async () => {
+    let emitActivity: ((activity: { total: number; active: number; lastChangedAt: string | null }) => void) | null =
+      null;
+    mockSubscribeJobsActivity.mockImplementation((onActivity) => {
+      emitActivity = onActivity;
+      return () => {};
+    });
+    mockListJobs
+      .mockResolvedValueOnce({
+        total: 1,
+        items: [makeSingleJob(1, "before-sse.dwg")],
+      })
+      .mockResolvedValue({
+        total: 1,
+        items: [makeSingleJob(2, "after-sse.dwg")],
+      });
+
+    render(<App />);
+
+    expect(await screen.findByText("before-sse.dwg")).toBeInTheDocument();
+    expect(mockSubscribeJobsActivity).toHaveBeenCalledTimes(1);
+    const listCallCountBeforeSse = mockListJobs.mock.calls.length;
+
+    act(() => {
+      emitActivity?.({
+        total: 1,
+        active: 1,
+        lastChangedAt: "2026-07-07T10:00:03+08:00",
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockListJobs.mock.calls.length).toBeGreaterThan(listCallCountBeforeSse);
+    });
+    expect(await screen.findByText("after-sse.dwg")).toBeInTheDocument();
+  });
+
   it("filters recent jobs by status and refreshes totals from the backend", async () => {
     const allJobs = [
       {

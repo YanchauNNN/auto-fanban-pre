@@ -34,6 +34,9 @@ class FlakyHeartbeatQueue:
 
 
 def _bare_worker_with_queue(queue_store: Any) -> Any:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
     from API.app.worker import DeliverableWorkerRuntime
 
     worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
@@ -41,6 +44,8 @@ def _bare_worker_with_queue(queue_store: Any) -> Any:
     worker.queue_store = queue_store
     worker.heartbeat_retry_attempts = 3
     worker.heartbeat_retry_delay_seconds = 0
+    worker.summary_sync_retry_attempts = 1
+    worker.summary_sync_retry_delay_seconds = 0
     worker._stop_event = threading.Event()
     return worker
 
@@ -229,6 +234,22 @@ def test_worker_heartbeat_retries_transient_sqlite_lock() -> None:
     assert queue_store.claim_calls == 1
 
 
+def test_worker_summary_sync_skips_sqlite_lock_without_crashing() -> None:
+    queue_store = FlakyHeartbeatQueue(fail_count=0)
+    worker = _bare_worker_with_queue(queue_store)
+    calls: list[tuple[str, str]] = []
+
+    def _refresh(item_type: str, item_id: str) -> None:
+        calls.append((item_type, item_id))
+        raise sqlite3.OperationalError("database is locked")
+
+    worker.runtime = SimpleNamespace(refresh_summary_index=_refresh)
+
+    worker._sync_current_summary(("busy", "job", "job-1", None))
+
+    assert calls == [("job", "job-1")]
+
+
 def test_worker_heartbeat_skips_persistent_sqlite_lock_without_crashing() -> None:
     queue_store = FlakyHeartbeatQueue(fail_count=10)
     worker = _bare_worker_with_queue(queue_store)
@@ -289,6 +310,63 @@ def test_worker_refreshes_heartbeats_while_processing_long_item(monkeypatch, tmp
     assert result == {"processed": True}
     assert refreshed_worker_seen != initial_worker_seen
     assert refreshed_queue_heartbeat != initial_queue_heartbeat
+
+
+def test_worker_heartbeat_refreshes_running_job_summary(monkeypatch, tmp_path: Path) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.DELIVERABLE.value,
+        project_no="2016",
+        options={"enabled": True},
+        params={},
+    )
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3")
+    queue_store.initialize()
+    queue_store.enqueue("job", job.job_id)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    processor = BlockingSlotBoundProcessor()
+    worker = DeliverableWorkerRuntime(
+        worker_id="worker-test",
+        job_processor=processor,
+        heartbeat_interval_seconds=10.0,
+        job_summary_sync_interval_seconds=0.05,
+    )
+    worker.runtime.refresh_summary_index("job", job.job_id)
+    initial_summary = queue_store.list_summaries()["items"][0]
+    assert initial_summary["status"] == "queued"
+
+    result: dict[str, bool] = {}
+    worker_thread = threading.Thread(
+        target=lambda: result.setdefault("processed", worker.run_once()),
+        daemon=True,
+    )
+    worker_thread.start()
+
+    assert processor.started.wait(timeout=2)
+    running_summary = initial_summary
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        running_summary = queue_store.list_summaries()["items"][0]
+        if running_summary["status"] == "running":
+            break
+        time.sleep(0.02)
+
+    processor.release.set()
+    worker_thread.join(timeout=2)
+    worker.stop()
+
+    assert result == {"processed": True}
+    assert running_summary["status"] == "running"
+    assert running_summary["stage"] == "TEST_WORKER"
 
 
 def test_worker_run_once_executes_group_children_inside_worker(monkeypatch, tmp_path: Path) -> None:

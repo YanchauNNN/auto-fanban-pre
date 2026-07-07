@@ -299,3 +299,71 @@ def test_probe_target_env_uses_openpyxl_for_excel_template_validation() -> None:
     assert "from openpyxl import load_workbook" in script_text
     assert 'validation_mode = "python_openpyxl"' in script_text
     assert "traceback_path = $tracebackPath" in script_text
+
+
+def test_probe_target_env_deep_excel_checks_do_not_depend_on_shallow_excel_com() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = script_text.index("function Get-OfficeFacts")
+    end = script_text.index("function Get-HostFacts")
+    office_facts_text = script_text[start:end]
+
+    assert '$excelExport = Test-ExcelExportSmoke' in office_facts_text
+    assert '$excelExport = if ($excelCom.status -eq "pass")' not in office_facts_text
+    assert "common_catalog = Test-ExcelTemplateOpen" in office_facts_text
+    assert "catalog_1818 = Test-ExcelTemplateOpen" in office_facts_text
+    assert 'common_catalog = if ($excelCom.status -eq "pass")' not in office_facts_text
+    assert 'catalog_1818 = if ($excelCom.status -eq "pass")' not in office_facts_text
+
+
+def test_probe_target_env_records_direct_excel_com_as_info_when_backend_export_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "$excelDirectComBackedByFunctionalCheck" in script_text
+    assert 'code = "excel_com_direct"' in script_text
+    assert '$officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck' in script_text
+    assert "$infoItems = @()" in script_text
+    assert "info_items = $infoItems" in script_text
+    assert "info_count = $infoItems.Count" in script_text
+
+    start = script_text.index('if ($officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck)')
+    end = script_text.index('$blockingIssues += [ordered]@{', start)
+    backed_by_functional_block = script_text[start:end]
+    assert "$infoItems += [ordered]@{" in backed_by_functional_block
+    assert "$warnings += [ordered]@{" not in backed_by_functional_block
+
+
+def test_probe_target_env_quick_excel_com_failure_runs_functional_fallback() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = script_text.index("function Get-OfficeFacts")
+    end = script_text.index("function Get-HostFacts")
+    office_facts_text = script_text[start:end]
+
+    assert 'if ($excelCom.status -ne "pass") {' in office_facts_text
+    assert '$excelExport = Test-ExcelExportSmoke' in office_facts_text
+    assert 'common_catalog = if ($excelCom.status -ne "pass")' in office_facts_text
+    assert 'catalog_1818 = if ($excelCom.status -ne "pass")' in office_facts_text
+    assert '$excelFunctionalReady = ($excelCom.status -eq "pass" -or $excelExport.status -eq "pass")' in office_facts_text
+    assert '$wordFunctionalReady = ($wordCom.status -eq "pass" -or $wordExport.status -eq "pass")' in office_facts_text
+
+
+def test_probe_target_env_quick_functional_excel_pass_prevents_direct_com_blocking() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "$excelDirectComBackedByFunctionalCheck" in script_text
+    assert '$officeFacts.probe_mode -eq "deep"' not in script_text[
+        script_text.index("$excelDirectComBackedByFunctionalCheck") :
+        script_text.index('foreach ($officeKey in @("word_com", "excel_com"))')
+    ]
+    assert '$officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck' in script_text

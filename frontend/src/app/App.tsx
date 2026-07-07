@@ -47,6 +47,7 @@ import type {
   FindingGroup,
   JobDetail,
   JobList,
+  JobsActivity,
   JobSummary,
   TaskKind,
 } from "../platform/api/types";
@@ -458,6 +459,11 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
     total: 1,
     items: [TUTORIAL_GROUP_SUMMARY],
   }),
+  getJobsActivity: async () => ({
+    total: 1,
+    active: 0,
+    lastChangedAt: TUTORIAL_FINISHED_AT,
+  }),
   getJobDetail: async (jobId: string) => {
     const detail = TUTORIAL_DETAIL_LOOKUP.get(jobId);
     if (!detail) {
@@ -527,6 +533,7 @@ function WorkspacePage() {
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
   const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
   const notifiedAuditJobIdsRef = useRef<Set<string>>(new Set());
+  const lastJobsActivityMarkerRef = useRef<string | null>(null);
 
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
@@ -616,22 +623,17 @@ function WorkspacePage() {
     queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
     queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
     placeholderData: (previous) => previous,
-    refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
-    },
   });
   const jobsActivityQuery = useQuery({
     queryKey: ["jobs-activity"],
-    queryFn: () => adapter.listJobs(undefined, 0, 100),
+    queryFn: () => adapter.getJobsActivity(),
     placeholderData: (previous) => previous,
     refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
+      const activity = query.state.data as JobsActivity | undefined;
+      return activity && activity.active > 0 ? 3000 : 12000;
     },
   });
+  const subscribeJobsActivity = adapter.subscribeJobsActivity;
 
   const jobCards = useMemo(
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
@@ -674,7 +676,32 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    const items = jobsActivityQuery.data?.items;
+    if (!subscribeJobsActivity) {
+      return undefined;
+    }
+
+    return subscribeJobsActivity((activity) => {
+      reactQueryClient.setQueryData(["jobs-activity"], activity);
+      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    });
+  }, [subscribeJobsActivity, reactQueryClient]);
+
+  useEffect(() => {
+    const activity = jobsActivityQuery.data;
+    if (!activity) {
+      return;
+    }
+
+    const marker = `${activity.total}:${activity.active}:${activity.lastChangedAt ?? ""}`;
+    const previousMarker = lastJobsActivityMarkerRef.current;
+    lastJobsActivityMarkerRef.current = marker;
+    if (previousMarker !== null && previousMarker !== marker) {
+      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  }, [jobsActivityQuery.data, reactQueryClient]);
+
+  useEffect(() => {
+    const items = jobsQuery.data?.items;
     if (!items) {
       return;
     }
@@ -777,7 +804,7 @@ function WorkspacePage() {
     return () => {
       active = false;
     };
-  }, [adapter, jobsActivityQuery.data]);
+  }, [adapter, jobsQuery.data?.items]);
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);

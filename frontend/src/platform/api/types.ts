@@ -308,6 +308,12 @@ export type JobList = {
   items: JobSummary[];
 };
 
+export type JobsActivity = {
+  total: number;
+  active: number;
+  lastChangedAt: string | null;
+};
+
 export type CreateBatchPayload = {
   batchId: string;
   jobs: JobSummary[];
@@ -387,5 +393,10 @@ export type ApiAdapter = {
     codes: readonly string[],
   ) => Promise<{ factoryCodes: readonly string[] }>;
   listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
+  getJobsActivity: () => Promise<JobsActivity>;
+  subscribeJobsActivity?: (
+    onActivity: (activity: JobsActivity) => void,
+    onError?: (event: Event) => void,
+  ) => () => void;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
 };

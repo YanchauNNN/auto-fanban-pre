@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -200,6 +202,54 @@ def test_jobs_activity_endpoint_returns_lightweight_marker(monkeypatch, tmp_path
     assert activity_response.json()["total"] == 1
     assert activity_response.json()["active"] == 1
     assert activity_response.json()["last_changed_at"]
+
+
+def test_jobs_activity_stream_emits_initial_and_changed_events() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.routers.jobs import _jobs_activity_event_stream
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def jobs_activity(self) -> dict[str, Any]:
+            self.calls += 1
+            if self.calls == 1:
+                return {"total": 1, "active": 1, "last_changed_at": "2026-07-07T00:00:00"}
+            return {"total": 1, "active": 0, "last_changed_at": "2026-07-07T00:00:03"}
+
+    class Request:
+        def __init__(self) -> None:
+            self.disconnect_checks = 0
+
+        async def is_disconnected(self) -> bool:
+            self.disconnect_checks += 1
+            return self.disconnect_checks > 4
+
+    async def _collect() -> list[str]:
+        chunks: list[str] = []
+        stream = _jobs_activity_event_stream(
+            SimpleNamespace(is_disconnected=Request().is_disconnected),
+            Runtime(),
+            poll_interval_sec=0.001,
+            keepalive_sec=10,
+        )
+        async for chunk in stream:
+            chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
+            if len(chunks) >= 2:
+                break
+        return chunks
+
+    first, second = asyncio.run(_collect())
+
+    assert "event: jobs_activity" in first
+    assert 'id: "1:1:2026-07-07T00:00:00"' not in first
+    assert "id: 1:1:2026-07-07T00:00:00" in first
+    assert '"active":1' in first
+    assert "id: 1:0:2026-07-07T00:00:03" in second
+    assert '"active":0' in second
 
 
 def test_api_mode_health_uses_sqlite_worker_heartbeat(monkeypatch, tmp_path: Path) -> None:

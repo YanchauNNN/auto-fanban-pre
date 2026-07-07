@@ -41,6 +41,13 @@ _FILE_NOT_FOUND_HRESULT = -2147024894
 _MK_E_UNAVAILABLE = -2147221021
 
 
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name != "nt":
+        return {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": creationflags} if creationflags else {}
+
+
 class PDFExporter(IPDFExporter):
     """PDF导出器实现"""
 
@@ -224,6 +231,7 @@ class PDFExporter(IPDFExporter):
                 errors="replace",
                 timeout=8,
                 check=False,
+                **_hidden_subprocess_kwargs(),
             )
         except Exception:
             return set()
@@ -264,6 +272,7 @@ class PDFExporter(IPDFExporter):
                 errors="replace",
                 timeout=10,
                 check=False,
+                **_hidden_subprocess_kwargs(),
             )
         except Exception:
             return {}
@@ -332,6 +341,7 @@ class PDFExporter(IPDFExporter):
                     stderr=subprocess.DEVNULL,
                     timeout=8,
                     check=False,
+                    **_hidden_subprocess_kwargs(),
                 )
 
     @staticmethod
@@ -734,6 +744,7 @@ class PDFExporter(IPDFExporter):
                 capture_output=True,
                 timeout=self.timeout,
                 check=True,
+                **_hidden_subprocess_kwargs(),
             )
         except FileNotFoundError as e:
             raise ExportError("LibreOffice 未安装或 soffice 不在 PATH 中") from e
