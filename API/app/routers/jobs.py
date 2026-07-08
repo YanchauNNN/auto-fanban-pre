@@ -134,8 +134,9 @@ def list_jobs(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    sort: str = "updated_at",
 ) -> dict:
-    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset)
+    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset, sort_by=sort)
 
 
 @router.get("/activity")

@@ -308,6 +308,8 @@ export type JobList = {
   items: JobSummary[];
 };
 
+export type JobListSort = "updated_at" | "created_at";
+
 export type JobsActivity = {
   total: number;
   active: number;
@@ -392,7 +394,7 @@ export type ApiAdapter = {
   rememberAuditReplaceFactoryCodes: (
     codes: readonly string[],
   ) => Promise<{ factoryCodes: readonly string[] }>;
-  listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
+  listJobs: (status?: string, offset?: number, limit?: number, sort?: JobListSort) => Promise<JobList>;
   getJobsActivity: () => Promise<JobsActivity>;
   subscribeJobsActivity?: (
     onActivity: (activity: JobsActivity) => void,

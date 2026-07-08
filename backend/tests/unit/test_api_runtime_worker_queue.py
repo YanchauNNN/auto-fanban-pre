@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -150,6 +153,68 @@ def test_api_mode_startup_backfills_summary_index_once(monkeypatch, tmp_path: Pa
     assert payload["total"] == 1
     assert payload["items"][0]["job_id"] == "job-existing-1"
     assert payload["items"][0]["source_filename"] == "existing.dwg"
+
+
+def test_api_mode_summary_backfill_keeps_historical_updated_at(monkeypatch, tmp_path: Path) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    from API.app.runtime import DeliverableApiRuntime
+
+    storage_root = tmp_path / "storage"
+    existing_job = Job(
+        job_id="job-existing-old",
+        job_type=JobType.DELIVERABLE,
+        project_no="2016",
+        status=JobStatus.SUCCEEDED,
+        params=_deliverable_params(),
+        source_filename="old-result.dwg",
+        created_at=datetime(2026, 3, 27, 17, 16, 36),
+        finished_at=datetime(2026, 3, 27, 17, 20, 0),
+    )
+    job_dir = storage_root / "jobs" / existing_job.job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job.json").write_text(
+        existing_job.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    runtime = DeliverableApiRuntime(
+        job_processor=RecordingProcessor(),
+        process_jobs_in_api=False,
+    )
+    runtime.queue_store.initialize()
+    runtime._backfill_summary_index()
+
+    store = SQLiteQueueStore(storage_root / "runtime" / "fanban_queue.sqlite3")
+    [summary] = store.list_summaries()["items"]
+
+    assert summary["created_at"].startswith("2026-03-27T17:16:36")
+    assert summary["updated_at"].startswith("2026-03-27T17:20:00")
+
+
+def test_api_mode_startup_does_not_block_on_summary_backfill(monkeypatch, tmp_path: Path) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    from API.app.runtime import DeliverableApiRuntime
+
+    runtime = DeliverableApiRuntime(
+        job_processor=RecordingProcessor(),
+        process_jobs_in_api=False,
+    )
+    backfill_called = threading.Event()
+
+    def _slow_backfill() -> None:
+        backfill_called.set()
+        time.sleep(1.0)
+
+    runtime._backfill_summary_index = _slow_backfill
+
+    started_at = time.perf_counter()
+    runtime.start()
+    elapsed = time.perf_counter() - started_at
+    try:
+        assert elapsed < 0.5
+        assert backfill_called.wait(timeout=1.0)
+    finally:
+        runtime.stop()
 
 
 def test_api_mode_list_jobs_uses_sqlite_summary_index(monkeypatch, tmp_path: Path) -> None:

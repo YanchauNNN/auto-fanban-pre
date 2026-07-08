@@ -142,6 +142,7 @@ class DeliverableApiRuntime:
         self._stop_event = threading.Event()
         self._group_dispatcher_thread: threading.Thread | None = None
         self._job_dispatcher_thread: threading.Thread | None = None
+        self._summary_backfill_thread: threading.Thread | None = None
 
         self._group_executor = ThreadPoolExecutor(
             max_workers=self._max_active_groups,
@@ -166,7 +167,7 @@ class DeliverableApiRuntime:
     def start(self) -> None:
         self.queue_store.initialize()
         if not self.process_jobs_in_api:
-            self._backfill_summary_index()
+            self._start_summary_backfill()
             return
         self._recover_groups_and_jobs()
         if self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive():
@@ -194,6 +195,8 @@ class DeliverableApiRuntime:
             self._group_dispatcher_thread.join(timeout=3)
         if self._job_dispatcher_thread:
             self._job_dispatcher_thread.join(timeout=3)
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            self._summary_backfill_thread.join(timeout=3)
         self._group_executor.shutdown(wait=False, cancel_futures=True)
         self._heavy_executor.shutdown(wait=False, cancel_futures=True)
         self._doc_executor.shutdown(wait=False, cancel_futures=True)
@@ -527,6 +530,13 @@ class DeliverableApiRuntime:
             )
 
         batch_id = self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/batch",
+            batch_id=batch_id,
+            files=files,
+            run_audit_check=run_audit_check,
+            split_only=split_only,
+        )
         if run_audit_check:
             groups = [
                 self._create_grouped_submission(
@@ -599,6 +609,12 @@ class DeliverableApiRuntime:
 
         explicit_batch_id = str(raw_params.get('batch_id') or '').strip()
         batch_id = explicit_batch_id or self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/audit-replace",
+            batch_id=batch_id,
+            files=files,
+            mode=normalized_mode,
+        )
         jobs: list[dict[str, Any]] = []
         if normalized_mode == 'replace':
             for upload, resolved_params in resolved_submissions:
@@ -796,12 +812,14 @@ class DeliverableApiRuntime:
         status_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         if not self.process_jobs_in_api:
             return self.queue_store.list_summaries(
                 status=status_filter,
                 limit=max(limit, 0),
                 offset=max(offset, 0),
+                sort_by=sort_by,
             )
         groups = [
             self._serialize_group_summary(group)
@@ -813,7 +831,12 @@ class DeliverableApiRuntime:
             for job in self.job_manager.load_all_jobs()
             if job.group_id is None and (status_filter is None or job.status.value == status_filter)
         ]
-        all_items = sorted([*groups, *standalone_jobs], key=lambda item: item['created_at'], reverse=True)
+        sort_key = 'created_at' if sort_by == 'created_at' else 'updated_at'
+        all_items = sorted(
+            [*groups, *standalone_jobs],
+            key=lambda item: item.get(sort_key) or item['created_at'],
+            reverse=True,
+        )
         normalized_limit = max(limit, 0)
         normalized_offset = max(offset, 0)
         items = all_items[normalized_offset:normalized_offset + normalized_limit]
@@ -982,30 +1005,77 @@ class DeliverableApiRuntime:
 
     def _backfill_summary_index(self) -> None:
         for group in self.group_manager.load_all_groups():
-            self._index_group_summary(group)
+            self._index_group_summary(group, touch_updated_at=False)
         for job in self.job_manager.load_all_jobs():
             if job.group_id is None:
-                self._index_job_summary(job)
+                self._index_job_summary(job, touch_updated_at=False)
 
-    def _index_job_summary(self, job: Job) -> dict[str, Any]:
+    def _start_summary_backfill(self) -> None:
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            return
+        self._summary_backfill_thread = threading.Thread(
+            target=self._run_summary_backfill,
+            name='fanban-summary-backfill',
+            daemon=True,
+        )
+        self._summary_backfill_thread.start()
+        self._summary_backfill_thread.join(timeout=0.25)
+
+    def _run_summary_backfill(self) -> None:
+        try:
+            self._backfill_summary_index()
+        except Exception:  # noqa: BLE001
+            logger.exception('summary index backfill failed')
+
+    def _index_job_summary(self, job: Job, *, touch_updated_at: bool = True) -> dict[str, Any]:
         summary = self._serialize_job_summary(job)
-        self._upsert_summary_index(summary)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
         return summary
 
-    def _index_group_summary(self, group: TaskGroup) -> dict[str, Any]:
+    def _index_group_summary(self, group: TaskGroup, *, touch_updated_at: bool = True) -> dict[str, Any]:
         summary = self._serialize_group_summary(group)
-        self._upsert_summary_index(summary)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
         return summary
 
-    def _upsert_summary_index(self, summary: dict[str, Any]) -> None:
+    def _upsert_summary_index(self, summary: dict[str, Any], *, touch_updated_at: bool = True) -> None:
         item_id = str(summary.get("job_id") or summary.get("group_id") or "").strip()
         if not item_id:
             return
         payload = dict(summary)
         payload["item_id"] = item_id
-        payload["updated_at"] = datetime.now().astimezone().isoformat()
+        payload["updated_at"] = (
+            datetime.now().astimezone().isoformat()
+            if touch_updated_at
+            else self._historical_summary_updated_at(summary)
+        )
         payload["artifact_flags"] = dict(summary.get("artifacts") or {})
         self.queue_store.upsert_summary(payload)
+
+    @staticmethod
+    def _historical_summary_updated_at(summary: dict[str, Any]) -> str:
+        value = summary.get("finished_at") or summary.get("created_at") or datetime.now().astimezone()
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+
+    @staticmethod
+    def _log_submission(
+        *,
+        endpoint: str,
+        batch_id: str,
+        files: list[UploadedFilePayload],
+        **context: Any,
+    ) -> None:
+        filenames = [Path(upload.filename).name or "upload.dwg" for upload in files]
+        logged_filenames = filenames[:100]
+        omitted = max(len(filenames) - len(logged_filenames), 0)
+        logger.info(
+            "job submission accepted endpoint=%s batch_id=%s file_count=%s omitted_filenames=%s context=%s filenames=%s",
+            endpoint,
+            batch_id,
+            len(filenames),
+            omitted,
+            context,
+            logged_filenames,
+        )
 
     def _recover_groups_and_jobs(self) -> None:
         for job in self.job_manager.load_all_jobs():

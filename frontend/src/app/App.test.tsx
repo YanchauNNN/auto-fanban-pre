@@ -515,7 +515,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("success-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledWith("queued", 0, 100);
+    expect(mockListJobs).toHaveBeenCalledWith("queued", 0, 100, "created_at");
 
     await user.click(screen.getByRole("button", { name: "成功" }));
     expect(screen.getByRole("button", { name: "成功" })).toHaveAttribute("aria-pressed", "true");
@@ -523,7 +523,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("queued-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100);
+    expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100, "created_at");
   });
 
   it("shows eight cards by default and opens the rest in a modal", async () => {
@@ -553,7 +553,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByRole("dialog", { name: "全部任务浏览器" })).not.toBeInTheDocument();
   });
 
-  it("uses total instead of fetched item count for the expand button", async () => {
+  it("uses loaded card count instead of backend total for the expand button", async () => {
     const jobs = Array.from({ length: 100 }, (_, index) =>
       makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
     );
@@ -565,7 +565,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     expect(await screen.findAllByTestId("recent-job-card")).toHaveLength(8);
-    expect(screen.getByRole("button", { name: "展开其余 361 个" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开其余 92 个" })).toBeInTheDocument();
   });
 
   it("loads more jobs inside the modal so records after the first 100 are reachable", async () => {
@@ -581,7 +581,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     await screen.findAllByTestId("recent-job-card");
-    await user.click(screen.getByRole("button", { name: "展开其余 112 个" }));
+    await user.click(screen.getByRole("button", { name: "展开其余 92 个" }));
 
     const modal = await screen.findByRole("dialog");
     expect(within(modal).queryByText("sample-120.dwg")).not.toBeInTheDocument();

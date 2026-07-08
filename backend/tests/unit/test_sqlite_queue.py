@@ -186,6 +186,44 @@ def test_summary_index_lists_recent_items_without_scanning_job_json(tmp_path: Pa
     assert page["items"][1]["artifact_flags"] == {"package": False}
 
 
+def test_summary_index_can_sort_by_created_at_for_recent_job_view(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    store.upsert_summary(
+        {
+            "item_id": "old-touched",
+            "is_group": False,
+            "status": "succeeded",
+            "source_filename": "old.dwg",
+            "stage": "DONE",
+            "percent": 100,
+            "message": "done",
+            "updated_at": _dt(10),
+            "created_at": _dt(1),
+            "artifact_flags": {},
+        }
+    )
+    store.upsert_summary(
+        {
+            "item_id": "new-created",
+            "is_group": False,
+            "status": "queued",
+            "source_filename": "new.dwg",
+            "stage": "INIT",
+            "percent": 0,
+            "message": "queued",
+            "updated_at": _dt(2),
+            "created_at": _dt(5),
+            "artifact_flags": {},
+        }
+    )
+
+    page = store.list_summaries(offset=0, limit=10, sort_by="created_at")
+
+    assert page["total"] == 2
+    assert [item["item_id"] for item in page["items"]] == ["new-created", "old-touched"]
+
+
 def test_summary_index_preserves_full_summary_payload(tmp_path: Path) -> None:
     store = _store(tmp_path)
 

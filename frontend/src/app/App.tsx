@@ -621,7 +621,7 @@ function WorkspacePage() {
 
   const jobsQuery = useQuery({
     queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
-    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
+    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100, "created_at"),
     placeholderData: (previous) => previous,
   });
   const jobsActivityQuery = useQuery({
@@ -652,7 +652,7 @@ function WorkspacePage() {
   }, [jobCards, normalizedRecentJobsSearch]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
+    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);

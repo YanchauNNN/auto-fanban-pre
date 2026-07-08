@@ -14,6 +14,7 @@ import type {
   HealthStatus,
   JobDetail,
   JobList,
+  JobListSort,
   JobSummary,
   JobsActivity,
   PingStatus,
@@ -521,13 +522,16 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  async listJobs(status?: string, offset = 0, limit = 100): Promise<JobList> {
+  async listJobs(status?: string, offset = 0, limit = 100, sort?: JobListSort): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
       search.set("status", status);
     }
     search.set("offset", String(offset));
     search.set("limit", String(limit));
+    if (sort) {
+      search.set("sort", sort);
+    }
 
     const payload = await this.fetchJson<{
       total: number;

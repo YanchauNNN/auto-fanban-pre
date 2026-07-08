@@ -341,6 +341,26 @@ describe("HttpAdapter", () => {
     expect(jobs.items).toHaveLength(0);
   });
 
+  it("passes created-at sorting to listJobs when requested", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 0,
+          items: [],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    await adapter.listJobs(undefined, 0, 100, "created_at");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs?offset=0&limit=100&sort=created_at",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("fetches lightweight jobs activity marker", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

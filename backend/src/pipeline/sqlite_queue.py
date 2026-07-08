@@ -412,13 +412,19 @@ class SQLiteQueueStore:
         return _summary_row_to_dict(row)
 
     def list_summaries(
-        self, *, status: str | None = None, offset: int = 0, limit: int = 100
+        self,
+        *,
+        status: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+        sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         params: list[Any] = []
         where = ""
         if status is not None:
             where = " WHERE status = ?"
             params.append(status)
+        sort_column = "created_at" if sort_by == "created_at" else "updated_at"
 
         with self._connect() as conn:
             total = int(
@@ -431,7 +437,7 @@ class SQLiteQueueStore:
                 SELECT *
                 FROM job_summaries
                 {where}
-                ORDER BY updated_at DESC, item_id DESC
+                ORDER BY {sort_column} DESC, item_id DESC
                 LIMIT ? OFFSET ?
                 """,
                 (*params, limit, offset),
