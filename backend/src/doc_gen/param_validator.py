@@ -88,9 +88,13 @@ class DocParamValidator:
             errors.setdefault("source_project_no", []).append("required_for_replace")
         if not target_project_no:
             errors.setdefault("target_project_no", []).append("required_for_replace")
-        elif source_project_no and source_project_no == target_project_no:
-            errors.setdefault("target_project_no", []).append("must_differ_from_source_project_no")
         self._validate_factory_index_variants(
+            raw_params,
+            errors,
+            source_project_no=source_project_no,
+            target_project_no=target_project_no,
+        )
+        self._validate_replace_identity_change(
             raw_params,
             errors,
             source_project_no=source_project_no,
@@ -119,19 +123,25 @@ class DocParamValidator:
         target_project_no: str,
     ) -> None:
         factory_config = get_config().factory_index_maps
+        source_unit_rules = self._configured_unit_values(source_project_no)
         source_rules = factory_config.source_variant_rules.get(source_project_no)
-        if source_rules:
+        if source_rules or source_unit_rules:
             source_variant = self._first_normalized_variant(
                 raw_params,
                 factory_config.source_variant_param_names,
             )
             if not source_variant:
                 errors.setdefault("source_island_no", []).append("required_for_source_project")
-            elif source_variant not in source_rules:
+            elif not self._is_supported_replace_variant(
+                project_no=source_project_no,
+                variant=source_variant,
+                explicit_variants=list((source_rules or {}).keys()),
+            ):
                 errors.setdefault("source_island_no", []).append("unsupported_source_island_no")
 
+        target_unit_rules = self._configured_unit_values(target_project_no)
         target_templates = factory_config.island_templates.get(target_project_no)
-        if target_templates:
+        if target_templates or target_unit_rules:
             target_names = list(factory_config.target_variant_param_names)
             for legacy_name in factory_config.variant_param_names:
                 if legacy_name not in target_names:
@@ -139,8 +149,76 @@ class DocParamValidator:
             target_variant = self._first_normalized_variant(raw_params, target_names)
             if not target_variant:
                 errors.setdefault("target_island_no", []).append("required_for_target_project")
-            elif target_variant not in target_templates:
+            elif not self._is_supported_replace_variant(
+                project_no=target_project_no,
+                variant=target_variant,
+                explicit_variants=list((target_templates or {}).keys()),
+            ):
                 errors.setdefault("target_island_no", []).append("unsupported_target_island_no")
+
+    def _validate_replace_identity_change(
+        self,
+        raw_params: dict[str, Any],
+        errors: dict[str, list[str]],
+        *,
+        source_project_no: str,
+        target_project_no: str,
+    ) -> None:
+        if not source_project_no or not target_project_no or source_project_no != target_project_no:
+            return
+
+        factory_config = get_config().factory_index_maps
+        source_variant = self._first_normalized_variant(
+            raw_params,
+            factory_config.source_variant_param_names,
+        )
+        target_names = list(factory_config.target_variant_param_names)
+        for legacy_name in factory_config.variant_param_names:
+            if legacy_name not in target_names:
+                target_names.append(legacy_name)
+        target_variant = self._first_normalized_variant(raw_params, target_names)
+
+        if not source_variant and not target_variant:
+            errors.setdefault("target_project_no", []).append("must_differ_from_source_project_no")
+            return
+        if source_variant and target_variant and source_variant == target_variant:
+            errors.setdefault("target_island_no", []).append("must_differ_from_source_island_no")
+
+    @staticmethod
+    def _configured_unit_values(project_no: str) -> set[str]:
+        unit_config = get_config().audit_check.unit_consistency
+        return {
+            str(value).strip()
+            for value in unit_config.project_units.get(str(project_no or "").strip(), [])
+            if str(value).strip()
+        }
+
+    def _is_supported_replace_variant(
+        self,
+        *,
+        project_no: str,
+        variant: str,
+        explicit_variants: list[str],
+    ) -> bool:
+        normalized_variant = str(variant or "").strip()
+        if not normalized_variant:
+            return False
+        if normalized_variant in {str(value).strip() for value in explicit_variants if str(value).strip()}:
+            return True
+        configured_units = self._configured_unit_values(project_no)
+        if normalized_variant in configured_units:
+            return True
+        unit_config = get_config().audit_check.unit_consistency
+        if (
+            configured_units
+            and unit_config.allow_unlisted_unit_no
+            and str(unit_config.unit_no_pattern or "").strip()
+        ):
+            try:
+                return bool(re.fullmatch(str(unit_config.unit_no_pattern), normalized_variant))
+            except re.error:
+                return False
+        return False
 
     @staticmethod
     def _first_normalized_variant(raw_params: dict[str, Any], names: list[str]) -> str | None:
@@ -149,7 +227,7 @@ class DocParamValidator:
             text = str(value or "").strip()
             if not text:
                 continue
-            match = re.search(r"[1-9]", text)
+            match = re.search(r"[0-9]", text)
             if match:
                 return match.group(0)
         return None

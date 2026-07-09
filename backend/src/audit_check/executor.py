@@ -14,12 +14,14 @@ from ..config import get_config
 from ..models import Job
 from ..pipeline.preview_pdf_service import PreviewPdfService
 from ..pipeline.shared_prep import SharedPrepService
+from ..workload.calculator import WorkloadCalculator
 from .bridge import AuditDotNetScanner
 from .lexicon import AuditLexiconLoader
 from .matcher import AuditMatchEngine
 from .models import AuditFinding
 from .reporting import write_report_json, write_report_xlsx
 from .roi_mapper import AuditFieldContextMapper
+from .standard_review import StandardLibraryLoader, StandardReviewEngine
 
 
 class AuditCheckExecutor:
@@ -33,7 +35,9 @@ class AuditCheckExecutor:
         self.cad_dxf_executor = CADDXFExecutor(config=self.config)
         self.preview_pdf_service = PreviewPdfService()
         self.lexicon_loader = AuditLexiconLoader()
+        self.standard_library_loader = StandardLibraryLoader()
         self.dotnet_scanner = AuditDotNetScanner()
+        self.workload_calculator = WorkloadCalculator()
 
     def execute(self, job: Job) -> None:
         if not job.input_files:
@@ -85,6 +89,7 @@ class AuditCheckExecutor:
             unit_no=str(job.params.get("unit_no") or "").strip() or None,
             items=annotated_items,
         )
+        findings.extend(self._standard_review_findings(annotated_items))
 
         reports_dir = job.work_dir / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
@@ -112,6 +117,7 @@ class AuditCheckExecutor:
         job.progress.details["affected_drawings_count"] = int(summary["affected_drawings_count"])
         job.progress.details["top_wrong_texts"] = list(summary["top_wrong_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
+        self._record_workload(job, remaining_frames, sheet_sets)
         self._generate_preview_pdf(
             job,
             source_dwg=preview_source,
@@ -120,6 +126,14 @@ class AuditCheckExecutor:
             findings=findings,
         )
         job.mark_succeeded()
+
+    def _record_workload(self, job: Job, frames: list, sheet_sets: list) -> None:
+        summary = self.workload_calculator.build_from_frame_sets(frames, sheet_sets)
+        job.progress.details["workload"] = summary.model_dump(mode="json")
+        job.progress.details["effective_workload"] = round(
+            float(summary.final_workload_a1 or summary.initial_workload_a1 or 0.0),
+            self.workload_calculator.precision,
+        )
 
     def _generate_preview_pdf(
         self,
@@ -176,3 +190,18 @@ class AuditCheckExecutor:
 
         job.artifacts.preview_pdf = preview_result.pdf_path
         job.artifacts.preview_mode = preview_result.mode
+
+    def _standard_review_findings(self, items: list) -> list[AuditFinding]:
+        standard_cfg = self.config.audit_check.standard_review
+        if not standard_cfg.enabled:
+            return []
+        entries = self.standard_library_loader.load(
+            standard_cfg.library_path,
+            sheet_name=standard_cfg.sheet_name,
+        )
+        return StandardReviewEngine(
+            entries,
+            same_line_y_tolerance=standard_cfg.same_line_y_tolerance,
+            same_text_pairing_enabled=standard_cfg.same_text_pairing_enabled,
+            format_variant_compatibility_enabled=standard_cfg.format_variant_compatibility_enabled,
+        ).evaluate(items)

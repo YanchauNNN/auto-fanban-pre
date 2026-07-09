@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import shutil
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -266,6 +267,49 @@ def test_excel_command_line_snapshot_uses_safe_output_decoding(monkeypatch) -> N
 
     assert captured["encoding"] == "utf-8"
     assert captured["errors"] == "replace"
+
+
+def test_excel_process_helper_commands_hide_subprocess_windows(monkeypatch) -> None:
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured.append(dict(kwargs))
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.run", fake_run)
+
+    assert PDFExporter._snapshot_process_ids_by_image("EXCEL.EXE") == set()
+    assert PDFExporter._snapshot_process_command_lines_by_image("EXCEL.EXE") == {}
+    PDFExporter._terminate_process_ids({1234})
+
+    assert [item["creationflags"] for item in captured] == [
+        0x08000000,
+        0x08000000,
+        0x08000000,
+    ]
+
+
+def test_libreoffice_export_hides_subprocess_window_on_windows(monkeypatch, temp_dir: Path) -> None:
+    input_docx = temp_dir / "input.docx"
+    input_docx.write_bytes(b"dummy")
+    output_pdf = temp_dir / "output.pdf"
+    captured: dict[str, object] = {}
+    monkeypatch.setattr("src.doc_gen.pdf_engine.os.name", "nt")
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    def fake_run(cmd, **kwargs):  # noqa: ANN001, ANN003
+        captured.update(kwargs)
+        (output_pdf.parent / f"{input_docx.stem}.pdf").write_bytes(b"%PDF-1.4\n")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    monkeypatch.setattr("src.doc_gen.pdf_engine.subprocess.run", fake_run)
+
+    PDFExporter(preferred_engine="libreoffice")._export_via_libreoffice(input_docx, output_pdf)
+
+    assert output_pdf.exists()
+    assert captured["creationflags"] == 0x08000000
 
 
 def test_export_xlsx_reports_original_com_error_when_fallback_also_fails(

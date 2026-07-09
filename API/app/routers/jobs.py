@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..runtime import UploadedFilePayload
+
+from src.config import load_mechanism_spec
 
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -35,7 +42,7 @@ async def preflight_fonts(
         )
         for upload in files
     ]
-    payload = request.app.state.runtime.preflight_fonts(files=uploads)
+    payload = await run_in_threadpool(request.app.state.runtime.preflight_fonts, files=uploads)
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 
 
@@ -127,8 +134,69 @@ def list_jobs(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    sort: str = "updated_at",
 ) -> dict:
-    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset)
+    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset, sort_by=sort)
+
+
+@router.get("/activity")
+def jobs_activity(request: Request) -> dict:
+    return request.app.state.runtime.jobs_activity()
+
+
+def _jobs_activity_marker(activity: dict[str, Any]) -> str:
+    return f"{activity.get('total', 0)}:{activity.get('active', 0)}:{activity.get('last_changed_at') or ''}"
+
+
+def _format_jobs_activity_sse(activity: dict[str, Any]) -> str:
+    marker = _jobs_activity_marker(activity)
+    data = json.dumps(activity, ensure_ascii=False, separators=(",", ":"))
+    return f"event: jobs_activity\nid: {marker}\ndata: {data}\n\n"
+
+
+async def _jobs_activity_event_stream(
+    request: Request,
+    runtime: Any,
+    *,
+    poll_interval_sec: float,
+    keepalive_sec: float,
+) -> AsyncIterator[str]:
+    last_marker: str | None = None
+    last_sent_at = 0.0
+    poll_interval = max(0.1, float(poll_interval_sec))
+    keepalive_interval = max(poll_interval, float(keepalive_sec))
+    while True:
+        activity = runtime.jobs_activity()
+        marker = _jobs_activity_marker(activity)
+        now = time.monotonic()
+        if marker != last_marker:
+            yield _format_jobs_activity_sse(activity)
+            last_marker = marker
+            last_sent_at = now
+        elif now - last_sent_at >= keepalive_interval:
+            yield f": keepalive {int(now)}\n\n"
+            last_sent_at = now
+        if await request.is_disconnected():
+            break
+        await asyncio.sleep(poll_interval)
+
+
+@router.get("/activity/stream")
+def jobs_activity_stream(request: Request) -> StreamingResponse:
+    api_runtime_cfg = load_mechanism_spec().api_runtime
+    return StreamingResponse(
+        _jobs_activity_event_stream(
+            request,
+            request.app.state.runtime,
+            poll_interval_sec=api_runtime_cfg.jobs_activity_stream_poll_interval_sec,
+            keepalive_sec=api_runtime_cfg.jobs_activity_stream_keepalive_sec,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{job_id}")

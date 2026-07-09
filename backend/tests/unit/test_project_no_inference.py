@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import yaml
 
-from src.pipeline.project_no_inference import infer_unit_no_from_path, resolve_project_no
+from src.pipeline.project_no_inference import (
+    infer_project_no_from_path,
+    infer_unit_no_from_path,
+    resolve_project_no,
+)
 
 
 def test_project_no_inference_reads_defaults_and_patterns_from_mechanism_yaml(tmp_path, monkeypatch) -> None:
@@ -30,3 +34,14 @@ def test_project_no_inference_reads_defaults_and_patterns_from_mechanism_yaml(tm
     assert resolve_project_no(None, "no-project.dwg") == "2026"
     assert resolve_project_no(None, "FB-1818-U3-JG001.dwg") == "1818"
     assert infer_unit_no_from_path("FB-1818-U3-JG001.dwg", "1818") == "3"
+
+
+def test_project_no_inference_default_pattern_accepts_zero_unit() -> None:
+    assert infer_unit_no_from_path("20260RB-JGS11-A.dwg", "2026") == "0"
+
+
+def test_project_no_inference_finds_album_code_not_at_filename_start() -> None:
+    filename = "出图版--18185NR-JGS50-A.dwg"
+
+    assert infer_project_no_from_path(filename) == "1818"
+    assert infer_unit_no_from_path(filename, "1818") == "5"

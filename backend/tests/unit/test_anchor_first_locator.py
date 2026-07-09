@@ -8,8 +8,9 @@ from pathlib import Path
 
 import ezdxf
 
-from src.cad.detection.anchor_first_locator import AnchorFirstLocator
+from src.cad.detection.anchor_first_locator import AnchorFirstLocator, CandidateFrame, TextItem
 from src.cad.detection.candidate_finder import CandidateFinder
+from src.cad.detection.paper_fitter import PaperFitter
 from src.config import BusinessSpec
 from src.models import BBox
 
@@ -376,6 +377,68 @@ def test_localized_candidate_build_keeps_integer_scale_gate() -> None:
     )
 
     assert localized == []
+
+
+def test_marker_bbox_expands_undersized_non_a4_frame_candidate() -> None:
+    spec = BusinessSpec(
+        schema_version="2.0",
+        titleblock_extract={
+            "paper_variants": {
+                "CNPE_A0+1/4": {"W": 1487.0, "H": 841.0, "profile": "BASE10"},
+                "CNPE_A1": {"W": 841.0, "H": 594.0, "profile": "BASE10"},
+                "CNPE_A1+1/4": {"W": 1051.0, "H": 594.0, "profile": "BASE10"},
+            },
+            "roi_profiles": {
+                "BASE10": {
+                    "description": "test",
+                    "tolerance": 0.5,
+                    "outer_frame": [0, 100, 0, 50],
+                    "fields": {"锚点": [0, 100, 0, 50]},
+                },
+            },
+            "anchor": {
+                "search_text": ["ANCHOR"],
+                "roi_field_name": "锚点",
+                "scale_candidates": [35, 50],
+                "scale_match_rel_tol": 0.1,
+                "calibration": {},
+            },
+            "scale_fit": {"uniform_scale_tol": 0.02, "scale_candidate_match_tol": 0.015},
+            "outer_frame": {"layer_priority": {"global_layers": ["HIGH"]}},
+            "tolerances": {"roi_margin_percent": 0.0},
+        },
+        a4_multipage={},
+        doc_generation={},
+        enums={},
+    )
+    locator = AnchorFirstLocator(
+        spec,
+        DummyFinder([]),
+        PaperFitter(allow_rotation=True, uniform_scale_required=True, uniform_scale_tol=0.02),
+    )
+    cand = CandidateFrame(
+        bbox=BBox(xmin=4808023.0, ymin=5705241.0, xmax=4850073.0, ymax=5734941.0),
+        paper_variant_id="CNPE_A1",
+        sx=50.0,
+        sy=50.0,
+        roi_profile_id="BASE10",
+        anchor_roi=BBox(xmin=0, ymin=0, xmax=1, ymax=1),
+        fit_error=0.0,
+    )
+    marker = TextItem(
+        x=4829048.0,
+        y=5720091.0,
+        text="17\nPC5NER12010B25C42MDACFC (18185NE-JGS47-018)",
+        bbox=BBox(xmin=4803248.0, ymin=5717691.0, xmax=4854848.0, ymax=5722491.0),
+        text_height=240.0,
+        source="test",
+    )
+
+    expanded = locator._expand_undersized_candidate_by_marker_bbox(cand, [marker])
+
+    assert expanded.bbox.xmin == marker.bbox.xmin
+    assert expanded.bbox.xmax == marker.bbox.xmax
+    assert expanded.paper_variant_id == "CNPE_A1+1/4"
 
 
 def test_locate_frames_retries_global_layers_with_localized_line_rebuild_for_unresolved_anchor() -> None:

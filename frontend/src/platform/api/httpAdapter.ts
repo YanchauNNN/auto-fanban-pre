@@ -14,7 +14,9 @@ import type {
   HealthStatus,
   JobDetail,
   JobList,
+  JobListSort,
   JobSummary,
+  JobsActivity,
   PingStatus,
   SubmissionParams,
 } from "./types";
@@ -90,6 +92,16 @@ type RawJobSummary = {
   replacement_font?: string | null;
   replacement_fonts?: Record<string, string | null> | null;
   replaced_style_count?: number | null;
+  workload?: {
+    initial_workload_a1?: number | null;
+    final_workload_a1?: number | null;
+    one_review_factor?: number | null;
+    two_review_factor?: number | null;
+    three_review_factor?: number | null;
+    settlement_status?: string | null;
+    settled_at?: string | null;
+  } | null;
+  effective_workload?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
   children?: RawJobSummary[] | null;
@@ -100,6 +112,18 @@ type RawJobDetail = RawJobSummary & {
   current_file?: string | null;
   flags?: string[];
   errors?: string[];
+  diagnostics?: Array<{
+    kind?: string | null;
+    severity?: string | null;
+    title?: string | null;
+    summary?: string | null;
+    suggestion?: string | null;
+    details?: Array<{
+      label?: string | null;
+      items?: string[] | null;
+    }> | null;
+    raw_items?: string[] | null;
+  }> | null;
   top_wrong_texts?: string[] | null;
   top_internal_codes?: string[] | null;
   shared_dir?: string | null;
@@ -122,6 +146,11 @@ type RawJobDetail = RawJobSummary & {
     matched_text?: string | null;
     count?: number | null;
     internal_codes?: string[] | null;
+    category?: string | null;
+    context_kind?: string | null;
+    issue_type?: string | null;
+    summary?: string | null;
+    details?: string[] | null;
   }> | null;
   replace_summary?: {
     replacement_count?: number | null;
@@ -244,6 +273,7 @@ type RawFormSchema = {
     project_units?: Record<string, string[]>;
     source_unit_options?: Record<string, { value: string; label: string }[]>;
     target_unit_options?: Record<string, { value: string; label: string }[]>;
+    unit_factory_codes?: string[];
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;
@@ -312,6 +342,20 @@ export class HttpAdapter implements ApiAdapter {
       retry: true,
     });
     return normalizeFormSchema(payload);
+  }
+
+  async rememberAuditReplaceFactoryCodes(
+    codes: readonly string[],
+  ): Promise<{ factoryCodes: readonly string[] }> {
+    const payload = await this.fetchJson<{ factory_codes: string[] }>(
+      "/api/meta/audit-replace/factory-codes",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codes }),
+      },
+    );
+    return { factoryCodes: payload.factory_codes ?? [] };
   }
 
   async preflightFonts(files: File[]): Promise<FontPreflightResult> {
@@ -434,11 +478,17 @@ export class HttpAdapter implements ApiAdapter {
     sourceIslandNo,
     targetProjectNo,
     targetIslandNo,
+    unitFactoryCodes,
     files,
     runDeliverable,
     deliverableParams,
   }: CreateAuditReplaceParams): Promise<CreateBatchPayload> {
     const formData = new FormData();
+    const normalizedUnitFactoryCodes = [...new Set(
+      (unitFactoryCodes ?? [])
+        .map((code) => code.trim().toUpperCase())
+        .filter((code) => /^[A-Z][A-Z0-9]{1,3}$/.test(code)),
+    )];
     formData.append("mode", "replace");
     formData.append(
       "params_json",
@@ -447,6 +497,7 @@ export class HttpAdapter implements ApiAdapter {
         ...(sourceIslandNo ? { source_island_no: sourceIslandNo } : {}),
         target_project_no: targetProjectNo,
         ...(targetIslandNo ? { target_island_no: targetIslandNo } : {}),
+        unit_factory_codes: normalizedUnitFactoryCodes,
         run_deliverable: runDeliverable,
         ...(runDeliverable && deliverableParams
           ? { deliverable_params: deliverableParams }
@@ -471,13 +522,16 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  async listJobs(status?: string, offset = 0, limit = 100): Promise<JobList> {
+  async listJobs(status?: string, offset = 0, limit = 100, sort?: JobListSort): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
       search.set("status", status);
     }
     search.set("offset", String(offset));
     search.set("limit", String(limit));
+    if (sort) {
+      search.set("sort", sort);
+    }
 
     const payload = await this.fetchJson<{
       total: number;
@@ -490,6 +544,61 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async getJobsActivity(): Promise<JobsActivity> {
+    const payload = await this.fetchJson<{
+      total: number;
+      active: number;
+      last_changed_at: string | null;
+    }>("/api/jobs/activity", undefined, { retry: true });
+
+    return {
+      total: payload.total,
+      active: payload.active,
+      lastChangedAt: payload.last_changed_at,
+    };
+  }
+
+  subscribeJobsActivity = (
+    onActivity: (activity: JobsActivity) => void,
+    onError?: (event: Event) => void,
+  ): (() => void) => {
+    if (typeof window === "undefined" || typeof window.EventSource === "undefined") {
+      return () => {};
+    }
+
+    const source = new window.EventSource(this.buildUrl("/api/jobs/activity/stream"));
+    const handleActivity = (event: MessageEvent<string>) => {
+      const payload = this.parseJsonOrText(event.data);
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+      const raw = payload as {
+        total?: number;
+        active?: number;
+        last_changed_at?: string | null;
+      };
+
+      onActivity({
+        total: Number(raw.total ?? 0),
+        active: Number(raw.active ?? 0),
+        lastChangedAt: typeof raw.last_changed_at === "string" ? raw.last_changed_at : null,
+      });
+    };
+    const handleError = (event: Event) => {
+      onError?.(event);
+      source.close();
+    };
+
+    source.addEventListener("jobs_activity", handleActivity as EventListener);
+    source.onerror = handleError;
+
+    return () => {
+      source.removeEventListener("jobs_activity", handleActivity as EventListener);
+      source.onerror = null;
+      source.close();
+    };
+  };
+
   async getJobDetail(jobId: string): Promise<JobDetail> {
     const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`, undefined, {
       retry: true,
@@ -500,6 +609,7 @@ export class HttpAdapter implements ApiAdapter {
       currentFile: payload.current_file ?? null,
       flags: payload.flags ?? [],
       errors: payload.errors ?? [],
+      diagnostics: this.normalizeDiagnostics(payload.diagnostics),
       topWrongTexts: payload.top_wrong_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
       sharedDir: payload.shared_dir ?? null,
@@ -565,7 +675,25 @@ export class HttpAdapter implements ApiAdapter {
       replacementFont: payload.replacement_font ?? null,
       replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       replacedStyleCount: payload.replaced_style_count ?? 0,
+      workload: this.normalizeWorkloadSummary(payload.workload),
+      effectiveWorkload: payload.effective_workload ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
+    };
+  }
+
+  private normalizeWorkloadSummary(payload: RawJobSummary["workload"]): JobSummary["workload"] {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      initialWorkloadA1: payload.initial_workload_a1 ?? 0,
+      finalWorkloadA1: payload.final_workload_a1 ?? 0,
+      oneReviewFactor: payload.one_review_factor ?? 1,
+      twoReviewFactor: payload.two_review_factor ?? 1,
+      threeReviewFactor: payload.three_review_factor ?? 1,
+      settlementStatus: payload.settlement_status ?? "pending",
+      settledAt: payload.settled_at ?? null,
     };
   }
 
@@ -700,6 +828,26 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  private normalizeDiagnostics(payload: RawJobDetail["diagnostics"]) {
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+    return payload.map((item) => ({
+      kind: item.kind ?? "other",
+      severity: item.severity ?? "warning",
+      title: item.title ?? "未命名问题",
+      summary: item.summary ?? "",
+      suggestion: item.suggestion ?? "",
+      details: Array.isArray(item.details)
+        ? item.details.map((detail) => ({
+            label: detail.label ?? "具体信息",
+            items: detail.items ?? [],
+          }))
+        : [],
+      rawItems: item.raw_items ?? [],
+    }));
+  }
+
   private normalizeFindingGroups(payload: RawJobDetail["finding_groups"]): FindingGroup[] | undefined {
     if (!payload) {
       return undefined;
@@ -709,6 +857,11 @@ export class HttpAdapter implements ApiAdapter {
       matchedText: group.matched_text ?? "",
       count: group.count ?? 0,
       internalCodes: group.internal_codes ?? [],
+      category: group.category ?? undefined,
+      contextKind: group.context_kind ?? undefined,
+      issueType: group.issue_type ?? undefined,
+      summary: group.summary ?? undefined,
+      details: group.details ?? undefined,
     }));
   }
 

@@ -1,0 +1,359 @@
+﻿{
+    "generated_at":  "2026-07-05T18:15:26",
+    "duration_seconds":  180,
+    "run_root":  "E:\\project\\auto-fanban-pre\\.codex_smoke\\logs12-watch-20260705-181216",
+    "start_log":  {
+                      "path":  "D:\\FanBanServer\\logs\\backend-stderr-20260704-214934.log",
+                      "length":  1492,
+                      "ping_failed_listener_alive":  0,
+                      "restarting_uvicorn":  0,
+                      "launch_attempts":  1,
+                      "ping_failed":  0
+                  },
+    "end_log":  {
+                    "path":  "D:\\FanBanServer\\logs\\backend-stderr-20260704-214934.log",
+                    "length":  1492,
+                    "ping_failed_listener_alive":  0,
+                    "restarting_uvicorn":  0,
+                    "launch_attempts":  1,
+                    "ping_failed":  0
+                },
+    "start_listener":  {
+                           "local_address":  "127.0.0.1",
+                           "local_port":  8000,
+                           "pid":  23024,
+                           "process_name":  "python.exe",
+                           "command_line":  null
+                       },
+    "end_listener":  {
+                         "local_address":  "127.0.0.1",
+                         "local_port":  8000,
+                         "pid":  23024,
+                         "process_name":  "python.exe",
+                         "command_line":  null
+                     },
+    "samples":  [
+                    {
+                        "at":  "2026-07-05T18:12:17",
+                        "index":  0,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:12:27",
+                        "index":  1,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:12:38",
+                        "index":  2,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:12:49",
+                        "index":  3,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:12:59",
+                        "index":  4,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:13:10",
+                        "index":  5,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:13:20",
+                        "index":  6,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:13:31",
+                        "index":  7,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:13:41",
+                        "index":  8,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:13:52",
+                        "index":  9,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:02",
+                        "index":  10,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:13",
+                        "index":  11,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:23",
+                        "index":  12,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:34",
+                        "index":  13,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:44",
+                        "index":  14,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:14:54",
+                        "index":  15,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:15:05",
+                        "index":  16,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    },
+                    {
+                        "at":  "2026-07-05T18:15:15",
+                        "index":  17,
+                        "ping_ok":  true,
+                        "ping_error":  "",
+                        "health_status":  "ok",
+                        "health_ready":  true,
+                        "health_error":  "",
+                        "listener":  {
+                                         "local_address":  "127.0.0.1",
+                                         "local_port":  8000,
+                                         "pid":  23024,
+                                         "process_name":  "python.exe",
+                                         "command_line":  null
+                                     }
+                    }
+                ],
+    "all_backend_logs":  [
+                             {
+                                 "name":  "backend-stderr-20260703-173236.log",
+                                 "length":  1525,
+                                 "last_write_time":  "2026-07-03T17:32:39",
+                                 "ping_failed_listener_alive":  0,
+                                 "restarting_uvicorn":  0,
+                                 "launch_attempts":  1
+                             },
+                             {
+                                 "name":  "backend-stderr-20260704-214934.log",
+                                 "length":  1525,
+                                 "last_write_time":  "2026-07-04T21:49:43",
+                                 "ping_failed_listener_alive":  0,
+                                 "restarting_uvicorn":  0,
+                                 "launch_attempts":  1
+                             }
+                         ],
+    "task":  {
+                 "state":  "Running",
+                 "last_task_result":  267009,
+                 "last_run_time":  "\/Date(1783172964000)\/"
+             },
+    "verdict_metrics":  {
+                            "sample_count":  18,
+                            "ping_failures":  0,
+                            "health_failures":  0,
+                            "distinct_listener_pids":  [
+                                                           23024
+                                                       ],
+                            "new_ping_failed_listener_alive":  0,
+                            "new_restarting_uvicorn":  0,
+                            "new_launch_attempts":  0
+                        }
+}

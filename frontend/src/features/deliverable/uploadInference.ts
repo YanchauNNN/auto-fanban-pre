@@ -15,7 +15,7 @@ export function inferProjectNumbers(files: File[]): UploadProjectInference {
       inferredProjectNos.push(projectNo);
     }
     const unitMatch = file.name.match(
-      new RegExp(`^${projectNo}([1-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\\d{2})`),
+      new RegExp(`^${projectNo}([0-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\\d{2})`),
     );
     if (unitMatch?.[1] && !inferredUnitNos.includes(unitMatch[1])) {
       inferredUnitNos.push(unitMatch[1]);

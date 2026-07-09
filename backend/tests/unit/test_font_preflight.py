@@ -322,6 +322,52 @@ def test_font_preflight_service_runs_compatibility_replacement_without_missing_f
     }
 
 
+def test_font_preflight_service_passes_exempt_style_names_to_replace_pass(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {
+        "hztxt.shx": "tssdchn.shx",
+    }
+    service.config.font_preflight.font_compatibility_exempt_style_names = [
+        "宋体",
+        "ST",
+    ]
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+    )
+
+    replace_call = bridge.calls[1]
+    assert replace_call["font_compatibility_exempt_style_names"] == [
+        "宋体",
+        "ST",
+    ]
+
+
 def test_font_preflight_service_skips_empty_style_replacement_without_target_regions(
     tmp_path: Path,
 ) -> None:

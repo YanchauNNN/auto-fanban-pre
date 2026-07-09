@@ -101,6 +101,18 @@ class TestDerivationEngine:
         assert derived_2016.cover_title_cn == "测试图册封面"
         assert derived_2016.catalog_title_cn == "测试图册目录"
 
+    def test_derive_cover_title_uses_album_cover_suffix_without_duplicate(
+        self,
+        engine: DerivationEngine,
+    ):
+        params = GlobalDocParams(project_no="2016", album_title_cn="\u6d4b\u8bd5")
+        derived = engine.compute(DocContext(params=params, frames=[]))
+        assert derived.cover_title_cn == "\u6d4b\u8bd5\u56fe\u518c\u5c01\u9762"
+
+        params_with_album = GlobalDocParams(project_no="2016", album_title_cn="\u6d4b\u8bd5\u56fe\u518c")
+        derived_with_album = engine.compute(DocContext(params=params_with_album, frames=[]))
+        assert derived_with_album.cover_title_cn == "\u6d4b\u8bd5\u56fe\u518c\u5c01\u9762"
+
     def test_derive_design_phase(self, derived_2016: DerivedFields):
         """测试设计阶段派生"""
         # doc_status = "CFC" -> design_phase = "施工图设计"
@@ -122,7 +134,7 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
 
-        assert derived.discipline_en == "Structural Engineering"
+        assert derived.discipline_en == "Structure"
         assert derived.design_phase_en == "Constructing Design"
         assert derived.cover_title_en == "Test Album Cover"
         assert derived.catalog_title_en == "Test Album Contents"
@@ -139,7 +151,7 @@ class TestDerivationEngine:
         ctx = DocContext(params=params, frames=[])
         derived = engine.compute(ctx)
 
-        assert derived.discipline_en == "Structural Engineering"
+        assert derived.discipline_en == "Structure"
 
     def test_derive_cover_catalog_revision_is_independent_from_highest_drawing_revision(
         self,

@@ -1,0 +1,177 @@
+{
+  "generated_at": "2026-07-03 17:45:13",
+  "base_url": "http://127.0.0.1:8000",
+  "dwg": "E:\\project\\auto-fanban-pre\\test\\王若愚反馈\\20161RC-JGS01.dwg",
+  "dwg_bytes": 2386144,
+  "case": {
+    "label": "出图",
+    "batch_id": "batch-20260703174416-601f85",
+    "job_id": "da5c5edb-ded9-4404-9d98-9d57fdacb434",
+    "submit_payload": {
+      "batch_id": "batch-20260703174416-601f85",
+      "jobs": [
+        {
+          "job_id": "da5c5edb-ded9-4404-9d98-9d57fdacb434",
+          "batch_id": "batch-20260703174416-601f85",
+          "group_id": null,
+          "shared_run_id": null,
+          "task_role": null,
+          "plot_style_key": null,
+          "plot_resource_mode": null,
+          "slot_id": null,
+          "cad_version": null,
+          "accoreconsole_exe": null,
+          "profile_arg": null,
+          "pc3_path": null,
+          "pmp_path": null,
+          "ctb_path": null,
+          "font_preflight_summary": {},
+          "missing_fonts_detected": false,
+          "font_replacement_applied": false,
+          "replacement_font": null,
+          "replacement_fonts": {},
+          "replaced_style_count": 0,
+          "is_group": false,
+          "source_filename": "20161RC-JGS01.dwg",
+          "task_kind": "deliverable",
+          "job_mode": "deliverable",
+          "project_no": "2016",
+          "status": "queued",
+          "stage": "INIT",
+          "percent": 0,
+          "message": "",
+          "failure_reason": null,
+          "stage_context": null,
+          "created_at": "2026-07-03T17:44:16.416837",
+          "finished_at": null,
+          "artifacts": {
+            "package_available": false,
+            "ied_available": false,
+            "preview_available": false,
+            "preview_mode": null,
+            "report_available": false,
+            "replaced_dwg_available": false
+          },
+          "findings_count": 0,
+          "affected_drawings_count": 0,
+          "workload": null,
+          "effective_workload": null,
+          "retry_available": false
+        }
+      ]
+    },
+    "final_detail": {
+      "job_id": "da5c5edb-ded9-4404-9d98-9d57fdacb434",
+      "status": "succeeded",
+      "stage": "PACKAGE_ZIP",
+      "percent": 100,
+      "message": "????",
+      "errors": [],
+      "flags": [
+        "[JD1RCE14001B25C42SDBCFC (20161RC-JGS01-001)] PLOT_MULTIPAGE_USED"
+      ],
+      "artifacts": {
+        "package_available": true,
+        "ied_available": false,
+        "preview_available": true,
+        "preview_mode": "plain",
+        "report_available": false,
+        "replaced_dwg_available": false,
+        "package_download_url": "/api/jobs/da5c5edb-ded9-4404-9d98-9d57fdacb434/download/package",
+        "ied_download_url": null,
+        "preview_download_url": "/api/jobs/da5c5edb-ded9-4404-9d98-9d57fdacb434/download/preview",
+        "report_download_url": null,
+        "replaced_dwg_download_url": null
+      },
+      "deliverable_outputs": {
+        "dwg_count": 5,
+        "pdf_count": 5,
+        "documents": [
+          {
+            "name": "JD1RCE14F01B25C42SDACFC (20161RC-JGS01-FM).docx",
+            "kind": "docx"
+          },
+          {
+            "name": "JD1RCE14F01B25C42SDACFC (20161RC-JGS01-FM).pdf",
+            "kind": "pdf"
+          },
+          {
+            "name": "JD1RCE14T01B25C42SDACFC (20161RC-JGS01-TM).pdf",
+            "kind": "pdf"
+          },
+          {
+            "name": "JD1RCE14T01B25C42SDACFC (20161RC-JGS01-TM).xlsx",
+            "kind": "xlsx"
+          },
+          {
+            "name": "设计文件.xlsx",
+            "kind": "xlsx"
+          }
+        ],
+        "drawings": [
+          {
+            "name": "JD1RCE14001B25C42SDBCFC (20161RC-JGS01-001)",
+            "internal_code": "20161RC-JGS01-001",
+            "dwg_name": "JD1RCE14001B25C42SDBCFC (20161RC-JGS01-001).dwg",
+            "pdf_name": "JD1RCE14001B25C42SDBCFC (20161RC-JGS01-001).pdf",
+            "page_total": 4
+          },
+          {
+            "name": "JD1RCE14002B25C42SDBCFC (20161RC-JGS01-002)",
+            "internal_code": "20161RC-JGS01-002",
+            "dwg_name": "JD1RCE14002B25C42SDBCFC (20161RC-JGS01-002).dwg",
+            "pdf_name": "JD1RCE14002B25C42SDBCFC (20161RC-JGS01-002).pdf",
+            "page_total": 1
+          },
+          {
+            "name": "JD1RCE14003B25C42SDACFC (20161RC-JGS01-003)",
+            "internal_code": "20161RC-JGS01-003",
+            "dwg_name": "JD1RCE14003B25C42SDACFC (20161RC-JGS01-003).dwg",
+            "pdf_name": "JD1RCE14003B25C42SDACFC (20161RC-JGS01-003).pdf",
+            "page_total": 1
+          },
+          {
+            "name": "JD1RCE14004B25C42SDACFC (20161RC-JGS01-004)",
+            "internal_code": "20161RC-JGS01-004",
+            "dwg_name": "JD1RCE14004B25C42SDACFC (20161RC-JGS01-004).dwg",
+            "pdf_name": "JD1RCE14004B25C42SDACFC (20161RC-JGS01-004).pdf",
+            "page_total": 1
+          },
+          {
+            "name": "JD1RCE14005B25C42SDACFC (20161RC-JGS01-005)",
+            "internal_code": "20161RC-JGS01-005",
+            "dwg_name": "JD1RCE14005B25C42SDACFC (20161RC-JGS01-005).dwg",
+            "pdf_name": "JD1RCE14005B25C42SDACFC (20161RC-JGS01-005).pdf",
+            "page_total": 1
+          }
+        ]
+      },
+      "workload": {
+        "initial_workload_a1": 6.5,
+        "final_workload_a1": 6.5,
+        "one_review_factor": 1.0,
+        "two_review_factor": 1.0,
+        "three_review_factor": 1.0,
+        "settlement_status": "pending",
+        "settled_at": null,
+        "contributor_entries": []
+      }
+    },
+    "downloads": {
+      "package_download_url": {
+        "url": "/api/jobs/da5c5edb-ded9-4404-9d98-9d57fdacb434/download/package",
+        "status_code": 200,
+        "bytes": 3411395,
+        "content_type": "application/zip",
+        "content_disposition": "attachment; filename=\"package.zip\""
+      },
+      "preview_download_url": {
+        "url": "/api/jobs/da5c5edb-ded9-4404-9d98-9d57fdacb434/download/preview",
+        "status_code": 200,
+        "bytes": 2694101,
+        "content_type": "application/pdf",
+        "content_disposition": "attachment; filename=\"da5c5edb-ded9-4404-9d98-9d57fdacb434-preview.pdf\""
+      }
+    }
+  }
+}

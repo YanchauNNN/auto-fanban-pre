@@ -823,5 +823,5 @@ def _normalize_variant_token(value: str | None) -> str | None:
     text = str(value or "").strip()
     if not text:
         return None
-    match = re.search(r"[1-9]", text)
+    match = re.search(r"[0-9]", text)
     return match.group(0) if match else None

@@ -19,11 +19,13 @@ import {
   useEffect,
   useDeferredValue,
   useLayoutEffect,
+  isValidElement,
   lazy,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import {
   BrowserRouter,
@@ -45,6 +47,7 @@ import type {
   FindingGroup,
   JobDetail,
   JobList,
+  JobsActivity,
   JobSummary,
   TaskKind,
 } from "../platform/api/types";
@@ -65,6 +68,7 @@ const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const JOBS_MODAL_PAGE_SIZE = 50;
 const BACKEND_CONNECTION_INTERRUPTED_MESSAGE = "后台服务连接中断，请检查后端服务或代理配置。";
 const BACKEND_BUSINESS_HEALTH_WARNING_MESSAGE = "后台业务健康异常";
+const BACKEND_HEALTH_PROBE_RETRYING_MESSAGE = "后台健康检查重试中";
 const CONNECTION_REFETCH_INTERVAL_MS = 12000;
 const CONNECTION_RETRY_COUNT = 2;
 const CONNECTION_RECENT_SUCCESS_GRACE_MS = 60000;
@@ -450,9 +454,15 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  rememberAuditReplaceFactoryCodes: async () => ({ factoryCodes: [] }),
   listJobs: async () => ({
     total: 1,
     items: [TUTORIAL_GROUP_SUMMARY],
+  }),
+  getJobsActivity: async () => ({
+    total: 1,
+    active: 0,
+    lastChangedAt: TUTORIAL_FINISHED_AT,
   }),
   getJobDetail: async (jobId: string) => {
     const detail = TUTORIAL_DETAIL_LOOKUP.get(jobId);
@@ -523,6 +533,7 @@ function WorkspacePage() {
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
   const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
   const notifiedAuditJobIdsRef = useRef<Set<string>>(new Set());
+  const lastJobsActivityMarkerRef = useRef<string | null>(null);
 
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
@@ -596,8 +607,10 @@ function WorkspacePage() {
     connectionQuery.isError &&
     connectionQuery.failureCount > CONNECTION_RETRY_COUNT &&
     !hasRecentConnectionSuccess;
+  const backendHealthProbeRetrying =
+    !backendConnectionInterrupted && healthQuery.isError && hasRecentConnectionSuccess;
   const backendBusinessHealthWarning =
-    !backendConnectionInterrupted && (healthQuery.isError || healthQuery.data?.ready === false);
+    !backendConnectionInterrupted && healthQuery.data?.ready === false;
   const entryActionsDisabled = !actionsReady || backendConnectionInterrupted;
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
@@ -608,24 +621,19 @@ function WorkspacePage() {
 
   const jobsQuery = useQuery({
     queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
-    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
+    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100, "created_at"),
     placeholderData: (previous) => previous,
-    refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
-    },
   });
   const jobsActivityQuery = useQuery({
     queryKey: ["jobs-activity"],
-    queryFn: () => adapter.listJobs(undefined, 0, 100),
+    queryFn: () => adapter.getJobsActivity(),
     placeholderData: (previous) => previous,
     refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
+      const activity = query.state.data as JobsActivity | undefined;
+      return activity && activity.active > 0 ? 3000 : 12000;
     },
   });
+  const subscribeJobsActivity = adapter.subscribeJobsActivity;
 
   const jobCards = useMemo(
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
@@ -644,7 +652,7 @@ function WorkspacePage() {
   }, [jobCards, normalizedRecentJobsSearch]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
+    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
@@ -668,7 +676,32 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    const items = jobsActivityQuery.data?.items;
+    if (!subscribeJobsActivity) {
+      return undefined;
+    }
+
+    return subscribeJobsActivity((activity) => {
+      reactQueryClient.setQueryData(["jobs-activity"], activity);
+      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    });
+  }, [subscribeJobsActivity, reactQueryClient]);
+
+  useEffect(() => {
+    const activity = jobsActivityQuery.data;
+    if (!activity) {
+      return;
+    }
+
+    const marker = `${activity.total}:${activity.active}:${activity.lastChangedAt ?? ""}`;
+    const previousMarker = lastJobsActivityMarkerRef.current;
+    lastJobsActivityMarkerRef.current = marker;
+    if (previousMarker !== null && previousMarker !== marker) {
+      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  }, [jobsActivityQuery.data, reactQueryClient]);
+
+  useEffect(() => {
+    const items = jobsQuery.data?.items;
     if (!items) {
       return;
     }
@@ -771,7 +804,7 @@ function WorkspacePage() {
     return () => {
       active = false;
     };
-  }, [adapter, jobsActivityQuery.data]);
+  }, [adapter, jobsQuery.data?.items]);
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
@@ -896,6 +929,10 @@ function WorkspacePage() {
             </div>
             {backendConnectionInterrupted ? (
               <p className={styles.titleStripHealthWarning}>后台连接不可达</p>
+            ) : backendHealthProbeRetrying ? (
+              <p className={styles.titleStripHealthLoading}>
+                {BACKEND_HEALTH_PROBE_RETRYING_MESSAGE}
+              </p>
             ) : backendBusinessHealthWarning ? (
               <>
                 <p className={styles.titleStripHealthWarning}>
@@ -1740,6 +1777,7 @@ function SingleJobDetailPanel({
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
 
   return (
     <section className={styles.detailPanel}>
@@ -1764,10 +1802,10 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -1840,11 +1878,8 @@ function SingleJobDetailPanel({
       ) : null}
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       <section className={styles.detailSection}>
@@ -1878,6 +1913,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
   const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -1903,10 +1939,10 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <StatusPill status={detail.status} />
       </header>
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -1985,11 +2021,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       </section>
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       {previewRequest ? (
@@ -2003,6 +2036,99 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       ) : null}
     </section>
   );
+}
+
+function DrawingQuantityCopy({ value }: { value: string }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  const handleCopy = async () => {
+    try {
+      await copyPlainText(value);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
+  };
+
+  return (
+    <div className={styles.drawingQuantityCopy}>
+      <div>
+        <span>图纸量（A1等效）</span>
+        <strong>{value}</strong>
+      </div>
+      <button type="button" onClick={handleCopy}>
+        {copyStatus === "copied" ? "已复制" : copyStatus === "failed" ? "复制失败" : "复制张数"}
+      </button>
+    </div>
+  );
+}
+
+function buildQuickDownloadItems(job: JobSummary, artifactButtons: ReactNode[]) {
+  const drawingQuantityText = formatWorkloadQuantity(resolveDrawingQuantity(job));
+  if (!drawingQuantityText) {
+    return artifactButtons;
+  }
+  return insertAfterArtifactKey(
+    artifactButtons,
+    "ied",
+    <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
+  );
+}
+
+function resolveDrawingQuantity(job: JobSummary) {
+  const ownQuantity = readJobDrawingQuantity(job);
+  if (ownQuantity !== null) {
+    return ownQuantity;
+  }
+
+  if (!job.isGroup || !job.children?.length) {
+    return null;
+  }
+
+  const childrenByPriority = [
+    ...job.children.filter((child) => child.taskKind === "deliverable"),
+    ...job.children.filter((child) => child.taskKind === "audit_check"),
+    ...job.children.filter((child) => child.taskKind === "audit_replace"),
+    ...job.children,
+  ];
+  for (const child of childrenByPriority) {
+    const childQuantity = readJobDrawingQuantity(child);
+    if (childQuantity !== null) {
+      return childQuantity;
+    }
+  }
+
+  return null;
+}
+
+function readJobDrawingQuantity(job: JobSummary) {
+  const candidates = [
+    job.workload?.initialWorkloadA1,
+    job.workload?.finalWorkloadA1,
+    job.effectiveWorkload,
+  ];
+  for (const candidate of candidates) {
+    if (isUsableDrawingQuantity(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function isUsableDrawingQuantity(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function insertAfterArtifactKey(
+  items: ReactNode[],
+  key: string,
+  insertedItem: ReactNode,
+) {
+  const insertIndex = items.findIndex((item) => isValidElement(item) && item.key === key);
+  if (insertIndex < 0) {
+    return [...items, insertedItem];
+  }
+  return [...items.slice(0, insertIndex + 1), insertedItem, ...items.slice(insertIndex + 1)];
 }
 
 function DeliverableResultCard({
@@ -2192,9 +2318,22 @@ function AuditResultCard({
             {groups.map((group) => (
               <div className={styles.findingGroupCard} key={group.matchedText}>
                 <div className={styles.findingGroupHeader}>
-                  <strong>{group.matchedText}</strong>
+                  <div>
+                    {group.category ? (
+                      <span className={styles.findingCodePill}>{group.category}</span>
+                    ) : null}
+                    <strong>{group.matchedText}</strong>
+                  </div>
                   <span className={styles.jobMetric}>命中 {group.count}</span>
                 </div>
+                {group.summary ? <p className={styles.muted}>{group.summary}</p> : null}
+                {group.details?.length ? (
+                  <ul className={styles.outputMetaList}>
+                    {group.details.map((item) => (
+                      <li key={`${group.matchedText}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className={styles.findingCodeList}>
                   {group.internalCodes.map((internalCode) => (
                     <span className={styles.findingCodePill} key={`${group.matchedText}-${internalCode}`}>
@@ -2372,6 +2511,90 @@ function ListBlock({
       )}
     </div>
   );
+}
+
+function DiagnosticPanel({ detail }: { detail: JobDetail }) {
+  const diagnostics = detail.diagnostics ?? [];
+
+  if (diagnostics.length === 0) {
+    return (
+      <div className={styles.columns}>
+        <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+        <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.diagnosticPanel}>
+      <div className={styles.diagnosticList}>
+        {diagnostics.map((diagnostic, index) => (
+          <article
+            className={`${styles.diagnosticCard} ${diagnosticSeverityClass(diagnostic.severity)}`}
+            key={`${diagnostic.kind}-${diagnostic.title}-${index}`}
+          >
+            <div className={styles.diagnosticHeader}>
+              <span className={styles.diagnosticSeverity}>
+                {diagnosticSeverityLabel(diagnostic.severity)}
+              </span>
+              <h3>{diagnostic.title}</h3>
+            </div>
+            {diagnostic.summary ? <p className={styles.diagnosticSummary}>{diagnostic.summary}</p> : null}
+            {diagnostic.suggestion ? (
+              <p className={styles.diagnosticSuggestion}>{diagnostic.suggestion}</p>
+            ) : null}
+            {diagnostic.details.length > 0 ? (
+              <div className={styles.diagnosticDetails}>
+                {diagnostic.details.map((detailItem) => (
+                  <div className={styles.diagnosticDetailGroup} key={detailItem.label}>
+                    <strong>{detailItem.label}</strong>
+                    <div className={styles.diagnosticChips}>
+                      {detailItem.items.map((item) => (
+                        <span className={styles.diagnosticChip} key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <details className={styles.rawDiagnosticDetails}>
+        <summary>展开原始诊断信息</summary>
+        <div className={styles.columns}>
+          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function hasStructuredDiagnostics(detail: JobDetail) {
+  return Boolean(detail.diagnostics && detail.diagnostics.length > 0);
+}
+
+function diagnosticSeverityLabel(severity: string) {
+  if (severity === "error") {
+    return "错误";
+  }
+  if (severity === "info") {
+    return "提示";
+  }
+  return "警告";
+}
+
+function diagnosticSeverityClass(severity: string) {
+  if (severity === "error") {
+    return styles.diagnosticError;
+  }
+  if (severity === "info") {
+    return styles.diagnosticInfo;
+  }
+  return styles.diagnosticWarning;
 }
 
 function TaskKindBadge({ kind, jobMode }: { kind: TaskKind; jobMode?: string | null }) {
@@ -2567,6 +2790,33 @@ function formatTimestamp(value: string) {
     second: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatWorkloadQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return String(Number(value.toFixed(4)));
+}
+
+async function copyPlainText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
 }
 
 function formatPageTotal(pageTotal: number) {

@@ -29,6 +29,7 @@ from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
+from src.job_diagnostics import build_job_diagnostics
 from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
@@ -39,7 +40,10 @@ from src.pipeline.project_no_inference import (
     resolve_project_no,
 )
 from src.pipeline.shared_prep import SharedPrepService
+from src.pipeline.sqlite_queue import SQLiteQueueStore
 from src.result_views import normalize_user_flags
+from src.workload.calculator import WorkloadCalculator
+from src.workload.models import WorkloadSummary
 
 
 logger = logging.getLogger(__name__)
@@ -98,9 +102,16 @@ class DeliverableApiRuntime:
         job_processor: Callable[[Job], None] | None = None,
         shared_prep_service: SharedPrepService | None = None,
         font_preflight_service: FontPreflightService | None = None,
+        process_jobs_in_api: bool = True,
+        worker_process_mode: bool = False,
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
+        self.process_jobs_in_api = process_jobs_in_api
+        self.worker_process_mode = worker_process_mode
+        self.queue_store = SQLiteQueueStore(
+            self.config.storage_dir / "runtime" / "fanban_queue.sqlite3"
+        )
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
         self.validator = DocParamValidator()
@@ -114,6 +125,7 @@ class DeliverableApiRuntime:
         self.shared_prep_service = shared_prep_service or SharedPrepService(
             font_preflight_service=self.font_preflight_service
         )
+        self.workload_calculator = WorkloadCalculator()
         self.cad_slot_pool = CADSlotPool(
             config=self.config,
             slot_count=max(int(self.config.cad_runtime.slot_count), 1),
@@ -130,6 +142,7 @@ class DeliverableApiRuntime:
         self._stop_event = threading.Event()
         self._group_dispatcher_thread: threading.Thread | None = None
         self._job_dispatcher_thread: threading.Thread | None = None
+        self._summary_backfill_thread: threading.Thread | None = None
 
         self._group_executor = ThreadPoolExecutor(
             max_workers=self._max_active_groups,
@@ -152,6 +165,10 @@ class DeliverableApiRuntime:
         self._job_completion_lock = threading.Lock()
 
     def start(self) -> None:
+        self.queue_store.initialize()
+        if not self.process_jobs_in_api:
+            self._start_summary_backfill()
+            return
         self._recover_groups_and_jobs()
         if self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive():
             return
@@ -171,18 +188,41 @@ class DeliverableApiRuntime:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._group_queue.put(None)
-        self._job_queue.put(None)
+        if self.process_jobs_in_api:
+            self._group_queue.put(None)
+            self._job_queue.put(None)
         if self._group_dispatcher_thread:
             self._group_dispatcher_thread.join(timeout=3)
         if self._job_dispatcher_thread:
             self._job_dispatcher_thread.join(timeout=3)
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            self._summary_backfill_thread.join(timeout=3)
         self._group_executor.shutdown(wait=False, cancel_futures=True)
         self._heavy_executor.shutdown(wait=False, cancel_futures=True)
         self._doc_executor.shutdown(wait=False, cancel_futures=True)
 
     def health(self) -> dict[str, Any]:
         storage_writable = self._storage_writable()
+        if not self.process_jobs_in_api:
+            worker_status = self.queue_store.worker_status()
+            queue_depth = self.queue_store.queue_depth()
+            return {
+                'status': 'ok',
+                'server_time': datetime.now().astimezone().isoformat(),
+                'ready': storage_writable and bool(worker_status["alive"]),
+                'storage_writable': storage_writable,
+                'worker_alive': bool(worker_status["alive"]),
+                'queue_depth': queue_depth,
+                'autocad_ready': self._autocad_ready(),
+                'office_ready': importlib.util.find_spec('win32com.client') is not None,
+                'active_groups': 0,
+                'active_jobs': 0,
+                'active_doc_jobs': 0,
+                'pending_doc_jobs': 0,
+                'active_total_jobs': 0,
+                'worker_count': int(worker_status["count"]),
+                'worker_last_seen_at': worker_status["last_seen_at"],
+            }
         group_alive = bool(self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive())
         job_alive = bool(self._job_dispatcher_thread and self._job_dispatcher_thread.is_alive())
         active_doc_jobs = self._active_doc_count()
@@ -490,6 +530,13 @@ class DeliverableApiRuntime:
             )
 
         batch_id = self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/batch",
+            batch_id=batch_id,
+            files=files,
+            run_audit_check=run_audit_check,
+            split_only=split_only,
+        )
         if run_audit_check:
             groups = [
                 self._create_grouped_submission(
@@ -517,8 +564,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     def create_audit_batch(
@@ -561,6 +609,12 @@ class DeliverableApiRuntime:
 
         explicit_batch_id = str(raw_params.get('batch_id') or '').strip()
         batch_id = explicit_batch_id or self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/audit-replace",
+            batch_id=batch_id,
+            files=files,
+            mode=normalized_mode,
+        )
         jobs: list[dict[str, Any]] = []
         if normalized_mode == 'replace':
             for upload, resolved_params in resolved_submissions:
@@ -587,8 +641,9 @@ class DeliverableApiRuntime:
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
+                summary = self._index_job_summary(job)
                 self._enqueue_job(job.job_id)
-                jobs.append(self._serialize_job_summary(job))
+                jobs.append(summary)
             return {'batch_id': batch_id, 'jobs': jobs}
 
         for upload, resolved_params in resolved_submissions:
@@ -604,8 +659,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     @staticmethod
@@ -756,7 +812,15 @@ class DeliverableApiRuntime:
         status_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        sort_by: str = "updated_at",
     ) -> dict[str, Any]:
+        if not self.process_jobs_in_api:
+            return self.queue_store.list_summaries(
+                status=status_filter,
+                limit=max(limit, 0),
+                offset=max(offset, 0),
+                sort_by=sort_by,
+            )
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
@@ -767,30 +831,38 @@ class DeliverableApiRuntime:
             for job in self.job_manager.load_all_jobs()
             if job.group_id is None and (status_filter is None or job.status.value == status_filter)
         ]
-        all_items = sorted([*groups, *standalone_jobs], key=lambda item: item['created_at'], reverse=True)
+        sort_key = 'created_at' if sort_by == 'created_at' else 'updated_at'
+        all_items = sorted(
+            [*groups, *standalone_jobs],
+            key=lambda item: item.get(sort_key) or item['created_at'],
+            reverse=True,
+        )
         normalized_limit = max(limit, 0)
         normalized_offset = max(offset, 0)
         items = all_items[normalized_offset:normalized_offset + normalized_limit]
         return {'items': items, 'total': len(all_items)}
 
+    def jobs_activity(self) -> dict[str, Any]:
+        return self.queue_store.activity()
+
     def get_job_detail(self, job_id: str) -> dict[str, Any]:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             return self._serialize_group_detail(group)
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         return self._serialize_job_detail(job)
 
     def get_artifact_path(self, job_id: str, artifact: str) -> Path:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             owner_job = self._resolve_group_artifact_owner(group, artifact)
             if owner_job is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
             return self.get_artifact_path(owner_job.job_id, artifact)
 
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         path = {
@@ -803,6 +875,16 @@ class DeliverableApiRuntime:
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
         return Path(path)
+
+    def _get_job_for_read(self, job_id: str) -> Job | None:
+        if self.process_jobs_in_api:
+            return self.job_manager.get_job(job_id)
+        return self.job_manager.reload_job(job_id) or self.job_manager.get_job(job_id)
+
+    def _get_group_for_read(self, group_id: str) -> TaskGroup | None:
+        if self.process_jobs_in_api:
+            return self.group_manager.get_group(group_id)
+        return self.group_manager.reload_group(group_id) or self.group_manager.get_group(group_id)
 
     def _create_grouped_submission(
         self,
@@ -852,8 +934,9 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [deliverable_job.job_id, audit_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
 
     def _create_replace_grouped_submission(
         self,
@@ -905,8 +988,94 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [replace_job.job_id, deliverable_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
+
+    def refresh_summary_index(self, item_type: str, item_id: str) -> None:
+        if item_type == "group":
+            group = self.group_manager.get_group(item_id)
+            if group is not None:
+                self._index_group_summary(group)
+            return
+        if item_type == "job":
+            job = self.job_manager.get_job(item_id)
+            if job is not None and job.group_id is None:
+                self._index_job_summary(job)
+
+    def _backfill_summary_index(self) -> None:
+        for group in self.group_manager.load_all_groups():
+            self._index_group_summary(group, touch_updated_at=False)
+        for job in self.job_manager.load_all_jobs():
+            if job.group_id is None:
+                self._index_job_summary(job, touch_updated_at=False)
+
+    def _start_summary_backfill(self) -> None:
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            return
+        self._summary_backfill_thread = threading.Thread(
+            target=self._run_summary_backfill,
+            name='fanban-summary-backfill',
+            daemon=True,
+        )
+        self._summary_backfill_thread.start()
+        self._summary_backfill_thread.join(timeout=0.25)
+
+    def _run_summary_backfill(self) -> None:
+        try:
+            self._backfill_summary_index()
+        except Exception:  # noqa: BLE001
+            logger.exception('summary index backfill failed')
+
+    def _index_job_summary(self, job: Job, *, touch_updated_at: bool = True) -> dict[str, Any]:
+        summary = self._serialize_job_summary(job)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
+        return summary
+
+    def _index_group_summary(self, group: TaskGroup, *, touch_updated_at: bool = True) -> dict[str, Any]:
+        summary = self._serialize_group_summary(group)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
+        return summary
+
+    def _upsert_summary_index(self, summary: dict[str, Any], *, touch_updated_at: bool = True) -> None:
+        item_id = str(summary.get("job_id") or summary.get("group_id") or "").strip()
+        if not item_id:
+            return
+        payload = dict(summary)
+        payload["item_id"] = item_id
+        payload["updated_at"] = (
+            datetime.now().astimezone().isoformat()
+            if touch_updated_at
+            else self._historical_summary_updated_at(summary)
+        )
+        payload["artifact_flags"] = dict(summary.get("artifacts") or {})
+        self.queue_store.upsert_summary(payload)
+
+    @staticmethod
+    def _historical_summary_updated_at(summary: dict[str, Any]) -> str:
+        value = summary.get("finished_at") or summary.get("created_at") or datetime.now().astimezone()
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+
+    @staticmethod
+    def _log_submission(
+        *,
+        endpoint: str,
+        batch_id: str,
+        files: list[UploadedFilePayload],
+        **context: Any,
+    ) -> None:
+        filenames = [Path(upload.filename).name or "upload.dwg" for upload in files]
+        logged_filenames = filenames[:100]
+        omitted = max(len(filenames) - len(logged_filenames), 0)
+        logger.info(
+            "job submission accepted endpoint=%s batch_id=%s file_count=%s omitted_filenames=%s context=%s filenames=%s",
+            endpoint,
+            batch_id,
+            len(filenames),
+            omitted,
+            context,
+            logged_filenames,
+        )
 
     def _recover_groups_and_jobs(self) -> None:
         for job in self.job_manager.load_all_jobs():
@@ -989,6 +1158,7 @@ class DeliverableApiRuntime:
                 font_compatibility_mode=self._coerce_bool(font_params.get("font_compatibility_mode")),
             )
             group.shared_dir = prep.shared_dir
+            group.workload = self.workload_calculator.build_from_shared_prep(prep)
             group.progress.percent = 35
             group.progress.message = '共享前处理完成'
             self.group_manager.update_group(group)
@@ -1077,6 +1247,9 @@ class DeliverableApiRuntime:
                 deliverable_job.params.get("font_compatibility_mode")
             ),
         )
+
+        group.workload = self.workload_calculator.build_from_shared_prep(deliverable_prep)
+        self.group_manager.update_group(group)
 
         deliverable_job.input_files = [replaced_dwg]
         deliverable_job.params['shared_prep_dir'] = str(deliverable_prep.shared_dir)
@@ -1171,15 +1344,24 @@ class DeliverableApiRuntime:
                 self._signal_job_completion(job.job_id)
 
     def _enqueue_group(self, group_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("group", group_id)
+            return
         self._group_queue.put(group_id)
 
     def _enqueue_job(self, job_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("job", job_id)
+            return
         with self._job_completion_lock:
             event = self._job_completion_events.get(job_id)
             if event is None:
                 event = threading.Event()
                 self._job_completion_events[job_id] = event
             event.clear()
+        if self.worker_process_mode:
+            self._submit_heavy_job(job_id)
+            return
         self._job_queue.put(job_id)
 
     def _submit_heavy_job(self, job_id: str) -> Future[None]:
@@ -1381,6 +1563,22 @@ class DeliverableApiRuntime:
             return value
         return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
+    @staticmethod
+    def _serialize_workload_from_details(details: dict[str, Any]) -> tuple[dict[str, Any] | None, float | None]:
+        raw_workload = details.get("workload")
+        if not isinstance(raw_workload, dict):
+            return None, None
+        try:
+            workload = WorkloadSummary.model_validate(raw_workload)
+        except Exception:  # noqa: BLE001
+            return None, None
+        effective_raw = details.get("effective_workload")
+        try:
+            effective = float(effective_raw)
+        except (TypeError, ValueError):
+            effective = float(workload.final_workload_a1 or workload.initial_workload_a1 or 0.0)
+        return workload.model_dump(mode="json"), round(effective, 2)
+
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
         task_kind = 'deliverable'
         job_mode = 'deliverable'
@@ -1400,6 +1598,7 @@ class DeliverableApiRuntime:
             message=job.progress.message,
             errors=job.errors,
         )
+        workload_payload, effective_workload = self._serialize_workload_from_details(job.progress.details)
         return {
             'job_id': job.job_id,
             'batch_id': job.batch_id,
@@ -1437,6 +1636,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_job_artifacts(job),
             'findings_count': int(job.progress.details.get('findings_count', 0) or 0),
             'affected_drawings_count': int(job.progress.details.get('affected_drawings_count', 0) or 0),
+            'workload': workload_payload,
+            'effective_workload': effective_workload,
             'retry_available': False,
         }
 
@@ -1449,6 +1650,12 @@ class DeliverableApiRuntime:
             'current_file': job.progress.current_file,
             'flags': normalize_user_flags(job.flags),
             'errors': job.errors,
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(job.flags),
+                errors=job.errors,
+                progress_details=job.progress.details,
+                font_preflight_summary=job.font_preflight_summary,
+            ),
             'top_wrong_texts': list(job.progress.details.get('top_wrong_texts', []) or []),
             'top_internal_codes': list(job.progress.details.get('top_internal_codes', []) or []),
             'artifacts': self._serialize_job_artifacts(job, include_urls=True, job_id=job.job_id),
@@ -1528,6 +1735,11 @@ class DeliverableApiRuntime:
             message=group.progress.message,
             errors=list(group.errors),
         )
+        effective_workload = float(
+            group.workload.final_workload_a1
+            or group.workload.initial_workload_a1
+            or 0.0
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
@@ -1549,6 +1761,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_group_artifacts(group),
             'findings_count': findings_count,
             'affected_drawings_count': affected_drawings_count,
+            'workload': group.workload.model_dump(mode='json'),
+            'effective_workload': round(effective_workload, 2),
             'retry_available': False,
         }
 
@@ -1558,6 +1772,11 @@ class DeliverableApiRuntime:
             'started_at': group.started_at.isoformat() if group.started_at else None,
             'flags': normalize_user_flags(group.flags),
             'errors': list(group.errors),
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(group.flags),
+                errors=list(group.errors),
+                progress_details=group.progress.details,
+            ),
             'shared_run_id': group.shared_run_id,
             'shared_dir': str(group.shared_dir) if group.shared_dir else None,
             'children': [self._serialize_job_summary(child) for child in self._iter_group_children(group)],
@@ -1708,7 +1927,7 @@ class DeliverableApiRuntime:
     def _iter_group_children(self, group: TaskGroup) -> list[Job]:
         children: list[Job] = []
         for child_job_id in group.child_job_ids:
-            child = self.job_manager.get_job(child_job_id)
+            child = self._get_job_for_read(child_job_id)
             if child is not None:
                 children.append(child)
         return children

@@ -1,0 +1,13 @@
+﻿{
+    "generated_at":  "2026-07-05T14:36:30",
+    "target_root":  "D:\\FanBanServer",
+    "run_root":  "E:\\project\\auto-fanban-pre\\.codex_smoke\\iis-real-20260705-143355-nonadmin-parsecheck",
+    "steps":  [
+                  {
+                      "name":  "admin_check",
+                      "status":  "fail",
+                      "message":  "not running as admin",
+                      "timestamp":  "2026-07-05T14:36:30"
+                  }
+              ]
+}

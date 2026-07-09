@@ -65,6 +65,7 @@ from .packager import Packager
 from .preview_pdf_service import PreviewPdfService
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
+from ..workload.calculator import WorkloadCalculator
 
 if TYPE_CHECKING:
     from ..models import Job
@@ -768,6 +769,11 @@ class PipelineExecutor:
         )
         steel_liner_mode = self._is_steel_liner_mode(context["frames"], context["sheet_sets"])
         context["steel_liner_mode"] = steel_liner_mode
+        requested_plot_style_key = (
+            STEEL_LINER_PLOT_STYLE_KEY
+            if steel_liner_mode
+            else str(job.plot_style_key or job.params.get("plot_style_key") or "").strip() or None
+        )
         total = len(grouped)
         done = 0
         job.progress.details.update({"split_total": total, "split_done": 0})
@@ -790,7 +796,7 @@ class PipelineExecutor:
                     output_dir=drawings_dir,
                     task_root=task_root,
                     slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
-                    plot_style_key=STEEL_LINER_PLOT_STYLE_KEY if steel_liner_mode else None,
+                    plot_style_key=requested_plot_style_key,
                 )
                 context["cad_dxf_results"][str(source_dxf)] = result
             except Exception as e:  # noqa: BLE001

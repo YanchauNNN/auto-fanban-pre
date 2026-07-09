@@ -236,6 +236,8 @@ class AuditCheckStandardReviewConfig(BaseModel):
     library_path: str = r"documents_bin\规范库.xlsx"
     sheet_name: str = "DatStdItem"
     same_line_y_tolerance: float = 5.0
+    same_text_pairing_enabled: bool = True
+    format_variant_compatibility_enabled: bool = True
 
 
 class AuditCheckConfig(BaseModel):
@@ -632,17 +634,24 @@ class RuntimeConfig(BaseSettings):
                     (base_dir / accore).resolve(),
                 )
         if self.module5_export.cad_runner.script_dir:
-            script_dir = Path(self.module5_export.cad_runner.script_dir)
-            if not script_dir.is_absolute():
-                self.module5_export.cad_runner.script_dir = str(
-                    (base_dir / script_dir).resolve(),
-                )
+            self.module5_export.cad_runner.script_dir = str(
+                self._resolve_module5_packaged_path(
+                    self.module5_export.cad_runner.script_dir,
+                    base_dir,
+                    Path("backend-runtime/backend/src/cad/scripts"),
+                ),
+            )
         if self.module5_export.dotnet_bridge.dll_path:
-            dll_path = Path(self.module5_export.dotnet_bridge.dll_path)
-            if not dll_path.is_absolute():
-                self.module5_export.dotnet_bridge.dll_path = str(
-                    (base_dir / dll_path).resolve(),
-                )
+            self.module5_export.dotnet_bridge.dll_path = str(
+                self._resolve_module5_packaged_path(
+                    self.module5_export.dotnet_bridge.dll_path,
+                    base_dir,
+                    Path(
+                        "backend-runtime/backend/src/cad/dotnet/"
+                        "Module5CadBridge/bin/Release/net48/Module5CadBridge.dll",
+                    ),
+                ),
+            )
         if self.audit_check.lexicon_path:
             lexicon_path = Path(self.audit_check.lexicon_path)
             if not lexicon_path.is_absolute():
@@ -697,6 +706,28 @@ class RuntimeConfig(BaseSettings):
         if path.is_absolute():
             return path
         return (project_root / path).resolve()
+
+    @classmethod
+    def _resolve_module5_packaged_path(
+        cls,
+        value: str | Path,
+        config_dir: Path,
+        packaged_relative: Path,
+    ) -> Path:
+        path = cls._coerce_path(value)
+        resolved = path.resolve() if path.is_absolute() else (config_dir / path).resolve()
+        if resolved.exists():
+            return resolved
+
+        project_root = cls._resolve_project_root(config_dir)
+        packaged = (project_root / packaged_relative).resolve()
+        legacy_cad_root = (project_root / "backend" / "src" / "cad").resolve()
+        is_legacy_cad_path = resolved == legacy_cad_root or resolved.is_relative_to(
+            legacy_cad_root,
+        )
+        if packaged.exists() and (not path.is_absolute() or is_legacy_cad_path):
+            return packaged
+        return resolved
 
     @staticmethod
     def _resolve_project_root(config_dir: Path) -> Path:
@@ -765,11 +796,43 @@ def _resolve_runtime_spec_path(yaml_path: str | Path | None = None) -> Path:
     if env_path:
         return Path(env_path)
 
-    if DEFAULT_RUNTIME_SPEC_PATH.exists():
-        return DEFAULT_RUNTIME_SPEC_PATH
-    if FALLBACK_RUNTIME_SPEC_PATH.exists():
-        return FALLBACK_RUNTIME_SPEC_PATH
+    for candidate in _default_runtime_spec_candidates():
+        if candidate.exists():
+            return candidate
     return DEFAULT_RUNTIME_SPEC_PATH
+
+
+def _default_runtime_spec_candidates() -> list[Path]:
+    candidates = [DEFAULT_RUNTIME_SPEC_PATH, FALLBACK_RUNTIME_SPEC_PATH]
+    cwd = Path.cwd()
+    if cwd.name.lower() == "backend-runtime":
+        candidates.extend(
+            [
+                cwd.parent / DEFAULT_RUNTIME_SPEC_PATH,
+                cwd.parent / FALLBACK_RUNTIME_SPEC_PATH,
+            ],
+        )
+
+    module_path = Path(__file__).resolve()
+    for parent in module_path.parents:
+        if parent.name.lower() == "backend-runtime":
+            candidates.extend(
+                [
+                    parent.parent / DEFAULT_RUNTIME_SPEC_PATH,
+                    parent.parent / FALLBACK_RUNTIME_SPEC_PATH,
+                ],
+            )
+            break
+
+    unique_candidates: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        normalized = candidate.resolve()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(candidate)
+    return unique_candidates
 
 
 def _normalize_runtime_spec_path(path: Path) -> Path:

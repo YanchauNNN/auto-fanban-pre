@@ -485,11 +485,54 @@ function Get-PlotterFacts {
 function Select-BestAccoreconsole {
     param([array]$InstallFacts)
 
+    function Get-AutoCADInstallYearFromFact {
+        param([object]$InstallFact)
+
+        $bestYear = 0
+        foreach ($raw in @(
+            $InstallFact.install_dir,
+            $InstallFact.acad_exe,
+            $InstallFact.accoreconsole_exe
+        )) {
+            $value = [string]$raw
+            if ([string]::IsNullOrWhiteSpace($value)) {
+                continue
+            }
+            foreach ($match in [regex]::Matches($value, '(?<!\d)(19\d{2}|20\d{2})(?!\d)')) {
+                $year = [int]$match.Groups[1].Value
+                if ($year -gt $bestYear) {
+                    $bestYear = $year
+                }
+            }
+        }
+
+        return $bestYear
+    }
+
     $withAccore = @($InstallFacts | Where-Object { $_.accoreconsole_exe_exists -eq $true })
     if ($withAccore.Count -eq 0) {
         return ""
     }
-    return [string]$withAccore[0].accoreconsole_exe
+
+    $ranked = @()
+    for ($i = 0; $i -lt $withAccore.Count; $i += 1) {
+        $fact = $withAccore[$i]
+        $ranked += [pscustomobject]@{
+            fact = $fact
+            year = Get-AutoCADInstallYearFromFact -InstallFact $fact
+            original_index = $i
+        }
+    }
+
+    $best = @(
+        $ranked |
+            Sort-Object -Property @{ Expression = "year"; Descending = $true }, @{ Expression = "original_index"; Ascending = $true } |
+            Select-Object -First 1
+    )
+    if ($best.Count -eq 0) {
+        return ""
+    }
+    return [string]$best[0].fact.accoreconsole_exe
 }
 
 function Select-BestPlotterDir {
@@ -716,12 +759,12 @@ function Get-RepoFacts {
         business_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范.yaml"))
         mechanism_spec = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents\参数规范-3.yaml"))
         cad_scripts_dir = (Resolve-PreferredPath -Candidates @(
-            (Join-Path $ActualRepoRoot "backend\src\cad\scripts"),
-            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts")
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\scripts"),
+            (Join-Path $ActualRepoRoot "backend\src\cad\scripts")
         ) -Container)
         dotnet_bridge_dll = (Resolve-PreferredPath -Candidates @(
-            (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"),
-            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll")
+            (Join-Path $ActualRepoRoot "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"),
+            (Join-Path $ActualRepoRoot "backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll")
         ))
         oda_exe = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "bin\ODAFileConverter 25.12.0\ODAFileConverter.exe"))
         common_cover_template = (Resolve-FullPathOrRaw (Join-Path $ActualRepoRoot "documents_bin\封面模板文件.docx"))
@@ -2281,11 +2324,7 @@ function Get-OfficeFacts {
         } else {
             New-CheckResult -Status "skip" -Error "word com is unavailable"
         }
-        $excelExport = if ($excelCom.status -eq "pass") {
-            Test-ExcelExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
-        } else {
-            New-CheckResult -Status "skip" -Error "excel com is unavailable"
-        }
+        $excelExport = Test-ExcelExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
 
         Write-ProbeStage -Stage "office 4/4" -Message "Office 模板复制深度检查"
         $templateChecks = [ordered]@{
@@ -2299,20 +2338,41 @@ function Get-OfficeFacts {
             } else {
                 New-CheckResult -Status "skip" -Error "word com is unavailable"
             }
-            common_catalog = if ($excelCom.status -eq "pass") {
-                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
-            } else {
-                New-CheckResult -Status "skip" -Error "excel com is unavailable"
-            }
-            catalog_1818 = if ($excelCom.status -eq "pass") {
-                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.catalog_1818_template) -TemplateLabel "catalog_1818"
-            } else {
-                New-CheckResult -Status "skip" -Error "excel com is unavailable"
-            }
+            common_catalog = Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
+            catalog_1818 = Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.catalog_1818_template) -TemplateLabel "catalog_1818"
         }
     } else {
-        Write-ProbeStage -Stage "office 3/4" -Message "快速模式：跳过 Office PDF 导出深度检查"
-        Write-ProbeStage -Stage "office 4/4" -Message "快速模式：跳过 Office 模板复制深度检查"
+        Write-ProbeStage -Stage "office 3/4" -Message "快速模式：direct COM 失败时执行 Office PDF 导出功能回退检查"
+        if ($wordCom.status -ne "pass") {
+            $wordExport = Test-WordExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_cover_template) -TemplateLabel "common_cover"
+        }
+        if ($excelCom.status -ne "pass") {
+            $excelExport = Test-ExcelExportSmoke -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
+        }
+
+        Write-ProbeStage -Stage "office 4/4" -Message "快速模式：direct COM 失败时执行模板功能回退检查"
+        $templateChecks = [ordered]@{
+            common_cover = if ($wordCom.status -ne "pass") {
+                Test-WordTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_cover_template) -TemplateLabel "common_cover"
+            } else {
+                New-CheckResult -Status "skip" -Error "direct word com passed; fallback skipped"
+            }
+            cover_1818 = if ($wordCom.status -ne "pass") {
+                Test-WordTemplateOpen -TemplatePath ([string]$RepoFacts.paths.cover_1818_template) -TemplateLabel "cover_1818"
+            } else {
+                New-CheckResult -Status "skip" -Error "direct word com passed; fallback skipped"
+            }
+            common_catalog = if ($excelCom.status -ne "pass") {
+                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.common_catalog_template) -TemplateLabel "common_catalog"
+            } else {
+                New-CheckResult -Status "skip" -Error "direct excel com passed; fallback skipped"
+            }
+            catalog_1818 = if ($excelCom.status -ne "pass") {
+                Test-ExcelTemplateOpen -TemplatePath ([string]$RepoFacts.paths.catalog_1818_template) -TemplateLabel "catalog_1818"
+            } else {
+                New-CheckResult -Status "skip" -Error "direct excel com passed; fallback skipped"
+            }
+        }
     }
 
     $templatesPass = $true
@@ -2323,12 +2383,15 @@ function Get-OfficeFacts {
         }
     }
 
+    $wordFunctionalReady = ($wordCom.status -eq "pass" -or $wordExport.status -eq "pass")
+    $excelFunctionalReady = ($excelCom.status -eq "pass" -or $excelExport.status -eq "pass")
+
     $status = if ($ProbeMode -eq "quick") {
-        if ($wordCom.status -eq "pass" -and $excelCom.status -eq "pass") { "pass" } else { "fail" }
+        if ($wordFunctionalReady -and $excelFunctionalReady -and $templatesPass) { "pass" } else { "fail" }
     } else {
         if (
             $wordCom.status -eq "pass" -and
-            $excelCom.status -eq "pass" -and
+            $excelFunctionalReady -and
             $wordExport.status -eq "pass" -and
             $excelExport.status -eq "pass" -and
             $templatesPass
@@ -2538,6 +2601,7 @@ $serviceHostingFacts = Get-ServiceHostingFacts -ActualRepoRoot $actualRepoRoot
 
 $blockingIssues = @()
 $warnings = @()
+$infoItems = @()
 
 foreach ($entry in $repoFacts.exists.GetEnumerator()) {
     if (-not [bool]$entry.Value) {
@@ -2666,9 +2730,34 @@ if (-not [bool]$autocadFacts.best_guess.has_required_fonts) {
     }
 }
 
+$wordDirectComBackedByFunctionalCheck = (
+    $officeFacts.word_com.status -ne "pass" -and
+    $officeFacts.word_export_smoke.status -eq "pass"
+)
+$excelDirectComBackedByFunctionalCheck = (
+    $officeFacts.excel_com.status -ne "pass" -and
+    $officeFacts.excel_export_smoke.status -eq "pass"
+)
+
 foreach ($officeKey in @("word_com", "excel_com")) {
     $check = $officeFacts[$officeKey]
     if ($check.status -ne "pass") {
+        if ($officeKey -eq "word_com" -and $wordDirectComBackedByFunctionalCheck) {
+            $infoItems += [ordered]@{
+                section = "office"
+                code = "word_com_direct"
+                message = "direct Word COM probe failed, but backend Word export smoke passed: " + [string]$check.error
+            }
+            continue
+        }
+        if ($officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck) {
+            $infoItems += [ordered]@{
+                section = "office"
+                code = "excel_com_direct"
+                message = "direct Excel COM probe failed, but backend Excel export smoke passed: " + [string]$check.error
+            }
+            continue
+        }
         $blockingIssues += [ordered]@{
             section = "office"
             code = $officeKey
@@ -2677,10 +2766,10 @@ foreach ($officeKey in @("word_com", "excel_com")) {
     }
 }
 
-if ($officeFacts.probe_mode -eq "deep") {
+if ($officeFacts.probe_mode -eq "deep" -or $officeFacts.word_export_smoke.status -ne "skip" -or $officeFacts.excel_export_smoke.status -ne "skip") {
     foreach ($officeKey in @("word_export_smoke", "excel_export_smoke")) {
         $check = $officeFacts[$officeKey]
-        if ($check.status -ne "pass") {
+        if ($check.status -eq "fail") {
             $blockingIssues += [ordered]@{
                 section = "office"
                 code = $officeKey
@@ -2690,7 +2779,7 @@ if ($officeFacts.probe_mode -eq "deep") {
     }
 
     foreach ($templateEntry in $officeFacts.template_checks.GetEnumerator()) {
-        if ($templateEntry.Value.status -ne "pass") {
+        if ($templateEntry.Value.status -eq "fail" -or ($officeFacts.probe_mode -eq "deep" -and $templateEntry.Value.status -ne "pass")) {
             $blockingIssues += [ordered]@{
                 section = "office"
                 code = [string]$templateEntry.Key
@@ -2823,6 +2912,8 @@ $result = [ordered]@{
     recommended_runtime = $recommendedRuntime
     blocking_issues = $blockingIssues
     warnings = $warnings
+    info_items = $infoItems
+    info_count = $infoItems.Count
     manual_checklist = @(
         "Confirm AutoCAD 2022 can start and the license is valid for unattended runs.",
         "Confirm Word and Excel have completed first-run activation under the service account.",

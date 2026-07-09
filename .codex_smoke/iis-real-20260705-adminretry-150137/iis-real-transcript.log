@@ -1,0 +1,284 @@
+﻿**********************
+Windows PowerShell 脚本开始
+开始时间: 20260705150324
+用户名: DESKTOP-LQJC0UJ\Yan
+RunAs 用户: DESKTOP-LQJC0UJ\Yan
+配置名称: 
+计算机: DESKTOP-LQJC0UJ (Microsoft Windows NT 10.0.26200.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Users\Yan\AppData\Local\Temp\codex_fanban_enable_iis_20260705-143355.ps1 -TargetRoot D:\FanBanServer -RunRoot E:\project\auto-fanban-pre\.codex_smoke\iis-real-20260705-adminretry-150137
+进程 ID: 9800
+PSVersion: 5.1.26100.8655
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8655
+BuildVersion: 10.0.26100.8655
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+=== admin_check ===
+{"User":"DESKTOP-LQJC0UJ\\Yan","IsAdmin":true,"Cwd":"C:\\Windows\\system32"}
+STEP pass: admin_check
+=== validate_target ===
+STEP pass: validate_target
+=== enable_iis_features ===
+feature=IIS-WebServerRole state=Disabled
+
+
+Path          :
+Online        : True
+RestartNeeded : False
+
+
+
+feature=IIS-WebServer state=Enabled
+feature=IIS-CommonHttpFeatures state=Enabled
+feature=IIS-DefaultDocument state=Enabled
+feature=IIS-StaticContent state=Enabled
+feature=IIS-HttpErrors state=Enabled
+feature=IIS-HttpRedirect state=Disabled
+
+
+Path          :
+Online        : True
+RestartNeeded : False
+
+
+
+feature=IIS-ApplicationDevelopment state=Enabled
+feature=IIS-ISAPIExtensions state=Disabled
+
+
+Path          :
+Online        : True
+RestartNeeded : False
+
+
+
+feature=IIS-ISAPIFilter state=Disabled
+
+
+Path          :
+Online        : True
+RestartNeeded : False
+
+
+
+feature=IIS-HealthAndDiagnostics state=Enabled
+feature=IIS-HttpLogging state=Enabled
+feature=IIS-Security state=Enabled
+feature=IIS-RequestFiltering state=Enabled
+feature=IIS-Performance state=Enabled
+feature=IIS-HttpCompressionStatic state=Enabled
+feature=IIS-WebServerManagementTools state=Enabled
+feature=IIS-ManagementConsole state=Enabled
+feature=IIS-ManagementScriptingTools state=Disabled
+
+
+Path          :
+Online        : True
+RestartNeeded : False
+
+
+
+STEP pass: enable_iis_features
+=== import_webadministration ===
+WebAdministration imported
+STEP pass: import_webadministration
+=== install_url_rewrite_arr ===
+安装 URL Rewrite: D:\FanBanServer\install\iis\url_rewrite\rewrite_amd64_zh-CN.msi
+安装 ARR: D:\FanBanServer\install\iis\arr\requestRouter_amd64.msi
+STEP pass: install_url_rewrite_arr
+=== check_iis_prereqs_after_install ===
+{
+    "iis":  {
+                "installed":  true,
+                "status":  "pass"
+            },
+    "url_rewrite":  {
+                        "installed":  true,
+                        "status":  "pass",
+                        "module_name":  "RewriteModule"
+                    },
+    "arr":  {
+                "installed":  true,
+                "status":  "pass",
+                "product_name":  "Application Request Routing"
+            }
+}
+STEP pass: check_iis_prereqs_after_install
+=== free_default_port80_binding ===
+removing default-site binding *:80:
+STEP pass: free_default_port80_binding
+=== configure_fanban_iis_site_port80 ===
+IIS 站点已配置完成。前端访问地址: http://<部署机IP或主机名>/
+STEP pass: configure_fanban_iis_site_port80
+=== open_firewall_port80 ===
+
+
+Name                          : {a4142d55-34a7-4e58-8fa8-ce3ae0cc09de}
+DisplayName                   : FanBanTerminal HTTP 80
+Description                   :
+DisplayGroup                  :
+Group                         :
+Enabled                       : True
+Profile                       : Any
+Platform                      : {}
+Direction                     : Inbound
+Action                        : Allow
+EdgeTraversalPolicy           : Block
+LooseSourceMapping            : False
+LocalOnlyMapping              : False
+Owner                         :
+PrimaryStatus                 : OK
+Status                        : 已从存储区成功分析规则。 (65536)
+EnforcementStatus             : NotApplicable
+PolicyStoreSource             : PersistentStore
+PolicyStoreSourceType         : Local
+RemoteDynamicKeywordAddresses : {}
+PolicyAppId                   :
+PackageFamilyName             :
+
+
+
+STEP pass: open_firewall_port80
+=== ensure_backend_task_running ===
+{"TaskName":"FanBanBackend","State":4}
+STEP pass: ensure_backend_task_running
+=== iis_http_smoke ===
+{"index_status":200,"index_length":1941,"ping_ok":true,"ping_time":"2026-07-05T15:04:33.081907+08:00"}
+STEP pass: iis_http_smoke
+=== check_health_after_iis ===
+[1/8] 收集主机基础信息
+[2/8] 检查仓库和模板资源
+[3/8] 检查 Python 运行环境
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\FanBanServer\backend\.venv\Scripts\python.exe”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\FanBanServer\backend-runtime\backend\.venv\Scripts\python.exe”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\FanBanServer\backend\.venv\Scripts\python.exe”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\FanBanServer\backend\.venv\Scripts\python.exe”，因为该路径不存在。”
+[4/8] 执行 SQLite 读写探针
+[5/8] 检查 storage 目录和磁盘空间
+[6/8] 检查网络端口和防火墙状态
+[7/8] 检查 AutoCAD / 打印资源
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\Program Files\AUTOCAD\acad.exe”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\Program Files\AUTOCAD\accoreconsole.exe”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\Program Files\AUTOCAD\Fonts”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\Program Files\AUTOCAD\Plotters”，因为该路径不存在。”
+PS>TerminatingError(Resolve-Path):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到路径“D:\Program Files\AUTOCAD\Plotters\Plot Styles”，因为该路径不存在。”
+[8/8] 检查 Office 环境（模式: deep）
+[office 1/4] Word COM 快速检查（模式: deep）
+[office 2/4] Excel COM 快速检查（模式: deep）
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+PS>TerminatingError():“Excel COM returned null: Excel.Workbooks”
+>> TerminatingError():“Excel COM returned null: Excel.Workbooks”
+[office 3/4] Office PDF 导出深度检查
+[office 4/4] Office 模板复制深度检查
+==== Fanban Environment Probe V2 ====
+Script version: fanban-env-probe@2.2-deploy-20260318
+Output JSON: D:\FanBanServer\logs\probe_target_env.deep.json
+Repo status: pass
+Python status: pass
+AutoCAD status: pass
+Office status: fail (mode: deep)
+Ready for web service: False
+Blocking issues: 4
+Warnings: 0
+=====================================
+PS>TerminatingError(Get-WinEvent):“已停止该运行的命令，因为首选项变量“ErrorActionPreference”或通用参数设置为 Stop: 找不到任何与指定的选择条件匹配的事件。”
+==== FanBan Health Summary ====
+Mode: full
+Overall status: fail
+Blocking issues: 4
+Warnings: 0
+Scheduled task: pass
+Scheduled task settings: pass
+Scheduled task recent events: warn
+Backend listener: pass (1)
+Backend failure classification: ok
+API ping: pass
+API health: pass
+IIS proxy prereqs: pass
+Top blocking issues:
+- [office/excel_com] Excel COM returned null: Excel.Workbooks
+- [office/excel_export_smoke] excel com is unavailable
+- [office/common_catalog] excel com is unavailable
+- [office/catalog_1818] excel com is unavailable
+Summary JSON: D:\FanBanServer\logs\check_health.summary.json
+Full JSON: D:\FanBanServer\logs\check_health.full.json
+STEP pass: check_health_after_iis
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260705150520
+**********************

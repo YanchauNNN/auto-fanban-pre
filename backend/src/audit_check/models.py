@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..models import BBox
 
@@ -35,6 +36,7 @@ class AuditFinding:
     position_x: float | None = None
     position_y: float | None = None
     text_bbox: BBox | None = None
+    details: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

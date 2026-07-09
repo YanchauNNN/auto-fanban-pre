@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 from .bootstrap import resolve_repo_path
 
-from src.config import get_config, load_spec
+from src.config import get_config, load_mechanism_spec, load_spec, normalize_audit_replace_factory_codes
 
 
 _ENUM_RE = re.compile(r"^enum\[(?P<enum_name>[^\]]+)\]$")
@@ -66,6 +66,9 @@ class FormMetadataService:
                 "project_units": self._resolve_project_units(),
                 "source_unit_options": self._resolve_source_unit_options(),
                 "target_unit_options": self._resolve_target_unit_options(),
+                "unit_factory_codes": normalize_audit_replace_factory_codes(
+                    load_mechanism_spec().audit_replace.unit_factory_codes,
+                ),
                 "factory_index_maps": {
                     "source_variant_options": {
                         project_no: list(variants.keys())
@@ -180,7 +183,11 @@ class FormMetadataService:
 
     def _resolve_source_unit_options(self) -> dict[str, list[dict[str, str]]]:
         factory_config = self.config.factory_index_maps
-        return self._build_unit_option_map(
+        unit_options = self._build_unit_option_map(
+            self.config.audit_check.unit_consistency.project_units,
+            default_suffix=self.config.audit_check.unit_consistency.label_suffix,
+        )
+        factory_options = self._build_unit_option_map(
             {
                 str(project_no): list(variant_rules.keys())
                 for project_no, variant_rules in factory_config.source_variant_rules.items()
@@ -188,6 +195,7 @@ class FormMetadataService:
             },
             default_suffix=factory_config.variant_label_suffix,
         )
+        return self._merge_unit_option_maps(unit_options, factory_options)
 
     def _resolve_target_unit_options(self) -> dict[str, list[dict[str, str]]]:
         factory_config = self.config.factory_index_maps

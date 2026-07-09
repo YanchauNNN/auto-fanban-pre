@@ -28,6 +28,14 @@ STALE_RUNTIME_PTH_FILES = (
     "_editable_impl_auto_fanban.pth",
     "a1_coverage.pth",
 )
+DEPLOY_IGNORE_PATTERNS = (
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    "*.lscache",
+    ".build_packages",
+    "~$*",
+)
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
 DELTA_MANIFEST = "delta-manifest.json"
@@ -190,7 +198,7 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
             shutil.rmtree(target)
         ignore = None
         if entry.destination != PYTHON_PACKAGES_DEST:
-            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", "*.lscache", ".build_packages")
+            ignore = shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS)
         shutil.copytree(
             entry.source,
             target,
@@ -239,6 +247,18 @@ def _prune_development_artifacts(output_root: Path) -> None:
     for target in removable_dirs:
         if target.exists():
             shutil.rmtree(target)
+    bridge_release_dir = (
+        backend_src_root
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "bin"
+        / "Release"
+        / "net48"
+    )
+    if bridge_release_dir.exists():
+        for pdb_file in bridge_release_dir.glob("*.pdb"):
+            pdb_file.unlink()
 
 
 def _find_local_managed_pdf2_pc3(pc3_name: str) -> Path | None:
@@ -471,67 +491,950 @@ def _write_support_files(
 
     start_backend = r'''param(
     [string]$ListenHost = "127.0.0.1",
-    [int]$Port = __DEFAULT_FRONTEND_API_PORT__
+    [int]$Port = __DEFAULT_FRONTEND_API_PORT__,
+    [int]$StartupGraceSeconds = 60,
+    [int]$SupervisorIntervalSeconds = 15,
+    [int]$SupervisorFailureThreshold = 3,
+    [int]$ListenerAliveFailureThreshold = 6,
+    [int]$RestartDelaySeconds = 10,
+    [int]$PingTimeoutSeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $root "python-runtime\python.exe"
 $runtimeEnv = Join-Path $PSScriptRoot "runtime.env.ps1"
+$logsDir = Join-Path $root "logs"
+$runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$stdoutLog = Join-Path $logsDir ("backend-stdout-{0}.log" -f $runStamp)
+$stderrLog = Join-Path $logsDir ("backend-stderr-{0}.log" -f $runStamp)
+$latestStdoutLog = Join-Path $logsDir "backend-latest-stdout.log"
+$latestStderrLog = Join-Path $logsDir "backend-latest-stderr.log"
+$script:backendExitCode = 0
+$script:stopSupervisor = $false
+$script:supervisorMutex = $null
+$script:supervisorMutexAcquired = $false
 
-if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
-    throw "Python 运行环境不存在: $python"
-}
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
-if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
-    . $runtimeEnv
-}
-
-$managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
-$managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
-$managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
-$managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
-
-if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $managedSpecPath
+function Update-LatestBackendLogs {
+    if (Test-Path -LiteralPath $stdoutLog -PathType Leaf) {
+        Copy-Item -LiteralPath $stdoutLog -Destination $latestStdoutLog -Force
+    }
+    if (Test-Path -LiteralPath $stderrLog -PathType Leaf) {
+        Copy-Item -LiteralPath $stderrLog -Destination $latestStderrLog -Force
     }
 }
 
-if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedRuntimeSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $managedRuntimeSpecPath
+function Write-BackendLogHeader {
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $scriptHash = ""
+    if ($scriptPath -and (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        try {
+            $scriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash
+        } catch {
+            $scriptHash = "<hash-error: $($_.Exception.Message)>"
+        }
+    }
+    $header = @(
+        "FanBanBackend start: " + (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"),
+        "Root: $root",
+        "Listen: $ListenHost`:$Port",
+        "Python: $python",
+        "backend-start-script: path=$scriptPath sha256=$scriptHash",
+        ""
+    ) -join [Environment]::NewLine
+    $header | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+    $header | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Get-BackendSupervisorMutexName {
+    $identity = "{0}|{1}|{2}" -f ([System.IO.Path]::GetFullPath($root).ToLowerInvariant()), $ListenHost, $Port
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($identity)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        $hash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+        return "Local\FanBanBackendSupervisor-{0}" -f $hash.Substring(0, 32)
+    } finally {
+        $sha256.Dispose()
     }
 }
 
-if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
-    if (Test-Path -LiteralPath $managedMechanismSpecPath -PathType Leaf) {
-        Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $managedMechanismSpecPath
+function New-BackendSupervisorMutex {
+    $mutexName = Get-BackendSupervisorMutexName
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+    $script:supervisorMutex = $mutex
+    $script:supervisorMutexAcquired = [bool]$createdNew
+    if ($createdNew) {
+        ("backend-supervisor: mutex_acquired name={0}" -f $mutexName) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    } else {
+        ("backend-supervisor: duplicate_supervisor_detected mutex={0} action=exit_without_launching_children" -f $mutexName) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    }
+    return [ordered]@{
+        acquired = [bool]$createdNew
+        name = $mutexName
     }
 }
 
-if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
-    Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $managedCtbName
+function Close-BackendSupervisorMutex {
+    if ($null -ne $script:supervisorMutex) {
+        if ($script:supervisorMutexAcquired) {
+            try {
+                $script:supervisorMutex.ReleaseMutex() | Out-Null
+            } catch {
+            }
+        }
+        try {
+            $script:supervisorMutex.Dispose()
+        } catch {
+        }
+    }
+    $script:supervisorMutex = $null
+    $script:supervisorMutexAcquired = $false
 }
 
-$previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
-$previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
-$previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
-$previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+function Set-BackendRuntimeEnvironment {
+    param(
+        [string]$SpecPath,
+        [string]$RuntimeSpecPath,
+        [string]$MechanismSpecPath,
+        [string]$CadScriptDir,
+        [string]$DotNetBridgeDllPath,
+        [string]$CtbName
+    )
 
-Push-Location (Join-Path $root "backend-runtime")
+    if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $SpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_SPEC_PATH" -Value $SpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_RUNTIME_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_RUNTIME_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $RuntimeSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH" -Value $RuntimeSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MECHANISM_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_MECHANISM_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $MechanismSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH" -Value $MechanismSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
+    }
+
+    if (Test-Path -LiteralPath $CadScriptDir -PathType Container) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" -Value $CadScriptDir
+    }
+
+    if (Test-Path -LiteralPath $DotNetBridgeDllPath -PathType Leaf) {
+        Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" -Value $DotNetBridgeDllPath
+    }
+
+    $requiredEnv = @(
+        @("FANBAN_SPEC_PATH", $env:FANBAN_SPEC_PATH),
+        @("FANBAN_RUNTIME_SPEC_PATH", $env:FANBAN_RUNTIME_SPEC_PATH),
+        @("FANBAN_MECHANISM_SPEC_PATH", $env:FANBAN_MECHANISM_SPEC_PATH),
+        @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
+        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
+    )
+    foreach ($entry in $requiredEnv) {
+        $name = [string]$entry[0]
+        $value = [string]$entry[1]
+        $pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR") { "Container" } else { "Leaf" }
+        if ([string]::IsNullOrWhiteSpace($value) -or -not (Test-Path -LiteralPath $value -PathType $pathType)) {
+            throw ("后端启动环境变量无效: {0}={1}" -f $name, $value)
+        }
+        ("backend-env: {0}={1}" -f $name, $value) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    }
+    ("backend-env: FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME={0}" -f $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Test-BackendImportPreflight {
+    param(
+        [string]$PythonPath,
+        [string]$BackendRuntimeRoot
+    )
+
+    $preflightCode = @'
+import os
+import sys
+from pathlib import Path
+
+backend_runtime_root = str(Path.cwd())
+if backend_runtime_root not in sys.path:
+    sys.path.insert(0, backend_runtime_root)
+
+required = ("FANBAN_SPEC_PATH", "FANBAN_RUNTIME_SPEC_PATH", "FANBAN_MECHANISM_SPEC_PATH")
+for name in required:
+    value = os.environ.get(name, "")
+    if not value or not Path(value).is_file():
+        raise SystemExit(f"{name} invalid: {value}")
+
+import API.app.main as main
+print("backend-import-preflight-ok", main.create_app)
+'@
+
+    $preflightPrefix = "fanban_backend_import_preflight_" + [guid]::NewGuid().ToString("N")
+    $preflightScript = Join-Path $BackendRuntimeRoot ($preflightPrefix + ".py")
+    $preflightStdout = Join-Path ([System.IO.Path]::GetTempPath()) ($preflightPrefix + ".stdout.log")
+    $preflightStderr = Join-Path ([System.IO.Path]::GetTempPath()) ($preflightPrefix + ".stderr.log")
+
+    try {
+        Set-Content -LiteralPath $preflightScript -Value $preflightCode -Encoding utf8
+        $preflightProcess = Start-Process `
+            -FilePath $PythonPath `
+            -ArgumentList @("-X", "utf8", $preflightScript) `
+            -WorkingDirectory $BackendRuntimeRoot `
+            -WindowStyle Hidden `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $preflightStdout `
+            -RedirectStandardError $preflightStderr
+
+        foreach ($outputPath in @($preflightStdout, $preflightStderr)) {
+            if (Test-Path -LiteralPath $outputPath -PathType Leaf) {
+                Get-Content -LiteralPath $outputPath -Encoding utf8 |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+        }
+        if ($preflightProcess.ExitCode -ne 0) {
+            throw ("后端导入预检失败: exit_code={0}; cwd={1}" -f $preflightProcess.ExitCode, $BackendRuntimeRoot)
+        }
+    } finally {
+        foreach ($tempPath in @($preflightScript, $preflightStdout, $preflightStderr)) {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Get-BackendProbeHost {
+    param([string]$HostValue)
+
+    if ([string]::IsNullOrWhiteSpace($HostValue) -or $HostValue -eq "0.0.0.0" -or $HostValue -eq "::") {
+        return "127.0.0.1"
+    }
+    return $HostValue
+}
+
+function Test-BackendPing {
+    param(
+        [string]$PingUrl,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $response = Invoke-RestMethod -Uri $PingUrl -Method Get -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+        $timer.Stop()
+        $ok = ($null -ne $response -and $response.ok -eq $true)
+        $status = if ($ok) { "pass" } else { "fail" }
+        $error = if ($ok) { "" } else { "unexpected ping response" }
+        return [ordered]@{
+            ok = $ok
+            status = $status
+            error = $error
+            elapsed_ms = [int64]$timer.ElapsedMilliseconds
+            response = $response
+        }
+    } catch {
+        $timer.Stop()
+        return [ordered]@{
+            ok = $false
+            status = "fail"
+            error = $_.Exception.Message
+            elapsed_ms = [int64]$timer.ElapsedMilliseconds
+            response = $null
+        }
+    }
+}
+
+function Append-UvicornProcessLogs {
+    param(
+        [string]$UvicornStdoutLog,
+        [string]$UvicornStderrLog
+    )
+
+    foreach ($entry in @(@("stdout", $UvicornStdoutLog), @("stderr", $UvicornStderrLog))) {
+        $label = [string]$entry[0]
+        $path = [string]$entry[1]
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            ("----- uvicorn-{0}: {1} -----" -f $label, $path) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            Get-Content -LiteralPath $path -Encoding utf8 |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        } else {
+            ("----- uvicorn-{0}: missing {1} -----" -f $label, $path) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        }
+    }
+}
+
+function Get-BackendListenerSnapshot {
+    param([int]$BackendPort)
+
+    try {
+        $connections = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction Stop)
+    } catch {
+        $message = $_.Exception.Message
+        if ($message -match "找不到任何匹配|No matching|No MSFT_NetTCPConnection objects found") {
+            return [ordered]@{
+                status = "fail"
+                error = ""
+                count = 0
+                listeners = @()
+            }
+        }
+        return [ordered]@{
+            status = "error"
+            error = $message
+            count = 0
+            listeners = @()
+        }
+    }
+
+    $listeners = @()
+    foreach ($connection in $connections) {
+        $processId = [int]$connection.OwningProcess
+        $processName = ""
+        $commandLine = ""
+        try {
+            $processInfo = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId) -ErrorAction Stop
+            $processName = [string]$processInfo.Name
+            $commandLine = [string]$processInfo.CommandLine
+        } catch {
+            $processName = ""
+            $commandLine = ""
+        }
+
+        $listeners += [ordered]@{
+            local_address = [string]$connection.LocalAddress
+            local_port = [int]$connection.LocalPort
+            process_id = $processId
+            process_name = $processName
+            command_line = $commandLine
+        }
+    }
+
+    return [ordered]@{
+        status = if ($listeners.Count -gt 0) { "pass" } else { "fail" }
+        error = ""
+        count = $listeners.Count
+        listeners = $listeners
+    }
+}
+
+function Test-ExistingBackendBeforeLaunch {
+    param(
+        [string]$PingUrl,
+        [int]$BackendPort,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $pingResult = Test-BackendPing -PingUrl $PingUrl -TimeoutSeconds $TimeoutSeconds
+    $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $BackendPort
+    $pingElapsedMs = if ($null -ne $pingResult.elapsed_ms) { [int64]$pingResult.elapsed_ms } else { -1 }
+    $pingError = if ($null -ne $pingResult.error) { [string]$pingResult.error } else { "" }
+
+    if ([bool]$pingResult.ok) {
+        ("backend-supervisor: existing_backend_detected action=exit_without_launching_children listener_status={0} listener_count={1} ping_elapsed_ms={2}" -f `
+            $listenerSnapshot.status,
+            $listenerSnapshot.count,
+            $pingElapsedMs) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        return [ordered]@{
+            action = "exit"
+            reason = "healthy_existing_backend"
+            ping = $pingResult
+            listener = $listenerSnapshot
+        }
+    }
+
+    if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
+        ("backend-supervisor: backend_port_already_listening action=fail_without_launching_children listener_status={0} listener_count={1} ping_elapsed_ms={2} ping_error={3}" -f `
+            $listenerSnapshot.status,
+            $listenerSnapshot.count,
+            $pingElapsedMs,
+            $pingError) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        return [ordered]@{
+            action = "exit"
+            reason = "port_already_listening_unhealthy"
+            ping = $pingResult
+            listener = $listenerSnapshot
+        }
+    }
+
+    return [ordered]@{
+        action = "launch"
+        reason = "no_existing_backend"
+        ping = $pingResult
+        listener = $listenerSnapshot
+    }
+}
+
+function Test-ManagedProcessPortBindFailure {
+    param([string]$ChildStderrLog)
+
+    if (-not (Test-Path -LiteralPath $ChildStderrLog -PathType Leaf)) {
+        return $false
+    }
+
+    $content = ""
+    try {
+        $content = (Get-Content -LiteralPath $ChildStderrLog -Encoding utf8 -Tail 120) -join [Environment]::NewLine
+    } catch {
+        return $false
+    }
+
+    return (
+        $content -match "WinError 10048" -or
+        $content -match "Errno 10048" -or
+        $content -match "address already in use" -or
+        $content -match "only one usage of each socket address" -or
+        $content -match "通常每个套接字地址"
+    )
+}
+
+function Stop-BackendProcessTree {
+    param(
+        [object]$BackendProcess,
+        [object]$ListenerSnapshot
+    )
+
+    if ($null -ne $ListenerSnapshot -and $null -ne $ListenerSnapshot.listeners) {
+        foreach ($listener in @($ListenerSnapshot.listeners)) {
+            $processId = [int]$listener.process_id
+            $commandLine = [string]$listener.command_line
+            if ($processId -gt 0 -and ($commandLine -match "API\.app\.main:create_app" -or $commandLine -match "uvicorn")) {
+                try {
+                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+                } catch {
+                }
+            }
+        }
+    }
+
+    if ($null -ne $BackendProcess -and -not $BackendProcess.HasExited) {
+        try {
+            Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
+        } catch {
+        }
+    }
+}
+
+$script:backendProcessJobHandle = [IntPtr]::Zero
+$script:backendProcessJobTypeLoaded = $false
+
+function Ensure-BackendChildProcessJobType {
+    if ($script:backendProcessJobTypeLoaded) {
+        return
+    }
+
+    if ($null -ne ("FanBanBackendJobObject" -as [type])) {
+        $script:backendProcessJobTypeLoaded = $true
+        return
+    }
+
+    $source = @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class FanBanBackendJobObject {
+    public const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        public Int64 PerProcessUserTimeLimit;
+        public Int64 PerJobUserTimeLimit;
+        public UInt32 LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public UInt32 ActiveProcessLimit;
+        public IntPtr Affinity;
+        public UInt32 PriorityClass;
+        public UInt32 SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS {
+        public UInt64 ReadOperationCount;
+        public UInt64 WriteOperationCount;
+        public UInt64 OtherOperationCount;
+        public UInt64 ReadTransferCount;
+        public UInt64 WriteTransferCount;
+        public UInt64 OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetInformationJobObject(
+        IntPtr hJob,
+        int JobObjectInfoClass,
+        IntPtr lpJobObjectInfo,
+        UInt32 cbJobObjectInfoLength
+    );
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hObject);
+}
+"@
+
+    Add-Type -TypeDefinition $source -ErrorAction Stop
+    $script:backendProcessJobTypeLoaded = $true
+}
+
+function New-BackendChildProcessJob {
+    if ($script:backendProcessJobHandle -ne [IntPtr]::Zero) {
+        return
+    }
+
+    Ensure-BackendChildProcessJobType
+    $jobName = "FanBanBackend-{0}-{1}" -f $PID, $runStamp
+    $handle = [FanBanBackendJobObject]::CreateJobObject([IntPtr]::Zero, $jobName)
+    if ($handle -eq [IntPtr]::Zero) {
+        $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw ("backend-job-object create failed: win32_error={0}" -f $err)
+    }
+
+    $basicLimitInformation = New-Object FanBanBackendJobObject+JOBOBJECT_BASIC_LIMIT_INFORMATION
+    $basicLimitInformation.LimitFlags = [FanBanBackendJobObject]::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    $info = New-Object FanBanBackendJobObject+JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    $info.BasicLimitInformation = $basicLimitInformation
+    $size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+    $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal($size)
+    try {
+        [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false)
+        $ok = [FanBanBackendJobObject]::SetInformationJobObject($handle, 9, $ptr, [UInt32]$size)
+        if (-not $ok) {
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            [FanBanBackendJobObject]::CloseHandle($handle) | Out-Null
+            throw ("backend-job-object configure failed: win32_error={0}" -f $err)
+        }
+        $script:backendProcessJobHandle = $handle
+    } finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
+    }
+}
+
+function Register-BackendChildProcessForTaskStop {
+    param([object]$BackendProcess)
+
+    if ($null -eq $BackendProcess) {
+        return
+    }
+
+    try {
+        New-BackendChildProcessJob
+        $ok = [FanBanBackendJobObject]::AssignProcessToJobObject(
+            $script:backendProcessJobHandle,
+            $BackendProcess.Handle
+        )
+        if ($ok) {
+            ("backend-job-object: assigned_pid={0} kill_on_job_close=true" -f $BackendProcess.Id) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        } else {
+            $err = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw ("backend-job-object assign failed pid={0} win32_error={1}" -f $BackendProcess.Id, $err)
+        }
+    } catch {
+        ("backend-job-object-fatal: " + $_.Exception.Message) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        try {
+            if ($null -ne $BackendProcess -and -not $BackendProcess.HasExited) {
+                Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+        }
+        Close-BackendChildProcessJob
+        throw
+    }
+}
+
+function Close-BackendChildProcessJob {
+    if ($script:backendProcessJobHandle -eq [IntPtr]::Zero) {
+        return
+    }
+
+    [FanBanBackendJobObject]::CloseHandle($script:backendProcessJobHandle) | Out-Null
+    $script:backendProcessJobHandle = [IntPtr]::Zero
+}
+
+Write-BackendLogHeader
+
 try {
-    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
-    & $python -X utf8 -m uvicorn API.app.main:create_app --factory --host $ListenHost --port $Port
+    $mutexResult = New-BackendSupervisorMutex
+    if (-not [bool]$mutexResult.acquired) {
+        Update-LatestBackendLogs
+        return
+    }
+
+    $probeHost = Get-BackendProbeHost -HostValue $ListenHost
+    $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
+    $existingBackendDecision = Test-ExistingBackendBeforeLaunch `
+        -PingUrl $pingUrl `
+        -BackendPort $Port `
+        -TimeoutSeconds $PingTimeoutSeconds
+    if ([string]$existingBackendDecision.action -eq "exit") {
+        Update-LatestBackendLogs
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        throw "Python 运行环境不存在: $python"
+    }
+
+    if (Test-Path -LiteralPath $runtimeEnv -PathType Leaf) {
+        . $runtimeEnv
+    }
+
+    $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
+    $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
+    $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
+    $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
+    $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
+
+    Set-BackendRuntimeEnvironment `
+        -SpecPath $managedSpecPath `
+        -RuntimeSpecPath $managedRuntimeSpecPath `
+        -MechanismSpecPath $managedMechanismSpecPath `
+        -CadScriptDir $managedCadScriptDir `
+        -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
+        -CtbName $managedCtbName
+
+    $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
+    $previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
+    $previousPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
+    $previousPythonHome = [Environment]::GetEnvironmentVariable("PYTHONHOME", "Process")
+
+    Push-Location (Join-Path $root "backend-runtime")
+    try {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
+        ("backend-start-cwd: " + (Get-Location).Path) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        Test-BackendImportPreflight -PythonPath $python -BackendRuntimeRoot (Get-Location).Path
+        "Starting backend supervisor..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
+
+        $apiArgs = @(
+            "-X",
+            "utf8",
+            "-m",
+            "uvicorn",
+            "API.app.main:create_app",
+            "--factory",
+            "--host",
+            $ListenHost,
+            "--port",
+            [string]$Port
+        )
+        $workerArgs = @(
+            "-X",
+            "utf8",
+            "-m",
+            "API.app.worker"
+        )
+        $apiCmdLine = ('"{0}" {1}' -f $python, ($apiArgs -join " "))
+        $workerCmdLine = ('"{0}" {1}' -f $python, ($workerArgs -join " "))
+        ("backend-command: " + $apiCmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        ("backend-worker-command: " + $workerCmdLine) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+
+        function Start-BackendManagedProcess {
+            param(
+                [string]$Label,
+                [object[]]$ArgumentList,
+                [int]$Attempt
+            )
+
+            $attemptStamp = "{0}-{1}-{2:D4}" -f $runStamp, $Label, $Attempt
+            if ($Label -eq "api") {
+                $childStdoutLog = Join-Path $logsDir ("api-stdout-{0}.log" -f $attemptStamp)
+                $childStderrLog = Join-Path $logsDir ("api-stderr-{0}.log" -f $attemptStamp)
+            } else {
+                $childStdoutLog = Join-Path $logsDir ("worker-stdout-{0}.log" -f $attemptStamp)
+                $childStderrLog = Join-Path $logsDir ("worker-stderr-{0}.log" -f $attemptStamp)
+            }
+            if ($Label -eq "api") {
+                ("backend-supervisor: launching api attempt={0}" -f $Attempt) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            } else {
+                ("backend-supervisor: launching worker attempt={0}" -f $Attempt) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+            if ($Label -eq "api") {
+                ("backend-api-logs: stdout={0} stderr={1}" -f $childStdoutLog, $childStderrLog) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            } else {
+                ("backend-worker-logs: stdout={0} stderr={1}" -f $childStdoutLog, $childStderrLog) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            }
+            $childProcess = Start-Process `
+                -FilePath $python `
+                -ArgumentList $ArgumentList `
+                -WorkingDirectory (Get-Location).Path `
+                -WindowStyle Hidden `
+                -PassThru `
+                -RedirectStandardOutput $childStdoutLog `
+                -RedirectStandardError $childStderrLog
+            if ($Label -eq "api") {
+                $apiProcess = $childProcess
+                Register-BackendChildProcessForTaskStop -BackendProcess $apiProcess
+            } else {
+                $workerProcess = $childProcess
+                Register-BackendChildProcessForTaskStop -BackendProcess $workerProcess
+            }
+            ("backend-supervisor: {0}_pid={1}" -f $Label, $childProcess.Id) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            return [ordered]@{
+                process = $childProcess
+                stdout = $childStdoutLog
+                stderr = $childStderrLog
+            }
+        }
+
+        function Append-ManagedProcessLogs {
+            param(
+                [string]$Label,
+                [string]$StdoutLog,
+                [string]$ChildStderrLog,
+                [string]$SupervisorStderrLog,
+                [int]$MaxTailLines = 400
+            )
+
+            foreach ($entry in @(@("stdout", $StdoutLog), @("stderr", $ChildStderrLog))) {
+                $streamLabel = [string]$entry[0]
+                $path = [string]$entry[1]
+                if (Test-Path -LiteralPath $path -PathType Leaf) {
+                    $sourceFullPath = [System.IO.Path]::GetFullPath($path)
+                    $targetFullPath = [System.IO.Path]::GetFullPath($SupervisorStderrLog)
+                    if ($sourceFullPath -eq $targetFullPath) {
+                        ("----- {0}-{1}: skipped self-reference {2} -----" -f $Label, $streamLabel, $path) |
+                            Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                        continue
+                    }
+                    ("----- {0}-{1}: {2} -----" -f $Label, $streamLabel, $path) |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                    Get-Content -LiteralPath $path -Encoding utf8 -Tail $MaxTailLines |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                } else {
+                    ("----- {0}-{1}: missing {2} -----" -f $Label, $streamLabel, $path) |
+                        Out-File -LiteralPath $SupervisorStderrLog -Encoding utf8 -Append
+                }
+            }
+        }
+
+        function Stop-ManagedProcess {
+            param([object]$ManagedProcess)
+
+            if ($null -ne $ManagedProcess -and $null -ne $ManagedProcess.process -and -not $ManagedProcess.process.HasExited) {
+                try {
+                    Stop-Process -Id $ManagedProcess.process.Id -Force -ErrorAction SilentlyContinue
+                } catch {
+                }
+            }
+        }
+
+        $apiAttempt = 0
+        $workerAttempt = 0
+        $apiChild = $null
+        $workerChild = $null
+        $failureCount = 0
+        $startupDeadline = Get-Date
+        $apiReadyForWorker = $false
+        while (-not $script:stopSupervisor) {
+            if ($null -eq $apiChild) {
+                $apiAttempt += 1
+                $apiChild = Start-BackendManagedProcess -Label "api" -ArgumentList $apiArgs -Attempt $apiAttempt
+                $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
+                $failureCount = 0
+                $apiReadyForWorker = $false
+            }
+
+            if ($script:stopSupervisor) {
+                $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+                if ($null -ne $apiChild) {
+                    Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                }
+                if ($null -ne $workerChild) {
+                    Stop-ManagedProcess -ManagedProcess $workerChild
+                }
+                break
+            }
+
+            Start-Sleep -Seconds $SupervisorIntervalSeconds
+
+            if ($null -ne $workerChild -and $workerChild.process.HasExited) {
+                $workerChild.process.Refresh()
+                $workerExitCode = $workerChild.process.ExitCode
+                $workerRestartReason = "worker_process_exited"
+                Append-ManagedProcessLogs `
+                    -Label "worker" `
+                    -StdoutLog $workerChild.stdout `
+                    -ChildStderrLog $workerChild.stderr `
+                    -SupervisorStderrLog $stderrLog
+                ("backend-supervisor: restarting worker reason={0} exit_code={1} delay_seconds={2}" -f `
+                    $workerRestartReason,
+                    $workerExitCode,
+                    $RestartDelaySeconds) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                $workerChild = $null
+                Start-Sleep -Seconds $RestartDelaySeconds
+                continue
+            }
+
+            if ($null -ne $apiChild -and $apiChild.process.HasExited) {
+                $apiChild.process.Refresh()
+                $script:backendExitCode = $apiChild.process.ExitCode
+                $apiRestartReason = "api_process_exited"
+                $apiReadyForWorker = $false
+                Append-ManagedProcessLogs `
+                    -Label "api" `
+                    -StdoutLog $apiChild.stdout `
+                    -ChildStderrLog $apiChild.stderr `
+                    -SupervisorStderrLog $stderrLog
+                if (Test-ManagedProcessPortBindFailure -ChildStderrLog $apiChild.stderr) {
+                    ("backend-supervisor: api_port_bind_failed action=fail_without_retry exit_code={0}" -f $script:backendExitCode) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                    Update-LatestBackendLogs
+                    return
+                }
+                ("backend-supervisor: restarting api reason={0} exit_code={1} delay_seconds={2}" -f `
+                    $apiRestartReason,
+                    $script:backendExitCode,
+                    $RestartDelaySeconds) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                $apiChild = $null
+                Start-Sleep -Seconds $RestartDelaySeconds
+                continue
+            }
+
+            $pingResult = Test-BackendPing -PingUrl $pingUrl -TimeoutSeconds $PingTimeoutSeconds
+            if ([bool]$pingResult.ok) {
+                if ($failureCount -gt 0) {
+                    ("backend-supervisor: api_ping_recovered_after_failures count={0} ping_elapsed_ms={1}" -f `
+                        $failureCount,
+                        $pingResult.elapsed_ms) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                }
+                $failureCount = 0
+                $apiReadyForWorker = $true
+                if ($apiReadyForWorker -and $null -eq $workerChild) {
+                    $workerAttempt += 1
+                    $workerChild = Start-BackendManagedProcess -Label "worker" -ArgumentList $workerArgs -Attempt $workerAttempt
+                }
+                continue
+            }
+            $apiReadyForWorker = $false
+            if ((Get-Date) -lt $startupDeadline) {
+                continue
+            }
+
+            $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $Port
+            $failureCount += 1
+            $pingElapsedMs = if ($null -ne $pingResult.elapsed_ms) { [int64]$pingResult.elapsed_ms } else { -1 }
+            $pingError = if ($null -ne $pingResult.error) { [string]$pingResult.error } else { "" }
+            $listenerAliveThreshold = [Math]::Max($SupervisorFailureThreshold, $ListenerAliveFailureThreshold)
+            if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
+                ("backend-supervisor: api_ping_failed_listener_alive count={0}/{1} listener_status={2} listener_count={3} ping_elapsed_ms={4} ping_error={5}" -f `
+                    $failureCount,
+                    $listenerAliveThreshold,
+                    $listenerSnapshot.status,
+                    $listenerSnapshot.count,
+                    $pingElapsedMs,
+                    $pingError) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                if ($failureCount -lt $listenerAliveThreshold) {
+                    continue
+                }
+                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                try {
+                    $apiChild.process.WaitForExit(5000) | Out-Null
+                } catch {
+                }
+                $apiRestartReason = "api_ping_failed_listener_alive"
+            } else {
+                ("backend-supervisor: api_ping_failed_no_listener count={0}/{1} listener_status={2} listener_count={3} ping_elapsed_ms={4} ping_error={5}" -f `
+                    $failureCount,
+                    $SupervisorFailureThreshold,
+                    $listenerSnapshot.status,
+                    $listenerSnapshot.count,
+                    $pingElapsedMs,
+                    $pingError) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                if ($failureCount -lt $SupervisorFailureThreshold) {
+                    continue
+                }
+                ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+                    Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                Stop-BackendProcessTree -BackendProcess $apiChild.process -ListenerSnapshot $listenerSnapshot
+                try {
+                    $apiChild.process.WaitForExit(5000) | Out-Null
+                } catch {
+                }
+                $apiRestartReason = "api_ping_failed_no_listener"
+            }
+
+            $apiChild.process.Refresh()
+            $script:backendExitCode = $apiChild.process.ExitCode
+            Append-ManagedProcessLogs `
+                -Label "api" `
+                -StdoutLog $apiChild.stdout `
+                -ChildStderrLog $apiChild.stderr `
+                -SupervisorStderrLog $stderrLog
+            ("backend-supervisor: restarting api reason={0} exit_code={1} delay_seconds={2}" -f `
+                $apiRestartReason,
+                $script:backendExitCode,
+                $RestartDelaySeconds) |
+                Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+            $apiChild = $null
+            Start-Sleep -Seconds $RestartDelaySeconds
+        }
+    } finally {
+        [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
+        [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
+        Close-BackendChildProcessJob
+        Pop-Location
+        Update-LatestBackendLogs
+    }
+} catch {
+    ("FanBanBackend startup/runtime failure: " + $_.Exception.Message) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ($_ | Out-String) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    Update-LatestBackendLogs
+    throw
 } finally {
-    [Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", $previousPythonNoUserSite, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", $previousPythonDontWriteBytecode, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONPATH", $previousPythonPath, "Process")
-    [Environment]::SetEnvironmentVariable("PYTHONHOME", $previousPythonHome, "Process")
-    Pop-Location
+    Close-BackendSupervisorMutex
 }
 '''
     start_backend = (
@@ -644,6 +1547,7 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
     check_health = r'''param(
     [string]$Url = "http://127.0.0.1:8000/api/system/health",
     [string]$PingUrl = "http://127.0.0.1:8000/api/system/ping",
+    [int]$ApiPort = __DEFAULT_FRONTEND_API_PORT__,
     [ValidateSet("full", "deep")]
     [string]$Mode = "full"
 )
@@ -659,11 +1563,108 @@ $fullJson = Join-Path $logsDir "check_health.full.json"
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
+function Get-BackendListenerSnapshot {
+    param([int]$BackendPort)
+
+    try {
+        $connections = @(Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction Stop)
+    } catch {
+        return [ordered]@{
+            status = "error"
+            error = $_.Exception.Message
+            count = 0
+            listeners = @()
+        }
+    }
+
+    $listeners = @()
+    foreach ($connection in $connections) {
+        $processId = [int]$connection.OwningProcess
+        $processName = ""
+        $commandLine = ""
+        try {
+            $processInfo = Get-CimInstance Win32_Process -Filter ("ProcessId={0}" -f $processId) -ErrorAction Stop
+            $processName = [string]$processInfo.Name
+            $commandLine = [string]$processInfo.CommandLine
+        } catch {
+            $processName = ""
+            $commandLine = ""
+        }
+
+        $listeners += [ordered]@{
+            local_address = [string]$connection.LocalAddress
+            local_port = [int]$connection.LocalPort
+            process_id = $processId
+            process_name = $processName
+            command_line = $commandLine
+        }
+    }
+
+    return [ordered]@{
+        status = if ($listeners.Count -gt 0) { "pass" } else { "fail" }
+        error = ""
+        count = $listeners.Count
+        listeners = $listeners
+    }
+}
+
+function Get-BackendFailureClassification {
+    param(
+        [string]$PingStatus,
+        [string]$TaskState,
+        [object]$ListenerSnapshot
+    )
+
+    if ($PingStatus -eq "pass") {
+        return "ok"
+    }
+
+    $listenerCount = 0
+    if ($null -ne $ListenerSnapshot -and $null -ne $ListenerSnapshot.count) {
+        $listenerCount = [int]$ListenerSnapshot.count
+    }
+
+    if ($listenerCount -eq 0) {
+        if ($TaskState -eq "Running") {
+            return "task_running_but_no_backend_listener"
+        }
+        return "backend_not_listening"
+    }
+
+    return "listener_present_but_api_unreachable"
+}
+
+function Convert-FirstJsonObjectFromText {
+    param([string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+
+    $start = $Text.IndexOf("{")
+    $end = $Text.LastIndexOf("}")
+    if ($start -lt 0 -or $end -lt $start) {
+        return $null
+    }
+
+    $jsonText = $Text.Substring($start, $end - $start + 1)
+    try {
+        return ($jsonText | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
 $deepProbe = $null
 $selectedProbe = $null
+$selectedProbeJson = ""
 $proxyOutput = ""
 $proxyStatus = "skip"
 $proxyError = ""
+$proxyDetails = $null
+$proxyTimeoutStatus = "skip"
+$proxyTimeoutSeconds = $null
+$proxyMinimumTimeoutSeconds = 600
 $apiPingStatus = "fail"
 $apiPingError = ""
 $apiPingResponse = $null
@@ -671,18 +1672,46 @@ $apiHealthStatus = "fail"
 $apiHealthError = ""
 $apiHealthResponse = $null
 $taskStatus = "skip"
+$taskSettingsStatus = "skip"
+$taskEventStatus = "skip"
+$taskEventError = ""
 $taskDetails = [ordered]@{}
+$recentTaskEvents = @()
+$backendListener = [ordered]@{
+    status = "skip"
+    error = ""
+    count = 0
+    listeners = @()
+}
+$backendListenerStatus = "skip"
+$backendFailureClassification = "unknown"
 
-if (Test-Path -LiteralPath $probeScript -PathType Leaf) {
+if ($Mode -eq "deep" -and (Test-Path -LiteralPath $probeScript -PathType Leaf)) {
     & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
     $deepProbe = Get-Content -LiteralPath $deepProbeJson -Raw | ConvertFrom-Json
     $selectedProbe = $deepProbe
+    $selectedProbeJson = $deepProbeJson
 }
 
 if (Test-Path -LiteralPath $iisProxyScript -PathType Leaf) {
     try {
         $proxyOutput = (& $iisProxyScript 2>&1 | Out-String).Trim()
-        if ($proxyOutput -match '"missing"' -or $proxyOutput -match '未检测到') {
+        $proxyDetails = Convert-FirstJsonObjectFromText -Text $proxyOutput
+        if ($null -ne $proxyDetails -and $null -ne $proxyDetails.arr) {
+            if ($null -ne $proxyDetails.arr.timeout_status) {
+                $proxyTimeoutStatus = [string]$proxyDetails.arr.timeout_status
+            }
+            if ($null -ne $proxyDetails.arr.timeout_seconds) {
+                $proxyTimeoutSeconds = [int]$proxyDetails.arr.timeout_seconds
+            }
+            if ($null -ne $proxyDetails.arr.minimum_timeout_seconds) {
+                $proxyMinimumTimeoutSeconds = [int]$proxyDetails.arr.minimum_timeout_seconds
+            }
+        }
+
+        $proxyMissing = ($proxyOutput -match '"missing"' -or $proxyOutput -match '未检测到')
+        $proxyTimeoutUnsafe = ($proxyTimeoutStatus -eq "warn" -or $proxyTimeoutStatus -eq "unknown")
+        if ($proxyMissing -or $proxyTimeoutUnsafe) {
             $proxyStatus = "warn"
         } else {
             $proxyStatus = "pass"
@@ -703,6 +1732,20 @@ try {
         [uint64]$lastTaskResultInt64
     }
     $lastTaskResultHex = "0x{0:X8}" -f ($lastTaskResultUnsigned -band 0xffffffff)
+    $executionTimeLimit = [string]$task.Settings.ExecutionTimeLimit
+    $restartCount = [int]$task.Settings.RestartCount
+    $restartInterval = if ($null -ne $task.Settings.RestartInterval) { [string]$task.Settings.RestartInterval } else { "" }
+    $multipleInstances = [string]$task.Settings.MultipleInstances
+    $stopIfGoingOnBatteries = [bool]$task.Settings.StopIfGoingOnBatteries
+    $executionTimeLimitUnlimited = ($executionTimeLimit -eq "" -or $executionTimeLimit -eq "PT0S" -or $executionTimeLimit -eq "P0D")
+    $taskSettingsProblems = @()
+    if (-not $executionTimeLimitUnlimited) {
+        $taskSettingsProblems += ("ExecutionTimeLimit is " + $executionTimeLimit + ", expected PT0S/unlimited")
+    }
+    if ($restartCount -lt 1) {
+        $taskSettingsProblems += ("RestartCount is " + $restartCount + ", expected >= 1")
+    }
+    $taskSettingsStatus = if ($taskSettingsProblems.Count -eq 0) { "pass" } else { "fail" }
     $taskStatus = "pass"
     $taskDetails = [ordered]@{
         state = [string]$task.State
@@ -711,12 +1754,39 @@ try {
         last_task_result_hex = $lastTaskResultHex
         last_task_result_ok = ($lastTaskResultInt64 -eq 0)
         next_run_time = if ($taskInfo.NextRunTime) { [string]$taskInfo.NextRunTime } else { "" }
+        settings = [ordered]@{
+            status = $taskSettingsStatus
+            problems = $taskSettingsProblems
+            execution_time_limit = $executionTimeLimit
+            execution_time_limit_unlimited = $executionTimeLimitUnlimited
+            restart_count = $restartCount
+            restart_interval = $restartInterval
+            multiple_instances = $multipleInstances
+            stop_if_going_on_batteries = $stopIfGoingOnBatteries
+        }
     }
 } catch {
     $taskStatus = "fail"
     $taskDetails = [ordered]@{
         error = $_.Exception.Message
     }
+}
+
+try {
+    $recentTaskEvents = @(
+        Get-WinEvent -LogName "Microsoft-Windows-TaskScheduler/Operational" -MaxEvents 200 -ErrorAction Stop |
+            Where-Object { $_.Message -match "\\FanBanBackend|FanBanBackend" } |
+            Select-Object -First 12 `
+                @{Name = "time_created"; Expression = { if ($_.TimeCreated) { $_.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss") } else { "" } } },
+                Id,
+                LevelDisplayName,
+                ProviderName,
+                Message
+    )
+    $taskEventStatus = "pass"
+} catch {
+    $taskEventStatus = "warn"
+    $taskEventError = $_.Exception.Message
 }
 
 try {
@@ -735,6 +1805,14 @@ try {
     $apiHealthError = $_.Exception.Message
 }
 
+$backendListener = Get-BackendListenerSnapshot -BackendPort $ApiPort
+$backendListenerStatus = [string]$backendListener.status
+$taskStateForDiagnosis = if ($taskDetails.Contains("state")) { [string]$taskDetails.state } else { "" }
+$backendFailureClassification = Get-BackendFailureClassification `
+    -PingStatus $apiPingStatus `
+    -TaskState $taskStateForDiagnosis `
+    -ListenerSnapshot $backendListener
+
 $blockingIssues = @()
 $warnings = @()
 if ($null -ne $selectedProbe) {
@@ -743,17 +1821,20 @@ if ($null -ne $selectedProbe) {
 }
 
 $overallStatus = "pass"
-if ($null -eq $selectedProbe -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass") {
+$probeRequiredForOverall = ($Mode -eq "deep")
+if (($probeRequiredForOverall -and $null -eq $selectedProbe) -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail") {
     $overallStatus = "fail"
 } elseif ($proxyStatus -eq "warn") {
     $overallStatus = "warn"
 }
 
+$reportedDeepProbeJson = if ($Mode -eq "deep") { $deepProbeJson } else { "" }
+
 $summary = [ordered]@{
     generated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     mode = $Mode
     overall_status = $overallStatus
-    selected_probe_json = $deepProbeJson
+    selected_probe_json = $selectedProbeJson
     blocking_issue_count = $blockingIssues.Count
     warning_count = $warnings.Count
     api_status = $apiPingStatus
@@ -763,7 +1844,15 @@ $summary = [ordered]@{
     api_health_status = $apiHealthStatus
     api_health_url = $Url
     task_status = $taskStatus
+    task_settings_status = $taskSettingsStatus
+    task_event_status = $taskEventStatus
+    backend_listener_status = $backendListenerStatus
+    backend_listener_count = $backendListener.count
+    backend_failure_classification = $backendFailureClassification
     proxy_status = $proxyStatus
+    proxy_timeout_status = $proxyTimeoutStatus
+    proxy_timeout_seconds = $proxyTimeoutSeconds
+    proxy_minimum_timeout_seconds = $proxyMinimumTimeoutSeconds
     summary_json = $summaryJson
     full_json = $fullJson
 }
@@ -772,10 +1861,20 @@ $fullReport = [ordered]@{
     summary = $summary
     probe = [ordered]@{
         quick_json = ""
-        deep_json = $deepProbeJson
+        deep_json = $reportedDeepProbeJson
         selected = $selectedProbe
     }
     scheduled_task = $taskDetails
+    scheduled_task_events = [ordered]@{
+        status = $taskEventStatus
+        error = $taskEventError
+        recent_task_events = $recentTaskEvents
+    }
+    backend_runtime = [ordered]@{
+        status = if ($apiPingStatus -eq "pass" -and $backendListenerStatus -eq "pass") { "pass" } else { "fail" }
+        failure_classification = $backendFailureClassification
+    }
+    backend_listener = $backendListener
     api = [ordered]@{
         status = $apiPingStatus
         url = $PingUrl
@@ -798,6 +1897,10 @@ $fullReport = [ordered]@{
         status = $proxyStatus
         error = $proxyError
         output = $proxyOutput
+        details = $proxyDetails
+        timeout_status = $proxyTimeoutStatus
+        timeout_seconds = $proxyTimeoutSeconds
+        minimum_timeout_seconds = $proxyMinimumTimeoutSeconds
     }
 }
 
@@ -810,9 +1913,14 @@ Write-Host ("Overall status: " + $overallStatus)
 Write-Host ("Blocking issues: " + $blockingIssues.Count)
 Write-Host ("Warnings: " + $warnings.Count)
 Write-Host ("Scheduled task: " + $taskStatus)
+Write-Host ("Scheduled task settings: " + $taskSettingsStatus)
+Write-Host ("Scheduled task recent events: " + $taskEventStatus)
+Write-Host ("Backend listener: " + $backendListenerStatus + " (" + $backendListener.count + ")")
+Write-Host ("Backend failure classification: " + $backendFailureClassification)
 Write-Host ("API ping: " + $apiPingStatus)
 Write-Host ("API health: " + $apiHealthStatus)
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
+Write-Host ("IIS proxy timeout: " + $proxyTimeoutStatus + " (" + $proxyTimeoutSeconds + "s, minimum " + $proxyMinimumTimeoutSeconds + "s)")
 if ($blockingIssues.Count -gt 0) {
     Write-Host "Top blocking issues:"
     foreach ($issue in $blockingIssues) {
@@ -831,6 +1939,9 @@ if ($apiHealthStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiHealt
 Write-Host ("Summary JSON: " + $summaryJson)
 Write-Host ("Full JSON: " + $fullJson)
 '''
+    check_health = check_health.replace(
+        "__DEFAULT_FRONTEND_API_PORT__", str(int(deployment.default_frontend_api_port))
+    )
     _write_text(output_root / "scripts" / "check_health.ps1", check_health)
 
     install_runtime = r'''$ErrorActionPreference = "Stop"
@@ -970,8 +2081,9 @@ function Sync-PythonSitePackages {
         Remove-Item -LiteralPath (Join-Path $targetRoot $stalePth) -Force -ErrorAction SilentlyContinue
     }
 
-    $backendRoot = Join-Path $packageRoot "backend-runtime\backend"
-    Set-Content -LiteralPath (Join-Path $targetRoot "fanban_backend_runtime.pth") -Value $backendRoot -Encoding utf8
+    $backendRuntimeRoot = Join-Path $packageRoot "backend-runtime"
+    $backendRoot = Join-Path $backendRuntimeRoot "backend"
+    Set-Content -LiteralPath (Join-Path $targetRoot "fanban_backend_runtime.pth") -Value @($backendRuntimeRoot, $backendRoot) -Encoding utf8
 }
 
 $dotnet = Get-ChildItem -Path (Join-Path $root "dotnet") -Filter *.exe -File -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -1084,6 +2196,85 @@ try {
 
 $rewriteInstalled = $false
 $arrInstalled = $false
+$minimumProxyTimeoutSeconds = 600
+$proxyTimeoutRaw = ""
+$proxyTimeoutSeconds = $null
+$proxyTimeoutStatus = "skip"
+
+function Resolve-ArrTimeoutValue {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [TimeSpan]) {
+        return $Value
+    }
+    if ($Value -is [string]) {
+        return $Value
+    }
+
+    try {
+        $valueProperty = $Value.PSObject.Properties["Value"]
+        if ($null -ne $valueProperty -and $null -ne $valueProperty.Value) {
+            return $valueProperty.Value
+        }
+    } catch {
+    }
+
+    try {
+        $attributesProperty = $Value.PSObject.Properties["Attributes"]
+        if ($null -ne $attributesProperty -and $null -ne $attributesProperty.Value) {
+            $timeoutAttribute = $attributesProperty.Value["timeout"]
+            if ($null -ne $timeoutAttribute) {
+                $timeoutValueProperty = $timeoutAttribute.PSObject.Properties["Value"]
+                if ($null -ne $timeoutValueProperty -and $null -ne $timeoutValueProperty.Value) {
+                    return $timeoutValueProperty.Value
+                }
+                return $timeoutAttribute
+            }
+        }
+    } catch {
+    }
+
+    try {
+        $timeoutProperty = $Value.PSObject.Properties["timeout"]
+        if ($null -ne $timeoutProperty -and $null -ne $timeoutProperty.Value) {
+            return Resolve-ArrTimeoutValue -Value $timeoutProperty.Value
+        }
+    } catch {
+    }
+
+    return $Value
+}
+
+function Convert-ArrTimeoutToSeconds {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [TimeSpan]) {
+        return [int][Math]::Round($Value.TotalSeconds)
+    }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $null
+    }
+
+    $parsedTimeSpan = [TimeSpan]::Zero
+    if ([TimeSpan]::TryParse($text, [ref]$parsedTimeSpan)) {
+        return [int][Math]::Round($parsedTimeSpan.TotalSeconds)
+    }
+
+    $parsedSeconds = 0
+    if ([int]::TryParse($text, [ref]$parsedSeconds)) {
+        return $parsedSeconds
+    }
+
+    return $null
+}
 
 if ($iisInstalled) {
     $rewriteModule = Get-WebGlobalModule -Name "RewriteModule" -ErrorAction SilentlyContinue
@@ -1094,6 +2285,30 @@ if ($iisInstalled) {
     $proxySection = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "." -ErrorAction SilentlyContinue
     if ($null -ne $proxySection) {
         $arrInstalled = $true
+        $proxyTimeoutValue = $null
+        try {
+            $proxyTimeoutValue = Get-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "timeout" -ErrorAction SilentlyContinue
+        } catch {
+            $proxyTimeoutValue = $null
+        }
+        if ($null -eq $proxyTimeoutValue -and $null -ne $proxySection.timeout) {
+            $proxyTimeoutValue = $proxySection.timeout
+        }
+
+        $proxyTimeoutResolved = Resolve-ArrTimeoutValue -Value $proxyTimeoutValue
+        $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutResolved
+        if ($null -eq $proxyTimeoutSeconds -and $null -ne $proxySection) {
+            $proxyTimeoutResolved = Resolve-ArrTimeoutValue -Value $proxySection
+            $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutResolved
+        }
+        $proxyTimeoutRaw = if ($null -ne $proxyTimeoutResolved) { [string]$proxyTimeoutResolved } else { "" }
+        if ($null -eq $proxyTimeoutSeconds) {
+            $proxyTimeoutStatus = "unknown"
+        } elseif ([int]$proxyTimeoutSeconds -lt $minimumProxyTimeoutSeconds) {
+            $proxyTimeoutStatus = "warn"
+        } else {
+            $proxyTimeoutStatus = "pass"
+        }
     }
 
     if (-not $arrInstalled) {
@@ -1120,6 +2335,10 @@ $result = [ordered]@{
         installed = $arrInstalled
         status = if ($arrInstalled) { "pass" } else { "missing" }
         product_name = "Application Request Routing"
+        timeout = $proxyTimeoutRaw
+        timeout_seconds = $proxyTimeoutSeconds
+        timeout_status = $proxyTimeoutStatus
+        minimum_timeout_seconds = $minimumProxyTimeoutSeconds
     }
 }
 
@@ -1133,6 +2352,12 @@ if (-not $rewriteInstalled) {
 }
 if (-not $arrInstalled) {
     Write-Warning "未检测到 ARR（Application Request Routing）。"
+}
+if ($arrInstalled -and $proxyTimeoutStatus -eq "warn") {
+    Write-Warning ("ARR proxy timeout 低于 10 分钟，当前为 " + $proxyTimeoutSeconds + " 秒。请执行 configure_iis_site.ps1 或手动设置为 00:10:00。")
+}
+if ($arrInstalled -and $proxyTimeoutStatus -eq "unknown") {
+    Write-Warning "ARR proxy timeout 无法解析，请检查 system.webServer/proxy timeout 设置。"
 }
 '''
     _write_text(output_root / "install" / "check_iis_proxy_prereqs.ps1", check_iis_proxy)
@@ -1257,7 +2482,7 @@ $staticContentConfig
     } else {
         $appcmd = Join-Path $env:WinDir "System32\inetsrv\appcmd.exe"
         if (Test-Path -LiteralPath $appcmd -PathType Leaf) {
-            & $appcmd set config -section:system.webServer/proxy /enabled:"True" /commit:apphost | Out-Null
+            & $appcmd set config -section:system.webServer/proxy /enabled:"True" /timeout:"00:10:00" /commit:apphost | Out-Null
         }
         $webConfigContent = @"
 <?xml version="1.0" encoding="utf-8"?>
@@ -1369,7 +2594,16 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument (Build-TaskActionArguments)
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserName
 $principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Interactive -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -Hidden
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -Hidden `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+    -RestartCount 999 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
+$settings.AllowHardTerminate = $true
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host ("已注册登录触发任务: " + $TaskName)
@@ -1436,8 +2670,33 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 5. 再执行 `scripts\deep_check_terminal.ps1`
 6. 配置 IIS：`install\configure_iis_site.ps1`
 7. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
-8. 执行 `scripts\check_health.ps1`
-9. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+8. 等待 `http://127.0.0.1:8000/api/system/ping` 就绪
+9. 执行 `scripts\check_health.ps1`
+10. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+
+等待 API 就绪的推荐命令：
+
+```powershell
+$apiReady = $false
+$deadline = (Get-Date).AddMinutes(5)
+do {
+    try {
+        Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/system/ping" -TimeoutSec 5 | Out-Null
+        $apiReady = $true
+    } catch {
+        Start-Sleep -Seconds 5
+    }
+} until ($apiReady -or (Get-Date) -ge $deadline)
+if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查看 D:\FanBanServer\logs\backend-latest-stderr.log" }
+```
+
+## 后端启动模型
+
+- 当前部署包采用 API 与 worker 分离：API 进程只负责网页接口和队列入库，worker 进程负责 CAD/文档长任务。
+- 正常安装命令不需要变化，也不需要单独启动 worker；`scripts\start_backend.ps1` 会同时托管 API 和 worker。
+- `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
+- `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
+- `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
 
 ## 一致性边界
 

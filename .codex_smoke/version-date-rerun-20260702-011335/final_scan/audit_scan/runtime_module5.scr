@@ -1,0 +1,16 @@
+(setvar "FILEDIA" 0)
+(setvar "CMDDIA" 0)
+(setvar "SECURELOAD" 0)
+; fanban-cad-env-probe definitions
+(vl-load-com)
+(setq _fanban_cad_env_probe_log "E:/project/auto-fanban-pre/.codex_smoke/version-date-rerun-20260702-011335/final_scan/audit_scan/module5_trace.log")
+(defun fanban-cad-env-probe-log (line / fh) (setq fh (open _fanban_cad_env_probe_log "a")) (if fh (progn (write-line line fh) (close fh))) (princ))
+(defun fanban-cad-env-probe-safe-getvar (name / value) (setq value (vl-catch-all-apply 'getvar (list name))) (if (vl-catch-all-error-p value) (strcat "<error:" (vl-catch-all-error-message value) ">") (vl-princ-to-string value)))
+(defun fanban-cad-env-probe-safe-findfile (name / value) (setq value (vl-catch-all-apply 'findfile (list name))) (if (vl-catch-all-error-p value) (strcat "<error:" (vl-catch-all-error-message value) ">") (if value value "")))
+(defun fanban-cad-env-probe (stage / item) (foreach item '("FONTMAP" "FONTALT" "ACADPREFIX" "ROAMABLEROOTPREFIX" "LOCALROOTPREFIX" "BACKGROUNDPLOT" "PDFSHX" "EPDFSHX") (fanban-cad-env-probe-log (strcat "[CAD_ENV_PROBE][" stage "] getvar " item "=" (fanban-cad-env-probe-safe-getvar item)))) (foreach item '("tssdeng.shx" "hztxt.shx" "tssdchn.shx" "simplex.shx" "gbcbig.shx" "simsun.ttc" "打印PDF2.pc3") (fanban-cad-env-probe-log (strcat "[CAD_ENV_PROBE][" stage "] findfile " item "=" (fanban-cad-env-probe-safe-findfile item)))) (princ))
+(vl-catch-all-apply 'fanban-cad-env-probe (list "pre")) (princ)
+(command "_.NETLOAD" "E:/project/auto-fanban-pre/backend/src/cad/dotnet/Module5CadBridge/bin/Release/net48/Module5CadBridge.dll")
+(command "M5BRIDGE_RUN" "E:/project/auto-fanban-pre/.codex_smoke/version-date-rerun-20260702-011335/final_scan/audit_scan/task.json" "E:/project/auto-fanban-pre/.codex_smoke/version-date-rerun-20260702-011335/final_scan/audit_scan/result.json" "E:/project/auto-fanban-pre/.codex_smoke/version-date-rerun-20260702-011335/final_scan/audit_scan/module5_trace.log")
+(vl-catch-all-apply 'fanban-cad-env-probe (list "post")) (princ)
+_.QUIT
+_N

@@ -105,6 +105,9 @@ class AuditFieldContextMapper:
             "engineering_no": "titleblock_engineering_no",
             "internal_code": "titleblock_internal_code",
             "external_code": "titleblock_external_code",
+            "date": "titleblock_date",
+            "revision": "titleblock_revision",
+            "revision_description": "titleblock_revision_description",
         }
         regions: list[_FieldRegion] = []
         for frame, internal_code in self._iter_field_frames(frames, sheet_sets):

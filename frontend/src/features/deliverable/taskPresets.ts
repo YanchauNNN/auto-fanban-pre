@@ -145,11 +145,26 @@ function normalizeStoredPreset(preset: TaskConfigPreset): TaskConfigPreset {
   return {
     ...preset,
     runAuditCheck: preset.runAuditCheck ?? false,
-    replaceConfig: {
-      sourceProjectNo: preset.replaceConfig?.sourceProjectNo ?? "",
-      sourceIslandNo: preset.replaceConfig?.sourceIslandNo ?? "",
-      targetProjectNo: preset.replaceConfig?.targetProjectNo ?? "",
-      targetIslandNo: preset.replaceConfig?.targetIslandNo ?? "",
-    },
+    replaceConfig: buildReplaceConfig(preset.replaceConfig),
+  };
+}
+
+function normalizeFactoryCodes(values: readonly string[] | undefined) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values
+    .map((value) => value.trim().toUpperCase())
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+}
+
+function buildReplaceConfig(replaceConfig: TaskConfigPreset["replaceConfig"] | undefined) {
+  const unitFactoryCodes = normalizeFactoryCodes(replaceConfig?.unitFactoryCodes);
+  return {
+    sourceProjectNo: replaceConfig?.sourceProjectNo ?? "",
+    sourceIslandNo: replaceConfig?.sourceIslandNo ?? "",
+    targetProjectNo: replaceConfig?.targetProjectNo ?? "",
+    targetIslandNo: replaceConfig?.targetIslandNo ?? "",
+    ...(unitFactoryCodes.length > 0 ? { unitFactoryCodes } : {}),
   };
 }

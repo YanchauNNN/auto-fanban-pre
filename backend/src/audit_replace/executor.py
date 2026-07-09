@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from collections import defaultdict
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,9 +17,10 @@ from ..audit_check.matcher import AuditMatchEngine
 from ..audit_check.roi_mapper import AuditFieldContextMapper
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
 from ..cad.dwg_version import detect_dwg_version_code_or_none
-from ..config import get_config
+from ..config import get_config, load_mechanism_spec, load_spec, normalize_audit_replace_factory_codes
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
+from ..workload.calculator import WorkloadCalculator
 from .factory_index_bridge import FactoryIndexMapReplacementService, FactoryIndexReplacementResult
 from .mapping import ReplaceMapping, ReplaceMappingBuilder
 from .reporting import write_replace_report_json, write_replace_report_xlsx
@@ -31,6 +33,7 @@ def derive_replaced_dwg_filename(
     target_project_no: str,
     source_unit_no: str | None = None,
     target_unit_no: str | None = None,
+    unit_factory_codes: list[str] | None = None,
 ) -> str:
     path = Path(str(source_name or "").strip() or "replaced.dwg")
     suffix = path.suffix or ".dwg"
@@ -45,13 +48,14 @@ def derive_replaced_dwg_filename(
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         return f"{replaced_stem}{suffix}"
     return f"{stem}——{target_project_no}{suffix}"
 
 
 def normalize_unit_no(value: object) -> str:
-    match = re.search(r"[1-9]", str(value or ""))
+    match = re.search(r"[0-9]", str(value or ""))
     return match.group(0) if match else ""
 
 
@@ -61,6 +65,7 @@ def rewrite_target_unit_text(
     target_project_no: str,
     source_unit_no: str | None,
     target_unit_no: str | None,
+    unit_factory_codes: list[str] | None = None,
 ) -> str:
     source_unit = normalize_unit_no(source_unit_no)
     target_unit = normalize_unit_no(target_unit_no)
@@ -69,13 +74,17 @@ def rewrite_target_unit_text(
 
     updated = text
     target_project_no = str(target_project_no or "").strip()
-    if target_project_no:
+    factory_code_alternation = _factory_code_alternation(unit_factory_codes)
+    if target_project_no and factory_code_alternation:
         code_pattern = re.compile(
             rf"(?<!\d)({re.escape(target_project_no)}){re.escape(source_unit)}"
-            r"(?P<rest>[A-Z0-9]{2,4}-[A-Z]{3}\d{2}(?:-\d{3})?)",
+            rf"(?P<factory_code>{factory_code_alternation})(?P<rest>-[A-Z]{{3}}\d{{2}}(?:-\d{{3}})?)",
             re.IGNORECASE,
         )
-        updated = code_pattern.sub(lambda match: f"{match.group(1)}{target_unit}{match.group('rest')}", updated)
+        updated = code_pattern.sub(
+            lambda match: f"{match.group(1)}{target_unit}{match.group('factory_code')}{match.group('rest')}",
+            updated,
+        )
 
     explicit_unit_pattern = re.compile(
         rf"{re.escape(source_unit)}(?P<suffix>\s*号\s*(?:机\s*组|岛))",
@@ -83,16 +92,17 @@ def rewrite_target_unit_text(
     )
     updated = explicit_unit_pattern.sub(lambda match: f"{target_unit}{match.group('suffix')}", updated)
 
+    if not factory_code_alternation:
+        return updated
+
     short_factory_pattern = re.compile(
-        rf"(?<![A-Z0-9]){re.escape(source_unit)}"
-        r"(?P<factory_code>(?=[A-Z0-9]{2,4}(?![A-Z0-9]))(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2,4})"
-        r"(?![A-Z0-9])",
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>{factory_code_alternation})(?![A-Z0-9])",
         re.IGNORECASE,
     )
     updated = short_factory_pattern.sub(lambda match: f"{target_unit}{match.group('factory_code')}", updated)
 
     embedded_factory_prefix_pattern = re.compile(
-        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>[A-Z]{{2}})(?=\d)",
+        rf"(?<![A-Z0-9]){re.escape(source_unit)}(?P<factory_code>{factory_code_alternation})(?=\d)",
         re.IGNORECASE,
     )
     updated = embedded_factory_prefix_pattern.sub(
@@ -102,7 +112,7 @@ def rewrite_target_unit_text(
 
     prefixed_external_code_pattern = re.compile(
         rf"(?<![A-Z0-9])(?P<prefix>[A-Z]{{1,4}}){re.escape(source_unit)}"
-        r"(?P<factory_code>[A-Z]{2})(?=[A-Z0-9])",
+        rf"(?P<factory_code>{factory_code_alternation})(?=[A-Z0-9])",
         re.IGNORECASE,
     )
     return prefixed_external_code_pattern.sub(
@@ -111,12 +121,22 @@ def rewrite_target_unit_text(
     )
 
 
+def _factory_code_alternation(unit_factory_codes: list[str] | None) -> str:
+    codes = normalize_audit_replace_factory_codes(
+        unit_factory_codes
+        if unit_factory_codes is not None
+        else load_mechanism_spec().audit_replace.unit_factory_codes,
+    )
+    return "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
+
+
 class AuditReplaceExecutor:
     _EXTERNAL_CODE_CONTEXT = "titleblock_external_code"
     _EXTERNAL_CODE_MIN_LEN = 19
 
     def __init__(self) -> None:
         self.config = get_config()
+        self.spec = load_spec()
         self.oda = ODAConverter()
         self.frame_detector = FrameDetector()
         self.titleblock_extractor = TitleblockExtractor()
@@ -125,6 +145,7 @@ class AuditReplaceExecutor:
         self.dotnet_scanner = AuditDotNetScanner()
         self.mapping_builder = ReplaceMappingBuilder()
         self.factory_index_maps = FactoryIndexMapReplacementService()
+        self.workload_calculator = WorkloadCalculator()
 
     def execute(self, job: Job) -> None:
         if not job.input_files:
@@ -138,6 +159,7 @@ class AuditReplaceExecutor:
             raise ValueError("source_project_no and target_project_no are required for replace")
         source_unit_no = self._factory_index_source_variant(job.params)
         target_unit_no = self._factory_index_target_variant(job.params)
+        unit_factory_codes = self._unit_factory_codes(job.params)
 
         job.mark_running(stage="AUDIT_REPLACE")
         job.progress.message = "replacing"
@@ -188,6 +210,7 @@ class AuditReplaceExecutor:
             mapping,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         replace_entries.extend(
             self._build_external_code_prefix_entries(
@@ -203,6 +226,29 @@ class AuditReplaceExecutor:
                 existing_entries=replace_entries,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
+            )
+        )
+        postprocess_config = self._replace_postprocess_config()
+        replace_entries.extend(
+            self._build_titleblock_standardization_entries(
+                items=annotated_items,
+                existing_entries=replace_entries,
+                issue_month_text=self._current_issue_month_text(
+                    str(postprocess_config.get("issue_month_format") or "%Y.%m"),
+                ),
+                target_revision=str(postprocess_config.get("target_revision") or "A"),
+                target_revision_description=str(
+                    postprocess_config.get("target_revision_description") or "首次出版",
+                ),
+                revision_description_keywords=[
+                    str(value)
+                    for value in postprocess_config.get("revision_description_keywords", ["出版", "升版"])
+                    if str(value)
+                ],
+                date_pattern=str(postprocess_config.get("date_pattern") or r"\d{4}\.\d{2}"),
+                source_project_no=mapping.source_project_no,
+                target_project_no=mapping.target_project_no,
             )
         )
         replace_dir = job.work_dir / "work" / "replace"
@@ -215,11 +261,12 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
 
         converted_dir = replace_dir / "converted"
         converted_dwg = self.oda.dxf_to_dwg(replaced_dxf, converted_dir)
-        if self._should_skip_factory_index_for_unlisted_unit(
+        if self._should_skip_factory_index_for_unit_without_template(
             source_project_no=source_project_no,
             source_unit_no=source_unit_no,
             target_project_no=target_project_no,
@@ -228,7 +275,7 @@ class AuditReplaceExecutor:
             factory_result = FactoryIndexReplacementResult(
                 applied=False,
                 output_dwg=converted_dwg,
-                message="factory_index_map_skipped_unlisted_unit",
+                message="factory_index_map_skipped_unit_without_template",
             )
         else:
             factory_result = self.factory_index_maps.replace_if_configured(
@@ -252,6 +299,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
         replaced_dwg = job.work_dir / derive_replaced_dwg_filename(
             source_name=source_display_name,
@@ -259,6 +307,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
         replaced_dwg.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(final_dwg, replaced_dwg)
@@ -297,7 +346,16 @@ class AuditReplaceExecutor:
         job.progress.details["top_replaced_texts"] = list(summary["top_replaced_texts"])
         job.progress.details["top_internal_codes"] = list(summary["top_internal_codes"])
         job.progress.details["factory_index_map"] = factory_result.to_progress_dict()
+        self._record_workload(job, remaining_frames, sheet_sets)
         job.mark_succeeded()
+
+    def _record_workload(self, job: Job, frames: list, sheet_sets: list) -> None:
+        summary = self.workload_calculator.build_from_frame_sets(frames, sheet_sets)
+        job.progress.details["workload"] = summary.model_dump(mode="json")
+        job.progress.details["effective_workload"] = round(
+            float(summary.final_workload_a1 or summary.initial_workload_a1 or 0.0),
+            self.workload_calculator.precision,
+        )
 
     def _factory_index_source_variant(self, params: dict[str, Any]) -> str | None:
         return self._factory_index_variant_from_params(
@@ -312,7 +370,22 @@ class AuditReplaceExecutor:
                 names.append(legacy_name)
         return self._factory_index_variant_from_params(params, names)
 
-    def _should_skip_factory_index_for_unlisted_unit(
+    @staticmethod
+    def _unit_factory_codes(params: dict[str, Any]) -> list[str]:
+        if "unit_factory_codes" not in params:
+            return normalize_audit_replace_factory_codes(
+                load_mechanism_spec().audit_replace.unit_factory_codes,
+            )
+        raw = params.get("unit_factory_codes")
+        if isinstance(raw, str):
+            values = re.split(r"[\s,，;；、]+", raw)
+        elif isinstance(raw, (list, tuple, set)):
+            values = list(raw)
+        else:
+            values = []
+        return normalize_audit_replace_factory_codes(values)
+
+    def _should_skip_factory_index_for_unit_without_template(
         self,
         *,
         source_project_no: str,
@@ -320,13 +393,47 @@ class AuditReplaceExecutor:
         target_project_no: str,
         target_unit_no: str | None,
     ) -> bool:
-        return self._is_unlisted_unit_for_project(
+        if self._is_unlisted_unit_for_project(
             project_no=source_project_no,
             unit_no=source_unit_no,
         ) or self._is_unlisted_unit_for_project(
             project_no=target_project_no,
             unit_no=target_unit_no,
+        ):
+            return True
+
+        source_rules = self.config.factory_index_maps.source_variant_rules.get(
+            str(source_project_no or "").strip(),
         )
+        normalized_source_unit = normalize_unit_no(source_unit_no)
+        if source_rules and normalized_source_unit and normalized_source_unit not in source_rules:
+            return True
+
+        target_templates = self.config.factory_index_maps.island_templates.get(
+            str(target_project_no or "").strip(),
+        )
+        normalized_target_unit = normalize_unit_no(target_unit_no)
+        if target_templates and normalized_target_unit and normalized_target_unit not in target_templates:
+            return True
+        if (
+            normalized_target_unit
+            and self._is_universal_unit(normalized_target_unit)
+            and target_templates is None
+            and str(target_project_no or "").strip() in self.config.factory_index_maps.templates
+        ):
+            return True
+
+        return False
+
+    def _is_universal_unit(self, unit_no: str | None) -> bool:
+        normalized_unit_no = normalize_unit_no(unit_no)
+        if not normalized_unit_no:
+            return False
+        return normalized_unit_no in {
+            str(value).strip()
+            for value in self.config.audit_check.unit_consistency.universal_units
+            if str(value).strip()
+        }
 
     def _is_unlisted_unit_for_project(self, *, project_no: str, unit_no: str | None) -> bool:
         normalized_project_no = str(project_no or "").strip()
@@ -362,6 +469,14 @@ class AuditReplaceExecutor:
                 return FactoryIndexMapReplacementService._normalize_variant(str(value))
         return None
 
+    def _replace_postprocess_config(self) -> dict[str, Any]:
+        config = self.spec.titleblock_extract.get("replace_postprocess", {})
+        return config if isinstance(config, dict) else {}
+
+    @staticmethod
+    def _current_issue_month_text(format_text: str = "%Y.%m") -> str:
+        return date.today().strftime(format_text or "%Y.%m")
+
     @staticmethod
     def _build_replace_entries(
         findings: list[Any],
@@ -369,6 +484,7 @@ class AuditReplaceExecutor:
         *,
         source_unit_no: str | None = None,
         target_unit_no: str | None = None,
+        unit_factory_codes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
         seen_pairs: set[tuple[str | None, str]] = set()
@@ -390,6 +506,7 @@ class AuditReplaceExecutor:
                     target_project_no=mapping.target_project_no,
                     source_unit_no=source_unit_no,
                     target_unit_no=target_unit_no,
+                    unit_factory_codes=unit_factory_codes,
                 )
                 if replacement_text == finding.matched_text:
                     status = "skipped_unmapped"
@@ -456,44 +573,54 @@ class AuditReplaceExecutor:
         for group in cls._cluster_external_code_char_items(items):
             ordered = sorted(group, key=cls._item_x)
             chars = [cls._single_alnum(item.raw_text) for item in ordered]
-            code = "".join(chars)
+            if any(char is None for char in chars):
+                continue
+            normalized_chars = [str(char) for char in chars]
+            code = "".join(normalized_chars)
             if not cls._looks_like_external_code(code):
                 continue
 
             upper_code = code.upper()
-            for source_prefix, target_prefix in prefix_pairs:
-                if not upper_code.startswith(source_prefix):
+            matched_pair = next(
+                (
+                    (source_prefix, target_prefix)
+                    for source_prefix, target_prefix in prefix_pairs
+                    if upper_code.startswith(source_prefix)
+                ),
+                None,
+            )
+            if matched_pair is None:
+                continue
+            source_prefix, target_prefix = matched_pair
+            for index, target_char in enumerate(target_prefix):
+                item = ordered[index]
+                source_char = normalized_chars[index].upper()
+                handle = str(item.entity_handle or "")
+                if not handle or handle in existing_handles or source_char == target_char:
                     continue
-                for index, target_char in enumerate(target_prefix):
-                    item = ordered[index]
-                    source_char = chars[index].upper()
-                    handle = str(item.entity_handle or "")
-                    if not handle or handle in existing_handles or source_char == target_char:
-                        continue
-                    existing_handles.add(handle)
-                    entries.append(
-                        {
-                            "status": "pending",
-                            "matched_text": source_char,
-                            "replacement_text": target_char,
-                            "raw_text": item.raw_text,
-                            "new_text": item.raw_text,
-                            "source_project_no": mapping.source_project_no,
-                            "target_project_no": mapping.target_project_no,
-                            "matched_project_nos": [mapping.source_project_no],
-                            "context_kind": "code_like",
-                            "internal_code": item.internal_code,
-                            "layout_name": item.layout_name,
-                            "entity_type": item.entity_type,
-                            "entity_handle": item.entity_handle,
-                            "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
-                            "block_path": item.block_path,
-                            "position_x": item.position_x,
-                            "position_y": item.position_y,
-                            "message": "external_code_prefix",
-                        }
-                    )
-                break
+                existing_handles.add(handle)
+                entries.append(
+                    {
+                        "status": "pending",
+                        "matched_text": source_char,
+                        "replacement_text": target_char,
+                        "raw_text": item.raw_text,
+                        "new_text": item.raw_text,
+                        "source_project_no": mapping.source_project_no,
+                        "target_project_no": mapping.target_project_no,
+                        "matched_project_nos": [mapping.source_project_no],
+                        "context_kind": "code_like",
+                        "internal_code": item.internal_code,
+                        "layout_name": item.layout_name,
+                        "entity_type": item.entity_type,
+                        "entity_handle": item.entity_handle,
+                        "field_context": item.field_context,
+                        "block_path": item.block_path,
+                        "position_x": item.position_x,
+                        "position_y": item.position_y,
+                        "message": "external_code_prefix",
+                    }
+                )
         return entries
 
     @classmethod
@@ -505,6 +632,7 @@ class AuditReplaceExecutor:
         existing_entries: list[dict[str, Any]],
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         source_unit = normalize_unit_no(source_unit_no)
         target_unit = normalize_unit_no(target_unit_no)
@@ -520,7 +648,10 @@ class AuditReplaceExecutor:
         for group in cls._cluster_external_code_char_items(items):
             ordered = sorted(group, key=cls._item_x)
             chars = [cls._single_alnum(item.raw_text) for item in ordered]
-            code = "".join(chars)
+            if any(char is None for char in chars):
+                continue
+            normalized_chars = [str(char) for char in chars]
+            code = "".join(normalized_chars)
             if not cls._looks_like_external_code(code):
                 continue
 
@@ -529,12 +660,13 @@ class AuditReplaceExecutor:
                 target_project_no=mapping.target_project_no,
                 source_unit_no=source_unit,
                 target_unit_no=target_unit,
+                unit_factory_codes=unit_factory_codes,
             ).upper()
-            if rewritten_code == code.upper() or len(rewritten_code) != len(chars):
+            if rewritten_code == code.upper() or len(rewritten_code) != len(normalized_chars):
                 continue
 
             for index, target_char in enumerate(rewritten_code):
-                source_char = chars[index].upper()
+                source_char = normalized_chars[index].upper()
                 if source_char == target_char:
                     continue
                 item = ordered[index]
@@ -557,7 +689,7 @@ class AuditReplaceExecutor:
                         "layout_name": item.layout_name,
                         "entity_type": item.entity_type,
                         "entity_handle": item.entity_handle,
-                        "field_context": item.field_context or cls._EXTERNAL_CODE_CONTEXT,
+                        "field_context": item.field_context,
                         "block_path": item.block_path,
                         "position_x": item.position_x,
                         "position_y": item.position_y,
@@ -565,6 +697,248 @@ class AuditReplaceExecutor:
                     }
                 )
         return entries
+
+    @classmethod
+    def _build_titleblock_standardization_entries(
+        cls,
+        *,
+        items: list[Any],
+        existing_entries: list[dict[str, Any]],
+        issue_month_text: str,
+        target_revision: str,
+        target_revision_description: str,
+        date_pattern: str,
+        revision_description_keywords: list[str] | None = None,
+        source_project_no: str = "",
+        target_project_no: str = "",
+    ) -> list[dict[str, Any]]:
+        existing_handles = {
+            str(entry.get("entity_handle"))
+            for entry in existing_entries
+            if entry.get("entity_handle") and entry.get("status") == "pending"
+        }
+        entries: list[dict[str, Any]] = []
+
+        try:
+            compiled_date_pattern = re.compile(date_pattern)
+        except re.error:
+            compiled_date_pattern = re.compile(r"\d{4}\.\d{2}")
+
+        revision_groups_by_frame = cls._group_items_by_frame_key_and_context(
+            items,
+            field_context="titleblock_revision",
+        )
+        date_groups_by_frame = cls._group_items_by_frame_key_and_context(
+            items,
+            field_context="titleblock_date",
+        )
+        handled_date_handles: set[str] = set()
+        for frame_key, revision_group in revision_groups_by_frame.items():
+            sorted_revisions = sorted(revision_group, key=lambda item: cls._item_y(item) or 0.0)
+            keep_revision = sorted_revisions[0] if sorted_revisions else None
+            if keep_revision is None:
+                continue
+            for date_item in date_groups_by_frame.get(frame_key, []):
+                handle = str(date_item.entity_handle or "")
+                if not handle or handle in existing_handles:
+                    continue
+                paired_revision = cls._nearest_same_row_item(date_item, sorted_revisions)
+                if paired_revision is None:
+                    continue
+                raw_text = str(date_item.raw_text or "")
+                match = compiled_date_pattern.search(raw_text)
+                if paired_revision is keep_revision:
+                    if match is None or match.group(0) == issue_month_text:
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            date_item,
+                            matched_text=match.group(0),
+                            replacement_text=issue_month_text,
+                            message="titleblock_date_month",
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                else:
+                    matched_text = match.group(0) if match is not None else raw_text
+                    if not matched_text:
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            date_item,
+                            matched_text=matched_text,
+                            replacement_text="",
+                            message="titleblock_date_clear_non_target_revision",
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                existing_handles.add(handle)
+                handled_date_handles.add(handle)
+
+        for item in items:
+            if item.field_context != "titleblock_date":
+                continue
+            handle = str(item.entity_handle or "")
+            if not handle or handle in existing_handles or handle in handled_date_handles:
+                continue
+            match = compiled_date_pattern.search(str(item.raw_text or ""))
+            if match is None or match.group(0) == issue_month_text:
+                continue
+            entries.append(
+                cls._make_standardization_entry(
+                    item,
+                    matched_text=match.group(0),
+                    replacement_text=issue_month_text,
+                    message="titleblock_date_month",
+                    source_project_no=source_project_no,
+                    target_project_no=target_project_no,
+                )
+            )
+            existing_handles.add(handle)
+
+        for field_context, target_text, message in (
+            ("titleblock_revision", target_revision, "titleblock_revision_target_a"),
+            (
+                "titleblock_revision_description",
+                target_revision_description,
+                "titleblock_revision_description_target_a",
+            ),
+        ):
+            grouped = cls._group_items_by_frame_and_context(
+                items,
+                field_context=field_context,
+                revision_description_keywords=revision_description_keywords,
+            )
+            for group in grouped:
+                sorted_group = sorted(group, key=lambda item: cls._item_y(item) or 0.0)
+                keep = sorted_group[0] if sorted_group else None
+                for item in sorted_group:
+                    handle = str(item.entity_handle or "")
+                    if not handle or handle in existing_handles:
+                        continue
+                    raw_text = str(item.raw_text or "")
+                    if item is keep:
+                        if target_text and raw_text.strip() != target_text:
+                            entries.append(
+                                cls._make_standardization_entry(
+                                    item,
+                                    matched_text=raw_text,
+                                    replacement_text=target_text,
+                                    message=message,
+                                    source_project_no=source_project_no,
+                                    target_project_no=target_project_no,
+                                )
+                            )
+                            existing_handles.add(handle)
+                        continue
+                    entries.append(
+                        cls._make_standardization_entry(
+                            item,
+                            matched_text=raw_text,
+                            replacement_text="",
+                            message=message,
+                            source_project_no=source_project_no,
+                            target_project_no=target_project_no,
+                        )
+                    )
+                    existing_handles.add(handle)
+
+        return entries
+
+    @staticmethod
+    def _group_items_by_frame_and_context(
+        items: list[Any],
+        *,
+        field_context: str,
+        revision_description_keywords: list[str] | None = None,
+    ) -> list[list[Any]]:
+        grouped = AuditReplaceExecutor._group_items_by_frame_key_and_context(
+            items,
+            field_context=field_context,
+            revision_description_keywords=revision_description_keywords,
+        )
+        return list(grouped.values())
+
+    @staticmethod
+    def _group_items_by_frame_key_and_context(
+        items: list[Any],
+        *,
+        field_context: str,
+        revision_description_keywords: list[str] | None = None,
+    ) -> dict[tuple[str, str], list[Any]]:
+        grouped: dict[tuple[str, str], list[Any]] = defaultdict(list)
+        for item in items:
+            if item.field_context != field_context or not item.entity_handle:
+                continue
+            if AuditReplaceExecutor._item_y(item) is None:
+                continue
+            if field_context == "titleblock_revision_description":
+                raw_text = str(item.raw_text or "")
+                keywords = revision_description_keywords or ["出版", "升版"]
+                if not any(keyword and keyword in raw_text for keyword in keywords):
+                    continue
+            grouped[(str(item.internal_code or ""), str(item.layout_name or ""))].append(item)
+        return grouped
+
+    @classmethod
+    def _nearest_same_row_item(cls, item: Any, candidates: list[Any]) -> Any | None:
+        item_y = cls._item_y(item)
+        if item_y is None:
+            return None
+        nearby: list[tuple[float, Any]] = []
+        for candidate in candidates:
+            candidate_y = cls._item_y(candidate)
+            if candidate_y is None:
+                continue
+            distance = abs(candidate_y - item_y)
+            if distance <= cls._same_titleblock_row_y_tolerance(item, candidate):
+                nearby.append((distance, candidate))
+        if not nearby:
+            return None
+        nearby.sort(key=lambda pair: pair[0])
+        return nearby[0][1]
+
+    @staticmethod
+    def _same_titleblock_row_y_tolerance(*items: Any) -> float:
+        heights = [
+            float(item.text_bbox.height)
+            for item in items
+            if getattr(item, "text_bbox", None) is not None and item.text_bbox.height > 0
+        ]
+        return max([5.0, *(height * 0.75 for height in heights)])
+
+    @staticmethod
+    def _make_standardization_entry(
+        item: Any,
+        *,
+        matched_text: str,
+        replacement_text: str,
+        message: str,
+        source_project_no: str = "",
+        target_project_no: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "status": "pending",
+            "matched_text": matched_text,
+            "replacement_text": replacement_text,
+            "raw_text": item.raw_text,
+            "new_text": item.raw_text,
+            "source_project_no": source_project_no,
+            "target_project_no": target_project_no,
+            "matched_project_nos": [],
+            "context_kind": "titleblock_standardization",
+            "internal_code": item.internal_code,
+            "layout_name": item.layout_name,
+            "entity_type": item.entity_type,
+            "entity_handle": item.entity_handle,
+            "field_context": item.field_context,
+            "block_path": item.block_path,
+            "position_x": item.position_x,
+            "position_y": item.position_y,
+            "message": message,
+        }
 
     @staticmethod
     def _external_code_prefix_pairs(mapping: ReplaceMapping) -> list[tuple[str, str]]:
@@ -586,7 +960,7 @@ class AuditReplaceExecutor:
     def _cluster_external_code_char_items(cls, items: list[Any]) -> list[list[Any]]:
         keyed: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for item in items:
-            if item.field_context not in (None, cls._EXTERNAL_CODE_CONTEXT):
+            if item.field_context != cls._EXTERNAL_CODE_CONTEXT:
                 continue
             if not item.entity_handle:
                 continue
@@ -664,6 +1038,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None = None,
         target_unit_no: str | None = None,
+        unit_factory_codes: list[str] | None = None,
     ) -> None:
         doc = ezdxf.readfile(source_dxf)
         pending_by_handle: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -695,6 +1070,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
 
             if updated_text == current_text:
@@ -715,6 +1091,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit_no,
             target_unit_no=target_unit_no,
+            unit_factory_codes=unit_factory_codes,
         )
 
         output_dxf.parent.mkdir(parents=True, exist_ok=True)
@@ -728,6 +1105,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> Path:
         source_unit = normalize_unit_no(source_unit_no)
         target_unit = normalize_unit_no(target_unit_no)
@@ -742,6 +1120,7 @@ class AuditReplaceExecutor:
             target_project_no=target_project_no,
             source_unit_no=source_unit,
             target_unit_no=target_unit,
+            unit_factory_codes=unit_factory_codes,
         )
 
         output_source_dxf = source_dxf
@@ -766,6 +1145,7 @@ class AuditReplaceExecutor:
         target_project_no: str,
         source_unit_no: str | None,
         target_unit_no: str | None,
+        unit_factory_codes: list[str] | None = None,
     ) -> int:
         changed_count = 0
         for entity in list(doc.entitydb.values()):
@@ -777,6 +1157,7 @@ class AuditReplaceExecutor:
                 target_project_no=target_project_no,
                 source_unit_no=source_unit_no,
                 target_unit_no=target_unit_no,
+                unit_factory_codes=unit_factory_codes,
             )
             if updated_text != current_text:
                 self._set_entity_text(entity, updated_text)

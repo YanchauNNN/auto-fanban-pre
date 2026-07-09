@@ -108,7 +108,20 @@ def test_audit_dotnet_scanner_writes_slot_runtime_into_task_payload(
 
     def fake_run(*, task_json: Path, result_json: Path, **_: object) -> None:
         captured["task"] = json.loads(task_json.read_text(encoding="utf-8"))
-        result_json.write_text(json.dumps({"texts": []}, ensure_ascii=False), encoding="utf-8-sig")
+        result_json.write_text(
+            json.dumps(
+                {
+                    "texts": [
+                        {
+                            "raw_text": "示例文本",
+                            "entity_type": "DBText",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8-sig",
+        )
 
     monkeypatch.setattr(scanner.runner, "run", fake_run)
 
@@ -147,3 +160,23 @@ def test_audit_dotnet_scanner_raises_when_bridge_reports_errors(
 
     with pytest.raises(RuntimeError, match="audit scan failed"):
         scanner.scan(job_id="job-audit-error", source_dwg=source_dwg, workspace_dir=workspace_dir)
+
+
+def test_audit_dotnet_scanner_raises_when_scan_returns_no_texts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    scanner = AuditDotNetScanner()
+    source_dwg = tmp_path / "2026-A01.dwg"
+    source_dwg.write_bytes(b"dwg")
+    workspace_dir = tmp_path / "work"
+
+    def fake_run(*, result_json: Path, **_: object) -> None:
+        result_json.write_text(json.dumps({"texts": []}, ensure_ascii=False), encoding="utf-8-sig")
+
+    monkeypatch.setattr(scanner.runner, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="audit scan produced no text items"):
+        scanner.scan(job_id="job-audit-empty", source_dwg=source_dwg, workspace_dir=workspace_dir)

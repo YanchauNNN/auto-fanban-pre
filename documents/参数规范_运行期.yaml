@@ -137,10 +137,8 @@ runtime_options:
       pc3_name: { type: str, default: "打印PDF2.pc3", desc: "CAD 打印设备 PC3 名称（按图幅匹配规则使用）" }
       paper_variant_pc3_overrides:
         type: object
-        default:
-          CNPE_A2+1/2: "打印PDF3.pc3"
-          CNPE_A2+0.5: "打印PDF3.pc3"
-        desc: "特殊图幅到备用 PC3 的映射；命中这些图幅时，本次 CAD 打印任务使用对应 PC3，其余图幅仍使用 pc3_name"
+        default: {}
+        desc: "特殊图幅到备用 PC3 的映射；打印PDF2 已包含 A2+0.5(921.00 x 450.00 毫米) 媒体，默认无需切换备用 PC3"
       ctb_name: { type: str, default: "fanban_monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
       default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/review_white/steel_liner" }
       plot_style_profiles:
@@ -318,6 +316,14 @@ runtime_options:
         type: float
         default: 5.0
         desc: "标准号与标准名称判定为同一行/附近文本的 y 坐标容差；单位沿用 CAD 扫描坐标"
+      same_text_pairing_enabled:
+        type: bool
+        default: true
+        desc: "同一完整文本框内同时出现标准号和标准名称时，直接按该文本框内的标准号-名称成组校验，不再依赖 y 坐标邻近匹配"
+      format_variant_compatibility_enabled:
+        type: bool
+        default: true
+        desc: "标准号格式兼容：允许空格/换行、全角或缺失斜杠、常见连字符/破折号、括号年限等写法差异"
 
   # --------------------------------------------------------------------------
   # 5) 翻版厂房索引图模板映射

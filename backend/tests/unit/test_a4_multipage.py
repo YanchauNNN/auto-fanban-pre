@@ -245,7 +245,7 @@ class TestNoA4Frames:
         assert remaining == [sibling]
         assert len(sheet_sets) == 1
         sheet_set = sheet_sets[0]
-        assert sheet_set.sheet_set_type == "NON_A4_001_MARKER_FAMILY"
+        assert sheet_set.sheet_set_type == "001_MARKER_FAMILY"
         assert sheet_set.paper == "CNPE_A0"
         assert sheet_set.page_total == 2
         assert [page.page_index for page in sheet_set.pages] == [1, 2]

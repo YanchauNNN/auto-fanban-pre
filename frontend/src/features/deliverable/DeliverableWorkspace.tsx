@@ -18,6 +18,7 @@ import type {
   CreateBatchPayload,
   FontReplacementMap,
   FontReplacementOption,
+  FontPreflightFileResult,
   FontPreflightResult,
   FormField,
   FormSchema,
@@ -48,6 +49,7 @@ type DeliverableWorkspaceProps = {
     sourceIslandNo: string;
     targetProjectNo: string;
     targetIslandNo: string;
+    unitFactoryCodes?: readonly string[];
     runDeliverable: boolean;
   } | null;
   onBatchCreated: (payload: CreateBatchPayload) => void;
@@ -353,6 +355,7 @@ export function DeliverableWorkspace({
                 sourceIslandNo: pendingReplaceConfig.sourceIslandNo,
                 targetProjectNo: pendingReplaceConfig.targetProjectNo,
                 targetIslandNo: pendingReplaceConfig.targetIslandNo,
+                unitFactoryCodes: pendingReplaceConfig.unitFactoryCodes ?? [],
                 files: draft.files,
                 runDeliverable: true,
                 deliverableParams: submissionValues,
@@ -1266,6 +1269,10 @@ export function DeliverableWorkspace({
                 </p>
               </div>
             </header>
+            <div className={styles.fontManualCheckWarning} role="alert">
+              <strong>请出图后进行人工核查</strong>
+              <span>重点核查图签、内部编码、外部编码、页码等字体风险区域，确认 PDF 文字完整且位置正确。</span>
+            </div>
 
             <section className={styles.section}>
               <header className={styles.sectionHeader}>
@@ -1276,6 +1283,7 @@ export function DeliverableWorkspace({
                   const targetTextCount = Number(file.emptyStyleEntityReplacedCount ?? 0);
                   const patchedStyleCount = Number(file.emptyStyleStylePatchedCount ?? 0);
                   const sharedCount = Number(file.emptyStyleSharedSkippedCount ?? 0);
+                  const issueItems = buildFontRiskIssueItems(file);
                   return (
                     <article className={styles.fontFileCard} key={file.filename}>
                       <div className={styles.summaryHeaderRow}>
@@ -1289,6 +1297,11 @@ export function DeliverableWorkspace({
                       <p className={styles.emptyState}>
                         检测到图签关键区域存在空字体样式文字，建议使用当前勾选的字体兼容模式打印。
                       </p>
+                      <ul className={styles.fontRiskIssueList}>
+                        {issueItems.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
                     </article>
                   );
                 })}
@@ -2212,6 +2225,7 @@ function applyFilesToDraft(
   const replaceTargetProjectNo = pendingReplaceConfig?.runDeliverable
     ? pendingReplaceConfig.targetProjectNo.trim()
     : "";
+  const unitFactoryCodes = pendingReplaceConfig?.unitFactoryCodes ?? draft.replaceConfig.unitFactoryCodes;
   const shouldAutofillProjectNo =
     !currentProjectNo ||
     currentProjectNo === draft.inference.primaryProjectNo ||
@@ -2250,6 +2264,7 @@ function applyFilesToDraft(
       sourceIslandNo: pendingReplaceConfig?.sourceIslandNo ?? draft.replaceConfig.sourceIslandNo,
       targetProjectNo: replaceTargetProjectNo,
       targetIslandNo: pendingReplaceConfig?.targetIslandNo ?? draft.replaceConfig.targetIslandNo,
+      ...(unitFactoryCodes ? { unitFactoryCodes } : {}),
     },
   };
 }
@@ -2337,6 +2352,48 @@ function getFontCompatibilityRiskFiles(result: FontPreflightResult | null) {
       Number(file.emptyStyleStylePatchedCount ?? 0) > 0 ||
       Number(file.emptyStyleSharedSkippedCount ?? 0) > 0,
   );
+}
+
+function buildFontRiskIssueItems(file: FontPreflightFileResult) {
+  const items: string[] = [];
+  const targetTextCount = Number(file.emptyStyleEntityReplacedCount ?? 0);
+  const patchedStyleCount = Number(file.emptyStyleStylePatchedCount ?? 0);
+  const sharedCount = Number(file.emptyStyleSharedSkippedCount ?? 0);
+  const targetRegionCount = Number(file.emptyStyleTargetRegionsCount ?? 0);
+
+  if (
+    Boolean(file.fontCompatibilityRequired) ||
+    patchedStyleCount > 0 ||
+    targetTextCount > 0
+  ) {
+    const details = [
+      patchedStyleCount > 0 ? `${patchedStyleCount} 类样式` : "",
+      targetTextCount > 0 ? `${targetTextCount} 处文字` : "",
+      targetRegionCount > 0 ? `${targetRegionCount} 个目标区域` : "",
+    ].filter(Boolean);
+    items.push(
+      `空字体样式：${details.length > 0 ? details.join("，") : "图签关键区域存在空字体样式"}`,
+    );
+  }
+
+  if (sharedCount > 0) {
+    const styleNames = (file.emptyStyleSharedStyles ?? [])
+      .map((style) => style.trim())
+      .filter(Boolean);
+    items.push(
+      `共享空字体样式：${styleNames.length > 0 ? styleNames.join("、") : `${sharedCount} 类样式`}`,
+    );
+  }
+
+  for (const missingFont of file.missingFonts) {
+    const styleName = missingFont.styleName?.trim() || "未命名样式";
+    const fontName = missingFont.fontName?.trim() || "-";
+    const bigfontName = missingFont.bigfontName?.trim() || "-";
+    const kindLabel = getFontReplacementKindLabel(missingFont.kind);
+    items.push(`缺失字体样式：${styleName}（字体：${fontName}，大字体：${bigfontName}，类型：${kindLabel}）`);
+  }
+
+  return items.length > 0 ? items : ["字体显示风险：请核查 PDF 中图签和编码区域文字是否完整。"];
 }
 
 function buildFilePreflightCacheKey(files: File[]) {

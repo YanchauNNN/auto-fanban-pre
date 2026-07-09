@@ -11,6 +11,11 @@
     <Platforms>x64</Platforms>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="acdbmgd">
       <HintPath>$(AutoCADInstallDir)\acdbmgd.dll</HintPath>

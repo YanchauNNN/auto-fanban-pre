@@ -53,6 +53,10 @@ class CoverBinding(BaseModel):
     label: str | None = None
     desc: str | None = None
     split_rule: str | None = None
+    font_sizes: list[int] | None = None
+    min_font_size: int | None = None
+    max_chars_per_line: int | None = None
+    shrink_to_fit_fallback: bool = False
     merge: bool = False
     write_mode: str | None = None
     note: str | None = None

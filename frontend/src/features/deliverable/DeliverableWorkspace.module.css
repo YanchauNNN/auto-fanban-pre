@@ -309,6 +309,46 @@
   padding: 0.85rem 0.9rem;
 }
 
+.fontManualCheckWarning {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(177, 63, 36, 0.24);
+  background: linear-gradient(135deg, rgba(255, 246, 238, 0.98), rgba(255, 236, 226, 0.92));
+  color: #7c2d12;
+}
+
+.fontManualCheckWarning strong {
+  color: #9f2f18;
+  font-size: 1.34rem;
+  line-height: 1.2;
+}
+
+.fontManualCheckWarning span {
+  color: #84421f;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.fontRiskIssueList {
+  display: grid;
+  gap: 0.42rem;
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+}
+
+.fontRiskIssueList li {
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: rgba(177, 63, 36, 0.07);
+  color: #72361f;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.42;
+}
+
 .fontMissingList {
   display: grid;
   gap: 0.45rem;
