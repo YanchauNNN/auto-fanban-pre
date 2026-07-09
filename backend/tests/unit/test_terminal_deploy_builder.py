@@ -315,6 +315,9 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "API 与 worker 分离" in deploy_readme
     assert "不需要单独启动 worker" in deploy_readme
     assert "Stop-ScheduledTask -TaskName FanBanBackend" in deploy_readme
+    assert "api/system/ping" in deploy_readme
+    assert "不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`" in deploy_readme
+    assert "ARR proxy timeout 低于 600 秒" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -617,6 +620,11 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "$minimumProxyTimeoutSeconds = 600" in check_iis_proxy
     assert "timeout_status" in check_iis_proxy
     assert "timeout_seconds" in check_iis_proxy
+    assert "function Resolve-ArrTimeoutValue" in check_iis_proxy
+    assert '$Value.PSObject.Properties["Value"]' in check_iis_proxy
+    assert '$Value.PSObject.Properties["Attributes"]' in check_iis_proxy
+    assert '$attributesProperty.Value["timeout"]' in check_iis_proxy
+    assert "Convert-ArrTimeoutToSeconds -Value $proxyTimeoutResolved" in check_iis_proxy
     assert "msiexec.exe" in install_iis_proxy
     assert "url_rewrite" in install_iis_proxy
     assert "requestRouter_amd64.msi" in install_iis_proxy or "arr" in install_iis_proxy
@@ -986,4 +994,22 @@ def test_generated_start_backend_runs_api_and_worker_as_separate_children(tmp_pa
     assert "Register-BackendChildProcessForTaskStop -BackendProcess $workerProcess" in start_backend
 
 
+def test_generated_start_backend_prevents_duplicate_supervisors_and_workers(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    start_backend = (output_root / "scripts" / "start_backend.ps1").read_text(encoding="utf-8")
+
+    assert "New-BackendSupervisorMutex" in start_backend
+    assert "Test-ExistingBackendBeforeLaunch" in start_backend
+    assert "existing_backend_detected action=exit_without_launching_children" in start_backend
+    assert "backend_port_already_listening action=fail_without_launching_children" in start_backend
+    assert "api_port_bind_failed action=fail_without_retry" in start_backend
+    assert '$apiReadyForWorker = $false' in start_backend
+    assert '$apiReadyForWorker = $true' in start_backend
+    assert 'if ($apiReadyForWorker -and $null -eq $workerChild)' in start_backend
+    assert 'Start-BackendManagedProcess -Label "worker"' in start_backend
 

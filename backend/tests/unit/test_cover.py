@@ -352,3 +352,115 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
 
     assert left == "NP Building"
     assert right == "Level 3.900m~Roof Formwork"
+
+
+@pytest.mark.parametrize(
+    ("case_name", "project_no", "title_cn", "title_en", "cells", "max_font_size", "expect_reduced"),
+    [
+        (
+            "common_cn_short",
+            "2016",
+            "NF厂房屋面钢结构图",
+            "Short English Title",
+            ("I21", "I22"),
+            14,
+            False,
+        ),
+        (
+            "common_cn_medium",
+            "2016",
+            "核辅助厂房标高楼板结构布置图",
+            "Medium English Title",
+            ("I21", "I22"),
+            14,
+            False,
+        ),
+        (
+            "common_cn_long",
+            "2016",
+            (
+                "核辅助厂房内部结构外环墙钢楼梯及二次钢结构施工图很长标题"
+                "特别长用于触发封面标题字号自适应"
+            ),
+            "Long English Title",
+            ("I21", "I22"),
+            14,
+            True,
+        ),
+        (
+            "project_1818_cn_long",
+            "1818",
+            (
+                "巴基斯坦恰希玛核电五号机组NF厂房屋面钢结构详图"
+                "及二次钢结构施工图超长中文标题"
+            ),
+            "NF Building Roof Steel Structure Detail",
+            ("I21", "I22"),
+            14,
+            True,
+        ),
+        (
+            "project_1818_en_short",
+            "1818",
+            "NF厂房屋面钢结构详图",
+            "NF Building Roof Steel Structure Detail",
+            ("I23", "I24"),
+            10,
+            False,
+        ),
+        (
+            "project_1818_en_long",
+            "1818",
+            "NF厂房屋面钢结构详图",
+            (
+                "NF Building roof steel structure detail drawings and secondary steel "
+                "structure shop drawings at elevation twenty eight meters for "
+                "construction review package"
+            ),
+            ("I23", "I24"),
+            10,
+            True,
+        ),
+    ],
+)
+def test_cover_title_fit_smoke_for_project_and_title_lengths(
+    temp_dir: Path,
+    case_name: str,
+    project_no: str,
+    title_cn: str,
+    title_en: str,
+    cells: tuple[str, str],
+    max_font_size: int,
+    expect_reduced: bool,
+) -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no=project_no)
+    ctx.params.album_title_cn = title_cn
+    ctx.params.album_title_en = title_en
+    bindings = gen.spec.get_cover_bindings(ctx.params.project_no)
+    data = gen._prepare_data(ctx)
+
+    output_docx = temp_dir / f"cover-title-fit-{case_name}.docx"
+
+    def force_embedded_fallback(*, output_path, bindings, data):  # noqa: ANN001
+        raise RuntimeError("force embedded fallback")
+
+    gen._write_cover_via_com = force_embedded_fallback  # type: ignore[method-assign]
+    gen._refresh_cover_ole_preview_via_com = lambda output_path: None  # type: ignore[method-assign]
+
+    gen._write_cover(
+        template_path=gen._get_template_path(ctx),
+        output_path=output_docx,
+        bindings=bindings,
+        data=data,
+        ctx=ctx,
+    )
+
+    ws = _read_cover_embedded_wb(output_docx)
+    sizes = [float(ws[cell].font.sz) for cell in cells]
+
+    if expect_reduced:
+        assert all(size < max_font_size for size in sizes)
+    else:
+        assert all(size == max_font_size for size in sizes)
+    assert all(ws[cell].alignment.wrapText is True for cell in cells)

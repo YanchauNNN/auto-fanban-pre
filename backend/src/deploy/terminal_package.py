@@ -512,6 +512,8 @@ $latestStdoutLog = Join-Path $logsDir "backend-latest-stdout.log"
 $latestStderrLog = Join-Path $logsDir "backend-latest-stderr.log"
 $script:backendExitCode = 0
 $script:stopSupervisor = $false
+$script:supervisorMutex = $null
+$script:supervisorMutexAcquired = $false
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
@@ -544,6 +546,55 @@ function Write-BackendLogHeader {
     ) -join [Environment]::NewLine
     $header | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
     $header | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Get-BackendSupervisorMutexName {
+    $identity = "{0}|{1}|{2}" -f ([System.IO.Path]::GetFullPath($root).ToLowerInvariant()), $ListenHost, $Port
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($identity)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        $hash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+        return "Local\FanBanBackendSupervisor-{0}" -f $hash.Substring(0, 32)
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function New-BackendSupervisorMutex {
+    $mutexName = Get-BackendSupervisorMutexName
+    $createdNew = $false
+    $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+    $script:supervisorMutex = $mutex
+    $script:supervisorMutexAcquired = [bool]$createdNew
+    if ($createdNew) {
+        ("backend-supervisor: mutex_acquired name={0}" -f $mutexName) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    } else {
+        ("backend-supervisor: duplicate_supervisor_detected mutex={0} action=exit_without_launching_children" -f $mutexName) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    }
+    return [ordered]@{
+        acquired = [bool]$createdNew
+        name = $mutexName
+    }
+}
+
+function Close-BackendSupervisorMutex {
+    if ($null -ne $script:supervisorMutex) {
+        if ($script:supervisorMutexAcquired) {
+            try {
+                $script:supervisorMutex.ReleaseMutex() | Out-Null
+            } catch {
+            }
+        }
+        try {
+            $script:supervisorMutex.Dispose()
+        } catch {
+        }
+    }
+    $script:supervisorMutex = $null
+    $script:supervisorMutexAcquired = $false
 }
 
 function Set-BackendRuntimeEnvironment {
@@ -782,6 +833,80 @@ function Get-BackendListenerSnapshot {
     }
 }
 
+function Test-ExistingBackendBeforeLaunch {
+    param(
+        [string]$PingUrl,
+        [int]$BackendPort,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $pingResult = Test-BackendPing -PingUrl $PingUrl -TimeoutSeconds $TimeoutSeconds
+    $listenerSnapshot = Get-BackendListenerSnapshot -BackendPort $BackendPort
+    $pingElapsedMs = if ($null -ne $pingResult.elapsed_ms) { [int64]$pingResult.elapsed_ms } else { -1 }
+    $pingError = if ($null -ne $pingResult.error) { [string]$pingResult.error } else { "" }
+
+    if ([bool]$pingResult.ok) {
+        ("backend-supervisor: existing_backend_detected action=exit_without_launching_children listener_status={0} listener_count={1} ping_elapsed_ms={2}" -f `
+            $listenerSnapshot.status,
+            $listenerSnapshot.count,
+            $pingElapsedMs) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        return [ordered]@{
+            action = "exit"
+            reason = "healthy_existing_backend"
+            ping = $pingResult
+            listener = $listenerSnapshot
+        }
+    }
+
+    if ($listenerSnapshot.status -eq "pass" -and [int]$listenerSnapshot.count -gt 0) {
+        ("backend-supervisor: backend_port_already_listening action=fail_without_launching_children listener_status={0} listener_count={1} ping_elapsed_ms={2} ping_error={3}" -f `
+            $listenerSnapshot.status,
+            $listenerSnapshot.count,
+            $pingElapsedMs,
+            $pingError) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        ($listenerSnapshot | ConvertTo-Json -Depth 8 -Compress) |
+            Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        return [ordered]@{
+            action = "exit"
+            reason = "port_already_listening_unhealthy"
+            ping = $pingResult
+            listener = $listenerSnapshot
+        }
+    }
+
+    return [ordered]@{
+        action = "launch"
+        reason = "no_existing_backend"
+        ping = $pingResult
+        listener = $listenerSnapshot
+    }
+}
+
+function Test-ManagedProcessPortBindFailure {
+    param([string]$ChildStderrLog)
+
+    if (-not (Test-Path -LiteralPath $ChildStderrLog -PathType Leaf)) {
+        return $false
+    }
+
+    $content = ""
+    try {
+        $content = (Get-Content -LiteralPath $ChildStderrLog -Encoding utf8 -Tail 120) -join [Environment]::NewLine
+    } catch {
+        return $false
+    }
+
+    return (
+        $content -match "WinError 10048" -or
+        $content -match "Errno 10048" -or
+        $content -match "address already in use" -or
+        $content -match "only one usage of each socket address" -or
+        $content -match "通常每个套接字地址"
+    )
+}
+
 function Stop-BackendProcessTree {
     param(
         [object]$BackendProcess,
@@ -964,6 +1089,23 @@ function Close-BackendChildProcessJob {
 Write-BackendLogHeader
 
 try {
+    $mutexResult = New-BackendSupervisorMutex
+    if (-not [bool]$mutexResult.acquired) {
+        Update-LatestBackendLogs
+        return
+    }
+
+    $probeHost = Get-BackendProbeHost -HostValue $ListenHost
+    $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
+    $existingBackendDecision = Test-ExistingBackendBeforeLaunch `
+        -PingUrl $pingUrl `
+        -BackendPort $Port `
+        -TimeoutSeconds $PingTimeoutSeconds
+    if ([string]$existingBackendDecision.action -eq "exit") {
+        Update-LatestBackendLogs
+        return
+    }
+
     if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
         throw "Python 运行环境不存在: $python"
     }
@@ -1002,8 +1144,6 @@ try {
         Test-BackendImportPreflight -PythonPath $python -BackendRuntimeRoot (Get-Location).Path
         "Starting backend supervisor..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
 
-        $probeHost = Get-BackendProbeHost -HostValue $ListenHost
-        $pingUrl = "http://{0}:{1}/api/system/ping" -f $probeHost, $Port
         $apiArgs = @(
             "-X",
             "utf8",
@@ -1128,16 +1268,14 @@ try {
         $workerChild = $null
         $failureCount = 0
         $startupDeadline = Get-Date
+        $apiReadyForWorker = $false
         while (-not $script:stopSupervisor) {
             if ($null -eq $apiChild) {
                 $apiAttempt += 1
                 $apiChild = Start-BackendManagedProcess -Label "api" -ArgumentList $apiArgs -Attempt $apiAttempt
                 $startupDeadline = (Get-Date).AddSeconds($StartupGraceSeconds)
                 $failureCount = 0
-            }
-            if ($null -eq $workerChild) {
-                $workerAttempt += 1
-                $workerChild = Start-BackendManagedProcess -Label "worker" -ArgumentList $workerArgs -Attempt $workerAttempt
+                $apiReadyForWorker = $false
             }
 
             if ($script:stopSupervisor) {
@@ -1176,11 +1314,18 @@ try {
                 $apiChild.process.Refresh()
                 $script:backendExitCode = $apiChild.process.ExitCode
                 $apiRestartReason = "api_process_exited"
+                $apiReadyForWorker = $false
                 Append-ManagedProcessLogs `
                     -Label "api" `
                     -StdoutLog $apiChild.stdout `
                     -ChildStderrLog $apiChild.stderr `
                     -SupervisorStderrLog $stderrLog
+                if (Test-ManagedProcessPortBindFailure -ChildStderrLog $apiChild.stderr) {
+                    ("backend-supervisor: api_port_bind_failed action=fail_without_retry exit_code={0}" -f $script:backendExitCode) |
+                        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+                    Update-LatestBackendLogs
+                    return
+                }
                 ("backend-supervisor: restarting api reason={0} exit_code={1} delay_seconds={2}" -f `
                     $apiRestartReason,
                     $script:backendExitCode,
@@ -1200,8 +1345,14 @@ try {
                         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
                 }
                 $failureCount = 0
+                $apiReadyForWorker = $true
+                if ($apiReadyForWorker -and $null -eq $workerChild) {
+                    $workerAttempt += 1
+                    $workerChild = Start-BackendManagedProcess -Label "worker" -ArgumentList $workerArgs -Attempt $workerAttempt
+                }
                 continue
             }
+            $apiReadyForWorker = $false
             if ((Get-Date) -lt $startupDeadline) {
                 continue
             }
@@ -1282,6 +1433,8 @@ try {
     ($_ | Out-String) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
     Update-LatestBackendLogs
     throw
+} finally {
+    Close-BackendSupervisorMutex
 }
 '''
     start_backend = (
@@ -2048,6 +2201,53 @@ $proxyTimeoutRaw = ""
 $proxyTimeoutSeconds = $null
 $proxyTimeoutStatus = "skip"
 
+function Resolve-ArrTimeoutValue {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [TimeSpan]) {
+        return $Value
+    }
+    if ($Value -is [string]) {
+        return $Value
+    }
+
+    try {
+        $valueProperty = $Value.PSObject.Properties["Value"]
+        if ($null -ne $valueProperty -and $null -ne $valueProperty.Value) {
+            return $valueProperty.Value
+        }
+    } catch {
+    }
+
+    try {
+        $attributesProperty = $Value.PSObject.Properties["Attributes"]
+        if ($null -ne $attributesProperty -and $null -ne $attributesProperty.Value) {
+            $timeoutAttribute = $attributesProperty.Value["timeout"]
+            if ($null -ne $timeoutAttribute) {
+                $timeoutValueProperty = $timeoutAttribute.PSObject.Properties["Value"]
+                if ($null -ne $timeoutValueProperty -and $null -ne $timeoutValueProperty.Value) {
+                    return $timeoutValueProperty.Value
+                }
+                return $timeoutAttribute
+            }
+        }
+    } catch {
+    }
+
+    try {
+        $timeoutProperty = $Value.PSObject.Properties["timeout"]
+        if ($null -ne $timeoutProperty -and $null -ne $timeoutProperty.Value) {
+            return Resolve-ArrTimeoutValue -Value $timeoutProperty.Value
+        }
+    } catch {
+    }
+
+    return $Value
+}
+
 function Convert-ArrTimeoutToSeconds {
     param([object]$Value)
 
@@ -2095,8 +2295,13 @@ if ($iisInstalled) {
             $proxyTimeoutValue = $proxySection.timeout
         }
 
-        $proxyTimeoutRaw = if ($null -ne $proxyTimeoutValue) { [string]$proxyTimeoutValue } else { "" }
-        $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutValue
+        $proxyTimeoutResolved = Resolve-ArrTimeoutValue -Value $proxyTimeoutValue
+        $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutResolved
+        if ($null -eq $proxyTimeoutSeconds -and $null -ne $proxySection) {
+            $proxyTimeoutResolved = Resolve-ArrTimeoutValue -Value $proxySection
+            $proxyTimeoutSeconds = Convert-ArrTimeoutToSeconds -Value $proxyTimeoutResolved
+        }
+        $proxyTimeoutRaw = if ($null -ne $proxyTimeoutResolved) { [string]$proxyTimeoutResolved } else { "" }
         if ($null -eq $proxyTimeoutSeconds) {
             $proxyTimeoutStatus = "unknown"
         } elseif ([int]$proxyTimeoutSeconds -lt $minimumProxyTimeoutSeconds) {
@@ -2465,14 +2670,33 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 5. 再执行 `scripts\deep_check_terminal.ps1`
 6. 配置 IIS：`install\configure_iis_site.ps1`
 7. 注册登录触发任务：`install\register_backend_task.ps1 -UserName "<本机登录账号>"`
-8. 执行 `scripts\check_health.ps1`
-9. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+8. 等待 `http://127.0.0.1:8000/api/system/ping` 就绪
+9. 执行 `scripts\check_health.ps1`
+10. 如果只想临时本机调试，可手工执行 `scripts\start_backend.ps1`
+
+等待 API 就绪的推荐命令：
+
+```powershell
+$apiReady = $false
+$deadline = (Get-Date).AddMinutes(5)
+do {
+    try {
+        Invoke-RestMethod -Uri "http://127.0.0.1:8000/api/system/ping" -TimeoutSec 5 | Out-Null
+        $apiReady = $true
+    } catch {
+        Start-Sleep -Seconds 5
+    }
+} until ($apiReady -or (Get-Date) -ge $deadline)
+if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查看 D:\FanBanServer\logs\backend-latest-stderr.log" }
+```
 
 ## 后端启动模型
 
 - 当前部署包采用 API 与 worker 分离：API 进程只负责网页接口和队列入库，worker 进程负责 CAD/文档长任务。
 - 正常安装命令不需要变化，也不需要单独启动 worker；`scripts\start_backend.ps1` 会同时托管 API 和 worker。
 - `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
+- `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
+- `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
 
 ## 一致性边界
 
