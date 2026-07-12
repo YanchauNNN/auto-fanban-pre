@@ -39,6 +39,7 @@ import {
 import groupLogoUrl from "../assets/group-logo.jpg";
 import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
+import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
 import type {
   ApiAdapter,
   CreateBatchPayload,
@@ -471,6 +472,30 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
     }
     return detail;
   },
+  getAiState: async () => ({
+    enabled: false,
+    profile: "tutorial",
+    model: "",
+    ownerKey: "tutorial",
+    defaultAgent: "platform_assistant",
+    agents: [],
+    skills: [],
+    mcpServers: [],
+  }),
+  listAiConversations: async () => [],
+  createAiConversation: async () => {
+    throw new Error("Tutorial preview cannot create AI conversations.");
+  },
+  getAiConversation: async () => {
+    throw new Error("Tutorial preview cannot load AI conversations.");
+  },
+  renameAiConversation: async () => {
+    throw new Error("Tutorial preview cannot rename AI conversations.");
+  },
+  sendAiMessage: async () => {
+    throw new Error("Tutorial preview cannot send AI messages.");
+  },
+  clearAiConversation: async () => {},
 };
 
 type TutorialStep = (typeof DELIVERABLE_TUTORIAL_STEPS)[number];
@@ -1290,6 +1315,8 @@ function WorkspacePage() {
           onPrevious={handlePreviousTutorialStep}
         />
       ) : null}
+
+      <AiChatDrawer adapter={adapter} />
     </div>
   );
 }

@@ -387,6 +387,100 @@ describe("HttpAdapter", () => {
     });
   });
 
+  it("renames an AI conversation with a mutating PATCH request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          conversation_id: "conv-1",
+          title: "规则提炼会话",
+          created_at: "2026-07-11T10:00:00+08:00",
+          updated_at: "2026-07-11T10:04:00+08:00",
+          message_count: 2,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const renamed = await adapter.renameAiConversation("conv-1", "规则提炼会话");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conv-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "规则提炼会话" }),
+      }),
+    );
+    expect(renamed).toEqual({
+      conversationId: "conv-1",
+      title: "规则提炼会话",
+      createdAt: "2026-07-11T10:00:00+08:00",
+      updatedAt: "2026-07-11T10:04:00+08:00",
+      messageCount: 2,
+    });
+  });
+
+  it("propagates an external abort signal to AI GET requests", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let resolveFetch: ((value: unknown) => void) | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    const pending = adapter.getAiState(controller.signal);
+    controller.abort();
+    const abortWasPropagated = requestSignal?.aborted;
+    resolveFetch?.({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          enabled: true,
+          profile: "development_minimax",
+          model: "MiniMax-M3",
+          owner_key: "ip:127.0.0.1",
+          default_agent: "platform_assistant",
+          agents: [],
+          skills: [],
+          mcp_servers: [],
+        }),
+    });
+    await pending;
+
+    expect(abortWasPropagated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a timeout signal to AI control mutations", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return Promise.resolve({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            conversation_id: "conv-new",
+            title: "新会话",
+            created_at: "2026-07-12T12:00:00+08:00",
+            updated_at: "2026-07-12T12:00:00+08:00",
+            message_count: 0,
+          }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    await adapter.createAiConversation("新会话");
+
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("subscribes to jobs activity SSE and closes cleanly", () => {
     const instances: FakeEventSource[] = [];
 

@@ -316,6 +316,77 @@ export type JobsActivity = {
   lastChangedAt: string | null;
 };
 
+export type AiAgent = {
+  agentId: string;
+  name: string;
+  description: string;
+};
+
+export type AiSkill = {
+  skillId: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  readOnly: boolean;
+};
+
+export type AiMcpServer = {
+  serverId: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  readOnly: boolean;
+  transport?: string;
+};
+
+export type AiState = {
+  enabled: boolean;
+  profile: string;
+  model: string;
+  ownerKey: string;
+  defaultAgent: string;
+  agents: AiAgent[];
+  skills: AiSkill[];
+  mcpServers: AiMcpServer[];
+};
+
+export type AiConversationSummary = {
+  conversationId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+};
+
+export type AiMessage = {
+  messageId: string;
+  role: "system" | "user" | "assistant" | string;
+  content: string;
+  createdAt: string;
+  modelProfile?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type AiConversationDetail = AiConversationSummary & {
+  messages: AiMessage[];
+};
+
+export type SendAiMessagePayload = {
+  content: string;
+  agentId?: string | null;
+  skillIds?: string[];
+  mcpServerIds?: string[];
+};
+
+export type AiSendMessageResult = {
+  conversationId: string;
+  userMessage: AiMessage;
+  assistantMessage: AiMessage;
+  memory: {
+    usedHistoryMessages: number;
+  };
+};
+
 export type CreateBatchPayload = {
   batchId: string;
   jobs: JobSummary[];
@@ -401,4 +472,20 @@ export type ApiAdapter = {
     onError?: (event: Event) => void,
   ) => () => void;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
+  getAiState: (signal?: AbortSignal) => Promise<AiState>;
+  listAiConversations: (signal?: AbortSignal) => Promise<AiConversationSummary[]>;
+  createAiConversation: (title?: string) => Promise<AiConversationSummary>;
+  getAiConversation: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<AiConversationDetail>;
+  renameAiConversation: (
+    conversationId: string,
+    title: string,
+  ) => Promise<AiConversationSummary>;
+  sendAiMessage: (
+    conversationId: string,
+    payload: SendAiMessagePayload,
+  ) => Promise<AiSendMessageResult>;
+  clearAiConversation: (conversationId: string) => Promise<void>;
 };
