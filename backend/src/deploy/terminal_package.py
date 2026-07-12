@@ -2784,6 +2784,8 @@ if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查
 - 终端内网部署使用 `terminal_cnpe_intranet_qwen_fast` profile，对应 `http://models.ai.cnpe.cc/qwen_fast/v1/chat/completions`、模型 `Qwen3.6-35A3`、流式输出、无鉴权头。
 - `prepare_terminal.ps1` 会把 `FANBAN_AI_GATEWAY_CONFIG_PATH` 和 `FANBAN_AI_GATEWAY_PROFILE=terminal_cnpe_intranet_qwen_fast` 写入 `scripts\runtime.env.ps1`，后端启动时会自动加载。
 - 部署机上可执行 `scripts\test_ai_model_connectivity.ps1` 生成连通性诊断 JSON；默认输出到 `storage\ai\diagnostics\ai-connectivity-*.json`。
+- 诊断 JSON 的 `script.sha256` 应与同包 `package-manifest.json` 中 `scripts/test_ai_model_connectivity.ps1` 的 SHA-256 一致，`environment.config_sha256` 用于确认实际读取的网关配置版本。
+- 流式检查会重组多个 SSE delta 后再校验标记；部分兼容网关在完整响应后直接关闭连接而不发送 `[DONE]`，因此 `done_received=false` 不能单独判定为失败，应结合 `status_code`、`response_contains_expected`、`invalid_data_line_count` 和总状态判断。
 
 开发/测试环境验证：
 

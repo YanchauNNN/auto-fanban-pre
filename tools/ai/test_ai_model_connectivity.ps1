@@ -18,6 +18,39 @@ function Get-UtcIsoTimestamp {
     return (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $null
+    }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+}
+
+function ConvertTo-StringArray {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return @()
+    }
+    if ($Value -is [System.Array]) {
+        return @($Value | ForEach-Object { [string]$_ })
+    }
+
+    $text = ([string]$Value).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return @()
+    }
+    if ($text.StartsWith("[") -and $text.EndsWith("]")) {
+        try {
+            return @($text | ConvertFrom-Json | ForEach-Object { [string]$_ })
+        } catch {
+            return @($text)
+        }
+    }
+    return @($text)
+}
+
 function Resolve-FullPathOrRaw {
     param([string]$PathText)
 
@@ -285,16 +318,22 @@ function Invoke-HttpRequest {
     }
 
     $response = $null
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $response = $request.GetResponse()
         $status = [int]([System.Net.HttpWebResponse]$response).StatusCode
         $reader = [System.IO.StreamReader]::new($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
         $content = $reader.ReadToEnd()
         $reader.Dispose()
+        $stopwatch.Stop()
         return [PSCustomObject]@{
             status_code = $status
             body = $content
             body_preview = if ($content.Length -gt 1000) { $content.Substring(0, 1000) } else { $content }
+            content_type = [string]$response.ContentType
+            content_length = [long]$response.ContentLength
+            final_url = [string]$response.ResponseUri.AbsoluteUri
+            elapsed_ms = [long]$stopwatch.ElapsedMilliseconds
         }
     } catch [System.Net.WebException] {
         $errorResponse = $_.Exception.Response
@@ -303,14 +342,20 @@ function Invoke-HttpRequest {
             $reader = [System.IO.StreamReader]::new($errorResponse.GetResponseStream(), [System.Text.Encoding]::UTF8)
             $content = $reader.ReadToEnd()
             $reader.Dispose()
+            $stopwatch.Stop()
             return [PSCustomObject]@{
                 status_code = $status
                 body = $content
                 body_preview = if ($content.Length -gt 1000) { $content.Substring(0, 1000) } else { $content }
+                content_type = [string]$errorResponse.ContentType
+                content_length = [long]$errorResponse.ContentLength
+                final_url = [string]$errorResponse.ResponseUri.AbsoluteUri
+                elapsed_ms = [long]$stopwatch.ElapsedMilliseconds
             }
         }
         throw
     } finally {
+        $stopwatch.Stop()
         if ($null -ne $response) {
             $response.Dispose()
         }
@@ -346,21 +391,33 @@ function Get-JsonPropertyValue {
     return $property.Value
 }
 
-function ConvertFrom-StreamDeltaContent {
+function ConvertFrom-StreamResponse {
     param([string]$Body)
 
     $parts = [System.Collections.ArrayList]::new()
+    $parsedEventCount = 0
+    $invalidDataLineCount = 0
+    $doneReceived = $false
     foreach ($line in ($Body -split "`r?`n")) {
         $trimmed = $line.Trim()
         if (-not $trimmed.StartsWith("data:")) {
             continue
         }
         $payload = $trimmed.Substring(5).Trim()
-        if ([string]::IsNullOrWhiteSpace($payload) -or $payload -eq "[DONE]") {
+        if ([string]::IsNullOrWhiteSpace($payload)) {
+            continue
+        }
+        if ($payload -eq "[DONE]") {
+            $doneReceived = $true
             continue
         }
 
         $json = ConvertTo-JsonObjectOrNull $payload
+        if ($null -eq $json) {
+            $invalidDataLineCount += 1
+            continue
+        }
+        $parsedEventCount += 1
         $choices = Get-JsonPropertyValue $json "choices"
         if ($null -eq $choices) {
             continue
@@ -374,7 +431,12 @@ function ConvertFrom-StreamDeltaContent {
         }
     }
 
-    return ($parts -join "")
+    return [PSCustomObject]@{
+        content = ($parts -join "")
+        parsed_event_count = $parsedEventCount
+        invalid_data_line_count = $invalidDataLineCount
+        done_received = $doneReceived
+    }
 }
 
 function Add-DiagnosticError {
@@ -432,6 +494,8 @@ $apiKeyEnvVar = [string]$profileConfig["api_key_env_var"]
 $apiKeyRequired = [bool]$profileConfig["api_key_required"]
 $streamEnabled = [bool]$profileConfig["stream_enabled"]
 $modelListRequired = [bool]$profileConfig["model_list_required"]
+$networkMode = [string]$profileConfig["network_mode"]
+$allowedHosts = @(ConvertTo-StringArray $profileConfig["allowed_hosts"])
 $timeoutSec = [int]$profileConfig["timeout_sec"]
 $sslNoRevokeConfig = [bool]$profileConfig["ssl_no_revoke"]
 $testPrompt = [string]$profileConfig["test_prompt"]
@@ -462,51 +526,74 @@ if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
 }
 
 $endpoint = Get-UrlHostAndPort $baseUrl
+$normalizedAllowedHosts = @(
+    $allowedHosts |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim().ToLowerInvariant() }
+)
+$networkPolicyBlocked = $false
+if ($networkMode -eq "intranet_only") {
+    if ($normalizedAllowedHosts.Count -eq 0) {
+        Add-DiagnosticError $errors "config" "Intranet-only profile requires a non-empty allowed_hosts list."
+        $networkPolicyBlocked = $true
+    } elseif (-not ($normalizedAllowedHosts -contains $endpoint.host.ToLowerInvariant())) {
+        Add-DiagnosticError $errors "config" (
+            "Base URL host '{0}' is not allowed by intranet profile '{1}'." -f
+            $endpoint.host,
+            $selectedProfile
+        )
+        $networkPolicyBlocked = $true
+    }
+}
 $dnsResult = [PSCustomObject]@{
-    attempted = $true
+    attempted = -not $networkPolicyBlocked
     ok = $false
     host = $endpoint.host
     addresses = @()
     error = $null
 }
-try {
-    $addresses = [System.Net.Dns]::GetHostAddresses($endpoint.host) | ForEach-Object { $_.IPAddressToString }
-    $dnsResult.addresses = @($addresses)
-    $dnsResult.ok = $dnsResult.addresses.Count -gt 0
-} catch {
-    $dnsResult.error = $_.Exception.Message
-    Add-DiagnosticError $errors "dns" $_.Exception.Message
+if (-not $networkPolicyBlocked) {
+    try {
+        $addresses = [System.Net.Dns]::GetHostAddresses($endpoint.host) | ForEach-Object { $_.IPAddressToString }
+        $dnsResult.addresses = @($addresses)
+        $dnsResult.ok = $dnsResult.addresses.Count -gt 0
+    } catch {
+        $dnsResult.error = $_.Exception.Message
+        Add-DiagnosticError $errors "dns" $_.Exception.Message
+    }
 }
 
 $tcpResult = [PSCustomObject]@{
-    attempted = $true
+    attempted = -not $networkPolicyBlocked
     ok = $false
     host = $endpoint.host
     port = $endpoint.port
     error = $null
 }
-try {
-    $client = [System.Net.Sockets.TcpClient]::new()
+if (-not $networkPolicyBlocked) {
     try {
-        $async = $client.BeginConnect($endpoint.host, $endpoint.port, $null, $null)
-        $connected = $async.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds([int]$profileConfig["connect_timeout_sec"]))
-        if ($connected) {
-            $client.EndConnect($async)
-            $tcpResult.ok = $true
-        } else {
-            $tcpResult.error = "TCP connect timed out"
-            Add-DiagnosticError $errors "tcp" $tcpResult.error
+        $client = [System.Net.Sockets.TcpClient]::new()
+        try {
+            $async = $client.BeginConnect($endpoint.host, $endpoint.port, $null, $null)
+            $connected = $async.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds([int]$profileConfig["connect_timeout_sec"]))
+            if ($connected) {
+                $client.EndConnect($async)
+                $tcpResult.ok = $true
+            } else {
+                $tcpResult.error = "TCP connect timed out"
+                Add-DiagnosticError $errors "tcp" $tcpResult.error
+            }
+        } finally {
+            $client.Close()
         }
-    } finally {
-        $client.Close()
+    } catch {
+        $tcpResult.error = $_.Exception.Message
+        Add-DiagnosticError $errors "tcp" $_.Exception.Message
     }
-} catch {
-    $tcpResult.error = $_.Exception.Message
-    Add-DiagnosticError $errors "tcp" $_.Exception.Message
 }
 
 $modelsResult = [PSCustomObject]@{
-    attempted = -not $SkipModels
+    attempted = (-not $SkipModels) -and (-not $networkPolicyBlocked)
     ok = $false
     required = $modelListRequired
     url = Join-EndpointUrl $baseUrl $modelsPath
@@ -514,13 +601,21 @@ $modelsResult = [PSCustomObject]@{
     model_count = 0
     models = @()
     body_preview = ""
+    content_type = ""
+    content_length = $null
+    final_url = ""
+    elapsed_ms = $null
     error = $null
 }
-if (-not $SkipModels) {
+if ((-not $SkipModels) -and (-not $networkPolicyBlocked)) {
     try {
         $modelResponse = Invoke-CurlJson -Url $modelsResult.url -Headers $headers -TimeoutSec $timeoutSec -UseSslNoRevoke:$sslNoRevokeConfig
         $modelsResult.status_code = $modelResponse.status_code
         $modelsResult.body_preview = $modelResponse.body_preview
+        $modelsResult.content_type = $modelResponse.content_type
+        $modelsResult.content_length = $modelResponse.content_length
+        $modelsResult.final_url = $modelResponse.final_url
+        $modelsResult.elapsed_ms = $modelResponse.elapsed_ms
         if ($modelResponse.status_code -eq 200) {
             $modelJson = ConvertTo-JsonObjectOrNull $modelResponse.body
             $items = @()
@@ -556,7 +651,7 @@ if (-not $SkipModels) {
 }
 
 $chatResult = [PSCustomObject]@{
-    attempted = -not $SkipChat
+    attempted = (-not $SkipChat) -and (-not $networkPolicyBlocked)
     ok = $false
     url = Join-EndpointUrl $baseUrl $chatPath
     status_code = $null
@@ -565,9 +660,13 @@ $chatResult = [PSCustomObject]@{
     response_contains_expected = $false
     content_preview = ""
     body_preview = ""
+    content_type = ""
+    content_length = $null
+    final_url = ""
+    elapsed_ms = $null
     error = $null
 }
-if (-not $SkipChat) {
+if ((-not $SkipChat) -and (-not $networkPolicyBlocked)) {
     try {
         $chatHeaders = $headers.Clone()
         $chatHeaders["Content-Type"] = "application/json"
@@ -584,6 +683,10 @@ if (-not $SkipChat) {
         $chatResponse = Invoke-CurlJson -Url $chatResult.url -Method "POST" -Headers $chatHeaders -Body $payload -TimeoutSec $timeoutSec -UseSslNoRevoke:$sslNoRevokeConfig
         $chatResult.status_code = $chatResponse.status_code
         $chatResult.body_preview = $chatResponse.body_preview
+        $chatResult.content_type = $chatResponse.content_type
+        $chatResult.content_length = $chatResponse.content_length
+        $chatResult.final_url = $chatResponse.final_url
+        $chatResult.elapsed_ms = $chatResponse.elapsed_ms
         if ($chatResponse.status_code -eq 200) {
             $chatJson = ConvertTo-JsonObjectOrNull $chatResponse.body
             if ($null -ne $chatJson -and $null -ne $chatJson.choices -and @($chatJson.choices).Count -gt 0) {
@@ -612,18 +715,25 @@ if (-not $SkipChat) {
 }
 
 $streamResult = [PSCustomObject]@{
-    attempted = (-not $SkipStream) -and $streamEnabled
+    attempted = (-not $SkipStream) -and $streamEnabled -and (-not $networkPolicyBlocked)
     ok = $false
     url = Join-EndpointUrl $baseUrl $chatPath
     status_code = $null
     model = $chatModel
     data_line_count = 0
+    parsed_event_count = 0
+    invalid_data_line_count = 0
+    done_received = $false
     response_contains_expected = $false
     content_preview = ""
     body_preview = ""
+    content_type = ""
+    content_length = $null
+    final_url = ""
+    elapsed_ms = $null
     error = $null
 }
-if ((-not $SkipStream) -and $streamEnabled) {
+if ((-not $SkipStream) -and $streamEnabled -and (-not $networkPolicyBlocked)) {
     try {
         $streamHeaders = $headers.Clone()
         $streamHeaders["Content-Type"] = "application/json"
@@ -641,8 +751,16 @@ if ((-not $SkipStream) -and $streamEnabled) {
         $streamResponse = Invoke-CurlStream -Url $streamResult.url -Headers $streamHeaders -Body $payload -TimeoutSec $timeoutSec -UseSslNoRevoke:$sslNoRevokeConfig
         $streamResult.status_code = $streamResponse.status_code
         $streamResult.body_preview = $streamResponse.body_preview
+        $streamResult.content_type = $streamResponse.content_type
+        $streamResult.content_length = $streamResponse.content_length
+        $streamResult.final_url = $streamResponse.final_url
+        $streamResult.elapsed_ms = $streamResponse.elapsed_ms
         $streamResult.data_line_count = $streamResponse.data_line_count
-        $streamContent = ConvertFrom-StreamDeltaContent $streamResponse.body
+        $streamDiagnostics = ConvertFrom-StreamResponse $streamResponse.body
+        $streamContent = [string]$streamDiagnostics.content
+        $streamResult.parsed_event_count = $streamDiagnostics.parsed_event_count
+        $streamResult.invalid_data_line_count = $streamDiagnostics.invalid_data_line_count
+        $streamResult.done_received = $streamDiagnostics.done_received
         $streamResult.content_preview = if ($streamContent.Length -gt 600) { $streamContent.Substring(0, 600) } else { $streamContent }
         $streamResult.response_contains_expected = $streamContent.Contains($expectedResponseContains) -or $streamResponse.body.Contains($expectedResponseContains)
         $streamResult.ok = ($streamResponse.status_code -eq 200) -and ($streamResult.data_line_count -gt 0) -and $streamResult.response_contains_expected
@@ -658,13 +776,14 @@ if ((-not $SkipStream) -and $streamEnabled) {
 $finishedAt = Get-UtcIsoTimestamp
 $summaryOk = ($errors.Count -eq 0)
 $result = [PSCustomObject]@{
-    schema_version = "0.1"
+    schema_version = "0.2"
     status = if ($summaryOk) { "passed" } else { "failed" }
     started_at_utc = $startedAt
     finished_at_utc = $finishedAt
     script = [PSCustomObject]@{
         path = $PSCommandPath
-        version = "fanban-ai-connectivity@0.1"
+        version = "fanban-ai-connectivity@0.2"
+        sha256 = Get-FileSha256 $PSCommandPath
         powershell = $PSVersionTable.PSVersion.ToString()
     }
     environment = [PSCustomObject]@{
@@ -672,12 +791,24 @@ $result = [PSCustomObject]@{
         user_name = $env:USERNAME
         root = $root
         config_path = $ConfigPath
+        config_sha256 = Get-FileSha256 $ConfigPath
         profile = $selectedProfile
+        output_path = $OutputPath
+    }
+    invocation = [PSCustomObject]@{
+        skip_models = [bool]$SkipModels
+        skip_chat = [bool]$SkipChat
+        skip_stream = [bool]$SkipStream
+        base_url_overridden = -not [string]::IsNullOrWhiteSpace($BaseUrl)
+        chat_model_overridden = -not [string]::IsNullOrWhiteSpace($ChatModel)
+        api_key_env_var_overridden = -not [string]::IsNullOrWhiteSpace($ApiKeyEnvVar)
+        ssl_no_revoke = $sslNoRevokeConfig
     }
     profile = [PSCustomObject]@{
         provider = [string]$profileConfig["provider"]
         protocol = [string]$profileConfig["protocol"]
-        network_mode = [string]$profileConfig["network_mode"]
+        network_mode = $networkMode
+        allowed_hosts = @($allowedHosts)
         architecture = [string]$profileConfig["architecture"]
         base_url = $baseUrl
         models_url = $modelsResult.url

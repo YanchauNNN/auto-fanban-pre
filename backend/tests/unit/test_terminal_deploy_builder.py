@@ -337,6 +337,9 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
     assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
     assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).read_bytes() == (
+        repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME
+    ).read_bytes()
     assert (output_root / DEPLOY_README).exists()
     deploy_readme = (output_root / DEPLOY_README).read_text(encoding="utf-8")
     assert "install\\check_iis_proxy_prereqs.ps1" in deploy_readme
@@ -348,6 +351,10 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`" in deploy_readme
     assert "ARR proxy timeout 低于 600 秒" in deploy_readme
     assert "scripts\\test_ai_model_connectivity.ps1" in deploy_readme
+    assert "script.sha256" in deploy_readme
+    assert "package-manifest.json" in deploy_readme
+    assert "done_received=false" in deploy_readme
+    assert "不能单独判定为失败" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
