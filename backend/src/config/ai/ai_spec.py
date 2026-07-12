@@ -12,6 +12,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, Field
@@ -23,6 +24,9 @@ LEGACY_AI_SPEC_PATHS = (
     Path("config") / "参数规范_AI.yaml",
 )
 AI_SPEC_PATH_ENV_VAR = "FANBAN_AI_SPEC_PATH"
+AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+AI_GATEWAY_CONFIG_PATH_ENV_VAR = "FANBAN_AI_GATEWAY_CONFIG_PATH"
+AI_GATEWAY_PROFILE_ENV_VAR = "FANBAN_AI_GATEWAY_PROFILE"
 
 
 class AiDeploymentProfileConfig(BaseModel):
@@ -42,9 +46,39 @@ class AiModelGatewayConfig(BaseModel):
     base_url: str = "http://127.0.0.1:8001/v1"
     api_key_policy: str = "env_only"
     api_key: str | None = Field(default=None, repr=False)
+    authorization_scheme: str = "bearer"
     timeout_sec: int = 60
     max_retries: int = 1
     retry_backoff_ms: int = 800
+
+
+class AiModelGatewayProfileConfig(BaseModel):
+    provider: str = "openai_compatible"
+    protocol: str = "openai_compatible"
+    network_mode: str = "intranet_only"
+    base_url: str = ""
+    allowed_hosts: list[str] = Field(default_factory=list)
+    api_key_env_var: str = ""
+    api_key_required: bool = False
+    authorization_scheme: str = "none"
+    chat_model: str = ""
+    structured_model: str = ""
+    timeout_sec: int | None = None
+
+
+class AiModelGatewayProfilesSpec(BaseModel):
+    schema_version: str = "0.1"
+    active_profile: str = ""
+    profiles: dict[str, AiModelGatewayProfileConfig] = Field(default_factory=dict)
+
+    def select_profile(self) -> AiModelGatewayProfileConfig | None:
+        profile_name = os.getenv(AI_GATEWAY_PROFILE_ENV_VAR) or self.active_profile
+        if not profile_name:
+            return None
+        profile = self.profiles.get(profile_name)
+        if profile is None:
+            raise ValueError(f"Unknown AI gateway profile: {profile_name}")
+        return profile
 
 
 class AiChatModelConfig(BaseModel):
@@ -142,6 +176,58 @@ class AiKnowledgeBaseConfig(BaseModel):
     chunking: AiChunkingConfig = Field(default_factory=AiChunkingConfig)
 
 
+class AiChatConcurrencyConfig(BaseModel):
+    max_global_requests: int = 4
+    max_per_owner_requests: int = 1
+
+
+class AiChatAgentConfig(BaseModel):
+    agent_id: str
+    name: str
+    description: str = ""
+    system_prompt: str = ""
+
+
+class AiChatSkillConfig(BaseModel):
+    skill_id: str
+    name: str
+    description: str = ""
+    enabled: bool = True
+    read_only: bool = True
+
+
+class AiChatMcpServerConfig(BaseModel):
+    server_id: str
+    name: str
+    description: str = ""
+    enabled: bool = False
+    read_only: bool = True
+    transport: str = "disabled"
+    endpoint: str = ""
+
+
+class AiChatConfig(BaseModel):
+    enabled: bool = True
+    default_agent: str = "platform_assistant"
+    max_history_messages: int = 20
+    max_user_message_chars: int = 4000
+    request_timeout_seconds: int = 60
+    retention_days: int = 30
+    concurrency: AiChatConcurrencyConfig = Field(default_factory=AiChatConcurrencyConfig)
+    agents: list[AiChatAgentConfig] = Field(
+        default_factory=lambda: [
+            AiChatAgentConfig(
+                agent_id="platform_assistant",
+                name="出图平台助手",
+                description="回答出图平台使用、任务状态和图纸理解相关问题",
+                system_prompt="你是出图平台的只读 AI 助手，回答必须谨慎、可复核。",
+            )
+        ],
+    )
+    skills: list[AiChatSkillConfig] = Field(default_factory=list)
+    mcp_servers: list[AiChatMcpServerConfig] = Field(default_factory=list)
+
+
 class AiQAAssistantConfig(BaseModel):
     enabled: bool = False
     mode: str = "rule_based_seed"
@@ -187,6 +273,7 @@ class AiLayerConfig(BaseModel):
         default_factory=AiTemplateUnderstandingConfig,
     )
     knowledge_base: AiKnowledgeBaseConfig = Field(default_factory=AiKnowledgeBaseConfig)
+    chat: AiChatConfig = Field(default_factory=AiChatConfig)
     qa_assistant: AiQAAssistantConfig = Field(default_factory=AiQAAssistantConfig)
     safety: AiSafetyConfig = Field(default_factory=AiSafetyConfig)
     audit_and_cache: AiAuditAndCacheConfig = Field(default_factory=AiAuditAndCacheConfig)
@@ -199,6 +286,7 @@ class ResolvedAiGatewayConfig(BaseModel):
     base_url_env_var: str
     api_key_policy: str
     api_key: str | None = Field(default=None, repr=False)
+    authorization_scheme: str
     timeout_sec: int
     max_retries: int
     retry_backoff_ms: int
@@ -211,6 +299,7 @@ class ResolvedAiGatewayConfig(BaseModel):
             "base_url_env_var": self.base_url_env_var,
             "api_key_policy": self.api_key_policy,
             "api_key": _mask_secret(self.api_key),
+            "authorization_scheme": self.authorization_scheme,
             "timeout_sec": self.timeout_sec,
             "max_retries": self.max_retries,
             "retry_backoff_ms": self.retry_backoff_ms,
@@ -228,7 +317,7 @@ class AiSpec(BaseModel):
 
     @property
     def models(self) -> AiModelsConfig:
-        return self.ai_layer.models
+        return self.resolve_models()
 
     @property
     def drawing_understanding(self) -> AiDrawingUnderstandingConfig:
@@ -241,21 +330,94 @@ class AiSpec(BaseModel):
     def resolve_gateway(self) -> ResolvedAiGatewayConfig:
         gateway = self.ai_layer.model_gateway
         bootstrap = self.ai_layer.bootstrap_contract
-        base_url = os.getenv(bootstrap.base_url_env_var) or gateway.base_url
-        api_key = os.getenv(bootstrap.api_key_env_var)
+        gateway_profile = self.resolve_gateway_profile()
+        base_url = os.getenv(bootstrap.base_url_env_var) or (
+            gateway_profile.base_url if gateway_profile and gateway_profile.base_url else gateway.base_url
+        )
+        api_key_env_var = (
+            gateway_profile.api_key_env_var
+            if gateway_profile is not None
+            else bootstrap.api_key_env_var
+        )
+        api_key = os.getenv(api_key_env_var) if api_key_env_var else None
         if not api_key and gateway.api_key_policy != "env_only":
             api_key = gateway.api_key
+        api_key_policy = gateway.api_key_policy
+        if gateway_profile is not None and not gateway_profile.api_key_required and not api_key_env_var:
+            api_key_policy = "none"
+        authorization_scheme = (
+            gateway_profile.authorization_scheme
+            if gateway_profile is not None
+            else gateway.authorization_scheme
+        )
         return ResolvedAiGatewayConfig(
             provider=gateway.provider,
             base_url=base_url,
-            api_key_env_var=bootstrap.api_key_env_var,
+            api_key_env_var=api_key_env_var,
             base_url_env_var=bootstrap.base_url_env_var,
-            api_key_policy=gateway.api_key_policy,
+            api_key_policy=api_key_policy,
             api_key=api_key,
-            timeout_sec=gateway.timeout_sec,
+            authorization_scheme=authorization_scheme,
+            timeout_sec=(
+                gateway_profile.timeout_sec
+                if gateway_profile is not None and gateway_profile.timeout_sec is not None
+                else gateway.timeout_sec
+            ),
             max_retries=gateway.max_retries,
             retry_backoff_ms=gateway.retry_backoff_ms,
         )
+
+    def resolve_models(self) -> AiModelsConfig:
+        models = self.ai_layer.models.model_copy(deep=True)
+        gateway_profile = self.resolve_gateway_profile()
+        if gateway_profile is None:
+            return models
+        if gateway_profile.chat_model:
+            models.chat.model = gateway_profile.chat_model
+        if gateway_profile.structured_model:
+            models.structured.model = gateway_profile.structured_model
+        return models
+
+    def resolve_gateway_profile(self) -> AiModelGatewayProfileConfig | None:
+        gateway_profiles = _load_gateway_profiles_for_ai_spec(self.source_path)
+        if gateway_profiles is None:
+            return None
+        return gateway_profiles.select_profile()
+
+    def resolve_gateway_profile_name(self) -> str:
+        gateway_profiles = _load_gateway_profiles_for_ai_spec(self.source_path)
+        if gateway_profiles is None:
+            return ""
+        return os.getenv(AI_GATEWAY_PROFILE_ENV_VAR) or gateway_profiles.active_profile
+
+    def validate_gateway_network_policy(self, *, required_network_mode: str) -> None:
+        profile = self.resolve_gateway_profile()
+        profile_name = self.resolve_gateway_profile_name()
+        if profile is None:
+            raise ValueError("AI gateway profile is required by the deployment network policy")
+        if profile.network_mode != required_network_mode:
+            raise ValueError(
+                f"AI gateway profile {profile_name!r} network mode is not allowed: "
+                f"expected {required_network_mode!r}, got {profile.network_mode!r}",
+            )
+
+        deployment = self.ai_layer.deployment_profile
+        if required_network_mode == "intranet_only" and (
+            deployment.network_mode != "intranet_only" or deployment.allow_external_network
+        ):
+            raise ValueError("AI deployment policy is not allowed for an intranet-only terminal")
+
+        gateway_host = (urlsplit(self.resolve_gateway().base_url).hostname or "").lower()
+        allowed_hosts = {host.strip().lower() for host in profile.allowed_hosts if host.strip()}
+        if required_network_mode == "intranet_only" and not allowed_hosts:
+            raise ValueError(
+                f"AI gateway profile {profile_name!r} requires a non-empty host allowlist",
+            )
+        if not gateway_host or (allowed_hosts and gateway_host not in allowed_hosts):
+            raise ValueError(
+                f"AI gateway host {gateway_host or '<missing>'!r} is not allowed by "
+                f"profile {profile_name!r}",
+            )
 
 
 class AiSpecLoader:
@@ -288,6 +450,7 @@ class AiSpecLoader:
     @classmethod
     def clear_cache(cls) -> None:
         cls._load_cached.cache_clear()
+        _load_gateway_profiles_cached.cache_clear()
 
 
 def load_ai_spec(spec_path: str | Path = DEFAULT_AI_SPEC_PATH) -> AiSpec:
@@ -296,6 +459,47 @@ def load_ai_spec(spec_path: str | Path = DEFAULT_AI_SPEC_PATH) -> AiSpec:
 
 def reload_ai_spec(spec_path: str | Path = DEFAULT_AI_SPEC_PATH) -> AiSpec:
     return AiSpecLoader.reload(spec_path)
+
+
+def _load_gateway_profiles_for_ai_spec(
+    source_path: Path | None,
+) -> AiModelGatewayProfilesSpec | None:
+    config_path = _resolve_ai_gateway_config_path(source_path)
+    if config_path is None:
+        return None
+    if not config_path.exists():
+        if os.getenv(AI_GATEWAY_CONFIG_PATH_ENV_VAR):
+            raise FileNotFoundError(f"AI model gateway config does not exist: {config_path}")
+        return None
+    return _load_gateway_profiles_cached(_cache_key(config_path))
+
+
+@lru_cache(maxsize=8)
+def _load_gateway_profiles_cached(resolved_path: str) -> AiModelGatewayProfilesSpec:
+    path = Path(resolved_path)
+    with open(path, encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"AI model gateway config must be a YAML mapping: {path}")
+    return AiModelGatewayProfilesSpec.model_validate(data)
+
+
+def _resolve_ai_gateway_config_path(source_path: Path | None) -> Path | None:
+    env_path = os.getenv(AI_GATEWAY_CONFIG_PATH_ENV_VAR)
+    if env_path:
+        return Path(env_path)
+    if source_path is None:
+        return _find_relative_path(Path("documents") / "AI" / AI_GATEWAY_CONFIG_NAME)
+
+    source = Path(source_path)
+    candidates = [
+        source.parent / AI_GATEWAY_CONFIG_NAME,
+        source.parent / "AI" / AI_GATEWAY_CONFIG_NAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _resolve_ai_spec_path(spec_path: str | Path) -> Path:

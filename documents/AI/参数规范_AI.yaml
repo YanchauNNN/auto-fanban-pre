@@ -10,13 +10,13 @@
 # ============================================================================
 
 schema_version: "0.1"
-last_updated: "2026-06-16"
+last_updated: "2026-07-10"
 
 ai_layer:
   enabled:
     type: bool
-    default: false
-    desc: "AI 辅助层总开关；默认关闭，避免部署机未配置模型网关时影响主流程"
+    default: true
+    desc: "AI 辅助层总开关；关闭后所有 AI 对话和理解能力都不可用"
 
   deployment_profile:
     network_mode:
@@ -41,7 +41,7 @@ ai_layer:
     api_key_env_var:
       type: str
       default: "FANBAN_AI_API_KEY"
-      desc: "内部模型网关 API key 环境变量；不得写入 YAML 明文"
+      desc: "模型网关 API key 环境变量；不得写入 YAML 明文"
     base_url_env_var:
       type: str
       default: "FANBAN_AI_BASE_URL"
@@ -56,7 +56,7 @@ ai_layer:
     base_url:
       type: str
       default: "http://127.0.0.1:8001/v1"
-      desc: "内部模型网关地址；部署时建议用 FANBAN_AI_BASE_URL 覆盖"
+      desc: "无 profile 时的本机模型网关回退地址；部署时可用 FANBAN_AI_BASE_URL 覆盖"
     api_key_policy:
       type: enum
       default: "env_only"
@@ -79,8 +79,8 @@ ai_layer:
     chat:
       model:
         type: str
-        default: "internal-chat"
-        desc: "内部对话模型名称"
+        default: "MiniMax-M3"
+        desc: "默认 MiniMax 对话模型名称"
       temperature:
         type: float
         default: 0.1
@@ -92,8 +92,8 @@ ai_layer:
     structured:
       model:
         type: str
-        default: "internal-chat"
-        desc: "结构化 JSON 输出使用的模型"
+        default: "MiniMax-M3"
+        desc: "结构化 JSON 输出使用的 MiniMax 模型"
       require_json_schema:
         type: bool
         default: true
@@ -280,6 +280,78 @@ ai_layer:
         type: bool
         default: true
         desc: "切片时是否保留标题路径"
+
+  chat:
+    enabled:
+      type: bool
+      default: true
+      desc: "是否启用网页 AI 对话助手；模型调用必须从后端发出"
+    default_agent:
+      type: str
+      default: "platform_assistant"
+      desc: "默认智能体 ID"
+    max_history_messages:
+      type: int
+      default: 20
+      desc: "每次模型调用最多携带的历史 user/assistant 消息数"
+    max_user_message_chars:
+      type: int
+      default: 4000
+      desc: "单条用户消息最大字符数"
+    request_timeout_seconds:
+      type: int
+      default: 60
+      desc: "后端等待模型返回的超时时间"
+    retention_days:
+      type: int
+      default: 30
+      desc: "AI 对话记录默认保留天数；后续清理任务按该值执行"
+    concurrency:
+      max_global_requests:
+        type: int
+        default: 4
+        desc: "后端部署机同时发起的 AI 模型请求上限"
+      max_per_owner_requests:
+        type: int
+        default: 1
+        desc: "同一用户标识同一时间允许的 AI 请求数；第一版按 IP 区分"
+    agents:
+      - agent_id: "platform_assistant"
+        name: "出图平台助手"
+        description: "回答出图平台使用、任务记录和部署链路相关问题"
+        system_prompt: "你是中核工程出图平台的只读 AI 助手。回答必须基于当前对话和平台已知信息，不能声称已经修改图纸、任务、流程或文件。"
+      - agent_id: "drawing_understanding"
+        name: "图纸理解助手"
+        description: "解释图纸元素、图签字段、模板解析和规则提炼结果"
+        system_prompt: "你是图纸理解助手。你只能解释已有图纸元素、结构化结果和规则，不直接修改 DWG/DXF。"
+      - agent_id: "template_rule_assistant"
+        name: "模板规则助手"
+        description: "解释现有模板文件解析结果和规则来源"
+        system_prompt: "你是模板规则助手。你负责说明模板字段、规则来源和可能风险，不直接改动模板或参数文件。"
+    skills:
+      - skill_id: "drawing_element_explain"
+        name: "图纸元素解释"
+        description: "解释结构化图纸元素、图签字段、文本和几何对象含义"
+        enabled: true
+        read_only: true
+      - skill_id: "task_status_explain"
+        name: "任务状态解释"
+        description: "解释当前平台任务状态、错误信息和用户可执行的下一步"
+        enabled: true
+        read_only: true
+      - skill_id: "template_rule_query"
+        name: "模板规则查询"
+        description: "解释模板解析和规则提炼结果"
+        enabled: true
+        read_only: true
+    mcp_servers:
+      - server_id: "fanban_local_readonly"
+        name: "本地只读能力注册表"
+        description: "预留 MCP 能力注册；第一版不执行外部 MCP 工具"
+        enabled: false
+        read_only: true
+        transport: "disabled"
+        endpoint: ""
 
   qa_assistant:
     enabled:
