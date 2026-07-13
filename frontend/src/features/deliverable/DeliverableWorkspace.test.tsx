@@ -270,8 +270,10 @@ function createAdapter(): ApiAdapter {
     preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    rememberAuditReplaceFactoryCodes: vi.fn().mockResolvedValue({ factoryCodes: [] }),
     createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),
+    getJobsActivity: vi.fn(),
     getJobDetail: vi.fn(),
     createBatch: vi.fn(),
   };
@@ -355,6 +357,41 @@ function createMissingShxFontPreflightResult(
     },
     defaultReplacementFont: null,
     defaultReplacementFonts,
+    requiresConfirmation: true,
+  };
+}
+
+function createEmptyStyleFontPreflightResult(filename = "A12.dwg"): FontPreflightResult {
+  return {
+    files: [
+      {
+        filename,
+        status: "ok",
+        missingFonts: [],
+        detectedStyleCount: 14,
+        missingStyleCount: 0,
+        fontReplacementApplied: false,
+        replacementFont: null,
+        replacementFonts: {},
+        fontCompatibilityMode: true,
+        fontCompatibilityReplacements: {},
+        fontCompatibilityRequired: true,
+        emptyStyleEntityReplacedCount: 2,
+        emptyStyleStylePatchedCount: 2,
+        emptyStyleSharedSkippedCount: 1,
+        emptyStyleSharedStyles: ["汉字"],
+        emptyStyleTargetRegionsCount: 3,
+        emptyStyleGlobalReplacedCount: 0,
+        replacedStyleCount: 0,
+        verifyAfterReplace: null,
+        fontReplacementIncomplete: false,
+        errors: [],
+      },
+    ],
+    replacementOptions: [],
+    replacementOptionsByKind: {},
+    defaultReplacementFont: null,
+    defaultReplacementFonts: {},
     requiresConfirmation: true,
   };
 }
@@ -933,6 +970,57 @@ describe("DeliverableWorkspace", () => {
           font_compatibility_mode: true,
         }),
         expect.arrayContaining([expect.objectContaining({ name: "A01.dwg" })]),
+        false,
+      );
+    });
+  });
+
+  it("confirms empty style compatibility risk before creating a deliverable task", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(
+      createEmptyStyleFontPreflightResult("A12.dwg"),
+    );
+    adapter.createBatch = vi.fn().mockResolvedValue({
+      batchId: "batch-empty-style-risk",
+      jobs: [],
+    });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "A12.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await screen.findByText("A12.dwg");
+    await user.type(screen.getByLabelText(albumTitleLabel), "empty style");
+    await user.type(screen.getByLabelText(subitemNameLabel), "empty style subitem");
+    await user.click(screen.getByRole("button", { name: /创建交付任务/ }));
+
+    const dialog = await screen.findByRole("dialog", { name: "字体风险确认" });
+    expect(within(dialog).getByText(/A12\.dwg/)).toBeInTheDocument();
+    expect(within(dialog).getByText("请出图后进行人工核查")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/空字体样式：2 类样式，2 处文字，3 个目标区域/),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText(/共享空字体样式：汉字/)).toBeInTheDocument();
+    expect(adapter.createBatch).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "继续出图" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          font_replace_policy: "none",
+          font_compatibility_mode: true,
+        }),
+        expect.arrayContaining([expect.objectContaining({ name: "A12.dwg" })]),
         false,
       );
     });
@@ -2512,6 +2600,7 @@ describe("DeliverableWorkspace", () => {
         sourceIslandNo: "3",
         targetProjectNo: "2016",
         targetIslandNo: "1",
+        unitFactoryCodes: [],
         files: expect.arrayContaining([
           expect.objectContaining({ name: "20261NH-JGS51-B合并版.dwg" }),
         ]),

@@ -24,18 +24,21 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import math
 import re
 import shutil
 import time
 import zipfile
 from collections.abc import Callable
+from copy import copy
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from xml.etree import ElementTree as ET
+from xml.sax.saxutils import quoteattr
 
 from openpyxl import load_workbook
-from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter, range_boundaries
 
 from ..config import load_spec
 from ..config.spec_loader import CoverBinding
@@ -49,6 +52,7 @@ if TYPE_CHECKING:
     from ..models import DocContext
 
 _CELL_RE = re.compile(r"^([A-Za-z]+)(\d+)$")
+_XML_NAME_RE = r"[A-Za-z_][\w.-]*"
 _CN_SPLIT_PROTECTED_PHRASES = ("标高", "厂房")
 _XLSX_SHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _IGNORED_ERROR_FLAGS = {
@@ -92,6 +96,9 @@ _EXCEL_ERROR_CHECKING_OPTIONS = (
 class CoverGenerator(ICoverGenerator):
     """封面生成器实现"""
 
+    COVER_TITLE_WIDTH_PADDING_RATIO = 0.92
+    COVER_TITLE_LINE_HEIGHT_RATIO = 1.2
+
     def __init__(
         self,
         spec_path: str | None = None,
@@ -132,8 +139,13 @@ class CoverGenerator(ICoverGenerator):
             revision=ctx.get_cover_catalog_revision(),
             status=ctx.params.doc_status,
             internal_code=ctx.derived.cover_internal_code,
-            fallback_name="封面",
+            fallback_name=self._fallback_output_stem(),
         )
+
+    def _fallback_output_stem(self) -> str:
+        rule = self.spec.get_derivation_rules().get("cover_file_stem_fallback", {})
+        value = str(rule.get("value") or "").strip() if isinstance(rule, dict) else ""
+        return value or "图册封面"
 
     def _get_template_path(self, ctx: DocContext) -> str:
         """获取模板路径"""
@@ -207,6 +219,12 @@ class CoverGenerator(ICoverGenerator):
                     bindings=bindings,
                     data=data,
                 )
+                try:
+                    self._refresh_cover_ole_preview_via_com(output_path)
+                except Exception as refresh_exc:
+                    raise GenerationError(
+                        f"封面OLE预览刷新失败: COM={com_error}; refresh={refresh_exc}"
+                    ) from refresh_exc
                 return
             except Exception as embedded_exc:
                 raise GenerationError(
@@ -248,7 +266,10 @@ class CoverGenerator(ICoverGenerator):
                 return
             ws[cell] = value
 
-        self._apply_bindings(bindings, data, read_cell, write_cell)
+        def fit_cell(cell: str, text: str, binding: CoverBinding) -> None:
+            self._fit_cover_title_cell_openpyxl(ws, cell, text, binding)
+
+        self._apply_bindings(bindings, data, read_cell, write_cell, fit_cell)
 
         buf = BytesIO()
         wb.save(buf)
@@ -302,8 +323,12 @@ class CoverGenerator(ICoverGenerator):
                             f"Range({cell}).Value={value}",
                         )
 
-                    self._apply_bindings(bindings, data, read_cell, write_cell)
+                    def fit_cell(cell: str, text: str, binding: CoverBinding) -> None:
+                        self._fit_cover_title_cell_com(worksheet, cell, text, binding)
+
+                    self._apply_bindings(bindings, data, read_cell, write_cell, fit_cell)
                     self._suppress_cover_error_indicators_via_com(worksheet)
+                    self._refresh_cover_ole_preview_in_open_doc(doc)
                     self._com_call_with_retry(doc.Save, "Document.Save")
                 finally:
                     ws = None
@@ -321,6 +346,101 @@ class CoverGenerator(ICoverGenerator):
                     if pythoncom is not None:
                         with contextlib.suppress(Exception):
                             pythoncom.CoUninitialize()
+
+    def _refresh_cover_ole_preview_via_com(self, output_path: Path) -> None:
+        pythoncom = None
+        try:
+            import pythoncom  # type: ignore[import]
+            import win32com.client
+        except ImportError as exc:
+            raise GenerationError("缺少 pywin32，无法刷新封面 OLE 预览") from exc
+
+        word = None
+        doc = None
+        limiter = get_office_automation_limiter()
+        with limiter.word_session():
+            with limiter.excel_session():
+                try:
+                    pythoncom.CoInitialize()
+                    word = win32com.client.DispatchEx("Word.Application")
+                    word.Visible = False
+                    word.DisplayAlerts = 0
+                    doc = word.Documents.Open(str(output_path.absolute()))
+                    time.sleep(1.0)
+                    self._refresh_cover_ole_preview_in_open_doc(doc)
+                    self._com_call_with_retry(doc.Save, "Document.Save")
+                finally:
+                    if doc is not None:
+                        doc_obj = doc
+                        self._mark_document_saved(doc)
+                        self._close_com_object(lambda: doc_obj.Close(False), "Document.Close")
+                    doc = None
+                    if word is not None:
+                        self._close_all_word_documents(word, keep=doc)
+                        self._mark_normal_template_saved(word)
+                        self._close_com_object(word.Quit, "Word.Quit")
+                    word = None
+                    gc.collect()
+                    if pythoncom is not None:
+                        with contextlib.suppress(Exception):
+                            pythoncom.CoUninitialize()
+
+    def _refresh_cover_ole_preview_in_open_doc(self, doc: Any) -> None:
+        refreshed = False
+        for collection_name in ("InlineShapes", "Shapes"):
+            collection = getattr(doc, collection_name, None)
+            if collection is None:
+                continue
+            collection_obj = collection
+            try:
+                count = int(
+                    self._com_call_with_retry(
+                        lambda collection_obj=collection_obj: collection_obj.Count,
+                        f"{collection_name}.Count",
+                    )
+                )
+            except Exception:
+                continue
+
+            for idx in range(1, count + 1):
+                try:
+                    shape = self._com_call_with_retry(
+                        lambda collection_obj=collection_obj, idx=idx: collection_obj.Item(idx),
+                        f"{collection_name}.Item({idx})",
+                    )
+                    ole_format = self._com_call_with_retry(
+                        lambda shape=shape: shape.OLEFormat,
+                        f"{collection_name}.Item({idx}).OLEFormat",
+                    )
+                    with contextlib.suppress(Exception):
+                        self._com_call_with_retry(
+                            lambda ole_format=ole_format: ole_format.DoVerb(0),
+                            f"{collection_name}.Item({idx}).OLEFormat.DoVerb(0)",
+                            retries=2,
+                        )
+                    self._com_call_with_retry(
+                        ole_format.Activate,
+                        f"{collection_name}.Item({idx}).OLEFormat.Activate",
+                    )
+                    time.sleep(0.8)
+                    ole_obj = self._com_call_with_retry(
+                        lambda ole_format=ole_format: ole_format.Object,
+                        f"{collection_name}.Item({idx}).OLEFormat.Object",
+                    )
+                except Exception:
+                    continue
+
+                sheet = self._to_excel_sheet(ole_obj)
+                if sheet is None:
+                    continue
+                self._suppress_cover_error_indicators_via_com(sheet)
+                refreshed = True
+
+        if not refreshed:
+            raise GenerationError("未找到可刷新的封面 OLE 对象")
+
+        with contextlib.suppress(Exception):
+            self._com_call_with_retry(doc.Fields.Update, "Document.Fields.Update", retries=2)
 
     def _get_embedded_excel_sheet(self, doc: Any) -> Any | None:
         for collection_name in ("InlineShapes", "Shapes"):
@@ -458,6 +578,7 @@ class CoverGenerator(ICoverGenerator):
         data: dict[str, Any],
         read_cell: Callable[[str], Any],
         write_cell: Callable[[str, Any], None],
+        fit_cell: Callable[[str, str, CoverBinding], None] | None = None,
     ) -> None:
         for key, binding in bindings.items():
             if key == "册次":
@@ -479,6 +600,8 @@ class CoverGenerator(ICoverGenerator):
                 left, right = self._split_text_by_rule(str(value or ""), binding.split_rule)
                 write_cell(left_cell, left)
                 write_cell(right_cell, right)
+                self._fit_cell_if_configured(fit_cell, left_cell, left, binding)
+                self._fit_cell_if_configured(fit_cell, right_cell, right, binding)
                 continue
 
             target_cell = cell_ref.strip() if ":" in cell_ref else self._first_cell(cell_ref)
@@ -496,6 +619,20 @@ class CoverGenerator(ICoverGenerator):
 
             if not self._is_empty(value):
                 write_cell(target_cell, value)
+                self._fit_cell_if_configured(fit_cell, target_cell, str(value), binding)
+
+    def _fit_cell_if_configured(
+        self,
+        fit_cell: Callable[[str, str, CoverBinding], None] | None,
+        cell: str,
+        text: str,
+        binding: CoverBinding,
+    ) -> None:
+        if fit_cell is None:
+            return
+        if not self._has_cover_title_fit_config(binding):
+            return
+        fit_cell(cell, text, binding)
 
     @staticmethod
     def _is_empty(value: Any) -> bool:
@@ -504,6 +641,259 @@ class CoverGenerator(ICoverGenerator):
         if isinstance(value, str):
             return value.strip() == ""
         return False
+
+    @staticmethod
+    def _has_cover_title_fit_config(binding: CoverBinding) -> bool:
+        return bool(
+            binding.font_sizes
+            or binding.min_font_size
+            or binding.max_chars_per_line
+            or binding.shrink_to_fit_fallback
+        )
+
+    def _fit_cover_title_cell_openpyxl(
+        self,
+        ws,
+        cell_ref: str,
+        text: str,
+        binding: CoverBinding,
+    ) -> None:
+        fit_range = self._resolve_openpyxl_fit_range(ws, cell_ref)
+        anchor = self._first_cell(fit_range)
+        cell = ws[anchor]
+        width_points = self._merged_range_width_points(ws, fit_range)
+        height_points = self._merged_range_height_points(ws, fit_range)
+        chosen_size, fits_in_range = self._choose_cover_title_font_size(
+            text=text,
+            binding=binding,
+            width_points=width_points,
+            height_points=height_points,
+        )
+
+        font = copy(cell.font)
+        font.sz = chosen_size
+        cell.font = font
+
+        alignment = copy(cell.alignment)
+        alignment.wrapText = True
+        alignment.shrinkToFit = binding.shrink_to_fit_fallback and not fits_in_range
+        cell.alignment = alignment
+
+    def _fit_cover_title_cell_com(
+        self,
+        worksheet: Any,
+        cell_ref: str,
+        text: str,
+        binding: CoverBinding,
+    ) -> None:
+        target = self._com_call_with_retry(
+            lambda: worksheet.Range(cell_ref),
+            f"Range({cell_ref})",
+        )
+        with contextlib.suppress(Exception):
+            if self._com_call_with_retry(lambda: bool(target.MergeCells), f"Range({cell_ref}).MergeCells"):
+                target = self._com_call_with_retry(lambda: target.MergeArea, f"Range({cell_ref}).MergeArea")
+
+        width_points = self._safe_float_com_property(target, "Width")
+        height_points = self._safe_float_com_property(target, "Height")
+        chosen_size, fits_in_range = self._choose_cover_title_font_size(
+            text=text,
+            binding=binding,
+            width_points=width_points,
+            height_points=height_points,
+        )
+
+        self._com_call_with_retry(
+            lambda: setattr(target.Font, "Size", chosen_size),
+            f"Range({cell_ref}).Font.Size={chosen_size}",
+        )
+        self._com_call_with_retry(
+            lambda: setattr(target, "WrapText", True),
+            f"Range({cell_ref}).WrapText=True",
+        )
+        self._com_call_with_retry(
+            lambda: setattr(target, "ShrinkToFit", binding.shrink_to_fit_fallback and not fits_in_range),
+            f"Range({cell_ref}).ShrinkToFit",
+        )
+
+    def _resolve_openpyxl_fit_range(self, ws, cell_ref: str) -> str:
+        first = self._first_cell(cell_ref)
+        for merged_range in ws.merged_cells.ranges:
+            if first in merged_range:
+                return str(merged_range)
+        return cell_ref if ":" in cell_ref else f"{first}:{first}"
+
+    def _choose_cover_title_font_size(
+        self,
+        *,
+        text: str,
+        binding: CoverBinding,
+        width_points: float,
+        height_points: float,
+    ) -> tuple[float, bool]:
+        font_sizes = self._resolve_cover_title_font_sizes(binding)
+        chosen_size = font_sizes[-1]
+        for font_size in font_sizes:
+            if self._cover_title_text_fits(
+                text=text,
+                binding=binding,
+                font_size=font_size,
+                base_font_size=font_sizes[0],
+                width_points=width_points,
+                height_points=height_points,
+            ):
+                return font_size, True
+        return chosen_size, False
+
+    def _resolve_cover_title_font_sizes(self, binding: CoverBinding) -> tuple[float, ...]:
+        parsed: list[float] = []
+        if binding.font_sizes:
+            for size in binding.font_sizes:
+                with contextlib.suppress(TypeError, ValueError):
+                    value = float(size)
+                    if value > 0:
+                        parsed.append(value)
+        if not parsed:
+            min_size = float(binding.min_font_size or 8)
+            parsed = [float(size) for size in range(14, max(1, int(min_size)) - 1, -1)]
+        min_font_size = float(binding.min_font_size or 0)
+        if min_font_size > 0:
+            parsed = [size for size in parsed if size >= min_font_size]
+        if not parsed:
+            parsed = [float(binding.min_font_size or 8)]
+        return tuple(sorted(set(parsed), reverse=True))
+
+    def _cover_title_text_fits(
+        self,
+        *,
+        text: str,
+        binding: CoverBinding,
+        font_size: float,
+        base_font_size: float,
+        width_points: float,
+        height_points: float,
+    ) -> bool:
+        if binding.max_chars_per_line:
+            display_width = sum(self._char_display_width_points(ch, base_font_size) for ch in text)
+            allowed_width = float(binding.max_chars_per_line) * base_font_size * (base_font_size / font_size)
+            if display_width > allowed_width:
+                return False
+        if width_points <= 0 or height_points <= 0:
+            return True
+        line_count = self._estimate_wrapped_line_count_points(
+            text=text,
+            available_width_points=width_points * self.COVER_TITLE_WIDTH_PADDING_RATIO,
+            font_size=font_size,
+        )
+        available_lines = max(
+            1,
+            math.floor(height_points / (font_size * self.COVER_TITLE_LINE_HEIGHT_RATIO)),
+        )
+        return line_count <= available_lines
+
+    def _merged_range_width_points(self, ws, cell_ref: str) -> float:
+        min_col, _, max_col, _ = range_boundaries(cell_ref if ":" in cell_ref else f"{cell_ref}:{cell_ref}")
+        default_width = ws.sheet_format.defaultColWidth or 8.43
+        total_width = 0.0
+        for column_idx in range(min_col, max_col + 1):
+            column_letter = get_column_letter(column_idx)
+            column_dimension = ws.column_dimensions[column_letter]
+            column_width = column_dimension.width if column_dimension.width is not None else default_width
+            total_width += self._column_width_to_points(float(column_width))
+        return total_width
+
+    def _merged_range_height_points(self, ws, cell_ref: str) -> float:
+        _, min_row, _, max_row = range_boundaries(cell_ref if ":" in cell_ref else f"{cell_ref}:{cell_ref}")
+        default_height = ws.sheet_format.defaultRowHeight or 15
+        total_height = 0.0
+        for row_idx in range(min_row, max_row + 1):
+            row_dimension = ws.row_dimensions[row_idx]
+            total_height += row_dimension.height if row_dimension.height is not None else default_height
+        return total_height
+
+    @staticmethod
+    def _column_width_to_points(column_width: float) -> float:
+        return max(column_width, 0.0) * 5.3
+
+    def _estimate_wrapped_line_count_points(
+        self,
+        *,
+        text: str,
+        available_width_points: float,
+        font_size: float,
+    ) -> int:
+        paragraphs = text.splitlines() or [text]
+        return sum(
+            self._wrap_word_line_count(
+                text=paragraph if paragraph.strip() else " ",
+                available_width_points=available_width_points,
+                font_size=font_size,
+            )
+            for paragraph in paragraphs
+        )
+
+    def _wrap_word_line_count(
+        self,
+        *,
+        text: str,
+        available_width_points: float,
+        font_size: float,
+    ) -> int:
+        stripped = text.strip()
+        if not stripped:
+            return 1
+        if available_width_points <= 0:
+            return len(stripped)
+
+        words = re.findall(r"\S+", stripped)
+        if not words:
+            return 1
+
+        space_width = self._char_display_width_points(" ", font_size)
+        line_count = 1
+        line_width = 0.0
+
+        for word in words:
+            word_width = sum(self._char_display_width_points(char, font_size) for char in word)
+            if line_width == 0:
+                extra_lines = max(1, math.ceil(word_width / available_width_points))
+                line_count += extra_lines - 1
+                line_width = word_width - ((extra_lines - 1) * available_width_points)
+                continue
+
+            projected_width = line_width + space_width + word_width
+            if projected_width <= available_width_points:
+                line_width = projected_width
+                continue
+
+            line_count += 1
+            extra_lines = max(1, math.ceil(word_width / available_width_points))
+            line_count += extra_lines - 1
+            line_width = word_width - ((extra_lines - 1) * available_width_points)
+
+        return line_count
+
+    @staticmethod
+    def _char_display_width_points(char: str, font_size: float) -> float:
+        if char.isspace():
+            return font_size * 0.28
+        if "\u4e00" <= char <= "\u9fff":
+            return font_size
+        if char.isascii() and char.isalnum():
+            return font_size * 0.58
+        if char.isascii():
+            return font_size * 0.38
+        return font_size * 0.9
+
+    def _safe_float_com_property(self, target: Any, property_name: str) -> float:
+        with contextlib.suppress(Exception):
+            value = self._com_call_with_retry(
+                lambda: getattr(target, property_name),
+                f"Range.{property_name}",
+                retries=3,
+            )
+            return float(value)
+        return 0.0
 
     def _split_text_by_rule(self, text: str, split_rule: str) -> tuple[str, str]:
         if split_rule.startswith("cn_split"):
@@ -781,7 +1171,6 @@ def _suppress_excel_workbook_error_indicators(workbook_bytes: bytes) -> bytes:
 
 
 def _suppress_sheet_error_indicators(sheet_xml: bytes) -> bytes:
-    ET.register_namespace("", _XLSX_SHEET_NS)
     root = ET.fromstring(sheet_xml)
     dimension = root.find(_xlsx_tag("dimension"))
     sqref = dimension.get("ref") if dimension is not None else None
@@ -816,7 +1205,112 @@ def _suppress_sheet_error_indicators(sheet_xml: bytes) -> bytes:
 
     if not changed:
         return sheet_xml
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return _persist_ignored_errors_in_sheet_xml(sheet_xml, sqref)
+
+
+def _persist_ignored_errors_in_sheet_xml(sheet_xml: bytes, sqref: str) -> bytes:
+    text = sheet_xml.decode("utf-8")
+    block_match = re.search(
+        rf"(?P<open><(?P<prefix>{_XML_NAME_RE}:)?ignoredErrors\b[^>]*>)"
+        rf"(?P<body>.*?)"
+        rf"(?P<close></(?P=prefix)ignoredErrors\s*>)",
+        text,
+        flags=re.DOTALL,
+    )
+    if block_match:
+        prefix = block_match.group("prefix") or ""
+        body = block_match.group("body")
+        ignored_error = _build_ignored_error_xml(prefix, sqref)
+        updated_body = _replace_matching_ignored_error(body, sqref, ignored_error)
+        if updated_body is None:
+            updated_body = f"{body}{ignored_error}"
+        updated = (
+            text[: block_match.start("body")]
+            + updated_body
+            + text[block_match.end("body") :]
+        )
+        return updated.encode("utf-8")
+
+    self_closing_match = re.search(
+        rf"<(?P<prefix>{_XML_NAME_RE}:)?ignoredErrors\b(?P<attrs>[^>]*)\s*/>",
+        text,
+        flags=re.DOTALL,
+    )
+    if self_closing_match:
+        prefix = self_closing_match.group("prefix") or ""
+        block = _build_ignored_errors_xml(prefix, sqref)
+        updated = (
+            text[: self_closing_match.start()]
+            + block
+            + text[self_closing_match.end() :]
+        )
+        return updated.encode("utf-8")
+
+    prefix = _find_sheet_child_prefix(text)
+    block = _build_ignored_errors_xml(prefix, sqref)
+    insert_at = _ignored_errors_insert_offset(text)
+    updated = text[:insert_at] + block + text[insert_at:]
+    return updated.encode("utf-8")
+
+
+def _replace_matching_ignored_error(
+    ignored_errors_body: str,
+    sqref: str,
+    replacement: str,
+) -> str | None:
+    tag_pattern = re.compile(
+        rf"<(?P<prefix>{_XML_NAME_RE}:)?ignoredError\b(?P<attrs>[^>]*)\s*/>",
+        flags=re.DOTALL,
+    )
+    for match in tag_pattern.finditer(ignored_errors_body):
+        if _xml_attr_value(match.group("attrs"), "sqref") == sqref:
+            return (
+                ignored_errors_body[: match.start()]
+                + replacement
+                + ignored_errors_body[match.end() :]
+            )
+    return None
+
+
+def _build_ignored_errors_xml(prefix: str, sqref: str) -> str:
+    ignored_error = _build_ignored_error_xml(prefix, sqref)
+    return f"<{prefix}ignoredErrors>{ignored_error}</{prefix}ignoredErrors>"
+
+
+def _build_ignored_error_xml(prefix: str, sqref: str) -> str:
+    attrs = {"sqref": sqref, **_IGNORED_ERROR_FLAGS}
+    attr_text = " ".join(f"{key}={quoteattr(value)}" for key, value in attrs.items())
+    return f"<{prefix}ignoredError {attr_text} />"
+
+
+def _xml_attr_value(attrs: str, name: str) -> str | None:
+    match = re.search(
+        rf"(?:^|\s){re.escape(name)}\s*=\s*(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
+        attrs,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    return match.group("value")
+
+
+def _find_sheet_child_prefix(sheet_xml_text: str) -> str:
+    for local_name in ("dimension", "sheetViews", "sheetData"):
+        match = re.search(rf"<(?P<prefix>{_XML_NAME_RE}:)?{local_name}\b", sheet_xml_text)
+        if match:
+            return match.group("prefix") or ""
+    return ""
+
+
+def _ignored_errors_insert_offset(sheet_xml_text: str) -> int:
+    for local_name in _IGNORED_ERRORS_INSERT_BEFORE:
+        match = re.search(rf"<(?:{_XML_NAME_RE}:)?{local_name}\b", sheet_xml_text)
+        if match:
+            return match.start()
+    match = re.search(rf"</(?:{_XML_NAME_RE}:)?worksheet\s*>", sheet_xml_text)
+    if match:
+        return match.start()
+    return len(sheet_xml_text)
 
 
 def _ignored_errors_insert_index(root: ET.Element) -> int:

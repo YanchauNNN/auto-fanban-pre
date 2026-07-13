@@ -280,7 +280,7 @@ def test_cad_executor_sheet_set_entry_keeps_non_a4_page_media() -> None:
         PageInfo(page_index=2, outer_bbox=marker_page.runtime.outer_bbox, has_titleblock=False, frame_meta=marker_page),
     ]
     sheet_set = SheetSet(
-        sheet_set_type="NON_A4_001_MARKER_FAMILY",
+        sheet_set_type="001_MARKER_FAMILY",
         paper="CNPE_A0",
         cluster_id="cluster-001",
         page_total=2,

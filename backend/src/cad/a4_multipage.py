@@ -215,7 +215,7 @@ class A4MultipageGrouper(IA4MultipageGrouper):
             return None
 
         return SheetSet(
-            sheet_set_type="NON_A4_001_MARKER_FAMILY",
+            sheet_set_type="001_MARKER_FAMILY",
             paper=str(master.runtime.paper_variant_id or "NON_A4"),
             cluster_id=str(uuid.uuid4()),
             page_total=page_total,

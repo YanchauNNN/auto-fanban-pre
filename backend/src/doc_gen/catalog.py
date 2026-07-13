@@ -27,6 +27,7 @@ import math
 import os
 import re
 import shutil
+import time
 from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,25 +111,19 @@ class CatalogGenerator(ICatalogGenerator):
         output_xlsx = output_dir / f"{output_stem}.xlsx"
         self._write_catalog(template_path, output_xlsx, bindings, ctx)
 
-        # 4. 计算页数（优先Excel分页信息）
-        page_count = self._count_pages(output_xlsx)
-
-        # 5. 回填目录行页数
-        self._backfill_page_count(output_xlsx, page_count, bindings)
-
-        # 6. 导出PDF
+        # Export PDF and backfill the catalog row page count in the same flow.
         output_pdf = output_dir / f"{output_stem}.pdf"
         pdf_export_error: Exception | None = None
         try:
-            self.pdf_exporter.export_xlsx_to_pdf(output_xlsx, output_pdf)
-            page_count, pdf_export_error = self._reconcile_page_count_from_pdf(
+            page_count = self._export_catalog_pdf_with_backfilled_page_count(
                 output_xlsx,
                 output_pdf,
-                page_count,
                 bindings,
             )
         except Exception as exc:
             pdf_export_error = exc
+            page_count = self._count_pages(output_xlsx)
+            self._backfill_page_count(output_xlsx, page_count, bindings)
 
         return CatalogGenerationResult(
             xlsx_path=output_xlsx,
@@ -180,12 +175,12 @@ class CatalogGenerator(ICatalogGenerator):
         # 动态设置打印区域，保证目录计页与实际行数一致
         last_row = max(start_row, current_row - 1)
         ws.print_area = f"$A$1:$I${last_row}"
-        self._apply_detail_layout(ws, start_row, last_row)
+        self._apply_detail_layout(ws, start_row, last_row, bindings)
         self._repair_detail_grid_border_holes(ws, start_row, last_row)
 
         # 保存
         wb.save(output_path)
-        self._refine_detail_layout_via_com(output_path, start_row, last_row)
+        self._refine_detail_layout_via_com(output_path, start_row, last_row, bindings)
 
     def _write_header(self, ws, bindings: dict, ctx: DocContext) -> None:
         """写入表头"""
@@ -533,12 +528,27 @@ class CatalogGenerator(ICatalogGenerator):
         if "I" in columns:
             ws[f"I{row}"] = data.get("upgrade_note", "")
 
-    def _apply_detail_layout(self, ws, start_row: int, last_row: int) -> None:
-        column_width = ws.column_dimensions["E"].width or 30
+    def _apply_detail_layout(
+        self,
+        ws,
+        start_row: int,
+        last_row: int,
+        bindings: dict | None = None,
+    ) -> None:
+        row_height_config = self._get_title_row_height_config(bindings)
+        title_column = str(row_height_config.get("title_column") or "E")
+        column_width = ws.column_dimensions[title_column].width or 30
         for row in range(start_row, last_row + 1):
-            text = str(ws[f"E{row}"].value or "")
-            line_count = self._estimate_wrapped_line_count(text, column_width)
-            ws.row_dimensions[row].height = self._bucket_row_height_for_line_count(line_count)
+            text = str(ws[f"{title_column}{row}"].value or "")
+            line_count = self._estimate_wrapped_line_count(
+                text,
+                column_width,
+                row_height_config,
+            )
+            ws.row_dimensions[row].height = self._bucket_row_height_for_line_count(
+                line_count,
+                row_height_config,
+            )
 
     def _repair_detail_grid_border_holes(self, ws, start_row: int, last_row: int) -> None:
         if last_row <= start_row:
@@ -607,6 +617,7 @@ class CatalogGenerator(ICatalogGenerator):
         xlsx_path: Path,
         start_row: int,
         last_row: int,
+        bindings: dict | None = None,
     ) -> None:
         if not self._should_use_excel_com():
             return
@@ -626,6 +637,13 @@ class CatalogGenerator(ICatalogGenerator):
         temp_dir = None
         working_copy = xlsx_path
         should_copy_back = False
+        row_height_config = self._get_title_row_height_config(bindings)
+        expected_row_heights = self._expected_detail_row_heights(
+            xlsx_path,
+            start_row,
+            last_row,
+            row_height_config,
+        )
         with get_office_automation_limiter().excel_session():
             try:
                 pythoncom.CoInitialize()
@@ -666,7 +684,11 @@ class CatalogGenerator(ICatalogGenerator):
                             f"Rows({row}).RowHeight",
                         )
                     )
-                    bucket_height = self._bucket_row_height_from_measured_height(auto_height)
+                    bucket_height = self._bucket_row_height_from_measured_height(
+                        auto_height,
+                        row_height_config,
+                    )
+                    bucket_height = max(bucket_height, expected_row_heights.get(row, 0))
                     if bucket_height:
                         PDFExporter._retry_excel_com_call(
                             lambda row_ref_com=row_ref_com, bucket_height=bucket_height: setattr(
@@ -705,31 +727,93 @@ class CatalogGenerator(ICatalogGenerator):
                     with contextlib.suppress(Exception):
                         pythoncom.CoUninitialize()
 
-    def _estimate_wrapped_line_count(self, text: str, column_width: float) -> int:
+    def _expected_detail_row_heights(
+        self,
+        xlsx_path: Path,
+        start_row: int,
+        last_row: int,
+        row_height_config: dict | None,
+    ) -> dict[int, float]:
+        expected: dict[int, float] = {}
+        wb = None
+        try:
+            wb = load_workbook(xlsx_path)
+            ws = wb.active
+            if ws is None:
+                return expected
+            title_column = str((row_height_config or {}).get("title_column") or "E")
+            column_width = ws.column_dimensions[title_column].width or 30
+            for row in range(start_row, last_row + 1):
+                text = str(ws[f"{title_column}{row}"].value or "")
+                line_count = self._estimate_wrapped_line_count(
+                    text,
+                    column_width,
+                    row_height_config,
+                )
+                expected[row] = self._bucket_row_height_for_line_count(
+                    line_count,
+                    row_height_config,
+                )
+            return expected
+        except Exception:
+            return expected
+        finally:
+            if wb is not None:
+                with contextlib.suppress(Exception):
+                    wb.close()
+
+    def _estimate_wrapped_line_count(
+        self,
+        text: str,
+        column_width: float,
+        row_height_config: dict | None = None,
+    ) -> int:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
         if not normalized:
             return 1
 
-        effective_width = max(8.0, float(column_width) * 0.9)
+        wrap_width_ratio = self._float_config_value(
+            row_height_config,
+            "wrap_width_ratio",
+            0.9,
+        )
+        effective_width = max(8.0, float(column_width) * wrap_width_ratio)
         total_lines = 0
         for raw_line in normalized.split("\n"):
-            display_width = sum(self._char_display_width(ch) for ch in raw_line)
+            display_width = sum(
+                self._char_display_width(ch, row_height_config) for ch in raw_line
+            )
             wrapped_lines = max(1, math.ceil(display_width / effective_width))
             total_lines += wrapped_lines
         return max(1, total_lines)
 
-    def _char_display_width(self, char: str) -> float:
+    def _char_display_width(self, char: str, row_height_config: dict | None = None) -> float:
         if not char:
             return 0
+        display_width_config = {}
+        if isinstance(row_height_config, dict):
+            candidate = row_height_config.get("display_width")
+            if isinstance(candidate, dict):
+                display_width_config = candidate
         if char.isspace():
-            return 0.35
+            return self._float_config_value(display_width_config, "space", 0.35)
         if ord(char) > 127:
-            return 1.0
+            return self._float_config_value(display_width_config, "cjk", 1.0)
         if char.isalnum():
-            return 0.55
-        return 0.65
+            return self._float_config_value(display_width_config, "ascii_alnum", 0.55)
+        return self._float_config_value(display_width_config, "ascii_symbol", 0.65)
 
-    def _bucket_row_height_for_line_count(self, line_count: int) -> int:
+    def _bucket_row_height_for_line_count(
+        self,
+        line_count: int,
+        row_height_config: dict | None = None,
+    ) -> float:
+        configured_height = self._configured_row_height_for_line_count(
+            line_count,
+            row_height_config,
+        )
+        if configured_height is not None:
+            return configured_height
         if line_count <= 2:
             return self.BODY_ROW_HEIGHT
         if line_count == 3:
@@ -738,7 +822,17 @@ class CatalogGenerator(ICatalogGenerator):
             return self.FOUR_LINE_HEIGHT
         return self.FOUR_LINE_HEIGHT + (line_count - 4) * self.EXTRA_LINE_STEP
 
-    def _bucket_row_height_from_measured_height(self, measured_height: float) -> int:
+    def _bucket_row_height_from_measured_height(
+        self,
+        measured_height: float,
+        row_height_config: dict | None = None,
+    ) -> float:
+        configured_height = self._configured_row_height_from_measured_height(
+            measured_height,
+            row_height_config,
+        )
+        if configured_height is not None:
+            return configured_height
         if measured_height <= 0:
             return self.BODY_ROW_HEIGHT
         if measured_height <= self.BODY_ROW_HEIGHT:
@@ -749,6 +843,278 @@ class CatalogGenerator(ICatalogGenerator):
             return self.FOUR_LINE_HEIGHT
         extra_steps = math.ceil((measured_height - self.FOUR_LINE_HEIGHT) / self.EXTRA_LINE_STEP)
         return self.FOUR_LINE_HEIGHT + max(1, extra_steps) * self.EXTRA_LINE_STEP
+
+    @staticmethod
+    def _get_title_row_height_config(bindings: dict | None) -> dict:
+        if not isinstance(bindings, dict):
+            return {}
+        detail = bindings.get("detail")
+        if not isinstance(detail, dict):
+            return {}
+        config = detail.get("title_row_height")
+        return config if isinstance(config, dict) else {}
+
+    def _configured_row_height_for_line_count(
+        self,
+        line_count: int,
+        row_height_config: dict | None,
+    ) -> float | None:
+        if not isinstance(row_height_config, dict) or not row_height_config:
+            return None
+        by_line_count = row_height_config.get("by_line_count")
+        if not isinstance(by_line_count, dict) or not by_line_count:
+            return None
+        normalized_buckets = self._normalize_row_height_buckets(by_line_count)
+        if not normalized_buckets:
+            return None
+
+        line_count = max(1, int(line_count))
+        min_height = self._float_config_value(row_height_config, "min_height_points", 0)
+        if line_count in normalized_buckets:
+            return max(min_height, normalized_buckets[line_count])
+
+        max_bucket_line = max(normalized_buckets)
+        if line_count > max_bucket_line:
+            extra_step = self._float_config_value(
+                row_height_config,
+                "extra_line_step_points",
+                float(self.EXTRA_LINE_STEP),
+            )
+            return normalized_buckets[max_bucket_line] + (line_count - max_bucket_line) * extra_step
+
+        return max(min_height, normalized_buckets[min(normalized_buckets)])
+
+    def _configured_row_height_from_measured_height(
+        self,
+        measured_height: float,
+        row_height_config: dict | None,
+    ) -> float | None:
+        if not isinstance(row_height_config, dict) or not row_height_config:
+            return None
+        by_line_count = row_height_config.get("by_line_count")
+        if not isinstance(by_line_count, dict) or not by_line_count:
+            return None
+        normalized_buckets = self._normalize_row_height_buckets(by_line_count)
+        if not normalized_buckets:
+            return None
+
+        min_height = self._float_config_value(row_height_config, "min_height_points", 0)
+        if measured_height <= 0:
+            return max(min_height, normalized_buckets[min(normalized_buckets)])
+
+        for _, bucket_height in sorted(normalized_buckets.items()):
+            if measured_height <= bucket_height:
+                return max(min_height, bucket_height)
+
+        max_bucket_line = max(normalized_buckets)
+        max_bucket_height = normalized_buckets[max_bucket_line]
+        extra_step = self._float_config_value(
+            row_height_config,
+            "extra_line_step_points",
+            float(self.EXTRA_LINE_STEP),
+        )
+        extra_steps = math.ceil((measured_height - max_bucket_height) / extra_step)
+        return max_bucket_height + max(1, extra_steps) * extra_step
+
+    @staticmethod
+    def _normalize_row_height_buckets(by_line_count: dict) -> dict[int, float]:
+        normalized: dict[int, float] = {}
+        for key, value in by_line_count.items():
+            try:
+                line_count = int(key)
+                height = float(value)
+            except (TypeError, ValueError):
+                continue
+            if line_count <= 0 or height <= 0:
+                continue
+            normalized[line_count] = height
+        return normalized
+
+    @staticmethod
+    def _float_config_value(config: dict | None, key: str, default: float) -> float:
+        if not isinstance(config, dict):
+            return default
+        try:
+            return float(config.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _export_catalog_pdf_with_backfilled_page_count(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        bindings: dict,
+    ) -> int:
+        if self._should_use_catalog_single_excel_session():
+            return self._export_catalog_pdf_via_single_excel_session(xlsx_path, pdf_path, bindings)
+        return self._export_catalog_pdf_via_legacy_flow(xlsx_path, pdf_path, bindings)
+
+    def _should_use_catalog_single_excel_session(self) -> bool:
+        return (
+            self._should_use_excel_com()
+            and isinstance(self.pdf_exporter, PDFExporter)
+            and self.pdf_exporter.preferred == "office_com"
+        )
+
+    def _export_catalog_pdf_via_legacy_flow(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        bindings: dict,
+    ) -> int:
+        page_count = self._count_pages(xlsx_path)
+        self._backfill_page_count(xlsx_path, page_count, bindings)
+        self.pdf_exporter.export_xlsx_to_pdf(xlsx_path, pdf_path)
+        page_count, pdf_export_error = self._reconcile_page_count_from_pdf(
+            xlsx_path,
+            pdf_path,
+            page_count,
+            bindings,
+        )
+        if pdf_export_error is not None:
+            raise pdf_export_error
+        return page_count
+
+    def _export_catalog_pdf_via_single_excel_session(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        bindings: dict,
+    ) -> int:
+        last_exc: Exception | None = None
+        with get_office_automation_limiter().excel_session():
+            PDFExporter._terminate_stale_excel_automation_processes()
+            baseline_excel_pids = PDFExporter._snapshot_process_ids_by_image("EXCEL.EXE")
+            for attempt in range(2):
+                try:
+                    return self._export_catalog_pdf_via_single_excel_session_once(
+                        xlsx_path,
+                        pdf_path,
+                        bindings,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt == 0:
+                        PDFExporter._terminate_new_processes("EXCEL.EXE", baseline_excel_pids)
+                        time.sleep(0.8)
+        assert last_exc is not None
+        raise last_exc
+
+    def _export_catalog_pdf_via_single_excel_session_once(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        bindings: dict,
+    ) -> int:
+        pythoncom = None
+        try:
+            import pythoncom  # type: ignore[import]
+            import win32com.client
+        except ImportError as exc:
+            raise GenerationError("pywin32 不可用，无法通过 Excel 导出目录 PDF") from exc
+
+        excel = None
+        excel_owned = False
+        wb = None
+        temp_dir = None
+        working_copy: Path | None = None
+        copy_workbook_back = False
+        try:
+            pythoncom.CoInitialize()
+            excel, excel_owned = PDFExporter._create_excel_application(win32com)
+            PDFExporter._prepare_excel_for_headless_run(excel)
+            working_copy, temp_dir = PDFExporter._prepare_excel_path_for_com(
+                xlsx_path,
+                label=pdf_path.stem or xlsx_path.stem,
+            )
+            wb = PDFExporter._open_excel_workbook(excel, working_copy, read_only=False)
+            workbook_com = cast(Any, wb)
+            probe_pdf = temp_dir / f"{pdf_path.stem}.probe.pdf"
+
+            PDFExporter._retry_excel_com_call(
+                lambda: workbook_com.ExportAsFixedFormat(0, str(probe_pdf.absolute())),
+                "Catalog.Workbook.ExportAsFixedFormat(probe)",
+            )
+            page_count = self._count_catalog_probe_pdf_pages(probe_pdf, workbook_com)
+            self._write_catalog_page_count_via_com(workbook_com, bindings, page_count)
+            PDFExporter._retry_excel_com_call(
+                lambda: workbook_com.Save(),
+                "Catalog.Workbook.Save",
+                retries=3,
+            )
+            copy_workbook_back = True
+            PDFExporter._retry_excel_com_call(
+                lambda: workbook_com.ExportAsFixedFormat(0, str(pdf_path.absolute())),
+                "Catalog.Workbook.ExportAsFixedFormat(final)",
+            )
+            return page_count
+        finally:
+            if wb:
+                with contextlib.suppress(Exception):
+                    cast(Any, wb).Close(False)
+            wb = None
+            if copy_workbook_back and working_copy is not None and working_copy.exists():
+                shutil.copy2(working_copy, xlsx_path)
+            if excel and excel_owned:
+                with contextlib.suppress(Exception):
+                    cast(Any, excel).Quit()
+            excel = None
+            if temp_dir is not None:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            gc.collect()
+            if pythoncom is not None:
+                with contextlib.suppress(Exception):
+                    pythoncom.CoUninitialize()
+
+    def _count_catalog_probe_pdf_pages(self, probe_pdf: Path, workbook_com: Any) -> int:
+        try:
+            page_count = int(self.pdf_exporter.count_pdf_pages(probe_pdf))
+            if page_count > 0:
+                return page_count
+        except Exception:
+            pass
+        return self._count_pages_from_open_excel_workbook(workbook_com)
+
+    def _count_pages_from_open_excel_workbook(self, workbook_com: Any) -> int:
+        ws = PDFExporter._retry_excel_com_call(
+            lambda: workbook_com.Worksheets(1),
+            "Catalog.Workbook.Worksheets(1)",
+        )
+        worksheet_com = cast(Any, ws)
+        page_setup_count = PDFExporter._retry_excel_com_call(
+            lambda: worksheet_com.PageSetup.Pages.Count,
+            "Catalog.Worksheet.PageSetup.Pages.Count",
+        )
+        page_count = int(page_setup_count or 0)
+        if page_count > 0:
+            return page_count
+        h_break_count = PDFExporter._retry_excel_com_call(
+            lambda: worksheet_com.HPageBreaks.Count,
+            "Catalog.Worksheet.HPageBreaks.Count",
+        )
+        v_break_count = PDFExporter._retry_excel_com_call(
+            lambda: worksheet_com.VPageBreaks.Count,
+            "Catalog.Worksheet.VPageBreaks.Count",
+        )
+        return max(1, (int(h_break_count) + 1) * (int(v_break_count) + 1))
+
+    def _write_catalog_page_count_via_com(self, workbook_com: Any, bindings: dict, page_count: int) -> None:
+        cell_ref = self._catalog_page_count_cell(bindings)
+        ws = PDFExporter._retry_excel_com_call(
+            lambda: workbook_com.Worksheets(1),
+            "Catalog.Workbook.Worksheets(1)",
+        )
+        worksheet_com = cast(Any, ws)
+        PDFExporter._retry_excel_com_call(
+            lambda: setattr(worksheet_com.Range(cell_ref), "Value", int(page_count)),
+            f"Catalog.Worksheet.Range({cell_ref}).Value",
+            retries=3,
+        )
+
+    @staticmethod
+    def _catalog_page_count_cell(bindings: dict) -> str:
+        start_row = int(bindings.get("detail", {}).get("start_row", 9))
+        return f"H{start_row + 1}"
 
     def _count_pages(self, xlsx_path: Path) -> int:
         """计算目录页数"""

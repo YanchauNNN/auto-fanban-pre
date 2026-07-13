@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ..auth_helpers import require_current_account
 from ..runtime import UploadedFilePayload
 
+from src.config import load_mechanism_spec
+
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
-
 
 @router.post("/preflight-fonts")
 async def preflight_fonts(
     request: Request,
-    account=Depends(require_current_account),
+    _=Depends(require_current_account),
     files: list[UploadFile] = File(..., alias="files[]"),
 ) -> JSONResponse:
     uploads = [
@@ -26,7 +32,7 @@ async def preflight_fonts(
         )
         for upload in files
     ]
-    payload = request.app.state.runtime.preflight_fonts(files=uploads)
+    payload = await run_in_threadpool(request.app.state.runtime.preflight_fonts, files=uploads)
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 
 
@@ -118,6 +124,7 @@ def list_jobs(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    sort: str = "updated_at",
     account=Depends(require_current_account),
 ) -> dict:
     return request.app.state.runtime.list_jobs(
@@ -125,6 +132,77 @@ def list_jobs(
         status_filter=status,
         limit=limit,
         offset=offset,
+        sort_by=sort,
+    )
+
+
+@router.get("/activity")
+def jobs_activity(request: Request) -> dict:
+    return request.app.state.runtime.jobs_activity()
+
+
+def _jobs_activity_marker(activity: dict[str, Any]) -> str:
+    return f"{activity.get('total', 0)}:{activity.get('active', 0)}:{activity.get('last_changed_at') or ''}"
+
+
+def _format_jobs_activity_sse(activity: dict[str, Any], *, retry_ms: int | None = None) -> str:
+    marker = _jobs_activity_marker(activity)
+    data = json.dumps(activity, ensure_ascii=False, separators=(",", ":"))
+    retry_line = f"retry: {max(1000, int(retry_ms))}\n" if retry_ms is not None else ""
+    return f"event: jobs_activity\nid: {marker}\n{retry_line}data: {data}\n\n"
+
+
+async def _jobs_activity_event_stream(
+    request: Request,
+    runtime: Any,
+    *,
+    poll_interval_sec: float,
+    keepalive_sec: float,
+    max_duration_sec: float,
+    retry_ms: int,
+) -> AsyncIterator[str]:
+    last_marker: str | None = None
+    last_sent_at = 0.0
+    started_at = time.monotonic()
+    poll_interval = max(0.1, float(poll_interval_sec))
+    keepalive_interval = max(poll_interval, float(keepalive_sec))
+    max_duration = max(poll_interval, float(max_duration_sec))
+    while True:
+        activity = runtime.jobs_activity()
+        marker = _jobs_activity_marker(activity)
+        now = time.monotonic()
+        if marker != last_marker:
+            yield _format_jobs_activity_sse(activity, retry_ms=retry_ms)
+            last_marker = marker
+            last_sent_at = now
+        elif now - last_sent_at >= keepalive_interval:
+            yield f": keepalive {int(now)}\n\n"
+            last_sent_at = now
+        if await request.is_disconnected():
+            break
+        if now - started_at >= max_duration:
+            yield f": stream-close {int(now)}\n\n"
+            break
+        await asyncio.sleep(poll_interval)
+
+
+@router.get("/activity/stream")
+def jobs_activity_stream(request: Request) -> StreamingResponse:
+    api_runtime_cfg = load_mechanism_spec().api_runtime
+    return StreamingResponse(
+        _jobs_activity_event_stream(
+            request,
+            request.app.state.runtime,
+            poll_interval_sec=api_runtime_cfg.jobs_activity_stream_poll_interval_sec,
+            keepalive_sec=api_runtime_cfg.jobs_activity_stream_keepalive_sec,
+            max_duration_sec=api_runtime_cfg.jobs_activity_stream_max_duration_sec,
+            retry_ms=api_runtime_cfg.jobs_activity_stream_retry_ms,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

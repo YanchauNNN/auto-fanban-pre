@@ -27,7 +27,9 @@ import type {
   InvalidAccountRowList,
   JobDetail,
   JobList,
+  JobListSort,
   JobSummary,
+  JobsActivity,
   LegacyVisibilityState,
   LoginRequest,
   LoginResponse,
@@ -127,6 +129,8 @@ type RawJobSummary = {
   replacement_font?: string | null;
   replacement_fonts?: Record<string, string | null> | null;
   replaced_style_count?: number | null;
+  workload?: RawWorkloadSummary | null;
+  effective_workload?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
   children?: RawJobSummary[] | null;
@@ -137,6 +141,18 @@ type RawJobDetail = RawJobSummary & {
   current_file?: string | null;
   flags?: string[];
   errors?: string[];
+  diagnostics?: Array<{
+    kind?: string | null;
+    severity?: string | null;
+    title?: string | null;
+    summary?: string | null;
+    suggestion?: string | null;
+    details?: Array<{
+      label?: string | null;
+      items?: string[] | null;
+    }> | null;
+    raw_items?: string[] | null;
+  }> | null;
   top_wrong_texts?: string[] | null;
   top_internal_codes?: string[] | null;
   shared_dir?: string | null;
@@ -159,6 +175,11 @@ type RawJobDetail = RawJobSummary & {
     matched_text?: string | null;
     count?: number | null;
     internal_codes?: string[] | null;
+    category?: string | null;
+    context_kind?: string | null;
+    issue_type?: string | null;
+    summary?: string | null;
+    details?: string[] | null;
   }> | null;
   replace_summary?: {
     replacement_count?: number | null;
@@ -197,6 +218,13 @@ type RawFontPreflightResult = {
     replacement_fonts?: Record<string, string | null> | null;
     font_compatibility_mode?: boolean | null;
     font_compatibility_replacements?: Record<string, string | null> | null;
+    font_compatibility_required?: boolean | null;
+    empty_style_entity_replaced_count?: number | null;
+    empty_style_style_patched_count?: number | null;
+    empty_style_shared_skipped_count?: number | null;
+    empty_style_shared_styles?: string[] | null;
+    empty_style_target_regions_count?: number | null;
+    empty_style_global_replaced_count?: number | null;
     replaced_style_count?: number | null;
     verify_after_replace?: {
       status?: string | null;
@@ -274,6 +302,7 @@ type RawFormSchema = {
     project_units?: Record<string, string[]>;
     source_unit_options?: Record<string, { value: string; label: string }[]>;
     target_unit_options?: Record<string, { value: string; label: string }[]>;
+    unit_factory_codes?: string[];
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;
@@ -335,15 +364,13 @@ type RawWorkloadSummary = {
   node_factors?: Record<string, number | null> | null;
   settlement_status?: string | null;
   settled_at?: string | null;
-  contributor_entries?:
-    | Array<{
-        role_key?: string | null;
-        account_id?: string | null;
-        display_name?: string | null;
-        workload_a1?: number | null;
-        settled_at?: string | null;
-      }>
-    | null;
+  contributor_entries?: Array<{
+    role_key?: string | null;
+    account_id?: string | null;
+    display_name?: string | null;
+    workload_a1?: number | null;
+    settled_at?: string | null;
+  }> | null;
 };
 
 type RawNormalizedPersonnel = {
@@ -499,46 +526,30 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async login(payload: LoginRequest): Promise<LoginResponse> {
-    const response = await this.fetchJson<{
-      token: string;
-      account: RawAccount;
-    }>("/api/auth/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const response = await this.fetchJson<{ token: string; account: RawAccount }>(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: payload.accountId, password: payload.password }),
       },
-      body: JSON.stringify({
-        account_id: payload.accountId,
-        password: payload.password,
-      }),
-    });
-
-    return {
-      token: response.token,
-      account: this.normalizeAccount(response.account),
-    };
+    );
+    return { token: response.token, account: this.normalizeAccount(response.account) };
   }
 
   async logout(): Promise<{ ok: boolean }> {
-    return this.fetchJson<{ ok: boolean }>("/api/auth/logout", {
-      method: "POST",
-    });
+    return this.fetchJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
   }
 
   async getMe(): Promise<CurrentAccount> {
-    const payload = await this.fetchJson<RawAccount>("/api/auth/me");
-    return this.normalizeAccount(payload);
+    return this.normalizeAccount(await this.fetchJson<RawAccount>("/api/auth/me"));
   }
 
   async changePassword(newPassword: string): Promise<CurrentAccount> {
     const payload = await this.fetchJson<RawAccount>("/api/auth/change-password", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        new_password: newPassword,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: newPassword }),
     });
     return this.normalizeAccount(payload);
   }
@@ -551,16 +562,10 @@ export class HttpAdapter implements ApiAdapter {
       "/api/accounts/normalize-personnel",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          field_name: fieldName,
-          raw_value: rawValue,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field_name: fieldName, raw_value: rawValue }),
       },
     );
-
     return {
       normalized: this.normalizeNormalizedPersonnel(payload.normalized, fieldName),
       candidates: (payload.candidates ?? []).map((candidate) =>
@@ -586,11 +591,9 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async getWorkflowMonitor(): Promise<WorkflowMonitorList> {
-    const payload = await this.fetchJson<{
-      total: number;
-      items: RawTaskGroupSummary[];
-    }>("/api/workflow/monitor");
-
+    const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
+      "/api/workflow/monitor",
+    );
     return {
       total: payload.total,
       items: (payload.items ?? []).map((item) => this.normalizeTaskGroupSummary(item)),
@@ -600,50 +603,35 @@ export class HttpAdapter implements ApiAdapter {
   async approveWorkflow(groupId: string, payload: WorkflowApprovePayload): Promise<void> {
     await this.fetchJson(`/api/workflow/${groupId}/approve`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        factor: payload.factor,
-        ...(payload.nodeKey ? { node_key: payload.nodeKey } : {}),
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ factor: payload.factor, ...(payload.nodeKey ? { node_key: payload.nodeKey } : {}) }),
     });
   }
 
   async repairCurrentNode(groupId: string, payload: WorkflowRepairPayload): Promise<void> {
     await this.fetchJson(`/api/workflow/${groupId}/repair-current-node`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(this.serializeWorkflowRepairPayload(payload)),
     });
   }
 
   async listAccounts(): Promise<AccountListResponse> {
-    const payload = await this.fetchJson<{
-      items?: RawAccountRecord[] | null;
-    }>("/api/accounts");
-    return {
-      items: (payload.items ?? []).map((item) => this.normalizeAccountRecord(item)),
-    };
+    const payload = await this.fetchJson<{ items?: RawAccountRecord[] | null }>("/api/accounts");
+    return { items: (payload.items ?? []).map((item) => this.normalizeAccountRecord(item)) };
   }
 
   async listInvalidAccountRows(): Promise<InvalidAccountRowList> {
-    const payload = await this.fetchJson<{
-      items?: RawInvalidAccountRow[] | null;
-    }>("/api/accounts/invalid-rows");
-    return {
-      items: (payload.items ?? []).map((item) => this.normalizeInvalidAccountRow(item)),
-    };
+    const payload = await this.fetchJson<{ items?: RawInvalidAccountRow[] | null }>(
+      "/api/accounts/invalid-rows",
+    );
+    return { items: (payload.items ?? []).map((item) => this.normalizeInvalidAccountRow(item)) };
   }
 
   async createAccount(payload: AccountCreatePayload): Promise<AccountRecord> {
     const response = await this.fetchJson<RawAccountRecord>("/api/accounts", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(this.serializeAccountCreatePayload(payload)),
     });
     return this.normalizeAccountRecord(response);
@@ -652,9 +640,7 @@ export class HttpAdapter implements ApiAdapter {
   async updateAccount(accountId: string, payload: AccountUpdatePayload): Promise<AccountRecord> {
     const response = await this.fetchJson<RawAccountRecord>(`/api/accounts/${accountId}`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(this.serializeAccountUpdatePayload(payload)),
     });
     return this.normalizeAccountRecord(response);
@@ -663,28 +649,21 @@ export class HttpAdapter implements ApiAdapter {
   async updateAccountRow(rowNumber: number, payload: AccountUpdatePayload): Promise<AccountRecord> {
     const response = await this.fetchJson<RawAccountRecord>(`/api/accounts/rows/${rowNumber}`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(this.serializeAccountUpdatePayload(payload)),
     });
     return this.normalizeAccountRecord(response);
   }
 
   async getAdminConfig(): Promise<AdminConfig> {
-    const payload = await this.fetchJson<RawAdminConfig>("/api/admin/config");
-    return this.normalizeAdminConfig(payload);
+    return this.normalizeAdminConfig(await this.fetchJson<RawAdminConfig>("/api/admin/config"));
   }
 
   async patchAdminConfig(payload: AdminConfig): Promise<AdminConfig> {
     const response = await this.fetchJson<RawAdminConfig>("/api/admin/config", {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        archive_root_path: payload.archiveRootPath ?? "",
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archive_root_path: payload.archiveRootPath ?? "" }),
     });
     return this.normalizeAdminConfig(response);
   }
@@ -743,6 +722,20 @@ export class HttpAdapter implements ApiAdapter {
       retry: true,
     });
     return normalizeFormSchema(payload);
+  }
+
+  async rememberAuditReplaceFactoryCodes(
+    codes: readonly string[],
+  ): Promise<{ factoryCodes: readonly string[] }> {
+    const payload = await this.fetchJson<{ factory_codes: string[] }>(
+      "/api/meta/audit-replace/factory-codes",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codes }),
+      },
+    );
+    return { factoryCodes: payload.factory_codes ?? [] };
   }
 
   async preflightFonts(files: File[]): Promise<FontPreflightResult> {
@@ -865,11 +858,17 @@ export class HttpAdapter implements ApiAdapter {
     sourceIslandNo,
     targetProjectNo,
     targetIslandNo,
+    unitFactoryCodes,
     files,
     runDeliverable,
     deliverableParams,
   }: CreateAuditReplaceParams): Promise<CreateBatchPayload> {
     const formData = new FormData();
+    const normalizedUnitFactoryCodes = [...new Set(
+      (unitFactoryCodes ?? [])
+        .map((code) => code.trim().toUpperCase())
+        .filter((code) => /^[A-Z][A-Z0-9]{1,3}$/.test(code)),
+    )];
     formData.append("mode", "replace");
     formData.append(
       "params_json",
@@ -878,6 +877,7 @@ export class HttpAdapter implements ApiAdapter {
         ...(sourceIslandNo ? { source_island_no: sourceIslandNo } : {}),
         target_project_no: targetProjectNo,
         ...(targetIslandNo ? { target_island_no: targetIslandNo } : {}),
+        unit_factory_codes: normalizedUnitFactoryCodes,
         run_deliverable: runDeliverable,
         ...(runDeliverable && deliverableParams
           ? { deliverable_params: deliverableParams }
@@ -903,20 +903,19 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async listTaskGroups(): Promise<TaskGroupList> {
-    const payload = await this.fetchJson<{
-      total: number;
-      items: RawTaskGroupSummary[];
-    }>("/api/task-groups");
-
+    const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
+      "/api/task-groups",
+    );
     return {
       total: payload.total,
-      items: payload.items.map((item) => this.normalizeTaskGroupSummary(item)),
+      items: (payload.items ?? []).map((item) => this.normalizeTaskGroupSummary(item)),
     };
   }
 
   async getTaskGroupDetail(groupId: string): Promise<TaskGroupDetail> {
-    const payload = await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}`);
-    return this.normalizeTaskGroupDetail(payload);
+    return this.normalizeTaskGroupDetail(
+      await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}`),
+    );
   }
 
   async submitTaskGroup(
@@ -925,9 +924,7 @@ export class HttpAdapter implements ApiAdapter {
   ): Promise<TaskGroupDetail> {
     const response = await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}/submit`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         overwrite_archive_existing: payload.overwriteArchiveExisting,
         cancel_existing_in_progress: payload.cancelExistingInProgress,
@@ -944,9 +941,7 @@ export class HttpAdapter implements ApiAdapter {
       `/api/task-groups/${groupId}/restart-submit`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           overwrite_archive_existing: payload.overwriteArchiveExisting,
           cancel_existing_in_progress: payload.cancelExistingInProgress,
@@ -956,13 +951,16 @@ export class HttpAdapter implements ApiAdapter {
     return this.normalizeTaskGroupDetail(response);
   }
 
-  async listJobs(status?: string, offset = 0, limit = 100): Promise<JobList> {
+  async listJobs(status?: string, offset = 0, limit = 100, sort?: JobListSort): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
       search.set("status", status);
     }
     search.set("offset", String(offset));
     search.set("limit", String(limit));
+    if (sort) {
+      search.set("sort", sort);
+    }
 
     const payload = await this.fetchJson<{
       total: number;
@@ -975,6 +973,60 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async getJobsActivity(): Promise<JobsActivity> {
+    const payload = await this.fetchJson<{
+      total: number;
+      active: number;
+      last_changed_at: string | null;
+    }>("/api/jobs/activity", undefined, { retry: true });
+
+    return {
+      total: payload.total,
+      active: payload.active,
+      lastChangedAt: payload.last_changed_at,
+    };
+  }
+
+  subscribeJobsActivity = (
+    onActivity: (activity: JobsActivity) => void,
+    onError?: (event: Event) => void,
+  ): (() => void) => {
+    if (typeof window === "undefined" || typeof window.EventSource === "undefined") {
+      return () => {};
+    }
+
+    const source = new window.EventSource(this.buildUrl("/api/jobs/activity/stream"));
+    const handleActivity = (event: MessageEvent<string>) => {
+      const payload = this.parseJsonOrText(event.data);
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+      const raw = payload as {
+        total?: number;
+        active?: number;
+        last_changed_at?: string | null;
+      };
+
+      onActivity({
+        total: Number(raw.total ?? 0),
+        active: Number(raw.active ?? 0),
+        lastChangedAt: typeof raw.last_changed_at === "string" ? raw.last_changed_at : null,
+      });
+    };
+    const handleError = (event: Event) => {
+      onError?.(event);
+    };
+
+    source.addEventListener("jobs_activity", handleActivity as EventListener);
+    source.onerror = handleError;
+
+    return () => {
+      source.removeEventListener("jobs_activity", handleActivity as EventListener);
+      source.onerror = null;
+      source.close();
+    };
+  };
+
   async getJobDetail(jobId: string): Promise<JobDetail> {
     const payload = await this.fetchJson<RawJobDetail>(`/api/jobs/${jobId}`, undefined, {
       retry: true,
@@ -985,6 +1037,7 @@ export class HttpAdapter implements ApiAdapter {
       currentFile: payload.current_file ?? null,
       flags: payload.flags ?? [],
       errors: payload.errors ?? [],
+      diagnostics: this.normalizeDiagnostics(payload.diagnostics),
       topWrongTexts: payload.top_wrong_texts ?? [],
       topInternalCodes: payload.top_internal_codes ?? [],
       sharedDir: payload.shared_dir ?? null,
@@ -996,8 +1049,7 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   async readArtifact(url: string): Promise<Blob> {
-    const { blob } = await this.fetchArtifact(url);
-    return blob;
+    return (await this.fetchArtifact(url)).blob;
   }
 
   async downloadArtifact(url: string, fallbackFilename = "download"): Promise<void> {
@@ -1072,7 +1124,31 @@ export class HttpAdapter implements ApiAdapter {
       replacementFont: payload.replacement_font ?? null,
       replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
       replacedStyleCount: payload.replaced_style_count ?? 0,
+      workload: this.normalizeWorkloadSummary(payload.workload),
+      effectiveWorkload: payload.effective_workload ?? 0,
       children: payload.children?.map((child) => this.normalizeSummary(child)),
+    };
+  }
+
+  private normalizeWorkloadSummary(payload: RawWorkloadSummary | null | undefined): WorkloadSummary {
+    return {
+      initialWorkloadA1: payload?.initial_workload_a1 ?? 0,
+      finalWorkloadA1: payload?.final_workload_a1 ?? 0,
+      oneReviewFactor: payload?.one_review_factor ?? 1,
+      twoReviewFactor: payload?.two_review_factor ?? 1,
+      threeReviewFactor: payload?.three_review_factor ?? 1,
+      nodeFactors: Object.fromEntries(
+        Object.entries(payload?.node_factors ?? {}).map(([key, value]) => [key, value ?? 1]),
+      ),
+      settlementStatus: payload?.settlement_status ?? "pending",
+      settledAt: payload?.settled_at ?? null,
+      contributorEntries: (payload?.contributor_entries ?? []).map((entry) => ({
+        roleKey: entry.role_key ?? "",
+        accountId: entry.account_id ?? null,
+        displayName: entry.display_name ?? null,
+        workloadA1: entry.workload_a1 ?? 0,
+        settledAt: entry.settled_at ?? null,
+      })),
     };
   }
 
@@ -1146,7 +1222,6 @@ export class HttpAdapter implements ApiAdapter {
 
   private async fetchArtifact(path: string): Promise<{ blob: Blob; filename: string | null }> {
     const response = await fetch(this.buildUrl(path), this.withAuthorization());
-
     if (!response.ok) {
       if (response.status === 401) {
         this.onUnauthorized?.();
@@ -1164,11 +1239,10 @@ export class HttpAdapter implements ApiAdapter {
       };
       throw error;
     }
-
     return {
       blob: await response.blob(),
       filename: this.parseContentDispositionFilename(
-        response.headers?.get("Content-Disposition") ?? null,
+        response.headers.get("Content-Disposition"),
       ),
     };
   }
@@ -1178,16 +1252,11 @@ export class HttpAdapter implements ApiAdapter {
     if (!accessToken) {
       return init;
     }
-
     const headers = new Headers(init?.headers);
     if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${accessToken}`);
     }
-
-    return {
-      ...init,
-      headers,
-    };
+    return { ...init, headers };
   }
 
   private parseJsonOrText(text: string): unknown {
@@ -1216,7 +1285,6 @@ export class HttpAdapter implements ApiAdapter {
     if (!value) {
       return null;
     }
-
     const encodedMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
     if (encodedMatch?.[1]) {
       try {
@@ -1225,20 +1293,16 @@ export class HttpAdapter implements ApiAdapter {
         return encodedMatch[1];
       }
     }
-
     const quotedMatch = value.match(/filename="([^"]+)"/i);
     if (quotedMatch?.[1]) {
       return quotedMatch[1];
     }
-
-    const plainMatch = value.match(/filename=([^;]+)/i);
-    return plainMatch?.[1]?.trim() || null;
+    return value.match(/filename=([^;]+)/i)?.[1]?.trim() || null;
   }
 
   private inferFilenameFromUrl(url: string) {
     const normalized = url.split("?")[0]?.split("#")[0] ?? "";
-    const segment = normalized.split("/").filter(Boolean).pop();
-    return segment || null;
+    return normalized.split("/").filter(Boolean).pop() || null;
   }
 
   private isRetryableError(error: unknown) {
@@ -1286,6 +1350,26 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  private normalizeDiagnostics(payload: RawJobDetail["diagnostics"]) {
+    if (!Array.isArray(payload)) {
+      return [];
+    }
+    return payload.map((item) => ({
+      kind: item.kind ?? "other",
+      severity: item.severity ?? "warning",
+      title: item.title ?? "未命名问题",
+      summary: item.summary ?? "",
+      suggestion: item.suggestion ?? "",
+      details: Array.isArray(item.details)
+        ? item.details.map((detail) => ({
+            label: detail.label ?? "具体信息",
+            items: detail.items ?? [],
+          }))
+        : [],
+      rawItems: item.raw_items ?? [],
+    }));
+  }
+
   private normalizeFindingGroups(payload: RawJobDetail["finding_groups"]): FindingGroup[] | undefined {
     if (!payload) {
       return undefined;
@@ -1295,6 +1379,11 @@ export class HttpAdapter implements ApiAdapter {
       matchedText: group.matched_text ?? "",
       count: group.count ?? 0,
       internalCodes: group.internal_codes ?? [],
+      category: group.category ?? undefined,
+      contextKind: group.context_kind ?? undefined,
+      issueType: group.issue_type ?? undefined,
+      summary: group.summary ?? undefined,
+      details: group.details ?? undefined,
     }));
   }
 
@@ -1327,98 +1416,6 @@ export class HttpAdapter implements ApiAdapter {
       reportJson: payload.report_json ?? null,
       message: payload.message ?? "",
     };
-  }
-
-  private normalizeFontPreflightSummary(
-    payload: RawJobSummary["font_preflight_summary"],
-  ): FontPreflightSummary | null {
-    if (!payload) {
-      return null;
-    }
-
-    return {
-      files: (payload.files ?? []).map((file) => this.normalizeFontPreflightFile(file)),
-      policy: payload.policy ?? "none",
-      fontCompatibilityMode: Boolean(payload.font_compatibility_mode),
-      replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
-      fontMapPath: payload.font_map_path ?? null,
-      fontAlt: payload.font_alt ?? null,
-    };
-  }
-
-  private normalizeFontPreflightFile(
-    file: NonNullable<RawFontPreflightResult["files"]>[number],
-  ): FontPreflightResult["files"][number] {
-    return {
-      filename: file.filename ?? "",
-      status: file.status ?? "",
-      missingFonts: (file.missing_fonts ?? []).map((font) => ({
-        styleName: font.style_name ?? "",
-        fontName: font.font_name ?? "",
-        bigfontName: font.bigfont_name ?? "",
-        kind: font.kind ?? "unknown",
-        usedInBlock: Boolean(font.used_in_block),
-      })),
-      detectedStyleCount: file.detected_style_count ?? 0,
-      missingStyleCount: file.missing_style_count ?? 0,
-      fontReplacementApplied: Boolean(file.font_replacement_applied),
-      replacementFont: file.replacement_font ?? null,
-      replacementFonts: this.normalizeFontReplacementMap(file.replacement_fonts),
-      fontCompatibilityMode: Boolean(file.font_compatibility_mode),
-      fontCompatibilityReplacements: this.normalizeFontReplacementMap(
-        file.font_compatibility_replacements,
-      ),
-      replacedStyleCount: file.replaced_style_count ?? 0,
-      verifyAfterReplace: file.verify_after_replace
-        ? {
-            status: file.verify_after_replace.status ?? "",
-            missingStyleCount: file.verify_after_replace.missing_style_count ?? 0,
-            missingFonts: (file.verify_after_replace.missing_fonts ?? []).map((font) => ({
-              styleName: font.style_name ?? "",
-              fontName: font.font_name ?? "",
-              bigfontName: font.bigfont_name ?? "",
-              kind: font.kind ?? "unknown",
-              usedInBlock: Boolean(font.used_in_block),
-            })),
-          }
-        : null,
-      fontReplacementIncomplete: Boolean(file.font_replacement_incomplete),
-      errors: file.errors ?? [],
-    };
-  }
-
-  private normalizeFontReplacementOptions(
-    options: RawFontPreflightResult["replacement_options"],
-  ): FontReplacementOption[] {
-    return (options ?? []).map((option) => ({
-      label: option.label ?? "",
-      value: option.value ?? "",
-      family: option.family ?? "",
-      path: option.path ?? "",
-      kind: option.kind ?? "unknown",
-      source: option.source ?? "unknown",
-    }));
-  }
-
-  private normalizeFontReplacementOptionsByKind(
-    optionsByKind: RawFontPreflightResult["replacement_options_by_kind"],
-    fallbackOptions: FontReplacementOption[],
-  ): Record<string, FontReplacementOption[]> {
-    if (optionsByKind && Object.keys(optionsByKind).length > 0) {
-      return Object.fromEntries(
-        Object.entries(optionsByKind).map(([kind, options]) => [
-          kind,
-          this.normalizeFontReplacementOptions(options ?? []),
-        ]),
-      );
-    }
-
-    const grouped = new Map<string, FontReplacementOption[]>();
-    for (const option of fallbackOptions) {
-      const kind = option.kind.trim().toLowerCase() || "unknown";
-      grouped.set(kind, [...(grouped.get(kind) ?? []), option]);
-    }
-    return Object.fromEntries(grouped.entries());
   }
 
   private normalizeTaskGroupSummary(payload: RawTaskGroupSummary): TaskGroupSummary {
@@ -1465,7 +1462,6 @@ export class HttpAdapter implements ApiAdapter {
     if (!payload?.creator_account || !payload.creator_name || !payload.creator_role) {
       return null;
     }
-
     return {
       creatorAccount: payload.creator_account,
       creatorName: payload.creator_name,
@@ -1476,31 +1472,7 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  private normalizeWorkloadSummary(payload: RawWorkloadSummary | null | undefined): WorkloadSummary {
-    return {
-      initialWorkloadA1: payload?.initial_workload_a1 ?? 0,
-      finalWorkloadA1: payload?.final_workload_a1 ?? 0,
-      oneReviewFactor: payload?.one_review_factor ?? 1,
-      twoReviewFactor: payload?.two_review_factor ?? 1,
-      threeReviewFactor: payload?.three_review_factor ?? 1,
-      nodeFactors: Object.fromEntries(
-        Object.entries(payload?.node_factors ?? {}).map(([key, value]) => [key, value ?? 1]),
-      ),
-      settlementStatus: payload?.settlement_status ?? "pending",
-      settledAt: payload?.settled_at ?? null,
-      contributorEntries: (payload?.contributor_entries ?? []).map((entry) => ({
-        roleKey: entry.role_key ?? "",
-        accountId: entry.account_id ?? null,
-        displayName: entry.display_name ?? null,
-        workloadA1: entry.workload_a1 ?? 0,
-        settledAt: entry.settled_at ?? null,
-      })),
-    };
-  }
-
-  private normalizePersonnelSnapshot(
-    payload: RawPersonnelSnapshot | null | undefined,
-  ): PersonnelSnapshot {
+  private normalizePersonnelSnapshot(payload: RawPersonnelSnapshot | null | undefined): PersonnelSnapshot {
     return {
       members: Object.fromEntries(
         Object.entries(payload?.members ?? {}).map(([fieldName, member]) => [
@@ -1557,118 +1529,11 @@ export class HttpAdapter implements ApiAdapter {
   private normalizeInvalidAccountRow(
     payload: RawInvalidAccountRow | null | undefined,
   ): InvalidAccountRow {
-    return {
-      rowNumber: payload?.row_number ?? 0,
-      raw: payload?.raw ?? {},
-      errors: payload?.errors ?? [],
-    };
+    return { rowNumber: payload?.row_number ?? 0, raw: payload?.raw ?? {}, errors: payload?.errors ?? [] };
   }
 
   private normalizeAdminConfig(payload: RawAdminConfig | null | undefined): AdminConfig {
-    return {
-      archiveRootPath: payload?.archive_root_path ?? "",
-    };
-  }
-
-  private serializeAccountCreatePayload(payload: AccountCreatePayload) {
-    return {
-      office_code: payload.officeCode,
-      office_name: payload.officeName,
-      account_id: payload.accountId,
-      display_name: payload.displayName,
-      role: payload.role,
-      password: payload.password,
-    };
-  }
-
-  private serializeAccountUpdatePayload(payload: AccountUpdatePayload) {
-    return Object.fromEntries(
-      Object.entries({
-        office_code: payload.officeCode,
-        office_name: payload.officeName,
-        account_id: payload.accountId,
-        display_name: payload.displayName,
-        role: payload.role,
-        password: payload.password,
-      }).filter(([, value]) => value !== undefined),
-    );
-  }
-
-  private serializeWorkflowRepairPayload(payload: WorkflowRepairPayload) {
-    return {
-      ...(payload.replaceWithAccountId
-        ? { replace_with_account_id: payload.replaceWithAccountId }
-        : {}),
-      ...(payload.createAccountPayload
-        ? {
-            create_account_payload: this.serializeAccountCreatePayload(
-              payload.createAccountPayload,
-            ),
-          }
-        : {}),
-    };
-  }
-
-  private buildWorkloadQuery(filters: WorkloadQueryParams): URLSearchParams {
-    const search = new URLSearchParams();
-    if (filters.startDate) {
-      search.set("start_date", filters.startDate);
-    }
-    if (filters.endDate) {
-      search.set("end_date", filters.endDate);
-    }
-    if (filters.status) {
-      search.set("status", filters.status);
-    }
-    if (typeof filters.validOnly === "boolean") {
-      search.set("valid_only", filters.validOnly ? "true" : "false");
-    }
-    return search;
-  }
-
-  private async loadWorkloadScope(
-    path: string,
-    filters: WorkloadQueryParams,
-  ): Promise<WorkloadScopeResponse> {
-    const search = this.buildWorkloadQuery(filters);
-    const suffix = search.toString();
-    const payload = await this.fetchJson<RawWorkloadScopeResponse>(
-      `${path}${suffix ? `?${suffix}` : ""}`,
-    );
-    return this.normalizeWorkloadScopeResponse(payload);
-  }
-
-  private normalizeWorkloadScopeResponse(
-    payload: RawWorkloadScopeResponse | null | undefined,
-  ): WorkloadScopeResponse {
-    return {
-      scope: payload?.scope ?? "me",
-      filters: {
-        startDate: payload?.filters?.start_date ?? null,
-        endDate: payload?.filters?.end_date ?? null,
-        status: payload?.filters?.status ?? null,
-        validOnly: Boolean(payload?.filters?.valid_only),
-      },
-      officeName: payload?.office_name ?? null,
-      totalWorkloadA1: payload?.total_workload_a1 ?? 0,
-      totalsByAccount: Object.fromEntries(
-        Object.entries(payload?.totals_by_account ?? {}).map(([accountId, value]) => [
-          accountId,
-          value ?? 0,
-        ]),
-      ),
-      entries: (payload?.entries ?? []).map((entry) => ({
-        roleKey: entry.role_key ?? "",
-        accountId: entry.account_id ?? null,
-        displayName: entry.display_name ?? null,
-        workloadA1: entry.workload_a1 ?? 0,
-        settledAt: entry.settled_at ?? null,
-        groupId: entry.group_id ?? "",
-        groupDisplayName: entry.group_display_name ?? null,
-        albumInternalCode: entry.album_internal_code ?? null,
-        settlementStatus: entry.settlement_status ?? "pending",
-      })),
-    };
+    return { archiveRootPath: payload?.archive_root_path ?? "" };
   }
 
   private normalizeWorkflowState(payload: RawWorkflowState | null | undefined): WorkflowState {
@@ -1727,10 +1592,7 @@ export class HttpAdapter implements ApiAdapter {
   private normalizeLegacyVisibilityState(
     payload: RawLegacyVisibilityState | null | undefined,
   ): LegacyVisibilityState {
-    return {
-      scope: payload?.scope ?? "admin_only",
-      reason: payload?.reason ?? null,
-    };
+    return { scope: payload?.scope ?? "admin_only", reason: payload?.reason ?? null };
   }
 
   private normalizeAccount(payload: RawAccount): CurrentAccount {
@@ -1743,6 +1605,184 @@ export class HttpAdapter implements ApiAdapter {
       valid: payload.valid ?? true,
       pendingTodoCount: payload.pending_todo_count ?? 0,
     };
+  }
+
+  private serializeAccountCreatePayload(payload: AccountCreatePayload) {
+    return {
+      office_code: payload.officeCode,
+      office_name: payload.officeName,
+      account_id: payload.accountId,
+      display_name: payload.displayName,
+      role: payload.role,
+      password: payload.password,
+    };
+  }
+
+  private serializeAccountUpdatePayload(payload: AccountUpdatePayload) {
+    return Object.fromEntries(
+      Object.entries({
+        office_code: payload.officeCode,
+        office_name: payload.officeName,
+        account_id: payload.accountId,
+        display_name: payload.displayName,
+        role: payload.role,
+        password: payload.password,
+      }).filter(([, value]) => value !== undefined),
+    );
+  }
+
+  private serializeWorkflowRepairPayload(payload: WorkflowRepairPayload) {
+    return {
+      ...(payload.replaceWithAccountId ? { replace_with_account_id: payload.replaceWithAccountId } : {}),
+      ...(payload.createAccountPayload
+        ? { create_account_payload: this.serializeAccountCreatePayload(payload.createAccountPayload) }
+        : {}),
+    };
+  }
+
+  private buildWorkloadQuery(filters: WorkloadQueryParams): URLSearchParams {
+    const search = new URLSearchParams();
+    if (filters.startDate) search.set("start_date", filters.startDate);
+    if (filters.endDate) search.set("end_date", filters.endDate);
+    if (filters.status) search.set("status", filters.status);
+    if (typeof filters.validOnly === "boolean") {
+      search.set("valid_only", filters.validOnly ? "true" : "false");
+    }
+    return search;
+  }
+
+  private async loadWorkloadScope(
+    path: string,
+    filters: WorkloadQueryParams,
+  ): Promise<WorkloadScopeResponse> {
+    const search = this.buildWorkloadQuery(filters).toString();
+    const payload = await this.fetchJson<RawWorkloadScopeResponse>(
+      `${path}${search ? `?${search}` : ""}`,
+    );
+    return {
+      scope: payload.scope ?? "me",
+      filters: {
+        startDate: payload.filters?.start_date ?? null,
+        endDate: payload.filters?.end_date ?? null,
+        status: payload.filters?.status ?? null,
+        validOnly: Boolean(payload.filters?.valid_only),
+      },
+      officeName: payload.office_name ?? null,
+      totalWorkloadA1: payload.total_workload_a1 ?? 0,
+      totalsByAccount: Object.fromEntries(
+        Object.entries(payload.totals_by_account ?? {}).map(([accountId, value]) => [accountId, value ?? 0]),
+      ),
+      entries: (payload.entries ?? []).map((entry) => ({
+        roleKey: entry.role_key ?? "",
+        accountId: entry.account_id ?? null,
+        displayName: entry.display_name ?? null,
+        workloadA1: entry.workload_a1 ?? 0,
+        settledAt: entry.settled_at ?? null,
+        groupId: entry.group_id ?? "",
+        groupDisplayName: entry.group_display_name ?? null,
+        albumInternalCode: entry.album_internal_code ?? null,
+        settlementStatus: entry.settlement_status ?? "pending",
+      })),
+    };
+  }
+
+  private normalizeFontPreflightSummary(
+    payload: RawJobSummary["font_preflight_summary"],
+  ): FontPreflightSummary | null {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      files: (payload.files ?? []).map((file) => this.normalizeFontPreflightFile(file)),
+      policy: payload.policy ?? "none",
+      fontCompatibilityMode: Boolean(payload.font_compatibility_mode),
+      replacementFonts: this.normalizeFontReplacementMap(payload.replacement_fonts),
+      fontMapPath: payload.font_map_path ?? null,
+      fontAlt: payload.font_alt ?? null,
+    };
+  }
+
+  private normalizeFontPreflightFile(
+    file: NonNullable<RawFontPreflightResult["files"]>[number],
+  ): FontPreflightResult["files"][number] {
+    return {
+      filename: file.filename ?? "",
+      status: file.status ?? "",
+      missingFonts: (file.missing_fonts ?? []).map((font) => ({
+        styleName: font.style_name ?? "",
+        fontName: font.font_name ?? "",
+        bigfontName: font.bigfont_name ?? "",
+        kind: font.kind ?? "unknown",
+        usedInBlock: Boolean(font.used_in_block),
+      })),
+      detectedStyleCount: file.detected_style_count ?? 0,
+      missingStyleCount: file.missing_style_count ?? 0,
+      fontReplacementApplied: Boolean(file.font_replacement_applied),
+      replacementFont: file.replacement_font ?? null,
+      replacementFonts: this.normalizeFontReplacementMap(file.replacement_fonts),
+      fontCompatibilityMode: Boolean(file.font_compatibility_mode),
+      fontCompatibilityReplacements: this.normalizeFontReplacementMap(
+        file.font_compatibility_replacements,
+      ),
+      fontCompatibilityRequired: Boolean(file.font_compatibility_required),
+      emptyStyleEntityReplacedCount: file.empty_style_entity_replaced_count ?? 0,
+      emptyStyleStylePatchedCount: file.empty_style_style_patched_count ?? 0,
+      emptyStyleSharedSkippedCount: file.empty_style_shared_skipped_count ?? 0,
+      emptyStyleSharedStyles: file.empty_style_shared_styles ?? [],
+      emptyStyleTargetRegionsCount: file.empty_style_target_regions_count ?? 0,
+      emptyStyleGlobalReplacedCount: file.empty_style_global_replaced_count ?? 0,
+      replacedStyleCount: file.replaced_style_count ?? 0,
+      verifyAfterReplace: file.verify_after_replace
+        ? {
+            status: file.verify_after_replace.status ?? "",
+            missingStyleCount: file.verify_after_replace.missing_style_count ?? 0,
+            missingFonts: (file.verify_after_replace.missing_fonts ?? []).map((font) => ({
+              styleName: font.style_name ?? "",
+              fontName: font.font_name ?? "",
+              bigfontName: font.bigfont_name ?? "",
+              kind: font.kind ?? "unknown",
+              usedInBlock: Boolean(font.used_in_block),
+            })),
+          }
+        : null,
+      fontReplacementIncomplete: Boolean(file.font_replacement_incomplete),
+      errors: file.errors ?? [],
+    };
+  }
+
+  private normalizeFontReplacementOptions(
+    options: RawFontPreflightResult["replacement_options"],
+  ): FontReplacementOption[] {
+    return (options ?? []).map((option) => ({
+      label: option.label ?? "",
+      value: option.value ?? "",
+      family: option.family ?? "",
+      path: option.path ?? "",
+      kind: option.kind ?? "unknown",
+      source: option.source ?? "unknown",
+    }));
+  }
+
+  private normalizeFontReplacementOptionsByKind(
+    optionsByKind: RawFontPreflightResult["replacement_options_by_kind"],
+    fallbackOptions: FontReplacementOption[],
+  ): Record<string, FontReplacementOption[]> {
+    if (optionsByKind && Object.keys(optionsByKind).length > 0) {
+      return Object.fromEntries(
+        Object.entries(optionsByKind).map(([kind, options]) => [
+          kind,
+          this.normalizeFontReplacementOptions(options ?? []),
+        ]),
+      );
+    }
+
+    const grouped = new Map<string, FontReplacementOption[]>();
+    for (const option of fallbackOptions) {
+      const kind = option.kind.trim().toLowerCase() || "unknown";
+      grouped.set(kind, [...(grouped.get(kind) ?? []), option]);
+    }
+    return Object.fromEntries(grouped.entries());
   }
 
   private normalizeFontReplacementMap(

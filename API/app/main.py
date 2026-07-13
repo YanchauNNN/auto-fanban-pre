@@ -28,11 +28,16 @@ def create_app(
     job_processor: Callable[[Job], None] | None = None,
     shared_prep_service: SharedPrepService | None = None,
     font_preflight_service: FontPreflightService | None = None,
+    process_jobs_in_api: bool | None = None,
 ) -> FastAPI:
+    resolved_process_jobs_in_api = (
+        job_processor is not None if process_jobs_in_api is None else process_jobs_in_api
+    )
     runtime = DeliverableApiRuntime(
         job_processor=job_processor,
         shared_prep_service=shared_prep_service,
         font_preflight_service=font_preflight_service,
+        process_jobs_in_api=resolved_process_jobs_in_api,
     )
     management = ManagementServices.build(runtime)
 

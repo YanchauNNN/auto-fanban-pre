@@ -75,78 +75,6 @@ describe("HttpAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("reads artifact blobs with the current bearer token", async () => {
-    const artifactBlob = new Blob(["report"], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: async () => artifactBlob,
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
-      getAccessToken: () => "session-token",
-    });
-    const blob = await adapter.readArtifact("/api/jobs/job-1/download/report");
-
-    expect(blob).toBe(artifactBlob);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/jobs/job-1/download/report",
-      expect.objectContaining({
-        headers: expect.any(Headers),
-      }),
-    );
-    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
-    expect(headers.get("Authorization")).toBe("Bearer session-token");
-  });
-
-  it("downloads artifacts through an authenticated blob request", async () => {
-    const artifactBlob = new Blob(["report"], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: new Headers({
-        "Content-Disposition": 'attachment; filename="report.xlsx"',
-      }),
-      blob: async () => artifactBlob,
-    });
-    const anchor = {
-      href: "",
-      download: "",
-      style: { display: "" },
-      click: vi.fn(),
-      remove: vi.fn(),
-    } as unknown as HTMLAnchorElement;
-    vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(document, "createElement").mockReturnValue(anchor);
-    vi.spyOn(document.body, "appendChild").mockImplementation((node) => node);
-    const createObjectURLMock = vi.fn().mockReturnValue("blob:report");
-    const revokeObjectURLMock = vi.fn();
-    URL.createObjectURL = createObjectURLMock;
-    URL.revokeObjectURL = revokeObjectURLMock;
-
-    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
-      getAccessToken: () => "session-token",
-    });
-    await adapter.downloadArtifact("/api/jobs/job-1/download/report", "fallback.xlsx");
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/jobs/job-1/download/report",
-      expect.objectContaining({
-        headers: expect.any(Headers),
-      }),
-    );
-    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
-    expect(headers.get("Authorization")).toBe("Bearer session-token");
-    expect(createObjectURLMock).toHaveBeenCalledWith(artifactBlob);
-    expect(anchor.href).toBe("blob:report");
-    expect(anchor.download).toBe("report.xlsx");
-    expect(anchor.click).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURLMock).toHaveBeenCalledWith("blob:report");
-  });
-
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -172,6 +100,28 @@ describe("HttpAdapter", () => {
           affected_drawings_count: 0,
           top_wrong_texts: [],
           top_internal_codes: [],
+          finding_groups: [
+            {
+              matched_text: "GB 51058-2011",
+              count: 1,
+              internal_codes: ["18185NF-JGS19-003"],
+              category: "规范审查",
+              context_kind: "standard_review_year",
+              issue_type: "year_mismatch",
+              summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+              details: ["实际标准号：GB 51058-2011", "期望标准号：GB 51058-2014"],
+            },
+          ],
+          workload: {
+            initial_workload_a1: 2.5,
+            final_workload_a1: 2.7,
+            one_review_factor: 1,
+            two_review_factor: 1.08,
+            three_review_factor: 1,
+            settlement_status: "pending",
+            settled_at: null,
+          },
+          effective_workload: 2.7,
           deliverable_outputs: {
             dwg_count: 1,
             pdf_count: 1,
@@ -187,6 +137,22 @@ describe("HttpAdapter", () => {
             ],
           },
           retry_available: false,
+          diagnostics: [
+            {
+              kind: "duplicate_code",
+              severity: "error",
+              title: "检测到重复编码",
+              summary: "发现 0 个重复内部编码、1 个重复外部编码。",
+              suggestion: "请检查图签中的内部编码/外部编码。",
+              details: [
+                {
+                  label: "外部编码 PC5NPM12004B25C42SD",
+                  items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+                },
+              ],
+              raw_items: ["检测到重复编码"],
+            },
+          ],
           artifacts: {
             package_available: true,
             ied_available: true,
@@ -226,6 +192,53 @@ describe("HttpAdapter", () => {
       dwgName: "A01.dwg",
       pageTotal: 2,
     });
+    expect(detail.workload).toMatchObject({
+      initialWorkloadA1: 2.5,
+      finalWorkloadA1: 2.7,
+      twoReviewFactor: 1.08,
+      settlementStatus: "pending",
+    });
+    expect(detail.effectiveWorkload).toBe(2.7);
+    expect(detail.findingGroups?.[0]).toMatchObject({
+      matchedText: "GB 51058-2011",
+      category: "规范审查",
+      contextKind: "standard_review_year",
+      issueType: "year_mismatch",
+      summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+      details: ["实际标准号：GB 51058-2011", "期望标准号：GB 51058-2014"],
+    });
+    expect((detail as any).diagnostics?.[0]).toMatchObject({
+      kind: "duplicate_code",
+      severity: "error",
+      title: "检测到重复编码",
+      details: [
+        {
+          label: "外部编码 PC5NPM12004B25C42SD",
+          items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+        },
+      ],
+      rawItems: ["检测到重复编码"],
+    });
+  });
+
+  it("reads protected artifacts with the current bearer token", async () => {
+    const artifact = new Blob(["zip-content"], { type: "application/zip" });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => artifact,
+      headers: new Headers({ "Content-Disposition": 'attachment; filename="package.zip"' }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
+      getAccessToken: () => "access-token",
+    });
+
+    await expect(adapter.readArtifact("/api/jobs/job-1/download/package")).resolves.toBe(artifact);
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8000/api/jobs/job-1/download/package");
+    expect(new Headers(request.headers).get("Authorization")).toBe("Bearer access-token");
   });
 
   it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {
@@ -348,68 +361,130 @@ describe("HttpAdapter", () => {
     expect(jobs.items).toHaveLength(0);
   });
 
-  it("maps owner snapshot fields in job summaries", async () => {
+  it("passes created-at sorting to listJobs when requested", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       text: async () =>
         JSON.stringify({
-          total: 1,
-          items: [
-            {
-              job_id: "job-owned-1",
-              batch_id: "batch-owned-1",
-              source_filename: "owned.dwg",
-              task_kind: "deliverable",
-              job_mode: "deliverable",
-              project_no: "2016",
-              status: "succeeded",
-              stage: "DONE",
-              percent: 100,
-              message: "done",
-              created_at: "2026-06-01T10:00:00+08:00",
-              finished_at: "2026-06-01T10:01:00+08:00",
-              findings_count: 0,
-              affected_drawings_count: 0,
-              retry_available: false,
-              owner_snapshot: {
-                creator_account: "zhangsan",
-                creator_name: "张三",
-                creator_role: "设计人员",
-                creator_office: "结构一室",
-                created_by_scope: "current_login_user",
-                submitted_at: null,
-              },
-              creator_account: "zhangsan",
-              creator_name: "张三",
-              creator_office: "结构一室",
-              artifacts: {
-                package_available: true,
-                ied_available: false,
-                report_available: false,
-                replaced_dwg_available: false,
-              },
-            },
-          ],
+          total: 0,
+          items: [],
         }),
     });
     vi.stubGlobal("fetch", fetchMock);
 
     const adapter = new HttpAdapter("http://127.0.0.1:8000/");
-    const jobs = await adapter.listJobs();
+    await adapter.listJobs(undefined, 0, 100, "created_at");
 
-    expect(jobs.items[0]).toMatchObject({
-      creatorAccount: "zhangsan",
-      creatorName: "张三",
-      creatorOffice: "结构一室",
-      ownerSnapshot: {
-        creatorAccount: "zhangsan",
-        creatorName: "张三",
-        creatorRole: "设计人员",
-        creatorOffice: "结构一室",
-        createdByScope: "current_login_user",
-        submittedAt: null,
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs?offset=0&limit=100&sort=created_at",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("fetches lightweight jobs activity marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          total: 12,
+          active: 2,
+          last_changed_at: "2026-07-05T12:34:56+08:00",
+        }),
     });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const activity = await adapter.getJobsActivity();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/activity",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(activity).toEqual({
+      total: 12,
+      active: 2,
+      lastChangedAt: "2026-07-05T12:34:56+08:00",
+    });
+  });
+
+  it("subscribes to jobs activity SSE and closes cleanly", () => {
+    const instances: FakeEventSource[] = [];
+
+    class FakeEventSource {
+      readonly url: string;
+      onerror: ((event: Event) => void) | null = null;
+      closed = false;
+      private readonly listeners = new Map<string, EventListener[]>();
+
+      constructor(url: string) {
+        this.url = url;
+        instances.push(this);
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.set(
+          type,
+          (this.listeners.get(type) ?? []).filter((candidate) => candidate !== listener),
+        );
+      }
+
+      close() {
+        this.closed = true;
+      }
+
+      emit(type: string, data: string) {
+        const event = new MessageEvent(type, { data });
+        for (const listener of this.listeners.get(type) ?? []) {
+          listener(event);
+        }
+      }
+    }
+
+    vi.stubGlobal("EventSource", FakeEventSource);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const onActivity = vi.fn();
+    const onError = vi.fn();
+    const unsubscribe = adapter.subscribeJobsActivity(onActivity, onError);
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].url).toBe("http://127.0.0.1:8000/api/jobs/activity/stream");
+
+    instances[0].emit(
+      "jobs_activity",
+      JSON.stringify({
+        total: 12,
+        active: 2,
+        last_changed_at: "2026-07-05T12:34:56+08:00",
+      }),
+    );
+
+    expect(onActivity).toHaveBeenCalledWith({
+      total: 12,
+      active: 2,
+      lastChangedAt: "2026-07-05T12:34:56+08:00",
+    });
+
+    instances[0].onerror?.(new Event("error"));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(instances[0].closed).toBe(false);
+
+    unsubscribe();
+
+    expect(instances[0].closed).toBe(true);
+    instances[0].emit(
+      "jobs_activity",
+      JSON.stringify({
+        total: 13,
+        active: 0,
+        last_changed_at: "2026-07-05T12:35:00+08:00",
+      }),
+    );
+    expect(onActivity).toHaveBeenCalledTimes(1);
   });
 
   it("maps failure display fields in job summaries", async () => {
@@ -521,10 +596,69 @@ describe("HttpAdapter", () => {
         source_island_no: "2",
         target_project_no: "2016",
         target_island_no: "1",
+        unit_factory_codes: [],
         run_deliverable: false,
       }),
     );
     expect(created.jobs[0]?.taskKind).toBe("audit_replace");
+  });
+
+  it("sends factory-code unit replacement whitelist for replace jobs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-replace-2",
+          jobs: [
+            {
+              job_id: "job-replace-2",
+              batch_id: "batch-replace-2",
+              source_filename: "sample.dwg",
+              project_no: "2016",
+              task_kind: "audit_replace",
+              status: "queued",
+              stage: "PREP_SOURCE",
+              percent: 0,
+              message: "",
+              created_at: "2026-03-24T09:01:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    await adapter.createAuditReplace({
+      sourceProjectNo: "2016",
+      sourceIslandNo: "1",
+      targetProjectNo: "2026",
+      targetIslandNo: "2",
+      unitFactoryCodes: ["hl", "HL", "RX"],
+      files: [new File(["dwg"], "sample.dwg")],
+      runDeliverable: false,
+    });
+
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.get("params_json")).toBe(
+      JSON.stringify({
+        source_project_no: "2016",
+        source_island_no: "1",
+        target_project_no: "2026",
+        target_island_no: "2",
+        unit_factory_codes: ["HL", "RX"],
+        run_deliverable: false,
+      }),
+    );
   });
 
   it("creates replace-plus-deliverable groups with deliverable_params", async () => {
@@ -590,6 +724,7 @@ describe("HttpAdapter", () => {
         source_island_no: "2",
         target_project_no: "2016",
         target_island_no: "1",
+        unit_factory_codes: [],
         run_deliverable: true,
         deliverable_params: {
           project_no: "2016",
@@ -626,6 +761,13 @@ describe("HttpAdapter", () => {
               missing_style_count: 1,
               font_replacement_applied: false,
               replacement_font: null,
+              font_compatibility_required: true,
+              empty_style_entity_replaced_count: 2,
+              empty_style_style_patched_count: 1,
+              empty_style_shared_skipped_count: 1,
+              empty_style_shared_styles: ["汉字"],
+              empty_style_target_regions_count: 3,
+              empty_style_global_replaced_count: 0,
               replaced_style_count: 0,
             },
           ],
@@ -723,6 +865,13 @@ describe("HttpAdapter", () => {
       replacementFonts: {},
       fontCompatibilityMode: false,
       fontCompatibilityReplacements: {},
+      fontCompatibilityRequired: true,
+      emptyStyleEntityReplacedCount: 2,
+      emptyStyleStylePatchedCount: 1,
+      emptyStyleSharedSkippedCount: 1,
+      emptyStyleSharedStyles: ["汉字"],
+      emptyStyleTargetRegionsCount: 3,
+      emptyStyleGlobalReplacedCount: 0,
       replacedStyleCount: 0,
       verifyAfterReplace: null,
       fontReplacementIncomplete: false,

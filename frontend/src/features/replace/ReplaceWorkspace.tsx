@@ -20,6 +20,7 @@ type ReplaceWorkspaceProps = {
       sourceIslandNo: string;
       targetProjectNo: string;
       targetIslandNo: string;
+      unitFactoryCodes?: readonly string[];
       runDeliverable: boolean;
     };
   }) => void;
@@ -32,6 +33,7 @@ type ReplaceDraft = {
   sourceIslandNo: string;
   targetProjectNo: string;
   targetIslandNo: string;
+  factoryCodesText: string;
   files: File[];
   fieldErrors: Record<string, string[]>;
   formErrors: string[];
@@ -62,6 +64,8 @@ export function ReplaceWorkspace({
   const targetIslandOptions = getTargetIslandOptions(schema, draft.targetProjectNo);
   const targetIslandLabel = getUnitFieldLabel("目标");
   const islandSelectionRequired = targetIslandOptions.length > 0;
+  const factoryCodeOptions = schema.auditReplaceUnitFactoryCodes ?? [];
+  const unitFactoryCodes = parseFactoryCodes(draft.factoryCodesText);
 
   useEffect(() => {
     onDraftAvailabilityChange(
@@ -69,6 +73,7 @@ export function ReplaceWorkspace({
         Boolean(draft.sourceIslandNo.trim()) ||
         Boolean(draft.targetProjectNo.trim()) ||
         Boolean(draft.targetIslandNo.trim()) ||
+        Boolean(draft.factoryCodesText.trim()) ||
         draft.files.length > 0 ||
         draft.mode === "replace_with_deliverable",
     );
@@ -79,6 +84,7 @@ export function ReplaceWorkspace({
     draft.sourceIslandNo,
     draft.targetProjectNo,
     draft.targetIslandNo,
+    draft.factoryCodesText,
     onDraftAvailabilityChange,
   ]);
 
@@ -90,6 +96,7 @@ export function ReplaceWorkspace({
     draft.sourceIslandNo,
     draft.targetProjectNo,
     draft.targetIslandNo,
+    draft.factoryCodesText,
   ]);
 
   if (!isOpen) {
@@ -120,12 +127,35 @@ export function ReplaceWorkspace({
     ) {
       nextFieldErrors.target_island_no = ["required"];
     }
+    if (draft.factoryCodesText.trim() && unitFactoryCodes.length === 0) {
+      nextFieldErrors.unit_factory_codes = ["invalid_factory_code"];
+    }
+    const normalizedSourceProjectNo = draft.sourceProjectNo.trim();
+    const normalizedTargetProjectNo = draft.targetProjectNo.trim();
+    const normalizedSourceIslandNo = normalizeSourceIslandNo(
+      schema,
+      draft.sourceProjectNo,
+      draft.sourceIslandNo,
+    );
+    const normalizedTargetIslandNo = normalizeTargetIslandNo(
+      schema,
+      draft.targetProjectNo,
+      draft.targetIslandNo,
+    );
     if (
-      draft.sourceProjectNo.trim() &&
-      draft.targetProjectNo.trim() &&
-      draft.sourceProjectNo.trim() === draft.targetProjectNo.trim()
+      normalizedSourceProjectNo &&
+      normalizedTargetProjectNo &&
+      normalizedSourceProjectNo === normalizedTargetProjectNo
     ) {
-      nextFieldErrors.target_project_no = ["must_differ_from_source_project_no"];
+      if (!normalizedSourceIslandNo && !normalizedTargetIslandNo) {
+        nextFieldErrors.target_project_no = ["must_differ_from_source_project_no"];
+      } else if (
+        normalizedSourceIslandNo &&
+        normalizedTargetIslandNo &&
+        normalizedSourceIslandNo === normalizedTargetIslandNo
+      ) {
+        nextFieldErrors.target_island_no = ["must_differ_from_source_island_no"];
+      }
     }
     if (draft.files.length === 0) {
       nextFormErrors.push("请至少上传一个 DWG 文件。");
@@ -159,38 +189,52 @@ export function ReplaceWorkspace({
     }));
 
     if (draft.mode === "replace_with_deliverable") {
-      startTransition(() =>
-        onContinueToDeliverable({
-          files: draft.files,
-          replaceConfig: {
-            sourceProjectNo: draft.sourceProjectNo.trim(),
-            sourceIslandNo: normalizeSourceIslandNo(
-              schema,
-              draft.sourceProjectNo,
-              draft.sourceIslandNo,
-            ),
-            targetProjectNo: draft.targetProjectNo.trim(),
-            targetIslandNo: normalizeTargetIslandNo(
-              schema,
-              draft.targetProjectNo,
-              draft.targetIslandNo,
-            ),
-            runDeliverable: true,
-          },
-        }),
-      );
-      onClose();
+      setIsSubmitting(true);
+      try {
+        await rememberFactoryCodes(unitFactoryCodes);
+        startTransition(() =>
+          onContinueToDeliverable({
+            files: draft.files,
+            replaceConfig: {
+              sourceProjectNo: draft.sourceProjectNo.trim(),
+              sourceIslandNo: normalizeSourceIslandNo(
+                schema,
+                draft.sourceProjectNo,
+                draft.sourceIslandNo,
+              ),
+              targetProjectNo: draft.targetProjectNo.trim(),
+              targetIslandNo: normalizeTargetIslandNo(
+                schema,
+                draft.targetProjectNo,
+                draft.targetIslandNo,
+              ),
+              unitFactoryCodes,
+              runDeliverable: true,
+            },
+          }),
+        );
+        onClose();
+      } catch {
+        setDraft((current) => ({
+          ...current,
+          fieldErrors: { ...current.fieldErrors, unit_factory_codes: ["remember_failed"] },
+        }));
+      } finally {
+        setIsSubmitting(false);
+      }
       return;
     }
 
     setIsSubmitting(true);
 
     try {
+      await rememberFactoryCodes(unitFactoryCodes);
       const payload = await adapter.createAuditReplace({
         sourceProjectNo: draft.sourceProjectNo.trim(),
         sourceIslandNo: normalizeSourceIslandNo(schema, draft.sourceProjectNo, draft.sourceIslandNo),
         targetProjectNo: draft.targetProjectNo.trim(),
         targetIslandNo: normalizeTargetIslandNo(schema, draft.targetProjectNo, draft.targetIslandNo),
+        unitFactoryCodes,
         files: draft.files,
         runDeliverable: false,
       });
@@ -228,7 +272,7 @@ export function ReplaceWorkspace({
   }
 
   function handleFieldChange(
-    field: "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo",
+    field: "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo" | "factoryCodesText",
     value: string,
   ) {
     if (field === "sourceProjectNo" || field === "sourceIslandNo") {
@@ -244,7 +288,9 @@ export function ReplaceWorkspace({
           ? "source_island_no"
           : field === "targetProjectNo"
             ? "target_project_no"
-            : "target_island_no";
+            : field === "targetIslandNo"
+              ? "target_island_no"
+              : "unit_factory_codes";
     setDraft((current) => ({
       ...current,
       [field]: value,
@@ -257,6 +303,13 @@ export function ReplaceWorkspace({
         ...(field === "targetProjectNo" ? { target_island_no: [] } : {}),
       },
     }));
+  }
+
+  async function rememberFactoryCodes(codes: readonly string[]) {
+    if (codes.length === 0) {
+      return;
+    }
+    await adapter.rememberAuditReplaceFactoryCodes(codes);
   }
 
   function handleFilesReplace(files: File[]) {
@@ -306,7 +359,7 @@ export function ReplaceWorkspace({
 
   return (
     <TaskConfigModal title="翻版配置" onRequestClose={onClose}>
-      <div className={styles.layout}>
+      <div className={`${styles.layout} ${styles.replaceLayout}`}>
         <header className={styles.header}>
           <div>
             <p className={styles.kicker}>Audit Replace</p>
@@ -323,8 +376,8 @@ export function ReplaceWorkspace({
         </header>
 
         <form onSubmit={handleSubmit}>
-          <div className={styles.content}>
-            <section className={styles.summaryCard}>
+          <div className={`${styles.content} ${styles.replaceContent}`}>
+            <section className={`${styles.summaryCard} ${styles.replaceSummaryCard}`}>
               <div className={styles.summaryHeader}>
                 <h3>文件摘要</h3>
                 <span>{draft.files.length} 个</span>
@@ -365,9 +418,56 @@ export function ReplaceWorkspace({
                   清空草稿
                 </button>
               </div>
+              <div className={styles.replaceFactoryCodes}>
+                <div className={styles.fieldHeader}>
+                  <label className={styles.fieldLabel} htmlFor="replace-factory-codes">
+                    <span>涉及厂房代码</span>
+                  </label>
+                </div>
+                <input
+                  aria-label="涉及厂房代码"
+                  className={styles.input}
+                  id="replace-factory-codes"
+                  list="replace-factory-code-options"
+                  placeholder="例如 RC, RX, HL"
+                  type="text"
+                  value={draft.factoryCodesText}
+                  onChange={(event) => handleFieldChange("factoryCodesText", event.target.value)}
+                />
+                <datalist id="replace-factory-code-options">
+                  {factoryCodeOptions.map((code) => (
+                    <option key={code} value={code} />
+                  ))}
+                </datalist>
+                {factoryCodeOptions.length > 0 ? (
+                  <div className={styles.compactChips}>
+                    {factoryCodeOptions.map((code) => (
+                      <button
+                        key={code}
+                        className={styles.recommendationChip}
+                        type="button"
+                        onClick={() =>
+                          handleFieldChange(
+                            "factoryCodesText",
+                            appendFactoryCodeText(draft.factoryCodesText, code),
+                          )
+                        }
+                      >
+                        {code}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                <span className={styles.helperText}>
+                  只对“机组号数字 + 这些厂房代码”做机组转换。
+                </span>
+                {draft.fieldErrors.unit_factory_codes?.[0] ? (
+                  <span className={styles.errorText}>{draft.fieldErrors.unit_factory_codes[0]}</span>
+                ) : null}
+              </div>
             </section>
 
-            <section className={styles.formCard}>
+            <section className={`${styles.formCard} ${styles.replaceFormCard}`}>
               <h3>翻版参数</h3>
 
               {draft.formErrors.length > 0 ? (
@@ -378,7 +478,7 @@ export function ReplaceWorkspace({
                 </div>
               ) : null}
 
-              <div className={styles.fieldStack}>
+              <div className={`${styles.fieldStack} ${styles.replaceFieldStack}`}>
                 <div className={styles.field}>
                   <span className={styles.hintStrong}>执行模式</span>
                   <div className={styles.recommendations}>
@@ -546,7 +646,7 @@ export function ReplaceWorkspace({
             </section>
           </div>
 
-          <footer className={styles.actions}>
+          <footer className={`${styles.actions} ${styles.replaceActions}`}>
             <button className={styles.primaryButton} disabled={isSubmitting} type="submit">
               {draft.mode === "replace_only"
                 ? isSubmitting
@@ -565,7 +665,12 @@ function createReplaceDraft(
   persistedDraft?: Partial<
     Pick<
       ReplaceDraft,
-      "mode" | "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo"
+      | "mode"
+      | "sourceProjectNo"
+      | "sourceIslandNo"
+      | "targetProjectNo"
+      | "targetIslandNo"
+      | "factoryCodesText"
     >
   >,
 ): ReplaceDraft {
@@ -575,6 +680,7 @@ function createReplaceDraft(
     sourceIslandNo: persistedDraft?.sourceIslandNo ?? "",
     targetProjectNo: persistedDraft?.targetProjectNo ?? "",
     targetIslandNo: persistedDraft?.targetIslandNo ?? "",
+    factoryCodesText: persistedDraft?.factoryCodesText ?? "",
     files: [],
     fieldErrors: {},
     formErrors: [],
@@ -582,10 +688,15 @@ function createReplaceDraft(
 }
 
 function loadPersistedReplaceDraft(): Partial<
-  Pick<
-    ReplaceDraft,
-    "mode" | "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo"
-  >
+    Pick<
+      ReplaceDraft,
+      | "mode"
+      | "sourceProjectNo"
+      | "sourceIslandNo"
+      | "targetProjectNo"
+      | "targetIslandNo"
+      | "factoryCodesText"
+    >
 > {
   if (typeof window === "undefined") {
     return {};
@@ -613,6 +724,8 @@ function loadPersistedReplaceDraft(): Partial<
         typeof parsed.targetProjectNo === "string" ? parsed.targetProjectNo : "",
       targetIslandNo:
         typeof parsed.targetIslandNo === "string" ? parsed.targetIslandNo : "",
+      factoryCodesText:
+        typeof parsed.factoryCodesText === "string" ? parsed.factoryCodesText : "",
     };
   } catch {
     return {};
@@ -630,6 +743,7 @@ function persistReplaceDraft(draft: ReplaceDraft) {
     sourceIslandNo: draft.sourceIslandNo.trim(),
     targetProjectNo: draft.targetProjectNo.trim(),
     targetIslandNo: draft.targetIslandNo.trim(),
+    factoryCodesText: draft.factoryCodesText.trim(),
   } as const;
 
   if (
@@ -637,7 +751,8 @@ function persistReplaceDraft(draft: ReplaceDraft) {
     !normalizedDraft.sourceProjectNo &&
     !normalizedDraft.sourceIslandNo &&
     !normalizedDraft.targetProjectNo &&
-    !normalizedDraft.targetIslandNo
+    !normalizedDraft.targetIslandNo &&
+    !normalizedDraft.factoryCodesText
   ) {
     window.localStorage.removeItem(REPLACE_DRAFT_STORAGE_KEY);
     return;
@@ -665,6 +780,10 @@ function getTargetIslandOptions(schema: FormSchema, targetProjectNo: string) {
   if (configuredOptions) {
     return normalizeUnitOptions(configuredOptions);
   }
+  const projectUnits = schema.auditReplaceProjectUnits?.[normalizedProjectNo];
+  if (projectUnits) {
+    return buildVariantOptions(projectUnits);
+  }
   return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.targetVariantOptions[normalizedProjectNo]);
 }
 
@@ -673,6 +792,10 @@ function getSourceIslandOptions(schema: FormSchema, sourceProjectNo: string) {
   const configuredOptions = schema.auditReplaceSourceUnitOptions?.[normalizedProjectNo];
   if (configuredOptions) {
     return normalizeUnitOptions(configuredOptions);
+  }
+  const projectUnits = schema.auditReplaceProjectUnits?.[normalizedProjectNo];
+  if (projectUnits) {
+    return buildVariantOptions(projectUnits);
   }
   return buildVariantOptions(schema.auditReplaceFactoryIndexMaps?.sourceVariantOptions[normalizedProjectNo]);
 }
@@ -695,6 +818,29 @@ function normalizeUnitOptions(options: readonly { value: string; label: string }
 
 function getUnitFieldLabel(prefix: "来源" | "目标") {
   return `${prefix}机组号/岛号`;
+}
+
+function parseFactoryCodes(value: string) {
+  const seen = new Set<string>();
+  const codes: string[] = [];
+  for (const part of value.split(/[\s,，;；、]+/)) {
+    const normalized = part.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9]{1,3}$/.test(normalized) || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    codes.push(normalized);
+  }
+  return codes;
+}
+
+function appendFactoryCodeText(currentText: string, code: string) {
+  const currentCodes = parseFactoryCodes(currentText);
+  const normalizedCode = code.trim().toUpperCase();
+  if (!normalizedCode || currentCodes.includes(normalizedCode)) {
+    return currentCodes.join(", ");
+  }
+  return [...currentCodes, normalizedCode].join(", ");
 }
 
 function normalizeSourceIslandNo(schema: FormSchema, sourceProjectNo: string, sourceIslandNo: string) {

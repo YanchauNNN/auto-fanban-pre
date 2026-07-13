@@ -25,6 +25,7 @@ from src.models import (
 )
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.packager import Packager
+from src.workload.calculator import WorkloadCalculator
 
 
 def test_build_doc_context_prefers_job_project_no_without_duplicate_kwargs() -> None:
@@ -473,6 +474,7 @@ def test_catalog_pdf_export_failure_still_allows_package_zip(tmp_path: Path) -> 
     executor._update_progress = MagicMock()
     executor._require_work_dir = MagicMock(return_value=tmp_path)
     executor.packager = Packager()
+    executor.workload_calculator = WorkloadCalculator()
     executor._generate_preview_pdf = MagicMock()
 
     job = Job(
@@ -536,10 +538,51 @@ def test_stage_split_uses_steel_liner_plot_style_when_two_titles_match(
     assert execute_source_dxf.call_args.kwargs["plot_style_key"] == "steel_liner"
 
 
+def test_stage_split_preserves_requested_plot_style_for_regular_drawings(
+    tmp_path: Path,
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor._require_work_dir = MagicMock(return_value=tmp_path)
+    executor._update_progress = MagicMock()
+
+    source_dxf = tmp_path / "source.dxf"
+    frame = deepcopy(sample_frame)
+    frame.runtime.source_file = source_dxf
+    frame.titleblock.internal_code = "18185NE-JGS11-001"
+    frame.titleblock.title_cn = "普通结构布置图"
+
+    execute_source_dxf = MagicMock(return_value={"frames": [], "sheet_sets": [], "errors": []})
+    executor.cad_dxf_executor = cast(Any, SimpleNamespace(
+        group_by_source_dxf=lambda frames, sheet_sets: {
+            source_dxf: {"frames": frames, "sheet_sets": sheet_sets},
+        },
+        execute_source_dxf=execute_source_dxf,
+    ))
+    job = Job(
+        job_id="job-regular-plot-style",
+        job_type=JobType.DELIVERABLE,
+        project_no="1818",
+        work_dir=tmp_path,
+        params={},
+    )
+    job.plot_style_key = "same_width"
+
+    PipelineExecutor._stage_split_cad_dxf(
+        executor,
+        job,
+        {"frames": [frame], "sheet_sets": []},
+    )
+
+    execute_source_dxf.assert_called_once()
+    assert execute_source_dxf.call_args.kwargs["plot_style_key"] == "same_width"
+
+
 def test_stage_package_writes_manifest_before_zip_and_records_artifacts(tmp_path: Path) -> None:
     executor = object.__new__(PipelineExecutor)
     executor._update_progress = MagicMock()
     executor.packager = Packager()
+    executor.workload_calculator = WorkloadCalculator()
 
     job = Job(
         job_id="job-package-stage",

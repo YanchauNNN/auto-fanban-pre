@@ -22,13 +22,15 @@ from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
+from src.cad import FrameDetector, ODAConverter
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
-from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
+from src.job_diagnostics import build_job_diagnostics
+from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup, TaskOwnerSnapshot
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
@@ -38,8 +40,11 @@ from src.pipeline.project_no_inference import (
     resolve_project_no,
 )
 from src.pipeline.shared_prep import SharedPrepService
+from src.pipeline.sqlite_queue import SQLiteQueueStore
 from src.result_views import normalize_user_flags
 from src.task_groups.visibility import TaskGroupVisibility
+from src.workload.calculator import WorkloadCalculator
+from src.workload.models import WorkloadSummary
 
 
 logger = logging.getLogger(__name__)
@@ -98,21 +103,31 @@ class DeliverableApiRuntime:
         job_processor: Callable[[Job], None] | None = None,
         shared_prep_service: SharedPrepService | None = None,
         font_preflight_service: FontPreflightService | None = None,
+        process_jobs_in_api: bool = True,
+        worker_process_mode: bool = False,
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
+        self.process_jobs_in_api = process_jobs_in_api
+        self.worker_process_mode = worker_process_mode
+        self.queue_store = SQLiteQueueStore(
+            self.config.storage_dir / "runtime" / "fanban_queue.sqlite3"
+        )
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
+        self.task_visibility = TaskGroupVisibility()
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
-        self.task_visibility = TaskGroupVisibility()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
+        self.font_preflight_oda = ODAConverter()
+        self.font_preflight_frame_detector = FrameDetector()
         self.job_processor = job_processor or PipelineJobProcessor(
             font_preflight_service=self.font_preflight_service
         )
         self.shared_prep_service = shared_prep_service or SharedPrepService(
             font_preflight_service=self.font_preflight_service
         )
+        self.workload_calculator = WorkloadCalculator()
         self.cad_slot_pool = CADSlotPool(
             config=self.config,
             slot_count=max(int(self.config.cad_runtime.slot_count), 1),
@@ -129,6 +144,7 @@ class DeliverableApiRuntime:
         self._stop_event = threading.Event()
         self._group_dispatcher_thread: threading.Thread | None = None
         self._job_dispatcher_thread: threading.Thread | None = None
+        self._summary_backfill_thread: threading.Thread | None = None
 
         self._group_executor = ThreadPoolExecutor(
             max_workers=self._max_active_groups,
@@ -151,6 +167,10 @@ class DeliverableApiRuntime:
         self._job_completion_lock = threading.Lock()
 
     def start(self) -> None:
+        self.queue_store.initialize()
+        if not self.process_jobs_in_api:
+            self._start_summary_backfill()
+            return
         self._recover_groups_and_jobs()
         if self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive():
             return
@@ -170,18 +190,41 @@ class DeliverableApiRuntime:
 
     def stop(self) -> None:
         self._stop_event.set()
-        self._group_queue.put(None)
-        self._job_queue.put(None)
+        if self.process_jobs_in_api:
+            self._group_queue.put(None)
+            self._job_queue.put(None)
         if self._group_dispatcher_thread:
             self._group_dispatcher_thread.join(timeout=3)
         if self._job_dispatcher_thread:
             self._job_dispatcher_thread.join(timeout=3)
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            self._summary_backfill_thread.join(timeout=3)
         self._group_executor.shutdown(wait=False, cancel_futures=True)
         self._heavy_executor.shutdown(wait=False, cancel_futures=True)
         self._doc_executor.shutdown(wait=False, cancel_futures=True)
 
     def health(self) -> dict[str, Any]:
         storage_writable = self._storage_writable()
+        if not self.process_jobs_in_api:
+            worker_status = self.queue_store.worker_status()
+            queue_depth = self.queue_store.queue_depth()
+            return {
+                'status': 'ok',
+                'server_time': datetime.now().astimezone().isoformat(),
+                'ready': storage_writable and bool(worker_status["alive"]),
+                'storage_writable': storage_writable,
+                'worker_alive': bool(worker_status["alive"]),
+                'queue_depth': queue_depth,
+                'autocad_ready': self._autocad_ready(),
+                'office_ready': importlib.util.find_spec('win32com.client') is not None,
+                'active_groups': 0,
+                'active_jobs': 0,
+                'active_doc_jobs': 0,
+                'pending_doc_jobs': 0,
+                'active_total_jobs': 0,
+                'worker_count': int(worker_status["count"]),
+                'worker_last_seen_at': worker_status["last_seen_at"],
+            }
         group_alive = bool(self._group_dispatcher_thread and self._group_dispatcher_thread.is_alive())
         job_alive = bool(self._job_dispatcher_thread and self._job_dispatcher_thread.is_alive())
         active_doc_jobs = self._active_doc_count()
@@ -238,6 +281,12 @@ class DeliverableApiRuntime:
                     replacement_fonts=None,
                     workspace_dir=workspace_dir,
                 )
+                result = self._augment_font_preflight_with_compatibility_probe(
+                    result=result,
+                    source_path=source_path,
+                    workspace_dir=workspace_dir,
+                    original_filename=original_filename,
+                )
                 result["filename"] = original_filename
                 results.append(result)
             except Exception as exc:  # noqa: BLE001
@@ -287,9 +336,140 @@ class DeliverableApiRuntime:
             "replacement_options_by_kind": replacement_options_by_kind,
             "default_replacement_fonts": default_replacement_fonts,
             "requires_confirmation": any(
-                str(item.get("status") or "").strip().lower() == "missing_fonts" for item in results
+                self._font_preflight_requires_confirmation(item) for item in results
             ),
         }
+
+    def _augment_font_preflight_with_compatibility_probe(
+        self,
+        *,
+        result: dict[str, Any],
+        source_path: Path,
+        workspace_dir: Path,
+        original_filename: str,
+    ) -> dict[str, Any]:
+        if str(result.get("status") or "").strip().lower() != "ok":
+            return result
+        if list(result.get("missing_fonts") or []):
+            return result
+        if not self._font_compatibility_probe_enabled():
+            return result
+
+        frames = self._detect_font_preflight_target_frames(
+            source_path=source_path,
+            workspace_dir=workspace_dir,
+            original_filename=original_filename,
+        )
+        if not frames:
+            return result
+
+        compat_source_dir = workspace_dir / "compatibility_input"
+        compat_source_dir.mkdir(parents=True, exist_ok=True)
+        compat_source = compat_source_dir / source_path.name
+        try:
+            compat_source.write_bytes(source_path.read_bytes())
+            compat = self.font_preflight_service.inspect_dwg(
+                source_dwg=compat_source,
+                replacement_policy="none",
+                replacement_font=None,
+                replacement_fonts=None,
+                font_compatibility_mode=True,
+                frames=frames,
+                workspace_dir=workspace_dir / "compatibility_probe",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "font compatibility preflight probe failed for %s: %s",
+                original_filename,
+                exc,
+            )
+            result["font_compatibility_probe_errors"] = [str(exc)]
+            return result
+
+        empty_style_entity_count = _summary_int(compat, "empty_style_entity_replaced_count")
+        empty_style_style_patched_count = _summary_int(
+            compat,
+            "empty_style_style_patched_count",
+        )
+        empty_style_shared_skipped_count = _summary_int(
+            compat,
+            "empty_style_shared_skipped_count",
+        )
+        empty_style_target_count = _summary_int(compat, "empty_style_target_regions_count")
+        result["font_compatibility_mode"] = True
+        result["font_compatibility_required"] = (
+            empty_style_entity_count > 0
+            or empty_style_style_patched_count > 0
+            or empty_style_shared_skipped_count > 0
+        )
+        result["empty_style_entity_replaced_count"] = empty_style_entity_count
+        result["empty_style_style_patched_count"] = empty_style_style_patched_count
+        result["empty_style_shared_skipped_count"] = empty_style_shared_skipped_count
+        result["empty_style_shared_styles"] = list(
+            compat.get("empty_style_shared_styles") or []
+        )
+        result["empty_style_target_regions_count"] = empty_style_target_count
+        result["empty_style_global_replaced_count"] = _summary_int(
+            compat,
+            "empty_style_global_replaced_count",
+        )
+        if isinstance(compat.get("empty_style_replacement"), dict):
+            result["empty_style_replacement"] = dict(compat["empty_style_replacement"])
+        return result
+
+    def _detect_font_preflight_target_frames(
+        self,
+        *,
+        source_path: Path,
+        workspace_dir: Path,
+        original_filename: str,
+    ) -> list[Any]:
+        try:
+            probe_dir = workspace_dir / "frame_probe"
+            probe_dir.mkdir(parents=True, exist_ok=True)
+            dxf_path = self.font_preflight_oda.dwg_to_dxf(source_path, probe_dir)
+            project_no = infer_project_no_from_path(original_filename) or infer_project_no_from_path(
+                source_path.name
+            )
+            self.font_preflight_frame_detector.set_project_no(project_no)
+            frames = self.font_preflight_frame_detector.detect_frames(dxf_path)
+            for frame in frames:
+                runtime = getattr(frame, "runtime", None)
+                if runtime is not None:
+                    runtime.cad_source_file = source_path
+            return list(frames)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "font preflight target frame probe failed for %s: %s",
+                original_filename,
+                exc,
+            )
+            return []
+
+    def _font_compatibility_probe_enabled(self) -> bool:
+        font_cfg = self.config.font_preflight
+        replacement = getattr(font_cfg, "empty_style_replacement", {})
+        fields = getattr(font_cfg, "empty_style_target_fields", [])
+        if not isinstance(replacement, dict):
+            return False
+        has_replacement = any(
+            str(replacement.get(key) or "").strip()
+            for key in ("font", "bigfont")
+        )
+        has_fields = any(str(item or "").strip() for item in fields or [])
+        return has_replacement and has_fields
+
+    @staticmethod
+    def _font_preflight_requires_confirmation(item: dict[str, Any]) -> bool:
+        if str(item.get("status") or "").strip().lower() == "missing_fonts":
+            return True
+        if bool(item.get("font_compatibility_required")):
+            return True
+        return (
+            _summary_int(item, "empty_style_entity_replaced_count") > 0
+            or _summary_int(item, "empty_style_style_patched_count") > 0
+            or _summary_int(item, "empty_style_shared_skipped_count") > 0
+        )
 
     @staticmethod
     def _collect_missing_font_kinds(results: list[dict[str, Any]]) -> list[str]:
@@ -352,6 +532,13 @@ class DeliverableApiRuntime:
             )
 
         batch_id = self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/batch",
+            batch_id=batch_id,
+            files=files,
+            run_audit_check=run_audit_check,
+            split_only=split_only,
+        )
         if run_audit_check:
             groups = [
                 self._create_grouped_submission(
@@ -380,8 +567,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     def create_audit_batch(
@@ -424,6 +612,12 @@ class DeliverableApiRuntime:
 
         explicit_batch_id = str(raw_params.get('batch_id') or '').strip()
         batch_id = explicit_batch_id or self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/audit-replace",
+            batch_id=batch_id,
+            files=files,
+            mode=normalized_mode,
+        )
         jobs: list[dict[str, Any]] = []
         if normalized_mode == 'replace':
             for upload, resolved_params in resolved_submissions:
@@ -451,8 +645,9 @@ class DeliverableApiRuntime:
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
+                summary = self._index_job_summary(job)
                 self._enqueue_job(job.job_id)
-                jobs.append(self._serialize_job_summary(job))
+                jobs.append(summary)
             return {'batch_id': batch_id, 'jobs': jobs}
 
         for upload, resolved_params in resolved_submissions:
@@ -469,8 +664,9 @@ class DeliverableApiRuntime:
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
             self._enqueue_job(job.job_id)
-            jobs.append(self._serialize_job_summary(job))
+            jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
     @staticmethod
@@ -622,7 +818,24 @@ class DeliverableApiRuntime:
         status_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        sort_by: str = "updated_at",
     ) -> dict[str, Any]:
+        if not self.process_jobs_in_api:
+            indexed = self.queue_store.list_summaries(
+                status=status_filter,
+                limit=None,
+                offset=0,
+                sort_by=sort_by,
+            )
+            visible_items = [
+                item for item in indexed["items"] if self._can_view_summary(item, account)
+            ]
+            normalized_limit = max(limit, 0)
+            normalized_offset = max(offset, 0)
+            return {
+                "items": visible_items[normalized_offset:normalized_offset + normalized_limit],
+                "total": len(visible_items),
+            }
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
@@ -636,19 +849,27 @@ class DeliverableApiRuntime:
             and self.task_visibility.can_view_job(job, account)
             and (status_filter is None or job.status.value == status_filter)
         ]
-        all_items = sorted([*groups, *standalone_jobs], key=lambda item: item['created_at'], reverse=True)
+        sort_key = 'created_at' if sort_by == 'created_at' else 'updated_at'
+        all_items = sorted(
+            [*groups, *standalone_jobs],
+            key=lambda item: item.get(sort_key) or item['created_at'],
+            reverse=True,
+        )
         normalized_limit = max(limit, 0)
         normalized_offset = max(offset, 0)
         items = all_items[normalized_offset:normalized_offset + normalized_limit]
         return {'items': items, 'total': len(all_items)}
 
+    def jobs_activity(self) -> dict[str, Any]:
+        return self.queue_store.activity()
+
     def get_job_detail(self, job_id: str, *, account: AccountSnapshot) -> dict[str, Any]:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             if not self.task_visibility.can_view(group, account):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
             return self._serialize_group_detail(group)
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         if not self.task_visibility.can_view_job(job, account):
@@ -656,7 +877,7 @@ class DeliverableApiRuntime:
         return self._serialize_job_detail(job)
 
     def get_artifact_path(self, job_id: str, artifact: str, *, account: AccountSnapshot) -> Path:
-        group = self.group_manager.get_group(job_id)
+        group = self._get_group_for_read(job_id)
         if group is not None:
             if not self.task_visibility.can_view(group, account):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
@@ -665,15 +886,14 @@ class DeliverableApiRuntime:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
             return self._get_job_artifact_path(owner_job, artifact)
 
-        job = self.job_manager.get_job(job_id)
+        job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
         if not self.task_visibility.can_view_job(job, account):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
         return self._get_job_artifact_path(job, artifact)
 
-    @staticmethod
-    def _get_job_artifact_path(job: Job, artifact: str) -> Path:
+    def _get_job_artifact_path(self, job: Job, artifact: str) -> Path:
         path = {
             'package': job.artifacts.package_zip,
             'ied': job.artifacts.ied_xlsx,
@@ -684,6 +904,34 @@ class DeliverableApiRuntime:
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
         return Path(path)
+
+    def _can_view_summary(self, summary: dict[str, Any], account: AccountSnapshot) -> bool:
+        owner_payload = summary.get('owner_snapshot')
+        owner_snapshot: TaskOwnerSnapshot | None = None
+        if isinstance(owner_payload, dict):
+            try:
+                owner_snapshot = TaskOwnerSnapshot.model_validate(owner_payload)
+            except Exception:  # noqa: BLE001
+                owner_snapshot = None
+        legacy_scope = None
+        legacy_visibility = summary.get('legacy_visibility')
+        if isinstance(legacy_visibility, dict):
+            legacy_scope = str(legacy_visibility.get('scope') or '') or None
+        return self.task_visibility.can_view_owner_snapshot(
+            owner_snapshot,
+            account,
+            legacy_scope=legacy_scope,
+        )
+
+    def _get_job_for_read(self, job_id: str) -> Job | None:
+        if self.process_jobs_in_api:
+            return self.job_manager.get_job(job_id)
+        return self.job_manager.reload_job(job_id) or self.job_manager.get_job(job_id)
+
+    def _get_group_for_read(self, group_id: str) -> TaskGroup | None:
+        if self.process_jobs_in_api:
+            return self.group_manager.get_group(group_id)
+        return self.group_manager.reload_group(group_id) or self.group_manager.get_group(group_id)
 
     def _create_grouped_submission(
         self,
@@ -735,8 +983,9 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [deliverable_job.job_id, audit_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
 
     def _create_replace_grouped_submission(
         self,
@@ -790,8 +1039,94 @@ class DeliverableApiRuntime:
 
         group.child_job_ids = [replace_job.job_id, deliverable_job.job_id]
         self.group_manager.update_group(group)
+        summary = self._index_group_summary(group)
         self._enqueue_group(group.group_id)
-        return self._serialize_group_summary(group)
+        return summary
+
+    def refresh_summary_index(self, item_type: str, item_id: str) -> None:
+        if item_type == "group":
+            group = self.group_manager.get_group(item_id)
+            if group is not None:
+                self._index_group_summary(group)
+            return
+        if item_type == "job":
+            job = self.job_manager.get_job(item_id)
+            if job is not None and job.group_id is None:
+                self._index_job_summary(job)
+
+    def _backfill_summary_index(self) -> None:
+        for group in self.group_manager.load_all_groups():
+            self._index_group_summary(group, touch_updated_at=False)
+        for job in self.job_manager.load_all_jobs():
+            if job.group_id is None:
+                self._index_job_summary(job, touch_updated_at=False)
+
+    def _start_summary_backfill(self) -> None:
+        if self._summary_backfill_thread and self._summary_backfill_thread.is_alive():
+            return
+        self._summary_backfill_thread = threading.Thread(
+            target=self._run_summary_backfill,
+            name='fanban-summary-backfill',
+            daemon=True,
+        )
+        self._summary_backfill_thread.start()
+        self._summary_backfill_thread.join(timeout=0.25)
+
+    def _run_summary_backfill(self) -> None:
+        try:
+            self._backfill_summary_index()
+        except Exception:  # noqa: BLE001
+            logger.exception('summary index backfill failed')
+
+    def _index_job_summary(self, job: Job, *, touch_updated_at: bool = True) -> dict[str, Any]:
+        summary = self._serialize_job_summary(job)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
+        return summary
+
+    def _index_group_summary(self, group: TaskGroup, *, touch_updated_at: bool = True) -> dict[str, Any]:
+        summary = self._serialize_group_summary(group)
+        self._upsert_summary_index(summary, touch_updated_at=touch_updated_at)
+        return summary
+
+    def _upsert_summary_index(self, summary: dict[str, Any], *, touch_updated_at: bool = True) -> None:
+        item_id = str(summary.get("job_id") or summary.get("group_id") or "").strip()
+        if not item_id:
+            return
+        payload = dict(summary)
+        payload["item_id"] = item_id
+        payload["updated_at"] = (
+            datetime.now().astimezone().isoformat()
+            if touch_updated_at
+            else self._historical_summary_updated_at(summary)
+        )
+        payload["artifact_flags"] = dict(summary.get("artifacts") or {})
+        self.queue_store.upsert_summary(payload)
+
+    @staticmethod
+    def _historical_summary_updated_at(summary: dict[str, Any]) -> str:
+        value = summary.get("finished_at") or summary.get("created_at") or datetime.now().astimezone()
+        return value.isoformat() if isinstance(value, datetime) else str(value)
+
+    @staticmethod
+    def _log_submission(
+        *,
+        endpoint: str,
+        batch_id: str,
+        files: list[UploadedFilePayload],
+        **context: Any,
+    ) -> None:
+        filenames = [Path(upload.filename).name or "upload.dwg" for upload in files]
+        logged_filenames = filenames[:100]
+        omitted = max(len(filenames) - len(logged_filenames), 0)
+        logger.info(
+            "job submission accepted endpoint=%s batch_id=%s file_count=%s omitted_filenames=%s context=%s filenames=%s",
+            endpoint,
+            batch_id,
+            len(filenames),
+            omitted,
+            context,
+            logged_filenames,
+        )
 
     def _recover_groups_and_jobs(self) -> None:
         for job in self.job_manager.load_all_jobs():
@@ -874,6 +1209,7 @@ class DeliverableApiRuntime:
                 font_compatibility_mode=self._coerce_bool(font_params.get("font_compatibility_mode")),
             )
             group.shared_dir = prep.shared_dir
+            group.workload = self.workload_calculator.build_from_shared_prep(prep)
             group.progress.percent = 35
             group.progress.message = '共享前处理完成'
             self.group_manager.update_group(group)
@@ -962,6 +1298,9 @@ class DeliverableApiRuntime:
                 deliverable_job.params.get("font_compatibility_mode")
             ),
         )
+
+        group.workload = self.workload_calculator.build_from_shared_prep(deliverable_prep)
+        self.group_manager.update_group(group)
 
         deliverable_job.input_files = [replaced_dwg]
         deliverable_job.params['shared_prep_dir'] = str(deliverable_prep.shared_dir)
@@ -1056,15 +1395,24 @@ class DeliverableApiRuntime:
                 self._signal_job_completion(job.job_id)
 
     def _enqueue_group(self, group_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("group", group_id)
+            return
         self._group_queue.put(group_id)
 
     def _enqueue_job(self, job_id: str) -> None:
+        if not self.process_jobs_in_api:
+            self.queue_store.enqueue("job", job_id)
+            return
         with self._job_completion_lock:
             event = self._job_completion_events.get(job_id)
             if event is None:
                 event = threading.Event()
                 self._job_completion_events[job_id] = event
             event.clear()
+        if self.worker_process_mode:
+            self._submit_heavy_job(job_id)
+            return
         self._job_queue.put(job_id)
 
     def _submit_heavy_job(self, job_id: str) -> Future[None]:
@@ -1266,6 +1614,22 @@ class DeliverableApiRuntime:
             return value
         return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
+    @staticmethod
+    def _serialize_workload_from_details(details: dict[str, Any]) -> tuple[dict[str, Any] | None, float | None]:
+        raw_workload = details.get("workload")
+        if not isinstance(raw_workload, dict):
+            return None, None
+        try:
+            workload = WorkloadSummary.model_validate(raw_workload)
+        except Exception:  # noqa: BLE001
+            return None, None
+        effective_raw = details.get("effective_workload")
+        try:
+            effective = float(effective_raw)
+        except (TypeError, ValueError):
+            effective = float(workload.final_workload_a1 or workload.initial_workload_a1 or 0.0)
+        return workload.model_dump(mode="json"), round(effective, 2)
+
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
         owner = job.owner_snapshot.model_dump(mode='json') if job.owner_snapshot else None
         task_kind = 'deliverable'
@@ -1286,12 +1650,17 @@ class DeliverableApiRuntime:
             message=job.progress.message,
             errors=job.errors,
         )
+        workload_payload, effective_workload = self._serialize_workload_from_details(job.progress.details)
         return {
             'job_id': job.job_id,
             'batch_id': job.batch_id,
             'group_id': job.group_id,
             'shared_run_id': job.shared_run_id,
             'task_role': job.task_role,
+            'owner_snapshot': owner,
+            'creator_name': job.owner_snapshot.creator_name if job.owner_snapshot else None,
+            'creator_account': job.owner_snapshot.creator_account if job.owner_snapshot else None,
+            'creator_office': job.owner_snapshot.creator_office if job.owner_snapshot else None,
             'plot_style_key': job.plot_style_key,
             'plot_resource_mode': job.plot_resource_mode,
             'slot_id': job.slot_id,
@@ -1309,11 +1678,6 @@ class DeliverableApiRuntime:
             'replaced_style_count': job.replaced_style_count,
             'is_group': False,
             'source_filename': job.source_filename,
-            'source_filenames': [job.source_filename] if job.source_filename else [],
-            'owner_snapshot': owner,
-            'creator_name': job.owner_snapshot.creator_name if job.owner_snapshot else None,
-            'creator_account': job.owner_snapshot.creator_account if job.owner_snapshot else None,
-            'creator_office': job.owner_snapshot.creator_office if job.owner_snapshot else None,
             'task_kind': task_kind,
             'job_mode': job_mode,
             'project_no': job.project_no,
@@ -1328,6 +1692,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_job_artifacts(job),
             'findings_count': int(job.progress.details.get('findings_count', 0) or 0),
             'affected_drawings_count': int(job.progress.details.get('affected_drawings_count', 0) or 0),
+            'workload': workload_payload,
+            'effective_workload': effective_workload,
             'retry_available': False,
         }
 
@@ -1340,6 +1706,12 @@ class DeliverableApiRuntime:
             'current_file': job.progress.current_file,
             'flags': normalize_user_flags(job.flags),
             'errors': job.errors,
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(job.flags),
+                errors=job.errors,
+                progress_details=job.progress.details,
+                font_preflight_summary=job.font_preflight_summary,
+            ),
             'top_wrong_texts': list(job.progress.details.get('top_wrong_texts', []) or []),
             'top_internal_codes': list(job.progress.details.get('top_internal_codes', []) or []),
             'artifacts': self._serialize_job_artifacts(job, include_urls=True, job_id=job.job_id),
@@ -1420,6 +1792,11 @@ class DeliverableApiRuntime:
             message=group.progress.message,
             errors=list(group.errors),
         )
+        effective_workload = float(
+            group.workload.final_workload_a1
+            or group.workload.initial_workload_a1
+            or 0.0
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
@@ -1431,6 +1808,7 @@ class DeliverableApiRuntime:
             'creator_name': group.owner_snapshot.creator_name if group.owner_snapshot else None,
             'creator_account': group.owner_snapshot.creator_account if group.owner_snapshot else None,
             'creator_office': group.owner_snapshot.creator_office if group.owner_snapshot else None,
+            'legacy_visibility': group.legacy_visibility.model_dump(mode='json'),
             'project_no': group.project_no,
             'status': group.status.value,
             'stage': group.progress.stage,
@@ -1445,6 +1823,8 @@ class DeliverableApiRuntime:
             'artifacts': self._serialize_group_artifacts(group),
             'findings_count': findings_count,
             'affected_drawings_count': affected_drawings_count,
+            'workload': group.workload.model_dump(mode='json'),
+            'effective_workload': round(effective_workload, 2),
             'retry_available': False,
         }
 
@@ -1454,6 +1834,11 @@ class DeliverableApiRuntime:
             'started_at': group.started_at.isoformat() if group.started_at else None,
             'flags': normalize_user_flags(group.flags),
             'errors': list(group.errors),
+            'diagnostics': build_job_diagnostics(
+                flags=normalize_user_flags(group.flags),
+                errors=list(group.errors),
+                progress_details=group.progress.details,
+            ),
             'shared_run_id': group.shared_run_id,
             'shared_dir': str(group.shared_dir) if group.shared_dir else None,
             'children': [self._serialize_job_summary(child) for child in self._iter_group_children(group)],
@@ -1604,7 +1989,7 @@ class DeliverableApiRuntime:
     def _iter_group_children(self, group: TaskGroup) -> list[Job]:
         children: list[Job] = []
         for child_job_id in group.child_job_ids:
-            child = self.job_manager.get_job(child_job_id)
+            child = self._get_job_for_read(child_job_id)
             if child is not None:
                 children.append(child)
         return children

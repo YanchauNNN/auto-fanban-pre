@@ -42,6 +42,7 @@ type RawFormSchema = {
     project_units?: Record<string, readonly string[]>;
     source_unit_options?: Record<string, readonly { value: string; label: string }[]>;
     target_unit_options?: Record<string, readonly { value: string; label: string }[]>;
+    unit_factory_codes?: readonly string[];
     factory_index_maps?: {
       source_variant_options?: Record<string, readonly string[]>;
       target_variant_options?: Record<string, readonly string[]>;
@@ -255,6 +256,9 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
     auditReplaceTargetUnitOptions: normalizeUnitOptionMap(
       payload.audit_replace?.target_unit_options,
     ),
+    auditReplaceUnitFactoryCodes: normalizeCodeOptions(
+      payload.audit_replace?.unit_factory_codes,
+    ),
     auditReplaceFactoryIndexMaps: normalizeAuditReplaceFactoryIndexMaps(
       payload.audit_replace?.factory_index_maps,
     ),
@@ -460,6 +464,20 @@ function requiredNumber(value: number | null | undefined, fieldKey: string) {
     return value;
   }
   throw new Error(`management.${fieldKey} is required`);
+}
+
+function normalizeCodeOptions(value: readonly string[] | undefined) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of value ?? []) {
+    const normalized = item.trim().toUpperCase();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }
 
 function normalizeUnitOptionMap(

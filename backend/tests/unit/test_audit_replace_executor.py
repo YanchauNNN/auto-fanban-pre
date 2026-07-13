@@ -10,7 +10,11 @@ from openpyxl import load_workbook
 from src.audit_check.lexicon import AuditLexiconLoader
 from src.audit_check.matcher import AuditMatchEngine
 from src.audit_check.models import AuditLexicon, ScanTextItem
-from src.audit_replace.executor import AuditReplaceExecutor, derive_replaced_dwg_filename
+from src.audit_replace.executor import (
+    AuditReplaceExecutor,
+    derive_replaced_dwg_filename,
+    rewrite_target_unit_text,
+)
 from src.audit_replace.mapping import ReplaceMapping, ReplaceMappingBuilder
 from src.config import SpecLoader, reload_config
 from src.models import BBox, Job, JobStatus, JobType
@@ -214,8 +218,6 @@ def test_derive_replaced_dwg_filename_rewrites_target_unit_when_explicit() -> No
 
 
 def test_rewrite_target_unit_text_rewrites_embedded_factory_code_prefix() -> None:
-    from src.audit_replace.executor import rewrite_target_unit_text
-
     assert (
         rewrite_target_unit_text(
             "例如：08ZZ0089N实际应为2RC08ZZ0089N.",
@@ -233,6 +235,59 @@ def test_rewrite_target_unit_text_rewrites_embedded_factory_code_prefix() -> Non
             target_unit_no="1",
         )
         == "HP1RCG11001B25C42SD"
+    )
+
+
+def test_rewrite_target_unit_text_limits_short_factory_codes_to_whitelist() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "16mm",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "16mm"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1HL",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "2HL"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1RC",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "1RC"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "1HL",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=[],
+        )
+        == "1HL"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "20261HL-JGS01",
+            target_project_no="2026",
+            source_unit_no="1",
+            target_unit_no="2",
+            unit_factory_codes=["HL"],
+        )
+        == "20262HL-JGS01"
     )
 
 
@@ -669,7 +724,7 @@ def test_audit_replace_executor_does_not_group_split_external_code_outside_roi()
     assert unit_entries == []
 
 
-def test_audit_replace_executor_groups_split_external_code_when_block_roi_context_is_missing() -> None:
+def test_audit_replace_executor_does_not_group_split_external_code_when_roi_context_is_missing() -> None:
     code = "JD1RCG11002B25C42SD"
     items = [
         ScanTextItem(
@@ -710,13 +765,216 @@ def test_audit_replace_executor_groups_split_external_code_when_block_roi_contex
         target_unit_no="2",
     )
 
-    assert [(entry["matched_text"], entry["replacement_text"]) for entry in prefix_entries] == [
-        ("J", "H"),
-        ("D", "P"),
+    assert prefix_entries == []
+    assert unit_entries == []
+
+
+def test_audit_replace_executor_ignores_non_roi_noise_near_external_code() -> None:
+    code = "JD1RCE14005B25C42SD"
+    items = [
+        ScanTextItem(
+            raw_text="E",
+            entity_type="DBText",
+            entity_handle="NOISE",
+            field_context=None,
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_x=-50000.0,
+            position_y=0.0,
+        ),
+        *[
+            ScanTextItem(
+                raw_text=char,
+                entity_type="DBText",
+                entity_handle=f"H{index}",
+                field_context="titleblock_external_code",
+                internal_code="20161RC-JGS01-005",
+                layout_name="Model",
+                position_x=float(index),
+                position_y=0.0,
+            )
+            for index, char in enumerate(code)
+        ],
     ]
-    assert [(entry["matched_text"], entry["replacement_text"]) for entry in unit_entries] == [
-        ("1", "2"),
+    mapping = ReplaceMapping(
+        source_project_no="2016",
+        target_project_no="2026",
+        replacements={"JD": "XZ"},
+    )
+
+    prefix_entries = AuditReplaceExecutor._build_external_code_prefix_entries(
+        items=items,
+        mapping=mapping,
+        existing_entries=[],
+    )
+
+    assert [(entry["matched_text"], entry["replacement_text"], entry["entity_handle"]) for entry in prefix_entries] == [
+        ("J", "X", "H0"),
+        ("D", "Z", "H1"),
     ]
+
+
+def test_audit_replace_executor_does_not_window_external_code_when_roi_contains_extra_char() -> None:
+    code = "EJD1RCE14005B25C42SD"
+    items = [
+        ScanTextItem(
+            raw_text=char,
+            entity_type="DBText",
+            entity_handle=f"H{index}",
+            field_context="titleblock_external_code",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_x=float(index),
+            position_y=0.0,
+        )
+        for index, char in enumerate(code)
+    ]
+    mapping = ReplaceMapping(
+        source_project_no="2016",
+        target_project_no="2026",
+        replacements={"JD": "XZ"},
+    )
+
+    prefix_entries = AuditReplaceExecutor._build_external_code_prefix_entries(
+        items=items,
+        mapping=mapping,
+        existing_entries=[],
+    )
+
+    assert prefix_entries == []
+
+
+def test_audit_replace_executor_builds_titleblock_standardization_entries() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="2024.04",
+            entity_type="DBText",
+            entity_handle="DATE1",
+            field_context="titleblock_date",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=10.0,
+        ),
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="D",
+            entity_type="DBText",
+            entity_handle="REV_D",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="首次出版",
+            entity_type="DBText",
+            entity_handle="DESC_A",
+            field_context="titleblock_revision_description",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="根据上游专业最新资料升版",
+            entity_type="DBText",
+            entity_handle="DESC_D",
+            field_context="titleblock_revision_description",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="钢筋机械接头",
+            entity_type="DBText",
+            entity_handle="DESC_NOISE",
+            field_context="titleblock_revision_description",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=400.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.06",
+        target_revision="A",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+
+    assert [
+        (entry["entity_handle"], entry["matched_text"], entry["replacement_text"], entry["field_context"])
+        for entry in entries
+    ] == [
+        ("DATE1", "2024.04", "2026.06", "titleblock_date"),
+        ("REV_D", "D", "", "titleblock_revision"),
+        ("DESC_D", "根据上游专业最新资料升版", "", "titleblock_revision_description"),
+    ]
+
+
+def test_audit_replace_executor_clears_date_on_non_target_revision_row() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="2024.04",
+            entity_type="DBText",
+            entity_handle="DATE_A",
+            field_context="titleblock_date",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="2024.05",
+            entity_type="DBText",
+            entity_handle="DATE_B",
+            field_context="titleblock_date",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="B",
+            entity_type="DBText",
+            entity_handle="REV_B",
+            field_context="titleblock_revision",
+            internal_code="20161RC-JGS01-005",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.06",
+        target_revision="A",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+
+    assert by_handle["DATE_A"]["replacement_text"] == "2026.06"
+    assert by_handle["DATE_B"]["replacement_text"] == ""
+    assert by_handle["REV_B"]["replacement_text"] == ""
 
 
 def test_derive_replaced_dwg_filename_appends_target_project_when_source_project_absent() -> None:

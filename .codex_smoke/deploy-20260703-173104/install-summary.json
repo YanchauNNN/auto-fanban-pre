@@ -1,0 +1,111 @@
+﻿{
+    "generated_at":  "2026-07-03T17:33:24",
+    "package_root":  "E:\\project\\auto-fanban-pre\\build\\fanban-terminal-deploy",
+    "target_root":  "D:\\FanBanServer",
+    "run_root":  "E:\\project\\auto-fanban-pre\\.codex_smoke\\deploy-20260703-173104",
+    "user_name":  "DESKTOP-LQJC0UJ\\Yan",
+    "steps":  [
+                  {
+                      "name":  "admin_check",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:07"
+                  },
+                  {
+                      "name":  "validate_paths",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:07"
+                  },
+                  {
+                      "name":  "stop_backend_task_and_processes",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:10"
+                  },
+                  {
+                      "name":  "backup_existing_target",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:19"
+                  },
+                  {
+                      "name":  "copy_package_to_target",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:28"
+                  },
+                  {
+                      "name":  "check_iis_prereqs_before",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:28"
+                  },
+                  {
+                      "name":  "install_iis_prereqs",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:30"
+                  },
+                  {
+                      "name":  "check_iis_prereqs_after",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:30"
+                  },
+                  {
+                      "name":  "install_runtime_prereqs",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:31:37"
+                  },
+                  {
+                      "name":  "prepare_terminal_quick",
+                      "status":  "fail",
+                      "message":  "环境探测未通过，blocking issues = 1",
+                      "timestamp":  "2026-07-03T17:32:15"
+                  },
+                  {
+                      "name":  "manual_runtime_env_if_missing",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:32:15"
+                  },
+                  {
+                      "name":  "deep_check_terminal",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:32:35"
+                  },
+                  {
+                      "name":  "configure_iis_site_port80",
+                      "status":  "fail",
+                      "message":  "未能加载指定的模块“WebAdministration”，因为在任何模块目录中都没有找到有效模块文件。",
+                      "timestamp":  "2026-07-03T17:32:35"
+                  },
+                  {
+                      "name":  "configure_iis_site_port8080",
+                      "status":  "fail",
+                      "message":  "未能加载指定的模块“WebAdministration”，因为在任何模块目录中都没有找到有效模块文件。",
+                      "timestamp":  "2026-07-03T17:32:35"
+                  },
+                  {
+                      "name":  "register_backend_task",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:32:36"
+                  },
+                  {
+                      "name":  "wait_for_backend_ping",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:32:41"
+                  },
+                  {
+                      "name":  "check_health",
+                      "status":  "pass",
+                      "message":  "",
+                      "timestamp":  "2026-07-03T17:33:24"
+                  }
+              ]
+}

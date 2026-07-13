@@ -602,6 +602,71 @@ def test_run_sets_autocad_font_env_and_backend_cwd(tmp_path: Path, monkeypatch):
     assert captured["cwd"] == runner.backend_cwd
 
 
+def test_run_hides_accoreconsole_subprocess_window_on_windows(tmp_path: Path, monkeypatch):
+    cfg = RuntimeConfig()
+    fake_exe = tmp_path / "accoreconsole.exe"
+    fake_exe.write_text("", encoding="utf-8")
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    (script_dir / "module5_cad_executor.lsp").write_text("(princ)\n", encoding="utf-8")
+    cfg.module5_export.cad_runner.accoreconsole_exe = str(fake_exe)
+    cfg.module5_export.cad_runner.script_dir = str(script_dir)
+    cfg.module5_export.cad_runner.retry = 0
+    monkeypatch.setattr(
+        "src.cad.accoreconsole_runner.resolve_autocad_paths",
+        lambda configured_install_dir=None: SimpleNamespace(
+            accoreconsole_exe=fake_exe,
+            install_dir=None,
+            fonts_dir=None,
+        ),
+    )
+    monkeypatch.setattr("src.cad.accoreconsole_runner.os.name", "nt")
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    workspace = tmp_path / "work"
+    workspace.mkdir(parents=True, exist_ok=True)
+    task_json = workspace / "task.json"
+    result_json = workspace / "result.json"
+    task_json.write_text(
+        json.dumps(
+            {
+                "job_id": "job-hidden-window",
+                "source_dxf": str(source),
+                "output_dir": str(workspace / "out"),
+                "frames": [],
+                "sheet_sets": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_json.write_text("{}", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _capture_run(*args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(
+            args=kwargs.get("args", []),
+            returncode=0,
+            stdout="ok",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", _capture_run)
+
+    runner = AcCoreConsoleRunner(config=cfg)
+    runner.run(
+        source_dxf=source,
+        task_json=task_json,
+        result_json=result_json,
+        workspace_dir=workspace,
+    )
+
+    assert captured["creationflags"] == 0x08000000
+
+
 def test_runtime_preferences_content_writes_support_path(tmp_path: Path) -> None:
     runner = AcCoreConsoleRunner(config=RuntimeConfig())
 

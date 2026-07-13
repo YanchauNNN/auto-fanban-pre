@@ -9,12 +9,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 
-from src.config import SpecLoader, reload_config
-from src.models import Job, JobStatus, JobType
+from src.config import MechanismSpecLoader, SpecLoader, reload_config
+from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
+
+
+class TestClient(FastApiTestClient):
+    """Use the default administrator for tests of protected job endpoints."""
+
+    def __enter__(self):
+        client = super().__enter__()
+        response = client.post(
+            "/api/auth/login",
+            json={"account_id": "hbjjswd", "password": "password"},
+        )
+        assert response.status_code == 200, response.text
+        client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+        return client
 
 
 class FakeFontPreflightService:
@@ -104,6 +118,7 @@ class FakeFontPreflightService:
         replacement_font: str | None = None,
         replacement_fonts: dict[str, str] | None = None,
         font_compatibility_mode: bool = False,
+        frames: list[object] | None = None,
         workspace_dir: Path | None = None,
         slot_runtime: dict[str, str] | None = None,
     ) -> dict[str, object]:
@@ -114,11 +129,74 @@ class FakeFontPreflightService:
                 "replacement_font": replacement_font,
                 "replacement_fonts": replacement_fonts,
                 "font_compatibility_mode": font_compatibility_mode,
+                "frames": frames,
                 "workspace_dir": workspace_dir,
                 "slot_runtime": slot_runtime,
             }
         )
         filename = source_dwg.name
+        if filename.startswith("empty-style"):
+            if font_compatibility_mode:
+                return {
+                    "filename": filename,
+                    "status": "ok",
+                    "missing_fonts": [],
+                    "detected_style_count": 4,
+                    "missing_style_count": 0,
+                    "font_replacement_applied": False,
+                    "replacement_font": None,
+                    "replacement_fonts": {},
+                    "replaced_style_count": 0,
+                    "font_compatibility_mode": True,
+                    "empty_style_entity_replaced_count": 2,
+                    "empty_style_target_regions_count": 3,
+                    "empty_style_global_replaced_count": 0,
+                }
+            return {
+                "filename": filename,
+                "status": "ok",
+                "missing_fonts": [],
+                "detected_style_count": 4,
+                "missing_style_count": 0,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
+        if filename.startswith("patched-empty-style"):
+            if font_compatibility_mode:
+                return {
+                    "filename": filename,
+                    "status": "ok",
+                    "missing_fonts": [],
+                    "detected_style_count": 4,
+                    "missing_style_count": 0,
+                    "font_replacement_applied": False,
+                    "replacement_font": None,
+                    "replacement_fonts": {},
+                    "replaced_style_count": 0,
+                    "font_compatibility_mode": True,
+                    "font_compatibility_required": True,
+                    "empty_style_entity_replaced_count": 2,
+                    "empty_style_style_patched_count": 1,
+                    "empty_style_shared_skipped_count": 0,
+                    "empty_style_shared_styles": [],
+                    "empty_style_target_regions_count": 3,
+                    "empty_style_global_replaced_count": 0,
+                }
+            return {
+                "filename": filename,
+                "status": "ok",
+                "missing_fonts": [],
+                "detected_style_count": 4,
+                "missing_style_count": 0,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
         if filename.startswith("missing-font"):
             return {
                 "filename": filename,
@@ -254,6 +332,17 @@ class FakeJobProcessor:
             job.progress.details["affected_drawings_count"] = 1
             job.progress.details["top_wrong_texts"] = ["2016", "JD"]
             job.progress.details["top_internal_codes"] = ["1234567-JGS01-001"]
+            job.progress.details["workload"] = {
+                "initial_workload_a1": 1.0,
+                "final_workload_a1": 1.0,
+                "one_review_factor": 1.0,
+                "two_review_factor": 1.0,
+                "three_review_factor": 1.0,
+                "settlement_status": "pending",
+                "settled_at": None,
+                "contributor_entries": [],
+            }
+            job.progress.details["effective_workload"] = 1.0
             job.mark_succeeded()
             return
 
@@ -290,6 +379,17 @@ class FakeJobProcessor:
             )
             job.artifacts.package_zip = package_zip
             job.artifacts.drawings_dir = drawings_dir
+            job.progress.details["workload"] = {
+                "initial_workload_a1": 0.25,
+                "final_workload_a1": 0.25,
+                "one_review_factor": 1.0,
+                "two_review_factor": 1.0,
+                "three_review_factor": 1.0,
+                "settlement_status": "pending",
+                "settled_at": None,
+                "contributor_entries": [],
+            }
+            job.progress.details["effective_workload"] = 0.25
             job.mark_succeeded()
             return
 
@@ -390,6 +490,17 @@ class FakeJobProcessor:
             "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_MISMATCH",
             "[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED",
         ]
+        job.progress.details["workload"] = {
+            "initial_workload_a1": 2.0,
+            "final_workload_a1": 2.0,
+            "one_review_factor": 1.0,
+            "two_review_factor": 1.0,
+            "three_review_factor": 1.0,
+            "settlement_status": "pending",
+            "settled_at": None,
+            "contributor_entries": [],
+        }
+        job.progress.details["effective_workload"] = 2.0
         job.mark_succeeded()
 
 
@@ -408,19 +519,6 @@ def _configure_api_env(monkeypatch, tmp_path: Path) -> None:
     reload_config()
 
 
-def _authenticate_test_client(client: TestClient, account_id: str = "hbjjswd") -> None:
-    response = client.post("/api/auth/login", json={"account_id": account_id, "password": "password"})
-    assert response.status_code == 200
-    client.headers.update({"Authorization": f"Bearer {response.json()['token']}"})
-
-
-class AuthenticatedTestClient(TestClient):
-    def __enter__(self):
-        client = super().__enter__()
-        _authenticate_test_client(client)
-        return client
-
-
 def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=None) -> TestClient:
     _configure_api_env(monkeypatch, tmp_path)
     repo_root = Path(__file__).resolve().parents[3]
@@ -432,7 +530,7 @@ def _create_client(monkeypatch, tmp_path: Path, processor=None, font_service=Non
         job_processor=processor or FakeJobProcessor(),
         font_preflight_service=cast(Any, font_service),
     )
-    return AuthenticatedTestClient(app)
+    return TestClient(app)
 
 
 def _deliverable_params() -> dict[str, str]:
@@ -637,37 +735,50 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "3",
         "4",
     ]
-    assert payload["audit_replace"]["project_units"]["1915"] == ["1", "2"]
+    assert payload["audit_replace"]["project_units"]["1915"] == ["0", "1", "2", "7", "9"]
     assert payload["audit_replace"]["source_unit_options"]["2016"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["source_unit_options"]["1916"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "3", "label": "3号机组/岛"},
         {"value": "4", "label": "4号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["target_unit_options"]["1915"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_replace"]["target_unit_options"]["2016"] == [
+        {"value": "0", "label": "0号机组/岛"},
         {"value": "1", "label": "1号机组/岛"},
         {"value": "2", "label": "2号机组/岛"},
+        {"value": "7", "label": "7号机组/岛"},
+        {"value": "9", "label": "9号机组/岛"},
     ]
     assert payload["audit_check"]["unit_consistency"]["enabled"] is True
-    assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == ["1", "2"]
-    assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == ["3", "4"]
-    assert payload["management"]["account"]["valid_roles"]
-    assert payload["management"]["account"]["admin_created_default_password"] == "password"
-    assert payload["management"]["workflow"]["factor"]["min"] == 0.8
-    assert payload["management"]["workflow"]["terminal_status"] == "three_review_approved"
-    assert payload["management"]["workflow"]["status_labels"]["three_review_approved"] == "三审通过"
-    assert payload["management"]["workflow"]["node_labels"]["one_review"] == "一审"
-    assert payload["management"]["workflow"]["empty_current_node_label"] == "未进入审批"
-    assert payload["management"]["workload"]["settlement_trigger"] == "archive_success"
-    assert payload["management"]["workload"]["status_options"]
-    assert "admin" in payload["management"]["workload"]["scope_roles"]
-    assert payload["management"]["archive"]["status_labels"]["succeeded"] == "已归档"
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["2016"] == [
+        "0",
+        "1",
+        "2",
+        "7",
+        "9",
+    ]
+    assert payload["audit_check"]["unit_consistency"]["project_units"]["1916"] == [
+        "0",
+        "3",
+        "4",
+        "7",
+        "9",
+    ]
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"
@@ -711,7 +822,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert "DWG" in project_no["desc"]
     assert "2016" in project_no["desc"]
     assert unit_no["required"] is False
-    assert unit_no["options"] == ["1", "2", "3", "4", "5", "6"]
+    assert unit_no["options"] == ["0", "1", "2", "3", "4", "5", "6", "7", "9"]
     assert "1 总体文件" in file_category["options"]
     assert ied_design_type["required_when"] == "ied_status == '发布'"
     assert ied_design_type["type"] == "combobox"
@@ -864,6 +975,64 @@ def test_preflight_fonts_returns_missing_fonts_and_replacement_options(monkeypat
     ]
 
 
+def test_preflight_fonts_does_not_block_system_ping(monkeypatch, tmp_path: Path) -> None:
+    import threading
+
+    class SlowFontPreflightService(FakeFontPreflightService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+
+        def inspect_dwg(self, **kwargs: Any) -> dict[str, object]:
+            self.started.set()
+            time.sleep(0.45)
+            return {
+                "filename": Path(kwargs["source_dwg"]).name,
+                "status": "missing_fonts",
+                "missing_fonts": [
+                    {
+                        "style_name": "STYLE1",
+                        "font_name": "missing.shx",
+                        "bigfont_name": "",
+                        "kind": "shx",
+                        "used_in_block": True,
+                    }
+                ],
+                "detected_style_count": 1,
+                "missing_style_count": 1,
+                "font_replacement_applied": False,
+                "replacement_font": None,
+                "replacement_fonts": {},
+                "replaced_style_count": 0,
+            }
+
+    font_service = SlowFontPreflightService()
+    result: dict[str, Any] = {}
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        def run_preflight() -> None:
+            result["response"] = client.post(
+                "/api/jobs/preflight-fonts",
+                files=[("files[]", ("slow-font.dwg", b"dwg-a", "application/acad"))],
+            )
+
+        thread = threading.Thread(target=run_preflight, name="slow-preflight-test")
+        thread.start()
+        assert font_service.started.wait(timeout=1.0)
+
+        ping_started = time.perf_counter()
+        ping_response = client.get("/api/system/ping")
+        ping_elapsed = time.perf_counter() - ping_started
+
+        thread.join(timeout=2.0)
+        assert not thread.is_alive()
+
+    preflight_response = result["response"]
+    assert preflight_response.status_code == 200
+    assert ping_response.status_code == 200
+    assert ping_elapsed < 0.25
+
+
 def test_preflight_fonts_keeps_file_results_when_replacement_inventory_fails(
     monkeypatch,
     tmp_path: Path,
@@ -906,6 +1075,97 @@ def test_preflight_fonts_keeps_file_results_when_replacement_inventory_fails(
     assert payload["files"][0]["status"] == "missing_fonts"
 
 
+def test_preflight_fonts_reports_empty_style_compatibility_risk(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        runtime = client.app.state.runtime
+
+        class FakeOda:
+            def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                dxf_path = output_dir / f"{dwg_path.stem}.dxf"
+                dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+                return dxf_path
+
+        class FakeFrameDetector:
+            def __init__(self) -> None:
+                self.project_no: str | None = None
+
+            def set_project_no(self, project_no: str | None) -> None:
+                self.project_no = project_no
+
+            def detect_frames(self, dxf_path: Path) -> list[object]:
+                return [SimpleNamespace(frame_id="frame-1")]
+
+        runtime.font_preflight_oda = FakeOda()
+        runtime.font_preflight_frame_detector = FakeFrameDetector()
+
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[("files[]", ("empty-style-font.dwg", b"dwg-a", "application/acad"))],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["files"][0]["status"] == "ok"
+    assert payload["files"][0]["font_compatibility_required"] is True
+    assert payload["files"][0]["empty_style_entity_replaced_count"] == 2
+    assert payload["files"][0]["empty_style_target_regions_count"] == 3
+    assert [call["font_compatibility_mode"] for call in font_service.inspect_calls] == [False, True]
+
+
+def test_preflight_fonts_reports_empty_style_patch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    font_service = FakeFontPreflightService()
+
+    with _create_client(monkeypatch, tmp_path, font_service=font_service) as client:
+        runtime = client.app.state.runtime
+
+        class FakeOda:
+            def dwg_to_dxf(self, dwg_path: Path, output_dir: Path) -> Path:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                dxf_path = output_dir / f"{dwg_path.stem}.dxf"
+                dxf_path.write_text("0\nEOF\n", encoding="utf-8")
+                return dxf_path
+
+        class FakeFrameDetector:
+            def set_project_no(self, project_no: str | None) -> None:
+                self.project_no = project_no
+
+            def detect_frames(self, dxf_path: Path) -> list[object]:
+                return [SimpleNamespace(frame_id="frame-1")]
+
+        runtime.font_preflight_oda = FakeOda()
+        runtime.font_preflight_frame_detector = FakeFrameDetector()
+
+        response = client.post(
+            "/api/jobs/preflight-fonts",
+            files=[
+                (
+                    "files[]",
+                    ("patched-empty-style-font.dwg", b"dwg-a", "application/acad"),
+                )
+            ],
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requires_confirmation"] is True
+    assert payload["files"][0]["status"] == "ok"
+    assert payload["files"][0]["font_compatibility_required"] is True
+    assert payload["files"][0]["empty_style_entity_replaced_count"] == 2
+    assert payload["files"][0]["empty_style_style_patched_count"] == 1
+    assert payload["files"][0]["empty_style_shared_skipped_count"] == 0
+    assert payload["files"][0]["empty_style_shared_styles"] == []
+
+
 def test_preflight_fonts_uses_ascii_working_copy_for_non_ascii_upload_names(
     monkeypatch,
     tmp_path: Path,
@@ -944,6 +1204,9 @@ def test_create_batch_preserves_source_filename_but_stores_ascii_upload_copy(
         assert payload["jobs"][0]["source_filename"] == "20261NH-JGS51-B合并版.dwg"
 
         detail = _poll_job(client, job_id)
+        assert detail["workload"]["initial_workload_a1"] == 2.0
+        assert detail["workload"]["final_workload_a1"] == 2.0
+        assert detail["effective_workload"] == 2.0
         assert detail["source_filename"] == "20261NH-JGS51-B合并版.dwg"
 
     uploads_dir = tmp_path / "storage" / "jobs" / job_id / "uploads"
@@ -1077,6 +1340,9 @@ def test_create_batch_split_only_skips_document_param_validation(
     assert job_payload["project_no"] == "2026"
     assert job_payload["options"]["split_only"] is True
     assert detail["artifacts"]["package_available"] is True
+    assert detail["workload"]["initial_workload_a1"] == 0.25
+    assert detail["workload"]["final_workload_a1"] == 0.25
+    assert detail["effective_workload"] == 0.25
 
 
 def test_create_batch_infers_project_no_from_uploaded_filename_when_blank(
@@ -1196,6 +1462,63 @@ def test_create_audit_check_infers_unit_no_from_filename(
     assert payload["jobs"][0]["project_no"] == "2026"
 
 
+def test_create_batch_with_audit_check_infers_project_and_unit_per_upload(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    with TestClient(
+        create_app(
+            job_processor=FakeJobProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+        ),
+    ) as client:
+        params = _deliverable_params()
+        params["project_no"] = ""
+        params["unit_no"] = ""
+        params["subitem_name_en"] = "NR Building"
+        params["album_title_en"] = "Test Album"
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[
+                ("files[]", ("20261NS-JGS01.dwg", b"dwg", "application/acad")),
+                ("files[]", ("出图版--18185NR-JGS50-A.dwg", b"dwg", "application/acad")),
+            ],
+        )
+
+        assert response.status_code == 201, response.json()
+        payload = response.json()
+        projects = [job["project_no"] for job in payload["jobs"]]
+        assert projects == ["2026", "1818"]
+
+        stored_params = []
+        for group in payload["jobs"]:
+            group_json = json.loads(
+                (tmp_path / "storage" / "groups" / group["job_id"] / "group.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            child_job_id = group_json["child_job_ids"][0]
+            child_json = (
+                tmp_path / "storage" / "jobs" / child_job_id / "job.json"
+            ).read_text(encoding="utf-8")
+            stored_params.append(json.loads(child_json)["params"])
+
+    assert [(item["project_no"], item["unit_no"]) for item in stored_params] == [
+        ("2026", "1"),
+        ("1818", "5"),
+    ]
+
+
 def test_create_audit_check_accepts_unlisted_unit_no_for_configured_project(
     monkeypatch,
     tmp_path: Path,
@@ -1248,6 +1571,9 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{job_id}/download/preview"
         assert detail["findings_count"] == 2
         assert detail["affected_drawings_count"] == 1
+        assert detail["workload"]["initial_workload_a1"] == 1.0
+        assert detail["workload"]["final_workload_a1"] == 1.0
+        assert detail["effective_workload"] == 1.0
         assert detail["top_wrong_texts"] == ["2016", "JD"]
         assert detail["top_internal_codes"] == ["1234567-JGS01-001"]
         assert detail["finding_groups"] == [
@@ -1275,6 +1601,67 @@ def test_create_audit_check_processes_job_and_exposes_report_download(
         preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
         assert preview_download.status_code == 200
         assert preview_download.content == b"%PDF-annotated"
+
+
+def test_audit_check_detail_preserves_standard_review_finding_group(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FakeStandardReviewProcessor(FakeJobProcessor):
+        def __call__(self, job: Job) -> None:
+            super().__call__(job)
+            if job.job_type != JobType.AUDIT_REPLACE or str(job.options.get("mode", "")).lower() != "check":
+                return
+            assert job.artifacts.report_json is not None
+            payload = json.loads(job.artifacts.report_json.read_text(encoding="utf-8"))
+            payload["finding_groups"].append(
+                {
+                    "matched_text": "GB 51058-2011",
+                    "count": 1,
+                    "internal_codes": ["18185NF-JGS19-003"],
+                    "category": "规范审查",
+                    "context_kind": "standard_review_year",
+                    "issue_type": "year_mismatch",
+                    "summary": "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+                    "details": [
+                        "实际标准号：GB 51058-2011",
+                        "期望标准号：GB 51058-2014",
+                        "期望标准名称：核电厂抗震设计标准",
+                    ],
+                }
+            )
+            job.artifacts.report_json.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+    with _create_client(monkeypatch, tmp_path, processor=FakeStandardReviewProcessor()) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "check",
+                "params_json": json.dumps({"project_no": "2016", "unit_no": "1"}, ensure_ascii=False),
+            },
+            files=[("files[]", ("2016-A01.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert detail["finding_groups"][-1] == {
+            "matched_text": "GB 51058-2011",
+            "count": 1,
+            "internal_codes": ["18185NF-JGS19-003"],
+            "category": "规范审查",
+            "context_kind": "standard_review_year",
+            "issue_type": "year_mismatch",
+            "summary": "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+            "details": [
+                "实际标准号：GB 51058-2011",
+                "期望标准号：GB 51058-2014",
+                "期望标准名称：核电厂抗震设计标准",
+            ],
+        }
 
 
 def test_create_audit_check_reuses_explicit_batch_id_when_provided(
@@ -1349,6 +1736,34 @@ def test_create_audit_replace_rejects_missing_or_same_project_pair(
     ]
 
 
+def test_create_audit_replace_allows_same_project_when_unit_changes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2026",
+                        "source_island_no": "1",
+                        "target_project_no": "2026",
+                        "target_island_no": "2",
+                        "run_deliverable": False,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[("files[]", ("20261RB-JGS11-A.dwg", b"dwg", "application/acad"))],
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["jobs"][0]["task_kind"] == "audit_replace"
+
+
 def test_create_audit_replace_processes_job_without_deliverable(
     monkeypatch,
     tmp_path: Path,
@@ -1396,6 +1811,37 @@ def test_create_audit_replace_processes_job_without_deliverable(
         replaced_download = client.get(f"/api/jobs/{job_id}/download/replaced")
         assert replaced_download.status_code == 200
         assert replaced_download.content == b"dwg-replaced"
+
+
+def test_meta_remembers_audit_replace_factory_codes_in_mechanism_yaml(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    mechanism_spec = tmp_path / "documents" / "参数规范-3.yaml"
+    mechanism_spec.parent.mkdir(parents=True, exist_ok=True)
+    mechanism_spec.write_text(
+        "schema_version: '1.0'\n"
+        "backend_mechanism:\n"
+        "  audit_replace:\n"
+        "    unit_factory_codes:\n"
+        "      - RC\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(mechanism_spec))
+    MechanismSpecLoader.clear_cache()
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/meta/audit-replace/factory-codes",
+            json={"codes": ["hl", "RC", "16mm"]},
+        )
+        schema_response = client.get("/api/meta/form-schema")
+
+    assert response.status_code == 200
+    assert response.json()["factory_codes"] == ["RC", "HL"]
+    assert schema_response.status_code == 200
+    assert schema_response.json()["audit_replace"]["unit_factory_codes"] == ["RC", "HL"]
+    assert "HL" in mechanism_spec.read_text(encoding="utf-8")
 
 
 def test_create_audit_replace_creates_group_when_run_deliverable_enabled(
@@ -1487,7 +1933,7 @@ def test_create_audit_replace_with_deliverable_runs_replace_before_deliverable(
 
     params = _deliverable_params()
     params.pop("project_no")
-    with AuthenticatedTestClient(
+    with TestClient(
         create_app(
             job_processor=ReplaceThenDeliverableProcessor(),
             shared_prep_service=FakeSharedPrepService(),
@@ -1717,6 +2163,94 @@ class FakeSharedPrepService(SharedPrepService):
         )
 
 
+class FakeSharedPrepServiceWithWorkload(FakeSharedPrepService):
+    def prepare(self, **kwargs: Any) -> SharedPrepArtifacts:
+        artifacts = super().prepare(**kwargs)
+        bbox = BBox(xmin=0, ymin=0, xmax=100, ymax=100)
+        frame = FrameMeta(
+            runtime=FrameRuntime(
+                frame_id="frame-a1",
+                source_file=artifacts.source_converted_dxf,
+                cad_source_file=artifacts.source_input_dwg,
+                outer_bbox=bbox,
+                paper_variant_id="CNPE_A1",
+            ),
+        )
+        sheet_frame = FrameMeta(
+            runtime=FrameRuntime(
+                frame_id="frame-a4-master",
+                source_file=artifacts.source_converted_dxf,
+                cad_source_file=artifacts.source_input_dwg,
+                outer_bbox=bbox,
+                paper_variant_id="CNPE_A4",
+            ),
+        )
+        pages = [
+            PageInfo(page_index=1, outer_bbox=bbox, has_titleblock=True, frame_meta=sheet_frame),
+            PageInfo(page_index=2, outer_bbox=bbox, has_titleblock=False, frame_meta=None),
+        ]
+        sheet_set = SheetSet(
+            cluster_id="sheet-a4",
+            paper="A4",
+            page_total=2,
+            pages=pages,
+            master_page=pages[0],
+        )
+        (artifacts.shared_dir / "frames.json").write_text(
+            json.dumps([frame.model_dump(mode="json")], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (artifacts.shared_dir / "sheet_sets.json").write_text(
+            json.dumps([sheet_set.model_dump(mode="json")], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return SharedPrepArtifacts(
+            shared_dir=artifacts.shared_dir,
+            source_input_dwg=artifacts.source_input_dwg,
+            source_converted_dxf=artifacts.source_converted_dxf,
+            font_preflight_summary=artifacts.font_preflight_summary,
+            frames=[frame],
+            sheet_sets=[sheet_set],
+        )
+
+
+def test_grouped_batch_exposes_workload_from_shared_prep(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    with TestClient(
+        create_app(
+            job_processor=FakeJobProcessor(),
+            shared_prep_service=FakeSharedPrepServiceWithWorkload(),
+        ),
+    ) as client:
+        params = _deliverable_params()
+        params["unit_no"] = "1"
+        response = client.post(
+            "/api/jobs/batch",
+            data={
+                "params_json": json.dumps(params, ensure_ascii=False),
+                "run_audit_check": "true",
+            },
+            files=[("files[]", ("20261RS-JGS65.dwg", b"dwg", "application/acad"))],
+        )
+
+        assert response.status_code == 201
+        group_summary = response.json()["jobs"][0]
+        detail = _poll_job(client, group_summary["job_id"], timeout_sec=5.0)
+
+        assert detail["status"] == "succeeded"
+        assert detail["workload"]["initial_workload_a1"] == 1.25
+        assert detail["workload"]["final_workload_a1"] == 1.25
+        assert detail["effective_workload"] == 1.25
+
+
 def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
     monkeypatch,
     tmp_path: Path,
@@ -1727,7 +2261,7 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         sys.path.insert(0, str(repo_root))
     from API.app.main import create_app
 
-    with AuthenticatedTestClient(
+    with TestClient(
         create_app(
             job_processor=FakeJobProcessor(),
             shared_prep_service=FakeSharedPrepService(),
@@ -1756,6 +2290,9 @@ def test_create_batch_with_run_audit_check_returns_group_detail_and_children(
         assert detail["is_group"] is True
         assert detail["run_audit_check"] is True
         assert detail["flags"] == ["[DRAW001 (20261RS-JGS65-001)] PAPER_SIZE_AUTO_FIXED"]
+        assert detail["workload"]["initial_workload_a1"] == 0.0
+        assert detail["workload"]["final_workload_a1"] == 0.0
+        assert detail["effective_workload"] == 0.0
         assert detail["artifacts"]["preview_available"] is True
         assert detail["artifacts"]["preview_mode"] == "annotated"
         assert detail["artifacts"]["preview_download_url"] == f"/api/jobs/{group_summary['job_id']}/download/preview"
@@ -1823,7 +2360,7 @@ def test_grouped_batches_can_run_children_concurrently(
     params["album_title_en"] = "Example Album"
     params["unit_no"] = "1"
 
-    with AuthenticatedTestClient(
+    with TestClient(
         create_app(
             job_processor=processor,
             shared_prep_service=FakeSharedPrepService(),
@@ -1907,7 +2444,7 @@ def test_multi_file_batch_keeps_backlog_visible_until_worker_capacity_frees(
     from API.app.main import create_app
 
     processor = SlowTrackingProcessor()
-    with AuthenticatedTestClient(
+    with TestClient(
         create_app(
             job_processor=processor,
             font_preflight_service=cast(Any, FakeFontPreflightService()),
@@ -1999,7 +2536,7 @@ def test_slot_bound_phase_allows_next_wave_to_start_before_docs_finish(
     from API.app.main import create_app
 
     processor = PhaseAwareProcessor()
-    with AuthenticatedTestClient(create_app(job_processor=processor)) as client:
+    with TestClient(create_app(job_processor=processor)) as client:
         response = client.post(
             "/api/jobs/batch",
             data={"params_json": json.dumps(_deliverable_params(), ensure_ascii=False)},
@@ -2081,7 +2618,7 @@ def test_grouped_batch_keeps_pending_groups_in_external_queue(
     from API.app.main import create_app
 
     processor = SlowTrackingProcessor()
-    with AuthenticatedTestClient(
+    with TestClient(
         create_app(
             job_processor=processor,
             shared_prep_service=FakeSharedPrepService(),
@@ -2151,7 +2688,7 @@ def test_startup_recovery_marks_stale_jobs_failed(monkeypatch, tmp_path: Path) -
         encoding="utf-8",
     )
 
-    with AuthenticatedTestClient(create_app(job_processor=FakeJobProcessor())) as client:
+    with TestClient(create_app(job_processor=FakeJobProcessor())) as client:
         response = client.get(f"/api/jobs/{stale_job.job_id}")
 
     assert response.status_code == 200

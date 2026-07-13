@@ -1,0 +1,332 @@
+{
+  "generated_at": "2026-07-03 17:43:03",
+  "base_url": "http://127.0.0.1:8000",
+  "dwg": "E:\\project\\auto-fanban-pre\\test\\王若愚反馈\\20161RC-JGS01.dwg",
+  "dwg_bytes": 2386144,
+  "cases": [
+    {
+      "error": "POST http://127.0.0.1:8000/api/jobs/batch failed 422: {\"detail\": {\"upload_errors\": {}, \"param_errors\": {\"file_category\": [\"required\"]}}}",
+      "type": "RuntimeError"
+    },
+    {
+      "label": "纠错",
+      "batch_id": "batch-20260703174303-d1426b",
+      "job_id": "956eafcf-a451-4f90-a304-9e048b7881bd",
+      "submit_payload": {
+        "batch_id": "batch-20260703174303-d1426b",
+        "jobs": [
+          {
+            "job_id": "956eafcf-a451-4f90-a304-9e048b7881bd",
+            "batch_id": "batch-20260703174303-d1426b",
+            "group_id": null,
+            "shared_run_id": null,
+            "task_role": "audit_check",
+            "plot_style_key": null,
+            "plot_resource_mode": null,
+            "slot_id": null,
+            "cad_version": null,
+            "accoreconsole_exe": null,
+            "profile_arg": null,
+            "pc3_path": null,
+            "pmp_path": null,
+            "ctb_path": null,
+            "font_preflight_summary": {},
+            "missing_fonts_detected": false,
+            "font_replacement_applied": false,
+            "replacement_font": null,
+            "replacement_fonts": {},
+            "replaced_style_count": 0,
+            "is_group": false,
+            "source_filename": "20161RC-JGS01.dwg",
+            "task_kind": "audit_check",
+            "job_mode": "check",
+            "project_no": "2016",
+            "status": "queued",
+            "stage": "INIT",
+            "percent": 0,
+            "message": "",
+            "failure_reason": null,
+            "stage_context": null,
+            "created_at": "2026-07-03T17:43:03.638467",
+            "finished_at": null,
+            "artifacts": {
+              "package_available": false,
+              "ied_available": false,
+              "preview_available": false,
+              "preview_mode": null,
+              "report_available": false,
+              "replaced_dwg_available": false
+            },
+            "findings_count": 0,
+            "affected_drawings_count": 0,
+            "workload": null,
+            "effective_workload": null,
+            "retry_available": false
+          }
+        ]
+      },
+      "final_detail": {
+        "job_id": "956eafcf-a451-4f90-a304-9e048b7881bd",
+        "group_id": null,
+        "batch_id": "batch-20260703174303-d1426b",
+        "is_group": false,
+        "task_kind": "audit_check",
+        "task_role": "audit_check",
+        "status": "succeeded",
+        "stage": "AUDIT_CHECK",
+        "percent": 100,
+        "message": "auditing",
+        "errors": [],
+        "flags": [],
+        "artifacts": {
+          "package_available": false,
+          "ied_available": false,
+          "preview_available": true,
+          "preview_mode": "annotated",
+          "report_available": true,
+          "replaced_dwg_available": false,
+          "package_download_url": null,
+          "ied_download_url": null,
+          "preview_download_url": "/api/jobs/956eafcf-a451-4f90-a304-9e048b7881bd/download/preview",
+          "report_download_url": "/api/jobs/956eafcf-a451-4f90-a304-9e048b7881bd/download/report",
+          "replaced_dwg_download_url": null
+        },
+        "deliverable_outputs": null,
+        "findings_count": 77,
+        "affected_drawings_count": 5,
+        "finding_groups": [
+          {
+            "matched_text": "工种",
+            "count": 10,
+            "internal_codes": [
+              "20161RC-JGS01-001",
+              "未归属",
+              "20161RC-JGS01-003",
+              "20161RC-JGS01-004"
+            ]
+          },
+          {
+            "matched_text": "HL",
+            "count": 62,
+            "internal_codes": [
+              "20161RC-JGS01-003",
+              "20161RC-JGS01-004",
+              "20161RC-JGS01-005"
+            ]
+          },
+          {
+            "matched_text": "2号机组",
+            "count": 3,
+            "internal_codes": [
+              "20161RC-JGS01-001"
+            ]
+          },
+          {
+            "matched_text": "GB 50204-2015",
+            "count": 1,
+            "internal_codes": [
+              "20161RC-JGS01-001"
+            ],
+            "category": "规范审查",
+            "context_kind": "standard_review_name",
+            "issue_type": "name_missing",
+            "summary": "标准号与标准名称不对应：GB 50204-2015 附近为 未识别名称，应为 混凝土结构工程施工质量验收规范",
+            "details": [
+              "实际标准号：GB 50204-2015",
+              "期望标准号：GB 50204-2015",
+              "期望标准名称：混凝土结构工程施工质量验收规范"
+            ]
+          },
+          {
+            "matched_text": "JGJ 18-2012",
+            "count": 1,
+            "internal_codes": [
+              "20161RC-JGS01-001"
+            ],
+            "category": "规范审查",
+            "context_kind": "standard_review_name",
+            "issue_type": "name_missing",
+            "summary": "标准号与标准名称不对应：JGJ 18-2012 附近为 未识别名称，应为 钢筋焊接及验收规程",
+            "details": [
+              "实际标准号：JGJ 18-2012",
+              "期望标准号：JGJ 18-2012",
+              "期望标准名称：钢筋焊接及验收规程"
+            ]
+          }
+        ],
+        "replace_summary": null,
+        "workload": {
+          "initial_workload_a1": 6.5,
+          "final_workload_a1": 6.5,
+          "one_review_factor": 1.0,
+          "two_review_factor": 1.0,
+          "three_review_factor": 1.0,
+          "settlement_status": "pending",
+          "settled_at": null,
+          "contributor_entries": []
+        },
+        "children": []
+      },
+      "downloads": {
+        "preview_download_url": {
+          "url": "/api/jobs/956eafcf-a451-4f90-a304-9e048b7881bd/download/preview",
+          "status_code": 200,
+          "bytes": 2674353,
+          "content_type": "application/pdf",
+          "content_disposition": "attachment; filename=\"956eafcf-a451-4f90-a304-9e048b7881bd-preview-annotated.pdf\""
+        },
+        "report_download_url": {
+          "url": "/api/jobs/956eafcf-a451-4f90-a304-9e048b7881bd/download/report",
+          "status_code": 200,
+          "bytes": 14369,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "content_disposition": "attachment; filename=\"report.xlsx\""
+        }
+      }
+    },
+    {
+      "label": "翻版",
+      "batch_id": "batch-20260703174328-7f999a",
+      "job_id": "4a00a571-6e95-4e29-878c-5738f43b7c8e",
+      "submit_payload": {
+        "batch_id": "batch-20260703174328-7f999a",
+        "jobs": [
+          {
+            "job_id": "4a00a571-6e95-4e29-878c-5738f43b7c8e",
+            "batch_id": "batch-20260703174328-7f999a",
+            "group_id": null,
+            "shared_run_id": null,
+            "task_role": "audit_replace",
+            "plot_style_key": null,
+            "plot_resource_mode": null,
+            "slot_id": null,
+            "cad_version": null,
+            "accoreconsole_exe": null,
+            "profile_arg": null,
+            "pc3_path": null,
+            "pmp_path": null,
+            "ctb_path": null,
+            "font_preflight_summary": {},
+            "missing_fonts_detected": false,
+            "font_replacement_applied": false,
+            "replacement_font": null,
+            "replacement_fonts": {},
+            "replaced_style_count": 0,
+            "is_group": false,
+            "source_filename": "20161RC-JGS01.dwg",
+            "task_kind": "audit_replace",
+            "job_mode": "replace",
+            "project_no": "2026",
+            "status": "queued",
+            "stage": "INIT",
+            "percent": 0,
+            "message": "",
+            "failure_reason": null,
+            "stage_context": null,
+            "created_at": "2026-07-03T17:43:28.061792",
+            "finished_at": null,
+            "artifacts": {
+              "package_available": false,
+              "ied_available": false,
+              "preview_available": false,
+              "preview_mode": null,
+              "report_available": false,
+              "replaced_dwg_available": false
+            },
+            "findings_count": 0,
+            "affected_drawings_count": 0,
+            "workload": null,
+            "effective_workload": null,
+            "retry_available": false
+          }
+        ]
+      },
+      "final_detail": {
+        "job_id": "4a00a571-6e95-4e29-878c-5738f43b7c8e",
+        "group_id": null,
+        "batch_id": "batch-20260703174328-7f999a",
+        "is_group": false,
+        "task_kind": "audit_replace",
+        "task_role": "audit_replace",
+        "status": "succeeded",
+        "stage": "AUDIT_REPLACE",
+        "percent": 100,
+        "message": "replacing",
+        "errors": [],
+        "flags": [],
+        "artifacts": {
+          "package_available": false,
+          "ied_available": false,
+          "preview_available": false,
+          "preview_mode": null,
+          "report_available": true,
+          "replaced_dwg_available": true,
+          "package_download_url": null,
+          "ied_download_url": null,
+          "preview_download_url": null,
+          "report_download_url": "/api/jobs/4a00a571-6e95-4e29-878c-5738f43b7c8e/download/report",
+          "replaced_dwg_download_url": "/api/jobs/4a00a571-6e95-4e29-878c-5738f43b7c8e/download/replaced"
+        },
+        "deliverable_outputs": null,
+        "findings_count": 0,
+        "affected_drawings_count": 5,
+        "finding_groups": [],
+        "replace_summary": {
+          "replacement_count": 59,
+          "skipped_count": 72,
+          "affected_drawings_count": 5,
+          "source_project_no": "2016",
+          "source_island_no": "1",
+          "target_project_no": "2026",
+          "target_island_no": "1",
+          "top_replaced_texts": [
+            "2016",
+            "浙江金七门核电厂 1、2 号 机 组",
+            "J",
+            "D",
+            "2023.05",
+            "金七门",
+            "2024.03",
+            "B",
+            "2016JT0106",
+            "2016-J01ZHC06"
+          ],
+          "top_internal_codes": [
+            "20161RC-JGS01-001",
+            "20161RC-JGS01-005",
+            "20161RC-JGS01-002",
+            "20161RC-JGS01-003",
+            "20161RC-JGS01-004"
+          ]
+        },
+        "workload": {
+          "initial_workload_a1": 6.5,
+          "final_workload_a1": 6.5,
+          "one_review_factor": 1.0,
+          "two_review_factor": 1.0,
+          "three_review_factor": 1.0,
+          "settlement_status": "pending",
+          "settled_at": null,
+          "contributor_entries": []
+        },
+        "children": []
+      },
+      "downloads": {
+        "report_download_url": {
+          "url": "/api/jobs/4a00a571-6e95-4e29-878c-5738f43b7c8e/download/report",
+          "status_code": 200,
+          "bytes": 17281,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "content_disposition": "attachment; filename=\"report.xlsx\""
+        },
+        "replaced_dwg_download_url": {
+          "url": "/api/jobs/4a00a571-6e95-4e29-878c-5738f43b7c8e/download/replaced",
+          "status_code": 200,
+          "bytes": 871023,
+          "content_type": "application/acad",
+          "content_disposition": "attachment; filename=\"20261RC-JGS01.dwg\""
+        }
+      }
+    }
+  ]
+}

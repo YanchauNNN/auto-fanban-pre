@@ -20,16 +20,19 @@ import {
   useEffect,
   useDeferredValue,
   useLayoutEffect,
+  isValidElement,
   lazy,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import {
   BrowserRouter,
   Link,
+  Navigate,
   Route,
   Routes,
   useNavigate,
@@ -48,11 +51,8 @@ import type {
   FindingGroup,
   JobDetail,
   JobList,
+  JobsActivity,
   JobSummary,
-  ManagementSchema,
-  TaskGroupDetail,
-  TaskGroupList,
-  TaskGroupSummary,
   TaskKind,
 } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
@@ -61,7 +61,6 @@ import { SessionProvider, useSession } from "../shared/session/SessionContext";
 import styles from "./App.module.css";
 import { AccountModulePanel, WorkloadModulePanel, type AccountPanelMode } from "./ModulePanels";
 import { RoutePlaceholder } from "./RoutePlaceholder";
-import { TaskGroupConflictDialog } from "./TaskGroupConflictDialog";
 import {
   buildJobCardModels,
   getMessageLabel,
@@ -70,21 +69,13 @@ import {
   getTaskKindLabel,
   type JobCardModel,
 } from "./jobPresentation";
-import {
-  buildTaskGroupCardModels,
-  getArchiveStatusLabel,
-  getCurrentNodeLabel,
-  getTaskGroupDisplayTitle,
-  getWorkflowStatusLabel,
-  type TaskGroupCardModel,
-  type TaskGroupPresentationLabels,
-} from "../shared/task-groups/taskGroupPresentation";
 
 const ACTIVE_JOB_STATUSES = ["queued", "running", "cancel_requested"] as const;
 const DEFAULT_VISIBLE_JOB_CARDS = 8;
 const JOBS_MODAL_PAGE_SIZE = 50;
 const BACKEND_CONNECTION_INTERRUPTED_MESSAGE = "后台服务连接中断，请检查后端服务或代理配置。";
 const BACKEND_BUSINESS_HEALTH_WARNING_MESSAGE = "后台业务健康异常";
+const BACKEND_HEALTH_PROBE_RETRYING_MESSAGE = "后台健康检查重试中";
 const CONNECTION_REFETCH_INTERVAL_MS = 12000;
 const CONNECTION_RETRY_COUNT = 2;
 const CONNECTION_RECENT_SUCCESS_GRACE_MS = 60000;
@@ -92,88 +83,6 @@ const CONNECTION_RETRY_BASE_DELAY_MS = 100;
 const HEALTH_REFETCH_INTERVAL_MS = 20000;
 const HEALTH_RETRY_COUNT = 1;
 const HEALTH_STALE_TIME_MS = 10000;
-
-type RecentRecordCard =
-  | {
-      kind: "task-group";
-      key: string;
-      createdAt: string;
-      card: TaskGroupCardModel;
-    }
-  | {
-      kind: "job";
-      key: string;
-      createdAt: string;
-      card: JobCardModel;
-    };
-
-function buildTaskGroupPresentationLabels(
-  management: ManagementSchema | undefined,
-): TaskGroupPresentationLabels {
-  return {
-    workflowStatusLabels: management?.workflow.statusLabels ?? {},
-    archiveStatusLabels: management?.archive?.statusLabels ?? {},
-    nodeLabels: management?.workflow.nodeLabels ?? {},
-    emptyCurrentNodeLabel: management?.workflow.emptyCurrentNodeLabel ?? "",
-  };
-}
-
-function isStandaloneJobRecord(job: JobSummary) {
-  return !job.isGroup && !job.groupId;
-}
-
-function buildRecentRecordCards(
-  taskGroupCards: readonly TaskGroupCardModel[],
-  jobCards: readonly JobCardModel[],
-): RecentRecordCard[] {
-  return [
-    ...taskGroupCards.map((card) => ({
-      kind: "task-group" as const,
-      key: `task-group:${card.key}`,
-      createdAt: card.createdAt,
-      card,
-    })),
-    ...jobCards.map((card) => ({
-      kind: "job" as const,
-      key: `job:${card.key}`,
-      createdAt: card.summary.createdAt,
-      card,
-    })),
-  ].sort((left, right) => {
-    const leftTime = Date.parse(left.createdAt) || 0;
-    const rightTime = Date.parse(right.createdAt) || 0;
-    return rightTime - leftTime;
-  });
-}
-
-function useArtifactDownload(adapter: ApiAdapter): ArtifactDownloadHandler {
-  return useCallback(
-    (url, label) => {
-      if (adapter.downloadArtifact) {
-        void adapter.downloadArtifact(url, label).catch((error: unknown) => {
-          console.error("Failed to download job artifact", error);
-        });
-        return;
-      }
-
-      window.location.href = url;
-    },
-    [adapter],
-  );
-}
-
-function useArtifactReader(adapter: ApiAdapter) {
-  return useCallback(
-    (url: string) => {
-      if (!adapter.readArtifact) {
-        throw new Error("PDF preview reader is not available.");
-      }
-      return adapter.readArtifact(url);
-    },
-    [adapter],
-  );
-}
-
 const DeliverableWorkspace = lazy(async () => ({
   default: (await import("../features/deliverable/DeliverableWorkspace")).DeliverableWorkspace,
 }));
@@ -211,6 +120,21 @@ type PreviewRequest = {
 };
 type ArtifactDownloadHandler = (url: string, label: string) => void;
 
+function useArtifactDownload(adapter: ApiAdapter): ArtifactDownloadHandler {
+  return useCallback(
+    (url, label) => {
+      if (adapter.downloadArtifact) {
+        void adapter.downloadArtifact(url, label).catch((error: unknown) => {
+          console.error("Failed to download job artifact", error);
+        });
+        return;
+      }
+      window.location.href = url;
+    },
+    [adapter],
+  );
+}
+
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   queued: { label: "排队中", tone: "queued" },
   running: { label: "运行中", tone: "running" },
@@ -223,10 +147,6 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
 const HERO_PANEL_STYLE = {
   "--hero-photo": `url("${nuclearPlantHeroUrl}")`,
   "--structure-watermark": `url("${structureLogoWatermarkUrl}")`,
-} as CSSProperties;
-
-const LOGIN_PAGE_STYLE = {
-  "--login-hero": `url("${loginPlantHeroUrl}")`,
 } as CSSProperties;
 
 const TUTORIAL_SAMPLE_FILE = "demo-2026-structural-package.dwg";
@@ -386,67 +306,6 @@ const TUTORIAL_GROUP_SUMMARY: JobSummary = {
   children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
 };
 
-const TUTORIAL_TASK_GROUP_SUMMARY: TaskGroupSummary = {
-  groupId: TUTORIAL_GROUP_JOB_ID,
-  displayName: "18185NE-JGS11",
-  albumInternalCode: "18185NE-JGS11",
-  batchId: "tutorial-batch",
-  projectNo: TUTORIAL_SAMPLE_PROJECT,
-  status: "succeeded",
-  createdAt: TUTORIAL_CREATED_AT,
-  sourceFilenames: [TUTORIAL_SAMPLE_FILE],
-  ownerSnapshot: {
-    creatorAccount: "tutorial",
-    creatorName: "教程演示",
-    creatorRole: "设计人员",
-    creatorOffice: "河北分公司-建筑结构所",
-    createdByScope: "self",
-    submittedAt: TUTORIAL_CREATED_AT,
-  },
-  creatorName: "教程演示",
-  creatorAccount: "tutorial",
-  creatorOffice: "河北分公司-建筑结构所",
-  workflowStatus: "archived",
-  currentNodeKey: null,
-  archiveStatus: "succeeded",
-  workload: {
-    initialWorkloadA1: 1.2,
-    finalWorkloadA1: 1.2,
-    oneReviewFactor: 0.2,
-    twoReviewFactor: 0.3,
-    threeReviewFactor: 0.5,
-    nodeFactors: {},
-    settlementStatus: "settled",
-    settledAt: TUTORIAL_FINISHED_AT,
-    contributorEntries: [],
-  },
-  effectiveWorkload: 1.2,
-  canViewDetail: true,
-  canSubmit: false,
-  canApprove: false,
-  isRelatedToCurrentUser: true,
-};
-
-const TUTORIAL_TASK_GROUP_RECORD_CARD: TaskGroupCardModel =
-  buildTaskGroupCardModels([TUTORIAL_TASK_GROUP_SUMMARY])[0] ?? {
-    key: TUTORIAL_GROUP_JOB_ID,
-    groupId: TUTORIAL_GROUP_JOB_ID,
-    title: TUTORIAL_SAMPLE_FILE,
-    searchText: TUTORIAL_SAMPLE_FILE.toLowerCase(),
-    status: "succeeded",
-    createdAt: TUTORIAL_CREATED_AT,
-    creatorLabel: "教程演示",
-    officeLabel: "河北分公司-建筑结构所",
-    workflowLabel: "archived",
-    currentNodeLabel: "",
-    archiveLabel: "succeeded",
-    effectiveWorkloadLabel: "1.20",
-    canViewDetail: true,
-    canSubmit: false,
-    canApprove: false,
-    summary: TUTORIAL_TASK_GROUP_SUMMARY,
-  };
-
 const TUTORIAL_RECORD_CARD: JobCardModel = {
   kind: "real_group",
   key: `group:${TUTORIAL_GROUP_JOB_ID}`,
@@ -565,73 +424,6 @@ const TUTORIAL_GROUP_DETAIL: JobDetail = {
   children: [TUTORIAL_DELIVERABLE_CHILD_SUMMARY, TUTORIAL_AUDIT_CHILD_SUMMARY],
 };
 
-const TUTORIAL_TASK_GROUP_DETAIL: TaskGroupDetail = {
-  ...TUTORIAL_TASK_GROUP_SUMMARY,
-  childJobIds: [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_AUDIT_JOB_ID],
-  personnelSnapshot: {
-    members: {
-      ied_prepared_by: {
-        fieldName: "ied_prepared_by",
-        rawValue: "王丹丹",
-        normalizedValue: "王丹丹",
-        matchedAccount: "tutorial",
-        matchedName: "王丹丹",
-        matchStrategy: "tutorial",
-        status: "matched",
-        errors: [],
-      },
-    },
-  },
-  workflow: {
-    status: "archived",
-    initiatedAt: TUTORIAL_CREATED_AT,
-    initiatedByAccount: "tutorial",
-    initiatedByName: "教程演示",
-    duplicatePolicy: null,
-    overwriteArchiveTarget: null,
-    currentNodeKey: null,
-    nodes: [
-      {
-        nodeKey: "one_review",
-        nodeLabel: "一审",
-        assigneeAccount: "tutorial-reviewer",
-        assigneeName: "一审人员",
-        status: "approved",
-        factor: 0.2,
-        approvedAt: TUTORIAL_FINISHED_AT,
-        actedByAccount: "tutorial-reviewer",
-        actedByName: "一审人员",
-      },
-    ],
-    archiveStatus: "succeeded",
-    archiveRetryCount: 0,
-    archiveLastError: null,
-    archiveLastAttemptAt: TUTORIAL_FINISHED_AT,
-  },
-  archive: {
-    archiveRootPath: "D:\\archive",
-    targetDir: "D:\\archive\\2026\\demo",
-    status: "succeeded",
-    overwriteMode: null,
-    startedAt: TUTORIAL_CREATED_AT,
-    completedAt: TUTORIAL_FINISHED_AT,
-    lastError: null,
-    retryCount: 0,
-    lastAttemptAt: TUTORIAL_FINISHED_AT,
-    archivedFiles: ["package.zip", "IED计划表.xlsx"],
-  },
-  replacement: {
-    albumInternalCode: null,
-    revision: null,
-    replacedGroupId: null,
-    replacedRecordPendingDelete: false,
-  },
-  legacyVisibility: {
-    scope: "current_user",
-    reason: null,
-  },
-};
-
 const TUTORIAL_DETAIL_LOOKUP = new Map<string, JobDetail>([
   [TUTORIAL_GROUP_JOB_ID, TUTORIAL_GROUP_DETAIL],
   [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_DELIVERABLE_CHILD_DETAIL],
@@ -652,112 +444,6 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
     ok: true,
     serverTime: TUTORIAL_CREATED_AT,
   }),
-  login: async () => {
-    throw new Error("Tutorial preview does not support login.");
-  },
-  logout: async () => ({ ok: true }),
-  getMe: async () => ({
-    accountId: "tutorial",
-    displayName: "教程演示",
-    role: "设计人员",
-    officeCode: "HB-JG",
-    officeName: "河北分公司-建筑结构所",
-    valid: true,
-    pendingTodoCount: 0,
-  }),
-  changePassword: async () => {
-    throw new Error("Tutorial preview does not support password changes.");
-  },
-  normalizePersonnel: async (_fieldName, rawValue) => ({
-    normalized: {
-      fieldName: "tutorial",
-      rawValue,
-      normalizedValue: rawValue,
-      matchedAccount: "tutorial",
-      matchedName: rawValue,
-      matchStrategy: "tutorial",
-      status: rawValue ? "matched" : "empty",
-      errors: [],
-    },
-    candidates: [],
-  }),
-  getWorkloadMe: async () => ({
-    scope: "me",
-    filters: {
-      startDate: null,
-      endDate: null,
-      status: null,
-      validOnly: false,
-    },
-    officeName: null,
-    totalWorkloadA1: 0,
-    totalsByAccount: {},
-    entries: [],
-  }),
-  getWorkloadOffice: async () => ({
-    scope: "office",
-    filters: {
-      startDate: null,
-      endDate: null,
-      status: null,
-      validOnly: false,
-    },
-    officeName: "河北分公司-建筑结构所",
-    totalWorkloadA1: 0,
-    totalsByAccount: {},
-    entries: [],
-  }),
-  getWorkloadInstitute: async () => ({
-    scope: "institute",
-    filters: {
-      startDate: null,
-      endDate: null,
-      status: null,
-      validOnly: false,
-    },
-    officeName: null,
-    totalWorkloadA1: 0,
-    totalsByAccount: {},
-    entries: [],
-  }),
-  getWorkloadAdmin: async () => ({
-    scope: "admin",
-    filters: {
-      startDate: null,
-      endDate: null,
-      status: null,
-      validOnly: false,
-    },
-    officeName: null,
-    totalWorkloadA1: 0,
-    totalsByAccount: {},
-    entries: [],
-  }),
-  getWorkflowMonitor: async () => ({
-    total: 0,
-    items: [],
-  }),
-  approveWorkflow: async () => undefined,
-  repairCurrentNode: async () => undefined,
-  listAccounts: async () => ({
-    items: [],
-  }),
-  listInvalidAccountRows: async () => ({
-    items: [],
-  }),
-  createAccount: async () => {
-    throw new Error("Tutorial preview does not support account creation.");
-  },
-  updateAccount: async () => {
-    throw new Error("Tutorial preview does not support account updates.");
-  },
-  updateAccountRow: async () => {
-    throw new Error("Tutorial preview does not support account row updates.");
-  },
-  getAdminConfig: async () => ({
-    archiveRootPath: null,
-  }),
-  patchAdminConfig: async (payload) => payload,
   getHealth: async () => ({
     status: "ok",
     ready: true,
@@ -791,21 +477,15 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
-  listTaskGroups: async () => ({
-    total: 1,
-    items: [TUTORIAL_TASK_GROUP_SUMMARY],
-  }),
-  getTaskGroupDetail: async (groupId: string) => {
-    if (groupId !== TUTORIAL_GROUP_JOB_ID) {
-      throw new Error(`Missing tutorial task-group detail for ${groupId}.`);
-    }
-    return TUTORIAL_TASK_GROUP_DETAIL;
-  },
-  submitTaskGroup: async () => TUTORIAL_TASK_GROUP_DETAIL,
-  restartSubmitTaskGroup: async () => TUTORIAL_TASK_GROUP_DETAIL,
+  rememberAuditReplaceFactoryCodes: async () => ({ factoryCodes: [] }),
   listJobs: async () => ({
     total: 1,
     items: [TUTORIAL_GROUP_SUMMARY],
+  }),
+  getJobsActivity: async () => ({
+    total: 1,
+    active: 0,
+    lastChangedAt: TUTORIAL_FINISHED_AT,
   }),
   getJobDetail: async (jobId: string) => {
     const detail = TUTORIAL_DETAIL_LOOKUP.get(jobId);
@@ -865,29 +545,14 @@ export function App() {
         >
           <Routes>
             <Route element={<LoginPage />} path="/login" />
+            <Route element={<RequireSession><WorkspacePage /></RequireSession>} path="/" />
             <Route
-              element={
-                <ProtectedPage>
-                  <WorkspacePage />
-                </ProtectedPage>
-              }
-              path="/"
-            />
-            <Route
-              element={
-                <ProtectedPage>
-                  <JobDetailPage />
-                </ProtectedPage>
-              }
+              element={<RequireSession><JobDetailPage /></RequireSession>}
               path="/jobs/:jobId"
             />
             <Route
-              element={
-                <ProtectedPage>
-                  <TaskGroupDetailPage />
-                </ProtectedPage>
-              }
-              path="/task-groups/:groupId"
+              element={<RequireSession><JobDetailPage /></RequireSession>}
+              path="/task-groups/:jobId"
             />
           </Routes>
         </BrowserRouter>
@@ -896,31 +561,24 @@ export function App() {
   );
 }
 
-function ProtectedPage({ children }: { children: ReactNode }) {
+function RequireSession({ children }: { children: ReactNode }) {
   const { sessionStatus } = useSession();
-
-  if (import.meta.env.MODE === "test") {
-    return <>{children}</>;
-  }
-
   if (sessionStatus === "loading") {
     return <RoutePlaceholder description="正在确认登录状态..." title="正在进入平台" />;
   }
-
   if (sessionStatus === "anonymous") {
-    return <LoginPage />;
+    return <Navigate replace to="/login" />;
   }
-
   return <>{children}</>;
 }
 
 function LoginPage() {
-  const navigate = useNavigate();
   const adapter = useApiAdapter();
+  const navigate = useNavigate();
   const { currentAccount, login, sessionStatus } = useSession();
   const [accountId, setAccountId] = useState("");
   const [password, setPassword] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -930,64 +588,50 @@ function LoginPage() {
   }, [currentAccount, navigate, sessionStatus]);
 
   const schemaQuery = useQuery({
-    queryKey: ["form-schema", "login-management"],
+    queryKey: ["form-schema"],
     queryFn: () => adapter.getFormSchema(),
     staleTime: 60000,
   });
   const defaultPassword = schemaQuery.data?.management?.account.adminCreatedDefaultPassword.trim();
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedAccountId = accountId.trim();
-    if (!trimmedAccountId || !password) {
-      setErrorMessage("请输入账号和密码。");
+    const normalizedAccountId = accountId.trim();
+    if (!normalizedAccountId || !password) {
+      setError("请输入账号和密码。");
       return;
     }
-
     setSubmitting(true);
-    setErrorMessage(null);
+    setError(null);
     try {
-      await login({ accountId: trimmedAccountId, password });
+      await login({ accountId: normalizedAccountId, password });
       navigate("/", { replace: true });
     } catch {
-      setErrorMessage("登录失败，请确认账号和密码。");
+      setError("登录失败，请确认账号和密码。");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main className={styles.loginPage} style={LOGIN_PAGE_STYLE}>
+    <main
+      className={styles.loginPage}
+      style={{ "--login-hero": `url("${loginPlantHeroUrl}")` } as CSSProperties}
+    >
       <section className={styles.loginHeroPanel}>
         <div className={styles.loginHeroContent}>
-          <div className={styles.loginLogoBadge}>
-            <img alt="中核集团标识" className={styles.loginLogo} src={groupLogoUrl} />
-          </div>
-          <p className={styles.loginEyebrow}>CNPE Structural Drawing Platform</p>
-          <h1 className={styles.loginHeroTitle}>中核工程-河北分公司-建筑结构所出图平台</h1>
-          <p className={styles.loginHeroBody}>
-            面向结构出图、翻版、纠错与流程追踪的一体化工程工作台。以稳定的任务链路承接设计交付，把复杂流程收束到更清晰的操作界面里。
-          </p>
-          <div className={styles.loginFeatureList}>
-            <span>统一任务入口</span>
-            <span>任务包与审批联动</span>
-            <span>交付结果集中追踪</span>
-          </div>
+          <img alt="" className={styles.loginLogo} src={groupLogoUrl} />
+          <p className={styles.loginEyebrow}>Nuclear Design Workflow</p>
+          <h1 className={styles.loginHeroTitle}>核电图纸业务协同平台</h1>
+          <p className={styles.loginHeroBody}>统一进入出图、任务审批、账号管理和工作量结算。</p>
         </div>
       </section>
-
       <section className={styles.loginCardPanel}>
         <form className={styles.loginCard} onSubmit={handleSubmit}>
           <p className={styles.loginCardEyebrow}>Account Login</p>
-          <h2>账号登录</h2>
-          <p className={styles.loginCardBody}>
-            {defaultPassword
-              ? `使用平台账号进入工作台，默认密码为 ${defaultPassword}。`
-              : "使用平台账号进入工作台。"}
-          </p>
-
+          <h2>登录平台</h2>
           <label className={styles.loginField} htmlFor="login-account-id">
-            <span>账号</span>
+            账号
             <input
               autoComplete="username"
               className={styles.loginInput}
@@ -996,9 +640,8 @@ function LoginPage() {
               value={accountId}
             />
           </label>
-
           <label className={styles.loginField} htmlFor="login-password">
-            <span>密码</span>
+            密码
             <input
               autoComplete="current-password"
               className={styles.loginInput}
@@ -1008,16 +651,10 @@ function LoginPage() {
               value={password}
             />
           </label>
-          {defaultPassword ? <p className={styles.loginHelper}>{`默认密码 ${defaultPassword}`}</p> : null}
-
-          {errorMessage ? (
-            <p className={styles.loginError} role="alert">
-              {errorMessage}
-            </p>
-          ) : null}
-
+          {error ? <p className={styles.loginError} role="alert">{error}</p> : null}
+          {defaultPassword ? <p className={styles.loginHelper}>管理员新建账号默认密码：{defaultPassword}</p> : null}
           <button className={styles.loginPrimaryButton} disabled={submitting} type="submit">
-            {submitting ? "登录中..." : "登录"}
+            {submitting ? "正在登录..." : "登录"}
           </button>
         </form>
       </section>
@@ -1027,11 +664,13 @@ function LoginPage() {
 
 function WorkspacePage() {
   const adapter = useApiAdapter();
-  const reactQueryClient = useQueryClient();
   const { currentAccount, logout } = useSession();
+  const subscribeJobsActivity = adapter.subscribeJobsActivity;
+  const reactQueryClient = useQueryClient();
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
   const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
   const notifiedAuditJobIdsRef = useRef<Set<string>>(new Set());
+  const lastJobsActivityMarkerRef = useRef<string | null>(null);
 
   const [jobsStatusFilter, setJobsStatusFilter] = useState<string | undefined>();
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
@@ -1040,12 +679,6 @@ function WorkspacePage() {
   const [activeModule, setActiveModule] = useState<HomeModule>("business");
   const [accountPanelMode, setAccountPanelMode] = useState<AccountPanelMode>("self");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
-  const [taskGroupActionError, setTaskGroupActionError] = useState<string | null>(null);
-  const [taskGroupSubmittingId, setTaskGroupSubmittingId] = useState<string | null>(null);
-  const [taskGroupConflict, setTaskGroupConflict] = useState<{
-    groupId: string;
-    kind: "archive" | "duplicate";
-  } | null>(null);
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
@@ -1097,6 +730,8 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
+  const accountAdminRoles = schemaQuery.data?.management?.account.adminRoles ?? [];
+  const isAdmin = Boolean(currentAccount && accountAdminRoles.includes(currentAccount.role));
   const [lastConnectionSuccessAt, setLastConnectionSuccessAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -1112,73 +747,35 @@ function WorkspacePage() {
     connectionQuery.isError &&
     connectionQuery.failureCount > CONNECTION_RETRY_COUNT &&
     !hasRecentConnectionSuccess;
+  const backendHealthProbeRetrying =
+    !backendConnectionInterrupted && healthQuery.isError && hasRecentConnectionSuccess;
   const backendBusinessHealthWarning =
-    !backendConnectionInterrupted && (healthQuery.isError || healthQuery.data?.ready === false);
+    !backendConnectionInterrupted && healthQuery.data?.ready === false;
   const entryActionsDisabled = !actionsReady || backendConnectionInterrupted;
-  const accountAdminRoles = schemaQuery.data?.management?.account.adminRoles ?? [];
-  const isAdmin = Boolean(currentAccount && accountAdminRoles.includes(currentAccount.role));
   const primaryActionLabel = actionsReady ? "出图" : "正在加载配置";
   const auditActionLabel = actionsReady
     ? auditDraftAvailable
       ? "继续纠错"
       : "纠错"
     : "正在加载配置";
-  const taskGroupsSupported =
-    typeof adapter.listTaskGroups === "function" &&
-    typeof adapter.getTaskGroupDetail === "function" &&
-    typeof adapter.submitTaskGroup === "function";
-
-  const taskGroupsQuery = useQuery({
-    queryKey: ["task-groups"],
-    queryFn: () => adapter.listTaskGroups?.() ?? Promise.resolve({ total: 0, items: [] }),
-    enabled: taskGroupsSupported,
-    placeholderData: (previous) => previous,
-    refetchInterval: (query) => {
-      const items = (query.state.data as TaskGroupList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
-    },
-  });
 
   const jobsQuery = useQuery({
     queryKey: ["jobs", jobsStatusFilter ?? "__all__"],
-    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100),
+    queryFn: () => adapter.listJobs(jobsStatusFilter ?? undefined, 0, 100, "created_at"),
     placeholderData: (previous) => previous,
-    refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
-    },
   });
   const jobsActivityQuery = useQuery({
     queryKey: ["jobs-activity"],
-    queryFn: () => adapter.listJobs(undefined, 0, 100),
+    queryFn: () => adapter.getJobsActivity(),
     placeholderData: (previous) => previous,
     refetchInterval: (query) => {
-      const items = (query.state.data as JobList | undefined)?.items ?? [];
-      const hasActive = items.some((item) => ACTIVE_JOB_STATUSES.includes(item.status as never));
-      return hasActive ? 3000 : 12000;
+      const activity = query.state.data as JobsActivity | undefined;
+      return activity && activity.active > 0 ? 3000 : 12000;
     },
   });
-
   const jobCards = useMemo(
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
     [jobsQuery.data?.items],
-  );
-  const standaloneJobCards = useMemo(
-    () =>
-      taskGroupsSupported
-        ? buildJobCardModels((jobsQuery.data?.items ?? []).filter(isStandaloneJobRecord))
-        : [],
-    [jobsQuery.data?.items, taskGroupsSupported],
-  );
-  const taskGroupPresentationLabels = useMemo(
-    () => buildTaskGroupPresentationLabels(schemaQuery.data?.management),
-    [schemaQuery.data?.management],
-  );
-  const taskGroupCards = useMemo(
-    () => buildTaskGroupCardModels(taskGroupsQuery.data?.items ?? [], taskGroupPresentationLabels),
-    [taskGroupsQuery.data?.items, taskGroupPresentationLabels],
   );
   const deferredRecentJobsSearch = useDeferredValue(recentJobsSearch);
   const normalizedRecentJobsSearch = deferredRecentJobsSearch.trim().toLowerCase();
@@ -1191,61 +788,16 @@ function WorkspacePage() {
       card.title.toLowerCase().includes(normalizedRecentJobsSearch),
     );
   }, [jobCards, normalizedRecentJobsSearch]);
-  const statusFilteredTaskGroupCards = useMemo(() => {
-    if (!jobsStatusFilter) {
-      return taskGroupCards;
-    }
-
-    return taskGroupCards.filter((card) => card.status === jobsStatusFilter);
-  }, [jobsStatusFilter, taskGroupCards]);
-  const filteredTaskGroupCards = useMemo(() => {
-    if (!normalizedRecentJobsSearch) {
-      return statusFilteredTaskGroupCards;
-    }
-
-    return statusFilteredTaskGroupCards.filter((card) =>
-      card.searchText.includes(normalizedRecentJobsSearch),
-    );
-  }, [normalizedRecentJobsSearch, statusFilteredTaskGroupCards]);
-  const filteredStandaloneJobCards = useMemo(() => {
-    if (!normalizedRecentJobsSearch) {
-      return standaloneJobCards;
-    }
-
-    return standaloneJobCards.filter((card) =>
-      card.title.toLowerCase().includes(normalizedRecentJobsSearch),
-    );
-  }, [normalizedRecentJobsSearch, standaloneJobCards]);
-  const combinedRecentRecordCards = useMemo(
-    () => buildRecentRecordCards(filteredTaskGroupCards, filteredStandaloneJobCards),
-    [filteredStandaloneJobCards, filteredTaskGroupCards],
-  );
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : taskGroupsSupported
-      ? Math.max(combinedRecentRecordCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0)
-      : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
+    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
-  const visibleRecentRecordCards = normalizedRecentJobsSearch
-    ? combinedRecentRecordCards
-    : combinedRecentRecordCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
   const tutorialShowsRecordPreview = tutorialStep?.id === "record" || tutorialStep?.id === "detail";
   const displayedJobCards = tutorialShowsRecordPreview
     ? [TUTORIAL_RECORD_CARD, ...visibleJobCards]
     : visibleJobCards;
-  const displayedRecentRecordCards = tutorialShowsRecordPreview
-    ? [
-        {
-          kind: "task-group" as const,
-          key: `tutorial:${TUTORIAL_TASK_GROUP_RECORD_CARD.key}`,
-          createdAt: TUTORIAL_TASK_GROUP_RECORD_CARD.createdAt,
-          card: TUTORIAL_TASK_GROUP_RECORD_CARD,
-        },
-        ...visibleRecentRecordCards,
-      ]
-    : visibleRecentRecordCards;
 
   useEffect(() => {
     if (normalizedRecentJobsSearch) {
@@ -1262,7 +814,37 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    const items = jobsActivityQuery.data?.items;
+    const activity = jobsActivityQuery.data;
+    if (!activity) {
+      return;
+    }
+
+    const marker = `${activity.total}:${activity.active}:${activity.lastChangedAt ?? ""}`;
+    const previousMarker = lastJobsActivityMarkerRef.current;
+    lastJobsActivityMarkerRef.current = marker;
+    if (previousMarker !== null && previousMarker !== marker) {
+      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
+    }
+  }, [jobsActivityQuery.data, reactQueryClient]);
+
+  useEffect(() => {
+    const activity = jobsActivityQuery.data;
+    if (!subscribeJobsActivity || !activity || activity.active <= 0) {
+      return;
+    }
+
+    return subscribeJobsActivity(
+      (nextActivity) => {
+        reactQueryClient.setQueryData(["jobs-activity"], nextActivity);
+      },
+      () => {
+        void reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
+      },
+    );
+  }, [jobsActivityQuery.data?.active, reactQueryClient, subscribeJobsActivity]);
+
+  useEffect(() => {
+    const items = jobsQuery.data?.items;
     if (!items) {
       return;
     }
@@ -1365,7 +947,7 @@ function WorkspacePage() {
     return () => {
       active = false;
     };
-  }, [adapter, jobsActivityQuery.data]);
+  }, [adapter, jobsQuery.data?.items]);
 
   function handleBatchCreated(payload: CreateBatchPayload) {
     setHighlightedBatchId(payload.batchId);
@@ -1374,7 +956,6 @@ function WorkspacePage() {
     setAuditConfigOpen(false);
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
-    void reactQueryClient.invalidateQueries({ queryKey: ["task-groups"] });
   }
 
   function handleDeliverableUploadClick() {
@@ -1406,15 +987,6 @@ function WorkspacePage() {
     setPendingReplaceConfig(null);
     setTutorialStepIndex(0);
     setAllJobsModalOpen(false);
-  }
-
-  function handleOpenAdminPanel() {
-    setAccountPanelMode("admin");
-    setActiveModule("account");
-  }
-
-  function handleLogout() {
-    void logout();
   }
 
   function handleCloseTutorial() {
@@ -1450,10 +1022,7 @@ function WorkspacePage() {
     setJobsRefreshState("refreshing");
 
     try {
-      await Promise.all([
-        taskGroupsSupported ? taskGroupsQuery.refetch() : jobsQuery.refetch(),
-        jobsActivityQuery.refetch(),
-      ]);
+      await Promise.all([jobsQuery.refetch(), jobsActivityQuery.refetch()]);
       setJobsRefreshState("done");
       jobsRefreshResetTimerRef.current = window.setTimeout(() => {
         setJobsRefreshState("idle");
@@ -1462,57 +1031,6 @@ function WorkspacePage() {
     } catch {
       setJobsRefreshState("idle");
     }
-  }
-
-  async function submitTaskGroup(
-    groupId: string,
-    payload: { overwriteArchiveExisting: boolean; cancelExistingInProgress: boolean },
-  ) {
-    if (!adapter.submitTaskGroup) {
-      setTaskGroupActionError("当前后台暂未开放任务包提交接口。");
-      return;
-    }
-
-    setTaskGroupSubmittingId(groupId);
-    setTaskGroupActionError(null);
-    try {
-      const detail = await adapter.submitTaskGroup(groupId, payload);
-      setTaskGroupConflict(null);
-      setHighlightedBatchId(detail.batchId);
-      await reactQueryClient.invalidateQueries({ queryKey: ["task-groups"] });
-      await reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
-    } catch (error) {
-      const apiError = error as { status?: number; detail?: unknown };
-      if (apiError.status === 422 && apiError.detail === "archive_target_exists") {
-        setTaskGroupConflict({ groupId, kind: "archive" });
-      } else if (apiError.status === 422 && apiError.detail === "duplicate_in_progress_exists") {
-        setTaskGroupConflict({ groupId, kind: "duplicate" });
-      } else if (apiError.status === 422 && apiError.detail === "submitter_must_match_creator") {
-        setTaskGroupActionError("仅创建者本人可提交");
-      } else {
-        setTaskGroupActionError("提交失败，请稍后重试。");
-      }
-    } finally {
-      setTaskGroupSubmittingId(null);
-    }
-  }
-
-  function handleTaskGroupSubmit(groupId: string) {
-    void submitTaskGroup(groupId, {
-      overwriteArchiveExisting: false,
-      cancelExistingInProgress: false,
-    });
-  }
-
-  function handleConfirmTaskGroupConflict() {
-    if (!taskGroupConflict) {
-      return;
-    }
-
-    void submitTaskGroup(taskGroupConflict.groupId, {
-      overwriteArchiveExisting: taskGroupConflict.kind === "archive",
-      cancelExistingInProgress: taskGroupConflict.kind === "duplicate",
-    });
   }
 
   function handleDeliverableFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1544,33 +1062,28 @@ function WorkspacePage() {
           <section className={styles.titleStripStatus} data-testid="title-strip-status">
             <div className={styles.titleStripStatusTop}>
               <p className={styles.titleStripStatusLabel}>System Status</p>
-              <button
-                className={styles.tutorialEntryButton}
-                type="button"
-                onClick={handleOpenTutorial}
-              >
-                教程
-              </button>
               <div className={styles.titleStripAccountActions}>
                 <span className={styles.titleStripAccountName}>
                   {currentAccount?.displayName ?? "未登录"}
                 </span>
-                {isAdmin ? (
-                  <button
-                    className={styles.tutorialEntryButton}
-                    type="button"
-                    onClick={handleOpenAdminPanel}
-                  >
-                    管理员配置
-                  </button>
-                ) : null}
-                <button className={styles.tutorialEntryButton} type="button" onClick={handleLogout}>
-                  退出登录
+                <button
+                  className={styles.tutorialEntryButton}
+                  type="button"
+                  onClick={handleOpenTutorial}
+                >
+                  教程
+                </button>
+                <button className={styles.tutorialEntryButton} type="button" onClick={() => void logout()}>
+                  退出
                 </button>
               </div>
             </div>
             {backendConnectionInterrupted ? (
               <p className={styles.titleStripHealthWarning}>后台连接不可达</p>
+            ) : backendHealthProbeRetrying ? (
+              <p className={styles.titleStripHealthLoading}>
+                {BACKEND_HEALTH_PROBE_RETRYING_MESSAGE}
+              </p>
             ) : backendBusinessHealthWarning ? (
               <>
                 <p className={styles.titleStripHealthWarning}>
@@ -1790,67 +1303,8 @@ function WorkspacePage() {
                   ) : null}
                 </div>
 
-                {taskGroupActionError ? (
-                  <p className={styles.jobMessage} role="alert">
-                    {taskGroupActionError}
-                  </p>
-                ) : null}
-
                 <div className={styles.jobsGrid}>
-                  {taskGroupsSupported ? (
-                    displayedRecentRecordCards.length > 0 ? (
-                      displayedRecentRecordCards.map((record) => {
-                        if (record.kind === "job") {
-                          return (
-                            <JobCard
-                              adapter={adapter}
-                              card={record.card}
-                              highlighted={Boolean(
-                                record.card.summary.batchId &&
-                                  record.card.summary.batchId === highlightedBatchId,
-                              )}
-                              key={record.key}
-                            />
-                          );
-                        }
-
-                        const card = record.card;
-                        const isTutorialRecordCard = card.key === TUTORIAL_TASK_GROUP_RECORD_CARD.key;
-                        const node = (
-                          <TaskGroupCard
-                            card={card}
-                            highlighted={Boolean(
-                              !isTutorialRecordCard &&
-                                card.summary.batchId &&
-                                card.summary.batchId === highlightedBatchId,
-                            )}
-                            isSubmitting={!isTutorialRecordCard && taskGroupSubmittingId === card.groupId}
-                            key={record.key}
-                            onOpenWorkload={() => setActiveModule("workload")}
-                            onSubmit={isTutorialRecordCard ? undefined : handleTaskGroupSubmit}
-                          />
-                        );
-
-                        if (!isTutorialRecordCard) {
-                          return node;
-                        }
-
-                        return (
-                          <div
-                            data-testid="tutorial-record-preview"
-                            data-tutorial-target={tutorialStep?.id === "record" ? "record" : undefined}
-                            key={record.key}
-                          >
-                            {node}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className={styles.emptyPanel}>
-                        <p>{normalizedRecentJobsSearch ? "没有匹配的任务。" : "当前没有任务记录。"}</p>
-                      </div>
-                    )
-                  ) : displayedJobCards.length > 0 ? (
+                  {displayedJobCards.length > 0 ? (
                     displayedJobCards.map((card) => {
                       const isTutorialRecordCard = card.key === TUTORIAL_RECORD_CARD.key;
                       const node = (
@@ -1904,26 +1358,10 @@ function WorkspacePage() {
         <JobsBrowserModal
           adapter={adapter}
           filterValue={jobsStatusFilter}
-          refreshState={jobsRefreshState}
           searchValue={recentJobsSearch}
-          taskGroupCards={taskGroupsSupported ? filteredTaskGroupCards : undefined}
-          standaloneJobCards={taskGroupsSupported ? filteredStandaloneJobCards : undefined}
           onClose={() => setAllJobsModalOpen(false)}
           onFilterChange={setJobsStatusFilter}
-          onOpenWorkload={() => {
-            setAllJobsModalOpen(false);
-            setActiveModule("workload");
-          }}
-          onRefresh={handleJobsRefresh}
           onSearchChange={setRecentJobsSearch}
-        />
-      ) : null}
-
-      {taskGroupConflict ? (
-        <TaskGroupConflictDialog
-          kind={taskGroupConflict.kind}
-          onClose={() => setTaskGroupConflict(null)}
-          onConfirm={handleConfirmTaskGroupConflict}
         />
       ) : null}
 
@@ -2013,29 +1451,18 @@ function WorkspacePage() {
 function JobsBrowserModal({
   adapter,
   filterValue,
-  refreshState,
   searchValue,
-  taskGroupCards,
-  standaloneJobCards,
   onFilterChange,
-  onOpenWorkload,
-  onRefresh,
   onSearchChange,
   onClose,
 }: {
   adapter: ApiAdapter;
   filterValue?: string;
-  refreshState: "idle" | "refreshing" | "done";
   searchValue: string;
-  taskGroupCards?: TaskGroupCardModel[];
-  standaloneJobCards?: JobCardModel[];
   onFilterChange: (value?: string) => void;
-  onOpenWorkload: () => void;
-  onRefresh: () => void;
   onSearchChange: (value: string) => void;
   onClose: () => void;
 }) {
-  const usingTaskGroups = Boolean(taskGroupCards || standaloneJobCards);
   const modalJobsQuery = useInfiniteQuery({
     queryKey: ["jobs-browser", filterValue ?? "__all__"],
     initialPageParam: 0,
@@ -2045,7 +1472,6 @@ function JobsBrowserModal({
       const loadedCount = allPages.reduce((sum, page) => sum + page.items.length, 0);
       return loadedCount < lastPage.total ? loadedCount : undefined;
     },
-    enabled: !usingTaskGroups,
   });
   const loadedJobs = useMemo(
     () => modalJobsQuery.data?.pages.flatMap((page) => page.items) ?? [],
@@ -2062,34 +1488,6 @@ function JobsBrowserModal({
       card.title.toLowerCase().includes(normalizedSearchValue),
     );
   }, [loadedCards, normalizedSearchValue]);
-  const visibleTaskGroupCards = useMemo(() => {
-    if (!taskGroupCards) {
-      return [];
-    }
-
-    if (!normalizedSearchValue) {
-      return taskGroupCards;
-    }
-
-    return taskGroupCards.filter((card) => card.searchText.includes(normalizedSearchValue));
-  }, [normalizedSearchValue, taskGroupCards]);
-  const visibleStandaloneJobCards = useMemo(() => {
-    if (!standaloneJobCards) {
-      return [];
-    }
-
-    if (!normalizedSearchValue) {
-      return standaloneJobCards;
-    }
-
-    return standaloneJobCards.filter((card) =>
-      card.title.toLowerCase().includes(normalizedSearchValue),
-    );
-  }, [normalizedSearchValue, standaloneJobCards]);
-  const visibleTaskGroupRecords = useMemo(
-    () => buildRecentRecordCards(visibleTaskGroupCards, visibleStandaloneJobCards),
-    [visibleStandaloneJobCards, visibleTaskGroupCards],
-  );
   const totalJobs = modalJobsQuery.data?.pages[0]?.total ?? 0;
   const remainingJobs = Math.max(totalJobs - loadedJobs.length, 0);
 
@@ -2126,21 +1524,9 @@ function JobsBrowserModal({
             <button
               className={styles.subtleButton}
               type="button"
-              onClick={() => {
-                if (usingTaskGroups) {
-                  void onRefresh();
-                } else {
-                  void modalJobsQuery.refetch();
-                }
-              }}
+              onClick={() => void modalJobsQuery.refetch()}
             >
-              {usingTaskGroups
-                ? refreshState === "refreshing"
-                  ? "刷新中"
-                  : "刷新"
-                : modalJobsQuery.isRefetching
-                  ? "刷新中"
-                  : "刷新"}
+              {modalJobsQuery.isRefetching ? "刷新中" : "刷新"}
             </button>
             <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
               关闭
@@ -2178,32 +1564,7 @@ function JobsBrowserModal({
         </div>
 
         <div className={styles.jobsModalBody}>
-          {usingTaskGroups ? (
-            visibleTaskGroupRecords.length > 0 ? (
-              visibleTaskGroupRecords.map((record) =>
-                record.kind === "task-group" ? (
-                  <TaskGroupCard
-                    card={record.card}
-                    highlighted={false}
-                    isSubmitting={false}
-                    key={record.key}
-                    onOpenWorkload={onOpenWorkload}
-                  />
-                ) : (
-                  <JobCard
-                    adapter={adapter}
-                    card={record.card}
-                    highlighted={false}
-                    key={record.key}
-                  />
-                ),
-              )
-            ) : (
-              <div className={styles.emptyPanel}>
-                <p>没有匹配的任务。</p>
-              </div>
-            )
-          ) : visibleCards.length > 0 ? (
+          {visibleCards.length > 0 ? (
             visibleCards.map((card) => (
               <JobCard adapter={adapter} card={card} highlighted={false} key={card.key} />
             ))
@@ -2217,7 +1578,7 @@ function JobsBrowserModal({
             </div>
           )}
         </div>
-        {!usingTaskGroups && modalJobsQuery.hasNextPage ? (
+        {modalJobsQuery.hasNextPage ? (
           <footer className={styles.jobsModalFooter}>
             <button
               className={styles.secondaryActionButton}
@@ -2232,71 +1593,6 @@ function JobsBrowserModal({
                   : "加载更多"}
             </button>
           </footer>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TaskGroupCard({
-  card,
-  highlighted,
-  isSubmitting,
-  onOpenWorkload,
-  onSubmit,
-}: {
-  card: TaskGroupCardModel;
-  highlighted: boolean;
-  isSubmitting: boolean;
-  onOpenWorkload?: () => void;
-  onSubmit?: (groupId: string) => void;
-}) {
-  return (
-    <div
-      className={`${styles.jobCard} ${highlighted ? styles.jobCardHighlight : ""}`}
-      data-testid="recent-job-card"
-    >
-      <div className={styles.jobCardHeader}>
-        <strong>{card.title}</strong>
-        <div className={styles.jobCardHeaderMeta}>
-          <p className={styles.packageMeta}>{card.creatorLabel}</p>
-          <StatusPill status={card.status} />
-        </div>
-      </div>
-
-      <div className={styles.jobMetaRow}>
-        <span className={`${styles.kindBadge} ${styles.kindGroup}`}>任务包</span>
-        <span className={styles.jobMetric}>{card.officeLabel}</span>
-        <span className={styles.jobMetric}>{`工作量 ${card.effectiveWorkloadLabel}`}</span>
-      </div>
-
-      <p className={styles.jobStage}>{`流程：${card.workflowLabel}`}</p>
-      <p className={styles.jobMessage}>{`${card.currentNodeLabel} · 归档：${card.archiveLabel}`}</p>
-
-      <div className={styles.jobMetaRow}>
-        {card.canViewDetail ? (
-          <Link className={styles.subtaskLink} to={`/task-groups/${card.groupId}`}>
-            查看任务包
-          </Link>
-        ) : null}
-        {card.canSubmit && onSubmit ? (
-          <button
-            className={styles.subtaskLink}
-            disabled={isSubmitting}
-            type="button"
-            onClick={() => onSubmit?.(card.groupId)}
-          >
-            {isSubmitting ? "提交中..." : "提交"}
-          </button>
-        ) : null}
-        {card.canApprove && onOpenWorkload ? (
-          <button
-            className={styles.subtaskLink}
-            type="button"
-            onClick={onOpenWorkload}
-          >
-            前往审批
-          </button>
         ) : null}
       </div>
     </div>
@@ -2471,20 +1767,11 @@ function TutorialSpotlight({ stepId }: { stepId: TutorialStepId }) {
 }
 
 function TutorialGroupDetailPreview() {
-  const childDetailsById = new Map<string, JobDetail>([
-    [TUTORIAL_DELIVERABLE_JOB_ID, TUTORIAL_DELIVERABLE_CHILD_DETAIL],
-    [TUTORIAL_AUDIT_JOB_ID, TUTORIAL_AUDIT_CHILD_DETAIL],
-  ]);
-
   return (
     <div className={styles.tutorialScene}>
       <div className={styles.tutorialDetailPreview} data-tutorial-target="detail">
         <div className={styles.detailPage}>
-          <TaskGroupDetailPanel
-            adapter={TUTORIAL_PREVIEW_ADAPTER}
-            childDetailsById={childDetailsById}
-            detail={TUTORIAL_TASK_GROUP_DETAIL}
-          />
+          <GroupDetailPanel adapter={TUTORIAL_PREVIEW_ADAPTER} detail={TUTORIAL_GROUP_DETAIL} />
         </div>
       </div>
     </div>
@@ -2574,256 +1861,6 @@ function DeliverableTutorialOverlay({
   );
 }
 
-function TaskGroupDetailPage() {
-  const adapter = useApiAdapter();
-  const navigate = useNavigate();
-  const params = useParams();
-
-  const schemaQuery = useQuery({
-    queryKey: ["form-schema"],
-    queryFn: () => adapter.getFormSchema(),
-    staleTime: 60000,
-  });
-  const taskGroupPresentationLabels = useMemo(
-    () => buildTaskGroupPresentationLabels(schemaQuery.data?.management),
-    [schemaQuery.data?.management],
-  );
-
-  const detailQuery = useQuery({
-    queryKey: ["task-group-detail", params.groupId],
-    queryFn: () => {
-      if (!adapter.getTaskGroupDetail) {
-        throw new Error("Task group detail API is not available.");
-      }
-      return adapter.getTaskGroupDetail(params.groupId ?? "");
-    },
-    enabled: Boolean(params.groupId && adapter.getTaskGroupDetail),
-    refetchInterval: (query) => {
-      const data = query.state.data as TaskGroupDetail | undefined;
-      return data && ACTIVE_JOB_STATUSES.includes(data.status as never) ? 3000 : 12000;
-    },
-  });
-
-  const childJobIds = detailQuery.data?.childJobIds ?? [];
-  const childDetailQueries = useQueries({
-    queries: childJobIds.map((childJobId) => ({
-      queryKey: ["task-group-child-detail", childJobId],
-      queryFn: () => adapter.getJobDetail(childJobId),
-      enabled: Boolean(detailQuery.data),
-    })),
-  });
-  const childDetailsById = useMemo(
-    () =>
-      new Map(
-        childJobIds.flatMap((childJobId, index) => {
-          const detail = childDetailQueries[index]?.data;
-          return detail ? ([[childJobId, detail]] as const) : [];
-        }),
-      ),
-    [childDetailQueries, childJobIds],
-  );
-
-  return (
-    <div className={styles.detailPage}>
-      <button className={styles.backButton} type="button" onClick={() => navigate("/")}>
-        返回工作台
-      </button>
-
-      {!adapter.getTaskGroupDetail ? (
-        <section className={styles.detailPanel}>
-          <p className={styles.muted}>任务包详情接口暂未开放，请返回工作台查看任务记录。</p>
-        </section>
-      ) : detailQuery.data ? (
-        <TaskGroupDetailPanel
-          adapter={adapter}
-          childDetailsById={childDetailsById}
-          detail={detailQuery.data}
-          labels={taskGroupPresentationLabels}
-        />
-      ) : detailQuery.isError ? (
-        <section className={styles.detailPanel}>
-          <p className={styles.muted}>任务包详情暂时不可用，请返回工作台查看任务记录。</p>
-        </section>
-      ) : (
-        <section className={styles.detailPanel}>
-          <p className={styles.muted}>正在加载任务包详情…</p>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function TaskGroupDetailPanel({
-  adapter,
-  detail,
-  childDetailsById,
-  labels = {},
-}: {
-  adapter: ApiAdapter;
-  detail: TaskGroupDetail;
-  childDetailsById: Map<string, JobDetail>;
-  labels?: TaskGroupPresentationLabels;
-}) {
-  const childDetails = detail.childJobIds
-    .map((childJobId) => childDetailsById.get(childJobId))
-    .filter((child): child is JobDetail => Boolean(child));
-  const aggregateArtifacts = deriveTaskGroupArtifacts(childDetails);
-  const personnelEntries = Object.values(detail.personnelSnapshot.members);
-  const title = getTaskGroupDisplayTitle(detail);
-  const handleArtifactDownload = useArtifactDownload(adapter);
-
-  return (
-    <section className={styles.detailPanel}>
-      <header className={styles.detailHeader}>
-        <div>
-          <p className={styles.brandTop}>Task Group Detail</p>
-          <h1>{title}</h1>
-        </div>
-        <StatusPill status={detail.status} />
-      </header>
-
-      <section className={styles.detailSection}>
-        <h2>任务包概览</h2>
-        <div className={styles.detailGrid}>
-          <InfoBlock label="创建者" value={detail.creatorName ?? "-"} />
-          <InfoBlock label="科室" value={detail.creatorOffice ?? "-"} />
-          <InfoBlock label="流程状态" value={getWorkflowStatusLabel(detail.workflowStatus, labels)} />
-          <InfoBlock label="当前节点" value={getCurrentNodeLabel(detail.currentNodeKey, labels)} />
-          <InfoBlock label="归档状态" value={getArchiveStatusLabel(detail.archiveStatus, labels)} />
-          <InfoBlock label="有效工作量" value={detail.effectiveWorkload.toFixed(2)} />
-        </div>
-      </section>
-
-      <section className={styles.detailSection}>
-        <h2>流程状态</h2>
-        {detail.workflow.nodes.length > 0 ? (
-          <div className={styles.outputGrid}>
-            {detail.workflow.nodes.map((node) => (
-              <div className={styles.outputCard} key={node.nodeKey}>
-                <strong>{node.nodeLabel}</strong>
-                <span>{`状态：${node.status}`}</span>
-                <ul className={styles.outputMetaList}>
-                  <li>{`处理人：${node.assigneeName ?? "-"}`}</li>
-                  <li>{`系数：${node.factor.toFixed(2)}`}</li>
-                  <li>{`完成时间：${node.approvedAt ? formatTimestamp(node.approvedAt) : "-"}`}</li>
-                </ul>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.muted}>当前尚未进入审批流程。</p>
-        )}
-      </section>
-
-      <section className={styles.detailSection}>
-        <h2>归档状态</h2>
-        <div className={styles.detailGrid}>
-          <InfoBlock label="归档目录" value={detail.archive.targetDir ?? "-"} />
-          <InfoBlock label="归档根路径" value={detail.archive.archiveRootPath ?? "-"} />
-          <InfoBlock label="覆盖模式" value={detail.archive.overwriteMode ?? "-"} />
-          <InfoBlock label="最近错误" value={detail.archive.lastError ?? "-"} />
-        </div>
-      </section>
-
-      <section className={styles.detailSection}>
-        <h2>人员快照</h2>
-        {personnelEntries.length > 0 ? (
-          <div className={styles.outputGrid}>
-            {personnelEntries.map((personnel) => (
-              <div className={styles.outputCard} key={personnel.fieldName}>
-                <strong>{personnel.fieldName}</strong>
-                <span>{personnel.normalizedValue ?? personnel.rawValue ?? "-"}</span>
-                <ul className={styles.outputMetaList}>
-                  <li>{`匹配账号：${personnel.matchedAccount ?? "-"}`}</li>
-                  <li>{`状态：${personnel.status}`}</li>
-                </ul>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.muted}>暂无人员快照。</p>
-        )}
-      </section>
-
-      <section className={styles.quickDownloadSection}>
-        <h2>快捷下载</h2>
-        <div className={styles.downloadGrid}>
-          <ArtifactButton
-            href={aggregateArtifacts.packageDownloadUrl ?? undefined}
-            label="下载任务包"
-            onDownload={handleArtifactDownload}
-          />
-          <ArtifactButton
-            href={aggregateArtifacts.iedDownloadUrl ?? undefined}
-            label="下载 IED"
-            onDownload={handleArtifactDownload}
-          />
-          <ArtifactButton
-            href={aggregateArtifacts.reportDownloadUrl ?? undefined}
-            label="下载 report.xlsx"
-            onDownload={handleArtifactDownload}
-          />
-          <ArtifactButton
-            href={aggregateArtifacts.replacedDwgDownloadUrl ?? undefined}
-            label="下载替换后 DWG"
-            onDownload={handleArtifactDownload}
-          />
-        </div>
-      </section>
-
-      <section className={styles.detailSection}>
-        <h2>子任务</h2>
-        <div className={styles.childTaskList}>
-          {detail.childJobIds.length > 0 ? (
-            detail.childJobIds.map((childJobId) => {
-              const child = childDetailsById.get(childJobId);
-              return (
-                <div className={styles.childTaskCard} key={childJobId}>
-                  <div className={styles.jobCardHeader}>
-                    <div className={styles.childTaskTitle}>
-                      <strong>{child?.sourceFilename ?? childJobId}</strong>
-                      {child?.taskKind ? <TaskKindBadge kind={child.taskKind} /> : null}
-                    </div>
-                    {child ? <StatusPill status={child.status} /> : null}
-                  </div>
-
-                  {child?.taskKind === "deliverable" ? (
-                    <DeliverableResultCard
-                      outputs={child.deliverableOutputs}
-                      sourceFilename={child.sourceFilename}
-                    />
-                  ) : child?.taskKind === "audit_check" ? (
-                    <AuditResultCard
-                      affectedDrawingsCount={child.affectedDrawingsCount}
-                      findingGroups={child.findingGroups}
-                      findingsCount={child.findingsCount}
-                    />
-                  ) : child?.taskKind === "audit_replace" ? (
-                    <ReplaceResultCard
-                      affectedDrawingsCount={child.affectedDrawingsCount}
-                      replaceSummary={child.replaceSummary}
-                    />
-                  ) : (
-                    <p className={styles.muted}>正在整理子任务详情。</p>
-                  )}
-
-                  <div className={styles.childTaskActions}>
-                    <Link className={styles.subtaskLink} to={`/jobs/${childJobId}`}>
-                      查看子任务
-                    </Link>
-                  </div>
-                </div>
-              );
-            })
-          ) : (
-            <p className={styles.muted}>当前没有子任务。</p>
-          )}
-        </div>
-      </section>
-    </section>
-  );
-}
-
 function JobDetailPage() {
   const adapter = useApiAdapter();
   const navigate = useNavigate();
@@ -2893,11 +1930,16 @@ function SingleJobDetailPanel({
   hasWarnings: boolean;
 }) {
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
+  const downloadArtifact = useArtifactDownload(adapter);
+  const readArtifact = adapter.readArtifact;
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const handleArtifactDownload = useArtifactDownload(adapter);
-  const readArtifact = useArtifactReader(adapter);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
+  const artifactButtons = renderArtifactButtons(
+    detail,
+    setPreviewRequest,
+    adapter.downloadArtifact ? downloadArtifact : undefined,
+  );
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
 
   return (
     <section className={styles.detailPanel}>
@@ -2922,10 +1964,10 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -2998,11 +2040,8 @@ function SingleJobDetailPanel({
       ) : null}
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       <section className={styles.detailSection}>
@@ -3020,10 +2059,10 @@ function SingleJobDetailPanel({
       {previewRequest ? (
         <Suspense fallback={null}>
           <PreviewPdfModal
+            readArtifact={readArtifact}
+            onDownload={adapter.downloadArtifact ? downloadArtifact : undefined}
             title={previewRequest.title}
             url={previewRequest.url}
-            readArtifact={readArtifact}
-            onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />
         </Suspense>
@@ -3034,12 +2073,17 @@ function SingleJobDetailPanel({
 
 function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: JobDetail }) {
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
+  const downloadArtifact = useArtifactDownload(adapter);
+  const readArtifact = adapter.readArtifact;
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const handleArtifactDownload = useArtifactDownload(adapter);
-  const readArtifact = useArtifactReader(adapter);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest, handleArtifactDownload);
+  const artifactButtons = renderArtifactButtons(
+    detail,
+    setPreviewRequest,
+    adapter.downloadArtifact ? downloadArtifact : undefined,
+  );
+  const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
       queryKey: ["group-child-detail", child.jobId],
@@ -3065,10 +2109,10 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <StatusPill status={detail.status} />
       </header>
 
-      {artifactButtons.length > 0 ? (
+      {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
-          <div className={styles.downloadGrid}>{artifactButtons}</div>
+          <div className={styles.downloadGrid}>{quickDownloadItems}</div>
         </section>
       ) : null}
 
@@ -3147,20 +2191,17 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       </section>
 
       <section className={styles.detailSection}>
-        <h2>告警与错误</h2>
-        <div className={styles.columns}>
-          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
-          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
-        </div>
+        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+        <DiagnosticPanel detail={detail} />
       </section>
 
       {previewRequest ? (
         <Suspense fallback={null}>
           <PreviewPdfModal
+            readArtifact={readArtifact}
+            onDownload={adapter.downloadArtifact ? downloadArtifact : undefined}
             title={previewRequest.title}
             url={previewRequest.url}
-            readArtifact={readArtifact}
-            onDownload={handleArtifactDownload}
             onClose={() => setPreviewRequest(null)}
           />
         </Suspense>
@@ -3169,18 +2210,97 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
   );
 }
 
-function deriveTaskGroupArtifacts(childDetails: readonly JobDetail[]) {
-  const deliverableChild = childDetails.find((child) => child.taskKind === "deliverable");
-  const replaceChild = childDetails.find((child) => child.taskKind === "audit_replace");
-  const auditChild = childDetails.find((child) => child.taskKind === "audit_check");
+function DrawingQuantityCopy({ value }: { value: string }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
-  return {
-    packageDownloadUrl: deliverableChild?.artifacts.packageDownloadUrl ?? null,
-    iedDownloadUrl: deliverableChild?.artifacts.iedDownloadUrl ?? null,
-    reportDownloadUrl:
-      replaceChild?.artifacts.reportDownloadUrl ?? auditChild?.artifacts.reportDownloadUrl ?? null,
-    replacedDwgDownloadUrl: replaceChild?.artifacts.replacedDwgDownloadUrl ?? null,
+  const handleCopy = async () => {
+    try {
+      await copyPlainText(value);
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
+    }
   };
+
+  return (
+    <div className={styles.drawingQuantityCopy}>
+      <div>
+        <span>图纸量（A1等效）</span>
+        <strong>{value}</strong>
+      </div>
+      <button type="button" onClick={handleCopy}>
+        {copyStatus === "copied" ? "已复制" : copyStatus === "failed" ? "复制失败" : "复制张数"}
+      </button>
+    </div>
+  );
+}
+
+function buildQuickDownloadItems(job: JobSummary, artifactButtons: ReactNode[]) {
+  const drawingQuantityText = formatWorkloadQuantity(resolveDrawingQuantity(job));
+  if (!drawingQuantityText) {
+    return artifactButtons;
+  }
+  return insertAfterArtifactKey(
+    artifactButtons,
+    "ied",
+    <DrawingQuantityCopy key="drawing-quantity" value={drawingQuantityText} />,
+  );
+}
+
+function resolveDrawingQuantity(job: JobSummary) {
+  const ownQuantity = readJobDrawingQuantity(job);
+  if (ownQuantity !== null) {
+    return ownQuantity;
+  }
+
+  if (!job.isGroup || !job.children?.length) {
+    return null;
+  }
+
+  const childrenByPriority = [
+    ...job.children.filter((child) => child.taskKind === "deliverable"),
+    ...job.children.filter((child) => child.taskKind === "audit_check"),
+    ...job.children.filter((child) => child.taskKind === "audit_replace"),
+    ...job.children,
+  ];
+  for (const child of childrenByPriority) {
+    const childQuantity = readJobDrawingQuantity(child);
+    if (childQuantity !== null) {
+      return childQuantity;
+    }
+  }
+
+  return null;
+}
+
+function readJobDrawingQuantity(job: JobSummary) {
+  const candidates = [
+    job.workload?.initialWorkloadA1,
+    job.workload?.finalWorkloadA1,
+    job.effectiveWorkload,
+  ];
+  for (const candidate of candidates) {
+    if (isUsableDrawingQuantity(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function isUsableDrawingQuantity(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function insertAfterArtifactKey(
+  items: ReactNode[],
+  key: string,
+  insertedItem: ReactNode,
+) {
+  const insertIndex = items.findIndex((item) => isValidElement(item) && item.key === key);
+  if (insertIndex < 0) {
+    return [...items, insertedItem];
+  }
+  return [...items.slice(0, insertIndex + 1), insertedItem, ...items.slice(insertIndex + 1)];
 }
 
 function DeliverableResultCard({
@@ -3370,9 +2490,22 @@ function AuditResultCard({
             {groups.map((group) => (
               <div className={styles.findingGroupCard} key={group.matchedText}>
                 <div className={styles.findingGroupHeader}>
-                  <strong>{group.matchedText}</strong>
+                  <div>
+                    {group.category ? (
+                      <span className={styles.findingCodePill}>{group.category}</span>
+                    ) : null}
+                    <strong>{group.matchedText}</strong>
+                  </div>
                   <span className={styles.jobMetric}>命中 {group.count}</span>
                 </div>
+                {group.summary ? <p className={styles.muted}>{group.summary}</p> : null}
+                {group.details?.length ? (
+                  <ul className={styles.outputMetaList}>
+                    {group.details.map((item) => (
+                      <li key={`${group.matchedText}-${item}`}>{item}</li>
+                    ))}
+                  </ul>
+                ) : null}
                 <div className={styles.findingCodeList}>
                   {group.internalCodes.map((internalCode) => (
                     <span className={styles.findingCodePill} key={`${group.matchedText}-${internalCode}`}>
@@ -3419,18 +2552,11 @@ function ArtifactButton({
     );
   }
 
+  if (!onDownload) {
+    return <a className={styles.downloadButton} href={href}>{label}</a>;
+  }
   return (
-    <button
-      className={styles.downloadButton}
-      onClick={() => {
-        if (onDownload) {
-          onDownload(href, label);
-          return;
-        }
-        window.location.href = href;
-      }}
-      type="button"
-    >
+    <button className={styles.downloadButton} type="button" onClick={() => onDownload(href, label)}>
       {label}
     </button>
   );
@@ -3568,6 +2694,90 @@ function ListBlock({
       )}
     </div>
   );
+}
+
+function DiagnosticPanel({ detail }: { detail: JobDetail }) {
+  const diagnostics = detail.diagnostics ?? [];
+
+  if (diagnostics.length === 0) {
+    return (
+      <div className={styles.columns}>
+        <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+        <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.diagnosticPanel}>
+      <div className={styles.diagnosticList}>
+        {diagnostics.map((diagnostic, index) => (
+          <article
+            className={`${styles.diagnosticCard} ${diagnosticSeverityClass(diagnostic.severity)}`}
+            key={`${diagnostic.kind}-${diagnostic.title}-${index}`}
+          >
+            <div className={styles.diagnosticHeader}>
+              <span className={styles.diagnosticSeverity}>
+                {diagnosticSeverityLabel(diagnostic.severity)}
+              </span>
+              <h3>{diagnostic.title}</h3>
+            </div>
+            {diagnostic.summary ? <p className={styles.diagnosticSummary}>{diagnostic.summary}</p> : null}
+            {diagnostic.suggestion ? (
+              <p className={styles.diagnosticSuggestion}>{diagnostic.suggestion}</p>
+            ) : null}
+            {diagnostic.details.length > 0 ? (
+              <div className={styles.diagnosticDetails}>
+                {diagnostic.details.map((detailItem) => (
+                  <div className={styles.diagnosticDetailGroup} key={detailItem.label}>
+                    <strong>{detailItem.label}</strong>
+                    <div className={styles.diagnosticChips}>
+                      {detailItem.items.map((item) => (
+                        <span className={styles.diagnosticChip} key={item}>
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <details className={styles.rawDiagnosticDetails}>
+        <summary>展开原始诊断信息</summary>
+        <div className={styles.columns}>
+          <ListBlock title="Flags" items={detail.flags} emptyText="暂无 flags" />
+          <ListBlock title="Errors" items={detail.errors} emptyText="暂无 errors" />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function hasStructuredDiagnostics(detail: JobDetail) {
+  return Boolean(detail.diagnostics && detail.diagnostics.length > 0);
+}
+
+function diagnosticSeverityLabel(severity: string) {
+  if (severity === "error") {
+    return "错误";
+  }
+  if (severity === "info") {
+    return "提示";
+  }
+  return "警告";
+}
+
+function diagnosticSeverityClass(severity: string) {
+  if (severity === "error") {
+    return styles.diagnosticError;
+  }
+  if (severity === "info") {
+    return styles.diagnosticInfo;
+  }
+  return styles.diagnosticWarning;
 }
 
 function TaskKindBadge({ kind, jobMode }: { kind: TaskKind; jobMode?: string | null }) {
@@ -3777,6 +2987,33 @@ function formatTimestamp(value: string) {
     second: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatWorkloadQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return String(Number(value.toFixed(4)));
+}
+
+async function copyPlainText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textArea);
+  if (!copied) {
+    throw new Error("copy failed");
+  }
 }
 
 function formatPageTotal(pageTotal: number) {

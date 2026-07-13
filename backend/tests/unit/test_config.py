@@ -4,6 +4,7 @@
 每个模块完成后必须运行：pytest tests/unit/test_config.py -v
 """
 
+import zlib
 from pathlib import Path
 
 from src.config import BusinessSpec, RuntimeConfig, SpecLoader, get_config, load_spec, reload_config
@@ -27,6 +28,37 @@ class TestSpecLoader:
             assert a1.W == 841.0
             assert a1.H == 594.0
             assert a1.profile == "BASE10"
+
+    def test_a2_plus_half_decimal_plot_media_is_configured(self, spec: BusinessSpec):
+        """A2+0.5 图幅应在打印PDF2.pc3关联PMP中落盘为921x450媒体。"""
+        variants = spec.get_paper_variants()
+        assert variants["CNPE_A2+0.5"].W == 891.0
+        assert variants["CNPE_A2+0.5"].H == 420.0
+        assert variants["CNPE_A2+0.5"].profile == "BASE10"
+
+        raw_variant = spec.titleblock_extract["paper_variants"]["CNPE_A2+0.5"]
+        assert raw_variant["打印PDF2.pc3文件中对应纸张"] == "UserDefinedMetric (921.00 x 450.00毫米)"
+
+    def test_managed_pdf2_pmp_contains_a2_plus_half_media(self):
+        """托管打印PDF2资源必须包含A2+0.5(921x450)自定义媒体。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        pmp_path = repo_root / "documents" / "Resources" / "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
+        data = pmp_path.read_bytes()
+        compressed_offset = data.find(b"\x78\xda")
+        assert compressed_offset >= 0
+        payload = zlib.decompress(data[compressed_offset:]).decode("latin1")
+
+        assert "name=\"UserDefinedMetric (921.00 x 450.00" in payload
+        localized_label = "localized_name=\"A2+0.5(921.00 x 450.00 毫米)".encode(
+            "gbk"
+        ).decode("latin1")
+        assert localized_label in payload
+        assert "media_bounds_urx=921.0" in payload
+        assert "media_bounds_ury=450.0" in payload
+        assert "printable_bounds_llx=10.0" in payload
+        assert "printable_bounds_lly=10.0" in payload
+        assert "printable_bounds_urx=911.0" in payload
+        assert "printable_bounds_ury=440.0" in payload
 
     def test_get_roi_profile(self, spec: BusinessSpec):
         """测试获取ROI配置"""
@@ -123,6 +155,7 @@ class TestRuntimeConfig:
             "review_white": "打白图.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
+        assert runtime_config.module5_export.plot.paper_variant_pc3_overrides == {}
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001
         assert runtime_config.module5_export.plot.plot_window_top_right_expand_ratio == 0.0002
@@ -169,6 +202,13 @@ class TestRuntimeConfig:
         assert runtime_config.deliverable_consistency_fix.source_scope == "staged_source_before_split"
         assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
         assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
+
+    def test_a2_half_uses_default_pdf2_pc3_from_runtime_yaml(self):
+        """A2+0.5 媒体已进入打印PDF2后，运行期不应再切换到打印PDF3。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+
+        assert config.module5_export.plot.paper_variant_pc3_overrides == {}
 
     def test_unit_consistency_business_values_are_not_python_defaults(
         self,
@@ -243,6 +283,124 @@ runtime_options:
         restored = get_config()
 
         assert restored.concurrency.max_workers == 2
+
+    def test_runtime_spec_path_resolves_from_backend_runtime_cwd(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """部署环境手动启动 uvicorn 时，应从 backend-runtime 上一级读取 documents。"""
+        from src.config.runtime_config import _resolve_runtime_spec_path
+
+        deploy_root = tmp_path / "FanBanServer"
+        backend_runtime = deploy_root / "backend-runtime"
+        backend_runtime.mkdir(parents=True)
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text("runtime_options: {}\n", encoding="utf-8")
+
+        monkeypatch.chdir(backend_runtime)
+        monkeypatch.delenv("FANBAN_RUNTIME_SPEC_PATH", raising=False)
+
+        assert _resolve_runtime_spec_path().resolve() == runtime_spec.resolve()
+
+    def test_runtime_config_prefers_backend_runtime_cad_paths_in_deploy_layout(
+        self,
+        tmp_path: Path,
+    ):
+        """部署包中 CAD 脚本和 Bridge DLL 应优先解析到 backend-runtime。"""
+        deploy_root = tmp_path / "FanBanServer"
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        script_dir = deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "scripts"
+        script_dir.mkdir(parents=True)
+        bridge_dll = (
+            deploy_root
+            / "backend-runtime"
+            / "backend"
+            / "src"
+            / "cad"
+            / "dotnet"
+            / "Module5CadBridge"
+            / "bin"
+            / "Release"
+            / "net48"
+            / "Module5CadBridge.dll"
+        )
+        bridge_dll.parent.mkdir(parents=True)
+        bridge_dll.write_bytes(b"fake")
+        runtime_spec.write_text(
+            r"""
+runtime_options:
+  module5_export:
+    cad_runner:
+      script_dir:
+        type: str
+        default: '..\backend\src\cad\scripts'
+    dotnet_bridge:
+      dll_path:
+        type: str
+        default: '..\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll'
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert Path(config.module5_export.cad_runner.script_dir) == script_dir.resolve()
+        assert Path(config.module5_export.dotnet_bridge.dll_path) == bridge_dll.resolve()
+
+    def test_runtime_config_corrects_stale_absolute_backend_src_cad_env(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """旧 runtime.env 写死 backend/src/cad 时，应改用部署包 backend-runtime 资源。"""
+        deploy_root = tmp_path / "FanBanServer"
+        runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        script_dir = deploy_root / "backend-runtime" / "backend" / "src" / "cad" / "scripts"
+        script_dir.mkdir(parents=True)
+        bridge_dll = (
+            deploy_root
+            / "backend-runtime"
+            / "backend"
+            / "src"
+            / "cad"
+            / "dotnet"
+            / "Module5CadBridge"
+            / "bin"
+            / "Release"
+            / "net48"
+            / "Module5CadBridge.dll"
+        )
+        bridge_dll.parent.mkdir(parents=True)
+        bridge_dll.write_bytes(b"fake")
+        runtime_spec.write_text("runtime_options: {}\n", encoding="utf-8")
+        monkeypatch.setenv(
+            "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR",
+            str(deploy_root / "backend" / "src" / "cad" / "scripts"),
+        )
+        monkeypatch.setenv(
+            "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH",
+            str(
+                deploy_root
+                / "backend"
+                / "src"
+                / "cad"
+                / "dotnet"
+                / "Module5CadBridge"
+                / "bin"
+                / "Release"
+                / "net48"
+                / "Module5CadBridge.dll",
+            ),
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert Path(config.module5_export.cad_runner.script_dir) == script_dir.resolve()
+        assert Path(config.module5_export.dotnet_bridge.dll_path) == bridge_dll.resolve()
 
     def test_runtime_config_resolves_audit_lexicon_path_from_repo_root_sibling(
         self,
@@ -380,6 +538,64 @@ runtime_options:
             "hztxt.shx": "tssdchn.shx",
         }
 
+    def test_runtime_config_reads_empty_style_replacement(
+        self,
+        tmp_path: Path,
+    ):
+        """空字体实体修复策略应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    empty_style_replacement:
+      type: object
+      default: { "font": "tssdeng.shx", "bigfont": "tssdchn.shx" }
+    empty_style_target_fields:
+      type: "list[str]"
+      default: ["external_code", "internal_code", "page_info"]
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.empty_style_replacement == {
+            "font": "tssdeng.shx",
+            "bigfont": "tssdchn.shx",
+        }
+        assert config.font_preflight.empty_style_target_fields == [
+            "external_code",
+            "internal_code",
+            "page_info",
+        ]
+
+    def test_runtime_config_reads_font_compatibility_exempt_style_names(
+        self,
+        tmp_path: Path,
+    ):
+        """字体兼容豁免样式名应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    font_compatibility_exempt_style_names:
+      type: "list[str]"
+      default: ["宋体", "ST"]
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.font_compatibility_exempt_style_names == [
+            "宋体",
+            "ST",
+        ]
+
     def test_runtime_factory_index_maps_include_1915_target_template(self):
         """1915 作为翻版目标项目时应有无需岛号的厂房索引图模板。"""
         repo_root = Path(__file__).resolve().parents[3]
@@ -398,12 +614,27 @@ runtime_options:
         unit_consistency = config.audit_check.unit_consistency
 
         assert unit_consistency.enabled is True
-        assert unit_consistency.project_units["2016"] == ["1", "2"]
-        assert unit_consistency.project_units["2026"] == ["1", "2"]
+        assert unit_consistency.project_units["2016"] == ["0", "1", "2", "7", "9"]
+        assert unit_consistency.project_units["2026"] == ["0", "1", "2", "7", "9"]
+        assert unit_consistency.project_units["1907"] == ["0", "5", "6", "7", "9"]
         assert unit_consistency.allow_unlisted_unit_no is True
-        assert unit_consistency.unit_no_pattern == "^[1-9]$"
+        assert unit_consistency.universal_units == ["0", "7", "9"]
+        assert unit_consistency.unit_no_pattern == "^[0-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
+
+    def test_runtime_standard_review_reads_values_from_yaml(self):
+        """规范审查的开关、规范库路径和 y 容差应由运行期 YAML 提供。"""
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+        standard_review = config.audit_check.standard_review
+
+        assert standard_review.enabled is True
+        assert Path(standard_review.library_path) == repo_root / "documents_bin" / "规范库.xlsx"
+        assert standard_review.sheet_name == "DatStdItem"
+        assert standard_review.same_line_y_tolerance == 5.0
+        assert standard_review.same_text_pairing_enabled is True
+        assert standard_review.format_variant_compatibility_enabled is True
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""

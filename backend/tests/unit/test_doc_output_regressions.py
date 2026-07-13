@@ -114,7 +114,7 @@ def _build_cover_context() -> DocContext:
     return DocContext(params=params, derived=derived, frames=[])
 
 
-def test_catalog_detail_rows_center_title_and_use_uniform_body_height(
+def test_catalog_detail_rows_center_title_and_apply_bucketed_body_height(
     temp_dir: Path,
 ) -> None:
     gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyCatalogPDFExporter()))
@@ -137,7 +137,7 @@ def test_catalog_detail_rows_center_title_and_use_uniform_body_height(
     assert ws["E10"].alignment.horizontal == "center"
     assert ws["E11"].alignment.horizontal == "center"
     assert ws.row_dimensions[9].height == 36
-    assert ws.row_dimensions[10].height == 36
+    assert ws.row_dimensions[10].height == 46
     assert ws.row_dimensions[11].height == 36
 
 
@@ -164,8 +164,31 @@ def test_catalog_detail_rows_raise_height_for_three_and_four_line_titles(
     ws = load_workbook(output_xlsx).active
     assert ws is not None
 
-    assert ws.row_dimensions[11].height == pytest.approx(50, abs=0.2)
-    assert ws.row_dimensions[12].height == pytest.approx(60, abs=0.2)
+    assert ws.row_dimensions[11].height == pytest.approx(64, abs=0.2)
+    assert ws.row_dimensions[12].height == pytest.approx(82, abs=0.2)
+
+
+def test_catalog_detail_row_height_estimates_wrapped_long_titles(
+    temp_dir: Path,
+) -> None:
+    gen = CatalogGenerator(pdf_exporter=cast(IPDFExporter, DummyCatalogPDFExporter()))
+    ctx = _build_catalog_context()
+    ctx.frames[0].titleblock.title_cn = (
+        "核辅助厂房 1NH 8.450m~11.450m 标高板、墙模板图及结构设计说明"
+    )
+    output_xlsx = temp_dir / "catalog-long-title.xlsx"
+
+    gen._write_catalog(
+        template_path=gen._get_template_path(ctx),
+        output_path=output_xlsx,
+        bindings=gen.spec.get_catalog_bindings(),
+        ctx=ctx,
+    )
+
+    ws = load_workbook(output_xlsx).active
+    assert ws is not None
+
+    assert ws.row_dimensions[12].height >= 46
 
 
 def test_generate_catalog_uses_external_code_revision_status_filename(
@@ -234,5 +257,36 @@ def test_generate_cover_uses_external_code_revision_status_filename(
     expected_stem = "JD1NHT11F01B25C42SDACFC (1234567-JG001-FM)"
     assert output_docx == temp_dir / f"{expected_stem}.docx"
     assert output_pdf == temp_dir / f"{expected_stem}.pdf"
+    assert recorded["docx"] == output_docx
+    assert recorded["pdf"] == output_pdf
+
+
+def test_generate_cover_uses_configured_album_cover_fallback_filename(
+    temp_dir: Path,
+    monkeypatch,
+) -> None:
+    gen = CoverGenerator()
+    ctx = _build_cover_context()
+    ctx.derived.cover_external_code = None
+    ctx.derived.cover_internal_code = None
+    recorded: dict[str, Path] = {}
+
+    def fake_write_cover(self, template_path, output_path, bindings, data, ctx):  # noqa: ANN001
+        output_path.write_bytes(b"docx")
+        recorded["docx"] = output_path
+
+    monkeypatch.setattr(CoverGenerator, "_write_cover", fake_write_cover)
+
+    class FakePDFExporter:
+        def export_docx_to_pdf(self, docx_path: Path, pdf_path: Path) -> None:
+            pdf_path.write_bytes(b"pdf")
+            recorded["pdf"] = pdf_path
+
+    gen.pdf_exporter = cast(IPDFExporter, FakePDFExporter())
+
+    output_docx, output_pdf = gen.generate(ctx, temp_dir)
+
+    assert output_docx == temp_dir / "\u56fe\u518c\u5c01\u9762.docx"
+    assert output_pdf == temp_dir / "\u56fe\u518c\u5c01\u9762.pdf"
     assert recorded["docx"] == output_docx
     assert recorded["pdf"] == output_pdf

@@ -17,18 +17,18 @@ const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
 const mockListJobs = vi.fn();
+const mockGetJobsActivity = vi.fn();
+const mockSubscribeJobsActivity = vi.fn();
 const mockGetJobDetail = vi.fn();
-const mockListTaskGroups = vi.fn();
-const mockGetTaskGroupDetail = vi.fn();
-const mockSubmitTaskGroup = vi.fn();
+const mockGetMe = vi.fn();
+const mockLogin = vi.fn();
+const mockLogout = vi.fn();
 const mockReadArtifact = vi.fn();
-const mockDownloadArtifact = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
 const mockPdfDocument = vi.fn();
 const mockPdfPage = vi.fn();
-let exposeTaskGroupApis = false;
 
 vi.mock("react-pdf", () => ({
   pdfjs: {
@@ -60,6 +60,10 @@ vi.mock("react-pdf", () => ({
 
 vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
+    login: mockLogin,
+    logout: mockLogout,
+    getMe: mockGetMe,
+    readArtifact: mockReadArtifact,
     ping: mockPing,
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
@@ -68,19 +72,9 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
     listJobs: mockListJobs,
+    getJobsActivity: mockGetJobsActivity,
+    subscribeJobsActivity: mockSubscribeJobsActivity,
     getJobDetail: mockGetJobDetail,
-    __readArtifact: mockReadArtifact,
-    readArtifact(this: { __readArtifact: typeof mockReadArtifact }, url: string) {
-      return this.__readArtifact(url);
-    },
-    downloadArtifact: mockDownloadArtifact,
-    ...(exposeTaskGroupApis
-      ? {
-          listTaskGroups: mockListTaskGroups,
-          getTaskGroupDetail: mockGetTaskGroupDetail,
-          submitTaskGroup: mockSubmitTaskGroup,
-        }
-      : {}),
   }),
 }));
 
@@ -95,17 +89,30 @@ beforeEach(() => {
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
   mockListJobs.mockReset();
+  mockGetJobsActivity.mockReset();
+  mockSubscribeJobsActivity.mockReset();
   mockGetJobDetail.mockReset();
-  mockListTaskGroups.mockReset();
-  mockGetTaskGroupDetail.mockReset();
-  mockSubmitTaskGroup.mockReset();
+  mockGetMe.mockReset();
+  mockLogin.mockReset();
+  mockLogout.mockReset();
   mockReadArtifact.mockReset();
-  mockDownloadArtifact.mockReset();
-  exposeTaskGroupApis = false;
+  window.localStorage.setItem("auth_token", "test-access-token");
 
   mockPing.mockResolvedValue({
     ok: true,
     serverTime: "2026-03-08T10:20:29+08:00",
+  });
+  mockGetMe.mockResolvedValue({
+    accountId: "test-user",
+    displayName: "测试用户",
+    role: "管理员",
+    officeCode: "25C0",
+    officeName: "建筑结构所",
+    valid: true,
+    pendingTodoCount: 0,
+  });
+  mockReadArtifact.mockResolvedValue({
+    arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
   });
   mockGetHealth.mockResolvedValue({
     status: "ok",
@@ -144,76 +151,23 @@ beforeEach(() => {
       },
     ],
     auditReplaceProjectOptions: ["2026", "1818"],
-    management: {
-      account: {
-        validRoles: ["设计人员", "室主任", "所领导", "管理员"],
-        adminRoles: ["管理员"],
-        adminCreatedDefaultPassword: "password",
-      },
-      workflow: {
-        terminalStatus: "three_review_approved",
-        statusLabels: {
-          in_review: "审批中",
-          three_review_approved: "三审通过",
-        },
-        nodeLabels: {
-          one_review: "一审",
-          two_review: "二审",
-          three_review: "三审",
-        },
-        emptyCurrentNodeLabel: "未进入审批",
-        factor: {
-          default: 1,
-          min: 0.8,
-          max: 1.1,
-          precision: 2,
-        },
-      },
-      workload: {
-        settlementTrigger: "archive_success",
-        scopeRoles: {
-          office: ["室主任", "所领导", "管理员"],
-          institute: ["所领导", "管理员"],
-          admin: ["管理员"],
-        },
-        scopeLabels: {
-          me: "个人",
-          office: "科室",
-          institute: "全所",
-          admin: "管理员",
-        },
-        statusOptions: [
-          { label: "全部状态", value: "" },
-          { label: "已结算", value: "settled" },
-        ],
-      },
-      archive: {
-        statusLabels: {
-          pending: "待归档",
-          succeeded: "已归档",
-          failed: "归档失败",
-        },
-      },
-    },
   });
 
   mockListJobs.mockResolvedValue({
     total: 0,
     items: [],
   });
-  mockListTaskGroups.mockResolvedValue({
+  mockGetJobsActivity.mockResolvedValue({
     total: 0,
-    items: [],
+    active: 0,
+    lastChangedAt: null,
   });
+  mockSubscribeJobsActivity.mockReturnValue(() => {});
   mockPreflightFonts.mockResolvedValue({
     files: [],
     replacementOptions: [],
     requiresConfirmation: false,
   });
-  mockReadArtifact.mockResolvedValue({
-    arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
-  } as Blob);
-  mockDownloadArtifact.mockResolvedValue(undefined);
 
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
@@ -268,50 +222,6 @@ function makeSingleJob(index: number, sourceFilename: string) {
     },
     retryAvailable: false,
     sharedRunId: null,
-  };
-}
-
-function makeTaskGroup(index: number, sourceFilename: string, status = "succeeded") {
-  const displayName = sourceFilename.replace(/\.[^.\\/]+$/, "");
-  return {
-    groupId: `group-${index}`,
-    displayName,
-    albumInternalCode: displayName,
-    batchId: `batch-${index}`,
-    projectNo: "2026",
-    status,
-    createdAt: `2026-03-16T11:${String(index).padStart(2, "0")}:30+08:00`,
-    sourceFilenames: [sourceFilename],
-    ownerSnapshot: {
-      creatorAccount: "wangdd",
-      creatorName: "王丹丹",
-      creatorRole: "设计人员",
-      creatorOffice: "河北分公司-建筑结构所",
-      createdByScope: "self",
-      submittedAt: null,
-    },
-    creatorName: "王丹丹",
-    creatorAccount: "wangdd",
-    creatorOffice: "河北分公司-建筑结构所",
-    workflowStatus: "draft",
-    currentNodeKey: null,
-    archiveStatus: "pending",
-    workload: {
-      initialWorkloadA1: 0,
-      finalWorkloadA1: 0,
-      oneReviewFactor: 0,
-      twoReviewFactor: 0,
-      threeReviewFactor: 0,
-      nodeFactors: {},
-      settlementStatus: "pending",
-      settledAt: null,
-      contributorEntries: [],
-    },
-    effectiveWorkload: 0,
-    canViewDetail: true,
-    canSubmit: true,
-    canApprove: false,
-    isRelatedToCurrentUser: true,
   };
 }
 
@@ -393,12 +303,13 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
   });
 
-  it("keeps entries enabled when a health probe fails but ping still succeeds", async () => {
+  it("does not escalate a health probe failure while ping still succeeds", async () => {
     mockGetHealth.mockRejectedValue(new Error("health probe reset"));
 
     render(<App />);
 
-    expect(await screen.findByText("后台业务健康异常")).toBeInTheDocument();
+    expect(await screen.findByText("后台健康检查重试中")).toBeInTheDocument();
+    expect(screen.queryByText("后台业务健康异常")).not.toBeInTheDocument();
     expect(
       screen.queryByText("后台服务连接中断，请检查后端服务或代理配置。"),
     ).not.toBeInTheDocument();
@@ -480,7 +391,7 @@ describe("homepage shell", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "教程" }));
+    await user.click(await screen.findByRole("button", { name: "教程" }));
 
     expect(screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下一步" })).toBeInTheDocument();
@@ -523,7 +434,7 @@ describe("homepage shell", () => {
     expect(screen.queryByRole("dialog", { name: "教程任务详情" })).not.toBeInTheDocument();
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
     expect(screen.getByText("快捷下载")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
     expect(screen.getByTestId("tutorial-spotlight")).toHaveAttribute("data-target", "detail");
     expect(screen.getByRole("button", { name: "下一步" })).toBeDisabled();
 
@@ -541,7 +452,9 @@ describe("homepage shell", () => {
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "退出" }));
+    const tutorialPanel = screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。").closest("aside");
+    expect(tutorialPanel).not.toBeNull();
+    await user.click(within(tutorialPanel!).getByRole("button", { name: "退出" }));
     expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
     expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
@@ -554,43 +467,52 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
-  it("uses task-group records when the management API is available", async () => {
-    exposeTaskGroupApis = true;
-    mockListTaskGroups.mockResolvedValue({
-      total: 2,
-      items: [
-        makeTaskGroup(1, "task-group-draft.dwg", "queued"),
-        makeTaskGroup(2, "task-group-ready.dwg", "succeeded"),
-      ],
-    });
-
-    render(<App />);
-
-    expect(await screen.findByText("task-group-ready")).toBeInTheDocument();
-    expect(screen.getByText("task-group-draft")).toBeInTheDocument();
-    expect(screen.getAllByText("任务包").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "查看任务包" })[0]).toHaveAttribute(
-      "href",
-      "/task-groups/group-2",
-    );
-    expect(mockListTaskGroups).toHaveBeenCalled();
-  });
-
-  it("keeps standalone upload jobs visible when the task-group API is available", async () => {
-    exposeTaskGroupApis = true;
-    mockListTaskGroups.mockResolvedValue({
-      total: 0,
-      items: [],
+  it("opens a bounded jobs activity SSE stream only while jobs are active", async () => {
+    let onActivity: ((activity: { total: number; active: number; lastChangedAt: string | null }) => void) | null =
+      null;
+    const unsubscribe = vi.fn();
+    mockSubscribeJobsActivity.mockImplementation((activityHandler) => {
+      onActivity = activityHandler;
+      return unsubscribe;
     });
     mockListJobs.mockResolvedValue({
       total: 1,
-      items: [makeSingleJob(1, "new-upload.dwg")],
+      items: [
+        {
+          ...makeSingleJob(1, "sse-active.dwg"),
+          status: "running",
+          stage: "EXPORT_PDF_AND_DWG",
+          percent: 60,
+          finishedAt: null,
+        },
+      ],
+    });
+    mockGetJobsActivity.mockResolvedValue({
+      total: 1,
+      active: 1,
+      lastChangedAt: "2026-07-10T08:00:00+08:00",
     });
 
     render(<App />);
 
-    expect(await screen.findByText("new-upload.dwg")).toBeInTheDocument();
-    expect(screen.queryByText("当前没有任务记录。")).not.toBeInTheDocument();
+    expect(await screen.findByText("sse-active.dwg")).toBeInTheDocument();
+    expect(mockGetJobsActivity).toHaveBeenCalled();
+    await waitFor(() => expect(mockSubscribeJobsActivity).toHaveBeenCalledTimes(1));
+
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [makeSingleJob(1, "sse-active.dwg")],
+    });
+    act(() => {
+      onActivity?.({
+        total: 1,
+        active: 0,
+        lastChangedAt: "2026-07-10T08:00:03+08:00",
+      });
+    });
+
+    await waitFor(() => expect(mockListJobs).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledTimes(1));
   });
 
   it("filters recent jobs by status and refreshes totals from the backend", async () => {
@@ -631,7 +553,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("success-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledWith("queued", 0, 100);
+    expect(mockListJobs).toHaveBeenCalledWith("queued", 0, 100, "created_at");
 
     await user.click(screen.getByRole("button", { name: "成功" }));
     expect(screen.getByRole("button", { name: "成功" })).toHaveAttribute("aria-pressed", "true");
@@ -639,7 +561,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByText("queued-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("running-job.dwg")).not.toBeInTheDocument();
     expect(screen.queryByText("failed-job.dwg")).not.toBeInTheDocument();
-    expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100);
+    expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100, "created_at");
   });
 
   it("shows eight cards by default and opens the rest in a modal", async () => {
@@ -669,7 +591,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByRole("dialog", { name: "全部任务浏览器" })).not.toBeInTheDocument();
   });
 
-  it("uses total instead of fetched item count for the expand button", async () => {
+  it("uses loaded card count instead of backend total for the expand button", async () => {
     const jobs = Array.from({ length: 100 }, (_, index) =>
       makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
     );
@@ -681,7 +603,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     expect(await screen.findAllByTestId("recent-job-card")).toHaveLength(8);
-    expect(screen.getByRole("button", { name: "展开其余 361 个" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开其余 92 个" })).toBeInTheDocument();
   });
 
   it("loads more jobs inside the modal so records after the first 100 are reachable", async () => {
@@ -697,7 +619,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     await screen.findAllByTestId("recent-job-card");
-    await user.click(screen.getByRole("button", { name: "展开其余 112 个" }));
+    await user.click(screen.getByRole("button", { name: "展开其余 92 个" }));
 
     const modal = await screen.findByRole("dialog");
     expect(within(modal).queryByText("sample-120.dwg")).not.toBeInTheDocument();
@@ -856,7 +778,7 @@ describe("job cards", () => {
   });
 
   it("returns from a task group detail page with Escape", async () => {
-    window.history.pushState({}, "", "/jobs/group-esc");
+    window.history.pushState({}, "", "/task-groups/group-esc");
     mockGetJobDetail.mockResolvedValue({
       jobId: "group-esc",
       batchId: "batch-esc",
@@ -912,6 +834,75 @@ describe("job cards", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("renders categorized diagnostics on task group detail pages", async () => {
+    window.history.pushState({}, "", "/jobs/group-diagnostics");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "group-diagnostics",
+      batchId: "batch-diagnostics",
+      groupId: "group-diagnostics",
+      isGroup: true,
+      sourceFilename: "18185NP-JGS44仅拆图.dwg",
+      sourceFilenames: ["18185NP-JGS44仅拆图.dwg"],
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      projectNo: "1818",
+      status: "failed",
+      stage: "GROUP_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-06-17T17:46:26+08:00",
+      finishedAt: "2026-06-17T17:47:34+08:00",
+      startedAt: "2026-06-17T17:46:26+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: ["CAD结果错误:检测到重复编码"],
+      errors: [],
+      diagnostics: [
+        {
+          kind: "duplicate_code",
+          severity: "error",
+          title: "检测到重复编码",
+          summary: "发现 0 个重复内部编码、2 个重复外部编码。",
+          suggestion: "请检查图签中的内部编码/外部编码。",
+          details: [
+            {
+              label: "外部编码 PC5NPM12004B25C42SD",
+              items: ["18185NP-JGS44-024", "18185NP-JGS44-026"],
+            },
+            {
+              label: "外部编码 PC5NPM12004B25C42MD",
+              items: ["18185NP-JGS44-025", "18185NP-JGS44-027"],
+            },
+          ],
+          rawItems: ["CAD结果错误:检测到重复编码"],
+        },
+      ],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      children: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "问题原因" })).toBeInTheDocument();
+    expect(screen.getByText("检测到重复编码")).toBeInTheDocument();
+    expect(screen.getByText("外部编码 PC5NPM12004B25C42SD")).toBeInTheDocument();
+    expect(screen.getByText("18185NP-JGS44-024")).toBeInTheDocument();
+    expect(screen.getByText("18185NP-JGS44-026")).toBeInTheDocument();
+  });
+
   it("shows a completed single deliverable job with a detail link", async () => {
     mockListJobs.mockResolvedValue({
       total: 1,
@@ -951,6 +942,11 @@ describe("job cards", () => {
 describe("job detail pages", () => {
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
     window.history.pushState({}, "", "/jobs/group-downloads");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
     const groupDetail = {
       jobId: "group-downloads",
       batchId: "batch-downloads",
@@ -988,6 +984,16 @@ describe("job detail pages", () => {
       },
       retryAvailable: false,
       sharedRunId: null,
+      workload: {
+        initialWorkloadA1: 3.25,
+        finalWorkloadA1: 3.25,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 3.25,
       flags: [],
       errors: [],
       topWrongTexts: [],
@@ -1045,19 +1051,22 @@ describe("job detail pages", () => {
       return Promise.resolve(groupDetail);
     });
 
-    const user = userEvent.setup();
     render(<App />);
 
     expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
-    const mergedPdfDownload = screen.getByRole("button", { name: "下载合并版PDF" });
-    await user.click(mergedPdfDownload);
-    expect(mockDownloadArtifact).toHaveBeenCalledWith(
+    const mergedPdfDownload = screen.getByRole("link", { name: "下载合并版PDF" });
+    expect(mergedPdfDownload).toHaveAttribute(
+      "href",
       "/api/jobs/group-downloads/download/preview",
-      "下载合并版PDF",
     );
     expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载任务包" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("3.25")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("3.25");
+    expect(screen.getByRole("button", { name: "已复制" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "查看子任务 deliverable_main" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看子任务 audit_check" })).toBeInTheDocument();
 
@@ -1065,9 +1074,193 @@ describe("job detail pages", () => {
     expect(
       screen.queryByRole("button", { name: "预览子任务 PDF（纠错标注）" }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 package.zip" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 IED计划.xlsx" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载子任务 report.xlsx" })).not.toBeInTheDocument();
+  });
+
+  it("shows drawing quantity for deliverable-only groups from child workload", async () => {
+    window.history.pushState({}, "", "/jobs/group-deliverable-quantity");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+
+    const deliverableChild = {
+      ...makeSingleJob(11, "18185NF-JGS19-A.dwg"),
+      jobId: "deliverable-only-child",
+      batchId: "batch-deliverable-only",
+      groupId: "group-deliverable-quantity",
+      taskKind: "deliverable" as const,
+      taskRole: "deliverable_main",
+      workload: {
+        initialWorkloadA1: 6.5,
+        finalWorkloadA1: 6.5,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 6.5,
+    };
+
+    const groupDetail = {
+      ...makeSingleJob(10, "18185NF-JGS19-A.dwg"),
+      jobId: "group-deliverable-quantity",
+      batchId: "batch-deliverable-only",
+      groupId: "group-deliverable-quantity",
+      isGroup: true,
+      taskKind: null,
+      taskRole: null,
+      jobMode: null,
+      stage: "GROUP_COMPLETE",
+      runAuditCheck: false,
+      childJobIds: ["deliverable-only-child"],
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: true,
+        previewAvailable: false,
+        packageDownloadUrl: "/api/jobs/group-deliverable-quantity/download/package",
+        iedDownloadUrl: "/api/jobs/group-deliverable-quantity/download/ied",
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+      },
+      workload: null,
+      effectiveWorkload: 0,
+      children: [deliverableChild],
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+    };
+
+    mockGetJobDetail.mockImplementation((jobId: string) =>
+      Promise.resolve(jobId === "deliverable-only-child" ? deliverableChild : groupDetail),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 IED" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("6.5")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("6.5");
+  });
+
+  it("shows drawing quantity in single split-only job quick downloads", async () => {
+    window.history.pushState({}, "", "/jobs/split-only-quantity");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+    mockGetJobDetail.mockResolvedValue({
+      ...makeSingleJob(1, "18185NF-JGS19-A.dwg"),
+      jobId: "split-only-quantity",
+      batchId: "batch-split-only-quantity",
+      taskKind: "deliverable",
+      jobMode: "split_only",
+      taskRole: "仅拆图",
+      artifacts: {
+        packageAvailable: true,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        packageDownloadUrl: "/api/jobs/split-only-quantity/download/package",
+      },
+      workload: {
+        initialWorkloadA1: 6.5,
+        finalWorkloadA1: 6.5,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 6.5,
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      deliverableOutputs: {
+        dwgCount: 1,
+        pdfCount: 1,
+        documents: [],
+        drawings: [
+          {
+            name: "18185NF-JGS19-001",
+            internalCode: "18185NF-JGS19-001",
+            dwgName: "18185NF-JGS19-001.dwg",
+            pdfName: "18185NF-JGS19-001.pdf",
+            pageTotal: 1,
+          },
+        ],
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("6.5")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "复制张数" }));
+    expect(clipboardWrite).toHaveBeenCalledWith("6.5");
+  });
+
+  it("shows drawing quantity in single audit-check job quick downloads", async () => {
+    window.history.pushState({}, "", "/jobs/audit-check-quantity");
+    mockGetJobDetail.mockResolvedValue({
+      ...makeSingleJob(2, "18185NF-JGS19-A.dwg"),
+      jobId: "audit-check-quantity",
+      batchId: "batch-audit-check-quantity",
+      taskKind: "audit_check",
+      jobMode: "check",
+      taskRole: "audit_check",
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: true,
+        previewMode: "annotated",
+        previewDownloadUrl: "/api/jobs/audit-check-quantity/download/preview",
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/audit-check-quantity/download/report",
+        replacedDwgAvailable: false,
+      },
+      workload: {
+        initialWorkloadA1: 1,
+        finalWorkloadA1: 1,
+        oneReviewFactor: 1,
+        twoReviewFactor: 1,
+        threeReviewFactor: 1,
+        settlementStatus: "pending",
+        settledAt: null,
+      },
+      effectiveWorkload: 1,
+      startedAt: "2026-05-28T09:00:10+08:00",
+      currentFile: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      findingGroups: [],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "快捷下载" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.getByText("图纸量（A1等效）")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
   });
 
   it("shows a clean font summary when no missing fonts were detected for deliverable jobs", async () => {
@@ -1331,14 +1524,7 @@ describe("job detail pages", () => {
     await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
 
     expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
-    const downloadButton = screen.getByRole("button", { name: "下载预览 PDF" });
-    expect(mockReadArtifact).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview");
-    expect(mockFetch).not.toHaveBeenCalled();
-    await user.click(downloadButton);
-    expect(mockDownloadArtifact).toHaveBeenCalledWith(
-      "/api/jobs/audit-preview/download/preview",
-      "下载预览 PDF",
-    );
+    expect(screen.getByRole("button", { name: "下载预览 PDF" })).toBeEnabled();
     expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
     expect(mockPdfDocument).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1446,7 +1632,7 @@ describe("job detail pages", () => {
         },
       ],
     });
-    mockReadArtifact.mockRejectedValue(new Error("preview failed"));
+    mockReadArtifact.mockRejectedValue(new Error("preview request failed with status 500"));
 
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1461,6 +1647,74 @@ describe("job detail pages", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("shows standard review category, summary, and details in audit results", async () => {
+    window.history.pushState({}, "", "/jobs/audit-standard-review");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "audit-standard-review",
+      batchId: "batch-audit-standard-review",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "A01.dwg",
+      sourceFilenames: ["A01.dwg"],
+      taskKind: "audit_check",
+      taskRole: null,
+      jobMode: "check",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "EXPORT_REPORT",
+      percent: 100,
+      message: "",
+      createdAt: "2026-04-17T10:00:00+08:00",
+      finishedAt: "2026-04-17T10:03:00+08:00",
+      startedAt: "2026-04-17T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 1,
+      affectedDrawingsCount: 1,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        previewAvailable: false,
+        reportAvailable: true,
+        reportDownloadUrl: "/api/jobs/audit-standard-review/download/report",
+        replacedDwgAvailable: false,
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: ["GB 51058-2011"],
+      topInternalCodes: ["18185NF-JGS19-003"],
+      findingGroups: [
+        {
+          matchedText: "GB 51058-2011",
+          count: 1,
+          internalCodes: ["18185NF-JGS19-003"],
+          category: "规范审查",
+          contextKind: "standard_review_year",
+          issueType: "year_mismatch",
+          summary: "标准号年限不一致：GB 51058-2011 应为 GB 51058-2014",
+          details: [
+            "实际标准号：GB 51058-2011",
+            "期望标准号：GB 51058-2014",
+            "期望标准名称：核电厂抗震设计标准",
+          ],
+        },
+      ],
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { level: 3, name: "错误与图纸编号" })).toBeInTheDocument();
+    expect(screen.getByText("规范审查")).toBeInTheDocument();
+    expect(screen.getByText("标准号年限不一致：GB 51058-2011 应为 GB 51058-2014")).toBeInTheDocument();
+    expect(screen.getByText("实际标准号：GB 51058-2011")).toBeInTheDocument();
+    expect(screen.getByText("期望标准号：GB 51058-2014")).toBeInTheDocument();
+    expect(screen.getByText("期望标准名称：核电厂抗震设计标准")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "规范审查" })).not.toBeInTheDocument();
   });
 
   it("shows same-code multipage guidance and preserves X@Y filenames in deliverable results", async () => {
@@ -1602,7 +1856,8 @@ describe("job detail pages", () => {
     const resultHeading = await screen.findByRole("heading", { level: 2, name: "出图结果" });
 
     expect(quickDownloadHeading.compareDocumentPosition(resultHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("button", { name: "下载 package.zip" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 package.zip" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下载 IED计划.xlsx" })).not.toBeInTheDocument();
   });
 
@@ -1723,8 +1978,8 @@ describe("job detail pages", () => {
     expect(screen.getByText("3号机组/岛")).toBeInTheDocument();
     expect(screen.getByText("厂房索引图替换")).toBeInTheDocument();
     expect(screen.getByText("是")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载 report.xlsx" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "下载替换后 DWG" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载 report.xlsx" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });
 
   it("shows aggregate replaced dwg downloads for replace-plus-deliverable groups", async () => {
@@ -1860,6 +2115,6 @@ describe("job detail pages", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "下载替换后 DWG" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "下载替换后 DWG" })).toBeInTheDocument();
   });
 });

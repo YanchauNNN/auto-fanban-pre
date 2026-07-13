@@ -18,12 +18,20 @@ ODA 转换器 - DWG↔DXF 转换
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 from ..config import get_config
 from ..interfaces import ConversionError, IODAConverter
 from .dwg_version import oda_version_for_dwg_code
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name != "nt":
+        return {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": creationflags} if creationflags else {}
 
 
 class ODAConverter(IODAConverter):
@@ -72,6 +80,7 @@ class ODAConverter(IODAConverter):
                 timeout=self.timeout,
                 check=True,
                 cwd=str(self.work_dir) if self.work_dir else None,
+                **_hidden_subprocess_kwargs(),
             )
         except subprocess.TimeoutExpired as e:
             raise ConversionError(f"ODA转换超时: {dwg_path}") from e
@@ -125,6 +134,7 @@ class ODAConverter(IODAConverter):
                 timeout=self.timeout,
                 check=True,
                 cwd=str(self.work_dir) if self.work_dir else None,
+                **_hidden_subprocess_kwargs(),
             )
         except subprocess.TimeoutExpired as e:
             raise ConversionError(f"ODA转换超时: {dxf_path}") from e

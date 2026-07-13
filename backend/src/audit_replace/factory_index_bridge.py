@@ -271,7 +271,7 @@ class FactoryIndexMapReplacementService:
         text = str(value or "").strip()
         if not text:
             return None
-        match = re.search(r"[1-9]", text)
+        match = re.search(r"[0-9]", text)
         return match.group(0) if match else None
 
     @classmethod
@@ -286,8 +286,8 @@ class FactoryIndexMapReplacementService:
         for project_no in (target_project_no, source_project_no):
             if not project_no:
                 continue
-            match = re.search(rf"(?<!\d){re.escape(project_no)}([1-9])", text)
+            match = re.search(rf"(?<!\d){re.escape(project_no)}([0-9])", text)
             if match:
                 return match.group(1)
-        match = re.search(r"(?<!\d)\d{4}([1-9])", text)
+        match = re.search(r"(?<!\d)\d{4}([0-9])", text)
         return match.group(1) if match else None

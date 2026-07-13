@@ -169,8 +169,8 @@ doc_generation:
         required: false
         source: frontend
         default: ""
-        desc: "机组号；用于纠错机组/岛号一致性检查，可从DWG文件名自动推断；项目允许范围以运行期 audit_check.unit_consistency.project_units 为准"
-        options: ["1", "2", "3", "4", "5", "6"]
+        desc: "机组号；用于纠错机组/岛号一致性检查，可从DWG文件名自动推断；0/7/9 为通用机组，项目允许范围以运行期 audit_check.unit_consistency.project_units 为准"
+        options: ["0", "1", "2", "3", "4", "5", "6", "7", "9"]
       
       cover_variant:
         type: enum[cover_variant]
@@ -424,10 +424,11 @@ doc_generation:
       desc: "目录外部编码(第9-11位替换为T01)"
     
     # === 标题派生 ===
-    cover_title_cn:   { from: album_title_cn, transform: "append('封面')" }
+    cover_title_cn:   { from: album_title_cn, transform: "append('图册封面')" }
     catalog_title_cn: { from: album_title_cn, transform: "append('目录')" }
     cover_title_en:   { from: album_title_en, transform: "append(' Cover')", when: "project_no == '1818'" }
     catalog_title_en: { from: album_title_en, transform: "append(' Contents')", when: "project_no == '1818'" }
+    cover_file_stem_fallback: { value: "图册封面", desc: "封面 Word/PDF 在缺少内外部编码时使用的文件名主干" }
     
     # === 阶段派生 ===
     design_phase:
@@ -484,7 +485,7 @@ doc_generation:
         建筑: "JZ"
         总图运输: "ZY"
       discipline_to_en:
-        结构: "Structural"
+        结构: "Structure"
         建筑: "Architectural"
         总图运输: "Site & Transportation"
       status_to_design_phase:
@@ -535,7 +536,7 @@ doc_generation:
         subitem_name:        { cell: "I15", label: "D15" }
         design_phase:        { cell: "I17", label: "D17" }
         discipline:          { cell: "I19", label: "D19" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half" }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25:S25", merge: true }
         album_internal_code: { cell: "N3:S3", merge: true }
         cover_revision:      { cell: "N5:P5", merge: true, write_mode: "append_after_label", label: "版次：" }
@@ -555,8 +556,8 @@ doc_generation:
         design_phase_en:     { cell: "I17", label: "D17", desc: "设计阶段（英文），由映射表生成" }
         discipline:          { cell: "I18", label: "D18", desc: "专业（中文）" }
         discipline_en:       { cell: "I19:S19", label: "D19", desc: "专业（英文），由映射表生成" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half" }
-        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half" }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
+        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half", font_sizes: [10, 9, 8, 7, 6, 5], min_font_size: 5, max_chars_per_line: 38, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25", label: "D25/D26" }
         album_internal_code: { cell: "M3:S3", merge: true, label: "M2" }
         cover_revision:      { cell: "M5", write_mode: "append_after_label", label: "Rev.:" }
@@ -595,6 +596,22 @@ doc_generation:
       
       detail:
         start_row: 9
+        title_row_height:
+          desc: "目录明细E列图纸标题按实际换行数设置行高，避免标题文字超出上下边框"
+          title_column: "E"
+          wrap_width_ratio: 0.82
+          min_height_points: 36
+          by_line_count:
+            1: 36
+            2: 46
+            3: 64
+            4: 82
+          extra_line_step_points: 18
+          display_width:
+            cjk: 1.25
+            ascii_alnum: 0.58
+            ascii_symbol: 0.70
+            space: 0.35
         columns:
           A: { name: "序号",      source: "auto_increment" }
           B: { name: "图纸编号",  source: "internal_code", merge: "B:C" }
@@ -872,8 +889,8 @@ titleblock_extract:
     CNPE_A1H:      { W: 594.0,  H: 841.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A1,竖向打印 }
     CNPE_A2:       { W: 594.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2 }
     CNPE_A2H:      { W: 420.0,  H: 594.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2,竖向打印 }
-    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5, 打印PDF3.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
-    CNPE_A2+0.5:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: A2+0.5, 打印PDF3.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
+    CNPE_A2+1/2:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
+    CNPE_A2+0.5:   { W: 891.0,  H: 420.0,  profile: BASE10, 打印PDF2.pc3文件中对应纸张: UserDefinedMetric (921.00 x 450.00毫米) }
     # 小图幅（使用 SMALL5 ROI profile）
     CNPE_A3:       { W: 420.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A3 }
     CNPE_A4:       { W: 210.0,  H: 297.0,  profile: SMALL5, 打印PDF2.pc3文件中对应纸张: A4,竖向打印 }
@@ -945,6 +962,7 @@ titleblock_extract:
         版次:       [178.2, 190.0, 118.0, 141.8]
         状态:       [144.2, 160.2, 118.0, 141.8]
         日期:       [160.2, 178.2, 118.0, 141.8]
+        版本说明:   [10.2,  144.2, 118.0, 141.8]
 
     SMALL5:
       description: "小图幅紧凑版图签(A3/A4，dx_right≈5)"
@@ -963,6 +981,7 @@ titleblock_extract:
         版次:       [173.2, 185.0, 113.0, 136.8]
         状态:       [139.2, 155.2, 113.0, 136.8]
         日期:       [155.2, 173.2, 113.0, 136.8]
+        版本说明:   [5.2,   139.2, 113.0, 136.8]
 
   # --------------------------------------------------------------------------
   # 3.7 字段解析规则
@@ -1032,7 +1051,8 @@ titleblock_extract:
       roi: 版次
       parse:
         type: pick_top_by_y
-        note: "修订表列内取y值最大的文本"
+        candidate_pattern: "^[A-Z]$"
+        note: "修订表列内只取A/B/C等单字母版次候选，再按y值取最大"
 
     status:
       roi: 状态
@@ -1041,6 +1061,20 @@ titleblock_extract:
     date:
       roi: 日期
       parse: { type: pick_top_by_y }
+
+    revision_description:
+      roi: 版本说明
+      parse:
+        type: pick_bottom_by_y
+        note: "翻版目标默认为A版，仅保留y值最小的版本说明文字"
+
+  replace_postprocess:
+    date_pattern: "\\d{4}\\.\\d{2}"
+    issue_month_format: "%Y.%m"
+    target_revision: "A"
+    target_revision_description: "首次出版"
+    revision_description_keywords: ["出版", "升版"]
+    desc: "翻版后图签标准化：日期替换为当日年月；版次和版本说明仅保留y值最小的A版行"
 
   # --------------------------------------------------------------------------
   # 3.8 锚点检测配置
@@ -1308,8 +1342,7 @@ management_features:
     one_review:
       assignee_source: "ied_checked_by"
       require_checked_by: true
-    preserve_fields:
-      - "ied_discipline_leader"
+    preserve_discipline_leader: true
 
   workload:
     a1_equivalent:
@@ -1389,7 +1422,7 @@ submission_contracts:
             target_project_no:
               type: str
               required: true
-              desc: "目标项目号，决定替换输出列；必须与 source_project_no 不同"
+              desc: "目标项目号，决定替换输出列；允许与 source_project_no 相同，但 source_project_no/source_island_no 与 target_project_no/target_island_no 组合必须不同"
             run_deliverable:
               type: bool
               required: true
@@ -1398,12 +1431,12 @@ submission_contracts:
           optional_fields:
             source_island_no:
               type: str
-              required_when: "source_project_no in ['2016','1916']"
-              desc: "来源厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于区分同角度源索引图块"
+              required_when: "source_project_no in audit_check.unit_consistency.project_units 或 factory_index_maps.source_variant_rules"
+              desc: "来源机组/岛号；用于同项目不同机组翻版、机组文字替换和厂房索引图源块区分；0/7/9 为通用机组"
             target_island_no:
               type: str
-              required_when: "target_project_no in ['2016','1916']"
-              desc: "目标厂房索引图机组/岛号；2016 传 1/2，1916 传 3/4，用于选择目标模板"
+              required_when: "target_project_no in audit_check.unit_consistency.project_units 或 factory_index_maps.island_templates"
+              desc: "目标机组/岛号；用于同项目不同机组翻版、机组文字替换和目标厂房索引图模板选择；0/7/9 为通用机组，未配置专用索引图模板时只执行通用文本替换"
             deliverable_params:
               type: object
               required_when: "run_deliverable == true"

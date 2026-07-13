@@ -86,6 +86,7 @@ export type FormSchema = {
   auditReplaceProjectUnits?: Record<string, readonly string[]>;
   auditReplaceSourceUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
   auditReplaceTargetUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
+  auditReplaceUnitFactoryCodes?: readonly string[];
   auditReplaceFactoryIndexMaps?: {
     sourceVariantOptions: Record<string, readonly string[]>;
     targetVariantOptions: Record<string, readonly string[]>;
@@ -284,18 +285,6 @@ export type WorkloadContributorEntry = {
   settledAt: string | null;
 };
 
-export type WorkloadSummary = {
-  initialWorkloadA1: number;
-  finalWorkloadA1: number;
-  oneReviewFactor: number;
-  twoReviewFactor: number;
-  threeReviewFactor: number;
-  nodeFactors: Record<string, number>;
-  settlementStatus: string;
-  settledAt: string | null;
-  contributorEntries: WorkloadContributorEntry[];
-};
-
 export type WorkloadQueryParams = {
   startDate?: string;
   endDate?: string;
@@ -429,6 +418,11 @@ export type FindingGroup = {
   matchedText: string;
   count: number;
   internalCodes: string[];
+  category?: string;
+  contextKind?: string;
+  issueType?: string;
+  summary?: string;
+  details?: string[];
 };
 
 export type ReplaceSummary = {
@@ -486,6 +480,13 @@ export type FontPreflightFileResult = {
   replacementFonts: FontReplacementMap;
   fontCompatibilityMode?: boolean;
   fontCompatibilityReplacements?: FontReplacementMap;
+  fontCompatibilityRequired?: boolean;
+  emptyStyleEntityReplacedCount?: number;
+  emptyStyleStylePatchedCount?: number;
+  emptyStyleSharedSkippedCount?: number;
+  emptyStyleSharedStyles?: string[];
+  emptyStyleTargetRegionsCount?: number;
+  emptyStyleGlobalReplacedCount?: number;
   replacedStyleCount: number;
   verifyAfterReplace: FontVerifyAfterReplaceResult | null;
   fontReplacementIncomplete: boolean;
@@ -510,6 +511,18 @@ export type FontPreflightSummary = {
   fontAlt: string | null;
 };
 
+export type WorkloadSummary = {
+  initialWorkloadA1: number;
+  finalWorkloadA1: number;
+  oneReviewFactor: number;
+  twoReviewFactor: number;
+  threeReviewFactor: number;
+  nodeFactors: Record<string, number>;
+  settlementStatus: string;
+  settledAt: string | null;
+  contributorEntries: WorkloadContributorEntry[];
+};
+
 export type SubmissionParams = Record<string, unknown>;
 
 export type CreateAuditReplaceParams = {
@@ -517,6 +530,7 @@ export type CreateAuditReplaceParams = {
   sourceIslandNo?: string | null;
   targetProjectNo: string;
   targetIslandNo?: string | null;
+  unitFactoryCodes?: readonly string[];
   files: File[];
   runDeliverable: boolean;
   deliverableParams?: SubmissionParams;
@@ -567,7 +581,24 @@ export type JobSummary = {
   replacementFont?: string | null;
   replacementFonts?: FontReplacementMap;
   replacedStyleCount?: number;
+  workload?: WorkloadSummary | null;
+  effectiveWorkload?: number;
   children?: JobSummary[];
+};
+
+export type JobDiagnosticDetail = {
+  label: string;
+  items: string[];
+};
+
+export type JobDiagnostic = {
+  kind: string;
+  severity: "error" | "warning" | "info" | string;
+  title: string;
+  summary: string;
+  suggestion: string;
+  details: JobDiagnosticDetail[];
+  rawItems: string[];
 };
 
 export type JobDetail = JobSummary & {
@@ -575,6 +606,7 @@ export type JobDetail = JobSummary & {
   currentFile: string | null;
   flags: string[];
   errors: string[];
+  diagnostics?: JobDiagnostic[];
   topWrongTexts: string[];
   topInternalCodes: string[];
   sharedDir?: string | null;
@@ -587,6 +619,14 @@ export type JobDetail = JobSummary & {
 export type JobList = {
   total: number;
   items: JobSummary[];
+};
+
+export type JobListSort = "updated_at" | "created_at";
+
+export type JobsActivity = {
+  total: number;
+  active: number;
+  lastChangedAt: string | null;
 };
 
 export type CreateBatchPayload = {
@@ -608,6 +648,7 @@ export type ReplaceTaskConfig = {
   sourceIslandNo: string;
   targetProjectNo: string;
   targetIslandNo: string;
+  unitFactoryCodes?: readonly string[];
 };
 
 export type TaskConfigPreset = {
@@ -695,7 +736,15 @@ export type ApiAdapter = {
     groupId: string,
     payload: TaskGroupSubmitPayload,
   ) => Promise<TaskGroupDetail>;
-  listJobs: (status?: string, offset?: number, limit?: number) => Promise<JobList>;
+  rememberAuditReplaceFactoryCodes: (
+    codes: readonly string[],
+  ) => Promise<{ factoryCodes: readonly string[] }>;
+  listJobs: (status?: string, offset?: number, limit?: number, sort?: JobListSort) => Promise<JobList>;
+  getJobsActivity: () => Promise<JobsActivity>;
+  subscribeJobsActivity?: (
+    onActivity: (activity: JobsActivity) => void,
+    onError?: (event: Event) => void,
+  ) => () => void;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
   readArtifact?: (url: string) => Promise<Blob>;
   downloadArtifact?: (url: string, fallbackFilename?: string) => Promise<void>;

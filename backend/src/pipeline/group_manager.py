@@ -52,6 +52,13 @@ class GroupManager:
             self._groups[group_id] = group
         return group
 
+    def reload_group(self, group_id: str) -> TaskGroup | None:
+        """Reload a group from disk and refresh the in-memory cache."""
+        group = self._load_group(group_id)
+        if group is not None:
+            self._groups[group.group_id] = group
+        return group
+
     def update_group(self, group: TaskGroup) -> None:
         self._groups[group.group_id] = group
         self._persist_group(group)

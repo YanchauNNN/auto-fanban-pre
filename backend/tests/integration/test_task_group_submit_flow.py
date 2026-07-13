@@ -359,6 +359,8 @@ def test_jobs_list_requires_login_and_filters_by_owner_scope(monkeypatch, tmp_pa
             project_no="2016",
             source_filename="legacy.dwg",
         )
+        for job in (own_job, office_job, legacy_job):
+            runtime._index_job_summary(job)
 
         assert client.get("/api/jobs").status_code == 401
 

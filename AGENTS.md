@@ -15,6 +15,11 @@
 - For frontend changes, verify with relevant Vitest tests, full `npm test`, and `npm run build` before calling the work complete.
 - PDF preview interaction should keep Escape-to-close behavior, use Ctrl+wheel for zooming, and expose only one horizontal drag control fixed in the preview window's top control area.
 - For font replacement, trust the backend preflight result and show only the actual candidate fonts returned for the current batch; prefer multi-kind `font_replacement_fonts` over legacy single-font payloads.
+- Treat maintenance as full-stack ownership: frontend, FastAPI, Python pipeline, CAD/.NET bridge, Office COM, deployment scripts, YAML, and business workbooks must be checked together when behavior crosses layers.
+- For real-DWG verification, prefer the formal API/task workflow over isolated helper calls; report the exact source file, job or group id, output directory, and any part of the flow that was not exercised.
+- Project adaptation is complete only when the project is aligned across the business YAML enum/schema, runtime YAML rules, `documents_bin/词库收集.xlsx`, relevant templates or factory maps, frontend options, and targeted tests.
+- Deployment fixes must be validated against the packaged `D:\FanBanServer` layout and service entrypoints; success only in the development workspace is not sufficient.
+- Frontend/backend connection work must distinguish backend process reachability, business health, IIS/ARR proxy health, and task supervisor state; do not hide a real outage by only relaxing frontend warning thresholds.
 
 ## Learned Workspace Facts
 
@@ -22,7 +27,7 @@
 - The project is a Windows-oriented DWG batch-processing system with a FastAPI API layer, Python backend pipeline, React/Vite frontend, ODA/AutoCAD/AcCoreConsole/.NET Bridge CAD execution, and Office COM document export.
 - The backend lives under `backend`, the frontend lives under `frontend`, and the frontend uses Vite/Vitest.
 - The frontend development server is commonly started from `frontend` with `npm run dev -- --host 127.0.0.1 --port 5173`.
-- `documents/参数规范.yaml` is the business-parameter source of truth, and `documents/参数规范_运行期.yaml` is the runtime-parameter source of truth.
+- `documents/参数规范.yaml` is the business-parameter source of truth, `documents/参数规范_运行期.yaml` is the runtime-parameter source of truth, and `documents/参数规范-3.yaml` stores mechanism-level settings.
 - `documents_bin` contains project/business data files that should be interpreted together with the related backend logic.
 - The translation/upgrade feature is referred to as `翻版`; it converts legacy project DWG content such as 2016 project text into 2026 project text and must handle block text and nested block text.
 - 翻版 matching must support whitespace-normalized project-name matching, because DWG text can contain inconsistent spaces such as `浙江金七门核电厂 1、2 号 机 组` versus `浙江金七门核电厂1、2号机组`.

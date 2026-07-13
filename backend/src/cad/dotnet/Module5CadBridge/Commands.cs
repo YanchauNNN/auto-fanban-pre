@@ -175,6 +175,7 @@ internal sealed class BridgeTask
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> FontCompatibilityReplacements { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public List<string> FontCompatibilityExemptStyleNames { get; private set; } = new();
     public Dictionary<string, string> EmptyStyleReplacement { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public List<BridgeEmptyStyleTargetRegion> EmptyStyleTargetRegions { get; private set; } = new();
@@ -204,6 +205,13 @@ internal sealed class BridgeTask
             FontCompatibilityReplacements = BridgeValue.GetStringMap(
                 root.TryGetValue("font_compatibility_replacements", out var compatibilityObj) ? compatibilityObj : null
             ),
+            FontCompatibilityExemptStyleNames = BridgeValue.AsObjectEnumerable(
+                    root.TryGetValue("font_compatibility_exempt_style_names", out var exemptStylesObj) ? exemptStylesObj : null
+                )
+                .Select(item => item?.ToString()?.Trim() ?? string.Empty)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
             EmptyStyleReplacement = BridgeValue.GetStringMap(
                 root.TryGetValue("empty_style_replacement", out var emptyStyleObj) ? emptyStyleObj : null
             ),

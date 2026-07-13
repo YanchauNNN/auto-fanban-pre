@@ -20,11 +20,18 @@ def infer_project_no_from_path(path_or_name: str | Path | None) -> str | None:
     stem = Path(str(path_or_name)).stem.strip()
     if not stem:
         return None
-    match = _project_no_prefix_re().match(stem)
+    match = _project_no_prefix_re().search(stem)
     if match is None:
         return None
+    for name in ("project_no",):
+        value = match.groupdict().get(name)
+        if value:
+            return value
     if match.lastindex:
-        return match.group(1)
+        for index in range(1, match.lastindex + 1):
+            value = match.group(index)
+            if value:
+                return value
     return match.group(0)
 
 
@@ -52,7 +59,7 @@ def infer_unit_no_from_path(
     stem = Path(str(path_or_name)).stem.strip()
     if not stem:
         return None
-    match = _unit_no_by_project_prefix_re().match(stem)
+    match = _unit_no_by_project_prefix_re().search(stem)
     if match is None:
         return None
     expected_project_no = str(project_no or "").strip()

@@ -80,13 +80,24 @@ backend_mechanism:
       - "PLOT_FROM_SOURCE_WINDOW"
       - "PLOT_WINDOW_USED"
 
+  audit_replace:
+    unit_factory_codes:
+      - "RC"
+      - "RB"
+      - "RX"
+
   project_inference:
-    project_no_prefix_regex: '^\d{4}'
-    unit_no_by_project_prefix_regex: '^(?P<project_no>\d{4})(?P<unit_no>[1-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})'
+    project_no_prefix_regex: '(?P<project_no>\d{4})(?=[0-9][A-Z0-9]{2,4}-[A-Z]{3}\d{2})|^(\d{4})(?=[-_A-Z0-9]|$)'
+    unit_no_by_project_prefix_regex: '(?P<project_no>\d{4})(?P<unit_no>[0-9])(?=[A-Z0-9]{2,4}-[A-Z]{3}\d{2})'
     default_project_no: "2016"
 
   api_runtime:
     job_completion_wait_timeout_sec: 3600
+    job_summary_sync_interval_sec: 3
+    jobs_activity_stream_poll_interval_sec: 2
+    jobs_activity_stream_keepalive_sec: 15
+    jobs_activity_stream_max_duration_sec: 60
+    jobs_activity_stream_retry_ms: 5000
     stage_labels:
       INIT: "初始化"
       PREP_SOURCE: "准备源文件"

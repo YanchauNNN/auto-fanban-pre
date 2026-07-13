@@ -8,7 +8,13 @@
 """
 
 from .runtime_config import RuntimeConfig, get_config, reload_config
-from .mechanism_spec import MechanismSpec, MechanismSpecLoader, load_mechanism_spec
+from .mechanism_spec import (
+    MechanismSpec,
+    MechanismSpecLoader,
+    append_audit_replace_factory_codes,
+    load_mechanism_spec,
+    normalize_audit_replace_factory_codes,
+)
 from .spec_loader import BusinessSpec, SpecLoader, load_spec
 
 __all__ = [
@@ -17,7 +23,9 @@ __all__ = [
     "load_spec",
     "MechanismSpec",
     "MechanismSpecLoader",
+    "append_audit_replace_factory_codes",
     "load_mechanism_spec",
+    "normalize_audit_replace_factory_codes",
     "RuntimeConfig",
     "get_config",
     "reload_config",

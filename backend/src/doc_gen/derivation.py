@@ -85,7 +85,10 @@ class DerivationEngine:
         album_title_en = ctx.params.album_title_en
 
         if album_title_cn:
-            derived.cover_title_cn = album_title_cn + "封面"
+            derived.cover_title_cn = self._append_cn_title_suffix(
+                album_title_cn,
+                self._append_suffix_from_rule("cover_title_cn", "图册封面"),
+            )
             derived.catalog_title_cn = album_title_cn + "目录"
 
         if ctx.is_1818 and album_title_en:
@@ -132,6 +135,26 @@ class DerivationEngine:
         if s.endswith(old_suffix):
             return s[:-len(old_suffix)] + new_suffix
         return s + new_suffix
+
+    def _append_suffix_from_rule(self, field_name: str, default: str) -> str:
+        rule = self.rules.get(field_name, {})
+        transform = str(rule.get("transform") or "") if isinstance(rule, dict) else ""
+        match = re.fullmatch(r"""append\((?P<quote>['"])(?P<suffix>.*?)(?P=quote)\)""", transform.strip())
+        if match:
+            return match.group("suffix")
+        return default
+
+    @staticmethod
+    def _append_cn_title_suffix(title: str, suffix: str) -> str:
+        base = str(title or "").strip()
+        normalized_suffix = str(suffix or "").strip()
+        if not base or not normalized_suffix:
+            return base
+        if base.endswith(normalized_suffix):
+            return base
+        if normalized_suffix.startswith("图册") and base.endswith("图册"):
+            return base + normalized_suffix[len("图册"):]
+        return base + normalized_suffix
 
     @staticmethod
     def _album_base_internal_code(internal_code: str) -> str:

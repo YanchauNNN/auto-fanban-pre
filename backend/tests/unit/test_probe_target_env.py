@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -92,6 +93,23 @@ def test_probe_target_env_prefers_package_python_runtime() -> None:
 
     assert "python-runtime\\python.exe" in script_text
     assert 'Label "package_runtime"' in script_text
+
+
+def test_probe_target_env_prefers_terminal_backend_runtime_layout() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    runtime_scripts = 'backend-runtime\\backend\\src\\cad\\scripts'
+    dev_scripts = 'backend\\src\\cad\\scripts'
+    runtime_bridge = (
+        'backend-runtime\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll'
+    )
+    dev_bridge = 'backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll'
+
+    assert script_text.index(runtime_scripts) < script_text.index(dev_scripts)
+    assert script_text.index(runtime_bridge) < script_text.index(dev_bridge)
 
 
 def test_probe_target_env_downgrades_windows_store_python_alias() -> None:
@@ -219,6 +237,58 @@ def test_probe_target_env_checks_required_cad_fonts() -> None:
     assert 'code = "required_fonts"' in script_text
 
 
+def test_probe_target_env_prefers_highest_autocad_version_with_accoreconsole(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8-sig",
+    )
+    start = script_text.index("function Select-BestAccoreconsole")
+    end = script_text.index("function Select-BestPlotterDir")
+    function_text = script_text[start:end]
+    probe_script = tmp_path / "select_best_accore.ps1"
+    probe_script.write_text(
+        function_text
+        + r'''
+$facts = @(
+    [pscustomobject]@{
+        install_dir = "D:\Program Files\Autodesk\AutoCAD 2014"
+        acad_exe = "D:\Program Files\Autodesk\AutoCAD 2014\acad.exe"
+        accoreconsole_exe = "D:\Program Files\Autodesk\AutoCAD 2014\accoreconsole.exe"
+        accoreconsole_exe_exists = $true
+    },
+    [pscustomobject]@{
+        install_dir = "D:\AUTOCAD\AutoCAD 2022"
+        acad_exe = "D:\AUTOCAD\AutoCAD 2022\acad.exe"
+        accoreconsole_exe = "D:\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
+        accoreconsole_exe_exists = $true
+    }
+)
+$actual = Select-BestAccoreconsole -InstallFacts $facts
+$expected = "D:\AUTOCAD\AutoCAD 2022\accoreconsole.exe"
+if ($actual -ne $expected) {
+    throw "expected $expected but got $actual"
+}
+''',
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(probe_script),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_probe_target_env_uses_openpyxl_for_excel_template_validation() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
@@ -229,3 +299,71 @@ def test_probe_target_env_uses_openpyxl_for_excel_template_validation() -> None:
     assert "from openpyxl import load_workbook" in script_text
     assert 'validation_mode = "python_openpyxl"' in script_text
     assert "traceback_path = $tracebackPath" in script_text
+
+
+def test_probe_target_env_deep_excel_checks_do_not_depend_on_shallow_excel_com() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = script_text.index("function Get-OfficeFacts")
+    end = script_text.index("function Get-HostFacts")
+    office_facts_text = script_text[start:end]
+
+    assert '$excelExport = Test-ExcelExportSmoke' in office_facts_text
+    assert '$excelExport = if ($excelCom.status -eq "pass")' not in office_facts_text
+    assert "common_catalog = Test-ExcelTemplateOpen" in office_facts_text
+    assert "catalog_1818 = Test-ExcelTemplateOpen" in office_facts_text
+    assert 'common_catalog = if ($excelCom.status -eq "pass")' not in office_facts_text
+    assert 'catalog_1818 = if ($excelCom.status -eq "pass")' not in office_facts_text
+
+
+def test_probe_target_env_records_direct_excel_com_as_info_when_backend_export_passes() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "$excelDirectComBackedByFunctionalCheck" in script_text
+    assert 'code = "excel_com_direct"' in script_text
+    assert '$officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck' in script_text
+    assert "$infoItems = @()" in script_text
+    assert "info_items = $infoItems" in script_text
+    assert "info_count = $infoItems.Count" in script_text
+
+    start = script_text.index('if ($officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck)')
+    end = script_text.index('$blockingIssues += [ordered]@{', start)
+    backed_by_functional_block = script_text[start:end]
+    assert "$infoItems += [ordered]@{" in backed_by_functional_block
+    assert "$warnings += [ordered]@{" not in backed_by_functional_block
+
+
+def test_probe_target_env_quick_excel_com_failure_runs_functional_fallback() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = script_text.index("function Get-OfficeFacts")
+    end = script_text.index("function Get-HostFacts")
+    office_facts_text = script_text[start:end]
+
+    assert 'if ($excelCom.status -ne "pass") {' in office_facts_text
+    assert '$excelExport = Test-ExcelExportSmoke' in office_facts_text
+    assert 'common_catalog = if ($excelCom.status -ne "pass")' in office_facts_text
+    assert 'catalog_1818 = if ($excelCom.status -ne "pass")' in office_facts_text
+    assert '$excelFunctionalReady = ($excelCom.status -eq "pass" -or $excelExport.status -eq "pass")' in office_facts_text
+    assert '$wordFunctionalReady = ($wordCom.status -eq "pass" -or $wordExport.status -eq "pass")' in office_facts_text
+
+
+def test_probe_target_env_quick_functional_excel_pass_prevents_direct_com_blocking() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "$excelDirectComBackedByFunctionalCheck" in script_text
+    assert '$officeFacts.probe_mode -eq "deep"' not in script_text[
+        script_text.index("$excelDirectComBackedByFunctionalCheck") :
+        script_text.index('foreach ($officeKey in @("word_com", "excel_com"))')
+    ]
+    assert '$officeKey -eq "excel_com" -and $excelDirectComBackedByFunctionalCheck' in script_text

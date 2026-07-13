@@ -285,7 +285,13 @@ class AnchorFirstLocator:
         frames: list[FrameMeta] = []
         used_candidates: set[tuple[float, float, float, float]] = set()
         for idx in sorted(selected_by_anchor):
-            self._append_candidate_frame(selected_by_anchor[idx], dxf_path, frames, used_candidates)
+            self._append_candidate_frame(
+                selected_by_anchor[idx],
+                dxf_path,
+                frames,
+                used_candidates,
+                text_items=text_items,
+            )
 
         small5_templates = self._collect_size_templates(frames, "SMALL5")
         a4_local_windows_total = 0
@@ -972,12 +978,108 @@ class AnchorFirstLocator:
         dxf_path: Path,
         frames: list[FrameMeta],
         used_candidates: set[tuple[float, float, float, float]],
+        *,
+        text_items: list[TextItem] | None = None,
     ) -> None:
+        if text_items:
+            cand = self._expand_undersized_candidate_by_marker_bbox(cand, text_items)
         key = self._candidate_key(cand)
         if key in used_candidates:
             return
         used_candidates.add(key)
         frames.append(self._to_frame_meta(cand, dxf_path))
+
+    def _expand_undersized_candidate_by_marker_bbox(
+        self,
+        cand: CandidateFrame,
+        text_items: list[TextItem],
+    ) -> CandidateFrame:
+        if cand.roi_profile_id != "BASE10":
+            return cand
+        marker_bbox = self._find_wider_internal_code_marker_bbox(cand.bbox, text_items)
+        if marker_bbox is None:
+            return cand
+        expanded_bbox = BBox(
+            xmin=min(cand.bbox.xmin, marker_bbox.xmin),
+            ymin=cand.bbox.ymin,
+            xmax=max(cand.bbox.xmax, marker_bbox.xmax),
+            ymax=cand.bbox.ymax,
+        )
+        if expanded_bbox.width <= cand.bbox.width * 1.03:
+            return cand
+        original_scale = (cand.sx + cand.sy) / 2.0
+        fits = []
+        for fit in self.paper_fitter.fit_all(expanded_bbox, self.paper_variants):
+            fit_scale = (fit[1] + fit[2]) / 2.0
+            if fit[3] != cand.roi_profile_id:
+                continue
+            if not self._scale_matches_candidate(fit_scale):
+                continue
+            if original_scale > 1e-6 and abs(fit_scale - original_scale) / original_scale > 0.05:
+                continue
+            fits.append(fit)
+        if not fits:
+            return cand
+        paper_id, sx, sy, profile_id, error = min(fits, key=lambda fit: fit[4])
+        profile = self.spec.get_roi_profile(profile_id)
+        if not profile:
+            return cand
+        rb_offset = self._get_anchor_rb_offset(profile_id, profile)
+        if not rb_offset:
+            return cand
+        anchor_roi = self._restore_roi(expanded_bbox, rb_offset, sx, sy)
+        anchor_roi = self._expand_roi(anchor_roi, self.roi_margin_percent)
+        return CandidateFrame(
+            bbox=expanded_bbox,
+            paper_variant_id=paper_id,
+            sx=sx,
+            sy=sy,
+            roi_profile_id=profile_id,
+            anchor_roi=anchor_roi,
+            fit_error=error,
+            localized_fallback=cand.localized_fallback,
+        )
+
+    def _find_wider_internal_code_marker_bbox(
+        self,
+        bbox: BBox,
+        text_items: list[TextItem],
+    ) -> BBox | None:
+        candidates: list[tuple[float, BBox]] = []
+        for item in text_items:
+            item_bbox = item.bbox
+            if item_bbox is None:
+                continue
+            if not self._text_has_internal_code_marker(item.text):
+                continue
+            if item_bbox.width <= bbox.width * 1.05:
+                continue
+            if item_bbox.height >= bbox.height * 0.35:
+                continue
+            if not item_bbox.intersects(bbox):
+                continue
+            overflow = max(0.0, bbox.xmin - item_bbox.xmin) + max(0.0, item_bbox.xmax - bbox.xmax)
+            if overflow <= bbox.width * 0.03:
+                continue
+            candidates.append((overflow, item_bbox))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    @staticmethod
+    def _text_has_internal_code_marker(text: str) -> bool:
+        compact = AnchorFirstLocator._normalize_anchor(str(text or "")).upper()
+        return bool(
+            re.search(
+                r"[A-Z0-9]{7,19}\([0-9]{4}[0-9A-Z]{1,4}-[A-Z0-9]{3,8}-[0-9]{3}(?:\([A-Z0-9]+\))?\)",
+                compact,
+            )
+            or re.search(
+                r"\b[0-9]{4}[0-9A-Z]{1,4}-[A-Z0-9]{3,8}-[0-9]{3}(?:\([A-Z0-9]+\))?\b",
+                compact,
+            )
+        )
 
     def _append_marker_only_001_candidates(
         self,

@@ -75,6 +75,8 @@ class AuditDotNetScanner:
                     text_bbox=_to_bbox(row.get("bbox")),
                 )
             )
+        if not items:
+            raise RuntimeError("audit scan produced no text items")
         return items
 
 

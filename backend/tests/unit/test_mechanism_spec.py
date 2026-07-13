@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.config.mechanism_spec import MechanismSpecLoader, load_mechanism_spec
+from src.config.mechanism_spec import (
+    MechanismSpecLoader,
+    append_audit_replace_factory_codes,
+    load_mechanism_spec,
+)
 
 
 def _write_mechanism_spec(path: Path, payload: dict) -> Path:
@@ -61,53 +65,65 @@ def test_mechanism_spec_loader_uses_env_override(tmp_path: Path, monkeypatch) ->
     assert spec.project_inference.default_project_no == "2026"
 
 
-def test_mechanism_spec_loads_management_runtime_and_ui_config(tmp_path: Path, monkeypatch) -> None:
+def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> None:
     spec_path = _write_mechanism_spec(
-        tmp_path / "custom" / "mechanism.yaml",
+        tmp_path / "documents" / "参数规范-3.yaml",
         {
             "schema_version": "1.0",
             "backend_mechanism": {
-                "permissions": {
-                    "account_admin_roles": [],
-                    "workflow_admin_roles": [],
-                    "workload_scope_roles": {},
-                },
-                "workflow_runtime": {
-                    "approval_terminal_status": "archived",
-                    "archive_trigger_status": "archived",
-                    "active_conflict_statuses": ["in_review", "archived"],
-                },
-                "workload_runtime": {
-                    "status_options": [
-                        {"label": "All", "value": ""},
-                        {"label": "Settled", "value": "settled"},
-                    ],
-                },
-                "management_ui": {
-                    "workload_scope_labels": {
-                        "me": "Mine",
-                        "admin": "Admin",
-                    },
-                    "workflow_status_labels": {"archived": "Archived"},
-                    "archive_status_labels": {"succeeded": "Archived"},
-                    "empty_current_node_label": "No active node",
+                "audit_replace": {
+                    "unit_factory_codes": ["RC", "HL"],
                 },
             },
         },
     )
-    monkeypatch.setenv("FANBAN_MECHANISM_SPEC_PATH", str(spec_path))
     MechanismSpecLoader.clear_cache()
 
-    spec = load_mechanism_spec()
+    spec = MechanismSpecLoader.load(spec_path)
 
-    assert spec.workflow_runtime.approval_terminal_status == "archived"
-    assert spec.workflow_runtime.archive_trigger_status == "archived"
-    assert spec.workflow_runtime.active_conflict_statuses == ["in_review", "archived"]
-    assert spec.workload_runtime.status_options[1].label == "Settled"
-    assert spec.management_ui.workload_scope_labels["admin"] == "Admin"
-    assert spec.management_ui.workflow_status_labels["archived"] == "Archived"
-    assert spec.management_ui.archive_status_labels["succeeded"] == "Archived"
-    assert spec.management_ui.empty_current_node_label == "No active node"
+    assert spec.audit_replace.unit_factory_codes == ["RC", "HL"]
+
+
+def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "鍙傛暟瑙勮寖-3.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "api_runtime": {},
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(spec_path)
+
+    assert spec.api_runtime.job_summary_sync_interval_sec == 3.0
+    assert spec.api_runtime.jobs_activity_stream_poll_interval_sec == 2.0
+    assert spec.api_runtime.jobs_activity_stream_keepalive_sec == 15.0
+    assert spec.api_runtime.jobs_activity_stream_max_duration_sec == 60.0
+    assert spec.api_runtime.jobs_activity_stream_retry_ms == 5000
+
+
+def test_append_audit_replace_factory_codes_updates_yaml_and_cache(tmp_path: Path) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "参数规范-3.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "audit_replace": {
+                    "unit_factory_codes": ["RC"],
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    updated = append_audit_replace_factory_codes(["hl", "RC", "16mm"], spec_path=spec_path)
+
+    assert updated == ["RC", "HL"]
+    assert "HL" in spec_path.read_text(encoding="utf-8")
+    assert MechanismSpecLoader.load(spec_path).audit_replace.unit_factory_codes == ["RC", "HL"]
 
 
 def test_mechanism_spec_rejects_existing_yaml_roots(tmp_path: Path) -> None:

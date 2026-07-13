@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import json
 import os
 import re
 import shutil
@@ -38,6 +39,13 @@ from .office_automation import get_office_automation_limiter
 _RPC_CALL_REJECTED = -2147418111
 _FILE_NOT_FOUND_HRESULT = -2147024894
 _MK_E_UNAVAILABLE = -2147221021
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name != "nt":
+        return {}
+    creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": creationflags} if creationflags else {}
 
 
 class PDFExporter(IPDFExporter):
@@ -85,21 +93,24 @@ class PDFExporter(IPDFExporter):
 
         # 尝试Office COM
         if self.preferred == "office_com":
+            com_error: Exception | None = None
             try:
-                self._export_xlsx_via_com(xlsx_path, pdf_path)
+                self._export_xlsx_via_com_with_process_recycle(xlsx_path, pdf_path)
                 return
-            except Exception as com_error:
-                if self._should_use_libreoffice_fallback():
-                    try:
-                        self._export_via_libreoffice(xlsx_path, pdf_path)
-                        return
-                    except Exception as fallback_error:
-                        raise ExportError(
-                            "Excel export failed via Office COM, and LibreOffice fallback also failed. "
-                            f"COM error: {com_error}; fallback error: {fallback_error}"
-                        ) from fallback_error
-                else:
-                    raise ExportError(f"Excel导出PDF失败: {com_error}") from com_error
+            except Exception as exc:
+                com_error = exc
+            assert com_error is not None
+            if self._should_use_libreoffice_fallback():
+                try:
+                    self._export_via_libreoffice(xlsx_path, pdf_path)
+                    return
+                except Exception as fallback_error:
+                    raise ExportError(
+                        "Excel export failed via Office COM, and LibreOffice fallback also failed. "
+                        f"COM error: {com_error}; fallback error: {fallback_error}"
+                    ) from fallback_error
+            else:
+                raise ExportError(f"Excel导出PDF失败: {com_error}") from com_error
         elif self._should_use_libreoffice_fallback() or self.preferred == "libreoffice":
             self._export_via_libreoffice(xlsx_path, pdf_path)
         else:
@@ -206,6 +217,132 @@ class PDFExporter(IPDFExporter):
                 return True
         message = str(exc).lower()
         return ("系统找不到指定的文件" in str(exc)) or ("cannot find the file" in message)
+
+    @staticmethod
+    def _snapshot_process_ids_by_image(image_name: str) -> set[int]:
+        if os.name != "nt":
+            return set()
+        try:
+            completed = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {image_name}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+                check=False,
+                **_hidden_subprocess_kwargs(),
+            )
+        except Exception:
+            return set()
+        if completed.returncode != 0:
+            return set()
+
+        pids: set[int] = set()
+        stdout = completed.stdout or ""
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line or line.upper().startswith("INFO:"):
+                continue
+            parts = [part.strip().strip('"') for part in line.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pids.add(int(parts[1]))
+            except ValueError:
+                continue
+        return pids
+
+    @staticmethod
+    def _snapshot_process_command_lines_by_image(image_name: str) -> dict[int, str]:
+        if os.name != "nt":
+            return {}
+        script = (
+            "$items = Get-CimInstance Win32_Process -Filter "
+            f"\"Name='{image_name}'\" "
+            "| Select-Object ProcessId,CommandLine; "
+            "$items | ConvertTo-Json -Compress"
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+                **_hidden_subprocess_kwargs(),
+            )
+        except Exception:
+            return {}
+        stdout = completed.stdout or ""
+        if completed.returncode != 0 or not stdout.strip():
+            return {}
+
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(payload, dict):
+            rows = [payload]
+        elif isinstance(payload, list):
+            rows = payload
+        else:
+            return {}
+
+        result: dict[int, str] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                pid = int(row.get("ProcessId") or 0)
+            except (TypeError, ValueError):
+                continue
+            if pid > 0:
+                result[pid] = str(row.get("CommandLine") or "")
+        return result
+
+    @staticmethod
+    def _is_excel_automation_command_line(command_line: str) -> bool:
+        normalized = str(command_line or "").lower()
+        return (
+            "excel.exe" in normalized
+            and (
+                "/automation" in normalized
+                or "-embedding" in normalized
+                or "/embedding" in normalized
+            )
+        )
+
+    @classmethod
+    def _terminate_stale_excel_automation_processes(cls, *, keep_pids: set[int] | None = None) -> None:
+        keep = keep_pids or set()
+        command_lines = cls._snapshot_process_command_lines_by_image("EXCEL.EXE")
+        stale_pids = {
+            pid
+            for pid, command_line in command_lines.items()
+            if pid not in keep and cls._is_excel_automation_command_line(command_line)
+        }
+        cls._terminate_process_ids(stale_pids)
+
+    @classmethod
+    def _terminate_new_processes(cls, image_name: str, baseline_pids: set[int]) -> None:
+        current_pids = cls._snapshot_process_ids_by_image(image_name)
+        cls._terminate_process_ids(current_pids - baseline_pids)
+
+    @staticmethod
+    def _terminate_process_ids(pids: set[int]) -> None:
+        for pid in sorted(pids):
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F", "/T"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=8,
+                    check=False,
+                    **_hidden_subprocess_kwargs(),
+                )
 
     @staticmethod
     def _is_excel_operation_unavailable(exc: Exception) -> bool:
@@ -484,6 +621,23 @@ class PDFExporter(IPDFExporter):
             f"Excel.Workbooks.Open({workbook_path.name})",
         )
 
+    def _export_xlsx_via_com_with_process_recycle(self, xlsx_path: Path, pdf_path: Path) -> None:
+        with get_office_automation_limiter().excel_session():
+            self._terminate_stale_excel_automation_processes()
+            baseline_excel_pids = self._snapshot_process_ids_by_image("EXCEL.EXE")
+            last_exc: Exception | None = None
+            for attempt in range(2):
+                try:
+                    self._export_xlsx_via_com(xlsx_path, pdf_path, manage_limiter=False)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    if attempt == 0:
+                        self._terminate_new_processes("EXCEL.EXE", baseline_excel_pids)
+                        time.sleep(0.8)
+            assert last_exc is not None
+            raise last_exc
+
     def _export_docx_via_com(self, docx_path: Path, pdf_path: Path) -> None:
         """通过Office COM导出Word到PDF"""
         pythoncom = None
@@ -519,7 +673,13 @@ class PDFExporter(IPDFExporter):
                     with contextlib.suppress(Exception):
                         pythoncom.CoUninitialize()
 
-    def _export_xlsx_via_com(self, xlsx_path: Path, pdf_path: Path) -> None:
+    def _export_xlsx_via_com(
+        self,
+        xlsx_path: Path,
+        pdf_path: Path,
+        *,
+        manage_limiter: bool = True,
+    ) -> None:
         """通过Office COM导出Excel到PDF"""
         pythoncom = None
         try:
@@ -532,7 +692,12 @@ class PDFExporter(IPDFExporter):
         excel_owned = False
         wb = None
         temp_dir = None
-        with get_office_automation_limiter().excel_session():
+        limiter_context = (
+            get_office_automation_limiter().excel_session()
+            if manage_limiter
+            else contextlib.nullcontext()
+        )
+        with limiter_context:
             try:
                 pythoncom.CoInitialize()
                 excel, excel_owned = self._create_excel_application(win32com)
@@ -579,6 +744,7 @@ class PDFExporter(IPDFExporter):
                 capture_output=True,
                 timeout=self.timeout,
                 check=True,
+                **_hidden_subprocess_kwargs(),
             )
         except FileNotFoundError as e:
             raise ExportError("LibreOffice 未安装或 soffice 不在 PATH 中") from e
