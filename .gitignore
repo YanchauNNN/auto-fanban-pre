@@ -22,6 +22,7 @@ tmp/
 /build/
 /dist/
 output/
+outputs/
 plot.log
 .pytest_cache/
 .ruff_cache/

@@ -8,18 +8,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
+from ..cad.plot_resource_manager import PDF2_PMP_NAME
 from ..config.mechanism_spec import (
     DeploymentMechanismConfig,
     MechanismSpecLoader,
     load_mechanism_spec,
 )
-from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
-from ..cad.plot_resource_manager import PDF2_PMP_NAME
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
 RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
 MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
+AI_SPEC_NAME = "参数规范_AI.yaml"
+AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -118,6 +120,15 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             repo_root / "documents" / deployment.mechanism_spec_name,
             Path("documents") / deployment.mechanism_spec_name,
         ),
+        CopyPlanEntry(repo_root / "documents" / "AI", Path("documents") / "AI"),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_SPEC_NAME,
+            Path("documents") / "AI" / AI_SPEC_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_GATEWAY_CONFIG_NAME,
+            Path("documents") / "AI" / AI_GATEWAY_CONFIG_NAME,
+        ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
         CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
@@ -125,6 +136,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(
             repo_root / "tools" / "diagnose_iis_frontend_503.ps1",
             Path("tools") / "diagnose_iis_frontend_503.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1",
+            Path("scripts") / "test_ai_model_connectivity.ps1",
         ),
     ]
 
@@ -606,6 +621,8 @@ function Set-BackendRuntimeEnvironment {
         [string]$SpecPath,
         [string]$RuntimeSpecPath,
         [string]$MechanismSpecPath,
+        [string]$AiSpecPath,
+        [string]$AiGatewayConfigPath,
         [string]$CadScriptDir,
         [string]$DotNetBridgeDllPath,
         [string]$CtbName
@@ -629,6 +646,20 @@ function Set-BackendRuntimeEnvironment {
         }
     }
 
+    if ((-not $env:FANBAN_AI_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_SPEC_PATH" -Value $AiSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_AI_GATEWAY_CONFIG_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_GATEWAY_CONFIG_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiGatewayConfigPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_GATEWAY_CONFIG_PATH" -Value $AiGatewayConfigPath
+        }
+    }
+
+    Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE" -Value "terminal_cnpe_intranet_qwen_fast"
+
     if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
         Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
     }
@@ -645,6 +676,8 @@ function Set-BackendRuntimeEnvironment {
         @("FANBAN_SPEC_PATH", $env:FANBAN_SPEC_PATH),
         @("FANBAN_RUNTIME_SPEC_PATH", $env:FANBAN_RUNTIME_SPEC_PATH),
         @("FANBAN_MECHANISM_SPEC_PATH", $env:FANBAN_MECHANISM_SPEC_PATH),
+        @("FANBAN_AI_SPEC_PATH", $env:FANBAN_AI_SPEC_PATH),
+        @("FANBAN_AI_GATEWAY_CONFIG_PATH", $env:FANBAN_AI_GATEWAY_CONFIG_PATH),
         @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
         @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
     )
@@ -658,6 +691,10 @@ function Set-BackendRuntimeEnvironment {
         ("backend-env: {0}={1}" -f $name, $value) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
     }
     ("backend-env: FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME={0}" -f $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_CONFIG_PATH={0}" -f $env:FANBAN_AI_GATEWAY_CONFIG_PATH) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_PROFILE={0}" -f $env:FANBAN_AI_GATEWAY_PROFILE) |
         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 }
 
@@ -676,13 +713,34 @@ backend_runtime_root = str(Path.cwd())
 if backend_runtime_root not in sys.path:
     sys.path.insert(0, backend_runtime_root)
 
-required = ("FANBAN_SPEC_PATH", "FANBAN_RUNTIME_SPEC_PATH", "FANBAN_MECHANISM_SPEC_PATH")
+required = (
+    "FANBAN_SPEC_PATH",
+    "FANBAN_RUNTIME_SPEC_PATH",
+    "FANBAN_MECHANISM_SPEC_PATH",
+    "FANBAN_AI_SPEC_PATH",
+    "FANBAN_AI_GATEWAY_CONFIG_PATH",
+)
 for name in required:
     value = os.environ.get(name, "")
     if not value or not Path(value).is_file():
         raise SystemExit(f"{name} invalid: {value}")
 
 import API.app.main as main
+from src.config import load_ai_spec
+
+ai_spec = load_ai_spec(os.environ["FANBAN_AI_SPEC_PATH"])
+gateway = ai_spec.resolve_gateway()
+models = ai_spec.resolve_models()
+profile_name = ai_spec.resolve_gateway_profile_name()
+if profile_name != "terminal_cnpe_intranet_qwen_fast":
+    raise SystemExit(f"terminal AI gateway profile invalid: {profile_name}")
+ai_spec.validate_gateway_network_policy(required_network_mode="intranet_only")
+print(
+    "ai-config-preflight-ok",
+    f"profile={profile_name}",
+    f"model={models.chat.model}",
+    f"auth_required={bool(gateway.api_key_env_var)}",
+)
 print("backend-import-preflight-ok", main.create_app)
 '@
 
@@ -1121,6 +1179,8 @@ try {
     $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
     $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
     $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedAiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+    $managedAiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
     $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
     $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
     $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
@@ -1129,6 +1189,8 @@ try {
         -SpecPath $managedSpecPath `
         -RuntimeSpecPath $managedRuntimeSpecPath `
         -MechanismSpecPath $managedMechanismSpecPath `
+        -AiSpecPath $managedAiSpecPath `
+        -AiGatewayConfigPath $managedAiGatewayConfigPath `
         -CadScriptDir $managedCadScriptDir `
         -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
         -CtbName $managedCtbName
@@ -1158,7 +1220,12 @@ try {
             "--host",
             $ListenHost,
             "--port",
-            [string]$Port
+            [string]$Port,
+            "--workers",
+            "1",
+            "--proxy-headers",
+            "--forwarded-allow-ips",
+            "127.0.0.1"
         )
         $workerArgs = @(
             "-X",
@@ -1520,6 +1587,17 @@ foreach ($prop in $envMap.PSObject.Properties) {
     }
     $escaped = $value.Replace("'", "''")
     $lines += ("Set-Item -Path 'Env:{0}' -Value '{1}'" -f $name, $escaped)
+}
+$aiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+if (Test-Path -LiteralPath $aiSpecPath -PathType Leaf) {
+    $escapedAiSpecPath = $aiSpecPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_SPEC_PATH' -Value '{0}'" -f $escapedAiSpecPath)
+}
+$aiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
+if (Test-Path -LiteralPath $aiGatewayConfigPath -PathType Leaf) {
+    $escapedAiGatewayConfigPath = $aiGatewayConfigPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_GATEWAY_CONFIG_PATH' -Value '{0}'" -f $escapedAiGatewayConfigPath)
+    $lines += "Set-Item -Path 'Env:FANBAN_AI_GATEWAY_PROFILE' -Value 'terminal_cnpe_intranet_qwen_fast'"
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
@@ -3054,6 +3132,7 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 - `python-packages/`: 随包分发的 Python site-packages
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
 - `documents/Resources/`: 受管打印和校准资源
+- `documents/AI/`: AI 模型接入配置
 - `documents_bin/`: 模板与词库资源
 - `scripts/`: 启动、探测、健康检查脚本
 - `install/`: 离线运行时安装脚本和安装器目录
@@ -3094,6 +3173,30 @@ if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查
 - `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
 - `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
 - `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
+
+## AI 模型接入检查
+
+- AI 接入参数集中在 `documents\AI\ai_model_gateway.yaml`。
+- 开发/测试环境默认使用 `development_minimax` profile，通过 MiniMax OpenAI-compatible API 验证。
+- 终端内网部署使用 `terminal_cnpe_intranet_qwen_fast` profile，对应 `http://models.ai.cnpe.cc/qwen_fast/v1/chat/completions`、模型 `Qwen3.6-35A3`、流式输出、无鉴权头。
+- `prepare_terminal.ps1` 会把 `FANBAN_AI_GATEWAY_CONFIG_PATH` 和 `FANBAN_AI_GATEWAY_PROFILE=terminal_cnpe_intranet_qwen_fast` 写入 `scripts\runtime.env.ps1`，后端启动时会自动加载。
+- 部署机上可执行 `scripts\test_ai_model_connectivity.ps1` 生成连通性诊断 JSON；默认输出到 `storage\ai\diagnostics\ai-connectivity-*.json`。
+- 诊断 JSON 的 `script.sha256` 应与同包 `package-manifest.json` 中 `scripts/test_ai_model_connectivity.ps1` 的 SHA-256 一致，`environment.config_sha256` 用于确认实际读取的网关配置版本。
+- 流式检查会重组多个 SSE delta 后再校验标记；部分兼容网关在完整响应后直接关闭连接而不发送 `[DONE]`，因此 `done_received=false` 不能单独判定为失败，应结合 `status_code`、`response_contains_expected`、`invalid_data_line_count` 和总状态判断。
+
+开发/测试环境验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1
+```
+
+终端内网链路验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1 -Profile terminal_cnpe_intranet_qwen_fast
+```
+
+脚本会检查配置解析、DNS、TCP、模型列表、非流式对话和流式对话；不会把 API key 明文写入控制台或 JSON。
 
 ## 一致性边界
 

@@ -443,6 +443,7 @@ class RuntimeConfig(BaseSettings):
     spec_path: Path = Path("documents/参数规范.yaml")
     runtime_spec_path: Path = Path("documents/参数规范_运行期.yaml")
     mechanism_spec_path: Path = Path("documents/参数规范-3.yaml")
+    ai_spec_path: Path = Path("documents/AI/参数规范_AI.yaml")
 
     # 各子配置
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
@@ -525,6 +526,7 @@ class RuntimeConfig(BaseSettings):
             "spec_path",
             "runtime_spec_path",
             "mechanism_spec_path",
+            "ai_spec_path",
         ):
             if path_key in path_values:
                 yaml_values[path_key] = path_values[path_key]
@@ -684,6 +686,7 @@ class RuntimeConfig(BaseSettings):
         self.spec_path = self._resolve_root_path(self.spec_path, project_root)
         self.runtime_spec_path = self._resolve_root_path(self.runtime_spec_path, project_root)
         self.mechanism_spec_path = self._resolve_root_path(self.mechanism_spec_path, project_root)
+        self.ai_spec_path = self._resolve_root_path(self.ai_spec_path, project_root)
         self.management.admin_config_path = self._resolve_root_path(
             self.management.admin_config_path,
             runtime_root,

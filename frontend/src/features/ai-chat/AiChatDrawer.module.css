@@ -1,0 +1,500 @@
+.collapsedTab {
+  position: fixed;
+  right: 0;
+  top: min(48vh, 520px);
+  z-index: 32;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.25rem;
+  width: 3rem;
+  min-height: 6.2rem;
+  border: 1px solid rgba(20, 70, 128, 0.2);
+  border-right: 0;
+  border-radius: 16px 0 0 16px;
+  background: rgba(251, 253, 255, 0.94);
+  color: #164b83;
+  box-shadow: 0 18px 42px rgba(13, 44, 80, 0.16);
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 1.02rem;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.collapsedTab span:first-child {
+  writing-mode: vertical-rl;
+  justify-self: center;
+  letter-spacing: 0;
+}
+
+.drawer {
+  position: fixed;
+  right: 1rem;
+  top: 4.75rem;
+  bottom: 0.75rem;
+  z-index: 38;
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(12rem, 1fr) auto;
+  width: min(460px, calc(100vw - 2rem));
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  border-radius: 18px;
+  background: rgba(250, 253, 255, 0.96);
+  box-shadow: 0 26px 70px rgba(13, 44, 80, 0.2);
+  color: #173f69;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1rem 1rem 0.75rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.1);
+}
+
+.eyebrow {
+  margin: 0 0 0.18rem;
+  font-family: "Rajdhani", sans-serif;
+  color: #6385a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.header h2 {
+  margin: 0;
+  color: #143d67;
+  font-size: 1.16rem;
+  letter-spacing: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.modelBadge {
+  max-width: 11rem;
+  overflow: hidden;
+  padding: 0.36rem 0.55rem;
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  border-radius: 999px;
+  background: rgba(235, 244, 255, 0.82);
+  color: #1a528d;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  border-radius: 12px;
+  background: #fff;
+  color: #164b83;
+  font-size: 1.25rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.62rem 1rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
+  color: #6684a3;
+  font-size: 0.78rem;
+}
+
+.metaRow span,
+.metaRow strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metaRow strong {
+  color: #1a528d;
+}
+
+.errorBanner {
+  margin: 0.75rem 1rem 0;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid rgba(181, 76, 31, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 244, 238, 0.96);
+  color: #963614;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.controls {
+  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
+}
+
+.controlsSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.58rem 1rem;
+  color: #52749a;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+  list-style: none;
+}
+
+.controlsSummary::-webkit-details-marker {
+  display: none;
+}
+
+.controlsSummary strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #1a528d;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controlsBody {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0 1rem 0.75rem;
+}
+
+.fieldLabel {
+  display: grid;
+  gap: 0.35rem;
+  color: #52749a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.select,
+.textarea {
+  width: 100%;
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #153c66;
+  font: inherit;
+}
+
+.select {
+  min-height: 2.35rem;
+  padding: 0 0.65rem;
+}
+
+.chipGroup,
+.mcpRow,
+.conversationActions,
+.composerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip,
+.mcpChip,
+.ghostButton,
+.conversationButton {
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #315880;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.chip,
+.ghostButton,
+.conversationButton {
+  cursor: pointer;
+}
+
+.chip {
+  padding: 0.42rem 0.65rem;
+}
+
+.chipActive {
+  border-color: rgba(20, 70, 128, 0.3);
+  background: #1f65a9;
+  color: #fff;
+}
+
+.mcpChip {
+  padding: 0.34rem 0.55rem;
+  opacity: 0.72;
+}
+
+.mcpEnabled {
+  border-color: rgba(31, 126, 87, 0.28);
+  background: rgba(229, 247, 238, 0.92);
+  color: #236c4f;
+  opacity: 1;
+}
+
+.conversationBar {
+  display: grid;
+  gap: 0.48rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
+}
+
+.currentConversation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.currentConversationText {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.currentConversationText span,
+.currentConversationText small {
+  color: #6b86a3;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.currentConversationText strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #143d67;
+  font-size: 0.98rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.renameForm {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.45rem;
+}
+
+.titleInput {
+  min-width: 0;
+  border: 1px solid rgba(20, 70, 128, 0.18);
+  border-radius: 12px;
+  background: #fff;
+  color: #153c66;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.42rem 0.58rem;
+}
+
+.conversationList {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.1rem;
+}
+
+.conversationButton {
+  flex: 0 0 auto;
+  max-width: 11rem;
+  overflow: hidden;
+  padding: 0.42rem 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationButtonActive {
+  border-color: rgba(20, 70, 128, 0.3);
+  background: rgba(225, 239, 255, 0.95);
+  color: #134f8a;
+}
+
+.ghostButton {
+  padding: 0.42rem 0.7rem;
+}
+
+.ghostButton:disabled,
+.sendButton:disabled,
+.textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.62rem;
+  min-height: 0;
+  padding: 0.65rem 1rem 0.85rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: linear-gradient(180deg, rgba(241, 247, 253, 0.58), rgba(255, 255, 255, 0.22));
+}
+
+.messagesHeader {
+  position: sticky;
+  top: -0.65rem;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: -0.65rem -1rem 0;
+  padding: 0.46rem 1rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
+  background: rgba(246, 250, 255, 0.96);
+  color: #6b86a3;
+  font-size: 0.74rem;
+  font-weight: 800;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.messagesHeader strong {
+  color: #1a528d;
+}
+
+.message {
+  display: grid;
+  gap: 0.28rem;
+  max-width: 86%;
+}
+
+.messageRole {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #6b86a3;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.failedLabel {
+  color: #a13d1f;
+  font-style: normal;
+}
+
+.pendingLabel {
+  color: #8a5a00;
+  font-style: normal;
+}
+
+.message p {
+  margin: 0;
+  padding: 0.68rem 0.78rem;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  border-radius: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.assistantMessage {
+  align-self: flex-start;
+}
+
+.assistantMessage p {
+  background: rgba(255, 255, 255, 0.94);
+  color: #183f68;
+}
+
+.userMessage {
+  align-self: flex-end;
+  text-align: right;
+}
+
+.userMessage p {
+  background: #1f65a9;
+  color: #fff;
+  text-align: left;
+}
+
+.failedMessage p {
+  border-color: rgba(174, 68, 36, 0.32);
+  background: #fff4ef;
+  color: #8f361d;
+}
+
+.pendingMessage p {
+  border-color: rgba(173, 116, 0, 0.3);
+  background: #fff9e8;
+  color: #704900;
+}
+
+.emptyState {
+  margin: auto;
+  padding: 0.8rem;
+  color: #6b86a3;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.composer {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem 1rem 0.85rem;
+  border-top: 1px solid rgba(20, 70, 128, 0.1);
+  background: rgba(250, 253, 255, 0.98);
+}
+
+.textarea {
+  min-height: 3.6rem;
+  max-height: 7rem;
+  padding: 0.62rem 0.7rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.composerActions {
+  justify-content: flex-end;
+}
+
+.sendButton {
+  border: 1px solid rgba(20, 70, 128, 0.26);
+  border-radius: 999px;
+  background: linear-gradient(135deg, #194f90, #276fbd);
+  color: #fff;
+  padding: 0.46rem 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 12px 22px rgba(20, 70, 128, 0.16);
+}
+
+@media (max-width: 720px) {
+  .drawer {
+    right: 0.65rem;
+    left: 0.65rem;
+    top: auto;
+    bottom: 0.65rem;
+    width: auto;
+    height: min(82vh, 700px);
+    border-radius: 18px;
+  }
+
+  .collapsedTab {
+    top: auto;
+    bottom: 5.5rem;
+  }
+
+  .renameForm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

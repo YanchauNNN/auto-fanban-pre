@@ -24,12 +24,21 @@ from src.deploy.terminal_package import (
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
+AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+AI_SPEC_NAME = "参数规范_AI.yaml"
+AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 REGISTER_TASK_SCRIPT = "register_backend_task.ps1"
 UNREGISTER_TASK_SCRIPT = "unregister_backend_task.ps1"
+
+
+def _pick_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def _valid_pc3_text(label: str = "pc3") -> str:
@@ -167,12 +176,15 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
+    _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
+    _write_file(repo_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "documents_bin" / "~$规范库.xlsx", "office lock")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
     _write_file(repo_root / "tools" / "diagnose_iis_frontend_503.ps1", "Write-Host diagnose-503")
+    _write_file(repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME, "Write-Host ai-connectivity")
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -186,9 +198,22 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (Path("backend/.venv/Lib/site-packages"), Path("python-packages/Lib/site-packages")) in rel_pairs
     assert (Path("documents/Resources"), Path("documents/Resources")) in rel_pairs
     assert (Path("documents") / MECHANISM_SPEC_NAME, Path("documents") / MECHANISM_SPEC_NAME) in rel_pairs
+    assert (Path("documents/AI"), Path("documents/AI")) in rel_pairs
+    assert (
+        Path("documents/AI") / AI_SPEC_NAME,
+        Path("documents/AI") / AI_SPEC_NAME,
+    ) in rel_pairs
+    assert (
+        Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
+        Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
+    ) in rel_pairs
     assert (Path("documents_bin"), Path("documents_bin")) in rel_pairs
     assert (Path("bin/ODAFileConverter 25.12.0"), Path("bin/ODAFileConverter 25.12.0")) in rel_pairs
     assert (Path("tools/diagnose_iis_frontend_503.ps1"), Path("tools/diagnose_iis_frontend_503.ps1")) in rel_pairs
+    assert (
+        Path("tools") / "ai" / AI_CONNECTIVITY_SCRIPT_NAME,
+        Path("scripts") / AI_CONNECTIVITY_SCRIPT_NAME,
+    ) in rel_pairs
 
 
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
@@ -313,6 +338,8 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "documents" / "Resources" / PC3_NAME).exists()
     assert (output_root / "documents" / SPEC_NAME).exists()
     assert (output_root / "documents" / MECHANISM_SPEC_NAME).exists()
+    assert (output_root / "documents" / "AI" / AI_SPEC_NAME).exists()
+    assert (output_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()
     assert (output_root / "scripts" / "start_backend.ps1").exists()
     assert (output_root / "scripts" / "check_health.ps1").exists()
@@ -320,6 +347,10 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "scripts" / "probe_target_env.ps1").exists()
     assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
     assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
+    assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).read_bytes() == (
+        repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME
+    ).read_bytes()
     assert (output_root / DEPLOY_README).exists()
     deploy_readme = (output_root / DEPLOY_README).read_text(encoding="utf-8")
     assert "install\\check_iis_proxy_prereqs.ps1" in deploy_readme
@@ -330,6 +361,11 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "api/system/ping" in deploy_readme
     assert "不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`" in deploy_readme
     assert "ARR proxy timeout 低于 600 秒" in deploy_readme
+    assert "scripts\\test_ai_model_connectivity.ps1" in deploy_readme
+    assert "script.sha256" in deploy_readme
+    assert "package-manifest.json" in deploy_readme
+    assert "done_received=false" in deploy_readme
+    assert "不能单独判定为失败" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -490,6 +526,18 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'Set-Item -Path "Env:FANBAN_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_GATEWAY_CONFIG_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_SPEC_PATH"' in start_backend
+    assert "terminal_cnpe_intranet_qwen_fast" in start_backend
+    assert "ai-config-preflight-ok" in start_backend
+    assert 'if ([string]::IsNullOrWhiteSpace($env:FANBAN_AI_GATEWAY_PROFILE))' not in start_backend
+    assert 'profile_name != "terminal_cnpe_intranet_qwen_fast"' in start_backend
+    assert 'validate_gateway_network_policy(required_network_mode="intranet_only")' in start_backend
+    assert '"--proxy-headers"' in start_backend
+    assert '"--forwarded-allow-ips"' in start_backend
+    assert '"127.0.0.1"' in start_backend
+    assert '"--workers",\n            "1"' in start_backend
     assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
     assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in start_backend
@@ -551,6 +599,12 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Set-Item -Path 'Env:{0}' -Value '{1}'" in prepare_terminal
+    assert "documents\\AI\\ai_model_gateway.yaml" in prepare_terminal
+    assert "documents\\AI\\参数规范_AI.yaml" in prepare_terminal
+    assert "FANBAN_AI_SPEC_PATH" in prepare_terminal
+    assert "FANBAN_AI_GATEWAY_CONFIG_PATH" in prepare_terminal
+    assert "FANBAN_AI_GATEWAY_PROFILE" in prepare_terminal
+    assert "terminal_cnpe_intranet_qwen_fast" in prepare_terminal
     assert "$env:{0}" not in prepare_terminal
     assert "OfficeProbeMode" in prepare_terminal
     assert "quick" in prepare_terminal

@@ -7,7 +7,7 @@
 - 提供类型安全的配置访问接口
 """
 
-from .runtime_config import RuntimeConfig, get_config, reload_config
+from .ai.ai_spec import AiSpec, AiSpecLoader, load_ai_spec, reload_ai_spec
 from .mechanism_spec import (
     MechanismSpec,
     MechanismSpecLoader,
@@ -15,6 +15,7 @@ from .mechanism_spec import (
     load_mechanism_spec,
     normalize_audit_replace_factory_codes,
 )
+from .runtime_config import RuntimeConfig, get_config, reload_config
 from .spec_loader import BusinessSpec, SpecLoader, load_spec
 
 __all__ = [
@@ -26,6 +27,10 @@ __all__ = [
     "append_audit_replace_factory_codes",
     "load_mechanism_spec",
     "normalize_audit_replace_factory_codes",
+    "AiSpec",
+    "AiSpecLoader",
+    "load_ai_spec",
+    "reload_ai_spec",
     "RuntimeConfig",
     "get_config",
     "reload_config",

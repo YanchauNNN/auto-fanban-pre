@@ -9,6 +9,14 @@ import type {
   AccountRecord,
   AccountUpdatePayload,
   AdminConfig,
+  AiAgent,
+  AiConversationDetail,
+  AiConversationSummary,
+  AiMcpServer,
+  AiMessage,
+  AiSendMessageResult,
+  AiSkill,
+  AiState,
   ApiAdapter,
   ApiError,
   ArchiveState,
@@ -64,6 +72,7 @@ type FetchPolicy = {
 const DEFAULT_GET_RETRY_COUNT = 2;
 const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
 const DEFAULT_GET_TIMEOUT_MS = 8000;
+const AI_CONTROL_TIMEOUT_MS = 15000;
 
 type RawArtifacts = {
   package_available: boolean;
@@ -513,6 +522,72 @@ type HttpAdapterOptions = {
   getAccessToken?: () => string | null;
   onUnauthorized?: () => void;
 };
+
+type RawAiAgent = {
+  agent_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+};
+
+type RawAiSkill = {
+  skill_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  enabled?: boolean | null;
+  read_only?: boolean | null;
+};
+
+type RawAiMcpServer = {
+  server_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  enabled?: boolean | null;
+  read_only?: boolean | null;
+  transport?: string | null;
+};
+
+type RawAiState = {
+  enabled?: boolean | null;
+  profile?: string | null;
+  model?: string | null;
+  owner_key?: string | null;
+  default_agent?: string | null;
+  agents?: RawAiAgent[] | null;
+  skills?: RawAiSkill[] | null;
+  mcp_servers?: RawAiMcpServer[] | null;
+};
+
+type RawAiConversationSummary = {
+  conversation_id?: string | null;
+  title?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  message_count?: number | null;
+};
+
+type RawAiMessage = {
+  message_id?: string | null;
+  role?: string | null;
+  content?: string | null;
+  created_at?: string | null;
+  model_profile?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+type RawAiConversationDetail = RawAiConversationSummary & {
+  messages?: RawAiMessage[] | null;
+};
+
+type RawAiSendMessageResult = {
+  conversation_id?: string | null;
+  user_message?: RawAiMessage | null;
+  assistant_message?: RawAiMessage | null;
+  memory?: {
+    used_history_messages?: number | null;
+  } | null;
+};
+
+const CHAT_POST_TIMEOUT_MS = 90000;
 
 export class HttpAdapter implements ApiAdapter {
   private readonly normalizedBaseUrl: string;
@@ -1065,6 +1140,109 @@ export class HttpAdapter implements ApiAdapter {
     URL.revokeObjectURL(objectUrl);
   }
 
+  async getAiState(signal?: AbortSignal): Promise<AiState> {
+    const payload = await this.fetchJson<RawAiState>("/api/ai/state", { signal }, {
+      retry: true,
+    });
+    return this.normalizeAiState(payload);
+  }
+
+  async listAiConversations(signal?: AbortSignal): Promise<AiConversationSummary[]> {
+    const payload = await this.fetchJson<RawAiConversationSummary[]>(
+      "/api/ai/conversations",
+      { signal },
+      { retry: true },
+    );
+    return (payload ?? []).map((conversation) => this.normalizeAiConversationSummary(conversation));
+  }
+
+  async createAiConversation(title = "新会话"): Promise<AiConversationSummary> {
+    const payload = await this.fetchJson<RawAiConversationSummary>(
+      "/api/ai/conversations",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+    return this.normalizeAiConversationSummary(payload);
+  }
+
+  async renameAiConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<AiConversationSummary> {
+    const payload = await this.fetchJson<RawAiConversationSummary>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+    return this.normalizeAiConversationSummary(payload);
+  }
+
+  async getAiConversation(
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<AiConversationDetail> {
+    const payload = await this.fetchJson<RawAiConversationDetail>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      { signal },
+      { retry: true },
+    );
+    return {
+      ...this.normalizeAiConversationSummary(payload),
+      messages: (payload.messages ?? []).map((message) => this.normalizeAiMessage(message)),
+    };
+  }
+
+  async sendAiMessage(
+    conversationId: string,
+    payload: {
+      content: string;
+      agentId?: string | null;
+      skillIds?: string[];
+      mcpServerIds?: string[];
+    },
+  ): Promise<AiSendMessageResult> {
+    const response = await this.fetchJson<RawAiSendMessageResult>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: payload.content,
+          agent_id: payload.agentId ?? null,
+          skill_ids: payload.skillIds ?? [],
+          mcp_server_ids: payload.mcpServerIds ?? [],
+        }),
+      },
+      { timeoutMs: CHAT_POST_TIMEOUT_MS },
+    );
+    return {
+      conversationId: response.conversation_id ?? conversationId,
+      userMessage: this.normalizeAiMessage(response.user_message ?? {}),
+      assistantMessage: this.normalizeAiMessage(response.assistant_message ?? {}),
+      memory: {
+        usedHistoryMessages: response.memory?.used_history_messages ?? 0,
+      },
+    };
+  }
+
+  async clearAiConversation(conversationId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/clear`,
+      {
+        method: "POST",
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
   private normalizeSummary(payload: RawJobSummary): JobSummary {
     const sourceFilename = payload.source_filename ?? payload.source_filenames?.[0] ?? payload.job_id;
     return {
@@ -1130,6 +1308,71 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  private normalizeAiState(payload: RawAiState): AiState {
+    return {
+      enabled: Boolean(payload.enabled),
+      profile: payload.profile ?? "",
+      model: payload.model ?? "",
+      ownerKey: payload.owner_key ?? "",
+      defaultAgent: payload.default_agent ?? "",
+      agents: (payload.agents ?? []).map((agent) => this.normalizeAiAgent(agent)),
+      skills: (payload.skills ?? []).map((skill) => this.normalizeAiSkill(skill)),
+      mcpServers: (payload.mcp_servers ?? []).map((server) => this.normalizeAiMcpServer(server)),
+    };
+  }
+
+  private normalizeAiAgent(payload: RawAiAgent): AiAgent {
+    return {
+      agentId: payload.agent_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+    };
+  }
+
+  private normalizeAiSkill(payload: RawAiSkill): AiSkill {
+    return {
+      skillId: payload.skill_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+      enabled: Boolean(payload.enabled),
+      readOnly: payload.read_only ?? true,
+    };
+  }
+
+  private normalizeAiMcpServer(payload: RawAiMcpServer): AiMcpServer {
+    return {
+      serverId: payload.server_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+      enabled: Boolean(payload.enabled),
+      readOnly: payload.read_only ?? true,
+      transport: payload.transport ?? undefined,
+    };
+  }
+
+  private normalizeAiConversationSummary(
+    payload: RawAiConversationSummary,
+  ): AiConversationSummary {
+    return {
+      conversationId: payload.conversation_id ?? "",
+      title: payload.title ?? "新会话",
+      createdAt: payload.created_at ?? "",
+      updatedAt: payload.updated_at ?? "",
+      messageCount: payload.message_count ?? 0,
+    };
+  }
+
+  private normalizeAiMessage(payload: RawAiMessage): AiMessage {
+    return {
+      messageId: payload.message_id ?? "",
+      role: payload.role ?? "assistant",
+      content: payload.content ?? "",
+      createdAt: payload.created_at ?? "",
+      modelProfile: payload.model_profile ?? null,
+      metadata: payload.metadata ?? {},
+    };
+  }
+
   private normalizeWorkloadSummary(payload: RawWorkloadSummary | null | undefined): WorkloadSummary {
     return {
       initialWorkloadA1: payload?.initial_workload_a1 ?? 0,
@@ -1167,7 +1410,12 @@ export class HttpAdapter implements ApiAdapter {
         return await this.fetchJsonOnce<T>(path, init, policy);
       } catch (error) {
         lastError = error;
-        if (!shouldRetry || attempt >= maxAttempts - 1 || !this.isRetryableError(error)) {
+        if (
+          init?.signal?.aborted ||
+          !shouldRetry ||
+          attempt >= maxAttempts - 1 ||
+          !this.isRetryableError(error)
+        ) {
           throw error;
         }
         await this.delay(this.retryDelayMs(attempt, policy.retryBaseDelayMs));
@@ -1184,11 +1432,21 @@ export class HttpAdapter implements ApiAdapter {
   ): Promise<T> {
     const timeoutMs = policy.timeoutMs ?? (policy.retry ? DEFAULT_GET_TIMEOUT_MS : undefined);
     const abortController = timeoutMs ? new AbortController() : null;
+    const externalSignal = init?.signal;
+    const handleExternalAbort = () => abortController?.abort();
+    if (abortController && externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener("abort", handleExternalAbort, { once: true });
+      }
+    }
     const timeoutId =
       abortController && timeoutMs
         ? window.setTimeout(() => abortController.abort(), timeoutMs)
         : null;
-    const initWithSignal = abortController ? { ...init, signal: abortController.signal } : init;
+    const requestSignal = abortController?.signal ?? externalSignal;
+    const initWithSignal = requestSignal ? { ...init, signal: requestSignal } : init;
     const requestInit = this.withAuthorization(initWithSignal);
 
     try {
@@ -1217,6 +1475,7 @@ export class HttpAdapter implements ApiAdapter {
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);
       }
+      externalSignal?.removeEventListener("abort", handleExternalAbort);
     }
   }
 
@@ -1306,6 +1565,9 @@ export class HttpAdapter implements ApiAdapter {
   }
 
   private isRetryableError(error: unknown) {
+    if (error && typeof error === "object" && "name" in error && error.name === "AbortError") {
+      return false;
+    }
     if (this.isApiError(error)) {
       return [408, 429, 500, 502, 503, 504].includes(error.status);
     }
