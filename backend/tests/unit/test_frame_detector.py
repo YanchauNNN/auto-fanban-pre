@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from src.cad.detection.anchor_first_locator import CandidateFrame, TextItem
 from src.cad import FrameDetector
+from src.cad.detection.anchor_first_locator import CandidateFrame, TextItem
 from src.interfaces import DetectionError
 from src.models import BBox
 
@@ -113,3 +113,9 @@ def test_marker_only_001_candidate_accepts_chinese_page_marker() -> None:
     ]
 
     assert locator._candidate_has_marker_only_001_text(cand, text_items)
+
+
+def test_marker_only_001_detection_accepts_compact_internal_code() -> None:
+    locator = FrameDetector().anchor_locator
+
+    assert locator._is_001_marker_code_text("20260SC2JGS01-001(A)")

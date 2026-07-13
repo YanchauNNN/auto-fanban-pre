@@ -67,6 +67,17 @@ class AnchorFirstLocator:
         self.paper_fitter = paper_fitter
         self.paper_variants = self.spec.get_paper_variants()
         self.max_candidates = max_candidates
+        internal_field = self.spec.get_field_definitions().get("internal_code")
+        internal_patterns = internal_field.parse.get("patterns", {}) if internal_field else {}
+        self.internal_code_001_search_re = re.compile(
+            str(
+                internal_patterns.get(
+                    "search_001",
+                    r"[A-Z0-9]{7}-[A-Z0-9]{5}-001",
+                )
+            ),
+            flags=re.IGNORECASE,
+        )
 
         anchor_cfg = self.spec.titleblock_extract.get("anchor", {})
         texts = anchor_cfg.get("search_text", [])
@@ -1115,7 +1126,7 @@ class AnchorFirstLocator:
         has_later_page_marker = False
         for text in marker_texts:
             compact = self._normalize_anchor(text).upper()
-            if re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact):
+            if self.internal_code_001_search_re.search(compact):
                 has_001_code = True
 
             if self._is_later_page_marker_text(text):
@@ -1157,10 +1168,9 @@ class AnchorFirstLocator:
             windows.append(window)
         return windows
 
-    @staticmethod
-    def _is_001_marker_code_text(text: str) -> bool:
-        compact = AnchorFirstLocator._normalize_anchor(text).upper()
-        return bool(re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact))
+    def _is_001_marker_code_text(self, text: str) -> bool:
+        compact = self._normalize_anchor(text).upper()
+        return bool(self.internal_code_001_search_re.search(compact))
 
     @staticmethod
     def _is_later_page_marker_text(text: str) -> bool:

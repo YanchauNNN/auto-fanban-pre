@@ -1002,8 +1002,12 @@ titleblock_extract:
         patterns:
           full:  "^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
           short: "^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})$"
+          compact_full: "^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
+          compact_short: "^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})$"
+          search_full: "(?P<code>(?:[A-Z0-9]{7}-[A-Z0-9]{5}|[0-9]{5}[A-Z0-9]{8})-[0-9]{3})"
+          search_001: "(?:[A-Z0-9]{7}-[A-Z0-9]{5}|[0-9]{5}[A-Z0-9]{8})-001"
           mid_album: "^(?P<mid3>[A-Z0-9]{3})(?P<album>[0-9]{2})$"
-        note: "mid_album用于从mid字段的末2位提取album_code(图册编号)"
+        note: "full/short用于常规7-5分段编码；compact_full/compact_short用于20260SC2JGS01-001一类紧凑编码；search_full/search_001供续页标记与一致性检测复用；mid_album用于从mid字段的末2位提取album_code(图册编号)"
 
     engineering_no:
       roi: 工程号
@@ -1040,6 +1044,14 @@ titleblock_extract:
       roi: 图纸标题
       parse:
         type: bilingual_split
+        standalone_tilde_merge:
+          enabled: true
+          tokens: ["~", "～"]
+          numeric_gap_pattern: "(?<=\\d)\\s+(?=\\d)"
+          numeric_token_pattern: "\\d+(?:\\.\\d+)?"
+          allow_nonspace_numeric_boundary: true
+          require_host_bbox_overlap: true
+          note: "独立波浪号文字落在同一行宿主文字包围盒内时，将其写回最接近的数字区间（优先替换数字间空格，也支持0°120°）；未安全命中时保留原文字"
         rules:
           - "按y坐标聚类成行"
           - "含CJK字符的行归为中文候选"
