@@ -18,8 +18,11 @@ profiles:
     network_mode: "internet_allowed"
     base_url: "https://api.minimaxi.com/v1"
     allowed_hosts: ["api.minimaxi.com"]
+    # Applies when an MCP endpoint is supplied to the connectivity probe.
+    mcp_allowed_hosts: ["127.0.0.1", "localhost"]
     models_path: "/models"
     chat_completions_path: "/chat/completions"
+    responses_path: "/responses"
     api_key_env_var: "MiniMax-API"
     api_key_required: true
     authorization_scheme: "bearer"
@@ -32,6 +35,15 @@ profiles:
     ssl_no_revoke: false
     test_prompt: "Reply exactly: AI_CONNECTIVITY_OK"
     expected_response_contains: "AI_CONNECTIVITY_OK"
+    # Diagnostic discovery only. Unsupported optional capabilities do not fail
+    # core connectivity.
+    agent_probe_enabled: true
+    multimodal_probe_enabled: true
+    concurrency_probe_count: 2
+    mcp_streamable_http_url: ""
+    mcp_sse_url: ""
+    mcp_stdio_command: ""
+    mcp_api_key_env_var: ""
 
   terminal_cnpe_intranet_qwen_fast:
     description: "Terminal deployment through CNPE intranet OpenAI-compatible model gateway"
@@ -41,8 +53,11 @@ profiles:
     network_mode: "intranet_only"
     base_url: "http://models.ai.cnpe.cc/qwen_fast/v1"
     allowed_hosts: ["models.ai.cnpe.cc"]
+    # Keep this explicit and limited to approved internal MCP hosts.
+    mcp_allowed_hosts: ["127.0.0.1", "localhost", "models.ai.cnpe.cc"]
     models_path: "/models"
     chat_completions_path: "/chat/completions"
+    responses_path: "/responses"
     api_key_env_var: ""
     api_key_required: false
     authorization_scheme: "none"
@@ -55,3 +70,12 @@ profiles:
     ssl_no_revoke: false
     test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
     expected_response_contains: "AI_CONNECTIVITY_OK"
+    # Keep these probes enabled until the terminal capability matrix has been
+    # captured. They are non-destructive and optional for overall status.
+    agent_probe_enabled: true
+    multimodal_probe_enabled: true
+    concurrency_probe_count: 2
+    mcp_streamable_http_url: ""
+    mcp_sse_url: ""
+    mcp_stdio_command: ""
+    mcp_api_key_env_var: ""
