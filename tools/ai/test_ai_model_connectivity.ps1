@@ -50,7 +50,8 @@ function ConvertTo-StringArray {
     }
     if ($text.StartsWith("[") -and $text.EndsWith("]")) {
         try {
-            return @($text | ConvertFrom-Json | ForEach-Object { [string]$_ })
+            $parsed = $text | ConvertFrom-Json
+            return @(foreach ($item in @($parsed)) { [string]$item })
         } catch {
             return @($text)
         }
@@ -607,6 +608,7 @@ function Invoke-ChatCapabilityProbe {
         [int]$TimeoutSec,
         [hashtable]$ExtraPayload = @{},
         [string]$ExpectedContains = "",
+        [switch]$ExpectedContainsIgnoreCase,
         [string]$ExpectedToolName = "",
         [bool]$Required = $false,
         [bool]$Stream = $false,
@@ -668,7 +670,12 @@ function Invoke-ChatCapabilityProbe {
             $matching = @($result.tool_calls | Where-Object { $_.name -eq $ExpectedToolName -and $_.arguments_valid })
             $result.status = if ($matching.Count -gt 0) { "passed" } else { "inconclusive" }
         } elseif (-not [string]::IsNullOrWhiteSpace($ExpectedContains)) {
-            $result.status = if ($result.content_preview.Contains($ExpectedContains)) { "passed" } else { "inconclusive" }
+            $containsExpected = if ($ExpectedContainsIgnoreCase) {
+                $result.content_preview.IndexOf($ExpectedContains, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+            } else {
+                $result.content_preview.Contains($ExpectedContains)
+            }
+            $result.status = if ($containsExpected) { "passed" } else { "inconclusive" }
         } else {
             $result.status = "passed"
         }
@@ -803,6 +810,7 @@ function Get-PythonRuntimeInventory {
     $pythonVersion = $null
     $errorText = $null
     if ($null -ne $selectedPython) {
+        $exitCode = $null
         $pythonCode = @'
 import importlib.metadata as md
 import importlib.util
@@ -822,15 +830,42 @@ for module, distribution in (("openai", "openai"), ("agents", "openai-agents"), 
 print(json.dumps({"python_version": platform.python_version(), "packages": items}))
 '@
         try {
-            $output = & $selectedPython -c $pythonCode 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                $parsed = ConvertTo-JsonObjectOrNull (($output | Out-String).Trim())
+            $argument = '"' + ($pythonCode -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $selectedPython
+            $startInfo.Arguments = "-c $argument"
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            try {
+                if (-not $process.Start()) {
+                    throw "Python runtime process could not be started."
+                }
+                $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+                $stderrTask = $process.StandardError.ReadToEndAsync()
+                if (-not $process.WaitForExit(30000)) {
+                    $process.Kill()
+                    throw "Python runtime inventory timed out after 30 seconds."
+                }
+                [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask))
+                $outputText = (@($stdoutTask.Result, $stderrTask.Result) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+                $exitCode = $process.ExitCode
+            } finally {
+                $process.Dispose()
+            }
+
+            if ($exitCode -eq 0) {
+                $parsed = ConvertTo-JsonObjectOrNull $outputText.Trim()
                 if ($null -ne $parsed) {
                     $pythonVersion = [string]$parsed.python_version
                     $packages = $parsed.packages
                 }
             } else {
-                $errorText = (($output | Out-String).Trim())
+                $errorText = $outputText.Trim()
             }
         } catch {
             $errorText = $_.Exception.Message
@@ -1647,7 +1682,7 @@ if ($multimodalProbeEnabled -and (-not $SkipMultimodal) -and (-not $networkPolic
                         @{ type = "image_url"; image_url = @{ url = $imageDataUrl; detail = "high" } }
                     )
                 }
-            ) -ExpectedContains "VISION_MARKER_7319" -UseSslNoRevoke:$sslNoRevokeConfig
+            ) -ExpectedContains "VISION_MARKER_7319" -ExpectedContainsIgnoreCase -UseSslNoRevoke:$sslNoRevokeConfig
     } catch {
         $imageInputResult.status = "inconclusive"
         $imageInputResult.error = "Could not generate or submit the local vision fixture: $($_.Exception.Message)"
