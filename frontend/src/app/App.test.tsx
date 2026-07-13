@@ -869,41 +869,52 @@ describe("homepage shell", () => {
 });
 
 describe("recent jobs area", () => {
-  it("refreshes recent jobs after receiving a jobs activity SSE event", async () => {
-    let emitActivity: ((activity: { total: number; active: number; lastChangedAt: string | null }) => void) | null =
+  it("opens a bounded jobs activity SSE stream only while jobs are active", async () => {
+    let onActivity: ((activity: { total: number; active: number; lastChangedAt: string | null }) => void) | null =
       null;
-    mockSubscribeJobsActivity.mockImplementation((onActivity) => {
-      emitActivity = onActivity;
-      return () => {};
+    const unsubscribe = vi.fn();
+    mockSubscribeJobsActivity.mockImplementation((activityHandler) => {
+      onActivity = activityHandler;
+      return unsubscribe;
     });
-    mockListJobs
-      .mockResolvedValueOnce({
-        total: 1,
-        items: [makeSingleJob(1, "before-sse.dwg")],
-      })
-      .mockResolvedValue({
-        total: 1,
-        items: [makeSingleJob(2, "after-sse.dwg")],
-      });
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeSingleJob(1, "sse-active.dwg"),
+          status: "running",
+          stage: "EXPORT_PDF_AND_DWG",
+          percent: 60,
+          finishedAt: null,
+        },
+      ],
+    });
+    mockGetJobsActivity.mockResolvedValue({
+      total: 1,
+      active: 1,
+      lastChangedAt: "2026-07-10T08:00:00+08:00",
+    });
 
     render(<App />);
 
-    expect(await screen.findByText("before-sse.dwg")).toBeInTheDocument();
-    expect(mockSubscribeJobsActivity).toHaveBeenCalledTimes(1);
-    const listCallCountBeforeSse = mockListJobs.mock.calls.length;
+    expect(await screen.findByText("sse-active.dwg")).toBeInTheDocument();
+    expect(mockGetJobsActivity).toHaveBeenCalled();
+    await waitFor(() => expect(mockSubscribeJobsActivity).toHaveBeenCalledTimes(1));
 
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [makeSingleJob(1, "sse-active.dwg")],
+    });
     act(() => {
-      emitActivity?.({
+      onActivity?.({
         total: 1,
-        active: 1,
-        lastChangedAt: "2026-07-07T10:00:03+08:00",
+        active: 0,
+        lastChangedAt: "2026-07-10T08:00:03+08:00",
       });
     });
 
-    await waitFor(() => {
-      expect(mockListJobs.mock.calls.length).toBeGreaterThan(listCallCountBeforeSse);
-    });
-    expect(await screen.findByText("after-sse.dwg")).toBeInTheDocument();
+    await waitFor(() => expect(mockListJobs).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(unsubscribe).toHaveBeenCalledTimes(1));
   });
 
   it("filters recent jobs by status and refreshes totals from the backend", async () => {

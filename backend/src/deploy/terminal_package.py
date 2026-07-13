@@ -137,6 +137,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1",
             Path("scripts") / "test_ai_model_connectivity.ps1",
         ),
+        CopyPlanEntry(
+            repo_root / "tools" / "diagnose_iis_frontend_503.ps1",
+            Path("tools") / "diagnose_iis_frontend_503.ps1",
+        ),
     ]
 
 
@@ -1626,6 +1630,11 @@ Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
     [string]$Url = "http://127.0.0.1:8000/api/system/health",
     [string]$PingUrl = "http://127.0.0.1:8000/api/system/ping",
     [int]$ApiPort = __DEFAULT_FRONTEND_API_PORT__,
+    [string]$FrontendUrl = "",
+    [string]$FrontendApiPingUrl = "",
+    [string]$IisSiteName = "FanBanTerminal",
+    [string]$IisAppPoolName = "FanBanTerminalAppPool",
+    [int]$HttpTimeoutSec = 5,
     [ValidateSet("full", "deep")]
     [string]$Mode = "full"
 )
@@ -1712,6 +1721,295 @@ function Get-BackendFailureClassification {
     return "listener_present_but_api_unreachable"
 }
 
+function Convert-IisTimeValueToSeconds {
+    param([object]$Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [TimeSpan]) {
+        return [int][Math]::Round($Value.TotalSeconds)
+    }
+
+    try {
+        $valueProperty = $Value.PSObject.Properties["Value"]
+        if ($null -ne $valueProperty -and $null -ne $valueProperty.Value) {
+            return Convert-IisTimeValueToSeconds -Value $valueProperty.Value
+        }
+    } catch {
+    }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $null
+    }
+
+    $parsedTimeSpan = [TimeSpan]::Zero
+    if ([TimeSpan]::TryParse($text, [ref]$parsedTimeSpan)) {
+        return [int][Math]::Round($parsedTimeSpan.TotalSeconds)
+    }
+
+    $parsedSeconds = 0
+    if ([int]::TryParse($text, [ref]$parsedSeconds)) {
+        return $parsedSeconds
+    }
+
+    return $null
+}
+
+function Get-FrontendProbeUrlFromBinding {
+    param([object[]]$Bindings)
+
+    foreach ($binding in $Bindings) {
+        $protocol = [string]$binding.protocol
+        if ($protocol -ne "http") {
+            continue
+        }
+
+        $bindingInformation = [string]$binding.bindingInformation
+        $parts = $bindingInformation.Split(":")
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $portText = [string]$parts[1]
+        if ([string]::IsNullOrWhiteSpace($portText)) {
+            continue
+        }
+
+        $hostHeader = ""
+        if ($parts.Count -ge 3) {
+            $hostHeader = [string]$parts[2]
+        }
+        $hostForProbe = if ([string]::IsNullOrWhiteSpace($hostHeader)) { "127.0.0.1" } else { $hostHeader }
+        $portSuffix = if ($portText -eq "80") { "" } else { ":" + $portText }
+        return ("http://{0}{1}/" -f $hostForProbe, $portSuffix)
+    }
+
+    return ""
+}
+
+function Join-FrontendApiPingUrl {
+    param([string]$RootUrl)
+
+    if ([string]::IsNullOrWhiteSpace($RootUrl)) {
+        return ""
+    }
+
+    return ($RootUrl.TrimEnd("/") + "/api/system/ping")
+}
+
+function Invoke-FrontendHttpProbe {
+    param(
+        [string]$Uri,
+        [bool]$ExpectJsonOk = $false,
+        [int]$TimeoutSec = 5
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Uri)) {
+        return [ordered]@{
+            status = "fail"
+            url = ""
+            status_code = $null
+            json_ok = $false
+            error = "frontend probe url is empty"
+        }
+    }
+
+    $effectiveTimeoutSec = [Math]::Max(1, $TimeoutSec)
+    $job = Start-Job -ScriptBlock {
+        param(
+            [string]$TargetUri,
+            [bool]$TargetExpectJsonOk,
+            [int]$TargetTimeoutSec
+        )
+
+        try {
+            if ($TargetExpectJsonOk) {
+                $response = Invoke-RestMethod -Uri $TargetUri -Method Get -TimeoutSec $TargetTimeoutSec
+                $jsonOk = $false
+                if ($null -ne $response -and $null -ne $response.PSObject.Properties["ok"]) {
+                    $jsonOk = [bool]$response.ok
+                }
+                return [ordered]@{
+                    status = if ($jsonOk) { "pass" } else { "fail" }
+                    url = $TargetUri
+                    status_code = $null
+                    json_ok = $jsonOk
+                    error = if ($jsonOk) { "" } else { "response did not contain ok=true" }
+                }
+            }
+
+            $response = Invoke-WebRequest -Uri $TargetUri -UseBasicParsing -Method Get -TimeoutSec $TargetTimeoutSec
+            return [ordered]@{
+                status = if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 400) { "pass" } else { "fail" }
+                url = $TargetUri
+                status_code = [int]$response.StatusCode
+                json_ok = $false
+                error = ""
+            }
+        } catch {
+            $statusCode = $null
+            try {
+                if ($null -ne $_.Exception.Response) {
+                    $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+            } catch {
+                $statusCode = $null
+            }
+            return [ordered]@{
+                status = "fail"
+                url = $TargetUri
+                status_code = $statusCode
+                json_ok = $false
+                error = $_.Exception.Message
+            }
+        }
+    } -ArgumentList $Uri, $ExpectJsonOk, $effectiveTimeoutSec
+
+    $jobTimeoutSec = [Math]::Max($effectiveTimeoutSec + 3, 8)
+    if (-not (Wait-Job -Job $job -Timeout $jobTimeoutSec)) {
+        Stop-Job -Job $job -ErrorAction SilentlyContinue | Out-Null
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+        return [ordered]@{
+            status = "fail"
+            url = $Uri
+            status_code = $null
+            json_ok = $false
+            error = ("probe timed out after {0} seconds" -f $jobTimeoutSec)
+        }
+    }
+
+    $result = Receive-Job -Job $job
+    Remove-Job -Job $job -Force -ErrorAction SilentlyContinue | Out-Null
+    if ($null -eq $result) {
+        return [ordered]@{
+            status = "fail"
+            url = $Uri
+            status_code = $null
+            json_ok = $false
+            error = "probe returned no result"
+        }
+    }
+
+    return $result
+}
+
+function Get-IisFrontendSnapshot {
+    param(
+        [string]$SiteName,
+        [string]$AppPoolName
+    )
+
+    $result = [ordered]@{
+        status = "fail"
+        error = ""
+        problems = @()
+        site_name = $SiteName
+        app_pool_name = $AppPoolName
+        site_state = ""
+        site_physical_path = ""
+        site_physical_path_exists = $false
+        site_server_auto_start = $null
+        app_pool_state = ""
+        app_pool_auto_start = $null
+        app_pool_start_mode = ""
+        app_pool_idle_timeout_seconds = $null
+        app_pool_periodic_restart_seconds = $null
+        bindings = @()
+        derived_frontend_url = ""
+    }
+
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+        $site = Get-Website -Name $SiteName -ErrorAction Stop
+        $bindings = @(Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue)
+        $appPoolState = Get-WebAppPoolState -Name $AppPoolName -ErrorAction Stop
+        $appPool = Get-Item ("IIS:\AppPools\{0}" -f $AppPoolName) -ErrorAction Stop
+
+        $sitePhysicalPath = [Environment]::ExpandEnvironmentVariables([string]$site.PhysicalPath)
+        $siteServerAutoStart = $null
+        try {
+            if ($null -ne $site.serverAutoStart) {
+                $siteServerAutoStart = [bool]$site.serverAutoStart
+            }
+        } catch {
+            $siteServerAutoStart = $null
+        }
+
+        $appPoolAutoStart = $null
+        try {
+            if ($null -ne $appPool.autoStart) {
+                $appPoolAutoStart = [bool]$appPool.autoStart
+            }
+        } catch {
+            $appPoolAutoStart = $null
+        }
+        $idleTimeoutSeconds = Convert-IisTimeValueToSeconds -Value $appPool.processModel.idleTimeout
+        $periodicRestartSeconds = Convert-IisTimeValueToSeconds -Value $appPool.recycling.periodicRestart.time
+
+        $bindingDetails = @()
+        foreach ($binding in $bindings) {
+            $bindingDetails += [ordered]@{
+                protocol = [string]$binding.protocol
+                binding_information = [string]$binding.bindingInformation
+            }
+        }
+
+        $problems = @()
+        if ([string]$site.State -ne "Started") {
+            $problems += ("IIS site state is " + [string]$site.State + ", expected Started")
+        }
+        if ($siteServerAutoStart -eq $false) {
+            $problems += "IIS site serverAutoStart is false"
+        }
+        if (-not (Test-Path -LiteralPath $sitePhysicalPath -PathType Container)) {
+            $problems += ("IIS site physical path does not exist: " + $sitePhysicalPath)
+        }
+        if ([string]$appPoolState.Value -ne "Started") {
+            $problems += ("AppPool state is " + [string]$appPoolState.Value + ", expected Started")
+        }
+        if ($appPoolAutoStart -ne $true) {
+            $problems += "AppPool autoStart is not true"
+        }
+        if ([string]$appPool.startMode -ne "AlwaysRunning") {
+            $problems += ("AppPool startMode is " + [string]$appPool.startMode + ", expected AlwaysRunning")
+        }
+        if ($null -ne $idleTimeoutSeconds -and [int]$idleTimeoutSeconds -ne 0) {
+            $problems += ("AppPool idleTimeout is " + $idleTimeoutSeconds + " seconds, expected 0")
+        }
+        if ($null -eq $idleTimeoutSeconds) {
+            $problems += "AppPool idleTimeout could not be parsed"
+        }
+        if ($null -ne $periodicRestartSeconds -and [int]$periodicRestartSeconds -ne 0) {
+            $problems += ("AppPool periodic restart is " + $periodicRestartSeconds + " seconds, expected 0")
+        }
+        if ($null -eq $periodicRestartSeconds) {
+            $problems += "AppPool periodic restart could not be parsed"
+        }
+
+        $result.status = if ($problems.Count -eq 0) { "pass" } else { "fail" }
+        $result.problems = $problems
+        $result.site_state = [string]$site.State
+        $result.site_physical_path = $sitePhysicalPath
+        $result.site_physical_path_exists = (Test-Path -LiteralPath $sitePhysicalPath -PathType Container)
+        $result.site_server_auto_start = $siteServerAutoStart
+        $result.app_pool_state = [string]$appPoolState.Value
+        $result.app_pool_auto_start = $appPoolAutoStart
+        $result.app_pool_start_mode = [string]$appPool.startMode
+        $result.app_pool_idle_timeout_seconds = $idleTimeoutSeconds
+        $result.app_pool_periodic_restart_seconds = $periodicRestartSeconds
+        $result.bindings = $bindingDetails
+        $result.derived_frontend_url = Get-FrontendProbeUrlFromBinding -Bindings $bindings
+    } catch {
+        $result.status = "fail"
+        $result.error = $_.Exception.Message
+        $result.problems = @($_.Exception.Message)
+    }
+
+    return $result
+}
+
 function Convert-FirstJsonObjectFromText {
     param([string]$Text)
 
@@ -1763,6 +2061,27 @@ $backendListener = [ordered]@{
 }
 $backendListenerStatus = "skip"
 $backendFailureClassification = "unknown"
+$iisFrontend = [ordered]@{
+    status = "skip"
+    error = ""
+    problems = @()
+    derived_frontend_url = ""
+}
+$frontendAppPoolStatus = "skip"
+$frontendRootProbeUrl = ""
+$frontendApiProbeUrl = ""
+$frontendHttpProbe = [ordered]@{
+    status = "skip"
+    url = ""
+    error = ""
+}
+$frontendApiProxyProbe = [ordered]@{
+    status = "skip"
+    url = ""
+    error = ""
+}
+$frontendHttpStatus = "skip"
+$frontendApiProxyStatus = "skip"
 
 if ($Mode -eq "deep" -and (Test-Path -LiteralPath $probeScript -PathType Leaf)) {
     & $probeScript -OutJson $deepProbeJson -RepoRoot $root -OfficeProbeMode deep
@@ -1868,7 +2187,7 @@ try {
 }
 
 try {
-    $apiPingResponse = Invoke-RestMethod -Uri $PingUrl -Method Get
+    $apiPingResponse = Invoke-RestMethod -Uri $PingUrl -Method Get -TimeoutSec $HttpTimeoutSec
     $apiPingStatus = "pass"
 } catch {
     $apiPingStatus = "fail"
@@ -1876,7 +2195,7 @@ try {
 }
 
 try {
-    $apiHealthResponse = Invoke-RestMethod -Uri $Url -Method Get
+    $apiHealthResponse = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec $HttpTimeoutSec
     $apiHealthStatus = "pass"
 } catch {
     $apiHealthStatus = "fail"
@@ -1891,6 +2210,23 @@ $backendFailureClassification = Get-BackendFailureClassification `
     -TaskState $taskStateForDiagnosis `
     -ListenerSnapshot $backendListener
 
+$iisFrontend = Get-IisFrontendSnapshot -SiteName $IisSiteName -AppPoolName $IisAppPoolName
+$frontendAppPoolStatus = [string]$iisFrontend.status
+$frontendRootProbeUrl = if ([string]::IsNullOrWhiteSpace($FrontendUrl)) {
+    [string]$iisFrontend.derived_frontend_url
+} else {
+    $FrontendUrl
+}
+$frontendApiProbeUrl = if ([string]::IsNullOrWhiteSpace($FrontendApiPingUrl)) {
+    Join-FrontendApiPingUrl -RootUrl $frontendRootProbeUrl
+} else {
+    $FrontendApiPingUrl
+}
+$frontendHttpProbe = Invoke-FrontendHttpProbe -Uri $frontendRootProbeUrl -ExpectJsonOk:$false -TimeoutSec $HttpTimeoutSec
+$frontendApiProxyProbe = Invoke-FrontendHttpProbe -Uri $frontendApiProbeUrl -ExpectJsonOk:$true -TimeoutSec $HttpTimeoutSec
+$frontendHttpStatus = [string]$frontendHttpProbe.status
+$frontendApiProxyStatus = [string]$frontendApiProxyProbe.status
+
 $blockingIssues = @()
 $warnings = @()
 if ($null -ne $selectedProbe) {
@@ -1900,7 +2236,7 @@ if ($null -ne $selectedProbe) {
 
 $overallStatus = "pass"
 $probeRequiredForOverall = ($Mode -eq "deep")
-if (($probeRequiredForOverall -and $null -eq $selectedProbe) -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail") {
+if (($probeRequiredForOverall -and $null -eq $selectedProbe) -or $blockingIssues.Count -gt 0 -or $apiPingStatus -ne "pass" -or $apiHealthStatus -ne "pass" -or $taskStatus -ne "pass" -or $taskSettingsStatus -eq "fail" -or $frontendAppPoolStatus -ne "pass" -or $frontendHttpStatus -ne "pass" -or $frontendApiProxyStatus -ne "pass") {
     $overallStatus = "fail"
 } elseif ($proxyStatus -eq "warn") {
     $overallStatus = "warn"
@@ -1927,6 +2263,11 @@ $summary = [ordered]@{
     backend_listener_status = $backendListenerStatus
     backend_listener_count = $backendListener.count
     backend_failure_classification = $backendFailureClassification
+    frontend_app_pool_status = $frontendAppPoolStatus
+    frontend_http_status = $frontendHttpStatus
+    frontend_api_proxy_status = $frontendApiProxyStatus
+    frontend_url = $frontendRootProbeUrl
+    frontend_api_ping_url = $frontendApiProbeUrl
     proxy_status = $proxyStatus
     proxy_timeout_status = $proxyTimeoutStatus
     proxy_timeout_seconds = $proxyTimeoutSeconds
@@ -1953,6 +2294,12 @@ $fullReport = [ordered]@{
         failure_classification = $backendFailureClassification
     }
     backend_listener = $backendListener
+    frontend_iis = $iisFrontend
+    frontend = [ordered]@{
+        app_pool_status = $frontendAppPoolStatus
+        http = $frontendHttpProbe
+        api_proxy = $frontendApiProxyProbe
+    }
     api = [ordered]@{
         status = $apiPingStatus
         url = $PingUrl
@@ -1997,6 +2344,9 @@ Write-Host ("Backend listener: " + $backendListenerStatus + " (" + $backendListe
 Write-Host ("Backend failure classification: " + $backendFailureClassification)
 Write-Host ("API ping: " + $apiPingStatus)
 Write-Host ("API health: " + $apiHealthStatus)
+Write-Host ("Frontend AppPool: " + $frontendAppPoolStatus)
+Write-Host ("Frontend HTTP: " + $frontendHttpStatus + " (" + $frontendRootProbeUrl + ")")
+Write-Host ("Frontend API proxy: " + $frontendApiProxyStatus + " (" + $frontendApiProbeUrl + ")")
 Write-Host ("IIS proxy prereqs: " + $proxyStatus)
 Write-Host ("IIS proxy timeout: " + $proxyTimeoutStatus + " (" + $proxyTimeoutSeconds + "s, minimum " + $proxyMinimumTimeoutSeconds + "s)")
 if ($blockingIssues.Count -gt 0) {
@@ -2013,6 +2363,18 @@ if ($apiPingStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiPingErr
 }
 if ($apiHealthStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace($apiHealthError)) {
     Write-Host ("API health detail: " + $apiHealthError)
+}
+if ($frontendAppPoolStatus -ne "pass") {
+    Write-Host "Frontend AppPool detail:"
+    foreach ($problem in @($iisFrontend.problems)) {
+        Write-Host ("- " + [string]$problem)
+    }
+}
+if ($frontendHttpStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace([string]$frontendHttpProbe.error)) {
+    Write-Host ("Frontend HTTP detail: " + [string]$frontendHttpProbe.error)
+}
+if ($frontendApiProxyStatus -ne "pass" -and -not [string]::IsNullOrWhiteSpace([string]$frontendApiProxyProbe.error)) {
+    Write-Host ("Frontend API proxy detail: " + [string]$frontendApiProxyProbe.error)
 }
 Write-Host ("Summary JSON: " + $summaryJson)
 Write-Host ("Full JSON: " + $fullJson)
@@ -2491,6 +2853,10 @@ if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
 }
 Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value ""
 Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name autoStart -Value $true
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name startMode -Value "AlwaysRunning"
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.idleTimeout -Value "00:00:00"
+Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name recycling.periodicRestart.time -Value "00:00:00"
 
 $bindingInformation = "{0}:{1}:{2}" -f $BindAddress, $Port, $HostName
 $conflictingSiteName = Get-ConflictingHttpBindingSiteName -CurrentSiteName $SiteName -BindingInformation $bindingInformation
@@ -2513,6 +2879,7 @@ if (-not (Test-Path "IIS:\Sites\$SiteName")) {
 }
 
 Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $AppPoolName
+Set-ItemProperty "IIS:\Sites\$SiteName" -Name serverAutoStart -Value $true
 
 $webConfig = Join-Path $PhysicalPath "web.config"
 $proxyWarning = $null
@@ -2613,10 +2980,40 @@ $staticContentConfig
 
 $webConfigContent | Out-File -LiteralPath $webConfig -Encoding utf8
 Start-Website -Name $SiteName | Out-Null
+try {
+    Start-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue | Out-Null
+} catch {
+}
+
+function Invoke-FrontendWarmup {
+    param([string]$Url)
+
+    $lastError = ""
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 10 | Out-Null
+            Write-Host ("IIS 前端预热成功: " + $Url)
+            return
+        } catch {
+            $lastError = $_.Exception.Message
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    throw ("IIS 前端预热失败: {0}; {1}" -f $Url, $lastError)
+}
+
+if ([string]::IsNullOrWhiteSpace($HostName)) {
+    $warmupPort = if ($Port -eq 80) { "" } else { ":" + $Port }
+    Invoke-FrontendWarmup -Url ("http://127.0.0.1{0}/" -f $warmupPort)
+} else {
+    Write-Warning "已跳过本机前端预热：当前使用非空 HostName，请确保部署机和客户端可解析该主机名。"
+}
 
 $displayHost = if ([string]::IsNullOrWhiteSpace($HostName)) { "<部署机IP或主机名>" } else { $HostName }
 $displayPort = if ($Port -eq 80) { "" } else { ":" + $Port }
 Write-Host ("IIS 站点已配置完成。前端访问地址: http://{0}{1}/" -f $displayHost, $displayPort)
+Write-Host "frontend-app-pool: AlwaysRunning autoStart=True idleTimeout=00:00:00 periodicRestart=00:00:00"
 if (-not [string]::IsNullOrWhiteSpace($HostName)) {
     Write-Warning "HostName 只负责 IIS 主机头绑定，不会自动创建 DNS 或 hosts 解析。若要直接访问该主机名，请先让部署机和客户端都能解析到正确 IP。"
 }

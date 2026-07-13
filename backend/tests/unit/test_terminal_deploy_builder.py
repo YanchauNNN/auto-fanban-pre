@@ -60,6 +60,12 @@ def _write_file(path: Path, content: str = "x") -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _find_unused_tcp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
 def _relative_files(root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
 
@@ -178,6 +184,7 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
     _write_file(repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME, "Write-Host ai-connectivity")
+    _write_file(repo_root / "tools" / "diagnose_iis_frontend_503.ps1", "Write-Host diagnose-503")
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -206,6 +213,7 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
         Path("tools") / "ai" / AI_CONNECTIVITY_SCRIPT_NAME,
         Path("scripts") / AI_CONNECTIVITY_SCRIPT_NAME,
     ) in rel_pairs
+    assert (Path("tools/diagnose_iis_frontend_503.ps1"), Path("tools/diagnose_iis_frontend_503.ps1")) in rel_pairs
 
 
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
@@ -222,6 +230,9 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert 'url="http://127.0.0.1:8000/api/{R:1}"' in frontend_web_config
     assert 'url="/index.html"' in frontend_web_config
     assert (output_root / "backend-runtime" / "API" / "app" / "main.py").exists()
+    assert (output_root / "tools" / "diagnose_iis_frontend_503.ps1").read_text(
+        encoding="utf-8-sig"
+    ) == "Write-Host diagnose-503"
     assert not (output_root / "documents_bin" / "~$规范库.xlsx").exists()
     assert (output_root / "python-packages" / "Lib" / "site-packages" / "demo_pkg" / "__init__.py").exists()
     assert not (
@@ -871,6 +882,51 @@ if ($errors -and $errors.Count -gt 0) {
         assert completed.returncode == 0, f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
 
 
+def test_generated_configure_iis_site_keeps_frontend_app_pool_resident(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    configure_iis = (output_root / "install" / "configure_iis_site.ps1").read_text(encoding="utf-8")
+
+    assert 'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name autoStart -Value $true' in configure_iis
+    assert 'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name startMode -Value "AlwaysRunning"' in configure_iis
+    assert 'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name processModel.idleTimeout -Value "00:00:00"' in configure_iis
+    assert 'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name recycling.periodicRestart.time -Value "00:00:00"' in configure_iis
+    assert "frontend-app-pool: AlwaysRunning" in configure_iis
+
+
+def test_generated_check_health_reports_frontend_iis_residency_and_http(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    check_health = (output_root / "scripts" / "check_health.ps1").read_text(encoding="utf-8")
+
+    assert '[string]$FrontendUrl = ""' in check_health
+    assert '[string]$FrontendApiPingUrl = ""' in check_health
+    assert '[string]$IisSiteName = "FanBanTerminal"' in check_health
+    assert '[string]$IisAppPoolName = "FanBanTerminalAppPool"' in check_health
+    assert "Get-FrontendProbeUrlFromBinding" in check_health
+    assert "Invoke-FrontendHttpProbe" in check_health
+    assert "Get-WebAppPoolState -Name $AppPoolName" in check_health
+    assert "processModel.idleTimeout" in check_health
+    assert "recycling.periodicRestart.time" in check_health
+    assert "frontend_app_pool_status" in check_health
+    assert "frontend_http_status" in check_health
+    assert "frontend_api_proxy_status" in check_health
+    assert "Frontend HTTP:" in check_health
+    assert "Frontend AppPool:" in check_health
+
+
 def test_build_terminal_deploy_package_init_storage_does_not_hardcode_slot_count(
     tmp_path: Path,
 ) -> None:
@@ -958,6 +1014,7 @@ def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(
     port = _pick_free_port()
 
     build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    unused_port = _find_unused_tcp_port()
 
     completed = subprocess.run(
         [
@@ -968,7 +1025,7 @@ def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(
             "-File",
             str(output_root / "scripts" / "start_backend.ps1"),
             "-Port",
-            str(port),
+            str(unused_port),
         ],
         capture_output=True,
     )
@@ -1070,4 +1127,3 @@ def test_generated_start_backend_prevents_duplicate_supervisors_and_workers(tmp_
     assert '$apiReadyForWorker = $true' in start_backend
     assert 'if ($apiReadyForWorker -and $null -eq $workerChild)' in start_backend
     assert 'Start-BackendManagedProcess -Label "worker"' in start_backend
-

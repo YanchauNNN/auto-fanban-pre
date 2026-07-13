@@ -16,3 +16,26 @@ cd E:\project\auto-fanban-pre\.worktrees\codex-frontend-app-shell-sync\frontend
 $env:VITE_API_BASE_URL='http://127.0.0.1:8080'
 $env:VITE_API_PROXY_TARGET='http://127.0.0.1:8080'
 npm run dev -- --host 127.0.0.1 --port 5180
+
+
+AI 图纸理解测试空间 codex/ai-drawing-understanding（独立端口，避免和 main 的 8000/5173、frontend-app-shell-sync 的 8080/5180 冲突）
+
+后端：
+cd E:\project\auto-fanban-pre\.worktrees\codex-ai-drawing-understanding
+$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
+uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 18181
+
+前端：
+cd E:\project\auto-fanban-pre\.worktrees\codex-ai-drawing-understanding\frontend
+$env:VITE_API_BASE_URL='http://127.0.0.1:18181'
+$env:VITE_API_PROXY_TARGET='http://127.0.0.1:18181'
+npm run dev -- --host 127.0.0.1 --port 5185 --strictPort
+
+访问地址：
+http://127.0.0.1:5185/
+
+后端健康检查：
+http://127.0.0.1:18181/api/system/ping
+
+AI 状态检查：
+http://127.0.0.1:18181/api/ai/state

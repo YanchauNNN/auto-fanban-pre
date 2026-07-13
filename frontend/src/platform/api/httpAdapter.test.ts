@@ -522,7 +522,8 @@ describe("HttpAdapter", () => {
 
     const adapter = new HttpAdapter("http://127.0.0.1:8000/");
     const onActivity = vi.fn();
-    const unsubscribe = adapter.subscribeJobsActivity(onActivity);
+    const onError = vi.fn();
+    const unsubscribe = adapter.subscribeJobsActivity(onActivity, onError);
 
     expect(instances).toHaveLength(1);
     expect(instances[0].url).toBe("http://127.0.0.1:8000/api/jobs/activity/stream");
@@ -541,6 +542,10 @@ describe("HttpAdapter", () => {
       active: 2,
       lastChangedAt: "2026-07-05T12:34:56+08:00",
     });
+
+    instances[0].onerror?.(new Event("error"));
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(instances[0].closed).toBe(false);
 
     unsubscribe();
 

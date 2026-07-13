@@ -101,6 +101,8 @@ def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> 
     assert spec.api_runtime.job_summary_sync_interval_sec == 3.0
     assert spec.api_runtime.jobs_activity_stream_poll_interval_sec == 2.0
     assert spec.api_runtime.jobs_activity_stream_keepalive_sec == 15.0
+    assert spec.api_runtime.jobs_activity_stream_max_duration_sec == 60.0
+    assert spec.api_runtime.jobs_activity_stream_retry_ms == 5000
 
 
 def test_append_audit_replace_factory_codes_updates_yaml_and_cache(tmp_path: Path) -> None:
