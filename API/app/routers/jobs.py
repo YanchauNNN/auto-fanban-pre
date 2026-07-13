@@ -148,10 +148,11 @@ def _jobs_activity_marker(activity: dict[str, Any]) -> str:
     return f"{activity.get('total', 0)}:{activity.get('active', 0)}:{activity.get('last_changed_at') or ''}"
 
 
-def _format_jobs_activity_sse(activity: dict[str, Any]) -> str:
+def _format_jobs_activity_sse(activity: dict[str, Any], *, retry_ms: int | None = None) -> str:
     marker = _jobs_activity_marker(activity)
     data = json.dumps(activity, ensure_ascii=False, separators=(",", ":"))
-    return f"event: jobs_activity\nid: {marker}\ndata: {data}\n\n"
+    retry_line = f"retry: {max(1000, int(retry_ms))}\n" if retry_ms is not None else ""
+    return f"event: jobs_activity\nid: {marker}\n{retry_line}data: {data}\n\n"
 
 
 async def _jobs_activity_event_stream(
@@ -160,23 +161,30 @@ async def _jobs_activity_event_stream(
     *,
     poll_interval_sec: float,
     keepalive_sec: float,
+    max_duration_sec: float,
+    retry_ms: int,
 ) -> AsyncIterator[str]:
     last_marker: str | None = None
     last_sent_at = 0.0
+    started_at = time.monotonic()
     poll_interval = max(0.1, float(poll_interval_sec))
     keepalive_interval = max(poll_interval, float(keepalive_sec))
+    max_duration = max(poll_interval, float(max_duration_sec))
     while True:
         activity = runtime.jobs_activity()
         marker = _jobs_activity_marker(activity)
         now = time.monotonic()
         if marker != last_marker:
-            yield _format_jobs_activity_sse(activity)
+            yield _format_jobs_activity_sse(activity, retry_ms=retry_ms)
             last_marker = marker
             last_sent_at = now
         elif now - last_sent_at >= keepalive_interval:
             yield f": keepalive {int(now)}\n\n"
             last_sent_at = now
         if await request.is_disconnected():
+            break
+        if now - started_at >= max_duration:
+            yield f": stream-close {int(now)}\n\n"
             break
         await asyncio.sleep(poll_interval)
 
@@ -190,6 +198,8 @@ def jobs_activity_stream(request: Request) -> StreamingResponse:
             request.app.state.runtime,
             poll_interval_sec=api_runtime_cfg.jobs_activity_stream_poll_interval_sec,
             keepalive_sec=api_runtime_cfg.jobs_activity_stream_keepalive_sec,
+            max_duration_sec=api_runtime_cfg.jobs_activity_stream_max_duration_sec,
+            retry_ms=api_runtime_cfg.jobs_activity_stream_retry_ms,
         ),
         media_type="text/event-stream",
         headers={

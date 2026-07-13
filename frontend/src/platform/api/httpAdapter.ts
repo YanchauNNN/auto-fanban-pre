@@ -586,7 +586,6 @@ export class HttpAdapter implements ApiAdapter {
     };
     const handleError = (event: Event) => {
       onError?.(event);
-      source.close();
     };
 
     source.addEventListener("jobs_activity", handleActivity as EventListener);

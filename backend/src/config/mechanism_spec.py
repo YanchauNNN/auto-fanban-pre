@@ -117,6 +117,8 @@ class ApiRuntimeMechanismConfig(BaseModel):
     job_summary_sync_interval_sec: float = 3.0
     jobs_activity_stream_poll_interval_sec: float = 2.0
     jobs_activity_stream_keepalive_sec: float = 15.0
+    jobs_activity_stream_max_duration_sec: float = 60.0
+    jobs_activity_stream_retry_ms: int = 5000
 
 
 class CadRuntimeMechanismConfig(BaseModel):

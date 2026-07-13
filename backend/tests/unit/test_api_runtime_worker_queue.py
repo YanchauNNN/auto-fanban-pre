@@ -300,6 +300,8 @@ def test_jobs_activity_stream_emits_initial_and_changed_events() -> None:
             Runtime(),
             poll_interval_sec=0.001,
             keepalive_sec=10,
+            max_duration_sec=60,
+            retry_ms=5000,
         )
         async for chunk in stream:
             chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
@@ -310,11 +312,46 @@ def test_jobs_activity_stream_emits_initial_and_changed_events() -> None:
     first, second = asyncio.run(_collect())
 
     assert "event: jobs_activity" in first
+    assert "retry: 5000" in first
     assert 'id: "1:1:2026-07-07T00:00:00"' not in first
     assert "id: 1:1:2026-07-07T00:00:00" in first
     assert '"active":1' in first
     assert "id: 1:0:2026-07-07T00:00:03" in second
     assert '"active":0' in second
+
+
+def test_jobs_activity_stream_closes_before_iis_requests_become_stale() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.routers.jobs import _jobs_activity_event_stream
+
+    class Runtime:
+        def jobs_activity(self) -> dict[str, Any]:
+            return {"total": 1, "active": 1, "last_changed_at": "2026-07-07T00:00:00"}
+
+    async def is_disconnected() -> bool:
+        return False
+
+    async def _collect() -> list[str]:
+        chunks: list[str] = []
+        stream = _jobs_activity_event_stream(
+            SimpleNamespace(is_disconnected=is_disconnected),
+            Runtime(),
+            poll_interval_sec=0.001,
+            keepalive_sec=10,
+            max_duration_sec=0.001,
+            retry_ms=5000,
+        )
+        async for chunk in stream:
+            chunks.append(chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk)
+        return chunks
+
+    chunks = asyncio.run(asyncio.wait_for(_collect(), timeout=1))
+
+    assert "event: jobs_activity" in chunks[0]
+    assert "retry: 5000" in chunks[0]
+    assert chunks[-1].startswith(": stream-close ")
 
 
 def test_api_mode_health_uses_sqlite_worker_heartbeat(monkeypatch, tmp_path: Path) -> None:

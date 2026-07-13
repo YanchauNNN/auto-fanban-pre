@@ -529,6 +529,7 @@ export function App() {
 
 function WorkspacePage() {
   const adapter = useApiAdapter();
+  const subscribeJobsActivity = adapter.subscribeJobsActivity;
   const reactQueryClient = useQueryClient();
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
   const knownJobStatusesRef = useRef<Map<string, string> | null>(null);
@@ -633,8 +634,6 @@ function WorkspacePage() {
       return activity && activity.active > 0 ? 3000 : 12000;
     },
   });
-  const subscribeJobsActivity = adapter.subscribeJobsActivity;
-
   const jobCards = useMemo(
     () => buildJobCardModels(jobsQuery.data?.items ?? []),
     [jobsQuery.data?.items],
@@ -676,17 +675,6 @@ function WorkspacePage() {
   }, []);
 
   useEffect(() => {
-    if (!subscribeJobsActivity) {
-      return undefined;
-    }
-
-    return subscribeJobsActivity((activity) => {
-      reactQueryClient.setQueryData(["jobs-activity"], activity);
-      void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
-    });
-  }, [subscribeJobsActivity, reactQueryClient]);
-
-  useEffect(() => {
     const activity = jobsActivityQuery.data;
     if (!activity) {
       return;
@@ -699,6 +687,22 @@ function WorkspacePage() {
       void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
     }
   }, [jobsActivityQuery.data, reactQueryClient]);
+
+  useEffect(() => {
+    const activity = jobsActivityQuery.data;
+    if (!subscribeJobsActivity || !activity || activity.active <= 0) {
+      return;
+    }
+
+    return subscribeJobsActivity(
+      (nextActivity) => {
+        reactQueryClient.setQueryData(["jobs-activity"], nextActivity);
+      },
+      () => {
+        void reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
+      },
+    );
+  }, [jobsActivityQuery.data?.active, reactQueryClient, subscribeJobsActivity]);
 
   useEffect(() => {
     const items = jobsQuery.data?.items;
