@@ -52,6 +52,27 @@ def test_parse_internal_code_full_and_short() -> None:
     assert code == "ABC1234-ABCDE"
 
 
+def test_parse_internal_code_compact_project_unit_subitem_format() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["internal_code"].parse
+
+    code, album = extractor._parse_internal_code(
+        [_item("20260SC2JGS01-001")],
+        parse_cfg,
+    )
+
+    assert code == "20260SC2JGS01-001"
+    assert album == "01"
+
+
+def test_subitem_no_can_be_derived_from_compact_internal_code() -> None:
+    extractor = TitleblockExtractor()
+    assert (
+        extractor._subitem_no_from_internal_code("20260SC2JGS01-001")
+        == "SC2"
+    )
+
+
 def test_parse_internal_code_recombines_fragmented_lines() -> None:
     extractor = TitleblockExtractor()
     parse_cfg = extractor.field_defs["internal_code"].parse
@@ -435,6 +456,72 @@ def test_parse_title_bilingual_merges_visual_line_by_bbox_overlap() -> None:
     assert title_en == "ZT Structural Design Description （二）"
 
 
+def test_extract_title_lines_inserts_overlapping_standalone_tilde_into_numeric_gap() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item(
+            "6RC-钢衬里筒壁(32.250 46.600m)",
+            x=10.0,
+            y=100.0,
+            bbox=BBox(xmin=10.0, ymin=96.0, xmax=210.0, ymax=104.0),
+        ),
+        _item(
+            "~",
+            x=119.0,
+            y=100.0,
+            bbox=BBox(xmin=117.0, ymin=96.0, xmax=121.0, ymax=104.0),
+        ),
+    ]
+
+    lines = extractor._extract_title_lines(items)
+
+    assert lines == ["6RC-钢衬里筒壁(32.250~46.600m)"]
+
+
+def test_extract_title_lines_keeps_standalone_tilde_without_safe_bbox_host() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item(
+            "32.250 46.600m",
+            x=10.0,
+            y=100.0,
+            bbox=BBox(xmin=10.0, ymin=96.0, xmax=110.0, ymax=104.0),
+        ),
+        _item(
+            "~",
+            x=130.0,
+            y=100.0,
+            bbox=BBox(xmin=128.0, ymin=96.0, xmax=132.0, ymax=104.0),
+        ),
+    ]
+
+    lines = extractor._extract_title_lines(items)
+
+    assert lines == ["32.250 46.600m ~"]
+
+
+def test_extract_title_lines_inserts_overlapping_tilde_between_angle_values() -> None:
+    extractor = TitleblockExtractor()
+    items = [
+        _item(
+            "钢衬里展开图0°120°",
+            x=10.0,
+            y=100.0,
+            bbox=BBox(xmin=10.0, ymin=96.0, xmax=170.0, ymax=104.0),
+        ),
+        _item(
+            "~",
+            x=125.0,
+            y=100.0,
+            bbox=BBox(xmin=123.0, ymin=96.0, xmax=127.0, ymax=104.0),
+        ),
+    ]
+
+    lines = extractor._extract_title_lines(items)
+
+    assert lines == ["钢衬里展开图0°~120°"]
+
+
 def test_parse_title_bilingual_treats_compact_alnum_prefix_as_chinese_title() -> None:
     extractor = TitleblockExtractor()
     items = [
@@ -565,6 +652,16 @@ def test_parse_a4_page_marker_identity_with_parenthesized_revision() -> None:
     internal_code, revision = extractor._parse_a4_marker_identity(items)
 
     assert internal_code == "18185NE-JGS11-001"
+    assert revision == "A"
+
+
+def test_parse_a4_page_marker_identity_with_compact_internal_code() -> None:
+    extractor = TitleblockExtractor()
+    items = [_item("20260SC2JGS01-001(A)", x=10.0, y=100.0)]
+
+    internal_code, revision = extractor._parse_a4_marker_identity(items)
+
+    assert internal_code == "20260SC2JGS01-001"
     assert revision == "A"
 
 

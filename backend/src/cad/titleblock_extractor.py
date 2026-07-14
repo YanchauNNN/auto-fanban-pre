@@ -75,6 +75,50 @@ class TitleblockExtractor(ITitleblockExtractor):
         self.roi_margin_percent = float(tolerances.get("roi_margin_percent", 0.0))
         self.y_cluster_abs = float(text_grouping.get("y_cluster_abs", 1.0))
         self.line_join = str(text_grouping.get("line_join", "\n"))
+        title_parse = self.field_defs.get("title").parse if self.field_defs.get("title") else {}
+        tilde_merge = title_parse.get("standalone_tilde_merge", {})
+        self.standalone_tilde_merge_enabled = bool(tilde_merge.get("enabled", True))
+        self.standalone_tilde_tokens = {
+            str(token).strip()
+            for token in tilde_merge.get("tokens", ["~", "～"])
+            if str(token).strip()
+        }
+        self.standalone_tilde_gap_re = re.compile(
+            str(tilde_merge.get("numeric_gap_pattern", r"(?<=\d)\s+(?=\d)"))
+        )
+        self.standalone_tilde_numeric_token_re = re.compile(
+            str(tilde_merge.get("numeric_token_pattern", r"\d+(?:\.\d+)?"))
+        )
+        self.standalone_tilde_allow_nonspace_boundary = bool(
+            tilde_merge.get("allow_nonspace_numeric_boundary", True)
+        )
+        self.standalone_tilde_require_bbox_overlap = bool(
+            tilde_merge.get("require_host_bbox_overlap", True)
+        )
+        internal_parse = (
+            self.field_defs.get("internal_code").parse
+            if self.field_defs.get("internal_code")
+            else {}
+        )
+        internal_patterns = internal_parse.get("patterns", {})
+        self.internal_code_search_re = re.compile(
+            str(
+                internal_patterns.get(
+                    "search_full",
+                    r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})",
+                )
+            ),
+            flags=re.IGNORECASE,
+        )
+        self.internal_code_001_search_re = re.compile(
+            str(
+                internal_patterns.get(
+                    "search_001",
+                    r"[A-Z0-9]{7}-[A-Z0-9]{5}-001",
+                )
+            ),
+            flags=re.IGNORECASE,
+        )
         scale_mismatch = tolerances.get("scale_mismatch", {})
         self.scale_tol_abs = float(scale_mismatch.get("abs_tol", 0.5))
         self.scale_tol_rel = float(scale_mismatch.get("rel_tol", 0.02))
@@ -515,8 +559,8 @@ class TitleblockExtractor(ITitleblockExtractor):
         self, items: list[TextItem]
     ) -> tuple[str | None, str | None]:
         pattern = re.compile(
-            r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})"
-            r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|[:：]\s*(?P<rev_colon>[A-Z0-9]+))?",
+            self.internal_code_search_re.pattern
+            + r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|[:：]\s*(?P<rev_colon>[A-Z0-9]+))?",
             flags=re.IGNORECASE,
         )
         for cand in self._candidate_strings(items):
@@ -586,7 +630,7 @@ class TitleblockExtractor(ITitleblockExtractor):
                 continue
             compact = self._strip_all_whitespace(text).upper()
             if (
-                re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001", compact, flags=re.IGNORECASE)
+                self.internal_code_001_search_re.search(compact)
                 or "PAGE" in compact
                 or "OF" in compact
                 or "第" in compact
@@ -690,9 +734,26 @@ class TitleblockExtractor(ITitleblockExtractor):
         short_pat = patterns.get(
             "short", r"^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})$"
         )
+        compact_full_pat = patterns.get(
+            "compact_full",
+            (
+                r"^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])"
+                r"(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})-"
+                r"(?P<seq>[0-9]{3})$"
+            ),
+        )
+        compact_short_pat = patterns.get(
+            "compact_short",
+            (
+                r"^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])"
+                r"(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})$"
+            ),
+        )
         mid_album_pat = patterns.get("mid_album", r"^(?P<mid3>[A-Z0-9]{3})(?P<album>[0-9]{2})$")
         re_full = re.compile(full_pat)
         re_short = re.compile(short_pat)
+        re_compact_full = re.compile(compact_full_pat)
+        re_compact_short = re.compile(compact_short_pat)
         re_mid_album = re.compile(mid_album_pat)
 
         candidates = self._candidate_strings(items)
@@ -705,22 +766,15 @@ class TitleblockExtractor(ITitleblockExtractor):
         short_match: re.Match[str] | None = None
         for cand in candidates:
             text = self._strip_all_whitespace(cand.upper())
-            m = re_full.match(text)
-            if m:
-                internal_code = m.group(0)
-                album_code = None
-                mid = m.groupdict().get("mid")
-                if mid:
-                    mm = re_mid_album.match(mid)
-                    if mm:
-                        album_code = mm.group("album")
-                    elif len(mid) >= 2:
-                        album_code = mid[-2:]
-                return internal_code, album_code
+            for full_regex in (re_full, re_compact_full):
+                m = full_regex.match(text)
+                if m:
+                    return self._internal_code_and_album_from_match(m, re_mid_album)
 
-            m = re_short.match(text)
-            if m and short_match is None:
-                short_match = m
+            for short_regex in (re_short, re_compact_short):
+                m = short_regex.match(text)
+                if m and short_match is None:
+                    short_match = m
 
         rebuilt = self._rebuild_internal_code_from_segments(items, re_full, re_short)
         if rebuilt:
@@ -737,18 +791,24 @@ class TitleblockExtractor(ITitleblockExtractor):
                 return rebuilt, album_code
 
         if short_match:
-            internal_code = short_match.group(0)
-            album_code = None
-            mid = short_match.groupdict().get("mid")
-            if mid:
-                mm = re_mid_album.match(mid)
-                if mm:
-                    album_code = mm.group("album")
-                elif len(mid) >= 2:
-                    album_code = mid[-2:]
-            return internal_code, album_code
+            return self._internal_code_and_album_from_match(short_match, re_mid_album)
 
         return None, None
+
+    @staticmethod
+    def _internal_code_and_album_from_match(
+        match: re.Match[str],
+        mid_album_regex: re.Pattern[str],
+    ) -> tuple[str, str | None]:
+        album_code = None
+        mid = match.groupdict().get("mid")
+        if mid:
+            album_match = mid_album_regex.match(mid)
+            if album_match:
+                album_code = album_match.group("album")
+            elif len(mid) >= 2:
+                album_code = mid[-2:]
+        return match.group(0), album_code
 
     # 外部编码中至少包含的数字个数（过滤模板占位文字）
     _EXT_CODE_MIN_DIGITS = 3
@@ -1035,13 +1095,22 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         return expected
 
-    @staticmethod
-    def _subitem_no_from_internal_code(internal_code: str | None) -> str | None:
+    def _subitem_no_from_internal_code(self, internal_code: str | None) -> str | None:
         text = str(internal_code or "").strip().upper()
         match = re.match(r"^\d{4}\d(?P<subitem>[A-Z]{2,4})-", text)
-        if not match:
-            return None
-        return match.group("subitem")
+        if match:
+            return match.group("subitem")
+
+        internal_field = self.field_defs.get("internal_code")
+        patterns = internal_field.parse.get("patterns", {}) if internal_field else {}
+        for pattern_name in ("compact_full", "compact_short"):
+            pattern = patterns.get(pattern_name)
+            if not pattern:
+                continue
+            compact_match = re.match(str(pattern), text)
+            if compact_match and compact_match.groupdict().get("subitem"):
+                return compact_match.group("subitem")
+        return None
 
     @staticmethod
     def _normalize_subitem_candidate(value: str) -> str:
@@ -1102,7 +1171,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         return self.line_join.join(joined).strip()
 
     def _extract_title_lines(self, items: list[TextItem]) -> list[str]:
-        frags: list[tuple[float, float, str, float, float]] = []
+        frags: list[tuple[float, float, str, float, float, float, float]] = []
         for it in items:
             text = (it.text or "").strip()
             if not text:
@@ -1110,28 +1179,29 @@ class TitleblockExtractor(ITitleblockExtractor):
             parts = [p.strip() for p in text.splitlines() if p.strip()]
             if not parts:
                 continue
-            _, ymin, _, ymax = self._item_span(it)
+            xmin, ymin, xmax, ymax = self._item_span(it)
             if len(parts) == 1:
-                frags.append((it.y, it.x, parts[0], ymin, ymax))
+                frags.append((it.y, it.x, parts[0], ymin, ymax, xmin, xmax))
             else:
                 for idx, part in enumerate(parts):
                     part_y = it.y - idx * (self.y_cluster_abs * 0.1)
-                    frags.append((part_y, it.x, part, ymin, ymax))
+                    frags.append((part_y, it.x, part, ymin, ymax, xmin, xmax))
 
         frags.sort(key=lambda t: (-t[0], t[1]))
-        lines: list[list[tuple[float, float, str, float, float]]] = []
-        for y, x, text, ymin, ymax in frags:
+        lines: list[list[tuple[float, float, str, float, float, float, float]]] = []
+        for y, x, text, ymin, ymax, xmin, xmax in frags:
             placed = False
             for line in lines:
                 if self._title_fragments_same_visual_line(line, y, ymin, ymax):
-                    line.append((y, x, text, ymin, ymax))
+                    line.append((y, x, text, ymin, ymax, xmin, xmax))
                     placed = True
                     break
             if not placed:
-                lines.append([(y, x, text, ymin, ymax)])
+                lines.append([(y, x, text, ymin, ymax, xmin, xmax)])
 
         out: list[str] = []
         for line in lines:
+            line = self._merge_standalone_tildes_into_numeric_gaps(line)
             line.sort(key=lambda t: t[1])
             s = " ".join(seg[2] for seg in line if seg[2])
             s = self._normalize_spaces(s)
@@ -1139,9 +1209,93 @@ class TitleblockExtractor(ITitleblockExtractor):
                 out.append(s)
         return out
 
+    def _merge_standalone_tildes_into_numeric_gaps(
+        self,
+        line: list[tuple[float, float, str, float, float, float, float]],
+    ) -> list[tuple[float, float, str, float, float, float, float]]:
+        if not self.standalone_tilde_merge_enabled or len(line) < 2:
+            return line
+
+        merged = list(line)
+        consumed: set[int] = set()
+        for tilde_index, tilde in enumerate(merged):
+            if tilde[2].strip() not in self.standalone_tilde_tokens:
+                continue
+            tilde_center_x = (tilde[5] + tilde[6]) / 2.0
+            host_candidates: list[tuple[float, int, str]] = []
+            for host_index, host in enumerate(merged):
+                if host_index == tilde_index or host_index in consumed:
+                    continue
+                if host[2].strip() in self.standalone_tilde_tokens:
+                    continue
+                if self.standalone_tilde_require_bbox_overlap and not (
+                    host[5] <= tilde_center_x <= host[6]
+                ):
+                    continue
+                replacement = self._insert_tilde_into_nearest_numeric_gap(
+                    host[2],
+                    host_xmin=host[5],
+                    host_xmax=host[6],
+                    tilde_x=tilde_center_x,
+                )
+                if replacement is None:
+                    continue
+                host_center_x = (host[5] + host[6]) / 2.0
+                host_candidates.append(
+                    (abs(host_center_x - tilde_center_x), host_index, replacement)
+                )
+
+            if not host_candidates:
+                continue
+            _, host_index, replacement = min(host_candidates, key=lambda candidate: candidate[0])
+            host = merged[host_index]
+            merged[host_index] = (*host[:2], replacement, *host[3:])
+            consumed.add(tilde_index)
+
+        return [fragment for index, fragment in enumerate(merged) if index not in consumed]
+
+    def _insert_tilde_into_nearest_numeric_gap(
+        self,
+        text: str,
+        *,
+        host_xmin: float,
+        host_xmax: float,
+        tilde_x: float,
+    ) -> str | None:
+        matches = list(self.standalone_tilde_gap_re.finditer(text))
+        if host_xmax <= host_xmin:
+            return None
+        text_length = max(len(text), 1)
+        relative_tilde_x = (tilde_x - host_xmin) / (host_xmax - host_xmin)
+        if matches:
+            match = min(
+                matches,
+                key=lambda candidate: abs(
+                    ((candidate.start() + candidate.end()) / 2.0) / text_length
+                    - relative_tilde_x
+                ),
+            )
+            return f"{text[:match.start()]}~{text[match.end():]}"
+
+        if not self.standalone_tilde_allow_nonspace_boundary:
+            return None
+        numeric_tokens = list(self.standalone_tilde_numeric_token_re.finditer(text))
+        insertion_points = [
+            right.start()
+            for left, right in zip(numeric_tokens, numeric_tokens[1:], strict=False)
+            if left.end() < right.start()
+        ]
+        if not insertion_points:
+            return None
+        insertion_point = min(
+            insertion_points,
+            key=lambda position: abs(position / text_length - relative_tilde_x),
+        )
+        return f"{text[:insertion_point]}~{text[insertion_point:]}"
+
     def _title_fragments_same_visual_line(
         self,
-        line: list[tuple[float, float, str, float, float]],
+        line: list[tuple[float, float, str, float, float, float, float]],
         y: float,
         ymin: float,
         ymax: float,

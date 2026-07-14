@@ -17,6 +17,14 @@ def test_paper_text_from_variant_normalizes_special_cases() -> None:
     assert service.paper_text_from_variant("CNPE_A4H") == "A4"
 
 
+def test_a4_marker_revision_rewrite_accepts_compact_internal_code() -> None:
+    service = TitleblockConsistencyService()
+
+    rewritten = service._rewrite_a4_marker_revision("20260SC2JGS01-001(B)", "A")
+
+    assert rewritten == "20260SC2JGS01-001(A)"
+
+
 def test_plan_replacements_updates_only_changed_fragments() -> None:
     service = TitleblockConsistencyService()
     fragments = [
