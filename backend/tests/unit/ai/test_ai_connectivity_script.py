@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -99,7 +100,12 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
                 item.get("type") for item in last_content if isinstance(item, dict)
             }
             if "image_url" in content_types:
-                self._send_completion("VISION_MARKER_7319")
+                marker = (
+                    "vision_marker_7319"
+                    if payload.get("model") == "concurrency-generic-model"
+                    else "VISION_MARKER_7319"
+                )
+                self._send_completion(marker)
                 return
             if "file" in content_types:
                 self._send_completion("FILE_CONTENT_OK_7319")
@@ -539,6 +545,7 @@ profiles:
     network_mode: "test"
     architecture: "local_test_gateway"
     base_url: "{openai_compatible_server}"
+    mcp_allowed_hosts: ["127.0.0.1", "localhost"]
     models_path: "/models"
     chat_completions_path: "/chat/completions"
     api_key_env_var: ""
@@ -597,12 +604,15 @@ profiles:
     assert runtime["timezone"]
     assert "python_candidates" in runtime
     assert "packages" in runtime
+    assert runtime["python_version"]
+    assert runtime["error"] is None
     mcp = result["checks"]["mcp"]["streamable_http"]
     assert mcp["status"] == "passed"
     assert mcp["session_id"] == "test-session-7319"
     assert mcp["server_name"] == "fanban-test-mcp"
     assert mcp["tool_count"] == 1
     assert result["readiness"]["mcp"]["status"] == "passed"
+    assert result["profile"]["mcp_allowed_hosts"] == ["127.0.0.1", "localhost"]
     serialized = json.dumps(result)
     assert "Authorization: Bearer" not in serialized
     assert "MCP_SECRET_7319" not in serialized
@@ -612,6 +622,91 @@ profiles:
         if item.get("method") == "notifications/initialized"
     )
     assert "id" not in initialized
+
+
+def test_ai_connectivity_script_captures_full_python_runtime_error(
+    tmp_path: Path,
+    openai_compatible_server: str,
+) -> None:
+    if shutil.which("powershell") is None:
+        pytest.skip("PowerShell is required for the connectivity script")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    source_script = repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1"
+    isolated_root = tmp_path / "isolated-probe-root"
+    script_path = isolated_root / "tools" / "ai" / source_script.name
+    config_path = isolated_root / "documents" / "AI" / "ai_model_gateway.yaml"
+    output_path = tmp_path / "connectivity.json"
+    fake_python = isolated_root / "python-runtime" / "python.exe"
+    script_path.parent.mkdir(parents=True)
+    config_path.parent.mkdir(parents=True)
+    fake_python.parent.mkdir(parents=True)
+    shutil.copy2(source_script, script_path)
+
+    powershell_path = Path(shutil.which("powershell") or "")
+    assert powershell_path.is_file()
+    try:
+        os.link(powershell_path, fake_python)
+    except OSError:
+        shutil.copy2(powershell_path, fake_python)
+
+    config_path.write_text(
+        f"""
+schema_version: "0.1"
+active_profile: "runtime_probe_test"
+profiles:
+  runtime_probe_test:
+    provider: "local-test"
+    protocol: "openai_compatible"
+    network_mode: "test"
+    architecture: "local_test_gateway"
+    base_url: "{openai_compatible_server}"
+    models_path: "/models"
+    chat_completions_path: "/chat/completions"
+    api_key_env_var: ""
+    api_key_required: false
+    authorization_scheme: "none"
+    chat_model: "Qwen3.6-35A3"
+    structured_model: "Qwen3.6-35A3"
+    stream_enabled: true
+    timeout_sec: 15
+    connect_timeout_sec: 5
+    model_list_required: true
+    ssl_no_revoke: false
+    test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
+    expected_response_contains: "AI_CONNECTIVITY_OK"
+    agent_probe_enabled: false
+    multimodal_probe_enabled: false
+    concurrency_probe_count: 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ConfigPath",
+            str(config_path),
+            "-OutputPath",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=90,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output_path.read_text(encoding="utf-8-sig"))
+    runtime = result["checks"]["runtime"]
+    assert runtime["python_version"] is None
+    assert "MissingOpenParenthesisAfterKeyword" in runtime["error"]
+    assert "\n" in runtime["error"]
 
 
 def test_optional_agent_and_multimodal_rejections_do_not_fail_core_connectivity(
