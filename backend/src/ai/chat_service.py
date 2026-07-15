@@ -187,6 +187,17 @@ class AiChatService:
         finally:
             conversation_lock.release()
 
+    def delete_conversation(self, owner_key: str, conversation_id: str) -> None:
+        self._ensure_enabled()
+        conversation_lock = self._lock_for_conversation(conversation_id)
+        if not conversation_lock.acquire(blocking=False):
+            raise AiConversationBusy("conversation has an active AI request")
+        try:
+            if not self.store.delete_conversation(conversation_id, owner_key):
+                raise AiConversationNotFound("conversation not found")
+        finally:
+            conversation_lock.release()
+
     def send_message(
         self,
         *,

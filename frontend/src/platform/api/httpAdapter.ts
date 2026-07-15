@@ -1208,12 +1208,14 @@ export class HttpAdapter implements ApiAdapter {
       skillIds?: string[];
       mcpServerIds?: string[];
     },
+    signal?: AbortSignal,
   ): Promise<AiSendMessageResult> {
     const response = await this.fetchJson<RawAiSendMessageResult>(
       `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({
           content: payload.content,
           agent_id: payload.agentId ?? null,
@@ -1238,6 +1240,16 @@ export class HttpAdapter implements ApiAdapter {
       `/api/ai/conversations/${encodeURIComponent(conversationId)}/clear`,
       {
         method: "POST",
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
+  async deleteAiConversation(conversationId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: "DELETE",
       },
       { timeoutMs: AI_CONTROL_TIMEOUT_MS },
     );

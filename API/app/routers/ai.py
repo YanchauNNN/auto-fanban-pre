@@ -197,6 +197,23 @@ def clear_conversation(conversation_id: str, request: Request) -> dict[str, bool
     return {"ok": True}
 
 
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str, request: Request) -> dict[str, bool]:
+    try:
+        _service(request).delete_conversation(_owner_key(request), conversation_id)
+    except AiConversationBusy as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except AiConversationNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return {"ok": True}
+
+
 def build_chat_client(spec: AiSpec) -> OpenAICompatibleChatClient:
     gateway = spec.resolve_gateway()
     models = spec.resolve_models()

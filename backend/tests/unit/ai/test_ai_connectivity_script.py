@@ -18,9 +18,23 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
     request_count = 0
     received_payloads: list[dict[str, object]] = []
     received_mcp_payloads: list[dict[str, object]] = []
+    received_application_state_headers: list[dict[str, str]] = []
 
     def do_GET(self) -> None:
         type(self).request_count += 1
+        if urlsplit(self.path).path == "/api/ai/state":
+            type(self).received_application_state_headers.append(dict(self.headers.items()))
+            forwarded_for = self.headers.get("X-Forwarded-For")
+            owner_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else "127.0.0.1"
+            self._send_json(
+                {
+                    "enabled": True,
+                    "profile": "application_probe_test",
+                    "model": "Qwen3.6-35A3",
+                    "owner_key": f"ip:{owner_ip}",
+                }
+            )
+            return
         if self.path != "/v1/models":
             self.send_error(404)
             return
@@ -325,6 +339,7 @@ def openai_compatible_server() -> str:
     _OpenAiCompatibleHandler.request_count = 0
     _OpenAiCompatibleHandler.received_payloads = []
     _OpenAiCompatibleHandler.received_mcp_payloads = []
+    _OpenAiCompatibleHandler.received_application_state_headers = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _OpenAiCompatibleHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -334,6 +349,87 @@ def openai_compatible_server() -> str:
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_ai_connectivity_script_probes_application_api_proxy_owner_behavior(
+    tmp_path: Path,
+    openai_compatible_server: str,
+) -> None:
+    if shutil.which("powershell") is None:
+        pytest.skip("PowerShell is required for the connectivity script")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script_path = repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1"
+    config_path = tmp_path / "ai_model_gateway.yaml"
+    output_path = tmp_path / "connectivity.json"
+    application_base_url = openai_compatible_server.removesuffix("/v1")
+    config_path.write_text(
+        f"""
+schema_version: "0.1"
+active_profile: "application_probe_test"
+profiles:
+  application_probe_test:
+    provider: "local-test"
+    protocol: "openai_compatible"
+    network_mode: "test"
+    architecture: "local_test_gateway"
+    base_url: "{openai_compatible_server}"
+    models_path: "/models"
+    chat_completions_path: "/chat/completions"
+    api_key_env_var: ""
+    api_key_required: false
+    authorization_scheme: "none"
+    chat_model: "Qwen3.6-35A3"
+    structured_model: "Qwen3.6-35A3"
+    stream_enabled: true
+    timeout_sec: 15
+    connect_timeout_sec: 5
+    model_list_required: true
+    ssl_no_revoke: false
+    test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
+    expected_response_contains: "AI_CONNECTIVITY_OK"
+    agent_probe_enabled: false
+    multimodal_probe_enabled: false
+    concurrency_probe_count: 0
+    application_api_base_url: "{application_base_url}"
+    application_api_state_path: "/api/ai/state"
+    application_api_host_header: "fanban-terminal.local"
+    application_api_forwarded_for_probe: "198.18.0.73"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ConfigPath",
+            str(config_path),
+            "-OutputPath",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output_path.read_text(encoding="utf-8-sig"))
+    application = result["checks"]["application_api"]
+    assert application["status"] == "passed"
+    assert application["direct"]["owner_key"] == "ip:127.0.0.1"
+    assert application["forwarded"]["owner_key"] == "ip:198.18.0.73"
+    assert application["forwarded_owner_effective"] is True
+    assert application["profile_matches_selected"] is True
+    assert application["sensitive_response_fields"] == []
+    assert result["readiness"]["application_api_proxy"]["status"] == "passed"
+    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["Host"] == "fanban-terminal.local"
+    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"] == "198.18.0.73"
 
 
 def test_ai_connectivity_script_accepts_split_stream_content(
@@ -397,9 +493,9 @@ profiles:
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     result = json.loads(output_path.read_text(encoding="utf-8-sig"))
-    assert result["schema_version"] == "0.3"
+    assert result["schema_version"] == "0.4"
     assert result["status"] == "passed"
-    assert result["script"]["version"] == "fanban-ai-connectivity@0.3"
+    assert result["script"]["version"] == "fanban-ai-connectivity@0.4"
     assert result["script"]["sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest().upper()
     assert result["environment"]["config_sha256"] == hashlib.sha256(
         config_path.read_bytes(),

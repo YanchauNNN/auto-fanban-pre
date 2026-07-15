@@ -20,6 +20,7 @@
   cursor: pointer;
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
+  animation: collapsed-tab-in 180ms ease-out both;
 }
 
 .collapsedTab span:first-child {
@@ -31,12 +32,12 @@
 .drawer {
   position: fixed;
   right: 1rem;
-  top: 4.75rem;
-  bottom: 0.75rem;
+  bottom: 0.5rem;
   z-index: 38;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(12rem, 1fr) auto;
-  width: min(460px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  width: min(var(--ai-drawer-width, 720px), calc(100vw - 2rem));
+  height: min(var(--ai-drawer-height, 820px), calc(100dvh - 1rem));
   border: 1px solid rgba(20, 70, 128, 0.16);
   border-radius: 18px;
   background: rgba(250, 253, 255, 0.96);
@@ -44,8 +45,52 @@
   color: #173f69;
   overflow: hidden;
   overscroll-behavior: contain;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity 160ms ease,
+    transform 200ms cubic-bezier(0.22, 0.8, 0.28, 1);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
+}
+
+.drawerOpen {
+  animation: drawer-enter 200ms cubic-bezier(0.22, 0.8, 0.28, 1) backwards;
+}
+
+.drawerClosing {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(100% + 1.5rem));
+}
+
+.resizeHandle {
+  position: absolute;
+  top: 0.55rem;
+  left: 0.48rem;
+  z-index: 2;
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.resizeHandle span {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-top: 2px solid rgba(43, 92, 139, 0.68);
+  border-left: 2px solid rgba(43, 92, 139, 0.68);
+}
+
+.resizeHandle:focus-visible {
+  outline: 2px solid #1f65a9;
+  outline-offset: 2px;
 }
 
 .header {
@@ -205,7 +250,6 @@
 
 .chipGroup,
 .mcpRow,
-.conversationActions,
 .composerActions {
   display: flex;
   flex-wrap: wrap;
@@ -254,38 +298,18 @@
 
 .conversationBar {
   display: grid;
-  gap: 0.48rem;
-  padding: 0.65rem 1rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+  padding: 0.42rem 1rem;
   border-bottom: 1px solid rgba(20, 70, 128, 0.08);
 }
 
-.currentConversation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.55rem;
-}
-
-.currentConversationText {
-  display: grid;
-  gap: 0.1rem;
-  min-width: 0;
-}
-
-.currentConversationText span,
-.currentConversationText small {
+.conversationLabel {
   color: #6b86a3;
   font-size: 0.72rem;
   font-weight: 800;
-}
-
-.currentConversationText strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #143d67;
-  font-size: 0.98rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .renameForm {
@@ -308,18 +332,41 @@
 
 .conversationList {
   display: flex;
+  min-width: 0;
   gap: 0.45rem;
   overflow-x: auto;
-  padding-bottom: 0.1rem;
+  padding: 0.05rem 0;
+}
+
+.conversationItem {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.24rem;
 }
 
 .conversationButton {
-  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.38rem;
   max-width: 11rem;
+  min-height: 2.1rem;
   overflow: hidden;
-  padding: 0.42rem 0.68rem;
+  padding: 0.38rem 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.conversationButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversationButton small {
+  flex: 0 0 auto;
+  color: #6b86a3;
+  font-size: 0.66rem;
+  font-weight: 700;
 }
 
 .conversationButtonActive {
@@ -332,6 +379,72 @@
   padding: 0.42rem 0.7rem;
 }
 
+.newConversationButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid rgba(20, 70, 128, 0.18);
+  border-radius: 10px;
+  background: #fff;
+  color: #1a528d;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.newConversationButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.conversationMenu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  min-width: 10.5rem;
+  padding: 0.32rem;
+  border: 1px solid rgba(20, 70, 128, 0.18);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 14px 32px rgba(13, 44, 80, 0.2);
+}
+
+.conversationMenu button {
+  min-height: 2.35rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #1d496f;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversationMenu button:hover,
+.conversationMenu button:focus-visible {
+  background: rgba(225, 239, 255, 0.9);
+  outline: 0;
+}
+
+.conversationMenu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.conversationMenu .dangerMenuItem {
+  color: #a33c26;
+}
+
+.conversationMenu .dangerMenuItem:hover,
+.conversationMenu .dangerMenuItem:focus-visible {
+  background: rgba(255, 237, 231, 0.96);
+}
+
 .ghostButton:disabled,
 .sendButton:disabled,
 .textarea:disabled {
@@ -341,6 +454,7 @@
 
 .messages {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   gap: 0.62rem;
   min-height: 0;
@@ -398,6 +512,16 @@
   font-style: normal;
 }
 
+.thinkingLabel {
+  color: #1a528d;
+  font-style: normal;
+}
+
+.cancelledLabel {
+  color: #6f7280;
+  font-style: normal;
+}
+
 .message p {
   margin: 0;
   padding: 0.68rem 0.78rem;
@@ -439,6 +563,18 @@
   color: #704900;
 }
 
+.thinkingMessage p {
+  border-color: rgba(36, 100, 169, 0.24);
+  background: rgba(236, 246, 255, 0.96);
+  color: #1a528d;
+}
+
+.cancelledMessage p {
+  border-color: rgba(89, 97, 111, 0.22);
+  background: rgba(245, 247, 250, 0.96);
+  color: #5b6471;
+}
+
 .emptyState {
   margin: auto;
   padding: 0.8rem;
@@ -478,6 +614,16 @@
   box-shadow: 0 12px 22px rgba(20, 70, 128, 0.16);
 }
 
+.stopButton {
+  border: 1px solid rgba(157, 91, 22, 0.28);
+  border-radius: 999px;
+  background: #fff7e8;
+  color: #8a5410;
+  padding: 0.46rem 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 @media (max-width: 720px) {
   .drawer {
     right: 0.65rem;
@@ -485,8 +631,12 @@
     top: auto;
     bottom: 0.65rem;
     width: auto;
-    height: min(82vh, 700px);
+    height: min(var(--ai-drawer-height, 820px), calc(100dvh - 1.3rem));
     border-radius: 18px;
+  }
+
+  .resizeHandle {
+    display: none;
   }
 
   .collapsedTab {
@@ -496,5 +646,37 @@
 
   .renameForm {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@keyframes collapsed-tab-in {
+  from {
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes drawer-enter {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 1.5rem));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsedTab,
+  .drawer {
+    animation: none;
+    transition: none;
   }
 }

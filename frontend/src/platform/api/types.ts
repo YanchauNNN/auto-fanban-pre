@@ -833,6 +833,8 @@ export type ApiAdapter = {
   sendAiMessage: (
     conversationId: string,
     payload: SendAiMessagePayload,
+    signal?: AbortSignal,
   ) => Promise<AiSendMessageResult>;
   clearAiConversation: (conversationId: string) => Promise<void>;
+  deleteAiConversation?: (conversationId: string) => Promise<void>;
 };

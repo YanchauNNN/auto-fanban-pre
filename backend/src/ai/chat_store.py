@@ -367,6 +367,25 @@ class AiChatStore:
                 )
         return True
 
+    def delete_conversation(self, conversation_id: str, owner_key: str) -> bool:
+        with self._connect() as conn:
+            conversation = conn.execute(
+                """
+                SELECT conversation_id
+                FROM ai_conversations
+                WHERE conversation_id = ?
+                  AND owner_key = ?
+                  AND archived = 0
+                """,
+                (conversation_id, owner_key),
+            ).fetchone()
+            if conversation is None:
+                return False
+            with conn:
+                conn.execute("DELETE FROM ai_messages WHERE conversation_id = ?", (conversation_id,))
+                conn.execute("DELETE FROM ai_conversations WHERE conversation_id = ?", (conversation_id,))
+        return True
+
     def purge_expired(
         self,
         *,

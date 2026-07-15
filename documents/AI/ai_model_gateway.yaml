@@ -2,7 +2,7 @@
 # This file stores operational endpoint parameters only. Never write API keys here.
 
 schema_version: "0.1"
-last_updated: "2026-07-10"
+last_updated: "2026-07-14"
 
 # Development uses the internet MiniMax gateway on the current workstation.
 # Terminal deployment can switch to terminal_cnpe_intranet_qwen_fast without
@@ -44,6 +44,12 @@ profiles:
     mcp_sse_url: ""
     mcp_stdio_command: ""
     mcp_api_key_env_var: ""
+    # Optional deployment application probe. Leave the URL empty on a shared
+    # developer machine; pass it explicitly when checking a packaged server.
+    application_api_base_url: ""
+    application_api_state_path: "/api/ai/state"
+    application_api_host_header: ""
+    application_api_forwarded_for_probe: "198.18.0.73"
 
   terminal_cnpe_intranet_qwen_fast:
     description: "Terminal deployment through CNPE intranet OpenAI-compatible model gateway"
@@ -79,3 +85,9 @@ profiles:
     mcp_sse_url: ""
     mcp_stdio_command: ""
     mcp_api_key_env_var: ""
+    # Set this to the IIS/ARR application address during terminal deployment.
+    # The probe only reads /api/ai/state and verifies IP owner-key forwarding.
+    application_api_base_url: ""
+    application_api_state_path: "/api/ai/state"
+    application_api_host_header: ""
+    application_api_forwarded_for_probe: "198.18.0.73"

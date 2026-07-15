@@ -15,6 +15,10 @@ param(
     [string]$McpSseUrl = "",
     [string]$McpStdioCommand = "",
     [string[]]$McpStdioArguments = @(),
+    [string]$ApplicationApiBaseUrl = "",
+    [string]$ApplicationApiStatePath = "",
+    [string]$ApplicationApiHostHeader = "",
+    [string]$ApplicationApiForwardedFor = "",
     [switch]$SslNoRevoke
 )
 
@@ -331,6 +335,10 @@ function Invoke-HttpRequest {
             $request.ContentType = $value
             continue
         }
+        if ($key -ieq "Host") {
+            $request.Host = $value
+            continue
+        }
         $request.Headers[$key] = $value
     }
 
@@ -427,6 +435,202 @@ function Get-JsonPropertyValue {
         return $null
     }
     return $property.Value
+}
+
+function Find-SensitiveJsonPropertyNames {
+    param(
+        [object]$Value,
+        [System.Collections.ArrayList]$Matches,
+        [string]$Prefix = "",
+        [int]$Depth = 0
+    )
+
+    if ($null -eq $Value -or $Depth -gt 8) {
+        return
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        foreach ($key in $Value.Keys) {
+            $name = [string]$key
+            $path = if ([string]::IsNullOrWhiteSpace($Prefix)) { $name } else { "$Prefix.$name" }
+            if ($name -match '(?i)(api[_-]?key|authorization|secret|token|password)') {
+                [void]$Matches.Add($path)
+            }
+            Find-SensitiveJsonPropertyNames -Value $Value[$key] -Matches $Matches -Prefix $path -Depth ($Depth + 1)
+        }
+        return
+    }
+
+    if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
+        $index = 0
+        foreach ($item in $Value) {
+            $path = if ([string]::IsNullOrWhiteSpace($Prefix)) { "[$index]" } else { "$Prefix[$index]" }
+            Find-SensitiveJsonPropertyNames -Value $item -Matches $Matches -Prefix $path -Depth ($Depth + 1)
+            $index += 1
+        }
+        return
+    }
+
+    foreach ($property in @($Value.PSObject.Properties | Where-Object { $_.MemberType -eq "NoteProperty" })) {
+        $name = [string]$property.Name
+        $path = if ([string]::IsNullOrWhiteSpace($Prefix)) { $name } else { "$Prefix.$name" }
+        if ($name -match '(?i)(api[_-]?key|authorization|secret|token|password)') {
+            [void]$Matches.Add($path)
+        }
+        Find-SensitiveJsonPropertyNames -Value $property.Value -Matches $Matches -Prefix $path -Depth ($Depth + 1)
+    }
+}
+
+function Get-SensitiveJsonPropertyNames {
+    param([object]$Value)
+
+    $matches = [System.Collections.ArrayList]::new()
+    Find-SensitiveJsonPropertyNames -Value $Value -Matches $matches
+    return @($matches | Select-Object -Unique)
+}
+
+function New-ApplicationApiStateRequestResult {
+    param([string]$Url)
+
+    return [PSCustomObject]@{
+        status = "not_configured"
+        attempted = $false
+        url = Get-SanitizedUrl $Url
+        status_code = $null
+        elapsed_ms = $null
+        final_url = ""
+        enabled = $null
+        profile = $null
+        model = $null
+        owner_key = $null
+        sensitive_response_fields = @()
+        error = $null
+    }
+}
+
+function Invoke-ApplicationApiStateRequest {
+    param(
+        [string]$Url,
+        [int]$TimeoutSec,
+        [hashtable]$Headers = @{}
+    )
+
+    $result = New-ApplicationApiStateRequestResult -Url $Url
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        return $result
+    }
+
+    $result.attempted = $true
+    try {
+        $response = Invoke-CurlJson -Url $Url -Method "GET" -Headers $Headers -TimeoutSec $TimeoutSec
+        $result.status_code = $response.status_code
+        $result.elapsed_ms = $response.elapsed_ms
+        $result.final_url = Get-SanitizedUrl $response.final_url
+        if ($response.status_code -ne 200) {
+            $result.status = "failed"
+            $result.error = "HTTP $($response.status_code)"
+            return $result
+        }
+
+        $json = ConvertTo-JsonObjectOrNull $response.body
+        if ($null -eq $json) {
+            $result.status = "inconclusive"
+            $result.error = "Application AI state response was not valid JSON."
+            return $result
+        }
+
+        $result.enabled = Get-JsonPropertyValue $json "enabled"
+        $result.profile = Get-JsonPropertyValue $json "profile"
+        $result.model = Get-JsonPropertyValue $json "model"
+        $result.owner_key = Get-JsonPropertyValue $json "owner_key"
+        $result.sensitive_response_fields = @(Get-SensitiveJsonPropertyNames $json)
+        if ($result.sensitive_response_fields.Count -gt 0) {
+            $result.status = "failed"
+            $result.error = "Application AI state response contains sensitive field names."
+        } elseif ($result.enabled -ne $true -or [string]::IsNullOrWhiteSpace([string]$result.profile) -or [string]::IsNullOrWhiteSpace([string]$result.model)) {
+            $result.status = "inconclusive"
+            $result.error = "Application AI state response omitted enabled, profile, or model."
+        } else {
+            $result.status = "passed"
+        }
+    } catch {
+        $result.status = "failed"
+        $result.error = $_.Exception.Message
+    }
+    return $result
+}
+
+function Invoke-ApplicationApiProxyProbe {
+    param(
+        [string]$BaseUrl,
+        [string]$StatePath,
+        [string]$HostHeader,
+        [string]$ForwardedFor,
+        [string]$ExpectedProfile,
+        [int]$TimeoutSec
+    )
+
+    $stateUrl = if ([string]::IsNullOrWhiteSpace($BaseUrl)) { "" } else { Join-EndpointUrl $BaseUrl $StatePath }
+    $notConfigured = [string]::IsNullOrWhiteSpace($stateUrl)
+    $direct = New-ApplicationApiStateRequestResult -Url $stateUrl
+    $forwarded = New-ApplicationApiStateRequestResult -Url $stateUrl
+    $result = [PSCustomObject]@{
+        status = if ($notConfigured) { "not_configured" } else { "inconclusive" }
+        configured = -not $notConfigured
+        state_url = Get-SanitizedUrl $stateUrl
+        host_header_configured = -not [string]::IsNullOrWhiteSpace($HostHeader)
+        forwarded_for_probe = $ForwardedFor
+        direct = $direct
+        forwarded = $forwarded
+        forwarded_owner_effective = $null
+        profile_matches_selected = $null
+        sensitive_response_fields = @()
+        error = $null
+    }
+    if ($notConfigured) {
+        return $result
+    }
+
+    $headers = @{ Accept = "application/json" }
+    if (-not [string]::IsNullOrWhiteSpace($HostHeader)) {
+        $headers["Host"] = $HostHeader
+    }
+    $result.direct = Invoke-ApplicationApiStateRequest -Url $stateUrl -TimeoutSec $TimeoutSec -Headers $headers
+
+    if (-not [string]::IsNullOrWhiteSpace($ForwardedFor)) {
+        $forwardedHeaders = $headers.Clone()
+        $forwardedHeaders["X-Forwarded-For"] = $ForwardedFor
+        $result.forwarded = Invoke-ApplicationApiStateRequest -Url $stateUrl -TimeoutSec $TimeoutSec -Headers $forwardedHeaders
+        if ($result.forwarded.status -eq "passed") {
+            $result.forwarded_owner_effective = $result.forwarded.owner_key -eq ("ip:" + $ForwardedFor)
+        }
+    } else {
+        $result.forwarded.status = "skipped"
+        $result.forwarded.error = "No application_api_forwarded_for_probe value was configured."
+    }
+
+    $result.profile_matches_selected = $result.direct.profile -eq $ExpectedProfile
+    $sensitiveFields = @($result.direct.sensitive_response_fields + $result.forwarded.sensitive_response_fields | Select-Object -Unique)
+    $result.sensitive_response_fields = $sensitiveFields
+    if ($sensitiveFields.Count -gt 0) {
+        $result.status = "failed"
+        $result.error = "Application AI state response exposed sensitive field names."
+    } elseif ($result.direct.status -ne "passed") {
+        $result.status = $result.direct.status
+        $result.error = "Direct application API state probe did not pass."
+    } elseif (-not $result.profile_matches_selected) {
+        $result.status = "inconclusive"
+        $result.error = "Application AI state profile does not match the selected model gateway profile."
+    } elseif ($result.forwarded.status -ne "passed") {
+        $result.status = $result.forwarded.status
+        $result.error = "Forwarded application API state probe did not pass."
+    } elseif ($result.forwarded_owner_effective -ne $true) {
+        $result.status = "inconclusive"
+        $result.error = "X-Forwarded-For did not produce the expected owner_key; inspect IIS/ARR and Uvicorn proxy-header configuration."
+    } else {
+        $result.status = "passed"
+    }
+    return $result
 }
 
 function ConvertFrom-StreamResponse {
@@ -1038,7 +1242,7 @@ function Invoke-McpStreamableHttpProbe {
             params = [ordered]@{
                 protocolVersion = "2025-06-18"
                 capabilities = [ordered]@{}
-                clientInfo = [ordered]@{ name = "fanban-ai-connectivity"; version = "0.3" }
+                clientInfo = [ordered]@{ name = "fanban-ai-connectivity"; version = "0.4" }
             }
         } | ConvertTo-Json -Depth 12 -Compress
         $initializeResponse = Invoke-CurlJson -Url $Url -Method "POST" -Headers $headers -Body $initializePayload -TimeoutSec $TimeoutSec
@@ -1170,6 +1374,10 @@ $mcpStreamableHttpUrl = if (-not [string]::IsNullOrWhiteSpace($McpUrl)) { $McpUr
 $mcpLegacySseUrl = if (-not [string]::IsNullOrWhiteSpace($McpSseUrl)) { $McpSseUrl } else { [string]$profileConfig["mcp_sse_url"] }
 $mcpCommand = if (-not [string]::IsNullOrWhiteSpace($McpStdioCommand)) { $McpStdioCommand } else { [string]$profileConfig["mcp_stdio_command"] }
 $mcpApiKeyEnvVar = [string]$profileConfig["mcp_api_key_env_var"]
+$applicationApiBaseUrl = if (-not [string]::IsNullOrWhiteSpace($ApplicationApiBaseUrl)) { $ApplicationApiBaseUrl } else { [string]$profileConfig["application_api_base_url"] }
+$applicationApiStatePath = if (-not [string]::IsNullOrWhiteSpace($ApplicationApiStatePath)) { $ApplicationApiStatePath } elseif (-not [string]::IsNullOrWhiteSpace([string]$profileConfig["application_api_state_path"])) { [string]$profileConfig["application_api_state_path"] } else { "/api/ai/state" }
+$applicationApiHostHeader = if (-not [string]::IsNullOrWhiteSpace($ApplicationApiHostHeader)) { $ApplicationApiHostHeader } else { [string]$profileConfig["application_api_host_header"] }
+$applicationApiForwardedFor = if (-not [string]::IsNullOrWhiteSpace($ApplicationApiForwardedFor)) { $ApplicationApiForwardedFor } else { [string]$profileConfig["application_api_forwarded_for_probe"] }
 
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
@@ -1760,16 +1968,21 @@ $mcpStdioResult = [PSCustomObject]@{
     error = if ([string]::IsNullOrWhiteSpace($mcpCommand)) { $null } elseif (-not (Test-Path -LiteralPath $mcpCommand -PathType Leaf)) { "Configured MCP stdio command was not found." } else { "MCP stdio command exists; use the packaged MCP SDK runtime to complete a duplex protocol probe." }
 }
 
+$applicationApiResult = Invoke-ApplicationApiProxyProbe `
+    -BaseUrl $applicationApiBaseUrl -StatePath $applicationApiStatePath `
+    -HostHeader $applicationApiHostHeader -ForwardedFor $applicationApiForwardedFor `
+    -ExpectedProfile $selectedProfile -TimeoutSec $timeoutSec
+
 $finishedAt = Get-UtcIsoTimestamp
 $summaryOk = ($errors.Count -eq 0)
 $result = [PSCustomObject]@{
-    schema_version = "0.3"
+    schema_version = "0.4"
     status = if ($summaryOk) { "passed" } else { "failed" }
     started_at_utc = $startedAt
     finished_at_utc = $finishedAt
     script = [PSCustomObject]@{
         path = $PSCommandPath
-        version = "fanban-ai-connectivity@0.3"
+        version = "fanban-ai-connectivity@0.4"
         sha256 = Get-FileSha256 $PSCommandPath
         powershell = $PSVersionTable.PSVersion.ToString()
     }
@@ -1792,6 +2005,10 @@ $result = [PSCustomObject]@{
         mcp_streamable_http_configured = -not [string]::IsNullOrWhiteSpace($mcpStreamableHttpUrl)
         mcp_sse_configured = -not [string]::IsNullOrWhiteSpace($mcpLegacySseUrl)
         mcp_stdio_configured = -not [string]::IsNullOrWhiteSpace($mcpCommand)
+        application_api_base_url_overridden = -not [string]::IsNullOrWhiteSpace($ApplicationApiBaseUrl)
+        application_api_state_path_overridden = -not [string]::IsNullOrWhiteSpace($ApplicationApiStatePath)
+        application_api_host_header_overridden = -not [string]::IsNullOrWhiteSpace($ApplicationApiHostHeader)
+        application_api_forwarded_for_overridden = -not [string]::IsNullOrWhiteSpace($ApplicationApiForwardedFor)
         base_url_overridden = -not [string]::IsNullOrWhiteSpace($BaseUrl)
         chat_model_overridden = -not [string]::IsNullOrWhiteSpace($ChatModel)
         api_key_env_var_overridden = -not [string]::IsNullOrWhiteSpace($ApiKeyEnvVar)
@@ -1812,6 +2029,10 @@ $result = [PSCustomObject]@{
         structured_model = [string]$profileConfig["structured_model"]
         stream_enabled = $streamEnabled
         model_list_required = $modelListRequired
+        application_api_base_url = Get-SanitizedUrl $applicationApiBaseUrl
+        application_api_state_path = $applicationApiStatePath
+        application_api_host_header = $applicationApiHostHeader
+        application_api_forwarded_for_probe_configured = -not [string]::IsNullOrWhiteSpace($applicationApiForwardedFor)
     }
     auth = [PSCustomObject]@{
         api_key_env_var = $apiKeyEnvVar
@@ -1840,6 +2061,7 @@ $result = [PSCustomObject]@{
         }
         concurrency = $concurrencyResult
         runtime = $runtimeResult
+        application_api = $applicationApiResult
         mcp = [PSCustomObject]@{
             streamable_http = $mcpStreamableResult
             sse = $mcpSseResult
@@ -1872,6 +2094,10 @@ $result = [PSCustomObject]@{
             ) `
             -Summary "MCP readiness reflects only explicitly configured transports; no listed tool was executed." `
             -Checks @("streamable_http", "sse", "stdio")
+        application_api_proxy = New-ReadinessResult `
+            -Status $applicationApiResult.status `
+            -Summary "Application API probe reads only /api/ai/state and verifies proxy owner-key behavior without creating a conversation." `
+            -Checks @("direct_state", "forwarded_state", "owner_key", "profile", "response_redaction")
     }
     recommendations = @(
         "Use the capability readiness sections, not core connectivity alone, when selecting the Agent architecture."

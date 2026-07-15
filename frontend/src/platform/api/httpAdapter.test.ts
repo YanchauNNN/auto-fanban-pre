@@ -75,6 +75,37 @@ describe("HttpAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards a caller cancellation signal for AI message POST requests", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("The request was aborted.", "AbortError")),
+          { once: true },
+        );
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const controller = new AbortController();
+    const request = adapter.sendAiMessage(
+      "conversation-1",
+      { content: "请停止等待" },
+      controller.signal,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conversation-1/messages",
+      expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) }),
+    );
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -438,6 +469,22 @@ describe("HttpAdapter", () => {
       updatedAt: "2026-07-11T10:04:00+08:00",
       messageCount: 2,
     });
+  });
+
+  it("deletes an AI conversation with a bounded DELETE request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    await adapter.deleteAiConversation("conv-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conv-1",
+      expect.objectContaining({ method: "DELETE", signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("propagates an external abort signal to AI GET requests", async () => {

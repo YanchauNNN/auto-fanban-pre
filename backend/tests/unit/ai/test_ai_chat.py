@@ -239,6 +239,21 @@ def test_chat_store_renames_only_owner_conversation(tmp_path: Path) -> None:
     assert store.get_conversation(conversation.conversation_id, "ip:10.0.0.1").title == "规则提炼会话"
 
 
+def test_chat_store_deletes_only_the_owner_conversation_and_messages(tmp_path: Path) -> None:
+    from src.ai.chat_store import AiChatStore
+
+    store = AiChatStore(tmp_path / "fanban_ai_chat.sqlite3")
+    store.initialize()
+    conversation = store.create_conversation(owner_key="ip:10.0.0.1", title="待删除会话")
+    store.add_message(conversation.conversation_id, "user", "需要删除的消息")
+
+    assert store.delete_conversation(conversation.conversation_id, "ip:10.0.0.2") is False
+    assert store.get_conversation(conversation.conversation_id, "ip:10.0.0.1") is not None
+    assert store.delete_conversation(conversation.conversation_id, "ip:10.0.0.1") is True
+    assert store.get_conversation(conversation.conversation_id, "ip:10.0.0.1") is None
+    assert store.list_messages(conversation.conversation_id) == []
+
+
 def test_chat_store_purges_expired_conversations_and_messages(tmp_path: Path) -> None:
     from src.ai.chat_store import AiChatStore
 
@@ -725,6 +740,14 @@ ai_layer:
             json={"title": "越权修改"},
         )
         assert blocked_rename.status_code == 404
+        blocked_delete = other_client.delete(f"/api/ai/conversations/{conversation_id}")
+        assert blocked_delete.status_code == 404
+
+    with TestClient(create_app(), client=("10.0.0.8", 50000)) as owner_client:
+        deleted = owner_client.delete(f"/api/ai/conversations/{conversation_id}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"ok": True}
+        assert owner_client.get(f"/api/ai/conversations/{conversation_id}").status_code == 404
 
 
 def test_ai_api_busy_response_includes_retry_after_header(tmp_path: Path) -> None:

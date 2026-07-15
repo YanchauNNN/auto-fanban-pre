@@ -1,41 +1,97 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { createPortal } from "react-dom";
 
 import type { ApiAdapter } from "../../platform/api/types";
 import styles from "./AiChatDrawer.module.css";
-import { useAiChat } from "./useAiChat";
+import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
 
 const DRAWER_OPEN_KEY = "fanban.ai.drawerOpen";
+const DRAWER_SIZE_KEY = "fanban.ai.drawerSize";
+const DRAWER_SIZE_VERSION_KEY = "fanban.ai.drawerSizeVersion";
+const DRAWER_SIZE_VERSION = "2";
+const DRAWER_TRANSITION_MS = 200;
+const MIN_DRAWER_WIDTH = 380;
+const MIN_DRAWER_HEIGHT = 460;
+const DEFAULT_DRAWER_WIDTH = 720;
+const DEFAULT_DRAWER_HEIGHT = 820;
+
+type DrawerSize = {
+  width: number;
+  height: number;
+};
+
+type ConversationMenu = {
+  conversationId: string;
+  left: number;
+  top: number;
+};
 
 export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
-  const [open, setOpen] = useState(() =>
+  const [isDrawerVisible, setDrawerVisible] = useState(() =>
+    typeof window === "undefined"
+      ? false
+      : window.localStorage.getItem(DRAWER_OPEN_KEY) === "true",
+  );
+  const [isDrawerOpen, setDrawerOpen] = useState(() =>
     typeof window === "undefined"
       ? false
       : window.localStorage.getItem(DRAWER_OPEN_KEY) === "true",
   );
   const [draft, setDraft] = useState("");
-  const [renaming, setRenaming] = useState(false);
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [conversationMenu, setConversationMenu] = useState<ConversationMenu | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [lastMemoryCount, setLastMemoryCount] = useState<number | null>(null);
+  const [drawerSize, setDrawerSize] = useState<DrawerSize>(loadDrawerSize);
   const collapsedButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
+  const conversationMenuRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusOnCloseRef = useRef(false);
-  const chat = useAiChat(adapter, open);
+  const drawerTransitionTimerRef = useRef<number | null>(null);
+  const chat = useAiChat(adapter, isDrawerVisible);
   const selectedConversationIdRef = useRef(chat.selectedConversationId);
 
   const state = chat.stateQuery.data;
-  const conversations = chat.conversationsQuery.data ?? [];
+  const conversations = chat.availableConversations;
   const conversation = chat.conversationQuery.data;
-  const activeConversation =
-    conversation ??
-    conversations.find((item) => item.conversationId === chat.selectedConversationId) ??
-    null;
-  const activeTitle = activeConversation?.title || "新会话";
   const activeMessageCount =
-    conversation?.messages.length ?? activeConversation?.messageCount ?? 0;
+    conversation?.messages.length ??
+    conversations.find((item) => item.conversationId === chat.selectedConversationId)?.messageCount ??
+    0;
+  const displayedMessages = useMemo(() => {
+    const messages = [...(conversation?.messages ?? [])];
+    const optimistic = chat.optimisticExchange;
+    if (!optimistic || optimistic.conversationId !== chat.selectedConversationId) {
+      return messages;
+    }
+    messages.push({
+      ...optimistic.userMessage,
+      metadata: { ...optimistic.userMessage.metadata, status: optimistic.status },
+    });
+    if (optimistic.status === "thinking") {
+      messages.push({
+        messageId: `local-assistant-${optimistic.requestId}`,
+        role: "assistant",
+        content: "AI 正在思考",
+        createdAt: optimistic.userMessage.createdAt,
+        metadata: { status: "thinking", local: true },
+      });
+    }
+    return messages;
+  }, [chat.optimisticExchange, chat.selectedConversationId, conversation?.messages]);
   const enabledSkills = useMemo(
     () => (state?.skills ?? []).filter((skill) => skill.enabled && skill.readOnly),
     [state?.skills],
@@ -43,9 +99,9 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(DRAWER_OPEN_KEY, open ? "true" : "false");
+      window.localStorage.setItem(DRAWER_OPEN_KEY, isDrawerOpen ? "true" : "false");
     }
-    if (open) {
+    if (isDrawerOpen) {
       const focusTimer = window.setTimeout(() => {
         if (document.activeElement === document.body) {
           inputRef.current?.focus();
@@ -53,10 +109,34 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       }, 120);
       return () => window.clearTimeout(focusTimer);
     }
-  }, [open]);
+  }, [isDrawerOpen]);
 
   useEffect(() => {
-    if (open || !restoreFocusOnCloseRef.current) {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(DRAWER_SIZE_KEY, JSON.stringify(drawerSize));
+      window.localStorage.setItem(DRAWER_SIZE_VERSION_KEY, DRAWER_SIZE_VERSION);
+    }
+  }, [drawerSize]);
+
+  useEffect(
+    () => () => {
+      if (drawerTransitionTimerRef.current !== null) {
+        window.clearTimeout(drawerTransitionTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    function keepDrawerInViewport() {
+      setDrawerSize((current) => clampDrawerSize(current));
+    }
+    window.addEventListener("resize", keepDrawerInViewport);
+    return () => window.removeEventListener("resize", keepDrawerInViewport);
+  }, []);
+
+  useEffect(() => {
+    if (isDrawerVisible || !restoreFocusOnCloseRef.current) {
       return;
     }
     const focusTimer = window.setTimeout(() => {
@@ -64,10 +144,10 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       restoreFocusOnCloseRef.current = false;
     });
     return () => window.clearTimeout(focusTimer);
-  }, [open]);
+  }, [isDrawerVisible]);
 
   useEffect(() => {
-    if (!open || typeof document === "undefined") {
+    if (!isDrawerVisible || typeof document === "undefined") {
       return;
     }
     const previousBodyOverflow = document.body.style.overflow;
@@ -78,21 +158,45 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       document.body.style.overflow = previousBodyOverflow;
       document.documentElement.style.scrollbarGutter = previousScrollbarGutter;
     };
-  }, [open]);
+  }, [isDrawerVisible]);
 
   useEffect(() => {
     selectedConversationIdRef.current = chat.selectedConversationId;
-    setRenaming(false);
+    setRenamingConversationId(null);
     setRenameDraft("");
+    setConversationMenu(null);
     setLastMemoryCount(null);
   }, [chat.selectedConversationId]);
 
   useEffect(() => {
-    if (!open || !messagesRef.current) {
+    if (!conversationMenu) {
+      return;
+    }
+    const closeOnOutsidePress = (event: MouseEvent) => {
+      if (!conversationMenuRef.current?.contains(event.target as Node)) {
+        setConversationMenu(null);
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsidePress);
+    return () => document.removeEventListener("mousedown", closeOnOutsidePress);
+  }, [conversationMenu]);
+
+  useEffect(() => {
+    if (!conversationMenu) {
+      return;
+    }
+    const focusTimer = window.setTimeout(() => {
+      conversationMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    });
+    return () => window.clearTimeout(focusTimer);
+  }, [conversationMenu]);
+
+  useEffect(() => {
+    if (!isDrawerOpen || !messagesRef.current) {
       return;
     }
     messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-  }, [conversation?.messages.length, open]);
+  }, [displayedMessages.length, isDrawerOpen]);
 
   useEffect(() => {
     if (!state) {
@@ -105,7 +209,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   }, [enabledSkills, state]);
 
   useEffect(() => {
-    if (!open) {
+    if (!isDrawerOpen) {
       return;
     }
     function handleKeyDown(event: KeyboardEvent) {
@@ -114,17 +218,26 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       }
       if (event.key === "Escape") {
         event.preventDefault();
+        if (conversationMenu) {
+          setConversationMenu(null);
+          return;
+        }
         handleClose();
         return;
       }
       if (event.key !== "Tab" || !drawerRef.current) {
         return;
       }
-      const focusable = Array.from(
-        drawerRef.current.querySelectorAll<HTMLElement>(
-          "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [href], [tabindex]:not([tabindex='-1'])",
-        ),
-      ).filter((element) => !element.hasAttribute("hidden"));
+      const focusRoots = [drawerRef.current, conversationMenuRef.current].filter(
+        (root): root is HTMLElement => Boolean(root),
+      );
+      const focusable = focusRoots.flatMap((root) =>
+        Array.from(
+          root.querySelectorAll<HTMLElement>(
+            "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [href], [tabindex]:not([tabindex='-1'])",
+          ),
+        ).filter((element) => !element.hasAttribute("hidden")),
+      );
       if (focusable.length === 0) {
         event.preventDefault();
         return;
@@ -132,48 +245,72 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       const active = document.activeElement;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && (active === first || !drawerRef.current.contains(active))) {
+      const activeInsideFocusTrap = focusRoots.some((root) => root.contains(active));
+      if (event.shiftKey && (active === first || !activeInsideFocusTrap)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && (active === last || !drawerRef.current.contains(active))) {
+      } else if (!event.shiftKey && (active === last || !activeInsideFocusTrap)) {
         event.preventDefault();
         first.focus();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [conversationMenu, isDrawerOpen]);
 
   function handleClose() {
+    if (!isDrawerVisible) {
+      return;
+    }
     restoreFocusOnCloseRef.current = true;
-    setOpen(false);
+    setConversationMenu(null);
+    setDrawerOpen(false);
+    if (drawerTransitionTimerRef.current !== null) {
+      window.clearTimeout(drawerTransitionTimerRef.current);
+    }
+    drawerTransitionTimerRef.current = window.setTimeout(() => {
+      setDrawerVisible(false);
+      drawerTransitionTimerRef.current = null;
+    }, DRAWER_TRANSITION_MS);
+  }
+
+  function handleOpen() {
+    restoreFocusOnCloseRef.current = false;
+    if (drawerTransitionTimerRef.current !== null) {
+      window.clearTimeout(drawerTransitionTimerRef.current);
+      drawerTransitionTimerRef.current = null;
+    }
+    setDrawerVisible(true);
+    setDrawerOpen(true);
   }
 
   async function handleNewConversation() {
     try {
       const title = draft.trim() ? draft.trim().slice(0, 24) : "新会话";
       await chat.createConversationMutation.mutateAsync(title);
-      setRenaming(false);
+      setRenamingConversationId(null);
       setLastMemoryCount(null);
     } catch {
       return;
     }
   }
 
-  async function handleClearConversation() {
-    if (!chat.selectedConversationId) {
+  async function handleClearConversation(conversationId: string) {
+    if (!conversationId) {
       return;
     }
     try {
-      await chat.clearConversationMutation.mutateAsync(chat.selectedConversationId);
-      setLastMemoryCount(null);
+      await chat.clearConversationMutation.mutateAsync(conversationId);
+      if (conversationId === chat.selectedConversationId) {
+        setLastMemoryCount(null);
+      }
     } catch {
       return;
     }
   }
 
   async function handleRenameConversation() {
-    if (!chat.selectedConversationId) {
+    if (!renamingConversationId) {
       return;
     }
     const title = renameDraft.trim();
@@ -182,10 +319,10 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     }
     try {
       await chat.renameConversationMutation.mutateAsync({
-        conversationId: chat.selectedConversationId,
+        conversationId: renamingConversationId,
         title,
       });
-      setRenaming(false);
+      setRenamingConversationId(null);
     } catch {
       return;
     }
@@ -203,7 +340,8 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         conversationId = created.conversationId;
         selectedConversationIdRef.current = conversationId;
       }
-      const result = await chat.sendMessageMutation.mutateAsync({
+      setDraft("");
+      const result = await chat.sendMessage({
         conversationId,
         payload: {
           content,
@@ -212,13 +350,98 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
           mcpServerIds: [],
         },
       });
-      setDraft("");
       if (selectedConversationIdRef.current === conversationId) {
         setLastMemoryCount(result.memory.usedHistoryMessages);
       }
     } catch {
+      setDraft((current) => current || content);
       return;
     }
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    if (!conversationId) {
+      return;
+    }
+    try {
+      await chat.deleteConversationMutation.mutateAsync(conversationId);
+      if (conversationId === chat.selectedConversationId) {
+        setLastMemoryCount(null);
+      }
+    } catch {
+      return;
+    }
+  }
+
+  function openConversationMenu(conversationId: string, left: number, top: number) {
+    const menuWidth = 180;
+    const menuHeight = 132;
+    setConversationMenu({
+      conversationId,
+      left: Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8)),
+      top: Math.max(8, Math.min(top, window.innerHeight - menuHeight - 8)),
+    });
+  }
+
+  function handleConversationContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    conversationId: string,
+  ) {
+    event.preventDefault();
+    openConversationMenu(conversationId, event.clientX, event.clientY);
+  }
+
+  function handleConversationKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    conversationId: string,
+  ) {
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) {
+      return;
+    }
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    openConversationMenu(conversationId, rect.left, rect.bottom);
+  }
+
+  function handleResizePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.currentTarget.focus();
+    const start = { x: event.clientX, y: event.clientY, size: drawerSize };
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      setDrawerSize(
+        clampDrawerSize({
+          width: start.size.width + start.x - moveEvent.clientX,
+          height: start.size.height + start.y - moveEvent.clientY,
+        }),
+      );
+    };
+    const handlePointerUp = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
+  }
+
+  function handleResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 48 : 24;
+    const deltaByKey: Record<string, Partial<DrawerSize>> = {
+      ArrowLeft: { width: step },
+      ArrowRight: { width: -step },
+      ArrowUp: { height: step },
+      ArrowDown: { height: -step },
+    };
+    const delta = deltaByKey[event.key];
+    if (!delta) {
+      return;
+    }
+    event.preventDefault();
+    setDrawerSize((current) =>
+      clampDrawerSize({
+        width: current.width + (delta.width ?? 0),
+        height: current.height + (delta.height ?? 0),
+      }),
+    );
   }
 
   function toggleSkill(skillId: string) {
@@ -229,17 +452,14 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     );
   }
 
-  if (!open) {
+  if (!isDrawerVisible) {
     return (
       <button
         aria-label="打开 AI 助手"
         className={styles.collapsedTab}
         ref={collapsedButtonRef}
         type="button"
-        onClick={() => {
-          restoreFocusOnCloseRef.current = false;
-          setOpen(true);
-        }}
+        onClick={handleOpen}
       >
         <span>AI</span>
         <span aria-hidden="true">‹</span>
@@ -251,26 +471,48 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     chat.sendMessageMutation.isPending ||
     chat.createConversationMutation.isPending ||
     chat.renameConversationMutation.isPending ||
-    chat.clearConversationMutation.isPending;
+    chat.clearConversationMutation.isPending ||
+    chat.deleteConversationMutation.isPending;
   const error = [
     chat.stateQuery.error,
     chat.conversationsQuery.error,
     chat.conversationQuery.error,
-    chat.sendMessageMutation.error,
+    chat.isSendCancelled ? null : chat.sendMessageMutation.error,
     chat.createConversationMutation.error,
     chat.renameConversationMutation.error,
     chat.clearConversationMutation.error,
-  ].find(Boolean);
+    chat.deleteConversationMutation.error,
+  ].find((candidate) => Boolean(candidate) && !isAiConversationNotFoundError(candidate));
 
   return (
     <aside
       aria-label="AI 助手"
       aria-modal="true"
-      className={styles.drawer}
+      className={`${styles.drawer} ${isDrawerOpen ? styles.drawerOpen : styles.drawerClosing}`}
       data-ai-chat-drawer="true"
+      data-animation-state={isDrawerOpen ? "open" : "closing"}
       ref={drawerRef}
       role="dialog"
+      style={
+        {
+          "--ai-drawer-width": `${drawerSize.width}px`,
+          "--ai-drawer-height": `${drawerSize.height}px`,
+        } as CSSProperties
+      }
     >
+      <div
+        aria-label="调整 AI 助手窗口大小"
+        aria-valuemax={Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 32)}
+        aria-valuemin={MIN_DRAWER_WIDTH}
+        aria-valuenow={drawerSize.width}
+        className={styles.resizeHandle}
+        role="separator"
+        tabIndex={0}
+        onKeyDown={handleResizeKeyDown}
+        onPointerDown={handleResizePointerDown}
+      >
+        <span aria-hidden="true" />
+      </div>
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>AI Assistant</p>
@@ -357,104 +599,134 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
           </details>
 
           <section className={styles.conversationBar} aria-label="AI 会话">
-            <div className={styles.currentConversation}>
-              {renaming ? (
-                <form
-                  className={styles.renameForm}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void handleRenameConversation();
-                  }}
-                >
-                  <input
-                    aria-label="会话标题"
-                    className={styles.titleInput}
-                    maxLength={80}
-                    value={renameDraft}
-                    onChange={(event) => setRenameDraft(event.target.value)}
-                  />
-                  <button
-                    aria-label="保存会话标题"
-                    className={styles.ghostButton}
-                    disabled={!renameDraft.trim() || chat.renameConversationMutation.isPending}
-                    type="submit"
-                  >
-                    保存
-                  </button>
-                  <button
-                    aria-label="取消重命名"
-                    className={styles.ghostButton}
-                    type="button"
-                    onClick={() => {
-                      setRenaming(false);
-                      setRenameDraft("");
-                    }}
-                  >
-                    取消
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <div className={styles.currentConversationText}>
-                    <span>当前会话</span>
-                    <strong title={activeTitle}>{activeTitle}</strong>
-                    <small>{activeMessageCount} 条消息</small>
-                  </div>
-                  <button
-                    aria-label="重命名会话"
-                    className={styles.ghostButton}
-                    disabled={!chat.selectedConversationId}
-                    type="button"
-                    onClick={() => {
-                      setRenameDraft(activeTitle);
-                      setRenaming(true);
-                    }}
-                  >
-                    重命名
-                  </button>
-                </>
-              )}
-            </div>
+            <span className={styles.conversationLabel}>会话</span>
             <div className={styles.conversationList}>
-              {conversations.map((item) => (
+              {conversations.map((item) => {
+                const selected = chat.selectedConversationId === item.conversationId;
+                const messageCount = selected ? activeMessageCount : item.messageCount;
+                return (
+                  <div className={styles.conversationItem} key={item.conversationId}>
+                    <button
+                      aria-label={item.title}
+                      aria-pressed={selected}
+                      className={`${styles.conversationButton} ${
+                        selected ? styles.conversationButtonActive : ""
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        selectedConversationIdRef.current = item.conversationId;
+                        setLastMemoryCount(null);
+                        chat.setSelectedConversationId(item.conversationId);
+                      }}
+                      onContextMenu={(event) => handleConversationContextMenu(event, item.conversationId)}
+                      onKeyDown={(event) => handleConversationKeyDown(event, item.conversationId)}
+                    >
+                      <span>{item.title}</span>
+                      <small aria-hidden="true">{messageCount} 条消息</small>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              aria-label="新建会话"
+              className={styles.newConversationButton}
+              disabled={busy}
+              type="button"
+              onClick={() => void handleNewConversation()}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+            {renamingConversationId ? (
+              <form
+                className={styles.renameForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleRenameConversation();
+                }}
+              >
+                <input
+                  aria-label="会话标题"
+                  className={styles.titleInput}
+                  maxLength={80}
+                  value={renameDraft}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                />
                 <button
-                  aria-pressed={chat.selectedConversationId === item.conversationId}
-                  className={`${styles.conversationButton} ${
-                    chat.selectedConversationId === item.conversationId
-                      ? styles.conversationButtonActive
-                      : ""
-                  }`}
-                  key={item.conversationId}
+                  aria-label="保存会话标题"
+                  className={styles.ghostButton}
+                  disabled={!renameDraft.trim() || chat.renameConversationMutation.isPending}
+                  type="submit"
+                >
+                  保存
+                </button>
+                <button
+                  aria-label="取消重命名"
+                  className={styles.ghostButton}
                   type="button"
                   onClick={() => {
-                    selectedConversationIdRef.current = item.conversationId;
-                    setLastMemoryCount(null);
-                    chat.setSelectedConversationId(item.conversationId);
+                    setRenamingConversationId(null);
+                    setRenameDraft("");
                   }}
                 >
-                  {item.title}
+                  取消
                 </button>
-              ))}
-            </div>
-            <div className={styles.conversationActions}>
-              <button
-                className={styles.ghostButton}
-                disabled={busy}
-                type="button"
-                onClick={() => void handleNewConversation()}
-              >
-                新建
-              </button>
-              <button
-                className={styles.ghostButton}
-                disabled={!chat.selectedConversationId || busy}
-                type="button"
-                onClick={handleClearConversation}
-              >
-                清空
-              </button>
-            </div>
+              </form>
+            ) : null}
           </section>
+
+          {conversationMenu && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  aria-label="会话操作"
+                  className={styles.conversationMenu}
+                  ref={conversationMenuRef}
+                  role="menu"
+                  style={{ left: `${conversationMenu.left}px`, top: `${conversationMenu.top}px` }}
+                >
+                  <button
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      const target = conversations.find(
+                        (item) => item.conversationId === conversationMenu.conversationId,
+                      );
+                      setRenameDraft(target?.title || "新会话");
+                      setRenamingConversationId(conversationMenu.conversationId);
+                      setConversationMenu(null);
+                    }}
+                  >
+                    重命名会话
+                  </button>
+                  <button
+                    disabled={busy}
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      const conversationId = conversationMenu.conversationId;
+                      setConversationMenu(null);
+                      void handleClearConversation(conversationId);
+                    }}
+                  >
+                    清空消息
+                  </button>
+                  <button
+                    className={styles.dangerMenuItem}
+                    disabled={busy}
+                    role="menuitem"
+                    type="button"
+                    onClick={() => {
+                      const conversationId = conversationMenu.conversationId;
+                      setConversationMenu(null);
+                      void handleDeleteConversation(conversationId);
+                    }}
+                  >
+                    删除会话
+                  </button>
+                </div>,
+                document.body,
+              )
+            : null}
 
           <section className={styles.messages} aria-label="AI 对话记录" ref={messagesRef}>
             <div className={styles.messagesHeader}>
@@ -463,17 +735,21 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
             </div>
             {chat.conversationQuery.isLoading ? (
               <div className={styles.emptyState}>正在读取对话。</div>
-            ) : conversation?.messages.length ? (
-              conversation.messages.map((message) => {
-                const status = message.metadata?.status;
+            ) : displayedMessages.length ? (
+              displayedMessages.map((message) => {
+                const status = typeof message.metadata?.status === "string" ? message.metadata.status : "";
                 const failed = status === "failed";
                 const pending = status === "pending";
+                const thinking = status === "thinking";
+                const cancelled = status === "cancelled";
                 return (
                   <article
                     className={`${styles.message} ${
                       message.role === "user" ? styles.userMessage : styles.assistantMessage
                     } ${failed ? styles.failedMessage : ""} ${
                       pending ? styles.pendingMessage : ""
+                    } ${thinking ? styles.thinkingMessage : ""} ${
+                      cancelled ? styles.cancelledMessage : ""
                     }`}
                     key={message.messageId}
                   >
@@ -481,6 +757,8 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
                       {message.role === "user" ? "我" : "AI"}
                       {failed ? <em className={styles.failedLabel}>发送失败</em> : null}
                       {pending ? <em className={styles.pendingLabel}>未完成</em> : null}
+                      {thinking ? <em className={styles.thinkingLabel}>思考中</em> : null}
+                      {cancelled ? <em className={styles.cancelledLabel}>已停止等待</em> : null}
                     </span>
                     <p>{message.content}</p>
                   </article>
@@ -516,20 +794,67 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
               >
                 取消
               </button>
-              <button
-                className={styles.sendButton}
-                disabled={!draft.trim() || busy || !state?.enabled}
-                type="button"
-                onClick={() => void handleSubmit()}
-              >
-                {chat.sendMessageMutation.isPending ? "发送中" : "发送"}
-              </button>
+              {chat.sendMessageMutation.isPending ? (
+                <button
+                  className={styles.stopButton}
+                  type="button"
+                  onClick={chat.cancelSendMessage}
+                >
+                  停止等待
+                </button>
+              ) : (
+                <button
+                  className={styles.sendButton}
+                  disabled={!draft.trim() || busy || !state?.enabled}
+                  type="button"
+                  onClick={() => void handleSubmit()}
+                >
+                  发送
+                </button>
+              )}
             </div>
           </footer>
         </>
       )}
     </aside>
   );
+}
+
+function loadDrawerSize(): DrawerSize {
+  if (typeof window === "undefined") {
+    return { width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT };
+  }
+  try {
+    if (window.localStorage.getItem(DRAWER_SIZE_VERSION_KEY) !== DRAWER_SIZE_VERSION) {
+      return clampDrawerSize({ width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT });
+    }
+    const stored = window.localStorage.getItem(DRAWER_SIZE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<DrawerSize>;
+      if (typeof parsed.width === "number" && typeof parsed.height === "number") {
+        return clampDrawerSize(parsed as DrawerSize);
+      }
+    }
+  } catch {
+    // Invalid local settings should not stop the drawer from opening.
+  }
+  return clampDrawerSize({ width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT });
+}
+
+function clampDrawerSize(size: DrawerSize): DrawerSize {
+  if (typeof window === "undefined") {
+    return size;
+  }
+  return {
+    width: Math.min(
+      Math.max(size.width, MIN_DRAWER_WIDTH),
+      Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 32),
+    ),
+    height: Math.min(
+      Math.max(size.height, MIN_DRAWER_HEIGHT),
+      Math.max(MIN_DRAWER_HEIGHT, window.innerHeight - 16),
+    ),
+  };
 }
 
 function formatError(error: unknown) {

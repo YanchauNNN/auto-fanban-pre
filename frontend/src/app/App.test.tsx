@@ -31,6 +31,7 @@ const mockGetAiConversation = vi.fn();
 const mockRenameAiConversation = vi.fn();
 const mockSendAiMessage = vi.fn();
 const mockClearAiConversation = vi.fn();
+const mockDeleteAiConversation = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
@@ -89,6 +90,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     renameAiConversation: mockRenameAiConversation,
     sendAiMessage: mockSendAiMessage,
     clearAiConversation: mockClearAiConversation,
+    deleteAiConversation: mockDeleteAiConversation,
   }),
 }));
 
@@ -119,6 +121,7 @@ beforeEach(() => {
   mockRenameAiConversation.mockReset();
   mockSendAiMessage.mockReset();
   mockClearAiConversation.mockReset();
+  mockDeleteAiConversation.mockReset();
 
   mockPing.mockResolvedValue({
     ok: true,
@@ -289,6 +292,7 @@ beforeEach(() => {
     },
   });
   mockClearAiConversation.mockResolvedValue(undefined);
+  mockDeleteAiConversation.mockResolvedValue(undefined);
 
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
@@ -482,7 +486,8 @@ describe("homepage shell", () => {
 
     const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
     expect(within(drawer).getByText("MiniMax-M3")).toBeInTheDocument();
-    expect(within(drawer).getAllByText("记忆验证").length).toBeGreaterThan(0);
+    expect(within(drawer).getByText("development_minimax")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("记忆验证")).toHaveLength(1);
     expect(within(drawer).getByText("请记住我的测试编号是 AI-0711")).toBeInTheDocument();
     expect(within(drawer).getByText("我已记住 AI-0711")).toBeInTheDocument();
 
@@ -490,17 +495,22 @@ describe("homepage shell", () => {
     await user.click(within(drawer).getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(mockSendAiMessage).toHaveBeenCalledWith("conv-1", {
-        content: "我刚才的测试编号是什么？",
-        agentId: "platform_assistant",
-        skillIds: ["drawing_explain"],
-        mcpServerIds: [],
-      });
+      expect(mockSendAiMessage).toHaveBeenCalledWith(
+        "conv-1",
+        {
+          content: "我刚才的测试编号是什么？",
+          agentId: "platform_assistant",
+          skillIds: ["drawing_explain"],
+          mcpServerIds: [],
+        },
+        expect.any(AbortSignal),
+      );
     });
     expect(await within(drawer).findByText("你的测试编号是 AI-0711。")).toBeInTheDocument();
     expect(within(drawer).getByText("已使用 2 条历史消息")).toBeInTheDocument();
 
     await user.click(within(drawer).getByRole("button", { name: "关闭 AI 助手" }));
+    await screen.findByRole("button", { name: "打开 AI 助手" });
     expect(document.body.style.overflow).toBe("");
   });
 
@@ -521,6 +531,63 @@ describe("homepage shell", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     const collapsedTrigger = await screen.findByRole("button", { name: "打开 AI 助手" });
     await waitFor(() => expect(collapsedTrigger).toHaveFocus());
+  });
+
+  it("resizes the AI drawer from its accessible resize handle and remembers the size", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    const handle = within(drawer).getByRole("separator", { name: "调整 AI 助手窗口大小" });
+    const initialWidth = drawer.style.getPropertyValue("--ai-drawer-width");
+    const initialHeight = drawer.style.getPropertyValue("--ai-drawer-height");
+
+    expect(Number.parseInt(initialWidth, 10)).toBeGreaterThanOrEqual(700);
+    expect(Number.parseInt(initialHeight, 10)).toBe(
+      Math.min(820, window.innerHeight - 16),
+    );
+
+    fireEvent.pointerDown(handle, { clientX: 960, clientY: 80 });
+    expect(handle).toHaveFocus();
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+
+    expect(drawer.style.getPropertyValue("--ai-drawer-width")).not.toBe(initialWidth);
+    expect(window.localStorage.getItem("fanban.ai.drawerSize")).toContain("width");
+  });
+
+  it("shows a user message and thinking state immediately and cancels the browser wait", async () => {
+    const user = userEvent.setup();
+    let requestSignal: AbortSignal | undefined;
+    mockSendAiMessage.mockImplementation(
+      (_conversationId: string, _payload: unknown, signal?: AbortSignal) => {
+        requestSignal = signal;
+        return new Promise((_, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("The request was aborted.", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    const composer = within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" });
+    await user.type(composer, "请立即显示这条消息");
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+
+    expect(await within(drawer).findByText("请立即显示这条消息")).toBeInTheDocument();
+    expect(within(drawer).getByText("AI 正在思考")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "停止等待" }));
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    expect(within(drawer).queryByText("AI 正在思考")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("已停止等待")).toBeInTheDocument();
+    await waitFor(() => expect(composer).not.toBeDisabled());
+    expect(mockGetAiConversation).toHaveBeenCalledTimes(1);
   });
 
   it("clears the displayed memory count when switching AI conversations", async () => {
@@ -667,14 +734,23 @@ describe("homepage shell", () => {
     expect(within(drawer).queryByText("记忆 2")).not.toBeInTheDocument();
   });
 
-  it("renames the selected AI conversation without adding a module tab", async () => {
+  it("manages an AI conversation from its context menu without adding a module tab", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
 
     const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
-    await user.click(await within(drawer).findByRole("button", { name: "重命名会话" }));
+    expect(within(drawer).queryByRole("button", { name: "重命名会话" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "清空" })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    expect(drawer).not.toContainElement(menu);
+    await user.click(within(menu).getByRole("menuitem", { name: "重命名会话" }));
     const titleInput = within(drawer).getByRole("textbox", { name: "会话标题" });
     await user.clear(titleInput);
     await user.type(titleInput, "规则提炼会话");
@@ -689,6 +765,114 @@ describe("homepage shell", () => {
     expect(
       within(screen.getByTestId("module-toolbar")).queryByRole("button", { name: "AI 助手" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps conversation management in the context menu without a visible ellipsis button", async () => {
+    render(<App />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    expect(
+      within(drawer).queryByRole("button", { name: "打开 记忆验证 会话操作" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    expect(drawer).not.toContainElement(menu);
+  });
+
+  it("clears an AI conversation from its context menu", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "清空消息" }));
+
+    await waitFor(() => expect(mockClearAiConversation).toHaveBeenCalledWith("conv-1"));
+  });
+
+  it("deletes an AI conversation from its context menu", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "删除会话" }));
+
+    await waitFor(() => expect(mockDeleteAiConversation).toHaveBeenCalledWith("conv-1"));
+    expect(within(drawer).queryByRole("button", { name: "记忆验证" })).not.toBeInTheDocument();
+  });
+
+  it("recovers from a stale listed AI conversation without exposing a not-found error", async () => {
+    window.localStorage.setItem("fanban.ai.selectedConversationId", "conv-stale");
+    mockListAiConversations
+      .mockResolvedValueOnce([
+        {
+          conversationId: "conv-stale",
+          title: "已失效会话",
+          createdAt: "2026-07-11T10:00:00+08:00",
+          updatedAt: "2026-07-11T10:01:00+08:00",
+          messageCount: 2,
+        },
+      ])
+      .mockResolvedValue([
+        {
+          conversationId: "conv-live",
+          title: "仍可用会话",
+          createdAt: "2026-07-11T10:02:00+08:00",
+          updatedAt: "2026-07-11T10:03:00+08:00",
+          messageCount: 1,
+        },
+      ]);
+    mockGetAiConversation.mockImplementation((conversationId: string) => {
+      if (conversationId === "conv-stale") {
+        return Promise.reject({ status: 404, detail: "conversation_not_found" });
+      }
+      return Promise.resolve({
+        conversationId: "conv-live",
+        title: "仍可用会话",
+        createdAt: "2026-07-11T10:02:00+08:00",
+        updatedAt: "2026-07-11T10:03:00+08:00",
+        messageCount: 1,
+        messages: [
+          {
+            messageId: "live-message",
+            role: "assistant",
+            content: "这是可恢复的会话。",
+            createdAt: "2026-07-11T10:03:00+08:00",
+          },
+        ],
+      });
+    });
+
+    render(<App />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    expect(await within(drawer).findByText("这是可恢复的会话。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockListAiConversations).toHaveBeenCalledTimes(2);
+      expect(window.localStorage.getItem("fanban.ai.selectedConversationId")).toBe("conv-live");
+    });
+    expect(within(drawer).queryByText("conversation_not_found")).not.toBeInTheDocument();
   });
 
   it("drops a stale stored AI conversation before sending for a new owner", async () => {
@@ -728,6 +912,7 @@ describe("homepage shell", () => {
     expect(mockSendAiMessage).toHaveBeenCalledWith(
       "conv-new",
       expect.objectContaining({ content: "新用户的问题" }),
+      expect.any(AbortSignal),
     );
     expect(mockGetAiConversation).not.toHaveBeenCalledWith("conv-from-old-ip");
   });
@@ -772,7 +957,7 @@ describe("homepage shell", () => {
     await user.click(within(drawer).getByRole("button", { name: "发送" }));
 
     expect(await within(drawer).findByText("model gateway request failed")).toBeInTheDocument();
-    expect(await within(drawer).findByText("发送失败")).toBeInTheDocument();
+    expect((await within(drawer).findAllByText("发送失败")).length).toBeGreaterThan(0);
     expect(await within(drawer).findByText("未完成")).toBeInTheDocument();
     expect(composer).toHaveValue("这条消息发送失败");
     expect(mockGetAiConversation).toHaveBeenCalledTimes(2);
