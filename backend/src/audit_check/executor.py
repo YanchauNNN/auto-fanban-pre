@@ -204,4 +204,15 @@ class AuditCheckExecutor:
             same_line_y_tolerance=standard_cfg.same_line_y_tolerance,
             same_text_pairing_enabled=standard_cfg.same_text_pairing_enabled,
             format_variant_compatibility_enabled=standard_cfg.format_variant_compatibility_enabled,
+            same_entity_name_before_code_enabled=(
+                standard_cfg.pairing.same_entity_name_before_code_enabled
+            ),
+            same_entity_code_before_name_enabled=(
+                standard_cfg.pairing.same_entity_code_before_name_enabled
+            ),
+            multiple_pairs_in_one_entity_enabled=(
+                standard_cfg.pairing.multiple_pairs_in_one_entity_enabled
+            ),
+            fallback_name_keywords=standard_cfg.pairing.fallback_name_keywords,
+            fallback_min_name_length=standard_cfg.pairing.fallback_min_name_length,
         ).evaluate(items)

@@ -16,6 +16,11 @@ class AuditMatchEngine:
         self.forbidden_terms = [str(term) for term in mechanism_cfg.forbidden_terms if str(term)]
         self.matching_policy = audit_cfg.matching_policy
         self._date_patterns = [re.compile(pattern) for pattern in audit_cfg.context_rules.date_like]
+        self._project_no_date_contexts = {
+            str(context).strip()
+            for context in audit_cfg.matching_policy.project_no_date_contexts
+            if str(context).strip()
+        }
         self._dimension_patterns = [
             re.compile(pattern) for pattern in audit_cfg.context_rules.dimension_like
         ]
@@ -102,9 +107,10 @@ class AuditMatchEngine:
                     observed_factory_codes=observed_factory_codes,
                 )
             )
-            if (
-                context_kind == "date_like"
-                and self.matching_policy.suppress_project_no_in_date_like
+            if self._is_project_number_suppressed_date(
+                field_context=item.field_context,
+                context_kind=context_kind,
+                normalized_text=normalized_text,
             ) or (
                 context_kind == "dimension_like"
                 and self.matching_policy.suppress_project_no_in_dimension_like
@@ -414,6 +420,21 @@ class AuditMatchEngine:
         if self._generic_identifier_re.fullmatch(normalized_text):
             return "generic_identifier_like"
         return "plain_text"
+
+    def _is_project_number_suppressed_date(
+        self,
+        *,
+        field_context: str | None,
+        context_kind: str,
+        normalized_text: str,
+    ) -> bool:
+        if not self.matching_policy.suppress_project_no_in_date_like:
+            return False
+        if not any(pattern.fullmatch(normalized_text) for pattern in self._date_patterns):
+            return False
+        return context_kind in self._project_no_date_contexts or (
+            str(field_context or "").strip() in self._project_no_date_contexts
+        )
 
     def _matches_token(self, *, token: str, text: str, context_kind: str) -> bool:
         if self._is_whitelisted_project_identifier(text, token):

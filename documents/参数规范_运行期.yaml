@@ -247,6 +247,10 @@ runtime_options:
       allow_embedded_match_in_titleblock: { type: bool, default: true, desc: "titleblock_* 语义中允许嵌入命中" }
       suppress_project_no_in_date_like: { type: bool, default: true, desc: "日期语义中抑制项目号命中" }
       suppress_project_no_in_dimension_like: { type: bool, default: true, desc: "尺寸语义中抑制项目号命中" }
+      project_no_date_contexts:
+        type: "list[str]"
+        default: ["date_like", "titleblock_date"]
+        desc: "项目号日期抑制适用的语义上下文；仅当全文同时满足 date_like 正则时生效"
     unit_consistency:
       enabled: { type: bool, default: true, desc: "是否启用项目号+机组号一致性纠错" }
       project_units:
@@ -324,6 +328,27 @@ runtime_options:
         type: bool
         default: true
         desc: "标准号格式兼容：允许空格/换行、全角或缺失斜杠、常见连字符/破折号、括号年限等写法差异"
+      pairing:
+        same_entity_name_before_code_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中《标准名称》（标准号）的名称在前写法"
+        same_entity_code_before_name_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中标准号：标准名称的名称在后写法"
+        multiple_pairs_in_one_entity_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中连续多组标准名称和标准号按顺序一一配对"
+        fallback_name_keywords:
+          type: "list[str]"
+          default: ["标准", "规范", "规程", "图集"]
+          desc: "跨实体同 y 值兜底时可作为规范名称候选的关键词；实际期望名称始终可参与匹配"
+        fallback_min_name_length:
+          type: int
+          default: 4
+          desc: "跨实体同 y 值兜底名称候选的最小规范化字符数"
 
   # --------------------------------------------------------------------------
   # 5) 翻版厂房索引图模板映射

@@ -635,6 +635,15 @@ runtime_options:
         assert standard_review.same_line_y_tolerance == 5.0
         assert standard_review.same_text_pairing_enabled is True
         assert standard_review.format_variant_compatibility_enabled is True
+        assert standard_review.pairing.same_entity_name_before_code_enabled is True
+        assert standard_review.pairing.same_entity_code_before_name_enabled is True
+        assert standard_review.pairing.multiple_pairs_in_one_entity_enabled is True
+        assert standard_review.pairing.fallback_name_keywords == ["标准", "规范", "规程", "图集"]
+        assert standard_review.pairing.fallback_min_name_length == 4
+        assert config.audit_check.matching_policy.project_no_date_contexts == [
+            "date_like",
+            "titleblock_date",
+        ]
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""
