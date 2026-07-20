@@ -124,7 +124,6 @@ runtime_options:
       dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
       command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
       netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
-      fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
     selection:
       engine: { type: enum, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
       mode: { type: enum, default: "database", desc: "选集模式：database/crossing（默认database，采用数据库级几何相交选集）" }
@@ -158,6 +157,11 @@ runtime_options:
         desc: "打印偏移（毫米）；模块5 CAD 路径固定为 0,0"
       plot_window_bottom_left_expand_ratio: { type: float, default: 0.0001, desc: "打印窗口左下角比例外扩；xmin -= width*ratio，ymin -= height*ratio；用于缓解左边/下边压边，默认万分之一" }
       plot_window_top_right_expand_ratio: { type: float, default: 0.0002, desc: "仅打印窗口右上角比例外扩；xmax += width*ratio，ymax += height*ratio；用于缓解上边/右边压边，默认万分之二" }
+      paper_variant_window_expand_overrides:
+        type: object
+        default:
+          CNPE_A1+1/4: { bottom_left_expand_ratio: 0.0, top_right_expand_ratio: 0.0 }
+        desc: "按图幅覆盖打印窗口外扩比例；A1+0.25 使用原图框窗口，避免全局外扩裁切其外框"
       scale_mode: { type: enum, default: "manual_integer_from_geometry", desc: "比例策略：manual_integer_from_geometry/scale_to_fit，默认按几何实测比例取整手动输入" }
       scale_integer_rounding: { type: enum, default: "round", desc: "manual_integer_from_geometry 的整数化方式：floor/round/ceil；先按小数点后1位四舍五入，再执行整数化，默认 round" }
       margins_mm:

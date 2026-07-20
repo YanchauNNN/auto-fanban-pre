@@ -159,6 +159,7 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001
         assert runtime_config.module5_export.plot.plot_window_top_right_expand_ratio == 0.0002
+        assert runtime_config.module5_export.plot.paper_variant_window_expand_overrides == {}
         assert runtime_config.module5_export.plot.scale_mode == "manual_integer_from_geometry"
         assert runtime_config.module5_export.plot.scale_integer_rounding == "round"
         assert runtime_config.module5_export.plot.margins_mm == {
@@ -209,6 +210,12 @@ class TestRuntimeConfig:
         config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
 
         assert config.module5_export.plot.paper_variant_pc3_overrides == {}
+        assert config.module5_export.plot.paper_variant_window_expand_overrides == {
+            "CNPE_A1+1/4": {
+                "bottom_left_expand_ratio": 0.0,
+                "top_right_expand_ratio": 0.0,
+            },
+        }
 
     def test_unit_consistency_business_values_are_not_python_defaults(
         self,

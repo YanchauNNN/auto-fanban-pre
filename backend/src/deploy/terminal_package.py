@@ -20,6 +20,7 @@ _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
 RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
 MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
+TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -117,6 +118,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(
             repo_root / "documents" / deployment.mechanism_spec_name,
             Path("documents") / deployment.mechanism_spec_name,
+        ),
+        CopyPlanEntry(
+            repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME,
+            Path("documents") / TERMINAL_INSTALL_PLAN_NAME,
         ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),

@@ -379,6 +379,32 @@ def test_localized_candidate_build_keeps_integer_scale_gate() -> None:
     assert localized == []
 
 
+def test_localized_candidate_with_valid_scale_keeps_detected_outer_bbox() -> None:
+    spec = _layered_anchor_spec()
+    locator = AnchorFirstLocator(spec, DummyFinder([]), DummyFitter())
+    detected_bbox = BBox(xmin=100.0, ymin=200.0, xmax=200.0, ymax=250.0)
+    candidate = locator._build_candidates_for_bbox(
+        detected_bbox,
+        use_scale_filter=False,
+        relax_scale_candidate_gate=True,
+    )
+    assert len(candidate) == 1
+    assert candidate[0].localized_fallback is False
+    anchor = TextItem(
+        x=110.0,
+        y=210.0,
+        text="ANCHOR",
+        bbox=BBox(xmin=110.0, ymin=210.0, xmax=120.0, ymax=215.0),
+        text_height=2.5,
+        source="test",
+    )
+
+    selected: dict[int, CandidateFrame] = {}
+    locator._resolve_anchor_matches([anchor], candidate, selected)
+
+    assert selected[1].bbox == detected_bbox
+
+
 def test_marker_bbox_expands_undersized_non_a4_frame_candidate() -> None:
     spec = BusinessSpec(
         schema_version="2.0",

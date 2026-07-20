@@ -618,8 +618,9 @@ class AnchorFirstLocator:
             bbox, self.paper_variants
         ):
             scale = (sx + sy) / 2.0
+            scale_matches_candidate = self._scale_matches_candidate(scale)
             # ① 强制校验：比例必须接近 scale_candidates 中的某个整数值
-            if not self._scale_matches_candidate(scale):
+            if not scale_matches_candidate:
                 self.logger.debug(
                     "候选矩形比例 %.3f 不在 scale_candidates 中，跳过 paper=%s",
                     scale,
@@ -653,7 +654,11 @@ class AnchorFirstLocator:
                     roi_profile_id=profile_id,
                     anchor_roi=anchor_roi,
                     fit_error=error,
-                    localized_fallback=relax_scale_candidate_gate,
+                    # Local scanning only relaxes the search scope.  A geometrically
+                    # valid rectangle remains the source of truth for the plot window.
+                    localized_fallback=(
+                        relax_scale_candidate_gate and not scale_matches_candidate
+                    ),
                 )
             )
         return candidates

@@ -71,7 +71,6 @@ class Module5DotNetBridgeConfig(BaseModel):
     )
     command_name: str = "M5BRIDGE_RUN"
     netload_each_run: bool = True
-    fallback_to_lisp_on_error: bool = True
 
 
 class Module5SelectionConfig(BaseModel):
@@ -109,6 +108,9 @@ class Module5PlotConfig(BaseModel):
     )
     plot_window_bottom_left_expand_ratio: float = 0.0001
     plot_window_top_right_expand_ratio: float = 0.0002
+    paper_variant_window_expand_overrides: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+    )
     scale_mode: str = "manual_integer_from_geometry"
     scale_integer_rounding: str = "round"
     margins_mm: dict[str, float] = Field(

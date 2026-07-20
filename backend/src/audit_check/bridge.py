@@ -40,7 +40,6 @@ class AuditDotNetScanner:
                     "dll_path": str(self.config.module5_export.dotnet_bridge.dll_path),
                     "command_name": str(self.config.module5_export.dotnet_bridge.command_name),
                     "netload_each_run": bool(self.config.module5_export.dotnet_bridge.netload_each_run),
-                    "fallback_to_lisp_on_error": False,
                 },
             },
         }

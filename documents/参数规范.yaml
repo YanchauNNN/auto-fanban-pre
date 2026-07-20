@@ -106,7 +106,7 @@ doc_generation:
     module5_dotnet_bridge_dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
     module5_dotnet_bridge_command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
     module5_dotnet_bridge_netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
-    module5_dotnet_bridge_fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
+    module5_plot_paper_variant_window_expand_overrides: { type: object, default: { "CNPE_A1+1/4": { bottom_left_expand_ratio: 0.0, top_right_expand_ratio: 0.0 } }, desc: "按图幅覆盖窗口外扩比例；A1+0.25 固定为原图框窗口" }
     module5_selection_engine: { type: str, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
     module5_selection_mode: { type: str, default: "database", desc: "选集模式：database/crossing（默认database，数据库级几何相交）" }
     module5_bbox_margin_percent: { type: float, default: 0.015, desc: "图框 bbox 扩边比例（用于选集）" }

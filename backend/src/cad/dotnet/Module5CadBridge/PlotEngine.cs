@@ -325,7 +325,9 @@ internal sealed class PlotEngine
         var pageInfos = new List<PlotInfo>();
         foreach (var page in pages)
         {
-            var pageWindow = BuildWindowBBox(page.Vertices, page.BBox);
+            var pageWindow = page.HasPlotWindowBBox
+                ? page.PlotWindowBBox
+                : BuildWindowBBox(page.Vertices, page.BBox);
             var targetLandscape = pageWindow.Width > pageWindow.Height;
             var mediaCandidates = GetStrictMediaCandidates(
                 db,
@@ -349,7 +351,7 @@ internal sealed class PlotEngine
                         db,
                         page.BBox,
                         page.Vertices,
-                        null,
+                        page.HasPlotWindowBBox ? page.PlotWindowBBox : null,
                         page.Sx,
                         page.Sy,
                         page.PaperVariantId,

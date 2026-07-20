@@ -10,7 +10,6 @@ CAD-DXF 执行器
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import shutil
@@ -131,7 +130,7 @@ class CADDXFExecutor:
             plot_style_key=resolved_plot_style_key,
             pc3_name=effective_pc3_name,
         )
-        split_run_meta = self._run_runner_with_engine_fallback(
+        self._run_runner(
             source_dxf=staged_source_dxf,
             task_payload=split_task,
             task_json=task_json,
@@ -140,10 +139,6 @@ class CADDXFExecutor:
         )
         split_result = self.load_result_json(result_json)
         self._enrich_dotnet_result_metadata(split_result)
-        if split_run_meta["fallback_used"]:
-            split_result.setdefault("errors", []).append(
-                f"DOTNET_TO_LISP_FALLBACK:{split_run_meta['reason']}",
-            )
 
         final_result = self._run_plot_stage_from_split_dwg(
             job_id=job_id,
@@ -608,7 +603,6 @@ class CADDXFExecutor:
                 "dll_path": str(bridge_cfg.dll_path),
                 "command_name": str(bridge_cfg.command_name),
                 "netload_each_run": bool(bridge_cfg.netload_each_run),
-                "fallback_to_lisp_on_error": bool(bridge_cfg.fallback_to_lisp_on_error),
             },
         }
 
@@ -1498,7 +1492,7 @@ class CADDXFExecutor:
         task_payload["source_dxf"] = str(staged_source)
         task_json = task_dir / "task.json"
         result_json = task_dir / "result.json"
-        run_meta = self._run_runner_with_engine_fallback(
+        self._run_runner(
             source_dxf=staged_source,
             task_payload=task_payload,
             task_json=task_json,
@@ -1507,13 +1501,9 @@ class CADDXFExecutor:
         )
         result = self.load_result_json(result_json)
         self._enrich_dotnet_result_metadata(result)
-        if run_meta["fallback_used"]:
-            result.setdefault("errors", []).append(
-                f"DOTNET_TO_LISP_FALLBACK:{run_meta['reason']}",
-            )
         return result
 
-    def _run_runner_with_engine_fallback(
+    def _run_runner(
         self,
         *,
         source_dxf: Path,
@@ -1521,75 +1511,14 @@ class CADDXFExecutor:
         task_json: Path,
         result_json: Path,
         workspace_dir: Path,
-    ) -> dict[str, str | bool]:
+    ) -> None:
         self._write_task_json(task_json, task_payload)
-        try:
-            self.runner.run(
-                source_dxf=source_dxf,
-                task_json=task_json,
-                result_json=result_json,
-                workspace_dir=workspace_dir,
-            )
-            return {"fallback_used": False, "reason": ""}
-        except Exception as exc:  # noqa: BLE001
-            if not self._task_can_fallback_to_lisp(task_payload):
-                raise
-            fallback_payload = self._build_lisp_fallback_task_payload(
-                task_payload=task_payload,
-                reason=str(exc),
-            )
-            self._write_task_json(task_json, fallback_payload)
-            self.runner.run(
-                source_dxf=source_dxf,
-                task_json=task_json,
-                result_json=result_json,
-                workspace_dir=workspace_dir,
-            )
-            return {"fallback_used": True, "reason": str(exc)}
-
-    def _task_can_fallback_to_lisp(self, task_payload: dict) -> bool:
-        engines = task_payload.get("engines", {})
-        if not isinstance(engines, dict):
-            return False
-        dotnet_bridge = engines.get("dotnet_bridge", {})
-        if not isinstance(dotnet_bridge, dict):
-            return False
-        if not bool(dotnet_bridge.get("enabled", False)):
-            return False
-        if not bool(dotnet_bridge.get("fallback_to_lisp_on_error", True)):
-            return False
-        return self._task_prefers_dotnet(task_payload)
-
-    @staticmethod
-    def _task_prefers_dotnet(task_payload: dict) -> bool:
-        stage = str(task_payload.get("workflow_stage", "split_only")).strip().lower()
-        engines = task_payload.get("engines", {})
-        if not isinstance(engines, dict):
-            return False
-        selection_engine = str(engines.get("selection_engine", "lisp")).strip().lower()
-        plot_engine = str(engines.get("plot_engine", "lisp")).strip().lower()
-        if stage == "split_only":
-            return selection_engine == "dotnet"
-        if stage in {"plot_window_only", "plot_from_split_dwg"}:
-            return plot_engine == "dotnet"
-        return False
-
-    @staticmethod
-    def _build_lisp_fallback_task_payload(*, task_payload: dict, reason: str) -> dict:
-        fallback_payload = copy.deepcopy(task_payload)
-        engines = fallback_payload.setdefault("engines", {})
-        if not isinstance(engines, dict):
-            engines = {}
-            fallback_payload["engines"] = engines
-        engines["selection_engine"] = "lisp"
-        engines["plot_engine"] = "lisp"
-        dotnet_bridge = engines.get("dotnet_bridge", {})
-        if not isinstance(dotnet_bridge, dict):
-            dotnet_bridge = {}
-        dotnet_bridge["enabled"] = False
-        dotnet_bridge["fallback_reason"] = reason
-        engines["dotnet_bridge"] = dotnet_bridge
-        return fallback_payload
+        self.runner.run(
+            source_dxf=source_dxf,
+            task_json=task_json,
+            result_json=result_json,
+            workspace_dir=workspace_dir,
+        )
 
     def _build_plot_frame_entry_from_page(
         self,
@@ -1708,7 +1637,7 @@ class CADDXFExecutor:
             sheet_set.generated_page_count = page_count
 
     def _build_frame_entry(self, frame: FrameMeta) -> dict:
-        return {
+        entry = {
             "frame_id": frame.frame_id,
             "name": self._name_for_frame(frame),
             "cad_source_file": (
@@ -1727,6 +1656,12 @@ class CADDXFExecutor:
             "sy": float(frame.runtime.sy) if frame.runtime.sy is not None else None,
             "kind": "single",
         }
+        self._apply_paper_variant_window_override(
+            entry=entry,
+            bbox=frame.runtime.outer_bbox,
+            paper_variant_id=frame.runtime.paper_variant_id,
+        )
+        return entry
 
     def _build_window_plot_frame_entry(
         self,
@@ -1738,36 +1673,7 @@ class CADDXFExecutor:
         return self._build_frame_entry(frame), []
 
     def _build_sheet_set_entry(self, sheet_set: SheetSet) -> dict:
-        pages = [
-            {
-                "page_index": page.page_index,
-                "bbox": self._bbox_to_dict(page.outer_bbox),
-                "vertices": (
-                    self._vertices_for_frame(
-                        page.outer_bbox,
-                        page.frame_meta.runtime.outer_vertices,
-                    )
-                    if page.frame_meta
-                    else self._vertices_from_bbox(page.outer_bbox)
-                ),
-                "paper_size_mm": self._paper_size_for_sheet_page(page),
-                "paper_variant_id": self._paper_variant_id_for_sheet_page(page),
-                "paper_media_name": self._paper_media_name_for_variant(
-                    self._paper_variant_id_for_sheet_page(page),
-                ),
-                "sx": (
-                    float(page.frame_meta.runtime.sx)
-                    if page.frame_meta and page.frame_meta.runtime.sx is not None
-                    else None
-                ),
-                "sy": (
-                    float(page.frame_meta.runtime.sy)
-                    if page.frame_meta and page.frame_meta.runtime.sy is not None
-                    else None
-                ),
-            }
-            for page in sheet_set.pages
-        ]
+        pages = [self._build_sheet_set_page_entry(page) for page in sheet_set.pages]
         return {
             "cluster_id": sheet_set.cluster_id,
             "name": self._name_for_sheet_set(sheet_set),
@@ -1780,6 +1686,84 @@ class CADDXFExecutor:
             ),
             "pages": pages,
         }
+
+    def _build_sheet_set_page_entry(self, page) -> dict:
+        paper_variant_id = self._paper_variant_id_for_sheet_page(page)
+        entry = {
+            "page_index": page.page_index,
+            "bbox": self._bbox_to_dict(page.outer_bbox),
+            "vertices": (
+                self._vertices_for_frame(
+                    page.outer_bbox,
+                    page.frame_meta.runtime.outer_vertices,
+                )
+                if page.frame_meta
+                else self._vertices_from_bbox(page.outer_bbox)
+            ),
+            "paper_size_mm": self._paper_size_for_sheet_page(page),
+            "paper_variant_id": paper_variant_id,
+            "paper_media_name": self._paper_media_name_for_variant(paper_variant_id),
+            "sx": (
+                float(page.frame_meta.runtime.sx)
+                if page.frame_meta and page.frame_meta.runtime.sx is not None
+                else None
+            ),
+            "sy": (
+                float(page.frame_meta.runtime.sy)
+                if page.frame_meta and page.frame_meta.runtime.sy is not None
+                else None
+            ),
+        }
+        self._apply_paper_variant_window_override(
+            entry=entry,
+            bbox=page.outer_bbox,
+            paper_variant_id=paper_variant_id,
+        )
+        return entry
+
+    def _apply_paper_variant_window_override(
+        self,
+        *,
+        entry: dict,
+        bbox: BBox,
+        paper_variant_id: str | None,
+    ) -> None:
+        override = self._paper_variant_window_expand_override(paper_variant_id)
+        if override is None:
+            return
+        bottom_left_ratio, top_right_ratio = override
+        entry["plot_window_bbox"] = self._bbox_to_dict(
+            BBox(
+                xmin=bbox.xmin - bbox.width * bottom_left_ratio,
+                ymin=bbox.ymin - bbox.height * bottom_left_ratio,
+                xmax=bbox.xmax + bbox.width * top_right_ratio,
+                ymax=bbox.ymax + bbox.height * top_right_ratio,
+            ),
+        )
+
+    def _paper_variant_window_expand_override(
+        self,
+        paper_variant_id: str | None,
+    ) -> tuple[float, float] | None:
+        variant_id = str(paper_variant_id or "").strip()
+        if not variant_id:
+            return None
+        raw_overrides = getattr(
+            self.config.module5_export.plot,
+            "paper_variant_window_expand_overrides",
+            {},
+        )
+        if not isinstance(raw_overrides, dict):
+            return None
+        raw = raw_overrides.get(variant_id)
+        if not isinstance(raw, dict):
+            return None
+        try:
+            bottom_left_ratio = max(0.0, float(raw.get("bottom_left_expand_ratio", 0.0)))
+            top_right_ratio = max(0.0, float(raw.get("top_right_expand_ratio", 0.0)))
+        except (TypeError, ValueError):
+            return None
+        return bottom_left_ratio, top_right_ratio
 
     def _paper_size_for_sheet_page(self, page) -> list[float] | None:
         if page.frame_meta is not None:
