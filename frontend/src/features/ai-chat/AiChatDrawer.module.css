@@ -477,6 +477,7 @@
 
 .assistantMessage {
   align-self: flex-start;
+  width: 86%;
 }
 
 .assistantMessage > p,
