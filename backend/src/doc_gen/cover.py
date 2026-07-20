@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import importlib
 import math
 import re
 import shutil
+import sys
+import threading
 import time
 import zipfile
 from collections.abc import Callable
@@ -78,6 +81,10 @@ _IGNORED_ERRORS_INSERT_BEFORE = (
     "tableParts",
     "extLst",
 )
+_EXCEL_TYPELIB_GUID = "{00020813-0000-0000-C000-000000000046}"
+_EXCEL_TYPELIB_VERSION = (1, 9)
+_EXCEL_GEN_PY_MODULE_NAME = "00020813-0000-0000-C000-000000000046x0x1x9"
+_EXCEL_GEN_PY_REPAIR_LOCK = threading.Lock()
 _EXCEL_COM_ERROR_CHECKS = tuple(range(1, 10))
 _EXCEL_ERROR_CHECKING_OPTIONS = (
     "BackgroundChecking",
@@ -423,10 +430,7 @@ class CoverGenerator(ICoverGenerator):
                         f"{collection_name}.Item({idx}).OLEFormat.Activate",
                     )
                     time.sleep(0.8)
-                    ole_obj = self._com_call_with_retry(
-                        lambda ole_format=ole_format: ole_format.Object,
-                        f"{collection_name}.Item({idx}).OLEFormat.Object",
-                    )
+                    ole_obj = self._get_ole_format_object(ole_format)
                 except Exception:
                     continue
 
@@ -473,10 +477,7 @@ class CoverGenerator(ICoverGenerator):
                         f"{collection_name}.Item({idx}).OLEFormat.Activate",
                     )
                     time.sleep(0.8)
-                    ole_obj = self._com_call_with_retry(
-                        lambda ole_format=ole_format: ole_format.Object,
-                        f"{collection_name}.Item({idx}).OLEFormat.Object",
-                    )
+                    ole_obj = self._get_ole_format_object(ole_format)
                 except Exception:
                     continue
 
@@ -484,6 +485,65 @@ class CoverGenerator(ICoverGenerator):
                 if sheet is not None:
                     return sheet
         return None
+
+    def _get_ole_format_object(self, ole_format: Any) -> Any:
+        """Return an embedded OLE object, repairing a broken Excel type-library cache once."""
+        try:
+            return self._com_call_with_retry(
+                lambda: ole_format.Object,
+                "OLEFormat.Object",
+            )
+        except Exception as exc:
+            if not self._is_incomplete_gen_py_error(exc):
+                raise
+
+        self._repair_incomplete_excel_gen_py_cache()
+        return self._com_call_with_retry(
+            lambda: ole_format.Object,
+            "OLEFormat.Object after gen_py repair",
+        )
+
+    @staticmethod
+    def _is_incomplete_gen_py_error(exc: Exception) -> bool:
+        message = str(exc)
+        return "gen_py" in message and (
+            "CLSIDToClassMap" in message or "CLSIDToPackageMap" in message
+        )
+
+    @staticmethod
+    def _repair_incomplete_excel_gen_py_cache() -> None:
+        """Rebuild only Excel's generated pywin32 wrapper when an incomplete cache is detected."""
+        try:
+            import win32com
+            from win32com.client import gencache
+        except ImportError as exc:
+            raise GenerationError("缺少 pywin32，无法修复 Excel COM 类型库缓存") from exc
+
+        module_name = f"win32com.gen_py.{_EXCEL_GEN_PY_MODULE_NAME}"
+        cache_root = Path(win32com.__gen_path__)
+        cache_file = cache_root / f"{_EXCEL_GEN_PY_MODULE_NAME}.py"
+        stale_dir = cache_root / _EXCEL_GEN_PY_MODULE_NAME
+        with _EXCEL_GEN_PY_REPAIR_LOCK:
+            for loaded_name in list(sys.modules):
+                if loaded_name == module_name or loaded_name.startswith(f"{module_name}."):
+                    sys.modules.pop(loaded_name, None)
+            if cache_file.exists():
+                cache_file.unlink()
+            if stale_dir.is_dir():
+                shutil.rmtree(stale_dir)
+            importlib.invalidate_caches()
+            try:
+                gencache.EnsureModule(
+                    _EXCEL_TYPELIB_GUID,
+                    0,
+                    _EXCEL_TYPELIB_VERSION[0],
+                    _EXCEL_TYPELIB_VERSION[1],
+                )
+                module = importlib.import_module(module_name)
+            except Exception as exc:
+                raise GenerationError(f"Excel COM 类型库缓存修复失败: {exc}") from exc
+            if not hasattr(module, "CLSIDToClassMap"):
+                raise GenerationError("Excel COM 类型库缓存修复后仍不完整")
 
     def _to_excel_sheet(self, ole_obj: Any) -> Any | None:
         if ole_obj is None:

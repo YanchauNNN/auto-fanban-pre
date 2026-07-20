@@ -536,7 +536,7 @@ doc_generation:
         subitem_name:        { cell: "I15", label: "D15" }
         design_phase:        { cell: "I17", label: "D17" }
         discipline:          { cell: "I19", label: "D19" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25:S25", merge: true }
         album_internal_code: { cell: "N3:S3", merge: true }
         cover_revision:      { cell: "N5:P5", merge: true, write_mode: "append_after_label", label: "版次：" }
@@ -556,8 +556,8 @@ doc_generation:
         design_phase_en:     { cell: "I17", label: "D17", desc: "设计阶段（英文），由映射表生成" }
         discipline:          { cell: "I18", label: "D18", desc: "专业（中文）" }
         discipline_en:       { cell: "I19:S19", label: "D19", desc: "专业（英文），由映射表生成" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
-        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half", font_sizes: [10, 9, 8, 7, 6, 5], min_font_size: 5, max_chars_per_line: 38, shrink_to_fit_fallback: true }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
+        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half", font_sizes: [9, 8, 7, 6, 5], min_font_size: 5, max_chars_per_line: 38, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25", label: "D25/D26" }
         album_internal_code: { cell: "M3:S3", merge: true, label: "M2" }
         cover_revision:      { cell: "M5", write_mode: "append_after_label", label: "Rev.:" }
@@ -1190,6 +1190,12 @@ a4_multipage:
     gap_threshold_formula: "gap_threshold_factor * min(W_obs, H_obs)"
     gap_threshold_factor: 1.0
     edge_rule: "min_dx < gap_threshold AND min_dy < gap_threshold"
+
+  composite_frame_filter:
+    enabled: true
+    minimum_contained_a4_pages: 2
+    bbox_relative_tolerance: 0.002
+    desc: "A4图族完成后，剔除同内部编码且包住多个A4页的组合外框候选，避免被误拆为独立图纸。"
 
   # --------------------------------------------------------------------------
   # 4.3 Master Page定位

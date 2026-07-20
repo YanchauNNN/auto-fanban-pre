@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 from pathlib import Path
@@ -689,13 +690,13 @@ _SAFE_BRIDGE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 def _safe_bridge_token(value: str) -> str:
     normalized = _SAFE_BRIDGE_TOKEN_RE.sub("-", str(value or "").strip()).strip("-.")
-    if not normalized:
-        normalized = "dwg"
-    return f"{normalized}-{uuid4().hex[:8]}"
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return f"dwg-{digest}"
 
 
 def _safe_bridge_filename(source_dwg: Path) -> str:
-    return f"{_safe_bridge_token(source_dwg.stem)}{source_dwg.suffix.lower()}"
+    digest = hashlib.sha256(source_dwg.name.encode("utf-8")).hexdigest()[:16]
+    return f"source-{digest}{source_dwg.suffix.lower()}"
 
 
 def _font_option_stem(value: str) -> str:

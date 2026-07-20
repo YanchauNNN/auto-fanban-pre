@@ -82,6 +82,31 @@ def _assert_suppresses_excel_error_indicators(docx_path: Path) -> None:
     assert any('twoDigitTextYear="1"' in xml for xml in sheet_xmls)
 
 
+def test_get_ole_format_object_repairs_incomplete_gen_py_and_retries() -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    expected_object = object()
+
+    class BrokenOleFormat:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        @property
+        def Object(self) -> object:  # noqa: N802
+            self.calls += 1
+            if self.calls == 1:
+                raise AttributeError("module gen_py has no attribute CLSIDToClassMap")
+            return expected_object
+
+    ole_format = BrokenOleFormat()
+    repairs: list[bool] = []
+    gen._com_call_with_retry = lambda fn, desc, **kwargs: fn()  # type: ignore[method-assign]
+    gen._repair_incomplete_excel_gen_py_cache = lambda: repairs.append(True)  # type: ignore[method-assign]
+
+    assert gen._get_ole_format_object(ole_format) is expected_object
+    assert repairs == [True]
+    assert ole_format.calls == 2
+
+
 def _assert_keeps_source_template_error_indicators_unpersisted(docx_path: Path) -> None:
     sheet_xmls = _read_cover_embedded_sheet_xmls(docx_path)
     assert all("<ignoredErrors" not in xml for xml in sheet_xmls)
@@ -125,6 +150,32 @@ def test_cover_variant_template_mapping() -> None:
 
     ctx.params.cover_variant = "核安全设备"
     assert gen._get_template_path(ctx).endswith("1818图册核安全设备封面模板.docx")
+
+
+@pytest.mark.parametrize(
+    ("project_no", "cover_variant"),
+    [
+        ("2016", "\u901a\u7528"),
+        ("2016", "\u538b\u529b\u5bb9\u5668"),
+        ("2016", "\u6838\u5b89\u5168\u8bbe\u5907"),
+        ("1818", "\u901a\u7528"),
+        ("1818", "\u538b\u529b\u5bb9\u5668"),
+        ("1818", "\u6838\u5b89\u5168\u8bbe\u5907"),
+    ],
+)
+def test_each_cover_template_uses_reduced_base_title_fonts(
+    project_no: str,
+    cover_variant: str,
+) -> None:
+    gen = CoverGenerator(pdf_exporter=cast(IPDFExporter, DummyPDFExporter()))
+    ctx = _build_context(project_no=project_no)
+    ctx.params.cover_variant = cover_variant
+
+    assert Path(gen._get_template_path(ctx)).is_file()
+    bindings = gen.spec.get_cover_bindings(project_no)
+    assert bindings["album_title_cn"].font_sizes[0] == 13
+    if project_no == "1818":
+        assert bindings["album_title_en"].font_sizes[0] == 9
 
 
 def test_1818_cover_binding_expands_discipline_en_range() -> None:
@@ -363,7 +414,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
             "NF厂房屋面钢结构图",
             "Short English Title",
             ("I21", "I22"),
-            14,
+            13,
             False,
         ),
         (
@@ -372,7 +423,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
             "核辅助厂房标高楼板结构布置图",
             "Medium English Title",
             ("I21", "I22"),
-            14,
+            13,
             False,
         ),
         (
@@ -384,7 +435,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
             ),
             "Long English Title",
             ("I21", "I22"),
-            14,
+            13,
             True,
         ),
         (
@@ -396,7 +447,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
             ),
             "NF Building Roof Steel Structure Detail",
             ("I21", "I22"),
-            14,
+            13,
             True,
         ),
         (
@@ -405,7 +456,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
             "NF厂房屋面钢结构详图",
             "NF Building Roof Steel Structure Detail",
             ("I23", "I24"),
-            10,
+            9,
             False,
         ),
         (
@@ -418,7 +469,7 @@ def test_en_title_split_restores_common_missing_spaces() -> None:
                 "construction review package"
             ),
             ("I23", "I24"),
-            10,
+            9,
             True,
         ),
     ],

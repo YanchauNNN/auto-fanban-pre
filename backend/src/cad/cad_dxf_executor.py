@@ -1748,8 +1748,13 @@ class CADDXFExecutor:
         variant_id = str(paper_variant_id or "").strip()
         if not variant_id:
             return None
+        plot_config = getattr(
+            getattr(getattr(self, "config", None), "module5_export", None),
+            "plot",
+            None,
+        )
         raw_overrides = getattr(
-            self.config.module5_export.plot,
+            plot_config,
             "paper_variant_window_expand_overrides",
             {},
         )
