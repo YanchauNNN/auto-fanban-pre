@@ -27,6 +27,14 @@ plot.log
 .ruff_cache/
 .uv-cache/
 
+# Local package dependencies (do not commit)
+node_modules/
+
+# Locally generated manual reports and visual QA artifacts.
+# Historical reports already tracked by Git remain available; new runs stay local.
+/outputs/manual-*/
+/outputs/qa-form*/
+
 # Browser automation/debug artifacts
 .playwright-mcp/
 /page-*-snapshot.md
