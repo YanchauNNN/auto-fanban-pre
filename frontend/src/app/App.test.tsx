@@ -506,6 +506,50 @@ describe("homepage shell", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  it("renders assistant Markdown while keeping user messages as literal text", async () => {
+    const user = userEvent.setup();
+    mockGetAiConversation.mockResolvedValueOnce({
+      conversationId: "conv-1",
+      title: "格式验证",
+      createdAt: "2026-07-20T09:00:00+08:00",
+      updatedAt: "2026-07-20T09:01:00+08:00",
+      messages: [
+        {
+          messageId: "format-user",
+          role: "user",
+          content: "**用户输入不加粗**",
+          createdAt: "2026-07-20T09:00:00+08:00",
+        },
+        {
+          messageId: "format-assistant",
+          role: "assistant",
+          content: [
+            "## APDL 示例",
+            "",
+            "- 保留列表",
+            "",
+            "```apdl",
+            "/PREP7",
+            "ET,1,SOLID185",
+            "```",
+          ].join("\n"),
+          createdAt: "2026-07-20T09:01:00+08:00",
+        },
+      ],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    const userText = await within(drawer).findByText("**用户输入不加粗**");
+    expect(userText.tagName).toBe("P");
+    expect(userText.closest("article")?.querySelector("strong")).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "APDL 示例" })).toBeInTheDocument();
+    expect(within(drawer).getByText("保留列表").closest("li")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "复制 APDL 代码" })).toBeInTheDocument();
+  });
+
   it("keeps keyboard focus in the AI dialog and restores the collapsed trigger", async () => {
     const user = userEvent.setup();
     render(<App />);

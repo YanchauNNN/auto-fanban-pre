@@ -465,7 +465,8 @@
   font-style: normal;
 }
 
-.message p {
+.message > p,
+.assistantContent {
   margin: 0;
   padding: 0.68rem 0.78rem;
   border: 1px solid rgba(20, 70, 128, 0.1);
@@ -478,7 +479,8 @@
   align-self: flex-start;
 }
 
-.assistantMessage p {
+.assistantMessage > p,
+.assistantContent {
   background: rgba(255, 255, 255, 0.94);
   color: #183f68;
 }
@@ -488,31 +490,31 @@
   text-align: right;
 }
 
-.userMessage p {
+.userMessage > p {
   background: #1f65a9;
   color: #fff;
   text-align: left;
 }
 
-.failedMessage p {
+.failedMessage > p {
   border-color: rgba(174, 68, 36, 0.32);
   background: #fff4ef;
   color: #8f361d;
 }
 
-.pendingMessage p {
+.pendingMessage > p {
   border-color: rgba(173, 116, 0, 0.3);
   background: #fff9e8;
   color: #704900;
 }
 
-.thinkingMessage p {
+.thinkingMessage > p {
   border-color: rgba(36, 100, 169, 0.24);
   background: rgba(236, 246, 255, 0.96);
   color: #1a528d;
 }
 
-.cancelledMessage p {
+.cancelledMessage > p {
   border-color: rgba(89, 97, 111, 0.22);
   background: rgba(245, 247, 250, 0.96);
   color: #5b6471;

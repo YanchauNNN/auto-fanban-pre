@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 
 import type { ApiAdapter } from "../../platform/api/types";
 import styles from "./AiChatDrawer.module.css";
+import { AiMessageContent } from "./AiMessageContent";
 import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
 
 const DRAWER_OPEN_KEY = "fanban.ai.drawerOpen";
@@ -705,6 +706,12 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
                 const pending = status === "pending";
                 const thinking = status === "thinking";
                 const cancelled = status === "cancelled";
+                const renderAssistantMarkdown =
+                  message.role === "assistant" &&
+                  !failed &&
+                  !pending &&
+                  !thinking &&
+                  !cancelled;
                 return (
                   <article
                     className={`${styles.message} ${
@@ -723,7 +730,13 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
                       {thinking ? <em className={styles.thinkingLabel}>思考中</em> : null}
                       {cancelled ? <em className={styles.cancelledLabel}>已停止等待</em> : null}
                     </span>
-                    <p>{message.content}</p>
+                    {renderAssistantMarkdown ? (
+                      <div className={styles.assistantContent}>
+                        <AiMessageContent content={message.content} />
+                      </div>
+                    ) : (
+                      <p>{message.content}</p>
+                    )}
                   </article>
                 );
               })
