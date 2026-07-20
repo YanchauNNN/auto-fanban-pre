@@ -32,6 +32,11 @@ from src.ai.ansys_mapdl_skill import (
     AnsysMapdlSkillConfig,
     resolve_skill_root,
 )
+from src.ai.building_standards_skill import (
+    BUILDING_STANDARDS_SKILL_ID,
+    BuildingStandardsSkill,
+    BuildingStandardsSkillConfig,
+)
 from src.ai.context_skills import ContextSkill
 from src.ai.owner_identity import normalize_ip_host
 from src.ai.read_only_tools import ReadOnlyHostTools
@@ -309,25 +314,48 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
         return []
     server_root = source_path.resolve().parents[2]
     result: list[ContextSkill] = []
-    defaults = AnsysMapdlSkillConfig()
+    ansys_defaults = AnsysMapdlSkillConfig()
+    standards_defaults = BuildingStandardsSkillConfig()
     for skill in spec.ai_layer.chat.skills:
-        if not skill.enabled or skill.handler != ANSYS_MAPDL_SKILL_ID:
+        if not skill.enabled:
             continue
         root = resolve_skill_root(server_root, skill.root, skill.root_env_var)
-        result.append(
-            AnsysMapdlSkill(
-                root=root,
-                config=AnsysMapdlSkillConfig(
-                    skill_id=skill.skill_id,
-                    auto_trigger=skill.auto_trigger,
-                    trigger_terms=tuple(skill.trigger_terms) or defaults.trigger_terms,
-                    max_results=skill.max_results,
-                    max_context_chars=skill.max_context_chars,
-                    query_timeout_seconds=skill.query_timeout_seconds,
-                    history_followup_messages=skill.history_followup_messages,
-                ),
+        if skill.handler == ANSYS_MAPDL_SKILL_ID:
+            result.append(
+                AnsysMapdlSkill(
+                    root=root,
+                    config=AnsysMapdlSkillConfig(
+                        skill_id=skill.skill_id,
+                        auto_trigger=skill.auto_trigger,
+                        trigger_terms=(
+                            tuple(skill.trigger_terms)
+                            or ansys_defaults.trigger_terms
+                        ),
+                        max_results=skill.max_results,
+                        max_context_chars=skill.max_context_chars,
+                        query_timeout_seconds=skill.query_timeout_seconds,
+                        history_followup_messages=skill.history_followup_messages,
+                    ),
+                )
             )
-        )
+        elif skill.handler == BUILDING_STANDARDS_SKILL_ID:
+            result.append(
+                BuildingStandardsSkill(
+                    root=root,
+                    config=BuildingStandardsSkillConfig(
+                        skill_id=skill.skill_id,
+                        auto_trigger=skill.auto_trigger,
+                        trigger_terms=(
+                            tuple(skill.trigger_terms)
+                            or standards_defaults.trigger_terms
+                        ),
+                        max_results=skill.max_results,
+                        max_context_chars=skill.max_context_chars,
+                        query_timeout_seconds=skill.query_timeout_seconds,
+                        history_followup_messages=skill.history_followup_messages,
+                    ),
+                )
+            )
     return result
 
 

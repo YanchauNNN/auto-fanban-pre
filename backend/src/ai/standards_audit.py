@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
-
+from typing import Any
 
 _TARGET_DEPARTMENT = "建筑结构所"
 _TARGET_MAJORS = frozenset({"建筑", "结构", "总图"})

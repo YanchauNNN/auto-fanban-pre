@@ -1,0 +1,907 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-20T10:31:04+00:00",
+  "case_count": 72,
+  "passed_count": 72,
+  "failed_count": 0,
+  "pass_rate": 1.0,
+  "categories": {
+    "概念检索": {
+      "case_count": 12,
+      "passed_count": 12
+    },
+    "版本与废止状态": {
+      "case_count": 8,
+      "passed_count": 8
+    },
+    "精确条款": {
+      "case_count": 36,
+      "passed_count": 36
+    },
+    "证据不足": {
+      "case_count": 10,
+      "passed_count": 10
+    },
+    "跨规范建议": {
+      "case_count": 6,
+      "passed_count": 6
+    }
+  },
+  "database_sha256": "01eef258d3ec05739347f9082dbb7d0b07b917f896f5b9e2f778a8fa3206f040",
+  "catalog_sha256": "c140e4a808c3c2034d7ba1ce0af09629920d66dfacb3f6036aa92d5df0d1abe6",
+  "cases_sha256": "d863134de205bfbf3ab5a412c3d188928bcb55c235fc50da7b6de014fa23bfcd",
+  "results": [
+    {
+      "id": "exact-001",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-002",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-003",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-004",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-005",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-006",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-007",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-008",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-009",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-010",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-011",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-012",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-013",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-014",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-015",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-016",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-017",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-018",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-019",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-020",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-021",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-022",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-023",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-024",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-025",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-026",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-027",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-028",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-029",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-030",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-031",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-032",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-033",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-034",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-035",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "exact-036",
+      "category": "精确条款",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-001",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-002",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-003",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-004",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-005",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-006",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-007",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-008",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-009",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-010",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-011",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "search-012",
+      "category": "概念检索",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "status-001",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "GB/T 18314-2009 官方状态为“废止”，不得直接作为当前设计依据。",
+          "官方替代信息：无官方替代信息。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-002",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "GB/T 16311-2009 官方状态为“废止”，不得直接作为当前设计依据。",
+          "官方替代信息：无官方替代信息。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-003",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "GB/T 26941.1-2011 官方状态为“废止”，不得直接作为当前设计依据。",
+          "官方替代信息：无官方替代信息。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-004",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "2026JT0106 官方状态为“内部文控待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：内部授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-005",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "CP 05JT0101 官方状态为“内部文控待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：内部授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-006",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "23J909 官方状态为“正版来源待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：单位授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-007",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "status-008",
+      "category": "版本与废止状态",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": []
+      }
+    },
+    {
+      "id": "insufficient-001",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 GB 12955-2024 第6.1.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-002",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 GB/T 14684-2022 第6.2.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-003",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 NB/T 20401-2017 第5.1.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-004",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 JGJ 63-2006 第3.1.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-005",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 GB 50207-2012 第4.2.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-006",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 HAF 101-2023 第9.9.9条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-007",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": false,
+        "evidence_level": null,
+        "warnings": [
+          "证据不足：离线语料中未找到 不存在标准-2026 第1.0.1条。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-008",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "22SG813 官方状态为“正版来源待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：单位授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-009",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "1907JT0106 官方状态为“内部文控待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：内部授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "insufficient-010",
+      "category": "证据不足",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": true,
+        "evidence_level": null,
+        "warnings": [
+          "CP 05JT0111 官方状态为“内部文控待核验”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：内部授权待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。"
+        ]
+      }
+    },
+    {
+      "id": "advice-001",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "sufficient",
+        "warnings": []
+      }
+    },
+    {
+      "id": "advice-002",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "partial",
+        "warnings": [
+          "GB/T 50011-2010 官方状态为“官方未匹配”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。",
+          "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+        ]
+      }
+    },
+    {
+      "id": "advice-003",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "partial",
+        "warnings": [
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。",
+          "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+        ]
+      }
+    },
+    {
+      "id": "advice-004",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "none",
+        "warnings": [
+          "证据不足：已授权离线语料中没有与“混凝土用水”直接匹配的条款。",
+          "JGJ 63-2006 官方状态为“官方未匹配”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。",
+          "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+        ]
+      }
+    },
+    {
+      "id": "advice-005",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "partial",
+        "warnings": [
+          "JTG D 60-2015 官方状态为“官方未匹配”，不得直接作为当前设计依据。",
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。",
+          "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+        ]
+      }
+    },
+    {
+      "id": "advice-006",
+      "category": "跨规范建议",
+      "passed": true,
+      "failures": [],
+      "result_summary": {
+        "found": null,
+        "evidence_level": "partial",
+        "warnings": [
+          "语料授权状态需复核：待确认。",
+          "该条目只有审计元数据，没有已授权全文，不能回答精确条款或数值。",
+          "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+        ]
+      }
+    }
+  ]
+}

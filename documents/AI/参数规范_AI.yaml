@@ -366,6 +366,34 @@ ai_layer:
         max_context_chars: 16000
         query_timeout_seconds: 20
         history_followup_messages: 6
+      - skill_id: "building_structure_standards"
+        name: "建筑结构总图规范离线库"
+        description: "自动检索已授权的建筑、结构、总图和核安全规范语料，提供标准状态、精确条款、页码证据和保守设计建议。"
+        enabled: true
+        read_only: true
+        handler: "building_structure_standards"
+        root: "storage/ai/skills/building-structure-standards"
+        root_env_var: "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
+        auto_trigger: true
+        trigger_terms:
+          - "规范"
+          - "标准"
+          - "条款"
+          - "图集"
+          - "建筑结构"
+          - "总图"
+          - "抗震"
+          - "防火"
+          - "厂址评价"
+          - "GB/T"
+          - "GB "
+          - "NB/T"
+          - "JGJ"
+          - "HAF"
+        max_results: 6
+        max_context_chars: 20000
+        query_timeout_seconds: 20
+        history_followup_messages: 6
     mcp_servers: []
     read_only_host_access:
       enabled:

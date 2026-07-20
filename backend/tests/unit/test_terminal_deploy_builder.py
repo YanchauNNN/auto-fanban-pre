@@ -30,6 +30,7 @@ AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
 ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
+BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
@@ -193,6 +194,10 @@ def _make_fake_repo(repo_root: Path) -> None:
         repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
         "Write-Host install-ansys-mapdl",
     )
+    _write_file(
+        repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+        "Write-Host install-building-standards",
+    )
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -226,6 +231,10 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (
         Path("tools") / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
         Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+    ) in rel_pairs
+    assert (
+        Path("tools") / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+        Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
     ) in rel_pairs
 
 
@@ -329,6 +338,48 @@ ai_layer:
     assert "_editable_impl_auto_fanban.pth" not in record
     assert "direct_url.json" not in record
     assert "METADATA" in record
+
+
+def test_terminal_package_materializes_building_standards_skill(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    (repo_root / "documents" / "AI" / AI_SPEC_NAME).write_text(
+        """
+schema_version: "0.1"
+ai_layer:
+  chat:
+    skills:
+      - skill_id: "building_structure_standards"
+        name: "建筑结构总图规范"
+        handler: "building_structure_standards"
+        enabled: true
+        root: "storage/ai/skills/building-structure-standards"
+""".strip(),
+        encoding="utf-8",
+    )
+    source = repo_root / "tools" / "ai" / "building-structure-standards"
+    _write_file(source / "SKILL.md", "skill")
+    _write_file(source / "scripts" / "standards_query.py", "print('{}')")
+    _write_file(source / "assets" / "data" / "standards.sqlite", "sqlite")
+    _write_file(source / "assets" / "data" / "audit_catalog.json", "[]")
+    _write_file(source / "assets" / "data" / "manifest.json", "{}")
+    _write_file(source / "assets" / "data" / "validation_report.json", "{}")
+
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    installed = (
+        output_root
+        / "storage"
+        / "ai"
+        / "skills"
+        / "building-structure-standards"
+    )
+    assert (installed / "SKILL.md").is_file()
+    assert (installed / "scripts" / "standards_query.py").is_file()
+    assert (installed / "assets" / "data" / "standards.sqlite").is_file()
     assert not (
         output_root
         / "backend-runtime"

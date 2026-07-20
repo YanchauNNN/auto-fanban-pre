@@ -1,0 +1,444 @@
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Any
+from zipfile import ZipFile
+
+from .context_skills import SkillContext
+
+BUILDING_STANDARDS_SKILL_ID = "building_structure_standards"
+BUILDING_STANDARDS_SKILL_DIR = "building-structure-standards"
+BUILDING_STANDARDS_SKILL_ROOT_ENV = "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
+
+_DEFAULT_TRIGGER_TERMS = (
+    "规范",
+    "标准",
+    "条款",
+    "图集",
+    "建筑结构",
+    "总图",
+    "抗震",
+    "防火",
+    "厂址评价",
+    "gb/t",
+    "gb ",
+    "nb/t",
+    "jgj",
+    "haf",
+)
+_FOLLOWUP_TERMS = (
+    "这个条款",
+    "该条款",
+    "这个规范",
+    "该规范",
+    "继续",
+    "版本",
+    "页码",
+    "依据",
+    "还要注意",
+    "设计建议",
+)
+_STANDARD_CODE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])("
+    r"(?:GB(?:/T)?|NB/T|JGJ|HAF)\s*[A-Za-z]?\s*\d+(?:\.\d+)?"
+    r"(?:-\d{4})?(?:[（(][^）)]*[）)])?"
+    r"|(?:19|20)\d{2}JT\d+"
+    r"|CP\s+\d{2}JT\d+"
+    r"|\d{2}[A-Z]{1,3}\d+(?:-\d+)?"
+    r")(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_CLAUSE_PATTERN = re.compile(r"第?\s*(\d+(?:\.\d+)+)\s*条?")
+_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("scripts") / "standards_query.py",
+    Path("assets") / "data" / "standards.sqlite",
+    Path("assets") / "data" / "audit_catalog.json",
+    Path("assets") / "data" / "manifest.json",
+    Path("assets") / "data" / "validation_report.json",
+)
+
+
+class BuildingStandardsSkillError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class BuildingStandardsSkillConfig:
+    skill_id: str = BUILDING_STANDARDS_SKILL_ID
+    auto_trigger: bool = True
+    trigger_terms: tuple[str, ...] = _DEFAULT_TRIGGER_TERMS
+    max_results: int = 6
+    max_context_chars: int = 20_000
+    query_timeout_seconds: int = 20
+    history_followup_messages: int = 6
+
+
+QueryRunner = Callable[..., dict[str, Any]]
+
+
+class BuildingStandardsSkill:
+    def __init__(
+        self,
+        *,
+        root: Path,
+        config: BuildingStandardsSkillConfig,
+        query_runner: QueryRunner | None = None,
+    ) -> None:
+        self.root = root.resolve()
+        self.config = config
+        self.skill_id = config.skill_id
+        self._query_runner = query_runner or self._run_query
+
+    @property
+    def available(self) -> bool:
+        return all((self.root / relative).is_file() for relative in _REQUIRED_FILES)
+
+    def matches(self, content: str, history: Sequence[Any]) -> bool:
+        if not self.config.auto_trigger:
+            return False
+        normalized = content.casefold()
+        if _STANDARD_CODE_PATTERN.search(content):
+            return True
+        if any(term.casefold() in normalized for term in self.config.trigger_terms):
+            return True
+        return self._history_used_skill(history) and (
+            not content.strip()
+            or any(term in normalized for term in _FOLLOWUP_TERMS)
+        )
+
+    def retrieve_if_applicable(
+        self,
+        content: str,
+        history: Sequence[Any],
+    ) -> SkillContext | None:
+        if not self.matches(content, history):
+            return None
+        if not self.available:
+            return SkillContext(
+                skill_id=self.skill_id,
+                content=(
+                    "建筑结构总图规范离线 Skill 已触发，但本地语料包不完整。"
+                    "不得凭记忆猜测规范条款、数值、表格、版本或替代关系；"
+                    "请明确告知用户当前不能提供可靠规范依据。"
+                ),
+                metadata={
+                    "available": False,
+                    "error": "skill_payload_incomplete",
+                    "operations": [],
+                    "evidence_count": 0,
+                },
+            )
+
+        codes = _unique(
+            _normalize_code(match)
+            for match in _STANDARD_CODE_PATTERN.findall(content)
+        )
+        clause_match = _CLAUSE_PATTERN.search(content)
+        clause_id = clause_match.group(1) if clause_match else ""
+        evidence: list[dict[str, Any]] = []
+        operations: list[str] = []
+        errors: list[dict[str, str]] = []
+
+        if codes and clause_id:
+            result = self._safe_query(
+                "clause",
+                codes[0],
+                errors,
+                clause_id=clause_id,
+                limit=self.config.max_results,
+            )
+            if result is not None:
+                operations.append("clause")
+                evidence.append(
+                    {
+                        "operation": "clause",
+                        "standard_code": codes[0],
+                        "clause_id": clause_id,
+                        **_compact_value(result),
+                    }
+                )
+        elif codes:
+            for code in codes[:3]:
+                result = self._safe_query(
+                    "search",
+                    content,
+                    errors,
+                    standard_code=code,
+                    limit=self.config.max_results,
+                )
+                if result and result.get("results"):
+                    operations.append("search")
+                    evidence.append(
+                        {
+                            "operation": "search",
+                            "standard_code": code,
+                            **_compact_value(result),
+                        }
+                    )
+                    continue
+                catalog = self._safe_query(
+                    "catalog",
+                    code,
+                    errors,
+                    limit=self.config.max_results,
+                )
+                if catalog is not None:
+                    operations.append("catalog")
+                    evidence.append(
+                        {
+                            "operation": "catalog",
+                            "standard_code": code,
+                            **_compact_value(catalog),
+                        }
+                    )
+        else:
+            result = self._safe_query(
+                "search",
+                content,
+                errors,
+                limit=self.config.max_results,
+            )
+            if result is not None:
+                operations.append("search")
+                evidence.append(
+                    {
+                        "operation": "search",
+                        **_compact_value(result),
+                    }
+                )
+
+        payload = {
+            "skill": "建筑结构总图规范离线库",
+            "policy": {
+                "catalog_is_not_fulltext": True,
+                "no_memory_guessing": True,
+                "citations_required": True,
+                "design_advice_requires_sufficient_evidence": True,
+                "confidential_sources_must_remain_local": True,
+            },
+            "requested_codes": codes,
+            "requested_clause": clause_id,
+            "evidence": evidence,
+            "errors": errors,
+        }
+        rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+        if len(rendered) > self.config.max_context_chars:
+            rendered = rendered[: self.config.max_context_chars] + "\n[context truncated]"
+        evidence_count = sum(
+            len(item.get("results") or [])
+            or int(bool(item.get("record") or item.get("standard")))
+            for item in evidence
+        )
+        return SkillContext(
+            skill_id=self.skill_id,
+            content=rendered,
+            metadata={
+                "available": True,
+                "operations": _unique(operations),
+                "evidence_count": evidence_count,
+                "requested_codes": codes,
+                "requested_clause": clause_id,
+                "errors": errors,
+            },
+        )
+
+    def _history_used_skill(self, history: Sequence[Any]) -> bool:
+        for message in list(history)[-max(self.config.history_followup_messages, 0) :]:
+            metadata = getattr(message, "metadata", None) or {}
+            if self.skill_id in metadata.get("auto_skill_ids", []):
+                return True
+        return False
+
+    def _safe_query(
+        self,
+        operation: str,
+        query: str,
+        errors: list[dict[str, str]],
+        **kwargs: Any,
+    ) -> dict[str, Any] | None:
+        try:
+            result = self._query_runner(operation, query, **kwargs)
+        except Exception as exc:
+            errors.append(
+                {"operation": operation, "query": query, "error": str(exc)}
+            )
+            return None
+        return result if isinstance(result, dict) else None
+
+    def _run_query(
+        self,
+        operation: str,
+        query: str,
+        *,
+        limit: int,
+        clause_id: str = "",
+        standard_code: str = "",
+    ) -> dict[str, Any]:
+        script = self.root / "scripts" / "standards_query.py"
+        arguments = [sys.executable, str(script)]
+        if operation == "clause":
+            arguments.extend(["clause", query, clause_id])
+        elif operation == "search":
+            arguments.extend(["search", query, "--limit", str(max(1, limit))])
+            if standard_code:
+                arguments.extend(["--code", standard_code])
+        elif operation == "catalog":
+            arguments.extend(["catalog", query])
+        else:
+            raise BuildingStandardsSkillError(f"unsupported query operation: {operation}")
+        completed = subprocess.run(
+            arguments,
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(1, int(self.config.query_timeout_seconds)),
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()[:1000]
+            raise BuildingStandardsSkillError(
+                f"standards query failed ({operation}, exit={completed.returncode}): "
+                f"{detail}"
+            )
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise BuildingStandardsSkillError(
+                "standards query returned invalid JSON"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise BuildingStandardsSkillError(
+                "standards query returned a non-object JSON payload"
+            )
+        return payload
+
+
+def install_skill_archive(archive: Path, destination: Path) -> Path:
+    archive = archive.resolve()
+    destination = destination.resolve()
+    if not archive.is_file():
+        raise FileNotFoundError(f"standards skill archive does not exist: {archive}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="building-standards-skill-",
+        dir=destination.parent,
+    ) as temp_dir:
+        staged = Path(temp_dir) / BUILDING_STANDARDS_SKILL_DIR
+        staged.mkdir(parents=True)
+        found_payload = False
+        with ZipFile(archive) as bundle:
+            for entry in bundle.infolist():
+                normalized = entry.filename.replace("\\", "/")
+                parts = PurePosixPath(normalized).parts
+                if normalized.startswith("/") or ".." in parts:
+                    raise BuildingStandardsSkillError(
+                        f"unsafe ZIP entry: {entry.filename}"
+                    )
+                try:
+                    skill_index = parts.index(BUILDING_STANDARDS_SKILL_DIR)
+                except ValueError:
+                    continue
+                relative_parts = parts[skill_index + 1 :]
+                if not relative_parts or entry.is_dir():
+                    continue
+                target = staged.joinpath(*relative_parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.open(entry) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+                found_payload = True
+        if not found_payload:
+            raise BuildingStandardsSkillError(
+                "archive does not contain building-structure-standards payload"
+            )
+        missing = [
+            str(relative)
+            for relative in _REQUIRED_FILES
+            if not (staged / relative).is_file()
+        ]
+        if missing:
+            raise BuildingStandardsSkillError(
+                f"skill payload is incomplete: {', '.join(missing)}"
+            )
+        backup = destination.with_name(f"{destination.name}.backup")
+        if backup.exists():
+            shutil.rmtree(backup)
+        if destination.exists():
+            destination.replace(backup)
+        try:
+            shutil.copytree(staged, destination)
+        except Exception:
+            if destination.exists():
+                shutil.rmtree(destination)
+            if backup.exists():
+                backup.replace(destination)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    return destination
+
+
+def _normalize_code(value: str) -> str:
+    normalized = value.replace("\u00a0", " ").strip().upper()
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"^(GB(?:/T)?|NB/T|JGJ|HAF)(?=\d)", r"\1 ", normalized)
+    return normalized
+
+
+def _compact_value(value: Any, *, depth: int = 0) -> Any:
+    if depth >= 4:
+        return "[nested content omitted]"
+    if isinstance(value, str):
+        return value if len(value) <= 3500 else value[:3500] + " [truncated]"
+    if isinstance(value, list):
+        return [_compact_value(item, depth=depth + 1) for item in value[:10]]
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_value(item, depth=depth + 1)
+            for key, item in list(value.items())[:40]
+        }
+    return value
+
+
+def _unique(values: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Install the building/structure/site standards offline Skill"
+    )
+    parser.add_argument("archive", type=Path)
+    parser.add_argument("destination", type=Path)
+    args = parser.parse_args()
+    installed = install_skill_archive(args.archive, args.destination)
+    print(
+        json.dumps(
+            {"ok": True, "skill_root": str(installed)},
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

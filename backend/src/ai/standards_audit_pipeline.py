@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Protocol
+from typing import Any, Protocol
 from urllib.parse import quote_plus
 
 from .standards_audit import AuditRecord, filter_target_rows, normalize_standard_code
@@ -16,7 +17,6 @@ from .standards_official_sources import (
     OfficialEvidence,
     apply_official_evidence,
 )
-
 
 NATIONAL_TYPES = frozenset({"国家强制性标准", "国家推荐性标准"})
 INDUSTRY_TYPES = frozenset({"行业标准"})
@@ -179,7 +179,7 @@ def _finalize_record(record: AuditRecord) -> None:
 
 
 def _checked_at() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def main(argv: list[str] | None = None) -> int:

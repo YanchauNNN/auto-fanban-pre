@@ -51,9 +51,20 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
     ]
     assert [(skill.skill_id, skill.handler, skill.auto_trigger) for skill in chat.skills] == [
         ("ansys_mapdl_18_2", "ansys_mapdl_18_2", True),
+        (
+            "building_structure_standards",
+            "building_structure_standards",
+            True,
+        ),
     ]
     assert chat.skills[0].root == "storage/ai/skills/ansys-mapdl-18-2"
     assert chat.skills[0].root_env_var == "FANBAN_ANSYS_MAPDL_SKILL_ROOT"
+    assert chat.skills[1].root == (
+        "storage/ai/skills/building-structure-standards"
+    )
+    assert chat.skills[1].root_env_var == (
+        "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
+    )
     assert chat.mcp_servers == []
     assert chat.response_format.enabled is True
     assert "GitHub Flavored Markdown" in chat.response_format.system_prompt_suffix

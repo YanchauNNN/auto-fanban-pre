@@ -8,15 +8,27 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..ai.ansys_mapdl_skill import ANSYS_MAPDL_SKILL_ID, install_skill_archive
+from ..ai.ansys_mapdl_skill import (
+    ANSYS_MAPDL_SKILL_ID,
+)
+from ..ai.ansys_mapdl_skill import (
+    install_skill_archive as install_ansys_mapdl_skill_archive,
+)
+from ..ai.building_standards_skill import (
+    BUILDING_STANDARDS_SKILL_DIR,
+    BUILDING_STANDARDS_SKILL_ID,
+)
+from ..ai.building_standards_skill import (
+    install_skill_archive as install_building_standards_skill_archive,
+)
 from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
 from ..cad.plot_resource_manager import PDF2_PMP_NAME
+from ..config.ai.ai_spec import AiSpecLoader
 from ..config.mechanism_spec import (
     DeploymentMechanismConfig,
     MechanismSpecLoader,
     load_mechanism_spec,
 )
-from ..config.ai.ai_spec import AiSpecLoader
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
@@ -27,6 +39,10 @@ AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB = "ansys-mapdl-18-2-private-offline-*.zip"
 ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
+BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB = (
+    "building-structure-standards-private-offline-*.zip"
+)
+BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -43,6 +59,7 @@ DEPLOY_IGNORE_PATTERNS = (
     ".build_packages",
     "~$*",
     ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB,
+    BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB,
 )
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
@@ -154,6 +171,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(
             repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
             Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+            Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         ),
     ]
 
@@ -272,7 +293,63 @@ def _materialize_ansys_mapdl_skill(repo_root: Path, output_root: Path) -> None:
             "ANSYS MAPDL 18.2 Skill 已启用，但未找到 storage 语料或私人离线包。"
             "请先运行 tools/ai/install_ansys_mapdl_skill.ps1。"
         )
-    install_skill_archive(archives[-1], target)
+    install_ansys_mapdl_skill_archive(archives[-1], target)
+
+
+def _materialize_building_standards_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == BUILDING_STANDARDS_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError(
+            "Building standards Skill root must be a package-relative path"
+        )
+    target = output_root / relative_root
+    candidates = (
+        repo_root / relative_root,
+        repo_root / "tools" / "ai" / BUILDING_STANDARDS_SKILL_DIR,
+    )
+    source = next((candidate for candidate in candidates if candidate.is_dir()), None)
+    if source is not None:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(
+            source,
+            target,
+            ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+        )
+        return
+
+    archives = sorted(
+        [
+            *repo_root.glob(
+                f"build/{BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB}"
+            ),
+            *(repo_root / "documents" / "AI").glob(
+                BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB
+            ),
+        ]
+    )
+    if not archives:
+        raise FileNotFoundError(
+            "建筑结构总图规范 Skill 已启用，但未找到 storage 语料、"
+            "tools/ai 源目录或私人离线包。"
+            "请先运行 tools/ai/package_building_standards_skill.py。"
+        )
+    install_building_standards_skill_archive(archives[-1], target)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -1651,6 +1728,11 @@ $ansysSkillRoot = Join-Path $root "storage\ai\skills\ansys-mapdl-18-2"
 if (Test-Path -LiteralPath $ansysSkillRoot -PathType Container) {
     $escapedAnsysSkillRoot = $ansysSkillRoot.Replace("'", "''")
     $lines += ("Set-Item -Path 'Env:FANBAN_ANSYS_MAPDL_SKILL_ROOT' -Value '{0}'" -f $escapedAnsysSkillRoot)
+}
+$buildingStandardsSkillRoot = Join-Path $root "storage\ai\skills\building-structure-standards"
+if (Test-Path -LiteralPath $buildingStandardsSkillRoot -PathType Container) {
+    $escapedBuildingStandardsSkillRoot = $buildingStandardsSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_BUILDING_STANDARDS_SKILL_ROOT' -Value '{0}'" -f $escapedBuildingStandardsSkillRoot)
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
@@ -3364,6 +3446,7 @@ def build_terminal_deploy_package(
         _copy_entry(entry, output_root)
 
     _materialize_ansys_mapdl_skill(repo_root, output_root)
+    _materialize_building_standards_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)

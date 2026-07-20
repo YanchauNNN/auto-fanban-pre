@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 WORKTREE_ROOT = Path(__file__).resolve().parents[4]
 VALIDATION_SET = (
     WORKTREE_ROOT / "documents" / "AI" / "建筑结构总图规范验证集.yaml"

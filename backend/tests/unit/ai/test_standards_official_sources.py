@@ -11,13 +11,12 @@ from src.ai.standards_official_sources import (
     AtlasOfficialClient,
     IndustryStandardClient,
     NationalStandardClient,
+    _find_openstd_detail_url,
     apply_official_evidence,
     parse_atlas_result,
     parse_industry_result,
     parse_openstd_detail,
 )
-from src.ai.standards_official_sources import _find_openstd_detail_url
-
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "standards"
 

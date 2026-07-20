@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, fields
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from typing import Any
 from urllib.error import URLError
@@ -11,7 +11,6 @@ from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
 from .standards_audit import AuditRecord, normalize_standard_code
-
 
 OPENSTD_BASE_URL = "https://openstd.samr.gov.cn"
 OPENSTD_SEARCH_URL = f"{OPENSTD_BASE_URL}/bzgk/std/std_list"
@@ -327,7 +326,7 @@ def _epoch_millis_date(value: Any) -> str:
 
 
 def _checked_at() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 class _MetadataHtmlParser(HTMLParser):
