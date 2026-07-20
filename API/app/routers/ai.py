@@ -259,6 +259,11 @@ def build_runtime(
         max_global_requests=chat.concurrency.max_global_requests,
         max_per_owner_requests=chat.concurrency.max_per_owner_requests,
         max_tool_rounds=chat.read_only_host_access.max_tool_rounds,
+        response_format_prompt=(
+            chat.response_format.system_prompt_suffix
+            if chat.response_format.enabled
+            else ""
+        ),
         agents=[
             AiAgentConfig(
                 agent_id=agent.agent_id,

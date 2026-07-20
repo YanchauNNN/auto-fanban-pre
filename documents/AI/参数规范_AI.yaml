@@ -306,6 +306,19 @@ ai_layer:
       type: int
       default: 30
       desc: "AI 对话记录默认保留天数；后续清理任务按该值执行"
+    response_format:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否要求模型按前端支持的安全 Markdown 格式输出"
+      system_prompt_suffix:
+        type: str
+        default: |-
+          使用 GitHub Flavored Markdown 组织回答。
+          普通说明使用段落、列表和表格；命令、程序和配置使用围栏代码块。
+          ANSYS Mechanical APDL、MAPDL 或 APDL 命令流必须使用 ```apdl 语言标签。
+          不要输出原始 HTML。
+        desc: "附加到所有 Agent 系统提示词末尾的统一响应格式规则"
     concurrency:
       max_global_requests:
         type: int

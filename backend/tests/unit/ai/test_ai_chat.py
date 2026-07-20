@@ -269,6 +269,30 @@ def test_chat_runtime_honors_ai_layer_master_switch(tmp_path: Path) -> None:
     assert build_runtime(spec).enabled is False
 
 
+def test_chat_runtime_carries_yaml_response_format_prompt(tmp_path: Path) -> None:
+    from API.app.routers.ai import build_runtime
+
+    from src.config.ai.ai_spec import AiSpec
+
+    spec = AiSpec.model_validate(
+        {
+            "ai_layer": {
+                "chat": {
+                    "response_format": {
+                        "enabled": True,
+                        "system_prompt_suffix": "使用 GFM，并将 APDL 写入 ```apdl 围栏。",
+                    }
+                }
+            }
+        }
+    )
+    spec.source_path = tmp_path / "参数规范_AI.yaml"
+
+    runtime = build_runtime(spec)
+
+    assert runtime.response_format_prompt == "使用 GFM，并将 APDL 写入 ```apdl 围栏。"
+
+
 def test_chat_client_rejects_redirects_without_forwarding_authorization() -> None:
     from src.ai.chat_client import ChatClientConfig, ChatGatewayError, OpenAICompatibleChatClient
 
@@ -578,6 +602,60 @@ def test_chat_service_sends_recent_history_to_model(tmp_path: Path) -> None:
     assert {"role": "user", "content": "请记住我的测试编号是 AI-0711"} in second_call
     assert {"role": "assistant", "content": "我已记住 AI-0711"} in second_call
     assert second.memory["used_history_messages"] == 2
+
+
+def test_chat_service_appends_response_format_prompt_for_every_agent(tmp_path: Path) -> None:
+    from src.ai.chat_service import AiAgentConfig, AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+
+    class PromptCapturingClient:
+        def __init__(self) -> None:
+            self.calls: list[list[dict[str, Any]]] = []
+
+        def complete(self, messages: list[dict[str, Any]], *, tools=None):
+            self.calls.append(messages)
+            return type("ChatResult", (), {"content": "完成", "usage": {}})()
+
+    store = AiChatStore(tmp_path / "format-chat.sqlite3")
+    store.initialize()
+    client = PromptCapturingClient()
+    format_prompt = "使用 GitHub Flavored Markdown；APDL 命令必须放入 ```apdl 围栏。"
+    service = AiChatService(
+        store=store,
+        client=client,
+        runtime=AiChatRuntimeConfig(
+            default_agent="general_assistant",
+            response_format_prompt=format_prompt,
+            agents=[
+                AiAgentConfig(
+                    agent_id="general_assistant",
+                    name="通用对话",
+                    system_prompt="执行通用问答。",
+                ),
+                AiAgentConfig(
+                    agent_id="business_agent",
+                    name="业务 Agent",
+                    system_prompt="执行业务问答。",
+                ),
+            ],
+        ),
+    )
+
+    for agent_id in ("general_assistant", "business_agent"):
+        conversation = service.create_conversation("ip:127.0.0.1", title=agent_id)
+        service.send_message(
+            owner_key="ip:127.0.0.1",
+            conversation_id=conversation.conversation_id,
+            content="给出一个 APDL 示例",
+            agent_id=agent_id,
+            skill_ids=[],
+            account_id=None,
+        )
+
+    system_prompts = [call[0]["content"] for call in client.calls]
+    assert all(format_prompt in prompt for prompt in system_prompts)
+    assert "执行通用问答。" in system_prompts[0]
+    assert "执行业务问答。" in system_prompts[1]
 
 
 def test_chat_service_runs_same_read_only_tool_loop_for_both_modes(tmp_path: Path) -> None:

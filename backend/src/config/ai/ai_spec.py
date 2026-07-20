@@ -252,6 +252,18 @@ class AiReadOnlyHostAccessConfig(BaseModel):
     max_tool_rounds: int = 3
 
 
+DEFAULT_AI_CHAT_RESPONSE_FORMAT_PROMPT = (
+    "使用 GitHub Flavored Markdown 组织回答。普通说明使用段落、列表和表格；"
+    "命令、程序和配置使用围栏代码块。ANSYS Mechanical APDL、MAPDL 或 APDL "
+    "命令流必须使用 ```apdl 语言标签。不要输出原始 HTML。"
+)
+
+
+class AiChatResponseFormatConfig(BaseModel):
+    enabled: bool = True
+    system_prompt_suffix: str = DEFAULT_AI_CHAT_RESPONSE_FORMAT_PROMPT
+
+
 class AiChatConfig(BaseModel):
     enabled: bool = True
     default_agent: str = "general_assistant"
@@ -259,6 +271,9 @@ class AiChatConfig(BaseModel):
     max_user_message_chars: int = 4000
     request_timeout_seconds: int = 60
     retention_days: int = 30
+    response_format: AiChatResponseFormatConfig = Field(
+        default_factory=AiChatResponseFormatConfig
+    )
     concurrency: AiChatConcurrencyConfig = Field(default_factory=AiChatConcurrencyConfig)
     agents: list[AiChatAgentConfig] = Field(
         default_factory=lambda: [

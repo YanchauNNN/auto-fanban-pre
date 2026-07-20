@@ -86,6 +86,7 @@ class AiChatRuntimeConfig(BaseModel):
     max_global_requests: int = 4
     max_per_owner_requests: int = 1
     max_tool_rounds: int = 3
+    response_format_prompt: str = ""
     agents: list[AiAgentConfig] = Field(default_factory=list)
     skills: list[AiSkillConfig] = Field(default_factory=list)
     mcp_servers: list[AiMcpServerConfig] = Field(default_factory=list)
@@ -454,6 +455,7 @@ class AiChatService:
                 "如果缺少证据或上下文，明确说明需要用户补充信息。",
                 "回答使用中文，保持简洁、可复核。",
                 f"当前模式: {agent.name}",
+                self.runtime.response_format_prompt.strip(),
                 "后端只读工具已启用。仅在用户请求需要后端事实时调用工具，并严格使用允许目录中的相对路径。"
                 if tools_available
                 else "后端只读工具当前不可用，不得假装已经读取后端文件。",
