@@ -194,6 +194,15 @@ class AiChatSkillConfig(BaseModel):
     description: str = ""
     enabled: bool = True
     read_only: bool = True
+    handler: str = "prompt_only"
+    root: str = ""
+    root_env_var: str = ""
+    auto_trigger: bool = False
+    trigger_terms: list[str] = Field(default_factory=list)
+    max_results: int = 4
+    max_context_chars: int = 16_000
+    query_timeout_seconds: int = 20
+    history_followup_messages: int = 6
 
 
 class AiChatMcpServerConfig(BaseModel):
@@ -206,9 +215,46 @@ class AiChatMcpServerConfig(BaseModel):
     endpoint: str = ""
 
 
+class AiReadOnlyHostAccessConfig(BaseModel):
+    enabled: bool = True
+    allowed_roots: list[str] = Field(
+        default_factory=lambda: [
+            "storage",
+            "documents",
+            "documents_bin",
+            "backend-runtime/backend/src/cad",
+            "backend/src/cad",
+        ],
+    )
+    denied_names: list[str] = Field(
+        default_factory=lambda: [
+            ".env",
+            "ai_model_gateway.yaml",
+            "runtime.env.ps1",
+        ],
+    )
+    denied_suffixes: list[str] = Field(
+        default_factory=lambda: [
+            ".db",
+            ".dll",
+            ".exe",
+            ".key",
+            ".p12",
+            ".pem",
+            ".pfx",
+            ".sqlite",
+            ".sqlite3",
+        ],
+    )
+    max_read_bytes: int = 262_144
+    max_search_results: int = 50
+    max_depth: int = 6
+    max_tool_rounds: int = 3
+
+
 class AiChatConfig(BaseModel):
     enabled: bool = True
-    default_agent: str = "platform_assistant"
+    default_agent: str = "general_assistant"
     max_history_messages: int = 20
     max_user_message_chars: int = 4000
     request_timeout_seconds: int = 60
@@ -217,15 +263,24 @@ class AiChatConfig(BaseModel):
     agents: list[AiChatAgentConfig] = Field(
         default_factory=lambda: [
             AiChatAgentConfig(
-                agent_id="platform_assistant",
-                name="出图平台助手",
-                description="回答出图平台使用、任务状态和图纸理解相关问题",
-                system_prompt="你是出图平台的只读 AI 助手，回答必须谨慎、可复核。",
-            )
+                agent_id="general_assistant",
+                name="通用对话",
+                description="进行正常知识问答、写作和日常交流",
+                system_prompt="你是通用 AI 助手，可以进行正常、完整的知识问答和日常交流。",
+            ),
+            AiChatAgentConfig(
+                agent_id="business_agent",
+                name="业务 Agent",
+                description="统一处理图纸理解、任务、模板规则和出图平台业务问题",
+                system_prompt="你是出图平台业务 Agent，统一处理图纸理解、任务状态、模板规则和平台使用问题。",
+            ),
         ],
     )
     skills: list[AiChatSkillConfig] = Field(default_factory=list)
     mcp_servers: list[AiChatMcpServerConfig] = Field(default_factory=list)
+    read_only_host_access: AiReadOnlyHostAccessConfig = Field(
+        default_factory=AiReadOnlyHostAccessConfig,
+    )
 
 
 class AiQAAssistantConfig(BaseModel):

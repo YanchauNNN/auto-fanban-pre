@@ -60,10 +60,19 @@ class ChatClientConfig:
 
 
 @dataclass
+class ChatToolCall:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+    arguments_raw: str
+
+
+@dataclass
 class ChatCompletionResult:
     content: str
     usage: dict[str, Any] = field(default_factory=dict)
     raw_model: str | None = None
+    tool_calls: list[ChatToolCall] = field(default_factory=list)
 
 
 class OpenAICompatibleChatClient:
@@ -73,7 +82,12 @@ class OpenAICompatibleChatClient:
     def __repr__(self) -> str:
         return f"OpenAICompatibleChatClient(base_url={self.config.base_url!r}, model={self.config.model!r})"
 
-    def complete(self, messages: list[dict[str, str]]) -> ChatCompletionResult:
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ChatCompletionResult:
         payload = {
             "model": self.config.model,
             "stream": False,
@@ -81,6 +95,9 @@ class OpenAICompatibleChatClient:
             "max_tokens": self.config.max_output_tokens,
             "messages": messages,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
         request = Request(
             self._chat_completions_url(),
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -143,10 +160,15 @@ def _parse_completion_response(payload: dict[str, Any]) -> ChatCompletionResult:
         raise ChatGatewayError("model gateway response choice is invalid")
     message = first.get("message")
     content: Any = None
+    tool_calls: list[ChatToolCall] = []
     if isinstance(message, dict):
         content = message.get("content")
+        tool_calls = _parse_tool_calls(message.get("tool_calls"))
     if content is None and isinstance(first.get("delta"), dict):
         content = first["delta"].get("content")
+        tool_calls = _parse_tool_calls(first["delta"].get("tool_calls"))
+    if content is None and tool_calls:
+        content = ""
     if not isinstance(content, str):
         raise ChatGatewayError("model gateway response did not include assistant content")
     usage = payload.get("usage")
@@ -154,7 +176,40 @@ def _parse_completion_response(payload: dict[str, Any]) -> ChatCompletionResult:
         content=_strip_think_blocks(content),
         usage=usage if isinstance(usage, dict) else {},
         raw_model=payload.get("model") if isinstance(payload.get("model"), str) else None,
+        tool_calls=tool_calls,
     )
+
+
+def _parse_tool_calls(value: Any) -> list[ChatToolCall]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ChatGatewayError("model gateway returned invalid tool calls")
+    parsed: list[ChatToolCall] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or not isinstance(item.get("function"), dict):
+            raise ChatGatewayError("model gateway returned an invalid tool call")
+        function = item["function"]
+        name = function.get("name")
+        arguments_raw = function.get("arguments", "{}")
+        if not isinstance(name, str) or not name.strip() or not isinstance(arguments_raw, str):
+            raise ChatGatewayError("model gateway returned an invalid tool function")
+        try:
+            arguments = json.loads(arguments_raw or "{}")
+        except json.JSONDecodeError as exc:
+            raise ChatGatewayError("model gateway returned invalid tool arguments") from exc
+        if not isinstance(arguments, dict):
+            raise ChatGatewayError("model gateway tool arguments must be an object")
+        call_id = item.get("id")
+        parsed.append(
+            ChatToolCall(
+                call_id=call_id if isinstance(call_id, str) and call_id else f"tool-call-{index}",
+                name=name.strip(),
+                arguments=arguments,
+                arguments_raw=arguments_raw,
+            ),
+        )
+    return parsed
 
 
 def _read_error_body(exc: HTTPError) -> str:

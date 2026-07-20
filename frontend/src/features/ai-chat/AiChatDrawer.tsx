@@ -17,7 +17,7 @@ import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
 const DRAWER_OPEN_KEY = "fanban.ai.drawerOpen";
 const DRAWER_SIZE_KEY = "fanban.ai.drawerSize";
 const DRAWER_SIZE_VERSION_KEY = "fanban.ai.drawerSizeVersion";
-const DRAWER_SIZE_VERSION = "2";
+const DRAWER_SIZE_VERSION = "3";
 const DRAWER_TRANSITION_MS = 200;
 const MIN_DRAWER_WIDTH = 380;
 const MIN_DRAWER_HEIGHT = 460;
@@ -51,7 +51,6 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   const [renameDraft, setRenameDraft] = useState("");
   const [conversationMenu, setConversationMenu] = useState<ConversationMenu | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState("");
-  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [lastMemoryCount, setLastMemoryCount] = useState<number | null>(null);
   const [drawerSize, setDrawerSize] = useState<DrawerSize>(loadDrawerSize);
   const collapsedButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -92,9 +91,12 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     }
     return messages;
   }, [chat.optimisticExchange, chat.selectedConversationId, conversation?.messages]);
-  const enabledSkills = useMemo(
-    () => (state?.skills ?? []).filter((skill) => skill.enabled && skill.readOnly),
-    [state?.skills],
+  const selectableAgents = useMemo(
+    () =>
+      (state?.agents ?? []).filter((agent) =>
+        ["general_assistant", "business_agent"].includes(agent.agentId),
+      ),
+    [state?.agents],
   );
 
   useEffect(() => {
@@ -202,11 +204,16 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     if (!state) {
       return;
     }
-    setSelectedAgentId((current) => current || state.defaultAgent || state.agents[0]?.agentId || "");
-    setSelectedSkillIds((current) =>
-      current.length > 0 ? current : enabledSkills.map((skill) => skill.skillId),
-    );
-  }, [enabledSkills, state]);
+    setSelectedAgentId((current) => {
+      if (selectableAgents.some((agent) => agent.agentId === current)) {
+        return current;
+      }
+      if (selectableAgents.some((agent) => agent.agentId === state.defaultAgent)) {
+        return state.defaultAgent;
+      }
+      return selectableAgents[0]?.agentId || "";
+    });
+  }, [selectableAgents, state]);
 
   useEffect(() => {
     if (!isDrawerOpen) {
@@ -346,7 +353,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         payload: {
           content,
           agentId: selectedAgentId || state?.defaultAgent || null,
-          skillIds: selectedSkillIds,
+          skillIds: [],
           mcpServerIds: [],
         },
       });
@@ -444,14 +451,6 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     );
   }
 
-  function toggleSkill(skillId: string) {
-    setSelectedSkillIds((current) =>
-      current.includes(skillId)
-        ? current.filter((item) => item !== skillId)
-        : [...current, skillId],
-    );
-  }
-
   if (!isDrawerVisible) {
     return (
       <button
@@ -502,7 +501,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     >
       <div
         aria-label="调整 AI 助手窗口大小"
-        aria-valuemax={Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 32)}
+        aria-valuemax={Math.max(MIN_DRAWER_WIDTH, window.innerWidth)}
         aria-valuemin={MIN_DRAWER_WIDTH}
         aria-valuenow={drawerSize.width}
         className={styles.resizeHandle}
@@ -546,57 +545,21 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         <div className={styles.emptyState}>AI 对话未启用。</div>
       ) : (
         <>
-          <details className={styles.controls}>
-            <summary className={styles.controlsSummary}>
-              <span>能力设置</span>
-              <strong>{state?.agents.find((agent) => agent.agentId === selectedAgentId)?.name}</strong>
-            </summary>
-            <div className={styles.controlsBody} aria-label="AI 能力选择">
-              <label className={styles.fieldLabel}>
-                智能体
-                <select
-                  className={styles.select}
-                  value={selectedAgentId}
-                  onChange={(event) => setSelectedAgentId(event.target.value)}
-                >
-                  {(state?.agents ?? []).map((agent) => (
-                    <option key={agent.agentId} value={agent.agentId}>
-                      {agent.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className={styles.chipGroup} aria-label="技能">
-                {enabledSkills.map((skill) => {
-                  const active = selectedSkillIds.includes(skill.skillId);
-                  return (
-                    <button
-                      aria-pressed={active}
-                      className={`${styles.chip} ${active ? styles.chipActive : ""}`}
-                      key={skill.skillId}
-                      type="button"
-                      onClick={() => toggleSkill(skill.skillId)}
-                    >
-                      {skill.name}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className={styles.mcpRow} aria-label="MCP 能力">
-                {(state?.mcpServers ?? []).map((server) => (
-                  <span
-                    className={`${styles.mcpChip} ${server.enabled ? styles.mcpEnabled : ""}`}
-                    key={server.serverId}
-                    title={server.description}
-                  >
-                    {server.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </details>
+          <label className={styles.modeBar}>
+            <span>对话模式</span>
+            <select
+              aria-label="对话模式"
+              className={styles.select}
+              value={selectedAgentId}
+              onChange={(event) => setSelectedAgentId(event.target.value)}
+            >
+              {selectableAgents.map((agent) => (
+                <option key={agent.agentId} value={agent.agentId}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <section className={styles.conversationBar} aria-label="AI 会话">
             <span className={styles.conversationLabel}>会话</span>
@@ -824,9 +787,10 @@ function loadDrawerSize(): DrawerSize {
   if (typeof window === "undefined") {
     return { width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT };
   }
+  const defaultSize = { width: DEFAULT_DRAWER_WIDTH, height: window.innerHeight };
   try {
     if (window.localStorage.getItem(DRAWER_SIZE_VERSION_KEY) !== DRAWER_SIZE_VERSION) {
-      return clampDrawerSize({ width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT });
+      return clampDrawerSize(defaultSize);
     }
     const stored = window.localStorage.getItem(DRAWER_SIZE_KEY);
     if (stored) {
@@ -838,7 +802,7 @@ function loadDrawerSize(): DrawerSize {
   } catch {
     // Invalid local settings should not stop the drawer from opening.
   }
-  return clampDrawerSize({ width: DEFAULT_DRAWER_WIDTH, height: DEFAULT_DRAWER_HEIGHT });
+  return clampDrawerSize(defaultSize);
 }
 
 function clampDrawerSize(size: DrawerSize): DrawerSize {
@@ -848,11 +812,11 @@ function clampDrawerSize(size: DrawerSize): DrawerSize {
   return {
     width: Math.min(
       Math.max(size.width, MIN_DRAWER_WIDTH),
-      Math.max(MIN_DRAWER_WIDTH, window.innerWidth - 32),
+      Math.max(MIN_DRAWER_WIDTH, window.innerWidth),
     ),
     height: Math.min(
       Math.max(size.height, MIN_DRAWER_HEIGHT),
-      Math.max(MIN_DRAWER_HEIGHT, window.innerHeight - 16),
+      Math.max(MIN_DRAWER_HEIGHT, window.innerHeight),
     ),
   };
 }

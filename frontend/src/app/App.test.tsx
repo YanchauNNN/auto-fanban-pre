@@ -198,37 +198,21 @@ beforeEach(() => {
     profile: "development_minimax",
     model: "MiniMax-M3",
     ownerKey: "ip:127.0.0.1",
-    defaultAgent: "platform_assistant",
+    defaultAgent: "general_assistant",
     agents: [
       {
-        agentId: "platform_assistant",
-        name: "出图平台助手",
-        description: "只读回答平台使用问题",
+        agentId: "general_assistant",
+        name: "通用对话",
+        description: "自由对话与只读信息查询",
       },
       {
-        agentId: "drawing_understanding",
-        name: "图纸理解助手",
-        description: "解释图纸元素与规则",
+        agentId: "business_agent",
+        name: "业务 Agent",
+        description: "统一处理图纸、任务与模板业务",
       },
     ],
-    skills: [
-      {
-        skillId: "drawing_explain",
-        name: "图纸元素解释",
-        description: "解释图纸元素",
-        enabled: true,
-        readOnly: true,
-      },
-    ],
-    mcpServers: [
-      {
-        serverId: "fanban_local_readonly",
-        name: "本地只读能力",
-        description: "预留 MCP 能力",
-        enabled: false,
-        readOnly: true,
-      },
-    ],
+    skills: [],
+    mcpServers: [],
   });
   mockListAiConversations.mockResolvedValue([
     {
@@ -487,6 +471,14 @@ describe("homepage shell", () => {
     const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
     expect(within(drawer).getByText("MiniMax-M3")).toBeInTheDocument();
     expect(within(drawer).getByText("development_minimax")).toBeInTheDocument();
+    const modeSelect = within(drawer).getByRole("combobox", { name: "对话模式" });
+    expect(within(modeSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "通用对话",
+      "业务 Agent",
+    ]);
+    expect(within(drawer).queryByText("能力设置")).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText("技能")).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText("MCP 能力")).not.toBeInTheDocument();
     expect(within(drawer).getAllByText("记忆验证")).toHaveLength(1);
     expect(within(drawer).getByText("请记住我的测试编号是 AI-0711")).toBeInTheDocument();
     expect(within(drawer).getByText("我已记住 AI-0711")).toBeInTheDocument();
@@ -499,8 +491,8 @@ describe("homepage shell", () => {
         "conv-1",
         {
           content: "我刚才的测试编号是什么？",
-          agentId: "platform_assistant",
-          skillIds: ["drawing_explain"],
+          agentId: "general_assistant",
+          skillIds: [],
           mcpServerIds: [],
         },
         expect.any(AbortSignal),
@@ -544,9 +536,7 @@ describe("homepage shell", () => {
     const initialHeight = drawer.style.getPropertyValue("--ai-drawer-height");
 
     expect(Number.parseInt(initialWidth, 10)).toBeGreaterThanOrEqual(700);
-    expect(Number.parseInt(initialHeight, 10)).toBe(
-      Math.min(820, window.innerHeight - 16),
-    );
+    expect(Number.parseInt(initialHeight, 10)).toBe(window.innerHeight);
 
     fireEvent.pointerDown(handle, { clientX: 960, clientY: 80 });
     expect(handle).toHaveFocus();

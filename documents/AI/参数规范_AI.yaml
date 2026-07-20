@@ -288,7 +288,7 @@ ai_layer:
       desc: "是否启用网页 AI 对话助手；模型调用必须从后端发出"
     default_agent:
       type: str
-      default: "platform_assistant"
+      default: "general_assistant"
       desc: "默认智能体 ID"
     max_history_messages:
       type: int
@@ -316,42 +316,82 @@ ai_layer:
         default: 1
         desc: "同一用户标识同一时间允许的 AI 请求数；第一版按 IP 区分"
     agents:
-      - agent_id: "platform_assistant"
-        name: "出图平台助手"
-        description: "回答出图平台使用、任务记录和部署链路相关问题"
-        system_prompt: "你是中核工程出图平台的只读 AI 助手。回答必须基于当前对话和平台已知信息，不能声称已经修改图纸、任务、流程或文件。"
-      - agent_id: "drawing_understanding"
-        name: "图纸理解助手"
-        description: "解释图纸元素、图签字段、模板解析和规则提炼结果"
-        system_prompt: "你是图纸理解助手。你只能解释已有图纸元素、结构化结果和规则，不直接修改 DWG/DXF。"
-      - agent_id: "template_rule_assistant"
-        name: "模板规则助手"
-        description: "解释现有模板文件解析结果和规则来源"
-        system_prompt: "你是模板规则助手。你负责说明模板字段、规则来源和可能风险，不直接改动模板或参数文件。"
+      - agent_id: "general_assistant"
+        name: "通用对话"
+        description: "进行正常知识问答、写作和日常交流"
+        system_prompt: "你是通用 AI 助手，可以进行正常、完整的知识问答和日常交流。用户明确要求读取后端允许目录时，可以使用已注册的只读工具。"
+      - agent_id: "business_agent"
+        name: "业务 Agent"
+        description: "统一处理图纸理解、任务、模板规则和出图平台业务问题"
+        system_prompt: "你是出图平台业务 Agent，统一处理图纸理解、任务状态、模板规则、部署链路和平台使用问题。需要平台或文件事实时优先使用已注册的只读工具核实。"
     skills:
-      - skill_id: "drawing_element_explain"
-        name: "图纸元素解释"
-        description: "解释结构化图纸元素、图签字段、文本和几何对象含义"
+      - skill_id: "ansys_mapdl_18_2"
+        name: "ANSYS MAPDL 18.2"
+        description: "自动检索本地 ANSYS Mechanical APDL 18.2 授权语料，解释命令、单元、材料、KEYOPT 和求解流程"
         enabled: true
         read_only: true
-      - skill_id: "task_status_explain"
-        name: "任务状态解释"
-        description: "解释当前平台任务状态、错误信息和用户可执行的下一步"
-        enabled: true
-        read_only: true
-      - skill_id: "template_rule_query"
-        name: "模板规则查询"
-        description: "解释模板解析和规则提炼结果"
-        enabled: true
-        read_only: true
-    mcp_servers:
-      - server_id: "fanban_local_readonly"
-        name: "本地只读能力注册表"
-        description: "预留 MCP 能力注册；第一版不执行外部 MCP 工具"
-        enabled: false
-        read_only: true
-        transport: "disabled"
-        endpoint: ""
+        handler: "ansys_mapdl_18_2"
+        root: "storage/ai/skills/ansys-mapdl-18-2"
+        root_env_var: "FANBAN_ANSYS_MAPDL_SKILL_ROOT"
+        auto_trigger: true
+        trigger_terms:
+          - "ANSYS"
+          - "MAPDL"
+          - "APDL"
+          - "Mechanical APDL"
+          - "KEYOPT"
+          - "ANTYPE"
+          - "/PREP7"
+          - "/SOLU"
+          - "/POST1"
+          - "/POST26"
+          - "*GET"
+          - "*DIM"
+          - "*DO"
+          - "TBDATA"
+        max_results: 4
+        max_context_chars: 16000
+        query_timeout_seconds: 20
+        history_followup_messages: 6
+    mcp_servers: []
+    read_only_host_access:
+      enabled:
+        type: bool
+        default: true
+        desc: "是否向所有对话模式提供受控的后端只读文件工具"
+      allowed_roots:
+        type: "list[str]"
+        default:
+          - "storage"
+          - "documents"
+          - "documents_bin"
+          - "backend-runtime/backend/src/cad"
+          - "backend/src/cad"
+        desc: "相对于部署根目录的只读目录白名单；不存在的目录会被忽略"
+      denied_names:
+        type: "list[str]"
+        default: [".env", "ai_model_gateway.yaml", "runtime.env.ps1"]
+        desc: "禁止读取的敏感文件名，不区分大小写"
+      denied_suffixes:
+        type: "list[str]"
+        default: [".db", ".dll", ".exe", ".key", ".p12", ".pem", ".pfx", ".sqlite", ".sqlite3"]
+        desc: "禁止读取的文件后缀，不区分大小写"
+      max_read_bytes:
+        type: int
+        default: 262144
+        desc: "单次只读文件工具允许读取的最大字节数"
+      max_search_results:
+        type: int
+        default: 50
+        desc: "单次文件搜索返回结果上限"
+      max_depth:
+        type: int
+        default: 6
+        desc: "目录搜索允许递归的最大层级"
+      max_tool_rounds:
+        type: int
+        default: 3
+        desc: "单条消息允许的模型只读工具调用轮数上限"
 
   qa_assistant:
     enabled:

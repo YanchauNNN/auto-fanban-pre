@@ -92,6 +92,84 @@ def test_chat_client_posts_openai_compatible_payload_without_leaking_key(
     assert "secret-for-test" not in repr(result)
 
 
+def test_chat_client_sends_tools_and_parses_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.ai.chat_client import ChatClientConfig, OpenAICompatibleChatClient
+
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "read_text_file",
+                                            "arguments": json.dumps(
+                                                {"root": "documents", "path": "README.txt"},
+                                            ),
+                                        },
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                },
+            ).encode("utf-8")
+
+    def fake_urlopen(request: Any, timeout: float) -> FakeResponse:
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("src.ai.chat_client.urlopen", fake_urlopen)
+    client = OpenAICompatibleChatClient(
+        ChatClientConfig(
+            base_url="https://api.example.test/v1",
+            api_key=None,
+            authorization_scheme="none",
+            model="test-model",
+            timeout_seconds=10,
+            temperature=0.2,
+            max_output_tokens=256,
+        ),
+    )
+    definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_text_file",
+                "description": "read",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ]
+
+    result = client.complete([{"role": "user", "content": "读取说明"}], tools=definitions)
+
+    assert captured["body"]["tools"] == definitions
+    assert captured["body"]["tool_choice"] == "auto"
+    assert result.content == ""
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].call_id == "call-1"
+    assert result.tool_calls[0].name == "read_text_file"
+    assert result.tool_calls[0].arguments == {"root": "documents", "path": "README.txt"}
+
+
 def test_chat_client_runtime_uses_chat_timeout_without_generation_retries(tmp_path: Path) -> None:
     from API.app.routers.ai import build_chat_client
 
@@ -111,6 +189,66 @@ def test_chat_client_runtime_uses_chat_timeout_without_generation_retries(tmp_pa
 
     assert client.config.timeout_seconds == 23
     assert client.config.max_retries == 0
+
+
+def test_owner_key_normalizes_proxy_resolved_ipv4_address_with_port() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.102.17.81:65255"),
+        headers={},
+    )
+
+    assert _owner_key(request) == "ip:10.102.17.81"
+
+
+def test_owner_key_normalizes_proxy_resolved_ipv6_address_with_port() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="[2001:db8:10::73]:65255"),
+        headers={},
+    )
+
+    assert _owner_key(request) == "ip:2001:db8:10::73"
+
+
+def test_owner_key_ignores_spoofed_forwarded_address_from_untrusted_peer() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="10.102.17.81"),
+        headers={"x-forwarded-for": "10.102.17.99:65255"},
+    )
+
+    assert _owner_key(request) == "ip:10.102.17.81"
+
+
+def test_chat_store_migrates_legacy_owner_keys_that_include_ports(tmp_path: Path) -> None:
+    from src.ai.chat_store import AiChatStore
+
+    db_path = tmp_path / "fanban_ai_chat.sqlite3"
+    store = AiChatStore(db_path)
+    store.initialize()
+    conversation = store.create_conversation(
+        owner_key="ip:10.102.17.81",
+        title="旧会话",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE ai_conversations SET owner_key = ? WHERE conversation_id = ?",
+            ("ip:10.102.17.81:65255", conversation.conversation_id),
+        )
+
+    restarted_store = AiChatStore(db_path)
+    restarted_store.initialize()
+
+    visible = restarted_store.list_conversations("ip:10.102.17.81")
+    assert [item.conversation_id for item in visible] == [conversation.conversation_id]
+    assert visible[0].owner_key == "ip:10.102.17.81"
+
+    restarted_store.initialize()
+    assert len(restarted_store.list_conversations("ip:10.102.17.81")) == 1
 
 
 def test_chat_runtime_honors_ai_layer_master_switch(tmp_path: Path) -> None:
@@ -374,7 +512,7 @@ def test_chat_service_sends_recent_history_to_model(tmp_path: Path) -> None:
         def __init__(self) -> None:
             self.calls: list[list[dict[str, str]]] = []
 
-        def complete(self, messages: list[dict[str, str]]):
+        def complete(self, messages: list[dict[str, Any]], *, tools=None):
             self.calls.append(messages)
             content = "我已记住 AI-0711" if len(self.calls) == 1 else "你的编号是 AI-0711"
             return type("ChatResult", (), {"content": content, "usage": {}})()
@@ -440,6 +578,95 @@ def test_chat_service_sends_recent_history_to_model(tmp_path: Path) -> None:
     assert {"role": "user", "content": "请记住我的测试编号是 AI-0711"} in second_call
     assert {"role": "assistant", "content": "我已记住 AI-0711"} in second_call
     assert second.memory["used_history_messages"] == 2
+
+
+def test_chat_service_runs_same_read_only_tool_loop_for_both_modes(tmp_path: Path) -> None:
+    from src.ai.chat_client import ChatCompletionResult, ChatToolCall
+    from src.ai.chat_service import AiAgentConfig, AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+    from src.ai.read_only_tools import ReadOnlyHostTools
+    from src.config.ai.ai_spec import AiReadOnlyHostAccessConfig
+
+    documents = tmp_path / "documents"
+    documents.mkdir()
+    (documents / "README.txt").write_text("后端只读说明", encoding="utf-8")
+    tools = ReadOnlyHostTools(
+        server_root=tmp_path,
+        config=AiReadOnlyHostAccessConfig(allowed_roots=["documents"]),
+    )
+
+    class ToolCallingClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[list[dict[str, Any]], list[dict[str, Any]] | None]] = []
+
+        def complete(self, messages, *, tools=None):
+            self.calls.append((messages, tools))
+            if messages[-1]["role"] == "tool":
+                return ChatCompletionResult(content="已读取允许目录中的说明。")
+            return ChatCompletionResult(
+                content="",
+                tool_calls=[
+                    ChatToolCall(
+                        call_id=f"call-{len(self.calls)}",
+                        name="read_text_file",
+                        arguments={"root": "documents", "path": "README.txt"},
+                        arguments_raw='{"root":"documents","path":"README.txt"}',
+                    ),
+                ],
+            )
+
+    store = AiChatStore(tmp_path / "chat.sqlite3")
+    store.initialize()
+    client = ToolCallingClient()
+    service = AiChatService(
+        store=store,
+        client=client,
+        tools=tools,
+        runtime=AiChatRuntimeConfig(
+            default_agent="general_assistant",
+            agents=[
+                AiAgentConfig(
+                    agent_id="general_assistant",
+                    name="通用对话",
+                    system_prompt="可以正常聊天。",
+                ),
+                AiAgentConfig(
+                    agent_id="business_agent",
+                    name="业务 Agent",
+                    system_prompt="处理全部平台业务。",
+                ),
+            ],
+            max_tool_rounds=3,
+        ),
+    )
+
+    for agent_id in ("general_assistant", "business_agent"):
+        conversation = service.create_conversation("ip:127.0.0.1", title=agent_id)
+        exchange = service.send_message(
+            owner_key="ip:127.0.0.1",
+            conversation_id=conversation.conversation_id,
+            content="读取后端 README",
+            agent_id=agent_id,
+            skill_ids=[],
+            account_id=None,
+        )
+
+        assert exchange.assistant_message.content == "已读取允许目录中的说明。"
+        assert exchange.assistant_message.metadata["tool_calls"] == [
+            {
+                "name": "read_text_file",
+                "ok": True,
+                "root": "documents",
+                "path": "README.txt",
+            },
+        ]
+
+    first_tool_result = client.calls[1][0][-1]
+    second_tool_result = client.calls[3][0][-1]
+    assert first_tool_result["role"] == "tool"
+    assert "后端只读说明" in first_tool_result["content"]
+    assert second_tool_result["role"] == "tool"
+    assert all(call_tools == tools.definitions() for _messages, call_tools in client.calls)
 
 
 def test_chat_service_records_gateway_failure_without_reusing_it_as_history(
@@ -691,10 +918,14 @@ ai_layer:
         def __init__(self) -> None:
             self.calls: list[list[dict[str, str]]] = []
 
-        def complete(self, messages: list[dict[str, str]]):
+        def complete(self, messages: list[dict[str, str]], *, tools=None):
             self.calls.append(messages)
             content = "记住了 AI-0711" if len(self.calls) == 1 else "AI-0711"
-            return type("ChatResult", (), {"content": content, "usage": {}})()
+            return type(
+                "ChatResult",
+                (),
+                {"content": content, "usage": {}, "tool_calls": ()},
+            )()
 
     fake_client = FakeClient()
     monkeypatch.setattr("API.app.routers.ai.build_chat_client", lambda *_args, **_kwargs: fake_client)
@@ -748,6 +979,17 @@ ai_layer:
         assert deleted.status_code == 200
         assert deleted.json() == {"ok": True}
         assert owner_client.get(f"/api/ai/conversations/{conversation_id}").status_code == 404
+
+    with TestClient(create_app(), client=("10.0.0.10:61001", 50000)) as first_proxy_connection:
+        created = first_proxy_connection.post("/api/ai/conversations", json={"title": "端口归一化"})
+        assert created.status_code == 201
+        proxy_conversation_id = created.json()["conversation_id"]
+
+    with TestClient(create_app(), client=("10.0.0.10:61002", 50000)) as second_proxy_connection:
+        listed = second_proxy_connection.get("/api/ai/conversations")
+        assert listed.status_code == 200
+        assert [item["conversation_id"] for item in listed.json()] == [proxy_conversation_id]
+        assert second_proxy_connection.get(f"/api/ai/conversations/{proxy_conversation_id}").status_code == 200
 
 
 def test_ai_api_busy_response_includes_retry_after_header(tmp_path: Path) -> None:
@@ -865,7 +1107,9 @@ def test_ai_service_lazy_initialization_is_singleton_under_concurrency(
     ))
     monkeypatch.setattr(ai_router, "load_ai_spec", slow_load_ai_spec)
     monkeypatch.setattr(ai_router, "build_chat_client", lambda _spec: FakeClient())
-    monkeypatch.setattr(ai_router, "build_runtime", lambda _spec: AiChatRuntimeConfig())
+    monkeypatch.setattr(ai_router, "build_runtime", lambda _spec, **_kwargs: AiChatRuntimeConfig())
+    monkeypatch.setattr(ai_router, "build_read_only_tools", lambda _spec: None)
+    monkeypatch.setattr(ai_router, "build_context_skills", lambda _spec: [])
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
 
     def resolve_service():

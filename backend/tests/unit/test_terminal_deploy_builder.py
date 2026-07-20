@@ -4,6 +4,7 @@ import json
 import socket
 import subprocess
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -24,9 +25,11 @@ from src.deploy.terminal_package import (
 SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
+TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
 AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
+ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
@@ -176,6 +179,7 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
+    _write_file(repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME, "terminal install plan")
     _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
     _write_file(repo_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
@@ -185,6 +189,10 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
     _write_file(repo_root / "tools" / "diagnose_iis_frontend_503.ps1", "Write-Host diagnose-503")
     _write_file(repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME, "Write-Host ai-connectivity")
+    _write_file(
+        repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        "Write-Host install-ansys-mapdl",
+    )
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -198,6 +206,7 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (Path("backend/.venv/Lib/site-packages"), Path("python-packages/Lib/site-packages")) in rel_pairs
     assert (Path("documents/Resources"), Path("documents/Resources")) in rel_pairs
     assert (Path("documents") / MECHANISM_SPEC_NAME, Path("documents") / MECHANISM_SPEC_NAME) in rel_pairs
+    assert (Path("documents") / TERMINAL_INSTALL_PLAN_NAME, Path("documents") / TERMINAL_INSTALL_PLAN_NAME) in rel_pairs
     assert (Path("documents/AI"), Path("documents/AI")) in rel_pairs
     assert (
         Path("documents/AI") / AI_SPEC_NAME,
@@ -213,6 +222,10 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (
         Path("tools") / "ai" / AI_CONNECTIVITY_SCRIPT_NAME,
         Path("scripts") / AI_CONNECTIVITY_SCRIPT_NAME,
+    ) in rel_pairs
+    assert (
+        Path("tools") / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
     ) in rel_pairs
 
 
@@ -230,6 +243,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert 'url="http://127.0.0.1:8000/api/{R:1}"' in frontend_web_config
     assert 'url="/index.html"' in frontend_web_config
     assert (output_root / "backend-runtime" / "API" / "app" / "main.py").exists()
+    assert (output_root / "documents" / TERMINAL_INSTALL_PLAN_NAME).read_text(encoding="utf-8-sig") == "terminal install plan"
     assert (output_root / "tools" / "diagnose_iis_frontend_503.ps1").read_text(
         encoding="utf-8-sig"
     ) == "Write-Host diagnose-503"
@@ -243,6 +257,53 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "deploy"
         / "__pycache__"
         / "terminal_package.cpython-313.pyc"
+    ).exists()
+
+
+def test_terminal_package_materializes_ansys_skill_without_copying_private_archive(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    (repo_root / "documents" / "AI" / AI_SPEC_NAME).write_text(
+        """
+schema_version: "0.1"
+ai_layer:
+  chat:
+    skills:
+      - skill_id: "ansys_mapdl_18_2"
+        name: "ANSYS MAPDL 18.2"
+        handler: "ansys_mapdl_18_2"
+        enabled: true
+        root: "storage/ai/skills/ansys-mapdl-18-2"
+""".strip(),
+        encoding="utf-8",
+    )
+    archive = (
+        repo_root
+        / "documents"
+        / "AI"
+        / "ansys-mapdl-18-2-private-offline-2026-07-16.zip"
+    )
+    with ZipFile(archive, "w") as bundle:
+        prefix = "private/ansys-mapdl-18-2"
+        bundle.writestr(f"{prefix}/SKILL.md", "skill")
+        bundle.writestr(f"{prefix}/scripts/mapdl_query.py", "print('{}')")
+        bundle.writestr(f"{prefix}/assets/data/mapdl_help.sqlite", "sqlite")
+        bundle.writestr(f"{prefix}/assets/data/mapdl_commands.jsonl", "{}\n")
+        bundle.writestr(f"{prefix}/assets/data/manifest.json", "{}\n")
+
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    installed = output_root / "storage" / "ai" / "skills" / "ansys-mapdl-18-2"
+    assert (installed / "SKILL.md").exists()
+    assert (installed / "scripts" / "mapdl_query.py").exists()
+    assert not (
+        output_root
+        / "documents"
+        / "AI"
+        / "ansys-mapdl-18-2-private-offline-2026-07-16.zip"
     ).exists()
     assert not (output_root / "python-packages" / "Lib" / "site-packages" / "_auto_fanban.pth").exists()
     assert not (

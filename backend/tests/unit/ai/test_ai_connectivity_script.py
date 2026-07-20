@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -19,21 +20,39 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
     received_payloads: list[dict[str, object]] = []
     received_mcp_payloads: list[dict[str, object]] = []
     received_application_state_headers: list[dict[str, str]] = []
+    application_conversations: dict[str, dict[str, object]] = {}
 
     def do_GET(self) -> None:
         type(self).request_count += 1
         if urlsplit(self.path).path == "/api/ai/state":
             type(self).received_application_state_headers.append(dict(self.headers.items()))
-            forwarded_for = self.headers.get("X-Forwarded-For")
-            owner_ip = forwarded_for.split(",", 1)[0].strip() if forwarded_for else "127.0.0.1"
             self._send_json(
                 {
                     "enabled": True,
                     "profile": "application_probe_test",
                     "model": "Qwen3.6-35A3",
-                    "owner_key": f"ip:{owner_ip}",
+                    "owner_key": self._application_owner_key(),
                 }
             )
+            return
+        if urlsplit(self.path).path == "/api/ai/conversations":
+            owner_key = self._application_owner_key()
+            conversations = [
+                self._application_conversation_payload(conversation)
+                for conversation in type(self).application_conversations.values()
+                if conversation["owner_key"] == owner_key
+            ]
+            self._send_json(conversations)
+            return
+        if urlsplit(self.path).path.startswith("/api/ai/conversations/"):
+            conversation_id = urlsplit(self.path).path.rsplit("/", 1)[-1]
+            conversation = type(self).application_conversations.get(conversation_id)
+            if conversation is None or conversation["owner_key"] != self._application_owner_key():
+                self._send_json({"detail": "conversation_not_found"}, status_code=404)
+                return
+            payload = self._application_conversation_payload(conversation)
+            payload["messages"] = []
+            self._send_json(payload)
             return
         if self.path != "/v1/models":
             self.send_error(404)
@@ -42,6 +61,35 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         type(self).request_count += 1
+        application_path = urlsplit(self.path).path
+        if application_path == "/api/ai/conversations":
+            self._read_json_body()
+            conversation_id = f"application-probe-{len(type(self).application_conversations) + 1}"
+            conversation = {
+                "conversation_id": conversation_id,
+                "owner_key": self._application_owner_key(),
+                "title": "AI owner probe",
+                "message_count": 0,
+            }
+            type(self).application_conversations[conversation_id] = conversation
+            self._send_json(self._application_conversation_payload(conversation), status_code=201)
+            return
+        if application_path.startswith("/api/ai/conversations/") and application_path.endswith("/messages"):
+            self._read_json_body()
+            conversation_id = application_path.removeprefix("/api/ai/conversations/").removesuffix("/messages").rstrip("/")
+            conversation = type(self).application_conversations.get(conversation_id)
+            if conversation is None or conversation["owner_key"] != self._application_owner_key():
+                self._send_json({"detail": "conversation_not_found"}, status_code=404)
+                return
+            conversation["message_count"] = 2
+            self._send_json(
+                {
+                    "user_message": {"role": "user", "content": "AI_OWNER_PROBE"},
+                    "assistant_message": {"role": "assistant", "content": "AI_OWNER_PROBE_OK"},
+                    "memory": {"used_history_messages": 0},
+                }
+            )
+            return
         if urlsplit(self.path).path == "/mcp":
             self._handle_mcp()
             return
@@ -71,8 +119,47 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
         else:
             self._send_chat(payload)
 
+    def do_DELETE(self) -> None:
+        type(self).request_count += 1
+        path = urlsplit(self.path).path
+        if not path.startswith("/api/ai/conversations/"):
+            self.send_error(404)
+            return
+        conversation_id = path.rsplit("/", 1)[-1]
+        conversation = type(self).application_conversations.get(conversation_id)
+        if conversation is None or conversation["owner_key"] != self._application_owner_key():
+            self._send_json({"detail": "conversation_not_found"}, status_code=404)
+            return
+        del type(self).application_conversations[conversation_id]
+        self._send_json({"ok": True})
+
     def log_message(self, *_args: object) -> None:
         return
+
+    def _application_owner_key(self) -> str:
+        raw = (self.headers.get("X-Forwarded-For") or "127.0.0.1").split(",", 1)[0].strip()
+        if raw.startswith("[") and "]" in raw:
+            raw = raw[1 : raw.index("]")]
+        else:
+            host, separator, port = raw.rpartition(":")
+            if separator and port.isdecimal():
+                raw = host
+        return f"ip:{ip_address(raw)}"
+
+    @staticmethod
+    def _application_conversation_payload(conversation: dict[str, object]) -> dict[str, object]:
+        return {
+            "conversation_id": conversation["conversation_id"],
+            "title": conversation["title"],
+            "message_count": conversation["message_count"],
+        }
+
+    def _read_json_body(self) -> dict[str, object]:
+        length = int(self.headers.get("Content-Length", "0"))
+        if length == 0:
+            return {}
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        return payload if isinstance(payload, dict) else {}
 
     def _send_json(
         self,
@@ -340,6 +427,7 @@ def openai_compatible_server() -> str:
     _OpenAiCompatibleHandler.received_payloads = []
     _OpenAiCompatibleHandler.received_mcp_payloads = []
     _OpenAiCompatibleHandler.received_application_state_headers = []
+    _OpenAiCompatibleHandler.application_conversations = {}
     server = ThreadingHTTPServer(("127.0.0.1", 0), _OpenAiCompatibleHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -425,11 +513,14 @@ profiles:
     assert application["direct"]["owner_key"] == "ip:127.0.0.1"
     assert application["forwarded"]["owner_key"] == "ip:198.18.0.73"
     assert application["forwarded_owner_effective"] is True
+    assert "conversation" in application
+    assert application["conversation"]["status"] == "passed"
+    assert application["conversation"]["same_owner_after_port_change"] is True
     assert application["profile_matches_selected"] is True
     assert application["sensitive_response_fields"] == []
     assert result["readiness"]["application_api_proxy"]["status"] == "passed"
     assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["Host"] == "fanban-terminal.local"
-    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"] == "198.18.0.73"
+    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"] == "198.18.0.73:49100"
 
 
 def test_ai_connectivity_script_accepts_split_stream_content(
@@ -493,14 +584,21 @@ profiles:
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
     result = json.loads(output_path.read_text(encoding="utf-8-sig"))
-    assert result["schema_version"] == "0.4"
+    assert result["schema_version"] == "0.6"
     assert result["status"] == "passed"
-    assert result["script"]["version"] == "fanban-ai-connectivity@0.4"
+    assert result["script"]["version"] == "fanban-ai-connectivity@0.6"
     assert result["script"]["sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest().upper()
     assert result["environment"]["config_sha256"] == hashlib.sha256(
         config_path.read_bytes(),
     ).hexdigest().upper()
     assert result["checks"]["chat"]["content_type"] == "application/json"
+    assert result["checks"]["ansys_mapdl_skill"]["skill_id"] == "ansys_mapdl_18_2"
+    assert result["checks"]["ansys_mapdl_skill"]["local_status"] in {
+        "passed",
+        "failed",
+        "not_installed",
+    }
+    assert "ansys_mapdl_skill" in result["readiness"]
     assert result["checks"]["chat"]["elapsed_ms"] >= 0
     assert result["checks"]["stream"]["content_type"] == "text/event-stream"
     assert result["checks"]["stream"]["elapsed_ms"] >= 0
@@ -950,3 +1048,20 @@ profiles:
     assert result["checks"]["chat"]["attempted"] is False
     assert result["checks"]["stream"]["attempted"] is False
     assert _OpenAiCompatibleHandler.request_count == 0
+
+
+def test_ai_connectivity_script_reports_ansys_mapdl_skill_readiness() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    script_text = (repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    required_probe_markers = (
+        "FANBAN_ANSYS_MAPDL_SKILL_ROOT",
+        "ansys_mapdl_18_2",
+        "validate_mapdl_skill.py",
+        "mapdl_query.py",
+        "ansys_mapdl_skill",
+    )
+    for marker in required_probe_markers:
+        assert marker in script_text

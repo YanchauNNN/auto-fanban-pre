@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .owner_identity import normalize_owner_key
+
 
 @dataclass(frozen=True)
 class AiConversation:
@@ -85,6 +87,7 @@ class AiChatStore:
                 ON ai_messages(conversation_id, created_at ASC);
                 """
             )
+            self._migrate_legacy_owner_keys(conn)
 
     def create_conversation(
         self,
@@ -93,6 +96,7 @@ class AiChatStore:
         title: str,
         account_id: str | None = None,
     ) -> AiConversation:
+        owner_key = normalize_owner_key(owner_key)
         now = _now()
         conversation_id = str(uuid.uuid4())
         with self._connect() as conn:
@@ -116,6 +120,7 @@ class AiChatStore:
         return _conversation_from_row(row)
 
     def list_conversations(self, owner_key: str) -> list[AiConversation]:
+        owner_key = normalize_owner_key(owner_key)
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -130,6 +135,7 @@ class AiChatStore:
         return [_conversation_from_row(row) for row in rows]
 
     def get_conversation(self, conversation_id: str, owner_key: str) -> AiConversation | None:
+        owner_key = normalize_owner_key(owner_key)
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -150,6 +156,7 @@ class AiChatStore:
         owner_key: str,
         title: str,
     ) -> AiConversation | None:
+        owner_key = normalize_owner_key(owner_key)
         normalized_title = title.strip() or "新会话"
         with self._connect() as conn:
             existing = conn.execute(
@@ -341,6 +348,7 @@ class AiChatStore:
         return _message_from_row(user_row), _message_from_row(assistant_row)
 
     def clear_conversation(self, conversation_id: str, owner_key: str) -> bool:
+        owner_key = normalize_owner_key(owner_key)
         with self._connect() as conn:
             conversation = conn.execute(
                 """
@@ -368,6 +376,7 @@ class AiChatStore:
         return True
 
     def delete_conversation(self, conversation_id: str, owner_key: str) -> bool:
+        owner_key = normalize_owner_key(owner_key)
         with self._connect() as conn:
             conversation = conn.execute(
                 """
@@ -426,6 +435,25 @@ class AiChatStore:
             yield conn
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_legacy_owner_keys(conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            "SELECT DISTINCT owner_key FROM ai_conversations WHERE owner_key LIKE 'ip:%'"
+        ).fetchall()
+        updates: list[tuple[str, str]] = []
+        for row in rows:
+            owner_key = str(row["owner_key"])
+            normalized_owner_key = normalize_owner_key(owner_key)
+            if normalized_owner_key != owner_key:
+                updates.append((normalized_owner_key, owner_key))
+        if not updates:
+            return
+        with conn:
+            conn.executemany(
+                "UPDATE ai_conversations SET owner_key = ? WHERE owner_key = ?",
+                updates,
+            )
 
 
 def _conversation_from_row(row: sqlite3.Row) -> AiConversation:

@@ -35,6 +35,44 @@ def test_load_ai_spec_reads_defaults_from_yaml() -> None:
     )
 
 
+def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access() -> None:
+    from src.config.ai.ai_spec import AiSpecLoader
+
+    repo_root = Path(__file__).resolve().parents[4]
+    AiSpecLoader.clear_cache()
+
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / "参数规范_AI.yaml")
+    chat = spec.ai_layer.chat
+
+    assert chat.default_agent == "general_assistant"
+    assert [(agent.agent_id, agent.name) for agent in chat.agents] == [
+        ("general_assistant", "通用对话"),
+        ("business_agent", "业务 Agent"),
+    ]
+    assert [(skill.skill_id, skill.handler, skill.auto_trigger) for skill in chat.skills] == [
+        ("ansys_mapdl_18_2", "ansys_mapdl_18_2", True),
+    ]
+    assert chat.skills[0].root == "storage/ai/skills/ansys-mapdl-18-2"
+    assert chat.skills[0].root_env_var == "FANBAN_ANSYS_MAPDL_SKILL_ROOT"
+    assert chat.mcp_servers == []
+
+    access = chat.read_only_host_access
+    assert access.enabled is True
+    assert access.allowed_roots == [
+        "storage",
+        "documents",
+        "documents_bin",
+        "backend-runtime/backend/src/cad",
+        "backend/src/cad",
+    ]
+    assert ".env" in access.denied_names
+    assert ".sqlite3" in access.denied_suffixes
+    assert ".exe" in access.denied_suffixes
+    assert access.max_read_bytes == 262_144
+    assert access.max_search_results == 50
+    assert access.max_tool_rounds == 3
+
+
 def test_load_ai_spec_default_path_resolves_from_backend_cwd(monkeypatch) -> None:
     from src.config.ai.ai_spec import AiSpecLoader, load_ai_spec
 

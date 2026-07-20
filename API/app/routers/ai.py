@@ -26,6 +26,15 @@ from src.ai.chat_service import (
     AiSkillConfig,
 )
 from src.ai.chat_store import AiChatMessage, AiChatStore, AiConversation
+from src.ai.ansys_mapdl_skill import (
+    ANSYS_MAPDL_SKILL_ID,
+    AnsysMapdlSkill,
+    AnsysMapdlSkillConfig,
+    resolve_skill_root,
+)
+from src.ai.context_skills import ContextSkill
+from src.ai.owner_identity import normalize_ip_host
+from src.ai.read_only_tools import ReadOnlyHostTools
 from src.config import get_config, load_ai_spec
 from src.config.ai.ai_spec import AiSpec
 
@@ -233,7 +242,11 @@ def build_chat_client(spec: AiSpec) -> OpenAICompatibleChatClient:
     )
 
 
-def build_runtime(spec: AiSpec) -> AiChatRuntimeConfig:
+def build_runtime(
+    spec: AiSpec,
+    *,
+    available_skill_ids: set[str] | None = None,
+) -> AiChatRuntimeConfig:
     chat = spec.ai_layer.chat
     models = spec.resolve_models()
     return AiChatRuntimeConfig(
@@ -245,6 +258,7 @@ def build_runtime(spec: AiSpec) -> AiChatRuntimeConfig:
         retention_days=chat.retention_days,
         max_global_requests=chat.concurrency.max_global_requests,
         max_per_owner_requests=chat.concurrency.max_per_owner_requests,
+        max_tool_rounds=chat.read_only_host_access.max_tool_rounds,
         agents=[
             AiAgentConfig(
                 agent_id=agent.agent_id,
@@ -261,6 +275,9 @@ def build_runtime(spec: AiSpec) -> AiChatRuntimeConfig:
                 description=skill.description,
                 enabled=skill.enabled,
                 read_only=skill.read_only,
+                handler=skill.handler,
+                auto_trigger=skill.auto_trigger,
+                available=skill.skill_id in (available_skill_ids or set()),
             )
             for skill in chat.skills
         ],
@@ -281,6 +298,44 @@ def build_runtime(spec: AiSpec) -> AiChatRuntimeConfig:
     )
 
 
+def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
+    source_path = spec.source_path
+    if source_path is None or len(source_path.resolve().parents) < 3:
+        return []
+    server_root = source_path.resolve().parents[2]
+    result: list[ContextSkill] = []
+    defaults = AnsysMapdlSkillConfig()
+    for skill in spec.ai_layer.chat.skills:
+        if not skill.enabled or skill.handler != ANSYS_MAPDL_SKILL_ID:
+            continue
+        root = resolve_skill_root(server_root, skill.root, skill.root_env_var)
+        result.append(
+            AnsysMapdlSkill(
+                root=root,
+                config=AnsysMapdlSkillConfig(
+                    skill_id=skill.skill_id,
+                    auto_trigger=skill.auto_trigger,
+                    trigger_terms=tuple(skill.trigger_terms) or defaults.trigger_terms,
+                    max_results=skill.max_results,
+                    max_context_chars=skill.max_context_chars,
+                    query_timeout_seconds=skill.query_timeout_seconds,
+                    history_followup_messages=skill.history_followup_messages,
+                ),
+            )
+        )
+    return result
+
+
+def build_read_only_tools(spec: AiSpec) -> ReadOnlyHostTools | None:
+    source_path = spec.source_path
+    access = spec.ai_layer.chat.read_only_host_access
+    if not access.enabled or source_path is None or len(source_path.resolve().parents) < 3:
+        return None
+    server_root = source_path.resolve().parents[2]
+    tools = ReadOnlyHostTools(server_root=server_root, config=access)
+    return tools if tools.definitions() else None
+
+
 def _service(request: Request) -> AiChatService:
     existing = getattr(request.app.state, "ai_chat_service", None)
     if isinstance(existing, AiChatService):
@@ -295,10 +350,20 @@ def _service(request: Request) -> AiChatService:
         spec = load_ai_spec(runtime_config.ai_spec_path)
         store = AiChatStore(runtime_config.storage_dir / "ai" / "chat" / "fanban_ai_chat.sqlite3")
         store.initialize()
+        context_skills = build_context_skills(spec)
         service = AiChatService(
             store=store,
             client=build_chat_client(spec),
-            runtime=build_runtime(spec),
+            runtime=build_runtime(
+                spec,
+                available_skill_ids={
+                    skill.skill_id
+                    for skill in context_skills
+                    if bool(getattr(skill, "available", False))
+                },
+            ),
+            tools=build_read_only_tools(spec),
+            context_skills=context_skills,
         )
         request.app.state.ai_chat_service = service
         return service
@@ -306,7 +371,7 @@ def _service(request: Request) -> AiChatService:
 
 def _owner_key(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
-    return f"ip:{host}"
+    return f"ip:{normalize_ip_host(host)}"
 
 
 def _account_id(request: Request, authorization: str | None) -> str | None:
@@ -339,6 +404,8 @@ def _state_payload(state) -> dict[str, Any]:
                 "description": skill.description,
                 "enabled": skill.enabled,
                 "read_only": skill.read_only,
+                "auto_trigger": skill.auto_trigger,
+                "available": skill.available,
             }
             for skill in state.skills
         ],

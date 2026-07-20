@@ -85,9 +85,9 @@ profiles:
     mcp_sse_url: ""
     mcp_stdio_command: ""
     mcp_api_key_env_var: ""
-    # Set this to the IIS/ARR application address during terminal deployment.
-    # The probe only reads /api/ai/state and verifies IP owner-key forwarding.
-    application_api_base_url: ""
+    # Terminal default: exercise the local IIS/ARR /api proxy, not just the model gateway.
+    # Override with -ApplicationApiBaseUrl when the terminal uses port 80 or another site binding.
+    application_api_base_url: "http://127.0.0.1:8080"
     application_api_state_path: "/api/ai/state"
     application_api_host_header: ""
     application_api_forwarded_for_probe: "198.18.0.73"

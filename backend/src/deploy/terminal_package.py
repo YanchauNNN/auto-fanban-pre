@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..ai.ansys_mapdl_skill import ANSYS_MAPDL_SKILL_ID, install_skill_archive
 from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
 from ..cad.plot_resource_manager import PDF2_PMP_NAME
 from ..config.mechanism_spec import (
@@ -15,13 +16,17 @@ from ..config.mechanism_spec import (
     MechanismSpecLoader,
     load_mechanism_spec,
 )
+from ..config.ai.ai_spec import AiSpecLoader
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
 RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
 MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
+TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB = "ansys-mapdl-18-2-private-offline-*.zip"
+ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -37,6 +42,7 @@ DEPLOY_IGNORE_PATTERNS = (
     "*.lscache",
     ".build_packages",
     "~$*",
+    ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB,
 )
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
@@ -120,6 +126,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             repo_root / "documents" / deployment.mechanism_spec_name,
             Path("documents") / deployment.mechanism_spec_name,
         ),
+        CopyPlanEntry(
+            repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME,
+            Path("documents") / TERMINAL_INSTALL_PLAN_NAME,
+        ),
         CopyPlanEntry(repo_root / "documents" / "AI", Path("documents") / "AI"),
         CopyPlanEntry(
             repo_root / "documents" / "AI" / AI_SPEC_NAME,
@@ -140,6 +150,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(
             repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1",
             Path("scripts") / "test_ai_model_connectivity.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+            Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
         ),
     ]
 
@@ -226,6 +240,39 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(entry.source, target)
+
+
+def _materialize_ansys_mapdl_skill(repo_root: Path, output_root: Path) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == ANSYS_MAPDL_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError("ANSYS MAPDL Skill root must be a package-relative path")
+    target = output_root / relative_root
+    source = repo_root / relative_root
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS))
+        return
+
+    archives = sorted((repo_root / "documents" / "AI").glob(ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB))
+    if not archives:
+        raise FileNotFoundError(
+            "ANSYS MAPDL 18.2 Skill 已启用，但未找到 storage 语料或私人离线包。"
+            "请先运行 tools/ai/install_ansys_mapdl_skill.ps1。"
+        )
+    install_skill_archive(archives[-1], target)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -505,7 +552,7 @@ def _write_support_files(
 ) -> None:
     deployment = _deployment_mechanism(output_root)
     storage_root = output_root / "storage"
-    for rel in [Path("jobs"), Path("groups"), Path("runtime")]:
+    for rel in [Path("jobs"), Path("groups"), Path("runtime"), Path("ai") / "skills"]:
         (storage_root / rel).mkdir(parents=True, exist_ok=True)
 
     start_backend = r'''param(
@@ -1526,7 +1573,8 @@ $dirs = @(
     "jobs",
     "groups",
     "runtime",
-    "runtime\cad-slots"
+    "runtime\cad-slots",
+    "ai\skills"
 )
 
 foreach ($dir in $dirs) {
@@ -1598,6 +1646,11 @@ if (Test-Path -LiteralPath $aiGatewayConfigPath -PathType Leaf) {
     $escapedAiGatewayConfigPath = $aiGatewayConfigPath.Replace("'", "''")
     $lines += ("Set-Item -Path 'Env:FANBAN_AI_GATEWAY_CONFIG_PATH' -Value '{0}'" -f $escapedAiGatewayConfigPath)
     $lines += "Set-Item -Path 'Env:FANBAN_AI_GATEWAY_PROFILE' -Value 'terminal_cnpe_intranet_qwen_fast'"
+}
+$ansysSkillRoot = Join-Path $root "storage\ai\skills\ansys-mapdl-18-2"
+if (Test-Path -LiteralPath $ansysSkillRoot -PathType Container) {
+    $escapedAnsysSkillRoot = $ansysSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_ANSYS_MAPDL_SKILL_ROOT' -Value '{0}'" -f $escapedAnsysSkillRoot)
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
@@ -3310,6 +3363,7 @@ def build_terminal_deploy_package(
     for entry in copy_plan:
         _copy_entry(entry, output_root)
 
+    _materialize_ansys_mapdl_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)

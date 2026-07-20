@@ -31,15 +31,15 @@
 
 .drawer {
   position: fixed;
-  right: 1rem;
-  bottom: 0.5rem;
+  right: 0;
+  bottom: 0;
   z-index: 38;
   display: flex;
   flex-direction: column;
-  width: min(var(--ai-drawer-width, 720px), calc(100vw - 2rem));
-  height: min(var(--ai-drawer-height, 820px), calc(100dvh - 1rem));
+  width: min(var(--ai-drawer-width, 720px), 100vw);
+  height: min(var(--ai-drawer-height, 100dvh), 100dvh);
   border: 1px solid rgba(20, 70, 128, 0.16);
-  border-radius: 18px;
+  border-radius: 18px 0 0 18px;
   background: rgba(250, 253, 255, 0.96);
   box-shadow: 0 26px 70px rgba(13, 44, 80, 0.2);
   color: #173f69;
@@ -189,48 +189,17 @@
   font-weight: 700;
 }
 
-.controls {
-  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
-}
-
-.controlsSummary {
+.modeBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.58rem 1rem;
+  min-height: 3rem;
+  padding: 0.42rem 1rem;
+  border-bottom: 1px solid rgba(20, 70, 128, 0.08);
   color: #52749a;
-  cursor: pointer;
   font-size: 0.8rem;
   font-weight: 800;
-  list-style: none;
-}
-
-.controlsSummary::-webkit-details-marker {
-  display: none;
-}
-
-.controlsSummary strong {
-  min-width: 0;
-  overflow: hidden;
-  color: #1a528d;
-  font-size: 0.78rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.controlsBody {
-  display: grid;
-  gap: 0.65rem;
-  padding: 0 1rem 0.75rem;
-}
-
-.fieldLabel {
-  display: grid;
-  gap: 0.35rem;
-  color: #52749a;
-  font-size: 0.78rem;
-  font-weight: 700;
 }
 
 .select,
@@ -244,20 +213,17 @@
 }
 
 .select {
-  min-height: 2.35rem;
+  width: min(14rem, 65%);
+  min-height: 2.15rem;
   padding: 0 0.65rem;
 }
 
-.chipGroup,
-.mcpRow,
 .composerActions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
 }
 
-.chip,
-.mcpChip,
 .ghostButton,
 .conversationButton {
   border: 1px solid rgba(20, 70, 128, 0.14);
@@ -268,32 +234,9 @@
   font-weight: 700;
 }
 
-.chip,
 .ghostButton,
 .conversationButton {
   cursor: pointer;
-}
-
-.chip {
-  padding: 0.42rem 0.65rem;
-}
-
-.chipActive {
-  border-color: rgba(20, 70, 128, 0.3);
-  background: #1f65a9;
-  color: #fff;
-}
-
-.mcpChip {
-  padding: 0.34rem 0.55rem;
-  opacity: 0.72;
-}
-
-.mcpEnabled {
-  border-color: rgba(31, 126, 87, 0.28);
-  background: rgba(229, 247, 238, 0.92);
-  color: #236c4f;
-  opacity: 1;
 }
 
 .conversationBar {
@@ -626,13 +569,13 @@
 
 @media (max-width: 720px) {
   .drawer {
-    right: 0.65rem;
-    left: 0.65rem;
+    right: 0;
+    left: 0;
     top: auto;
-    bottom: 0.65rem;
+    bottom: 0;
     width: auto;
-    height: min(var(--ai-drawer-height, 820px), calc(100dvh - 1.3rem));
-    border-radius: 18px;
+    height: 100dvh;
+    border-radius: 0;
   }
 
   .resizeHandle {

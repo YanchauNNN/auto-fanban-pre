@@ -503,6 +503,7 @@ function New-ApplicationApiStateRequestResult {
         profile = $null
         model = $null
         owner_key = $null
+        skills = @()
         sensitive_response_fields = @()
         error = $null
     }
@@ -543,6 +544,16 @@ function Invoke-ApplicationApiStateRequest {
         $result.profile = Get-JsonPropertyValue $json "profile"
         $result.model = Get-JsonPropertyValue $json "model"
         $result.owner_key = Get-JsonPropertyValue $json "owner_key"
+        $result.skills = @(
+            @(Get-JsonPropertyValue $json "skills") | ForEach-Object {
+                [PSCustomObject]@{
+                    skill_id = [string](Get-JsonPropertyValue $_ "skill_id")
+                    enabled = Get-JsonPropertyValue $_ "enabled"
+                    auto_trigger = Get-JsonPropertyValue $_ "auto_trigger"
+                    available = Get-JsonPropertyValue $_ "available"
+                }
+            }
+        )
         $result.sensitive_response_fields = @(Get-SensitiveJsonPropertyNames $json)
         if ($result.sensitive_response_fields.Count -gt 0) {
             $result.status = "failed"
@@ -556,6 +567,205 @@ function Invoke-ApplicationApiStateRequest {
     } catch {
         $result.status = "failed"
         $result.error = $_.Exception.Message
+    }
+    return $result
+}
+
+function Get-NormalizedIpAddress {
+    param([string]$Value)
+
+    $candidate = ($Value -split ",", 2)[0].Trim()
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        return ""
+    }
+    if ($candidate.StartsWith("[") -and $candidate.Contains("]")) {
+        $candidate = $candidate.Substring(1, $candidate.IndexOf("]") - 1)
+    }
+
+    $parsed = $null
+    if ([System.Net.IPAddress]::TryParse($candidate, [ref]$parsed)) {
+        return $parsed.ToString()
+    }
+
+    $lastColon = $candidate.LastIndexOf(":")
+    if ($lastColon -gt 0) {
+        $host = $candidate.Substring(0, $lastColon)
+        $port = $candidate.Substring($lastColon + 1)
+    } else {
+        $host = ""
+        $port = ""
+    }
+    if ($lastColon -gt 0 -and $port -match "^\d+$") {
+        $parsed = $null
+        if ([System.Net.IPAddress]::TryParse($host, [ref]$parsed)) {
+            return $parsed.ToString()
+        }
+    }
+    return ""
+}
+
+function New-ApplicationApiOperationResult {
+    param([string]$Url)
+
+    return [PSCustomObject]@{
+        status = "not_attempted"
+        attempted = $false
+        url = Get-SanitizedUrl $Url
+        status_code = $null
+        elapsed_ms = $null
+        error = $null
+    }
+}
+
+function Invoke-ApplicationApiConversationProbe {
+    param(
+        [string]$BaseUrl,
+        [string]$HostHeader,
+        [string]$ForwardedFor,
+        [int]$TimeoutSec
+    )
+
+    $conversationsUrl = if ([string]::IsNullOrWhiteSpace($BaseUrl)) { "" } else { Join-EndpointUrl $BaseUrl "/api/ai/conversations" }
+    $result = [PSCustomObject]@{
+        status = if ([string]::IsNullOrWhiteSpace($conversationsUrl)) { "not_configured" } else { "inconclusive" }
+        attempted = $false
+        conversations_url = Get-SanitizedUrl $conversationsUrl
+        expected_owner_key = $null
+        conversation_id = $null
+        same_owner_after_port_change = $null
+        create = New-ApplicationApiOperationResult -Url $conversationsUrl
+        send = New-ApplicationApiOperationResult -Url $conversationsUrl
+        list = New-ApplicationApiOperationResult -Url $conversationsUrl
+        detail = New-ApplicationApiOperationResult -Url $conversationsUrl
+        cleanup = New-ApplicationApiOperationResult -Url $conversationsUrl
+        error = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($conversationsUrl)) {
+        return $result
+    }
+
+    $ownerIp = Get-NormalizedIpAddress -Value $ForwardedFor
+    if ([string]::IsNullOrWhiteSpace($ownerIp)) {
+        $result.status = "inconclusive"
+        $result.error = "A valid application_api_forwarded_for_probe IP is required for the conversation owner probe."
+        return $result
+    }
+
+    $result.attempted = $true
+    $result.expected_owner_key = "ip:$ownerIp"
+    $conversationId = ""
+    $baseHeaders = @{ Accept = "application/json"; "Content-Type" = "application/json" }
+    if (-not [string]::IsNullOrWhiteSpace($HostHeader)) {
+        $baseHeaders["Host"] = $HostHeader
+    }
+
+    try {
+        $createHeaders = $baseHeaders.Clone()
+        $createHeaders["X-Forwarded-For"] = ("{0}:49101" -f $ownerIp)
+        $result.create.attempted = $true
+        $createResponse = Invoke-CurlJson -Url $conversationsUrl -Method "POST" `
+            -Body (@{ title = "AI owner probe" } | ConvertTo-Json -Compress) `
+            -Headers $createHeaders -TimeoutSec $TimeoutSec
+        $result.create.status_code = $createResponse.status_code
+        $result.create.elapsed_ms = $createResponse.elapsed_ms
+        if ($createResponse.status_code -ne 201) {
+            throw "Conversation creation returned HTTP $($createResponse.status_code)."
+        }
+        $created = ConvertTo-JsonObjectOrNull $createResponse.body
+        $conversationId = [string](Get-JsonPropertyValue $created "conversation_id")
+        if ([string]::IsNullOrWhiteSpace($conversationId)) {
+            throw "Conversation creation response omitted conversation_id."
+        }
+        $result.conversation_id = $conversationId
+        $result.create.status = "passed"
+
+        $messageUrl = Join-EndpointUrl $conversationsUrl ("/{0}/messages" -f $conversationId)
+        $result.send.url = Get-SanitizedUrl $messageUrl
+        $sendHeaders = $baseHeaders.Clone()
+        $sendHeaders["X-Forwarded-For"] = ("{0}:49102" -f $ownerIp)
+        $result.send.attempted = $true
+        $sendResponse = Invoke-CurlJson -Url $messageUrl -Method "POST" `
+            -Body (@{ content = "AI_OWNER_PROBE" } | ConvertTo-Json -Compress) `
+            -Headers $sendHeaders -TimeoutSec $TimeoutSec
+        $result.send.status_code = $sendResponse.status_code
+        $result.send.elapsed_ms = $sendResponse.elapsed_ms
+        if ($sendResponse.status_code -ne 200) {
+            throw "Conversation send returned HTTP $($sendResponse.status_code)."
+        }
+        $sent = ConvertTo-JsonObjectOrNull $sendResponse.body
+        $assistantMessage = Get-JsonPropertyValue $sent "assistant_message"
+        if ($null -eq $assistantMessage -or [string]::IsNullOrWhiteSpace([string](Get-JsonPropertyValue $assistantMessage "content"))) {
+            throw "Conversation send response omitted assistant_message.content."
+        }
+        $result.send.status = "passed"
+
+        $listHeaders = $baseHeaders.Clone()
+        $listHeaders["X-Forwarded-For"] = ("{0}:49103" -f $ownerIp)
+        $result.list.attempted = $true
+        $listResponse = Invoke-CurlJson -Url $conversationsUrl -Method "GET" -Headers $listHeaders -TimeoutSec $TimeoutSec
+        $result.list.status_code = $listResponse.status_code
+        $result.list.elapsed_ms = $listResponse.elapsed_ms
+        if ($listResponse.status_code -ne 200) {
+            throw "Conversation list returned HTTP $($listResponse.status_code)."
+        }
+        $listed = ConvertTo-JsonObjectOrNull $listResponse.body
+        $matchingConversation = @($listed | Where-Object { [string](Get-JsonPropertyValue $_ "conversation_id") -eq $conversationId })
+        if ($matchingConversation.Count -ne 1) {
+            throw "Conversation list did not include the conversation created with the same forwarded IP."
+        }
+        $result.list.status = "passed"
+
+        $detailUrl = Join-EndpointUrl $conversationsUrl ("/{0}" -f $conversationId)
+        $result.detail.url = Get-SanitizedUrl $detailUrl
+        $detailHeaders = $baseHeaders.Clone()
+        $detailHeaders["X-Forwarded-For"] = ("{0}:49104" -f $ownerIp)
+        $result.detail.attempted = $true
+        $detailResponse = Invoke-CurlJson -Url $detailUrl -Method "GET" -Headers $detailHeaders -TimeoutSec $TimeoutSec
+        $result.detail.status_code = $detailResponse.status_code
+        $result.detail.elapsed_ms = $detailResponse.elapsed_ms
+        if ($detailResponse.status_code -ne 200) {
+            throw "Conversation detail returned HTTP $($detailResponse.status_code)."
+        }
+        $detail = ConvertTo-JsonObjectOrNull $detailResponse.body
+        if ([string](Get-JsonPropertyValue $detail "conversation_id") -ne $conversationId) {
+            throw "Conversation detail response did not match the created conversation."
+        }
+        $result.detail.status = "passed"
+        $result.same_owner_after_port_change = $true
+        $result.status = "passed"
+    } catch {
+        $result.status = "failed"
+        $result.error = $_.Exception.Message
+    } finally {
+        if (-not [string]::IsNullOrWhiteSpace($conversationId)) {
+            $cleanupUrl = Join-EndpointUrl $conversationsUrl ("/{0}" -f $conversationId)
+            $result.cleanup.url = Get-SanitizedUrl $cleanupUrl
+            $cleanupHeaders = $baseHeaders.Clone()
+            $cleanupHeaders["X-Forwarded-For"] = ("{0}:49101" -f $ownerIp)
+            $result.cleanup.attempted = $true
+            try {
+                $cleanupResponse = Invoke-CurlJson -Url $cleanupUrl -Method "DELETE" -Headers $cleanupHeaders -TimeoutSec $TimeoutSec
+                $result.cleanup.status_code = $cleanupResponse.status_code
+                $result.cleanup.elapsed_ms = $cleanupResponse.elapsed_ms
+                if ($cleanupResponse.status_code -eq 200) {
+                    $result.cleanup.status = "passed"
+                } else {
+                    $result.cleanup.status = "failed"
+                    $result.cleanup.error = "HTTP $($cleanupResponse.status_code)"
+                    if ($result.status -eq "passed") {
+                        $result.status = "failed"
+                        $result.error = "Conversation owner probe cleanup failed."
+                    }
+                }
+            } catch {
+                $result.cleanup.status = "failed"
+                $result.cleanup.error = $_.Exception.Message
+                if ($result.status -eq "passed") {
+                    $result.status = "failed"
+                    $result.error = "Conversation owner probe cleanup failed."
+                }
+            }
+        }
     }
     return $result
 }
@@ -574,6 +784,8 @@ function Invoke-ApplicationApiProxyProbe {
     $notConfigured = [string]::IsNullOrWhiteSpace($stateUrl)
     $direct = New-ApplicationApiStateRequestResult -Url $stateUrl
     $forwarded = New-ApplicationApiStateRequestResult -Url $stateUrl
+    $conversation = Invoke-ApplicationApiConversationProbe -BaseUrl $BaseUrl `
+        -HostHeader $HostHeader -ForwardedFor $ForwardedFor -TimeoutSec $TimeoutSec
     $result = [PSCustomObject]@{
         status = if ($notConfigured) { "not_configured" } else { "inconclusive" }
         configured = -not $notConfigured
@@ -582,6 +794,7 @@ function Invoke-ApplicationApiProxyProbe {
         forwarded_for_probe = $ForwardedFor
         direct = $direct
         forwarded = $forwarded
+        conversation = $conversation
         forwarded_owner_effective = $null
         profile_matches_selected = $null
         sensitive_response_fields = @()
@@ -598,11 +811,17 @@ function Invoke-ApplicationApiProxyProbe {
     $result.direct = Invoke-ApplicationApiStateRequest -Url $stateUrl -TimeoutSec $TimeoutSec -Headers $headers
 
     if (-not [string]::IsNullOrWhiteSpace($ForwardedFor)) {
-        $forwardedHeaders = $headers.Clone()
-        $forwardedHeaders["X-Forwarded-For"] = $ForwardedFor
-        $result.forwarded = Invoke-ApplicationApiStateRequest -Url $stateUrl -TimeoutSec $TimeoutSec -Headers $forwardedHeaders
-        if ($result.forwarded.status -eq "passed") {
-            $result.forwarded_owner_effective = $result.forwarded.owner_key -eq ("ip:" + $ForwardedFor)
+        $forwardedOwnerIp = Get-NormalizedIpAddress -Value $ForwardedFor
+        if ([string]::IsNullOrWhiteSpace($forwardedOwnerIp)) {
+            $result.forwarded.status = "inconclusive"
+            $result.forwarded.error = "application_api_forwarded_for_probe must be a valid IPv4 or IPv6 address."
+        } else {
+            $forwardedHeaders = $headers.Clone()
+            $forwardedHeaders["X-Forwarded-For"] = ("{0}:49100" -f $forwardedOwnerIp)
+            $result.forwarded = Invoke-ApplicationApiStateRequest -Url $stateUrl -TimeoutSec $TimeoutSec -Headers $forwardedHeaders
+            if ($result.forwarded.status -eq "passed") {
+                $result.forwarded_owner_effective = $result.forwarded.owner_key -eq ("ip:" + $forwardedOwnerIp)
+            }
         }
     } else {
         $result.forwarded.status = "skipped"
@@ -627,6 +846,9 @@ function Invoke-ApplicationApiProxyProbe {
     } elseif ($result.forwarded_owner_effective -ne $true) {
         $result.status = "inconclusive"
         $result.error = "X-Forwarded-For did not produce the expected owner_key; inspect IIS/ARR and Uvicorn proxy-header configuration."
+    } elseif ($result.conversation.status -ne "passed") {
+        $result.status = $result.conversation.status
+        $result.error = "Application AI conversation owner probe did not pass: $($result.conversation.error)"
     } else {
         $result.status = "passed"
     }
@@ -1242,7 +1464,7 @@ function Invoke-McpStreamableHttpProbe {
             params = [ordered]@{
                 protocolVersion = "2025-06-18"
                 capabilities = [ordered]@{}
-                clientInfo = [ordered]@{ name = "fanban-ai-connectivity"; version = "0.4" }
+                clientInfo = [ordered]@{ name = "fanban-ai-connectivity"; version = "0.6" }
             }
         } | ConvertTo-Json -Depth 12 -Compress
         $initializeResponse = Invoke-CurlJson -Url $Url -Method "POST" -Headers $headers -Body $initializePayload -TimeoutSec $TimeoutSec
@@ -1968,21 +2190,264 @@ $mcpStdioResult = [PSCustomObject]@{
     error = if ([string]::IsNullOrWhiteSpace($mcpCommand)) { $null } elseif (-not (Test-Path -LiteralPath $mcpCommand -PathType Leaf)) { "Configured MCP stdio command was not found." } else { "MCP stdio command exists; use the packaged MCP SDK runtime to complete a duplex protocol probe." }
 }
 
+function ConvertTo-NativeProcessArgument {
+    param([string]$Value)
+
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Invoke-LocalJsonProcess {
+    param(
+        [string]$FileName,
+        [string[]]$Arguments,
+        [int]$TimeoutSec = 180
+    )
+
+    $result = [PSCustomObject]@{
+        attempted = $false
+        exit_code = $null
+        elapsed_ms = $null
+        json = $null
+        output = ""
+        error = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($FileName) -or -not (Test-Path -LiteralPath $FileName -PathType Leaf)) {
+        $result.error = "Executable was not found: $FileName"
+        return $result
+    }
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FileName
+    $startInfo.Arguments = (@($Arguments) | ForEach-Object { ConvertTo-NativeProcessArgument ([string]$_) }) -join " "
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.EnvironmentVariables["PYTHONUTF8"] = "1"
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $result.attempted = $true
+        if (-not $process.Start()) {
+            throw "Local diagnostic process could not be started."
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit([Math]::Max(1, $TimeoutSec) * 1000)) {
+            $process.Kill()
+            throw "Local diagnostic process timed out after $TimeoutSec seconds."
+        }
+        [System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask))
+        $result.exit_code = $process.ExitCode
+        $result.output = [string]$stdoutTask.Result
+        $stderrText = [string]$stderrTask.Result
+        $result.json = ConvertTo-JsonObjectOrNull $result.output.Trim()
+        if ($process.ExitCode -ne 0) {
+            $result.error = if ([string]::IsNullOrWhiteSpace($stderrText)) {
+                "Local diagnostic process exited with code $($process.ExitCode)."
+            } else {
+                $stderrText.Trim()
+            }
+        } elseif ($null -eq $result.json) {
+            $result.error = "Local diagnostic process did not return valid JSON."
+        }
+    } catch {
+        $result.error = $_.Exception.Message
+    } finally {
+        $stopwatch.Stop()
+        $result.elapsed_ms = [long]$stopwatch.ElapsedMilliseconds
+        $process.Dispose()
+    }
+    return $result
+}
+
+function Get-AnsysMapdlSkillProbe {
+    param(
+        [string]$Root,
+        [string]$PythonPath
+    )
+
+    $configuredRoot = [Environment]::GetEnvironmentVariable("FANBAN_ANSYS_MAPDL_SKILL_ROOT")
+    $rootSource = "package_default"
+    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
+        $configuredRoot = Join-Path $Root "storage\ai\skills\ansys-mapdl-18-2"
+    } else {
+        $rootSource = "environment"
+    }
+    $skillRoot = Resolve-FullPathOrRaw $configuredRoot
+    $requiredRelativePaths = @(
+        "SKILL.md",
+        "scripts\mapdl_query.py",
+        "scripts\validate_mapdl_skill.py",
+        "assets\data\mapdl_help.sqlite",
+        "assets\data\mapdl_commands.jsonl",
+        "assets\data\manifest.json",
+        "references\validation-cases.json"
+    )
+    $files = @(
+        foreach ($relativePath in $requiredRelativePaths) {
+            $path = Join-Path $skillRoot $relativePath
+            $exists = Test-Path -LiteralPath $path -PathType Leaf
+            [PSCustomObject]@{
+                relative_path = $relativePath.Replace("\", "/")
+                exists = $exists
+                bytes = if ($exists) { (Get-Item -LiteralPath $path).Length } else { $null }
+                sha256 = if ($exists -and $relativePath -in @("SKILL.md", "assets\data\manifest.json")) { Get-FileSha256 $path } else { $null }
+            }
+        }
+    )
+    $missingFiles = @($files | Where-Object { -not $_.exists } | ForEach-Object { $_.relative_path })
+    $result = [PSCustomObject]@{
+        skill_id = "ansys_mapdl_18_2"
+        release = "18.2"
+        status = "not_installed"
+        local_status = "not_installed"
+        root = $skillRoot
+        root_source = $rootSource
+        environment_override_configured = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("FANBAN_ANSYS_MAPDL_SKILL_ROOT"))
+        python = $PythonPath
+        required_files = $files
+        missing_files = $missingFiles
+        validation = [PSCustomObject]@{
+            attempted = $false
+            status = "not_attempted"
+            exit_code = $null
+            elapsed_ms = $null
+            passed = $null
+            integrity = $null
+            regression = $null
+            error = $null
+        }
+        query = [PSCustomObject]@{
+            attempted = $false
+            status = "not_attempted"
+            operation = "command"
+            input = "ANTYPE"
+            result_count = 0
+            first_canonical = $null
+            elapsed_ms = $null
+            error = $null
+        }
+        application_registration = [PSCustomObject]@{
+            status = "not_checked"
+            registered = $null
+            enabled = $null
+            auto_trigger = $null
+            available = $null
+            error = $null
+        }
+        error = $null
+    }
+
+    if ($missingFiles.Count -gt 0) {
+        $result.error = "ANSYS MAPDL Skill payload is incomplete."
+        return $result
+    }
+    if ([string]::IsNullOrWhiteSpace($PythonPath)) {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "No Python runtime was available for the ANSYS MAPDL Skill probe."
+        return $result
+    }
+
+    $validationProcess = Invoke-LocalJsonProcess -FileName $PythonPath `
+        -Arguments @((Join-Path $skillRoot "scripts\validate_mapdl_skill.py")) -TimeoutSec 300
+    $validationJson = $validationProcess.json
+    $result.validation.attempted = $validationProcess.attempted
+    $result.validation.exit_code = $validationProcess.exit_code
+    $result.validation.elapsed_ms = $validationProcess.elapsed_ms
+    $result.validation.passed = if ($null -ne $validationJson) { Get-JsonPropertyValue $validationJson "passed" } else { $null }
+    $result.validation.integrity = if ($null -ne $validationJson) { Get-JsonPropertyValue $validationJson "integrity" } else { $null }
+    $result.validation.regression = if ($null -ne $validationJson) { Get-JsonPropertyValue $validationJson "regression" } else { $null }
+    $result.validation.error = $validationProcess.error
+    $result.validation.status = if ($validationProcess.exit_code -eq 0 -and $result.validation.passed -eq $true) { "passed" } else { "failed" }
+
+    $queryProcess = Invoke-LocalJsonProcess -FileName $PythonPath `
+        -Arguments @((Join-Path $skillRoot "scripts\mapdl_query.py"), "command", "ANTYPE") -TimeoutSec 60
+    $queryJson = $queryProcess.json
+    [object[]]$queryResults = if ($null -ne $queryJson) { @(Get-JsonPropertyValue $queryJson "results") } else { @() }
+    $result.query.attempted = $queryProcess.attempted
+    $result.query.elapsed_ms = $queryProcess.elapsed_ms
+    $result.query.result_count = $queryResults.Count
+    if ($queryResults.Count -gt 0) {
+        $result.query.first_canonical = [string](Get-JsonPropertyValue $queryResults[0] "canonical")
+    }
+    $result.query.error = $queryProcess.error
+    $result.query.status = if ($queryProcess.exit_code -eq 0 -and $result.query.first_canonical -eq "ANTYPE") { "passed" } else { "failed" }
+
+    if ($result.validation.status -eq "passed" -and $result.query.status -eq "passed") {
+        $result.status = "passed"
+        $result.local_status = "passed"
+    } else {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "ANSYS MAPDL Skill validation or sample query failed."
+    }
+    return $result
+}
+
+function Set-AnsysMapdlApplicationRegistration {
+    param(
+        [object]$SkillProbe,
+        [object]$ApplicationApiProbe
+    )
+
+    if (-not $ApplicationApiProbe.configured) {
+        $SkillProbe.application_registration.status = "not_configured"
+        return
+    }
+    if ($ApplicationApiProbe.direct.status -ne "passed") {
+        $SkillProbe.application_registration.status = "inconclusive"
+        $SkillProbe.application_registration.error = "Application API state probe did not pass."
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "inconclusive" }
+        return
+    }
+
+    $registration = @($ApplicationApiProbe.direct.skills | Where-Object { $_.skill_id -eq "ansys_mapdl_18_2" }) | Select-Object -First 1
+    if ($null -eq $registration) {
+        $SkillProbe.application_registration.status = "not_registered"
+        $SkillProbe.application_registration.registered = $false
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "failed" }
+        return
+    }
+
+    $SkillProbe.application_registration.registered = $true
+    $SkillProbe.application_registration.enabled = $registration.enabled
+    $SkillProbe.application_registration.auto_trigger = $registration.auto_trigger
+    $SkillProbe.application_registration.available = $registration.available
+    if ($registration.enabled -eq $true -and $registration.auto_trigger -eq $true -and $registration.available -eq $true) {
+        $SkillProbe.application_registration.status = "passed"
+    } else {
+        $SkillProbe.application_registration.status = "failed"
+        $SkillProbe.application_registration.error = "Skill is registered but is not enabled, auto-triggered, and available."
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "failed" }
+    }
+}
+
+$ansysMapdlSkillResult = Get-AnsysMapdlSkillProbe -Root $root -PythonPath $runtimeResult.selected_python
 $applicationApiResult = Invoke-ApplicationApiProxyProbe `
     -BaseUrl $applicationApiBaseUrl -StatePath $applicationApiStatePath `
     -HostHeader $applicationApiHostHeader -ForwardedFor $applicationApiForwardedFor `
     -ExpectedProfile $selectedProfile -TimeoutSec $timeoutSec
+Set-AnsysMapdlApplicationRegistration -SkillProbe $ansysMapdlSkillResult -ApplicationApiProbe $applicationApiResult
+if ($applicationApiResult.configured -and $applicationApiResult.status -eq "failed") {
+    [void]$errors.Add("Application AI API probe failed: $($applicationApiResult.error)")
+}
 
 $finishedAt = Get-UtcIsoTimestamp
 $summaryOk = ($errors.Count -eq 0)
 $result = [PSCustomObject]@{
-    schema_version = "0.4"
+    schema_version = "0.6"
     status = if ($summaryOk) { "passed" } else { "failed" }
     started_at_utc = $startedAt
     finished_at_utc = $finishedAt
     script = [PSCustomObject]@{
         path = $PSCommandPath
-        version = "fanban-ai-connectivity@0.4"
+        version = "fanban-ai-connectivity@0.6"
         sha256 = Get-FileSha256 $PSCommandPath
         powershell = $PSVersionTable.PSVersion.ToString()
     }
@@ -2061,6 +2526,7 @@ $result = [PSCustomObject]@{
         }
         concurrency = $concurrencyResult
         runtime = $runtimeResult
+        ansys_mapdl_skill = $ansysMapdlSkillResult
         application_api = $applicationApiResult
         mcp = [PSCustomObject]@{
             streamable_http = $mcpStreamableResult
@@ -2085,6 +2551,10 @@ $result = [PSCustomObject]@{
             -Status $(if ($runtimeResult.packages.agents.installed) { "passed" } else { "not_installed" }) `
             -Summary $(if ($runtimeResult.packages.agents.installed) { "The OpenAI Agents SDK is installed in the selected Python runtime." } else { "The selected Python runtime does not contain the OpenAI Agents SDK." }) `
             -Checks @("python", "openai", "agents", "mcp")
+        ansys_mapdl_skill = New-ReadinessResult `
+            -Status $ansysMapdlSkillResult.status `
+            -Summary "ANSYS MAPDL Skill readiness covers packaged files, full corpus validation, an ANTYPE retrieval query, and application auto-trigger registration when the application API is configured." `
+            -Checks @("required_files", "integrity", "regression", "query", "application_registration")
         mcp = New-ReadinessResult `
             -Status $(
                 if ($mcpStreamableResult.status -eq "passed") { "passed" }
@@ -2096,8 +2566,8 @@ $result = [PSCustomObject]@{
             -Checks @("streamable_http", "sse", "stdio")
         application_api_proxy = New-ReadinessResult `
             -Status $applicationApiResult.status `
-            -Summary "Application API probe reads only /api/ai/state and verifies proxy owner-key behavior without creating a conversation." `
-            -Checks @("direct_state", "forwarded_state", "owner_key", "profile", "response_redaction")
+            -Summary "Application API probe verifies state, forwarded owner-key normalization, and a cleaned-up conversation create/send/list/detail round trip." `
+            -Checks @("direct_state", "forwarded_state", "owner_key", "conversation_create", "conversation_send", "conversation_list", "conversation_detail", "conversation_cleanup", "profile", "response_redaction")
     }
     recommendations = @(
         "Use the capability readiness sections, not core connectivity alone, when selecting the Agent architecture."
