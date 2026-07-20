@@ -252,6 +252,36 @@ def test_font_preflight_service_stages_unicode_filename_into_safe_workspace(tmp_
     assert all(ord(ch) < 128 for ch in staged.name)
 
 
+def test_font_preflight_service_uses_managed_ascii_workspace_when_workspace_dir_is_omitted(
+    tmp_path: Path,
+) -> None:
+    bridge = _FakeBridge()
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([])),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.storage_dir = tmp_path / "managed-storage"
+    source_dir = tmp_path / "张文泽反馈"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    source = source_dir / "1818TL电缆沟-结构图.dwg"
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+    )
+
+    staged = Path(bridge.calls[0]["source_dwg"]).resolve()
+    workspace = Path(bridge.calls[0]["workspace_dir"]).resolve()
+    managed_root = (tmp_path / "managed-storage").resolve()
+    assert staged.resolve() != source.resolve()
+    assert workspace.is_relative_to(managed_root)
+    assert staged.is_relative_to(managed_root)
+    assert all(ord(ch) < 128 for ch in staged.relative_to(managed_root).as_posix())
+    assert all(ord(ch) < 128 for ch in workspace.relative_to(managed_root).as_posix())
+
+
 def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path: Path) -> None:
     bridge = _FakeBridge()
     bridge.touch_source_on_replace = True

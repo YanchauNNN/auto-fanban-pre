@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime
@@ -195,6 +196,14 @@ def _coerce_bool(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y"}
     return False
+
+
+def _is_call_rejected_error(exc: Exception) -> bool:
+    with contextlib.suppress(Exception):
+        if getattr(exc, "hresult", None) == -2147418111:
+            return True
+    message = str(exc)
+    return "被呼叫方拒绝接收呼叫" in message or "call was rejected by callee" in message.lower()
 
 
 def _find_font_file(font_name: str, search_roots: list[str]) -> Path | None:
@@ -468,7 +477,7 @@ class FontSyncService:
             replacement_fonts=None,
         )
         environment = self.autocad_adapter.read_local_settings()
-        styles = self.autocad_adapter.inspect_dwg_styles(source_dwg)
+        styles = self._inspect_dwg_styles_with_retry(source_dwg=source_dwg)
         dependencies = self._collect_font_dependencies(
             styles=styles,
             environment=environment,
@@ -482,6 +491,18 @@ class FontSyncService:
             "styles": styles,
             "font_dependencies": dependencies,
         }
+
+    def _inspect_dwg_styles_with_retry(self, *, source_dwg: Path) -> list[dict[str, object]]:
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                return self.autocad_adapter.inspect_dwg_styles(source_dwg)
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if not _is_call_rejected_error(exc) or attempt == 2:
+                    raise
+                time.sleep(0.8)
+        raise RuntimeError(f"failed to inspect DWG styles: {source_dwg}") from last_exc
 
     def export_bundle(self, *, source_dwg: Path) -> dict[str, object]:
         scan_result = self.scan_source_dwg(source_dwg=source_dwg)

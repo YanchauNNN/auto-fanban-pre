@@ -147,7 +147,10 @@ class FontPreflightService:
             ),
         )
 
-        workspace_root = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
+        workspace_root = self._resolve_workspace_root(
+            source_dwg=source_dwg,
+            workspace_dir=workspace_dir,
+        )
         workspace = (workspace_root / _safe_bridge_token(source_dwg.stem)).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
         staged_source = workspace / _safe_bridge_filename(source_dwg)
@@ -250,6 +253,19 @@ class FontPreflightService:
                 if isinstance(flags, list) and "FONT_REPLACEMENT_INCOMPLETE" not in flags:
                     flags.append("FONT_REPLACEMENT_INCOMPLETE")
         return normalized_result
+
+    def _resolve_workspace_root(
+        self,
+        *,
+        source_dwg: Path,
+        workspace_dir: Path | None,
+    ) -> Path:
+        if workspace_dir is not None:
+            return workspace_dir.resolve()
+        self.config.ensure_dirs()
+        preflight_root = (self.config.storage_dir / "preflight").resolve()
+        preflight_root.mkdir(parents=True, exist_ok=True)
+        return (preflight_root / f"font-preflight-{uuid4().hex[:8]}").resolve()
 
     @staticmethod
     def _normalize_result(

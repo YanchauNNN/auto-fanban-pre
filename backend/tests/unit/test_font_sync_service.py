@@ -192,6 +192,43 @@ def test_source_scan_resolves_font_dependencies_and_is_guaranteed(tmp_path: Path
     assert result["environment"]["active_profile"] == "CADUserProfile"
 
 
+def test_source_scan_retries_transient_call_rejected_when_reading_styles(tmp_path: Path) -> None:
+    from src.cad.font_sync_service import FontSyncService
+
+    class _BusyCallRejectedError(Exception):
+        def __init__(self) -> None:
+            super().__init__("被呼叫方拒绝接收呼叫。")
+            self.hresult = -2147418111
+
+    class _FlakyAutoCADAdapter(_FakeAutoCADAdapter):
+        def __init__(self, *, snapshot: dict[str, object], styles: list[dict[str, object]]) -> None:
+            super().__init__(snapshot=snapshot, styles=styles)
+            self.inspect_attempts = 0
+
+        def inspect_dwg_styles(self, source_dwg: Path) -> list[dict[str, object]]:
+            self.inspect_attempts += 1
+            if self.inspect_attempts == 1:
+                raise _BusyCallRejectedError()
+            return super().inspect_dwg_styles(source_dwg)
+
+    snapshot = _build_snapshot(tmp_path=tmp_path)
+    adapter = _FlakyAutoCADAdapter(snapshot=snapshot, styles=_build_styles(tmp_path=tmp_path))
+    service = FontSyncService(
+        font_preflight_service=_FakeFontPreflightService(),
+        autocad_adapter=adapter,
+        storage_root=tmp_path / "storage",
+        managed_root=tmp_path / "managed",
+    )
+    source_dwg = tmp_path / "source.dwg"
+    source_dwg.write_bytes(b"dwg")
+
+    result = service.scan_source_dwg(source_dwg=source_dwg)
+
+    assert result["bundle_mode"] == "guaranteed"
+    assert adapter.inspect_attempts == 2
+    assert len(result["styles"]) == 3
+
+
 def test_export_bundle_writes_manifest_fonts_and_profile_backup(tmp_path: Path) -> None:
     service, adapter = _build_service(tmp_path)
     source_dwg = tmp_path / "source.dwg"
