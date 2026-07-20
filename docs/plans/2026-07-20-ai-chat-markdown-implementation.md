@@ -22,7 +22,7 @@ Run:
 
 ```powershell
 cd frontend
-npm install react-markdown@10.1.0 remark-gfm@4.0.1 remark-breaks@4.0.0 rehype-sanitize@6.0.2
+npm install react-markdown@10.1.0 remark-gfm@4.0.1 remark-breaks@4.0.0 rehype-sanitize@6.0.0
 ```
 
 Expected: dependencies and lockfile are updated without CDN references.
