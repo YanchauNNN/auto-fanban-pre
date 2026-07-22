@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from src.ai.chat_client import (
     ChatClientConfig,
@@ -154,7 +155,8 @@ async def upload_attachment(
             detail={"code": "attachment_too_large", "message": "attachment is too large"},
         )
     try:
-        attachment = service.upload_attachment(
+        attachment = await run_in_threadpool(
+            service.upload_attachment,
             owner_key=_owner_key(request),
             conversation_id=conversation_id,
             original_name=file.filename or "attachment",

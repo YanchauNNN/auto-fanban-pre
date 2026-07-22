@@ -557,6 +557,83 @@ def test_chat_service_sends_parsed_document_as_untrusted_evidence(tmp_path: Path
     assert follow_up.memory["used_history_messages"] == 2
 
 
+def test_chat_service_keeps_attachment_retriable_after_gateway_failure(
+    tmp_path: Path,
+) -> None:
+    from src.ai.attachment_store import AiAttachmentStore
+    from src.ai.chat_client import ChatGatewayError, ChatCompletionResult
+    from src.ai.chat_service import AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+
+    class FailingClient:
+        def complete(self, messages, *, tools=None):
+            raise ChatGatewayError("temporary gateway failure", status_code=502)
+
+    class SuccessfulClient:
+        def complete(self, messages, *, tools=None):
+            return ChatCompletionResult(content="retry succeeded")
+
+    chat_store = AiChatStore(tmp_path / "chat.sqlite3")
+    chat_store.initialize()
+    attachment_store = AiAttachmentStore(chat_store)
+    service = AiChatService(
+        store=chat_store,
+        attachment_store=attachment_store,
+        client=FailingClient(),
+        runtime=AiChatRuntimeConfig(
+            attachments={"allowed_extensions": [".txt"]},
+        ),
+    )
+    owner_key = "ip:10.0.0.8"
+    conversation = service.create_conversation(owner_key, title="retry")
+    attachment = service.upload_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        original_name="retry.txt",
+        media_type="text/plain",
+        content=b"RETRY-EVIDENCE-0711",
+    )
+
+    with pytest.raises(ChatGatewayError):
+        service.send_message(
+            owner_key=owner_key,
+            conversation_id=conversation.conversation_id,
+            content="read this",
+            attachment_ids=[attachment.attachment_id],
+            agent_id=None,
+            skill_ids=[],
+            mcp_server_ids=[],
+            account_id=None,
+        )
+
+    after_failure = attachment_store.get_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        attachment_id=attachment.attachment_id,
+    )
+    assert after_failure is not None
+    assert after_failure.message_id is None
+
+    service.client = SuccessfulClient()
+    exchange = service.send_message(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        content="retry",
+        attachment_ids=[attachment.attachment_id],
+        agent_id=None,
+        skill_ids=[],
+        mcp_server_ids=[],
+        account_id=None,
+    )
+    after_success = attachment_store.get_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        attachment_id=attachment.attachment_id,
+    )
+    assert after_success is not None
+    assert after_success.message_id == exchange.user_message.message_id
+
+
 def test_chat_service_rejects_cross_owner_and_failed_attachments(tmp_path: Path) -> None:
     import pytest
 

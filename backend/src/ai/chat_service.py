@@ -414,24 +414,6 @@ class AiChatService:
                 model_profile=self.runtime.model_profile,
                 metadata=user_metadata,
             )
-            for attachment in attachments:
-                bound = self.attachment_store.bind_to_message(
-                    owner_key=owner_key,
-                    conversation_id=conversation_id,
-                    attachment_id=attachment.attachment_id,
-                    message_id=user_message.message_id,
-                )
-                if bound is None:
-                    failed_metadata = {
-                        **user_metadata,
-                        "status": "failed",
-                        "error_code": "attachment_binding_failed",
-                    }
-                    self.store.update_message_metadata(
-                        user_message.message_id,
-                        failed_metadata,
-                    )
-                    raise AiChatValidationError("attachment binding failed")
             model_messages = self._build_model_messages(
                 history,
                 normalized_content,
@@ -478,6 +460,15 @@ class AiChatService:
                     "duration_ms": duration_ms,
                 },
             )
+            for attachment in attachments:
+                bound = self.attachment_store.bind_to_message(
+                    owner_key=owner_key,
+                    conversation_id=conversation_id,
+                    attachment_id=attachment.attachment_id,
+                    message_id=user_message.message_id,
+                )
+                if bound is None:
+                    raise AiChatValidationError("attachment binding failed")
             used_history = [message for message in history if _is_usable_history_message(message)]
             return AiChatExchange(
                 conversation_id=conversation.conversation_id,
