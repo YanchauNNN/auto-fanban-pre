@@ -15,6 +15,7 @@ from src.ai.chat_client import (
 )
 from src.ai.chat_service import (
     AiAgentConfig,
+    AiAttachmentRuntimeConfig,
     AiChatBusy,
     AiChatDisabled,
     AiChatRuntimeConfig,
@@ -38,7 +39,7 @@ from src.ai.building_standards_skill import (
     BuildingStandardsSkillConfig,
 )
 from src.ai.context_skills import ContextSkill
-from src.ai.owner_identity import normalize_ip_host
+from src.ai.owner_identity import resolve_client_ip
 from src.ai.read_only_tools import ReadOnlyHostTools
 from src.config import get_config, load_ai_spec
 from src.config.ai.ai_spec import AiSpec
@@ -269,6 +270,9 @@ def build_runtime(
             if chat.response_format.enabled
             else ""
         ),
+        attachments=AiAttachmentRuntimeConfig.model_validate(
+            chat.attachments.model_dump()
+        ),
         agents=[
             AiAgentConfig(
                 agent_id=agent.agent_id,
@@ -404,7 +408,8 @@ def _service(request: Request) -> AiChatService:
 
 def _owner_key(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
-    return f"ip:{normalize_ip_host(host)}"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    return f"ip:{resolve_client_ip(host, forwarded_for)}"
 
 
 def _account_id(request: Request, authorization: str | None) -> str | None:
@@ -422,6 +427,16 @@ def _state_payload(state) -> dict[str, Any]:
         "model": state.model,
         "owner_key": state.owner_key,
         "default_agent": state.default_agent,
+        "attachments": {
+            "enabled": state.attachments.enabled,
+            "allowed_extensions": state.attachments.allowed_extensions,
+            "max_files_per_message": state.attachments.max_files_per_message,
+            "max_image_size_mb": state.attachments.max_image_size_mb,
+            "max_file_size_mb": state.attachments.max_file_size_mb,
+            "max_total_size_mb_per_message": (
+                state.attachments.max_total_size_mb_per_message
+            ),
+        },
         "agents": [
             {
                 "agent_id": agent.agent_id,

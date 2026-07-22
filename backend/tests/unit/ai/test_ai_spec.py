@@ -70,6 +70,29 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
     assert "GitHub Flavored Markdown" in chat.response_format.system_prompt_suffix
     assert "```apdl" in chat.response_format.system_prompt_suffix
 
+    attachments = chat.attachments
+    assert attachments.enabled is True
+    assert attachments.allowed_extensions == [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".pdf",
+        ".txt",
+        ".md",
+        ".docx",
+        ".xlsx",
+        ".dwg",
+        ".dxf",
+    ]
+    assert attachments.max_files_per_message == 5
+    assert attachments.max_image_size_mb == 10
+    assert attachments.max_file_size_mb == 50
+    assert attachments.max_total_size_mb_per_message == 100
+    assert attachments.max_extracted_chars_per_file == 20_000
+    assert attachments.max_context_chars_per_message == 60_000
+    assert attachments.retention_days == 30
+
     access = chat.read_only_host_access
     assert access.enabled is True
     assert access.allowed_roots == [

@@ -264,6 +264,32 @@ class AiChatResponseFormatConfig(BaseModel):
     system_prompt_suffix: str = DEFAULT_AI_CHAT_RESPONSE_FORMAT_PROMPT
 
 
+class AiChatAttachmentsConfig(BaseModel):
+    enabled: bool = True
+    allowed_extensions: list[str] = Field(
+        default_factory=lambda: [
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".pdf",
+            ".txt",
+            ".md",
+            ".docx",
+            ".xlsx",
+            ".dwg",
+            ".dxf",
+        ]
+    )
+    max_files_per_message: int = Field(default=5, ge=1)
+    max_image_size_mb: int = Field(default=10, ge=1)
+    max_file_size_mb: int = Field(default=50, ge=1)
+    max_total_size_mb_per_message: int = Field(default=100, ge=1)
+    max_extracted_chars_per_file: int = Field(default=20_000, ge=1)
+    max_context_chars_per_message: int = Field(default=60_000, ge=1)
+    retention_days: int = Field(default=30, ge=1)
+
+
 class AiChatConfig(BaseModel):
     enabled: bool = True
     default_agent: str = "general_assistant"
@@ -273,6 +299,9 @@ class AiChatConfig(BaseModel):
     retention_days: int = 30
     response_format: AiChatResponseFormatConfig = Field(
         default_factory=AiChatResponseFormatConfig
+    )
+    attachments: AiChatAttachmentsConfig = Field(
+        default_factory=AiChatAttachmentsConfig
     )
     concurrency: AiChatConcurrencyConfig = Field(default_factory=AiChatConcurrencyConfig)
     agents: list[AiChatAgentConfig] = Field(

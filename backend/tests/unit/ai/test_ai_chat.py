@@ -224,6 +224,39 @@ def test_owner_key_ignores_spoofed_forwarded_address_from_untrusted_peer() -> No
     assert _owner_key(request) == "ip:10.102.17.81"
 
 
+def test_owner_key_uses_forwarded_ipv4_address_from_loopback_proxy() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={"x-forwarded-for": "198.18.0.73:49100, 127.0.0.1"},
+    )
+
+    assert _owner_key(request) == "ip:198.18.0.73"
+
+
+def test_owner_key_uses_forwarded_ipv6_address_from_loopback_proxy() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="::1"),
+        headers={"x-forwarded-for": "[2001:db8:10::73]:49100"},
+    )
+
+    assert _owner_key(request) == "ip:2001:db8:10::73"
+
+
+def test_owner_key_ignores_invalid_forwarded_address_from_loopback_proxy() -> None:
+    from API.app.routers.ai import _owner_key
+
+    request = SimpleNamespace(
+        client=SimpleNamespace(host="127.0.0.1"),
+        headers={"x-forwarded-for": "not-an-ip, 198.18.0.73"},
+    )
+
+    assert _owner_key(request) == "ip:127.0.0.1"
+
+
 def test_chat_store_migrates_legacy_owner_keys_that_include_ports(tmp_path: Path) -> None:
     from src.ai.chat_store import AiChatStore
 
@@ -291,6 +324,55 @@ def test_chat_runtime_carries_yaml_response_format_prompt(tmp_path: Path) -> Non
     runtime = build_runtime(spec)
 
     assert runtime.response_format_prompt == "使用 GFM，并将 APDL 写入 ```apdl 围栏。"
+
+
+def test_chat_runtime_and_state_expose_attachment_capabilities(tmp_path: Path) -> None:
+    from API.app.routers.ai import _state_payload, build_runtime
+
+    from src.ai.chat_service import AiChatService
+    from src.ai.chat_store import AiChatStore
+    from src.config.ai.ai_spec import AiSpec
+
+    spec = AiSpec.model_validate(
+        {
+            "ai_layer": {
+                "chat": {
+                    "attachments": {
+                        "enabled": True,
+                        "allowed_extensions": [".png", ".pdf"],
+                        "max_files_per_message": 3,
+                        "max_image_size_mb": 7,
+                        "max_file_size_mb": 40,
+                        "max_total_size_mb_per_message": 60,
+                        "max_extracted_chars_per_file": 12_000,
+                        "max_context_chars_per_message": 24_000,
+                        "retention_days": 14,
+                    }
+                }
+            }
+        }
+    )
+    spec.source_path = tmp_path / "params.yaml"
+
+    runtime = build_runtime(spec)
+    store = AiChatStore(tmp_path / "chat.sqlite3")
+    store.initialize()
+    service = AiChatService(
+        store=store,
+        client=SimpleNamespace(),
+        runtime=runtime,
+    )
+    payload = _state_payload(service.state("ip:10.0.0.1"))
+
+    assert runtime.attachments.max_context_chars_per_message == 24_000
+    assert payload["attachments"] == {
+        "enabled": True,
+        "allowed_extensions": [".png", ".pdf"],
+        "max_files_per_message": 3,
+        "max_image_size_mb": 7,
+        "max_file_size_mb": 40,
+        "max_total_size_mb_per_message": 60,
+    }
 
 
 def test_chat_client_rejects_redirects_without_forwarding_authorization() -> None:

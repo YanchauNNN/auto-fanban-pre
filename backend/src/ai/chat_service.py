@@ -76,6 +76,18 @@ class AiMcpServerConfig(BaseModel):
     endpoint: str = ""
 
 
+class AiAttachmentRuntimeConfig(BaseModel):
+    enabled: bool = True
+    allowed_extensions: list[str] = Field(default_factory=list)
+    max_files_per_message: int = 5
+    max_image_size_mb: int = 10
+    max_file_size_mb: int = 50
+    max_total_size_mb_per_message: int = 100
+    max_extracted_chars_per_file: int = 20_000
+    max_context_chars_per_message: int = 60_000
+    retention_days: int = 30
+
+
 class AiChatRuntimeConfig(BaseModel):
     enabled: bool = True
     default_agent: str = "general_assistant"
@@ -87,6 +99,9 @@ class AiChatRuntimeConfig(BaseModel):
     max_per_owner_requests: int = 1
     max_tool_rounds: int = 3
     response_format_prompt: str = ""
+    attachments: AiAttachmentRuntimeConfig = Field(
+        default_factory=AiAttachmentRuntimeConfig
+    )
     agents: list[AiAgentConfig] = Field(default_factory=list)
     skills: list[AiSkillConfig] = Field(default_factory=list)
     mcp_servers: list[AiMcpServerConfig] = Field(default_factory=list)
@@ -109,6 +124,9 @@ class AiChatState:
     model: str
     owner_key: str
     default_agent: str
+    attachments: AiAttachmentRuntimeConfig = field(
+        default_factory=AiAttachmentRuntimeConfig
+    )
     agents: list[AiAgentConfig] = field(default_factory=list)
     skills: list[AiSkillConfig] = field(default_factory=list)
     mcp_servers: list[AiMcpServerConfig] = field(default_factory=list)
@@ -143,6 +161,7 @@ class AiChatService:
             model=self.runtime.model_name,
             owner_key=owner_key,
             default_agent=self.runtime.default_agent,
+            attachments=self.runtime.attachments,
             agents=self.runtime.agents,
             skills=self.runtime.skills,
             mcp_servers=self.runtime.mcp_servers,
