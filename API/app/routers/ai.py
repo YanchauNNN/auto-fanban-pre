@@ -4,7 +4,7 @@ import logging
 import threading
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from src.ai.chat_client import (
@@ -59,10 +59,11 @@ class UpdateConversationPayload(BaseModel):
 
 
 class SendMessagePayload(BaseModel):
-    content: str
+    content: str = ""
     agent_id: str | None = None
     skill_ids: list[str] = Field(default_factory=list)
     mcp_server_ids: list[str] = Field(default_factory=list)
+    attachment_ids: list[str] = Field(default_factory=list)
 
 
 @router.get("/state")
@@ -131,6 +132,90 @@ def update_conversation(
     return _conversation_payload(conversation)
 
 
+@router.post(
+    "/conversations/{conversation_id}/attachments",
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_attachment(
+    conversation_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    service = _service(request)
+    max_upload_bytes = max(
+        service.runtime.attachments.max_image_size_mb,
+        service.runtime.attachments.max_file_size_mb,
+    ) * 1024 * 1024
+    content = await file.read(max_upload_bytes + 1)
+    await file.close()
+    if len(content) > max_upload_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"code": "attachment_too_large", "message": "attachment is too large"},
+        )
+    try:
+        attachment = service.upload_attachment(
+            owner_key=_owner_key(request),
+            conversation_id=conversation_id,
+            original_name=file.filename or "attachment",
+            media_type=file.content_type or "application/octet-stream",
+            content=content,
+        )
+    except AiConversationNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except AiChatValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return _attachment_payload(attachment)
+
+
+@router.get("/conversations/{conversation_id}/attachments")
+def list_attachments(conversation_id: str, request: Request) -> list[dict[str, Any]]:
+    try:
+        attachments = _service(request).list_attachments(
+            _owner_key(request),
+            conversation_id,
+        )
+    except AiConversationNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return [_attachment_payload(attachment) for attachment in attachments]
+
+
+@router.delete(
+    "/conversations/{conversation_id}/attachments/{attachment_id}"
+)
+def delete_attachment(
+    conversation_id: str,
+    attachment_id: str,
+    request: Request,
+) -> dict[str, bool]:
+    try:
+        _service(request).delete_attachment(
+            _owner_key(request),
+            conversation_id,
+            attachment_id,
+        )
+    except AiConversationBusy as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    except AiConversationNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "message": str(exc)},
+        ) from exc
+    return {"ok": True}
+
+
 @router.post("/conversations/{conversation_id}/messages")
 def send_message(
     conversation_id: str,
@@ -147,6 +232,7 @@ def send_message(
             agent_id=payload.agent_id,
             skill_ids=payload.skill_ids,
             mcp_server_ids=payload.mcp_server_ids,
+            attachment_ids=payload.attachment_ids,
             account_id=_account_id(request, authorization),
         )
     except AiConversationBusy as exc:
@@ -489,4 +575,21 @@ def _message_payload(message: AiChatMessage) -> dict[str, Any]:
         "created_at": message.created_at,
         "model_profile": message.model_profile,
         "metadata": message.metadata or {},
+    }
+
+
+def _attachment_payload(attachment) -> dict[str, Any]:
+    return {
+        "attachment_id": attachment.attachment_id,
+        "conversation_id": attachment.conversation_id,
+        "message_id": attachment.message_id,
+        "original_name": attachment.original_name,
+        "media_type": attachment.media_type,
+        "kind": attachment.kind,
+        "size_bytes": attachment.size_bytes,
+        "sha256": attachment.sha256,
+        "status": attachment.status,
+        "metadata": attachment.metadata,
+        "error_code": attachment.error_code,
+        "created_at": attachment.created_at,
     }

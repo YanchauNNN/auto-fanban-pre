@@ -406,3 +406,278 @@ def test_attachment_parser_converts_dwg_then_uses_same_dxf_pipeline(
     assert result.metadata["source_format"] == "dwg"
     assert result.metadata["conversion_status"] == "converted"
     assert "AI-DWG-0711" in result.extracted_text
+
+
+def test_chat_service_sends_image_url_and_keeps_user_content_plain(tmp_path: Path) -> None:
+    from src.ai.attachment_store import AiAttachmentStore
+    from src.ai.chat_service import AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages = []
+
+        def complete(self, messages, *, tools=None):
+            self.messages = messages
+            return type(
+                "ChatResult",
+                (),
+                {"content": "看到了图片", "usage": {}, "tool_calls": ()},
+            )()
+
+    chat_store = AiChatStore(tmp_path / "chat.sqlite3")
+    chat_store.initialize()
+    attachment_store = AiAttachmentStore(chat_store)
+    client = FakeClient()
+    service = AiChatService(
+        store=chat_store,
+        attachment_store=attachment_store,
+        client=client,
+        runtime=AiChatRuntimeConfig(
+            attachments={"allowed_extensions": [".png"]},
+        ),
+    )
+    owner_key = "ip:10.0.0.8"
+    conversation = service.create_conversation(owner_key, title="图片")
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\x0dIHDR"
+        + struct.pack(">II", 1, 1)
+        + b"\x08\x06\x00\x00\x00"
+    )
+    attachment = service.upload_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        original_name="现场.png",
+        media_type="image/png",
+        content=png,
+    )
+
+    exchange = service.send_message(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        content="请识别图片",
+        attachment_ids=[attachment.attachment_id],
+        agent_id=None,
+        skill_ids=[],
+        mcp_server_ids=[],
+        account_id=None,
+    )
+
+    current_user_content = client.messages[-1]["content"]
+    assert isinstance(current_user_content, list)
+    assert current_user_content[0] == {"type": "text", "text": "请识别图片"}
+    assert current_user_content[1]["type"] == "image_url"
+    assert current_user_content[1]["image_url"]["url"].startswith(
+        "data:image/png;base64,"
+    )
+    assert exchange.user_message.content == "请识别图片"
+    assert exchange.user_message.metadata["attachments"][0]["original_name"] == "现场.png"
+    bound = attachment_store.get_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        attachment_id=attachment.attachment_id,
+    )
+    assert bound is not None
+    assert bound.message_id == exchange.user_message.message_id
+
+
+def test_chat_service_sends_parsed_document_as_untrusted_evidence(tmp_path: Path) -> None:
+    from src.ai.attachment_store import AiAttachmentStore
+    from src.ai.chat_service import AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages = []
+
+        def complete(self, messages, *, tools=None):
+            self.messages = messages
+            return type(
+                "ChatResult",
+                (),
+                {"content": "已读取", "usage": {}, "tool_calls": ()},
+            )()
+
+    chat_store = AiChatStore(tmp_path / "chat.sqlite3")
+    chat_store.initialize()
+    attachment_store = AiAttachmentStore(chat_store)
+    client = FakeClient()
+    service = AiChatService(
+        store=chat_store,
+        attachment_store=attachment_store,
+        client=client,
+        runtime=AiChatRuntimeConfig(
+            attachments={"allowed_extensions": [".txt"]},
+        ),
+    )
+    owner_key = "ip:10.0.0.8"
+    conversation = service.create_conversation(owner_key, title="文档")
+    attachment = service.upload_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        original_name="说明.txt",
+        media_type="text/plain",
+        content="AI-DOC-EVIDENCE-0711".encode(),
+    )
+
+    exchange = service.send_message(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        content="",
+        attachment_ids=[attachment.attachment_id],
+        agent_id=None,
+        skill_ids=[],
+        mcp_server_ids=[],
+        account_id=None,
+    )
+
+    current_content = client.messages[-1]["content"]
+    assert isinstance(current_content, str)
+    assert "<attachments_untrusted>" in current_content
+    assert "AI-DOC-EVIDENCE-0711" in current_content
+    assert exchange.user_message.content == ""
+
+    follow_up = service.send_message(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        content="刚才的附件标记是什么？",
+        attachment_ids=[],
+        agent_id=None,
+        skill_ids=[],
+        mcp_server_ids=[],
+        account_id=None,
+    )
+    historical_user_contents = [
+        message["content"]
+        for message in client.messages[:-1]
+        if message["role"] == "user"
+    ]
+    assert any("AI-DOC-EVIDENCE-0711" in content for content in historical_user_contents)
+    assert follow_up.memory["used_history_messages"] == 2
+
+
+def test_chat_service_rejects_cross_owner_and_failed_attachments(tmp_path: Path) -> None:
+    import pytest
+
+    from src.ai.attachment_store import AiAttachmentStore
+    from src.ai.chat_service import (
+        AiChatRuntimeConfig,
+        AiChatService,
+        AiChatValidationError,
+    )
+    from src.ai.chat_store import AiChatStore
+
+    chat_store = AiChatStore(tmp_path / "chat.sqlite3")
+    chat_store.initialize()
+    attachment_store = AiAttachmentStore(chat_store)
+    service = AiChatService(
+        store=chat_store,
+        attachment_store=attachment_store,
+        client=object(),
+        runtime=AiChatRuntimeConfig(
+            attachments={"allowed_extensions": [".txt"]},
+        ),
+    )
+    owner_key = "ip:10.0.0.8"
+    conversation = service.create_conversation(owner_key, title="隔离")
+    attachment = service.upload_attachment(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        original_name="说明.txt",
+        media_type="text/plain",
+        content=b"private",
+    )
+    other_conversation = service.create_conversation(
+        "ip:10.0.0.9",
+        title="其他用户",
+    )
+
+    with pytest.raises(AiChatValidationError, match="attachment"):
+        service.send_message(
+            owner_key="ip:10.0.0.9",
+            conversation_id=other_conversation.conversation_id,
+            content="越权",
+            attachment_ids=[attachment.attachment_id],
+            agent_id=None,
+            skill_ids=[],
+            mcp_server_ids=[],
+            account_id=None,
+        )
+
+    attachment_store.mark_failed(
+        owner_key=owner_key,
+        conversation_id=conversation.conversation_id,
+        attachment_id=attachment.attachment_id,
+        error_code="test_failure",
+    )
+    with pytest.raises(AiChatValidationError, match="not ready"):
+        service.send_message(
+            owner_key=owner_key,
+            conversation_id=conversation.conversation_id,
+            content="读取失败附件",
+            attachment_ids=[attachment.attachment_id],
+            agent_id=None,
+            skill_ids=[],
+            mcp_server_ids=[],
+            account_id=None,
+        )
+
+
+def test_attachment_api_upload_list_and_owner_isolation(tmp_path: Path) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from API.app.routers.ai import router
+    from src.ai.attachment_store import AiAttachmentStore
+    from src.ai.chat_service import AiChatRuntimeConfig, AiChatService
+    from src.ai.chat_store import AiChatStore
+
+    chat_store = AiChatStore(tmp_path / "chat.sqlite3")
+    chat_store.initialize()
+    service = AiChatService(
+        store=chat_store,
+        attachment_store=AiAttachmentStore(chat_store),
+        client=object(),
+        runtime=AiChatRuntimeConfig(
+            attachments={"allowed_extensions": [".txt"]},
+        ),
+    )
+    owner_key = "ip:10.0.0.8"
+    conversation = service.create_conversation(owner_key, title="API 附件")
+    app = FastAPI()
+    app.include_router(router)
+    app.state.ai_chat_service = service
+
+    with TestClient(app, client=("10.0.0.8", 50000)) as client:
+        uploaded = client.post(
+            f"/api/ai/conversations/{conversation.conversation_id}/attachments",
+            files={"file": ("说明.txt", b"API-FILE-0711", "text/plain")},
+        )
+        assert uploaded.status_code == 201
+        payload = uploaded.json()
+        assert payload["status"] == "ready"
+        assert payload["original_name"] == "说明.txt"
+        attachment_id = payload["attachment_id"]
+
+        listed = client.get(
+            f"/api/ai/conversations/{conversation.conversation_id}/attachments"
+        )
+        assert listed.status_code == 200
+        assert [item["attachment_id"] for item in listed.json()] == [attachment_id]
+
+    with TestClient(app, client=("10.0.0.9", 50001)) as other_client:
+        blocked_list = other_client.get(
+            f"/api/ai/conversations/{conversation.conversation_id}/attachments"
+        )
+        assert blocked_list.status_code == 404
+        blocked_delete = other_client.delete(
+            f"/api/ai/conversations/{conversation.conversation_id}/attachments/{attachment_id}"
+        )
+        assert blocked_delete.status_code == 404
+
+    with TestClient(app, client=("10.0.0.8", 50000)) as owner_client:
+        deleted = owner_client.delete(
+            f"/api/ai/conversations/{conversation.conversation_id}/attachments/{attachment_id}"
+        )
+        assert deleted.status_code == 200

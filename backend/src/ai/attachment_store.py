@@ -165,6 +165,28 @@ class AiAttachmentStore:
             ).fetchone()
         return _attachment_from_row(row) if row is not None else None
 
+    def list_message_attachments(
+        self,
+        *,
+        owner_key: str,
+        conversation_id: str,
+        message_id: str,
+    ) -> list[AiAttachment]:
+        normalized_owner = normalize_owner_key(owner_key)
+        with self.chat_store._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM ai_attachments
+                WHERE message_id = ?
+                  AND conversation_id = ?
+                  AND owner_key = ?
+                ORDER BY created_at ASC, attachment_id ASC
+                """,
+                (message_id, conversation_id, normalized_owner),
+            ).fetchall()
+        return [_attachment_from_row(row) for row in rows]
+
     def bind_to_message(
         self,
         *,
@@ -214,6 +236,7 @@ class AiAttachmentStore:
         attachment_id: str,
         kind: str,
         extracted_text: str,
+        media_type: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> AiAttachment | None:
         return self._update_result(
@@ -223,6 +246,7 @@ class AiAttachmentStore:
             kind=kind,
             status="ready",
             extracted_text=extracted_text,
+            media_type=media_type,
             metadata=metadata or {},
             error_code=None,
         )
@@ -243,6 +267,7 @@ class AiAttachmentStore:
             kind="unknown",
             status="failed",
             extracted_text="",
+            media_type=None,
             metadata=metadata or {},
             error_code=error_code,
         )
@@ -325,6 +350,7 @@ class AiAttachmentStore:
         kind: str,
         status: str,
         extracted_text: str,
+        media_type: str | None,
         metadata: dict[str, Any],
         error_code: str | None,
     ) -> AiAttachment | None:
@@ -334,7 +360,7 @@ class AiAttachmentStore:
             cursor = connection.execute(
                 """
                 UPDATE ai_attachments
-                SET kind = ?, status = ?, extracted_text = ?,
+                SET kind = ?, status = ?, extracted_text = ?, media_type = COALESCE(?, media_type),
                     metadata_json = ?, error_code = ?
                 WHERE attachment_id = ?
                   AND conversation_id = ?
@@ -344,6 +370,7 @@ class AiAttachmentStore:
                     kind,
                     status,
                     extracted_text,
+                    media_type,
                     metadata_json,
                     error_code,
                     attachment_id,
