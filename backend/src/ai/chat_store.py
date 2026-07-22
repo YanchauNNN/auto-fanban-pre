@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -11,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from .owner_identity import normalize_owner_key
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -42,10 +46,16 @@ class AiChatStore:
         *,
         timeout_seconds: float = 30.0,
         busy_timeout_ms: int = 30000,
+        attachment_root: Path | str | None = None,
     ) -> None:
         self.db_path = Path(db_path)
         self.timeout_seconds = timeout_seconds
         self.busy_timeout_ms = busy_timeout_ms
+        self.attachment_root = (
+            Path(attachment_root)
+            if attachment_root is not None
+            else self.db_path.parent / "attachments"
+        )
 
     def initialize(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +95,37 @@ class AiChatStore:
 
                 CREATE INDEX IF NOT EXISTS ix_ai_messages_conversation_created
                 ON ai_messages(conversation_id, created_at ASC);
+
+                CREATE TABLE IF NOT EXISTS ai_attachments (
+                    attachment_id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    message_id TEXT,
+                    owner_key TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    stored_name TEXT NOT NULL,
+                    media_type TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    extracted_text TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(conversation_id)
+                        REFERENCES ai_conversations(conversation_id) ON DELETE CASCADE,
+                    FOREIGN KEY(message_id)
+                        REFERENCES ai_messages(message_id) ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS ix_ai_attachments_owner_conversation
+                ON ai_attachments(owner_key, conversation_id, created_at ASC);
+
+                CREATE INDEX IF NOT EXISTS ix_ai_attachments_message
+                ON ai_attachments(message_id);
+
+                CREATE INDEX IF NOT EXISTS ix_ai_attachments_created_at
+                ON ai_attachments(created_at);
                 """
             )
             self._migrate_legacy_owner_keys(conn)
@@ -362,7 +403,15 @@ class AiChatStore:
             ).fetchone()
             if conversation is None:
                 return False
+            stored_names = self._attachment_names(
+                connection=conn,
+                conversation_id=conversation_id,
+            )
             with conn:
+                conn.execute(
+                    "DELETE FROM ai_attachments WHERE conversation_id = ?",
+                    (conversation_id,),
+                )
                 conn.execute("DELETE FROM ai_messages WHERE conversation_id = ?", (conversation_id,))
                 conn.execute(
                     """
@@ -373,6 +422,7 @@ class AiChatStore:
                     """,
                     (_now(), conversation_id),
                 )
+        self.remove_attachment_files(stored_names)
         return True
 
     def delete_conversation(self, conversation_id: str, owner_key: str) -> bool:
@@ -390,9 +440,18 @@ class AiChatStore:
             ).fetchone()
             if conversation is None:
                 return False
+            stored_names = self._attachment_names(
+                connection=conn,
+                conversation_id=conversation_id,
+            )
             with conn:
+                conn.execute(
+                    "DELETE FROM ai_attachments WHERE conversation_id = ?",
+                    (conversation_id,),
+                )
                 conn.execute("DELETE FROM ai_messages WHERE conversation_id = ?", (conversation_id,))
                 conn.execute("DELETE FROM ai_conversations WHERE conversation_id = ?", (conversation_id,))
+        self.remove_attachment_files(stored_names)
         return True
 
     def purge_expired(
@@ -407,23 +466,88 @@ class AiChatStore:
         if current_time.tzinfo is None:
             current_time = current_time.replace(tzinfo=UTC)
         cutoff = (current_time.astimezone(UTC) - timedelta(days=retention_days)).isoformat()
-        with self._connect() as conn, conn:
-            conn.execute(
-                """
-                    DELETE FROM ai_messages
+        with self._connect() as conn:
+            stored_names = [
+                str(row["stored_name"])
+                for row in conn.execute(
+                    """
+                    SELECT stored_name
+                    FROM ai_attachments
                     WHERE conversation_id IN (
                         SELECT conversation_id
                         FROM ai_conversations
                         WHERE updated_at < ?
                     )
                     """,
-                (cutoff,),
-            )
-            cursor = conn.execute(
-                "DELETE FROM ai_conversations WHERE updated_at < ?",
-                (cutoff,),
-            )
+                    (cutoff,),
+                ).fetchall()
+            ]
+            with conn:
+                conn.execute(
+                    """
+                    DELETE FROM ai_attachments
+                    WHERE conversation_id IN (
+                        SELECT conversation_id
+                        FROM ai_conversations
+                        WHERE updated_at < ?
+                    )
+                    """,
+                    (cutoff,),
+                )
+                conn.execute(
+                    """
+                        DELETE FROM ai_messages
+                        WHERE conversation_id IN (
+                            SELECT conversation_id
+                            FROM ai_conversations
+                            WHERE updated_at < ?
+                        )
+                        """,
+                    (cutoff,),
+                )
+                cursor = conn.execute(
+                    "DELETE FROM ai_conversations WHERE updated_at < ?",
+                    (cutoff,),
+                )
+        self.remove_attachment_files(stored_names)
         return max(int(cursor.rowcount), 0)
+
+    def remove_attachment_files(self, stored_names: list[str]) -> None:
+        root = self.attachment_root.resolve()
+        for stored_name in stored_names:
+            candidate = (root / stored_name).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                logger.warning("ignored attachment path outside storage root: %s", stored_name)
+                continue
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("failed to remove attachment file: %s", candidate)
+                continue
+            current = candidate.parent
+            while current != root:
+                try:
+                    current.relative_to(root)
+                    current.rmdir()
+                except (OSError, ValueError):
+                    break
+                current = current.parent
+
+    @staticmethod
+    def _attachment_names(
+        *,
+        connection: sqlite3.Connection,
+        conversation_id: str,
+    ) -> list[str]:
+        return [
+            str(row["stored_name"])
+            for row in connection.execute(
+                "SELECT stored_name FROM ai_attachments WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchall()
+        ]
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
