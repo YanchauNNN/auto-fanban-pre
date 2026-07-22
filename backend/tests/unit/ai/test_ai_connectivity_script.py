@@ -97,12 +97,33 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             type(self).received_payloads.append(payload)
+            response_input = payload.get("input")
+            input_items = response_input if isinstance(response_input, list) else []
+            has_input_file = any(
+                content.get("type") == "input_file"
+                for item in input_items
+                if isinstance(item, dict)
+                for content in (
+                    item.get("content") if isinstance(item.get("content"), list) else []
+                )
+                if isinstance(content, dict)
+            )
+            if has_input_file and payload.get("model") == "limited-model":
+                self._send_json(
+                    {"error": {"message": "responses input_file is not supported"}},
+                    status_code=400,
+                )
+                return
             self._send_json(
                 {
                     "id": "resp-probe-7319",
                     "object": "response",
                     "model": payload.get("model"),
-                    "output_text": "RESPONSES_API_OK_7319",
+                    "output_text": (
+                        "RESPONSES_FILE_OK_7319"
+                        if has_input_file
+                        else "RESPONSES_API_OK_7319"
+                    ),
                     "output": [],
                 }
             )
@@ -586,7 +607,7 @@ profiles:
     result = json.loads(output_path.read_text(encoding="utf-8-sig"))
     assert result["schema_version"] == "0.6"
     assert result["status"] == "passed"
-    assert result["script"]["version"] == "fanban-ai-connectivity@0.6"
+    assert result["script"]["version"] == "fanban-ai-connectivity@0.7"
     assert result["script"]["sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest().upper()
     assert result["environment"]["config_sha256"] == hashlib.sha256(
         config_path.read_bytes(),
@@ -747,6 +768,7 @@ profiles:
     authorization_scheme: "none"
     chat_model: "concurrency-generic-model"
     structured_model: "concurrency-generic-model"
+    responses_path: "/responses"
     stream_enabled: true
     timeout_sec: 15
     connect_timeout_sec: 5
@@ -788,7 +810,21 @@ profiles:
     multimodal = result["checks"]["multimodal"]
     assert multimodal["image_input"]["status"] == "passed"
     assert multimodal["file_input"]["status"] == "passed"
+    assert multimodal["responses_file_input"]["status"] == "passed"
     assert result["readiness"]["multimodal"]["status"] == "passed"
+    responses_file_payload = next(
+        payload
+        for payload in _OpenAiCompatibleHandler.received_payloads
+        if isinstance(payload.get("input"), list)
+    )
+    input_content = responses_file_payload["input"][0]["content"]
+    assert input_content[0] == {
+        "type": "input_text",
+        "text": "Read and return the exact marker stored in the attached text file.",
+    }
+    assert input_content[1]["type"] == "input_file"
+    assert input_content[1]["filename"] == "fanban-agent-probe.txt"
+    assert input_content[1]["file_data"].startswith("data:text/plain;base64,")
     concurrency = result["checks"]["concurrency"]
     assert concurrency["status"] == "passed"
     assert concurrency["requested"] == 2
@@ -932,6 +968,7 @@ profiles:
     authorization_scheme: "none"
     chat_model: "limited-model"
     structured_model: "limited-model"
+    responses_path: "/responses"
     stream_enabled: true
     timeout_sec: 15
     connect_timeout_sec: 5
@@ -972,6 +1009,7 @@ profiles:
     assert result["checks"]["agent_protocol"]["json_schema"]["status"] == "unsupported"
     assert result["checks"]["multimodal"]["image_input"]["status"] == "unsupported"
     assert result["checks"]["multimodal"]["file_input"]["status"] == "unsupported"
+    assert result["checks"]["multimodal"]["responses_file_input"]["status"] == "unsupported"
     assert result["readiness"]["agent_protocol"]["status"] == "unsupported"
     assert result["readiness"]["multimodal"]["status"] == "unsupported"
     assert result["errors"] == []
@@ -1065,3 +1103,99 @@ def test_ai_connectivity_script_reports_ansys_mapdl_skill_readiness() -> None:
     )
     for marker in required_probe_markers:
         assert marker in script_text
+
+
+def test_ai_connectivity_script_records_empty_ansys_query_without_crashing(
+    tmp_path: Path,
+    openai_compatible_server: str,
+) -> None:
+    if shutil.which("powershell") is None:
+        pytest.skip("PowerShell is required for the connectivity script")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script_path = repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1"
+    config_path = tmp_path / "ai_model_gateway.yaml"
+    output_path = tmp_path / "connectivity.json"
+    skill_root = tmp_path / "ansys-mapdl-18-2"
+
+    required_files = {
+        "SKILL.md": "# Test ANSYS Skill\n",
+        "scripts/validate_mapdl_skill.py": (
+            "import json\n"
+            "print(json.dumps({'passed': True, 'integrity': {}, 'regression': {}}))\n"
+        ),
+        "scripts/mapdl_query.py": (
+            "import json\n"
+            "print(json.dumps({'query': 'ANTYPE', 'results': [], 'result_count': 0}))\n"
+        ),
+        "assets/data/mapdl_help.sqlite": "test database placeholder\n",
+        "assets/data/mapdl_commands.jsonl": "{}\n",
+        "assets/data/manifest.json": "{}\n",
+        "references/validation-cases.json": "[]\n",
+    }
+    for relative_path, content in required_files.items():
+        path = skill_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    config_path.write_text(
+        f"""
+schema_version: "0.1"
+active_profile: "empty_ansys_query_test"
+profiles:
+  empty_ansys_query_test:
+    provider: "local-test"
+    protocol: "openai_compatible"
+    network_mode: "test"
+    architecture: "local_test_gateway"
+    base_url: "{openai_compatible_server}"
+    models_path: "/models"
+    chat_completions_path: "/chat/completions"
+    api_key_env_var: ""
+    api_key_required: false
+    authorization_scheme: "none"
+    chat_model: "Qwen3.6-35A3"
+    structured_model: "Qwen3.6-35A3"
+    stream_enabled: false
+    timeout_sec: 15
+    connect_timeout_sec: 5
+    model_list_required: true
+    ssl_no_revoke: false
+    test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
+    expected_response_contains: "AI_CONNECTIVITY_OK"
+    agent_probe_enabled: false
+    multimodal_probe_enabled: false
+    concurrency_probe_count: 0
+""".strip(),
+        encoding="utf-8",
+    )
+
+    environment = os.environ.copy()
+    environment["FANBAN_ANSYS_MAPDL_SKILL_ROOT"] = str(skill_root)
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ConfigPath",
+            str(config_path),
+            "-OutputPath",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        timeout=60,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output_path.read_text(encoding="utf-8-sig"))
+    ansys_probe = result["checks"]["ansys_mapdl_skill"]
+    assert ansys_probe["query"]["result_count"] == 0
+    assert ansys_probe["query"]["first_canonical"] is None
+    assert ansys_probe["query"]["status"] == "failed"
+    assert ansys_probe["status"] == "failed"

@@ -1165,6 +1165,72 @@ function Invoke-ResponsesCapabilityProbe {
     return $result
 }
 
+function Invoke-ResponsesFileInputProbe {
+    param(
+        [string]$Url,
+        [string]$Model,
+        [hashtable]$Headers,
+        [int]$TimeoutSec,
+        [switch]$UseSslNoRevoke
+    )
+
+    $result = New-CapabilityResult -Name "responses_file_input"
+    if ([string]::IsNullOrWhiteSpace($Url)) {
+        $result.status = "not_configured"
+        return $result
+    }
+
+    $result.attempted = $true
+    $requestHeaders = $Headers.Clone()
+    $requestHeaders["Content-Type"] = "application/json"
+    $fileBytes = [System.Text.Encoding]::UTF8.GetBytes("The exact file marker is RESPONSES_FILE_OK_7319.")
+    $fileData = "data:text/plain;base64," + [Convert]::ToBase64String($fileBytes)
+    $payload = @{
+        model = $Model
+        input = @(
+            @{
+                role = "user"
+                content = @(
+                    @{ type = "input_text"; text = "Read and return the exact marker stored in the attached text file." },
+                    @{ type = "input_file"; filename = "fanban-agent-probe.txt"; file_data = $fileData }
+                )
+            }
+        )
+        max_output_tokens = 64
+    } | ConvertTo-Json -Depth 12 -Compress
+
+    try {
+        $response = Invoke-CurlJson -Url $Url -Method "POST" -Headers $requestHeaders -Body $payload -TimeoutSec $TimeoutSec -UseSslNoRevoke:$UseSslNoRevoke
+        $result.status_code = $response.status_code
+        $result.elapsed_ms = $response.elapsed_ms
+        $result.body_preview = $response.body_preview
+        if ($response.status_code -ne 200) {
+            $result.status = if ($response.status_code -in @(400, 404, 405, 415, 422, 501)) { "unsupported" } else { "failed" }
+            $result.error = "HTTP $($response.status_code)"
+            return $result
+        }
+
+        $json = ConvertTo-JsonObjectOrNull $response.body
+        $content = [string](Get-JsonPropertyValue $json "output_text")
+        if ([string]::IsNullOrWhiteSpace($content)) {
+            $parts = [System.Collections.ArrayList]::new()
+            foreach ($outputItem in @(Get-JsonPropertyValue $json "output")) {
+                foreach ($contentItem in @(Get-JsonPropertyValue $outputItem "content")) {
+                    $text = Get-JsonPropertyValue $contentItem "text"
+                    if ($null -ne $text) { [void]$parts.Add([string]$text) }
+                }
+            }
+            $content = $parts -join ""
+        }
+        $result.content_preview = if ($content.Length -gt 600) { $content.Substring(0, 600) } else { $content }
+        $result.status = if ($content.Contains("RESPONSES_FILE_OK_7319")) { "passed" } else { "inconclusive" }
+    } catch {
+        $result.status = "failed"
+        $result.error = $_.Exception.Message
+    }
+    return $result
+}
+
 function Get-ReadinessStatus {
     param([object[]]$Results)
 
@@ -2098,6 +2164,7 @@ if ($agentProbeEnabled -and (-not $SkipAdvanced) -and (-not $networkPolicyBlocke
 
 $imageInputResult = New-CapabilityResult -Name "image_input"
 $fileInputResult = New-CapabilityResult -Name "file_input"
+$responsesFileInputResult = New-CapabilityResult -Name "responses_file_input"
 if ($multimodalProbeEnabled -and (-not $SkipMultimodal) -and (-not $networkPolicyBlocked)) {
     $chatUrl = Join-EndpointUrl $baseUrl $chatPath
     try {
@@ -2131,6 +2198,11 @@ if ($multimodalProbeEnabled -and (-not $SkipMultimodal) -and (-not $networkPolic
                 )
             }
         ) -ExpectedContains "FILE_CONTENT_OK_7319" -UseSslNoRevoke:$sslNoRevokeConfig
+
+    $responsesUrl = if ([string]::IsNullOrWhiteSpace($responsesPath)) { "" } else { Join-EndpointUrl $baseUrl $responsesPath }
+    $responsesFileInputResult = Invoke-ResponsesFileInputProbe `
+        -Url $responsesUrl -Model $chatModel -Headers $headers -TimeoutSec $timeoutSec `
+        -UseSslNoRevoke:$sslNoRevokeConfig
 }
 
 $runtimeResult = Get-PythonRuntimeInventory -Root $root
@@ -2369,7 +2441,13 @@ function Get-AnsysMapdlSkillProbe {
     $queryProcess = Invoke-LocalJsonProcess -FileName $PythonPath `
         -Arguments @((Join-Path $skillRoot "scripts\mapdl_query.py"), "command", "ANTYPE") -TimeoutSec 60
     $queryJson = $queryProcess.json
-    [object[]]$queryResults = if ($null -ne $queryJson) { @(Get-JsonPropertyValue $queryJson "results") } else { @() }
+    [object[]]$queryResults = @()
+    if ($null -ne $queryJson) {
+        $queryResultValue = Get-JsonPropertyValue $queryJson "results"
+        if ($null -ne $queryResultValue) {
+            $queryResults = @($queryResultValue)
+        }
+    }
     $result.query.attempted = $queryProcess.attempted
     $result.query.elapsed_ms = $queryProcess.elapsed_ms
     $result.query.result_count = $queryResults.Count
@@ -2447,7 +2525,7 @@ $result = [PSCustomObject]@{
     finished_at_utc = $finishedAt
     script = [PSCustomObject]@{
         path = $PSCommandPath
-        version = "fanban-ai-connectivity@0.6"
+        version = "fanban-ai-connectivity@0.7"
         sha256 = Get-FileSha256 $PSCommandPath
         powershell = $PSVersionTable.PSVersion.ToString()
     }
@@ -2523,6 +2601,7 @@ $result = [PSCustomObject]@{
         multimodal = [PSCustomObject]@{
             image_input = $imageInputResult
             file_input = $fileInputResult
+            responses_file_input = $responsesFileInputResult
         }
         concurrency = $concurrencyResult
         runtime = $runtimeResult
@@ -2544,9 +2623,9 @@ $result = [PSCustomObject]@{
             -Summary $(if ($agentProbeEnabled -and (-not $SkipAdvanced)) { "Agent protocol probes completed; inspect individual capability evidence." } else { "Agent protocol probes were not enabled for this run." }) `
             -Checks @($agentProbeNames + @("general_conversation", "explicit_business_handoff"))
         multimodal = New-ReadinessResult `
-            -Status $(Get-ReadinessStatus @($imageInputResult, $fileInputResult)) `
-            -Summary $(if ($multimodalProbeEnabled -and (-not $SkipMultimodal)) { "Multimodal discovery probes completed; inspect each input type." } else { "Multimodal probes were not enabled for this run." }) `
-            -Checks @("image_input", "file_input")
+            -Status $(Get-ReadinessStatus @($imageInputResult, $fileInputResult, $responsesFileInputResult)) `
+            -Summary $(if ($multimodalProbeEnabled -and (-not $SkipMultimodal)) { "Multimodal discovery probes completed; Responses input_file is optional and the application uses backend parsing as its primary file path." } else { "Multimodal probes were not enabled for this run." }) `
+            -Checks @("image_input", "file_input", "responses_file_input")
         agents_sdk_runtime = New-ReadinessResult `
             -Status $(if ($runtimeResult.packages.agents.installed) { "passed" } else { "not_installed" }) `
             -Summary $(if ($runtimeResult.packages.agents.installed) { "The OpenAI Agents SDK is installed in the selected Python runtime." } else { "The selected Python runtime does not contain the OpenAI Agents SDK." }) `
