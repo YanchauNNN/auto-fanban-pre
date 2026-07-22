@@ -1,5 +1,7 @@
 import type {
   AiAgent,
+  AiAttachment,
+  AiAttachmentCapabilities,
   AiConversationDetail,
   AiConversationSummary,
   AiMcpServer,
@@ -12,6 +14,8 @@ import type {
 
 export type {
   AiAgent,
+  AiAttachment,
+  AiAttachmentCapabilities,
   AiConversationDetail,
   AiConversationSummary,
   AiMcpServer,

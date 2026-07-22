@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -10,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import type { ApiAdapter } from "../../platform/api/types";
+import type { AiAttachment, ApiAdapter } from "../../platform/api/types";
 import styles from "./AiChatDrawer.module.css";
 import { AiMessageContent } from "./AiMessageContent";
 import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
@@ -36,6 +37,11 @@ type ConversationMenu = {
   top: number;
 };
 
+type PendingAttachment = {
+  attachment: AiAttachment;
+  previewUrl?: string;
+};
+
 export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   const [isDrawerVisible, setDrawerVisible] = useState(() =>
     typeof window === "undefined"
@@ -53,16 +59,21 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   const [conversationMenu, setConversationMenu] = useState<ConversationMenu | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [lastMemoryCount, setLastMemoryCount] = useState<number | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
   const [drawerSize, setDrawerSize] = useState<DrawerSize>(loadDrawerSize);
   const collapsedButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesRef = useRef<HTMLElement | null>(null);
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusOnCloseRef = useRef(false);
   const drawerTransitionTimerRef = useRef<number | null>(null);
   const chat = useAiChat(adapter, isDrawerVisible);
   const selectedConversationIdRef = useRef(chat.selectedConversationId);
+  const pendingConversationIdRef = useRef("");
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>([]);
 
   const state = chat.stateQuery.data;
   const conversations = chat.availableConversations;
@@ -126,9 +137,14 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       if (drawerTransitionTimerRef.current !== null) {
         window.clearTimeout(drawerTransitionTimerRef.current);
       }
+      revokePreviewUrls(pendingAttachmentsRef.current);
     },
     [],
   );
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
 
   useEffect(() => {
     function keepDrawerInViewport() {
@@ -165,6 +181,16 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
 
   useEffect(() => {
     selectedConversationIdRef.current = chat.selectedConversationId;
+    if (
+      pendingConversationIdRef.current &&
+      pendingConversationIdRef.current !== chat.selectedConversationId
+    ) {
+      revokePreviewUrls(pendingAttachmentsRef.current);
+      pendingAttachmentsRef.current = [];
+      pendingConversationIdRef.current = "";
+      setPendingAttachments([]);
+      setAttachmentError("");
+    }
     setRenamingConversationId(null);
     setRenameDraft("");
     setConversationMenu(null);
@@ -336,9 +362,118 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     }
   }
 
+  async function handleAttachmentSelection(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    const capabilities = state?.attachments;
+    if (!files.length || !capabilities?.enabled) {
+      return;
+    }
+    setAttachmentError("");
+    if (pendingAttachments.length + files.length > capabilities.maxFilesPerMessage) {
+      setAttachmentError(`每条消息最多上传 ${capabilities.maxFilesPerMessage} 个附件。`);
+      return;
+    }
+    const allowedExtensions = new Set(
+      capabilities.allowedExtensions.map((extension) => extension.toLowerCase()),
+    );
+    const pendingBytes = pendingAttachments.reduce(
+      (total, item) => total + item.attachment.sizeBytes,
+      0,
+    );
+    const selectedBytes = files.reduce((total, file) => total + file.size, 0);
+    if (
+      pendingBytes + selectedBytes >
+      capabilities.maxTotalSizeMbPerMessage * 1024 * 1024
+    ) {
+      setAttachmentError("本条消息的附件总容量超过限制。");
+      return;
+    }
+    for (const file of files) {
+      const extension = fileExtension(file.name);
+      const isImage = [".png", ".jpg", ".jpeg", ".webp"].includes(extension);
+      const fileLimitMb = isImage
+        ? capabilities.maxImageSizeMb
+        : capabilities.maxFileSizeMb;
+      if (!allowedExtensions.has(extension)) {
+        setAttachmentError(`不支持附件类型：${file.name}`);
+        return;
+      }
+      if (file.size > fileLimitMb * 1024 * 1024) {
+        setAttachmentError(`${file.name} 超过 ${fileLimitMb} MB 限制。`);
+        return;
+      }
+    }
+
+    let conversationId = selectedConversationIdRef.current;
+    if (!conversationId) {
+      try {
+        const created = await chat.createConversationMutation.mutateAsync(
+          files[0]?.name.slice(0, 24) || "附件会话",
+        );
+        conversationId = created.conversationId;
+        selectedConversationIdRef.current = conversationId;
+      } catch (error) {
+        setAttachmentError(formatError(error));
+        return;
+      }
+    }
+    pendingConversationIdRef.current = conversationId;
+
+    for (const file of files) {
+      try {
+        const uploaded = await chat.uploadAttachmentMutation.mutateAsync({
+          conversationId,
+          file,
+        });
+        const previewUrl =
+          uploaded.kind === "image" && typeof URL.createObjectURL === "function"
+            ? URL.createObjectURL(file)
+            : undefined;
+        setPendingAttachments((current) => [...current, { attachment: uploaded, previewUrl }]);
+      } catch (error) {
+        setAttachmentError(formatError(error));
+        return;
+      }
+    }
+  }
+
+  async function handleRemoveAttachment(item: PendingAttachment) {
+    const conversationId = pendingConversationIdRef.current;
+    if (!conversationId) {
+      return;
+    }
+    try {
+      await chat.deleteAttachmentMutation.mutateAsync({
+        conversationId,
+        attachmentId: item.attachment.attachmentId,
+      });
+      revokePreviewUrls([item]);
+      setPendingAttachments((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.attachment.attachmentId !== item.attachment.attachmentId,
+        ),
+      );
+    } catch (error) {
+      setAttachmentError(formatError(error));
+    }
+  }
+
+  function clearPendingAttachments() {
+    revokePreviewUrls(pendingAttachmentsRef.current);
+    pendingAttachmentsRef.current = [];
+    pendingConversationIdRef.current = "";
+    setPendingAttachments([]);
+  }
+
   async function handleSubmit() {
     const content = draft.trim();
-    if (!content || chat.sendMessageMutation.isPending) {
+    if (
+      (!content && pendingAttachments.length === 0) ||
+      chat.sendMessageMutation.isPending ||
+      chat.uploadAttachmentMutation.isPending
+    ) {
       return;
     }
     try {
@@ -356,8 +491,16 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
           agentId: selectedAgentId || state?.defaultAgent || null,
           skillIds: [],
           mcpServerIds: [],
+          ...(pendingAttachments.length
+            ? {
+                attachmentIds: pendingAttachments.map(
+                  (item) => item.attachment.attachmentId,
+                ),
+              }
+            : {}),
         },
       });
+      clearPendingAttachments();
       if (selectedConversationIdRef.current === conversationId) {
         setLastMemoryCount(result.memory.usedHistoryMessages);
       }
@@ -472,8 +615,13 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     chat.createConversationMutation.isPending ||
     chat.renameConversationMutation.isPending ||
     chat.clearConversationMutation.isPending ||
-    chat.deleteConversationMutation.isPending;
+    chat.deleteConversationMutation.isPending ||
+    chat.deleteAttachmentMutation.isPending;
+  const attachmentUploading = chat.uploadAttachmentMutation.isPending;
+  const canSend = Boolean(draft.trim() || pendingAttachments.length);
+  const attachmentAccept = state?.attachments?.allowedExtensions.join(",") || undefined;
   const error = [
+    attachmentError,
     chat.stateQuery.error,
     chat.conversationsQuery.error,
     chat.conversationQuery.error,
@@ -482,6 +630,8 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     chat.renameConversationMutation.error,
     chat.clearConversationMutation.error,
     chat.deleteConversationMutation.error,
+    chat.uploadAttachmentMutation.error,
+    chat.deleteAttachmentMutation.error,
   ].find((candidate) => Boolean(candidate) && !isAiConversationNotFoundError(candidate));
 
   return (
@@ -702,6 +852,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
             ) : displayedMessages.length ? (
               displayedMessages.map((message) => {
                 const status = typeof message.metadata?.status === "string" ? message.metadata.status : "";
+                const messageAttachments = extractMessageAttachments(message.metadata);
                 const failed = status === "failed";
                 const pending = status === "pending";
                 const thinking = status === "thinking";
@@ -730,13 +881,30 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
                       {thinking ? <em className={styles.thinkingLabel}>思考中</em> : null}
                       {cancelled ? <em className={styles.cancelledLabel}>已停止等待</em> : null}
                     </span>
-                    {renderAssistantMarkdown ? (
+                    {renderAssistantMarkdown && message.content ? (
                       <div className={styles.assistantContent}>
                         <AiMessageContent content={message.content} />
                       </div>
-                    ) : (
+                    ) : message.content ? (
                       <p>{message.content}</p>
-                    )}
+                    ) : null}
+                    {messageAttachments.length ? (
+                      <div
+                        aria-label="消息附件"
+                        className={styles.messageAttachments}
+                      >
+                        {messageAttachments.map((attachment) => (
+                          <span
+                            className={styles.messageAttachment}
+                            key={attachment.attachmentId}
+                            title={attachment.mediaType}
+                          >
+                            <strong>{attachment.originalName}</strong>
+                            <small>{formatFileSize(attachment.sizeBytes)}</small>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })
@@ -746,27 +914,90 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
           </section>
 
           <footer className={styles.composer}>
-            <textarea
-              aria-label="输入 AI 对话内容"
-              className={styles.textarea}
-              disabled={busy || !state?.enabled}
-              ref={inputRef}
-              rows={2}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  void handleSubmit();
-                }
-              }}
-            />
+            {pendingAttachments.length || attachmentUploading ? (
+              <div aria-label="待发送附件" className={styles.pendingAttachments}>
+                {pendingAttachments.map((item) => (
+                  <div className={styles.pendingAttachment} key={item.attachment.attachmentId}>
+                    {item.previewUrl ? (
+                      <img alt="" src={item.previewUrl} />
+                    ) : (
+                      <span aria-hidden="true" className={styles.fileGlyph}>
+                        {item.attachment.kind === "drawing" ? "DWG" : "FILE"}
+                      </span>
+                    )}
+                    <span className={styles.pendingAttachmentName}>
+                      <strong>{item.attachment.originalName}</strong>
+                      <small>{formatFileSize(item.attachment.sizeBytes)} · 已就绪</small>
+                    </span>
+                    <button
+                      aria-label={`移除附件 ${item.attachment.originalName}`}
+                      className={styles.removeAttachmentButton}
+                      disabled={busy || attachmentUploading}
+                      title="移除附件"
+                      type="button"
+                      onClick={() => void handleRemoveAttachment(item)}
+                    >
+                      <span aria-hidden="true">×</span>
+                    </button>
+                  </div>
+                ))}
+                {attachmentUploading ? (
+                  <span className={styles.uploadingStatus} role="status">
+                    正在上传并解析附件
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <div className={styles.composerInputRow}>
+              {state?.attachments?.enabled ? (
+                <>
+                  <input
+                    accept={attachmentAccept}
+                    aria-label="选择 AI 对话附件"
+                    className={styles.hiddenFileInput}
+                    disabled={busy || attachmentUploading}
+                    multiple
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={(event) => void handleAttachmentSelection(event)}
+                  />
+                  <button
+                    aria-label="添加附件"
+                    className={styles.addAttachmentButton}
+                    disabled={busy || attachmentUploading}
+                    title="添加附件"
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <span aria-hidden="true">+</span>
+                  </button>
+                </>
+              ) : null}
+              <textarea
+                aria-label="输入 AI 对话内容"
+                className={styles.textarea}
+                disabled={busy || !state?.enabled}
+                ref={inputRef}
+                rows={2}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void handleSubmit();
+                  }
+                }}
+              />
+            </div>
             <div className={styles.composerActions}>
               <button
                 className={styles.ghostButton}
-                disabled={!draft.trim() || busy}
+                disabled={!canSend || busy || attachmentUploading}
                 type="button"
-                onClick={() => setDraft("")}
+                onClick={() => {
+                  setDraft("");
+                  setAttachmentError("");
+                }}
               >
                 取消
               </button>
@@ -781,7 +1012,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
               ) : (
                 <button
                   className={styles.sendButton}
-                  disabled={!draft.trim() || busy || !state?.enabled}
+                  disabled={!canSend || busy || attachmentUploading || !state?.enabled}
                   type="button"
                   onClick={() => void handleSubmit()}
                 >
@@ -834,7 +1065,76 @@ function clampDrawerSize(size: DrawerSize): DrawerSize {
   };
 }
 
+type MessageAttachment = {
+  attachmentId: string;
+  originalName: string;
+  mediaType: string;
+  sizeBytes: number;
+};
+
+function extractMessageAttachments(
+  metadata: Record<string, unknown> | undefined,
+): MessageAttachment[] {
+  const value = metadata?.attachments;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    const originalName = record.original_name ?? record.originalName;
+    if (typeof originalName !== "string" || !originalName) {
+      return [];
+    }
+    const attachmentId = record.attachment_id ?? record.attachmentId;
+    const mediaType = record.media_type ?? record.mediaType;
+    const sizeBytes = record.size_bytes ?? record.sizeBytes;
+    return [
+      {
+        attachmentId:
+          typeof attachmentId === "string" && attachmentId
+            ? attachmentId
+            : `${originalName}-${index}`,
+        originalName,
+        mediaType: typeof mediaType === "string" ? mediaType : "",
+        sizeBytes: typeof sizeBytes === "number" ? sizeBytes : 0,
+      },
+    ];
+  });
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+  if (sizeBytes < 1024 * 1024) {
+    return `${Math.round(sizeBytes / 1024)} KB`;
+  }
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileExtension(filename: string) {
+  const index = filename.lastIndexOf(".");
+  return index >= 0 ? filename.slice(index).toLowerCase() : "";
+}
+
+function revokePreviewUrls(items: PendingAttachment[]) {
+  if (typeof URL.revokeObjectURL !== "function") {
+    return;
+  }
+  for (const item of items) {
+    if (item.previewUrl) {
+      URL.revokeObjectURL(item.previewUrl);
+    }
+  }
+}
+
 function formatError(error: unknown) {
+  if (typeof error === "string") {
+    return error;
+  }
   if (error && typeof error === "object" && "detail" in error) {
     const detail = (error as { detail?: unknown }).detail;
     if (typeof detail === "string") {

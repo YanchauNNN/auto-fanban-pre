@@ -10,6 +10,7 @@ import type {
   AccountUpdatePayload,
   AdminConfig,
   AiAgent,
+  AiAttachment,
   AiConversationDetail,
   AiConversationSummary,
   AiMcpServer,
@@ -552,6 +553,14 @@ type RawAiState = {
   model?: string | null;
   owner_key?: string | null;
   default_agent?: string | null;
+  attachments?: {
+    enabled?: boolean | null;
+    allowed_extensions?: string[] | null;
+    max_files_per_message?: number | null;
+    max_image_size_mb?: number | null;
+    max_file_size_mb?: number | null;
+    max_total_size_mb_per_message?: number | null;
+  } | null;
   agents?: RawAiAgent[] | null;
   skills?: RawAiSkill[] | null;
   mcp_servers?: RawAiMcpServer[] | null;
@@ -576,6 +585,21 @@ type RawAiMessage = {
 
 type RawAiConversationDetail = RawAiConversationSummary & {
   messages?: RawAiMessage[] | null;
+};
+
+type RawAiAttachment = {
+  attachment_id?: string | null;
+  conversation_id?: string | null;
+  message_id?: string | null;
+  original_name?: string | null;
+  media_type?: string | null;
+  kind?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  status?: string | null;
+  metadata?: Record<string, unknown> | null;
+  error_code?: string | null;
+  created_at?: string | null;
 };
 
 type RawAiSendMessageResult = {
@@ -1207,6 +1231,7 @@ export class HttpAdapter implements ApiAdapter {
       agentId?: string | null;
       skillIds?: string[];
       mcpServerIds?: string[];
+      attachmentIds?: string[];
     },
     signal?: AbortSignal,
   ): Promise<AiSendMessageResult> {
@@ -1221,6 +1246,7 @@ export class HttpAdapter implements ApiAdapter {
           agent_id: payload.agentId ?? null,
           skill_ids: payload.skillIds ?? [],
           mcp_server_ids: payload.mcpServerIds ?? [],
+          attachment_ids: payload.attachmentIds ?? [],
         }),
       },
       { timeoutMs: CHAT_POST_TIMEOUT_MS },
@@ -1251,6 +1277,40 @@ export class HttpAdapter implements ApiAdapter {
       {
         method: "DELETE",
       },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
+  async uploadAiAttachment(conversationId: string, file: File): Promise<AiAttachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const payload = await this.fetchJson<RawAiAttachment>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments`,
+      {
+        method: "POST",
+        body: formData,
+      },
+      { timeoutMs: CHAT_POST_TIMEOUT_MS },
+    );
+    return this.normalizeAiAttachment(payload);
+  }
+
+  async listAiAttachments(
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<AiAttachment[]> {
+    const payload = await this.fetchJson<RawAiAttachment[]>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments`,
+      { signal },
+      { retry: true },
+    );
+    return (payload ?? []).map((attachment) => this.normalizeAiAttachment(attachment));
+  }
+
+  async deleteAiAttachment(conversationId: string, attachmentId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "DELETE" },
       { timeoutMs: AI_CONTROL_TIMEOUT_MS },
     );
   }
@@ -1327,6 +1387,15 @@ export class HttpAdapter implements ApiAdapter {
       model: payload.model ?? "",
       ownerKey: payload.owner_key ?? "",
       defaultAgent: payload.default_agent ?? "",
+      attachments: {
+        enabled: Boolean(payload.attachments?.enabled),
+        allowedExtensions: payload.attachments?.allowed_extensions ?? [],
+        maxFilesPerMessage: payload.attachments?.max_files_per_message ?? 0,
+        maxImageSizeMb: payload.attachments?.max_image_size_mb ?? 0,
+        maxFileSizeMb: payload.attachments?.max_file_size_mb ?? 0,
+        maxTotalSizeMbPerMessage:
+          payload.attachments?.max_total_size_mb_per_message ?? 0,
+      },
       agents: (payload.agents ?? []).map((agent) => this.normalizeAiAgent(agent)),
       skills: (payload.skills ?? []).map((skill) => this.normalizeAiSkill(skill)),
       mcpServers: (payload.mcp_servers ?? []).map((server) => this.normalizeAiMcpServer(server)),
@@ -1382,6 +1451,23 @@ export class HttpAdapter implements ApiAdapter {
       createdAt: payload.created_at ?? "",
       modelProfile: payload.model_profile ?? null,
       metadata: payload.metadata ?? {},
+    };
+  }
+
+  private normalizeAiAttachment(payload: RawAiAttachment): AiAttachment {
+    return {
+      attachmentId: payload.attachment_id ?? "",
+      conversationId: payload.conversation_id ?? "",
+      messageId: payload.message_id ?? null,
+      originalName: payload.original_name ?? "附件",
+      mediaType: payload.media_type ?? "application/octet-stream",
+      kind: payload.kind ?? "unknown",
+      sizeBytes: payload.size_bytes ?? 0,
+      sha256: payload.sha256 ?? "",
+      status: payload.status ?? "failed",
+      metadata: payload.metadata ?? {},
+      errorCode: payload.error_code ?? null,
+      createdAt: payload.created_at ?? "",
     };
   }
 

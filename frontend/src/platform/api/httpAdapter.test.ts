@@ -106,6 +106,82 @@ describe("HttpAdapter", () => {
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
   });
 
+  it("uploads an AI attachment with browser-managed multipart headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          attachment_id: "attachment-1",
+          conversation_id: "conversation-1",
+          message_id: null,
+          original_name: "说明.txt",
+          media_type: "text/plain",
+          kind: "document",
+          size_bytes: 12,
+          sha256: "abc123",
+          status: "ready",
+          metadata: {},
+          error_code: null,
+          created_at: "2026-07-22T10:00:00+08:00",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["AI-FILE-0711"], "说明.txt", { type: "text/plain" });
+
+    const attachment = await adapter.uploadAiAttachment("conversation-1", file);
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://127.0.0.1:8000/api/ai/conversations/conversation-1/attachments",
+    );
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toBe(file);
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false);
+    expect(attachment).toMatchObject({
+      attachmentId: "attachment-1",
+      originalName: "说明.txt",
+      status: "ready",
+    });
+  });
+
+  it("includes attachment ids in an AI message request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          conversation_id: "conversation-1",
+          user_message: {
+            message_id: "user-1",
+            role: "user",
+            content: "",
+            created_at: "2026-07-22T10:00:00+08:00",
+          },
+          assistant_message: {
+            message_id: "assistant-1",
+            role: "assistant",
+            content: "已读取",
+            created_at: "2026-07-22T10:00:01+08:00",
+          },
+          memory: { used_history_messages: 0 },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    await adapter.sendAiMessage("conversation-1", {
+      content: "",
+      attachmentIds: ["attachment-1"],
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content: "",
+      attachment_ids: ["attachment-1"],
+    });
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

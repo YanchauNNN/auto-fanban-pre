@@ -529,12 +529,163 @@
   text-align: center;
 }
 
+.messageAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.messageAttachment {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  max-width: 100%;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  border-radius: 8px;
+  background: rgba(246, 250, 255, 0.96);
+  color: #214d78;
+  text-align: left;
+}
+
+.messageAttachment strong {
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.messageAttachment small {
+  flex: 0 0 auto;
+  color: #6b86a3;
+  font-size: 0.66rem;
+}
+
 .composer {
   display: grid;
   gap: 0.5rem;
   padding: 0.7rem 1rem 0.85rem;
   border-top: 1px solid rgba(20, 70, 128, 0.1);
   background: rgba(250, 253, 255, 0.98);
+}
+
+.pendingAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 7rem;
+  overflow-y: auto;
+}
+
+.pendingAttachment {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 1.8rem;
+  align-items: center;
+  gap: 0.42rem;
+  width: min(18rem, 100%);
+  min-height: 2.65rem;
+  padding: 0.32rem;
+  border: 1px solid rgba(20, 70, 128, 0.14);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.pendingAttachment img,
+.fileGlyph {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+}
+
+.pendingAttachment img {
+  object-fit: cover;
+}
+
+.fileGlyph {
+  display: grid;
+  place-items: center;
+  background: #eaf3fd;
+  color: #1b5b99;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.55rem;
+  font-weight: 800;
+}
+
+.pendingAttachmentName {
+  display: grid;
+  min-width: 0;
+}
+
+.pendingAttachmentName strong,
+.pendingAttachmentName small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pendingAttachmentName strong {
+  color: #214d78;
+  font-size: 0.76rem;
+}
+
+.pendingAttachmentName small,
+.uploadingStatus {
+  color: #6b86a3;
+  font-size: 0.68rem;
+}
+
+.uploadingStatus {
+  align-self: center;
+  padding: 0.45rem;
+}
+
+.removeAttachmentButton,
+.addAttachmentButton {
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  background: #fff;
+  color: #1a528d;
+  cursor: pointer;
+}
+
+.removeAttachmentButton {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.composerInputRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.hiddenFileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.addAttachmentButton {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-bottom: 0.58rem;
+  border-radius: 8px;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.removeAttachmentButton:disabled,
+.addAttachmentButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .textarea {

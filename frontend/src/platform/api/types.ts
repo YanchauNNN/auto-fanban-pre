@@ -652,12 +652,37 @@ export type AiMcpServer = {
   transport?: string;
 };
 
+export type AiAttachmentCapabilities = {
+  enabled: boolean;
+  allowedExtensions: string[];
+  maxFilesPerMessage: number;
+  maxImageSizeMb: number;
+  maxFileSizeMb: number;
+  maxTotalSizeMbPerMessage: number;
+};
+
+export type AiAttachment = {
+  attachmentId: string;
+  conversationId: string;
+  messageId?: string | null;
+  originalName: string;
+  mediaType: string;
+  kind: "image" | "document" | "drawing" | "unknown" | string;
+  sizeBytes: number;
+  sha256: string;
+  status: "uploaded" | "ready" | "failed" | string;
+  metadata: Record<string, unknown>;
+  errorCode?: string | null;
+  createdAt: string;
+};
+
 export type AiState = {
   enabled: boolean;
   profile: string;
   model: string;
   ownerKey: string;
   defaultAgent: string;
+  attachments: AiAttachmentCapabilities;
   agents: AiAgent[];
   skills: AiSkill[];
   mcpServers: AiMcpServer[];
@@ -689,6 +714,7 @@ export type SendAiMessagePayload = {
   agentId?: string | null;
   skillIds?: string[];
   mcpServerIds?: string[];
+  attachmentIds?: string[];
 };
 
 export type AiSendMessageResult = {
@@ -837,4 +863,10 @@ export type ApiAdapter = {
   ) => Promise<AiSendMessageResult>;
   clearAiConversation: (conversationId: string) => Promise<void>;
   deleteAiConversation?: (conversationId: string) => Promise<void>;
+  uploadAiAttachment?: (conversationId: string, file: File) => Promise<AiAttachment>;
+  listAiAttachments?: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<AiAttachment[]>;
+  deleteAiAttachment?: (conversationId: string, attachmentId: string) => Promise<void>;
 };

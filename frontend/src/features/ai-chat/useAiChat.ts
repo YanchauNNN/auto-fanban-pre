@@ -266,6 +266,30 @@ export function useAiChat(adapter: ApiAdapter, enabled: boolean) {
     },
   });
 
+  const uploadAttachmentMutation = useMutation({
+    mutationFn: ({ conversationId, file }: { conversationId: string; file: File }) => {
+      if (!adapter.uploadAiAttachment) {
+        return Promise.reject(new Error("当前 AI 服务不支持附件上传。"));
+      }
+      return adapter.uploadAiAttachment(conversationId, file);
+    },
+  });
+
+  const deleteAttachmentMutation = useMutation({
+    mutationFn: ({
+      conversationId,
+      attachmentId,
+    }: {
+      conversationId: string;
+      attachmentId: string;
+    }) => {
+      if (!adapter.deleteAiAttachment) {
+        return Promise.reject(new Error("当前 AI 服务不支持删除附件。"));
+      }
+      return adapter.deleteAiAttachment(conversationId, attachmentId);
+    },
+  });
+
   const deleteConversationMutation = useMutation({
     mutationFn: (conversationId: string) => {
       if (!adapter.deleteAiConversation) {
@@ -351,6 +375,8 @@ export function useAiChat(adapter: ApiAdapter, enabled: boolean) {
     clearConversationMutation,
     deleteConversationMutation,
     renameConversationMutation,
+    uploadAttachmentMutation,
+    deleteAttachmentMutation,
     sendMessageMutation,
     sendMessage,
     cancelSendMessage,
