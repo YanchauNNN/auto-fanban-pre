@@ -8,6 +8,34 @@ from src.cad.ai.drawing_understanding import (
 )
 
 
+def test_element_package_exporter_reads_dxf_geometry_and_text(tmp_path) -> None:
+    import ezdxf
+
+    from src.cad.ai.element_package_exporter import process_source
+
+    source = tmp_path / "sample.dxf"
+    document = ezdxf.new("R2018")
+    modelspace = document.modelspace()
+    modelspace.add_circle((3, 4), 2, dxfattribs={"layer": "GEOMETRY"})
+    modelspace.add_text("EXPORTER-0711", dxfattribs={"insert": (0, 0)})
+    document.saveas(source)
+
+    drawing = process_source(
+        source_path=source,
+        dxf_dir=tmp_path / "dxf",
+        max_geometry_elements=20,
+    )
+
+    assert drawing["status"] == "ok"
+    assert drawing["conversion"]["status"] == "skipped"
+    assert {item["name"]: item["count"] for item in drawing["entity_type_counts"]} == {
+        "CIRCLE": 1,
+        "TEXT": 1,
+    }
+    assert drawing["geometry_elements"][0]["type"] == "CIRCLE"
+    assert any(item["text"] == "EXPORTER-0711" for item in drawing["text_elements"])
+
+
 def test_classify_text_semantics_labels_common_drawing_tokens() -> None:
     elements = [
         {"text": "20161NH-JGS03-009", "source": "msp:TEXT"},

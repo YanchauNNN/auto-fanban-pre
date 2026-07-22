@@ -332,3 +332,77 @@ def test_attachment_parser_rejects_unsupported_extension(tmp_path: Path) -> None
             declared_media_type="application/zip",
             max_chars=20_000,
         )
+
+
+def test_attachment_parser_builds_structured_dxf_context(tmp_path: Path) -> None:
+    import ezdxf
+
+    from src.ai.attachment_parser import parse_attachment
+
+    dxf_path = tmp_path / "drawing.dxf"
+    document = ezdxf.new("R2018")
+    document.layers.add("AI_LAYER")
+    modelspace = document.modelspace()
+    modelspace.add_line((0, 0), (10, 5), dxfattribs={"layer": "AI_LAYER"})
+    modelspace.add_text(
+        "AI-DXF-0711",
+        dxfattribs={"layer": "AI_LAYER", "insert": (1, 2)},
+    )
+    document.saveas(dxf_path)
+
+    result = parse_attachment(
+        dxf_path,
+        original_name=dxf_path.name,
+        declared_media_type="application/dxf",
+        max_chars=40_000,
+        cad_workspace=tmp_path / "cad-work",
+    )
+
+    assert result.kind == "drawing"
+    assert result.metadata["source_format"] == "dxf"
+    assert result.metadata["entity_count"] == 2
+    assert '"name": "AI_LAYER"' in result.extracted_text
+    assert "AI-DXF-0711" in result.extracted_text
+    assert '"type": "LINE"' in result.extracted_text
+
+
+def test_attachment_parser_converts_dwg_then_uses_same_dxf_pipeline(
+    tmp_path: Path,
+) -> None:
+    import ezdxf
+
+    from src.ai.attachment_parser import parse_attachment
+
+    converted_dxf = tmp_path / "converted.dxf"
+    document = ezdxf.new("R2018")
+    document.modelspace().add_text(
+        "AI-DWG-0711",
+        dxfattribs={"insert": (1, 2)},
+    )
+    document.saveas(converted_dxf)
+    dwg_path = tmp_path / "drawing.dwg"
+    dwg_path.write_bytes(b"mock-dwg")
+
+    class FakeOdaConverter:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, Path]] = []
+
+        def dwg_to_dxf(self, source: Path, output_dir: Path) -> Path:
+            self.calls.append((source, output_dir))
+            return converted_dxf
+
+    converter = FakeOdaConverter()
+    result = parse_attachment(
+        dwg_path,
+        original_name=dwg_path.name,
+        declared_media_type="application/acad",
+        max_chars=40_000,
+        cad_workspace=tmp_path / "cad-work",
+        oda_converter=converter,
+    )
+
+    assert converter.calls == [(dwg_path, tmp_path / "cad-work" / "dxf")]
+    assert result.kind == "drawing"
+    assert result.metadata["source_format"] == "dwg"
+    assert result.metadata["conversion_status"] == "converted"
+    assert "AI-DWG-0711" in result.extracted_text

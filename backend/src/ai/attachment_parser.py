@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,8 @@ def parse_attachment(
     original_name: str,
     declared_media_type: str,
     max_chars: int,
+    cad_workspace: Path | str | None = None,
+    oda_converter: Any | None = None,
 ) -> AttachmentParseResult:
     source = Path(path)
     suffix = Path(original_name).suffix.lower()
@@ -40,6 +43,13 @@ def parse_attachment(
         result = _parse_docx(source)
     elif suffix == ".xlsx":
         result = _parse_xlsx(source)
+    elif suffix in {".dxf", ".dwg"}:
+        result = _parse_drawing(
+            source,
+            suffix=suffix,
+            cad_workspace=Path(cad_workspace) if cad_workspace is not None else None,
+            oda_converter=oda_converter,
+        )
     else:
         raise AttachmentParseError(
             f"unsupported attachment extension: {suffix or '<none>'}",
@@ -202,6 +212,65 @@ def _parse_image(path: Path, *, suffix: str) -> AttachmentParseResult:
         media_type=media_type,
         extracted_text="",
         metadata=metadata,
+    )
+
+
+def _parse_drawing(
+    path: Path,
+    *,
+    suffix: str,
+    cad_workspace: Path | None,
+    oda_converter: Any | None,
+) -> AttachmentParseResult:
+    from src.cad.ai.element_package_exporter import process_source
+
+    workspace = cad_workspace or path.parent / "cad"
+    drawing = process_source(
+        source_path=path,
+        dxf_dir=workspace / "dxf",
+        oda=oda_converter,
+        max_geometry_elements=500,
+    )
+    if drawing.get("status") != "ok":
+        errors = drawing.get("errors") or []
+        message = errors[0].get("message") if errors else "unknown CAD parse error"
+        raise AttachmentParseError(
+            f"CAD extraction failed: {message}",
+            code="attachment_cad_parse_failed",
+        )
+
+    context = {
+        "schema_version": "drawing-attachment-context@0.1",
+        "source_name": drawing.get("source_name"),
+        "source_format": suffix.removeprefix("."),
+        "project_no_inferred": drawing.get("project_no_inferred"),
+        "unit_no_inferred": drawing.get("unit_no_inferred"),
+        "entity_type_counts": drawing.get("entity_type_counts", []),
+        "layers": drawing.get("layers", []),
+        "geometry_elements": drawing.get("geometry_elements", []),
+        "geometry_elements_truncated": drawing.get(
+            "geometry_elements_truncated",
+            False,
+        ),
+        "text_elements": drawing.get("text_elements", []),
+        "frames": drawing.get("frames", []),
+        "semantic_summary": drawing.get("semantic_summary", {}),
+    }
+    entity_count = sum(
+        int(item.get("count", 0))
+        for item in drawing.get("entity_type_counts", [])
+    )
+    return AttachmentParseResult(
+        kind="drawing",
+        media_type="application/dxf" if suffix == ".dxf" else "application/acad",
+        extracted_text=json.dumps(context, ensure_ascii=False, indent=2),
+        metadata={
+            "source_format": suffix.removeprefix("."),
+            "conversion_status": drawing.get("conversion", {}).get("status"),
+            "entity_count": entity_count,
+            "frame_count": len(drawing.get("frames", [])),
+            "text_element_count": len(drawing.get("text_elements", [])),
+        },
     )
 
 
