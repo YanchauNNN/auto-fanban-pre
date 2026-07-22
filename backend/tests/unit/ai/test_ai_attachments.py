@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import struct
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+import pytest
 
 
 def _stores(tmp_path: Path):
@@ -194,3 +197,138 @@ def test_attachment_retention_cleans_expired_files(tmp_path: Path) -> None:
 
     assert chat_store.purge_expired(retention_days=30, now=now) == 1
     assert conversation_path.exists() is False
+
+
+def test_attachment_parser_reads_gb18030_text_and_truncates(tmp_path: Path) -> None:
+    from src.ai.attachment_parser import parse_attachment
+
+    source = tmp_path / "说明.txt"
+    source.write_bytes("中文标记 AI-TXT-0711 后续内容".encode("gb18030"))
+
+    result = parse_attachment(
+        source,
+        original_name=source.name,
+        declared_media_type="text/plain",
+        max_chars=14,
+    )
+
+    assert result.kind == "document"
+    assert "AI-TXT" in result.extracted_text
+    assert len(result.extracted_text) == 14
+    assert result.metadata["encoding"] == "gb18030"
+    assert result.metadata["truncated"] is True
+    assert "content_truncated" in result.warnings
+
+
+def test_attachment_parser_reads_pdf_docx_and_xlsx_boundaries(tmp_path: Path) -> None:
+    import fitz
+    from docx import Document
+    from openpyxl import Workbook
+
+    from src.ai.attachment_parser import parse_attachment
+
+    pdf_path = tmp_path / "sample.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "AI-PDF-0711")
+    pdf.save(pdf_path)
+    pdf.close()
+
+    docx_path = tmp_path / "sample.docx"
+    document = Document()
+    document.add_paragraph("AI-DOCX-0711")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "参数"
+    table.cell(0, 1).text = "VALUE-0711"
+    document.save(docx_path)
+
+    xlsx_path = tmp_path / "sample.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "输入参数"
+    sheet["A1"] = "AI-XLSX-0711"
+    sheet["B2"] = 42
+    workbook.save(xlsx_path)
+    workbook.close()
+
+    pdf_result = parse_attachment(
+        pdf_path,
+        original_name=pdf_path.name,
+        declared_media_type="application/pdf",
+        max_chars=20_000,
+    )
+    docx_result = parse_attachment(
+        docx_path,
+        original_name=docx_path.name,
+        declared_media_type=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        max_chars=20_000,
+    )
+    xlsx_result = parse_attachment(
+        xlsx_path,
+        original_name=xlsx_path.name,
+        declared_media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        max_chars=20_000,
+    )
+
+    assert "[Page 1]" in pdf_result.extracted_text
+    assert "AI-PDF-0711" in pdf_result.extracted_text
+    assert "[Paragraphs]" in docx_result.extracted_text
+    assert "[Table 1]" in docx_result.extracted_text
+    assert "VALUE-0711" in docx_result.extracted_text
+    assert "[Sheet: 输入参数]" in xlsx_result.extracted_text
+    assert "A1=AI-XLSX-0711" in xlsx_result.extracted_text
+    assert "B2=42" in xlsx_result.extracted_text
+
+
+def test_attachment_parser_validates_image_signature(tmp_path: Path) -> None:
+    from src.ai.attachment_parser import AttachmentParseError, parse_attachment
+
+    png_path = tmp_path / "pixel.png"
+    png_path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\x0dIHDR"
+        + struct.pack(">II", 1, 1)
+        + b"\x08\x06\x00\x00\x00"
+    )
+
+    result = parse_attachment(
+        png_path,
+        original_name=png_path.name,
+        declared_media_type="image/png",
+        max_chars=20_000,
+    )
+
+    assert result.kind == "image"
+    assert result.media_type == "image/png"
+    assert result.metadata["width"] == 1
+    assert result.metadata["height"] == 1
+    assert result.extracted_text == ""
+
+    invalid = tmp_path / "fake.png"
+    invalid.write_bytes(b"not-a-png")
+    with pytest.raises(AttachmentParseError, match="signature"):
+        parse_attachment(
+            invalid,
+            original_name=invalid.name,
+            declared_media_type="image/png",
+            max_chars=20_000,
+        )
+
+
+def test_attachment_parser_rejects_unsupported_extension(tmp_path: Path) -> None:
+    from src.ai.attachment_parser import AttachmentParseError, parse_attachment
+
+    source = tmp_path / "archive.zip"
+    source.write_bytes(b"PK")
+
+    with pytest.raises(AttachmentParseError, match="unsupported"):
+        parse_attachment(
+            source,
+            original_name=source.name,
+            declared_media_type="application/zip",
+            max_chars=20_000,
+        )
