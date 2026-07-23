@@ -75,6 +75,60 @@ describe("HttpAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("creates a calculation-book task with params_json and one ZIP archive", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-calc-1",
+          jobs: [
+            {
+              job_id: "calc-1",
+              batch_id: "batch-calc-1",
+              source_filename: "calculation.zip",
+              task_kind: "calculation_book",
+              job_mode: "calculation_book",
+              project_no: "2016",
+              status: "queued",
+              stage: "INIT",
+              percent: 0,
+              message: "",
+              created_at: "2026-07-23T10:00:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+                calculation_docx_available: false,
+              },
+              retry_available: false,
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000");
+    const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
+
+    const result = await adapter.createCalculationBook(
+      { project_no: "2016", template_type: "internal_structure" },
+      archive,
+    );
+
+    expect(result.jobs[0]?.taskKind).toBe("calculation_book");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books");
+    const formData = init.body as FormData;
+    expect(formData.get("archive")).toBe(archive);
+    expect(JSON.parse(String(formData.get("params_json")))).toEqual({
+      project_no: "2016",
+      template_type: "internal_structure",
+    });
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

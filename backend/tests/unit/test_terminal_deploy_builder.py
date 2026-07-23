@@ -76,6 +76,10 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "frontend" / "dist" / "assets" / "pdf.worker.min-test.mjs", "worker")
     _write_file(repo_root / "API" / "app" / "main.py", "app = None")
     _write_file(repo_root / "backend" / "pyproject.toml", "[project]\nname = 'demo'\n")
+    _write_file(
+        repo_root / "backend" / "jisuanshu" / "Tesseract-OCR" / "tesseract.exe",
+        "portable tesseract",
+    )
     _write_file(repo_root / "backend" / "src" / "config" / "runtime_config.py", "CONFIG = 1")
     _write_file(
         repo_root / "backend" / "src" / "deploy" / "__pycache__" / "terminal_package.cpython-313.pyc",
@@ -211,6 +215,10 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     ) in rel_pairs
     assert (Path("documents") / TERMINAL_INSTALL_PLAN_NAME, Path("documents") / TERMINAL_INSTALL_PLAN_NAME) in rel_pairs
     assert (Path("documents_bin"), Path("documents_bin")) in rel_pairs
+    assert (
+        Path("backend/jisuanshu/Tesseract-OCR"),
+        Path("backend/jisuanshu/Tesseract-OCR"),
+    ) in rel_pairs
     assert (Path("bin/ODAFileConverter 25.12.0"), Path("bin/ODAFileConverter 25.12.0")) in rel_pairs
     assert (Path("tools/diagnose_iis_frontend_503.ps1"), Path("tools/diagnose_iis_frontend_503.ps1")) in rel_pairs
     assert (
@@ -345,6 +353,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "documents" / "AI" / AI_SPEC_NAME).exists()
     assert (output_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()
+    assert (output_root / "backend" / "jisuanshu" / "Tesseract-OCR" / "tesseract.exe").exists()
     assert (output_root / "scripts" / "start_backend.ps1").exists()
     assert (output_root / "scripts" / "check_health.ps1").exists()
     assert (output_root / "scripts" / "deep_check_terminal.ps1").exists()

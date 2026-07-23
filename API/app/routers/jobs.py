@@ -118,6 +118,38 @@ async def create_audit_batch(
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
 
 
+@router.post("/calculation-books")
+async def create_calculation_book(
+    request: Request,
+    params_json: str = Form(...),
+    archive: UploadFile = File(...),
+    account=Depends(require_current_account),
+) -> JSONResponse:
+    try:
+        params = json.loads(params_json)
+    except json.JSONDecodeError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": {
+                    "upload_errors": {},
+                    "param_errors": {"params_json": [f"invalid_json:{exc.msg}"]},
+                }
+            },
+        )
+    upload = UploadedFilePayload(
+        filename=archive.filename or "calculation-images.zip",
+        content=await archive.read(),
+        content_type=archive.content_type,
+    )
+    payload = request.app.state.runtime.create_calculation_book(
+        archive=upload,
+        raw_params=params,
+        creator_snapshot=account,
+    )
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
+
+
 @router.get("")
 def list_jobs(
     request: Request,
@@ -254,4 +286,22 @@ def download_replaced_dwg(request: Request, job_id: str, account=Depends(require
         path=path,
         filename=path.name,
         media_type="application/acad",
+    )
+
+
+@router.get("/{job_id}/download/calculation-book")
+def download_calculation_book(
+    request: Request,
+    job_id: str,
+    account=Depends(require_current_account),
+) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(
+        job_id,
+        "calculation_book",
+        account=account,
+    )
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )

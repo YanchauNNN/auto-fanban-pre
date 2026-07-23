@@ -80,6 +80,17 @@ class FormMetadataService:
                     },
                 },
             },
+            "calculation_book": {
+                **self.spec.calculation_book,
+                "project_options": [
+                    {
+                        "value": str(item.get("id") or ""),
+                        "label": str(item.get("name") or item.get("id") or ""),
+                    }
+                    for item in self.spec.enums.get("project_no", [])
+                    if isinstance(item, dict) and str(item.get("id") or "").strip()
+                ],
+            },
             "management": self._build_management_schema(),
         }
 

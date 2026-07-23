@@ -76,6 +76,16 @@ runtime_options:
   cad_runtime:
     slot_count: { type: int, default: 8, desc: "CAD 槽位池数量；会限制重任务最大并发数，API runtime 不应再硬编码" }
 
+  calculation_book:
+    template_dir: { type: str, default: "documents_bin/calculation_book", desc: "计算书 Word 模板目录" }
+    rebar_table: { type: str, default: "documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx", desc: "钢筋公称面积表" }
+    tesseract_exe: { type: str, default: "backend/jisuanshu/Tesseract-OCR/tesseract.exe", desc: "计算书 OCR 使用的 Tesseract 可执行文件；部署包会改写为终端相对路径" }
+    tessdata_dir: { type: str, default: "backend/jisuanshu/Tesseract-OCR/tessdata", desc: "Tesseract 语言数据目录" }
+    max_archive_mb: { type: int, default: 500, desc: "计算图片 ZIP 上传及解压总大小上限 MB" }
+    max_archive_files: { type: int, default: 500, desc: "计算图片 ZIP 最大文件数" }
+    max_single_file_mb: { type: int, default: 50, desc: "ZIP 内单个文件解压大小上限 MB" }
+    max_compression_ratio: { type: float, default: 200.0, desc: "ZIP 内单文件最大压缩比" }
+
   plot_assets:
     asset_roots:
       type: "list[str]"

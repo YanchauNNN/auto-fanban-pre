@@ -102,6 +102,15 @@ class AuditReplaceMechanismConfig(BaseModel):
     unit_factory_codes: list[str] = Field(default_factory=list)
 
 
+class CalculationBookMechanismConfig(BaseModel):
+    extra_ratio: float = 0.2
+    row_counts: list[int] = Field(default_factory=lambda: [1, 2])
+    spacings: list[int] = Field(default_factory=lambda: [200, 250])
+    max_diameter: int = 40
+    ocr_threshold: int = 160
+    chapter: str = "7.1"
+
+
 class ApiRuntimeMechanismConfig(BaseModel):
     stage_labels: dict[str, str] = Field(
         default_factory=lambda: {
@@ -220,6 +229,9 @@ class BackendMechanismConfig(BaseModel):
     management_ui: ManagementUiConfig = Field(default_factory=ManagementUiConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
     audit_replace: AuditReplaceMechanismConfig = Field(default_factory=AuditReplaceMechanismConfig)
+    calculation_book: CalculationBookMechanismConfig = Field(
+        default_factory=CalculationBookMechanismConfig
+    )
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
     api_runtime: ApiRuntimeMechanismConfig = Field(default_factory=ApiRuntimeMechanismConfig)
     cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(default_factory=CadRuntimeMechanismConfig)
@@ -262,6 +274,10 @@ class MechanismSpec(BaseModel):
     @property
     def audit_replace(self) -> AuditReplaceMechanismConfig:
         return self.backend_mechanism.audit_replace
+
+    @property
+    def calculation_book(self) -> CalculationBookMechanismConfig:
+        return self.backend_mechanism.calculation_book
 
     @property
     def project_inference(self) -> ProjectInferenceConfig:

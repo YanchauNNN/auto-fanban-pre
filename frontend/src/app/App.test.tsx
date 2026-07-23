@@ -16,6 +16,7 @@ const mockPreflightFonts = vi.fn();
 const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
+const mockCreateCalculationBook = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobsActivity = vi.fn();
 const mockSubscribeJobsActivity = vi.fn();
@@ -78,6 +79,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createBatch: mockCreateBatch,
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
+    createCalculationBook: mockCreateCalculationBook,
     listJobs: mockListJobs,
     getJobsActivity: mockGetJobsActivity,
     subscribeJobsActivity: mockSubscribeJobsActivity,
@@ -103,6 +105,7 @@ beforeEach(() => {
   mockCreateBatch.mockReset();
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
+  mockCreateCalculationBook.mockReset();
   mockListJobs.mockReset();
   mockGetJobsActivity.mockReset();
   mockSubscribeJobsActivity.mockReset();
@@ -173,6 +176,26 @@ beforeEach(() => {
       },
     ],
     auditReplaceProjectOptions: ["2026", "1818"],
+    calculationBook: {
+      templates: [{ value: "internal_structure", label: "内部结构计算书" }],
+      projectOptions: [{ value: "2016", label: "浙江金七门核电厂1、2号机组" }],
+      fields: [
+        {
+          key: "template_type",
+          label: "计算书模板",
+          type: "select",
+          required: true,
+          defaultValue: "internal_structure",
+          options: [],
+        },
+      ],
+      archive: {
+        accept: [".zip"],
+        requiredRootFigures: ["X", "Y", "Z"],
+        requiredDirectories: ["01", "02"],
+        description: "保留目录结构",
+      },
+    },
   });
 
   mockListJobs.mockResolvedValue({
@@ -449,6 +472,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "计算书" })).toBeInTheDocument();
 
     const toolbar = screen.getByTestId("module-toolbar");
     expect(within(toolbar).getByRole("button", { name: "业务模块" })).toHaveAttribute(
@@ -470,6 +494,18 @@ describe("homepage shell", () => {
     expect(screen.queryByText("工作量模块预留")).not.toBeInTheDocument();
     expect(within(toolbar).queryByRole("button", { name: "AI 助手" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开 AI 助手" })).toBeInTheDocument();
+  });
+
+  it("opens calculation-book creation as a same-level business action", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "打开 AI 助手" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "计算书" }));
+
+    expect(await screen.findByRole("dialog", { name: "创建计算书" })).toBeInTheDocument();
+    expect(screen.getByLabelText("ZIP 必需结构")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "打开 AI 助手" })).not.toBeInTheDocument();
   });
 
   it("opens the floating AI drawer and sends a message with conversation memory", async () => {
@@ -1369,6 +1405,63 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
+  it("shows calculation-book results and the exact DOCX download action", async () => {
+    window.history.pushState({}, "", "/jobs/calculation-book-1");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "calculation-book-1",
+      batchId: "batch-calculation-book-1",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "计算图片.zip",
+      sourceFilenames: ["计算图片.zip"],
+      taskKind: "calculation_book",
+      taskRole: null,
+      jobMode: "calculation_book",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "CALCULATION_BOOK_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-07-23T10:00:00+08:00",
+      finishedAt: "2026-07-23T10:05:00+08:00",
+      startedAt: "2026-07-23T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        calculationDocxAvailable: true,
+        calculationDocxDownloadUrl:
+          "/api/jobs/calculation-book-1/download/calculation-book",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      calculationBookOutput: {
+        figureCount: 5,
+        templateType: "internal_structure",
+        outputFilename: "20160RX-JGS01-001-A计算书.docx",
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "计算书结果" })).toBeInTheDocument();
+    expect(screen.getByText("内部结构计算书")).toBeInTheDocument();
+    expect(screen.getByText("5 张")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "下载计算书 DOCX" }),
+    ).toHaveAttribute("href", "/api/jobs/calculation-book-1/download/calculation-book");
+  });
+
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
     window.history.pushState({}, "", "/jobs/group-downloads");
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);

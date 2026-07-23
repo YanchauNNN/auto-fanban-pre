@@ -337,6 +337,19 @@ class UploadLimitsConfig(BaseModel):
     min_free_disk_mb: int = 10240
 
 
+class CalculationBookRuntimeConfig(BaseModel):
+    """计算书业务资产、OCR 运行时和 ZIP 安全限制。"""
+
+    template_dir: Path = Path("documents_bin/calculation_book")
+    rebar_table: Path = Path("documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx")
+    tesseract_exe: Path = Path("backend/jisuanshu/Tesseract-OCR/tesseract.exe")
+    tessdata_dir: Path = Path("backend/jisuanshu/Tesseract-OCR/tessdata")
+    max_archive_mb: int = 500
+    max_archive_files: int = 500
+    max_single_file_mb: int = 50
+    max_compression_ratio: float = 200.0
+
+
 class LifecycleConfig(BaseModel):
     """生命周期配置"""
 
@@ -479,6 +492,9 @@ class RuntimeConfig(BaseSettings):
         default_factory=DeliverableConsistencyFixConfig,
     )
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
+    calculation_book: CalculationBookRuntimeConfig = Field(
+        default_factory=CalculationBookRuntimeConfig
+    )
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
@@ -525,6 +541,9 @@ class RuntimeConfig(BaseSettings):
                 **cls._extract(runtime_opts, "deliverable_consistency_fix"),
             ),
             "upload_limits": UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
+            "calculation_book": CalculationBookRuntimeConfig(
+                **cls._extract(runtime_opts, "calculation_book"),
+            ),
             "lifecycle": LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
             "logging": LoggingConfig(**cls._extract(runtime_opts, "logging")),
             "multi_dwg_policy": MultiDwgPolicyConfig(
@@ -696,6 +715,22 @@ class RuntimeConfig(BaseSettings):
             path if path.is_absolute() else (self.base_dir / path).resolve()
             for path in self.font_preflight.font_library_dirs
         ]
+        self.calculation_book.template_dir = self._resolve_root_path(
+            self.calculation_book.template_dir,
+            self.base_dir,
+        )
+        self.calculation_book.rebar_table = self._resolve_root_path(
+            self.calculation_book.rebar_table,
+            self.base_dir,
+        )
+        self.calculation_book.tesseract_exe = self._resolve_root_path(
+            self.calculation_book.tesseract_exe,
+            self.base_dir,
+        )
+        self.calculation_book.tessdata_dir = self._resolve_root_path(
+            self.calculation_book.tessdata_dir,
+            self.base_dir,
+        )
 
     def _normalize_root_paths(self, base_dir: Path) -> None:
         """???????????????????? Path???????????"""

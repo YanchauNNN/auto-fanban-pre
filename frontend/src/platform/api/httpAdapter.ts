@@ -81,11 +81,13 @@ type RawArtifacts = {
   preview_mode?: "plain" | "annotated" | null;
   report_available: boolean;
   replaced_dwg_available: boolean;
+  calculation_docx_available?: boolean | null;
   package_download_url?: string | null;
   ied_download_url?: string | null;
   preview_download_url?: string | null;
   report_download_url?: string | null;
   replaced_dwg_download_url?: string | null;
+  calculation_docx_download_url?: string | null;
 };
 
 type RawJobSummary = {
@@ -101,7 +103,7 @@ type RawJobSummary = {
   creator_name?: string | null;
   creator_account?: string | null;
   creator_office?: string | null;
-  task_kind?: "deliverable" | "audit_check" | "audit_replace" | null;
+  task_kind?: "deliverable" | "audit_check" | "audit_replace" | "calculation_book" | null;
   job_mode?: string | null;
   project_no: string | null;
   status: string;
@@ -206,6 +208,11 @@ type RawJobDetail = RawJobSummary & {
     action_count?: number | null;
     report_json?: string | null;
     message?: string | null;
+  } | null;
+  calculation_book_output?: {
+    figure_count?: number | null;
+    template_type?: string | null;
+    output_filename?: string | null;
   } | null;
 };
 
@@ -315,6 +322,29 @@ type RawFormSchema = {
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;
+    };
+  };
+  calculation_book?: {
+    templates?: Array<{ value?: string | null; label?: string | null }>;
+    project_options?: Array<{ value?: string | null; label?: string | null }>;
+    fields?: Array<{
+      key?: string | null;
+      label?: string | null;
+      type?: string | null;
+      required?: boolean | null;
+      default?: string | number | null;
+      unit?: string | null;
+      placeholder?: string | null;
+      options?: string[] | null;
+      options_from?: string | null;
+      derived_from?: string | null;
+    }>;
+    archive?: {
+      accept?: string[] | null;
+      required_root_directions?: string[] | null;
+      required_folders?: string[] | null;
+      root_figure_pattern?: string | null;
+      description?: string | null;
     };
   };
 };
@@ -977,6 +1007,26 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createCalculationBook(
+    params: SubmissionParams,
+    archive: File,
+  ): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("params_json", JSON.stringify(params));
+    formData.append("archive", archive);
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/calculation-books", {
+      method: "POST",
+      body: formData,
+    });
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
   async listTaskGroups(): Promise<TaskGroupList> {
     const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
       "/api/task-groups",
@@ -1120,6 +1170,13 @@ export class HttpAdapter implements ApiAdapter {
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
       replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
       factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
+      calculationBookOutput: payload.calculation_book_output
+        ? {
+            figureCount: Number(payload.calculation_book_output.figure_count ?? 0),
+            templateType: payload.calculation_book_output.template_type ?? "",
+            outputFilename: payload.calculation_book_output.output_filename ?? "",
+          }
+        : undefined,
     };
   }
 
@@ -1278,11 +1335,15 @@ export class HttpAdapter implements ApiAdapter {
         previewMode: payload.artifacts.preview_mode ?? null,
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
+        calculationDocxAvailable: payload.artifacts.calculation_docx_available ?? false,
         packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
         iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
         previewDownloadUrl: this.resolveUrl(payload.artifacts.preview_download_url),
         reportDownloadUrl: this.resolveUrl(payload.artifacts.report_download_url),
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
+        calculationDocxDownloadUrl: this.resolveUrl(
+          payload.artifacts.calculation_docx_download_url,
+        ),
       },
       retryAvailable: payload.retry_available,
       taskRole: payload.task_role ?? null,

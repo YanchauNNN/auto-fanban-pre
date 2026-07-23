@@ -1,8 +1,41 @@
-export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
+export type TaskKind = "deliverable" | "audit_check" | "audit_replace" | "calculation_book";
 export type TaskIntent = TaskKind;
 export type PreviewMode = "plain" | "annotated";
 
-export type FormFieldType = "text" | "select" | "combobox" | "date" | "nameId" | "checkbox";
+export type FormFieldType =
+  | "text"
+  | "number"
+  | "select"
+  | "combobox"
+  | "date"
+  | "nameId"
+  | "checkbox";
+
+export type CalculationBookField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select";
+  required: boolean;
+  defaultValue?: string;
+  unit?: string;
+  placeholder?: string;
+  options?: readonly string[];
+  optionsFrom?: string;
+  derivedFrom?: string;
+};
+
+export type CalculationBookSchema = {
+  templates: readonly { value: string; label: string }[];
+  projectOptions: readonly { value: string; label: string }[];
+  fields: readonly CalculationBookField[];
+  archive: {
+    accept: readonly string[];
+    requiredRootDirections: readonly string[];
+    requiredFolders: readonly string[];
+    rootFigurePattern: string;
+    description: string;
+  };
+};
 
 export type UploadLimits = {
   maxFiles: number;
@@ -97,6 +130,7 @@ export type FormSchema = {
     allowUnlistedUnitNo?: boolean;
     unitNoPattern?: string;
   };
+  calculationBook?: CalculationBookSchema;
 };
 
 export type HealthStatus = {
@@ -387,11 +421,19 @@ export type JobArtifacts = {
   previewMode?: PreviewMode | null;
   reportAvailable: boolean;
   replacedDwgAvailable: boolean;
+  calculationDocxAvailable?: boolean;
   packageDownloadUrl?: string | null;
   iedDownloadUrl?: string | null;
   previewDownloadUrl?: string | null;
   reportDownloadUrl?: string | null;
   replacedDwgDownloadUrl?: string | null;
+  calculationDocxDownloadUrl?: string | null;
+};
+
+export type CalculationBookOutput = {
+  figureCount: number;
+  templateType: string;
+  outputFilename: string;
 };
 
 export type DeliverableDrawingOutput = {
@@ -614,6 +656,7 @@ export type JobDetail = JobSummary & {
   findingGroups?: FindingGroup[];
   replaceSummary?: ReplaceSummary;
   factoryIndexMap?: FactoryIndexMapSummary | null;
+  calculationBookOutput?: CalculationBookOutput;
 };
 
 export type JobList = {
@@ -797,6 +840,10 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
+  createCalculationBook?: (
+    params: SubmissionParams,
+    archive: File,
+  ) => Promise<CreateBatchPayload>;
   listTaskGroups?: () => Promise<TaskGroupList>;
   getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;
   submitTaskGroup?: (

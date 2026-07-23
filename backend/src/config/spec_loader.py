@@ -85,6 +85,9 @@ class BusinessSpec(BaseModel):
     # 任务提交契约（上传接口 form-data / params_json 结构）
     submission_contracts: dict[str, Any] = Field(default_factory=dict)
 
+    # 计算书业务字段、枚举和界面契约
+    calculation_book: dict[str, Any] = Field(default_factory=dict)
+
     # === 渚挎嵎璁块棶鏂规硶 ===
 
     def get_paper_variants(self) -> dict[str, PaperVariant]:

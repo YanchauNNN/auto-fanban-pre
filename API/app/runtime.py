@@ -22,6 +22,8 @@ from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
+from src.calculation_book.executor import CalculationBookJobExecutor
+from src.calculation_book.models import CalculationBookParams
 from src.cad import FrameDetector, ODAConverter
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
@@ -81,6 +83,9 @@ class PipelineJobProcessor:
         return PipelineExecutor(font_preflight_service=self.font_preflight_service)
 
     def __call__(self, job: Job) -> None:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            CalculationBookJobExecutor().execute(job)
+            return
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()
             if mode == "replace":
@@ -572,6 +577,64 @@ class DeliverableApiRuntime:
             jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
+    def create_calculation_book(
+        self,
+        *,
+        archive: UploadedFilePayload,
+        raw_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
+    ) -> dict[str, Any]:
+        upload_errors: dict[str, list[str]] = {}
+        if Path(archive.filename).suffix.lower() != ".zip":
+            upload_errors.setdefault("archive", []).append("only .zip files are allowed")
+        if not archive.content:
+            upload_errors.setdefault("archive", []).append("archive is empty")
+        max_archive_mb = self.config.calculation_book.max_archive_mb
+        if len(archive.content) > max_archive_mb * 1024 * 1024:
+            upload_errors.setdefault("archive", []).append(
+                f"archive exceeds {max_archive_mb} MB"
+            )
+
+        param_errors: dict[str, list[str]] = {}
+        params: CalculationBookParams | None = None
+        try:
+            params = CalculationBookParams.model_validate(raw_params)
+        except Exception as exc:  # noqa: BLE001
+            errors_method = getattr(exc, "errors", None)
+            if callable(errors_method):
+                for error in errors_method():
+                    location = error.get("loc") or ("params_json",)
+                    field = str(location[-1])
+                    param_errors.setdefault(field, []).append(
+                        str(error.get("msg") or "invalid")
+                    )
+            else:
+                param_errors.setdefault("params_json", []).append(str(exc))
+
+        if upload_errors or param_errors or params is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": upload_errors, "param_errors": param_errors},
+            )
+
+        batch_id = self._new_batch_id()
+        source_filename = Path(archive.filename).name or "calculation-images.zip"
+        job = self.job_manager.create_job(
+            job_type=JobType.CALCULATION_BOOK.value,
+            project_no=params.project_no,
+            options={"mode": "calculation_book"},
+            params=params.model_dump(mode="json", exclude_computed_fields=True),
+            batch_id=batch_id,
+            source_filename=source_filename,
+            task_role="计算书",
+            creator_snapshot=creator_snapshot,
+        )
+        self._store_job_upload(job, archive)
+        self.job_manager.update_job(job)
+        summary = self._index_job_summary(job)
+        self._enqueue_job(job.job_id)
+        return {"batch_id": batch_id, "jobs": [summary]}
+
     def create_audit_batch(
         self,
         *,
@@ -900,6 +963,7 @@ class DeliverableApiRuntime:
             'preview': job.artifacts.preview_pdf,
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
+            'calculation_book': job.artifacts.calculation_docx,
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
@@ -1340,6 +1404,12 @@ class DeliverableApiRuntime:
         slot = None
         completion_deferred = False
         try:
+            if job.job_type == JobType.CALCULATION_BOOK:
+                job.work_dir = self.config.get_job_dir(job.job_id)
+                job.work_dir.mkdir(parents=True, exist_ok=True)
+                self._submit_doc_job(job.job_id, lambda: self.job_processor(job))
+                completion_deferred = True
+                return
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
             resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
             job.slot_id = slot.slot_id
@@ -1634,7 +1704,10 @@ class DeliverableApiRuntime:
         owner = job.owner_snapshot.model_dump(mode='json') if job.owner_snapshot else None
         task_kind = 'deliverable'
         job_mode = 'deliverable'
-        if job.job_type == JobType.AUDIT_REPLACE:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            task_kind = 'calculation_book'
+            job_mode = 'calculation_book'
+        elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
                 task_kind = 'audit_check'
@@ -1726,6 +1799,12 @@ class DeliverableApiRuntime:
         })
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
+        elif job.job_type == JobType.CALCULATION_BOOK:
+            payload['calculation_book_output'] = {
+                'figure_count': int(job.progress.details.get('figure_count', 0) or 0),
+                'template_type': str(job.progress.details.get('template_type') or ''),
+                'output_filename': str(job.progress.details.get('output_filename') or ''),
+            }
         elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
@@ -1758,6 +1837,9 @@ class DeliverableApiRuntime:
         report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
         preview_available = bool(job.artifacts.preview_pdf and Path(job.artifacts.preview_pdf).exists())
+        calculation_docx_available = bool(
+            job.artifacts.calculation_docx and Path(job.artifacts.calculation_docx).exists()
+        )
         payload: dict[str, Any] = {
             'package_available': package_available,
             'ied_available': ied_available,
@@ -1765,6 +1847,7 @@ class DeliverableApiRuntime:
             'preview_mode': job.artifacts.preview_mode if preview_available else None,
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
+            'calculation_docx_available': calculation_docx_available,
         }
         if include_urls and job_id is not None:
             payload.update({
@@ -1773,6 +1856,11 @@ class DeliverableApiRuntime:
                 'preview_download_url': f'/api/jobs/{job_id}/download/preview' if preview_available else None,
                 'report_download_url': f'/api/jobs/{job_id}/download/report' if report_available else None,
                 'replaced_dwg_download_url': f'/api/jobs/{job_id}/download/replaced' if replaced_dwg_available else None,
+                'calculation_docx_download_url': (
+                    f'/api/jobs/{job_id}/download/calculation-book'
+                    if calculation_docx_available
+                    else None
+                ),
             })
         return payload
     def _serialize_group_summary(self, group: TaskGroup) -> dict[str, Any]:

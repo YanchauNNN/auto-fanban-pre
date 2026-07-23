@@ -46,6 +46,7 @@ import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
 import type {
   ApiAdapter,
+  CalculationBookOutput,
   CreateBatchPayload,
   DeliverableOutputs,
   FontReplacementMap,
@@ -95,6 +96,10 @@ const AuditCheckWorkspace = lazy(async () => ({
 }));
 const AuditCheckSummaryModal = lazy(async () => ({
   default: (await import("../features/audit-check/AuditCheckSummaryModal")).AuditCheckSummaryModal,
+}));
+const CalculationBookWorkspace = lazy(async () => ({
+  default: (await import("../features/calculation-book/CalculationBookWorkspace"))
+    .CalculationBookWorkspace,
 }));
 const PreviewPdfModal = lazy(async () => ({
   default: (await import("./PreviewPdfModal")).PreviewPdfModal,
@@ -478,6 +483,9 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  createCalculationBook: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
   rememberAuditReplaceFactoryCodes: async () => ({ factoryCodes: [] }),
   listJobs: async () => ({
     total: 1,
@@ -719,6 +727,7 @@ function WorkspacePage() {
   } | null>(null);
 
   const [auditConfigOpen, setAuditConfigOpen] = useState(false);
+  const [calculationConfigOpen, setCalculationConfigOpen] = useState(false);
   const [auditDraftAvailable, setAuditDraftAvailable] = useState(false);
   const [auditSummaryQueue, setAuditSummaryQueue] = useState<JobDetail[]>([]);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
@@ -979,6 +988,7 @@ function WorkspacePage() {
     setDeliverableConfigOpen(false);
     setReplaceConfigOpen(false);
     setAuditConfigOpen(false);
+    setCalculationConfigOpen(false);
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs"] });
     void reactQueryClient.invalidateQueries({ queryKey: ["jobs-activity"] });
   }
@@ -1009,6 +1019,7 @@ function WorkspacePage() {
     setDeliverableConfigOpen(false);
     setReplaceConfigOpen(false);
     setAuditConfigOpen(false);
+    setCalculationConfigOpen(false);
     setPendingReplaceConfig(null);
     setTutorialStepIndex(0);
     setAllJobsModalOpen(false);
@@ -1239,6 +1250,15 @@ function WorkspacePage() {
                     >
                       翻版
                     </button>
+                    <button
+                      className={styles.primaryActionButton}
+                      aria-busy={!actionsReady}
+                      disabled={entryActionsDisabled}
+                      type="button"
+                      onClick={() => setCalculationConfigOpen(true)}
+                    >
+                      计算书
+                    </button>
                     {deliverableDraftAvailable ? (
                       <button
                         className={styles.secondaryActionButton}
@@ -1445,6 +1465,15 @@ function WorkspacePage() {
               schema={schemaQuery.data}
             />
           ) : null}
+          {calculationConfigOpen && schemaQuery.data.calculationBook ? (
+            <CalculationBookWorkspace
+              adapter={adapter}
+              isOpen
+              onBatchCreated={handleBatchCreated}
+              onClose={() => setCalculationConfigOpen(false)}
+              schema={schemaQuery.data}
+            />
+          ) : null}
         </Suspense>
       ) : null}
 
@@ -1470,7 +1499,7 @@ function WorkspacePage() {
         />
       ) : null}
 
-      <AiChatDrawer adapter={adapter} />
+      {!calculationConfigOpen ? <AiChatDrawer adapter={adapter} /> : null}
     </div>
   );
 }
@@ -2059,6 +2088,13 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
+      {detail.taskKind === "calculation_book" ? (
+        <section className={styles.detailSection}>
+          <h2>计算书结果</h2>
+          <CalculationBookResultCard output={detail.calculationBookOutput} />
+        </section>
+      ) : null}
+
       {detail.taskKind === "deliverable" ? (
         <section className={styles.detailSection}>
           <h2>字体处理摘要</h2>
@@ -2391,6 +2427,33 @@ function DeliverableResultCard({
         ) : (
           <p className={styles.muted}>当前没有文档产物。</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function CalculationBookResultCard({
+  output,
+}: {
+  output: CalculationBookOutput | undefined;
+}) {
+  if (!output) {
+    return <p className={styles.muted}>正在整理计算书结果。</p>;
+  }
+
+  const templateLabel =
+    output.templateType === "internal_structure"
+      ? "内部结构计算书"
+      : output.templateType === "nuclear_island_plant"
+        ? "核岛厂房计算书"
+        : output.templateType;
+
+  return (
+    <div className={styles.resultStack}>
+      <div className={styles.resultSummaryGrid}>
+        <InfoBlock label="计算书模板" value={templateLabel} />
+        <InfoBlock label="配筋图数量" value={`${output.figureCount} 张`} />
+        <InfoBlock label="生成文件" value={output.outputFilename} />
       </div>
     </div>
   );
@@ -2850,6 +2913,9 @@ function kindToneClass(kind: TaskKind) {
   if (kind === "audit_replace") {
     return styles.kindReplace;
   }
+  if (kind === "calculation_book") {
+    return styles.kindCalculation;
+  }
   return styles.kindDeliverable;
 }
 
@@ -2873,6 +2939,7 @@ function renderArtifactButtons(
     previewAnnotated: "预览 PDF（纠错标注）",
     report: "下载 report.xlsx",
     replacedDwg: "下载替换后 DWG",
+    calculationDocx: "下载计算书 DOCX",
   };
 
   const previewButton =
@@ -2976,6 +3043,20 @@ function renderArtifactButtons(
         onDownload={onDownload}
       />,
     ];
+  }
+
+  if (job.taskKind === "calculation_book") {
+    return job.artifacts.calculationDocxAvailable &&
+      job.artifacts.calculationDocxDownloadUrl
+      ? [
+      <ArtifactButton
+        href={job.artifacts.calculationDocxDownloadUrl}
+        key="calculation-docx"
+        label={labels.calculationDocx}
+        onDownload={onDownload}
+      />,
+        ]
+      : [];
   }
 
   if (job.taskKind !== "audit_replace") {
