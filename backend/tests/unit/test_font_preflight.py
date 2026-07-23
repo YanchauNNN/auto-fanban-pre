@@ -601,6 +601,30 @@ def test_font_preflight_service_stages_unicode_filename_into_safe_workspace(tmp_
     assert all(ord(ch) < 128 for ch in staged.name)
 
 
+def test_font_preflight_service_uses_short_staging_paths_for_long_filename(tmp_path: Path) -> None:
+    bridge = _FakeBridge()
+    service = FontPreflightService(
+        inventory=cast(Any, _FakeInventory([])),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    source = tmp_path / "input" / f"PC5NWK14001B25C42SDACFC_{'x' * 100}.dwg"
+    source.parent.mkdir()
+    source.write_bytes(b"AC1024-original")
+
+    service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        workspace_dir=source.parent / ".font-preflight",
+    )
+
+    staged = Path(bridge.calls[0]["source_dwg"])
+    assert staged.name.startswith("source-")
+    assert staged.parent.name.startswith("dwg-")
+    assert len(staged.name) <= len("source-") + 16 + len(".dwg")
+    assert len(staged.parent.name) <= len("dwg-") + 16
+
+
 def test_font_preflight_service_copies_replaced_result_back_to_original(tmp_path: Path) -> None:
     bridge = _FakeBridge()
     bridge.touch_source_on_replace = True

@@ -184,12 +184,11 @@ class DerivationEngine:
         return None
 
     def _extract_mid5_last2(self, internal_code: str) -> str | None:
-        """从internal_code提取图册编号（中间5位的末2位）"""
-        parts = internal_code.split("-")
-        if len(parts) >= 2:
-            mid5 = parts[1]
-            if len(mid5) >= 2:
-                return mid5[-2:]
+        """从图纸级内部编码的图册主体末尾提取两位图册号。"""
+        album_base = self._album_base_internal_code(internal_code)
+        match = re.search(r"(?P<album>[0-9]{2})$", album_base)
+        if match:
+            return match.group("album")
         return None
 
     def _replace_pos(self, s: str, start: int, end: int, replacement: str) -> str:

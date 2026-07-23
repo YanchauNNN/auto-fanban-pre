@@ -27,6 +27,7 @@ MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
 AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
+TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
@@ -178,6 +179,7 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
     _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
     _write_file(repo_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME, "schema_version: '1'")
+    _write_file(repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME, "terminal install plan")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "documents_bin" / "~$规范库.xlsx", "office lock")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
@@ -207,6 +209,7 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
         Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
         Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
     ) in rel_pairs
+    assert (Path("documents") / TERMINAL_INSTALL_PLAN_NAME, Path("documents") / TERMINAL_INSTALL_PLAN_NAME) in rel_pairs
     assert (Path("documents_bin"), Path("documents_bin")) in rel_pairs
     assert (Path("bin/ODAFileConverter 25.12.0"), Path("bin/ODAFileConverter 25.12.0")) in rel_pairs
     assert (Path("tools/diagnose_iis_frontend_503.ps1"), Path("tools/diagnose_iis_frontend_503.ps1")) in rel_pairs
@@ -230,6 +233,7 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert 'url="http://127.0.0.1:8000/api/{R:1}"' in frontend_web_config
     assert 'url="/index.html"' in frontend_web_config
     assert (output_root / "backend-runtime" / "API" / "app" / "main.py").exists()
+    assert (output_root / "documents" / TERMINAL_INSTALL_PLAN_NAME).read_text(encoding="utf-8-sig") == "terminal install plan"
     assert (output_root / "tools" / "diagnose_iis_frontend_503.ps1").read_text(
         encoding="utf-8-sig"
     ) == "Write-Host diagnose-503"

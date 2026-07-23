@@ -296,6 +296,41 @@ class TestBasicCluster:
         # 成组后的帧不在 remaining 中
         assert len(remaining) == 0
 
+    def test_removes_non_a4_composite_frame_covering_grouped_a4_pages(self):
+        grouper = _make_grouper()
+        master = make_master_frame(x_offset=0, y_offset=0, page_total=2)
+        slave = make_slave_frame(
+            x_offset=_A4_W + 5,
+            y_offset=0,
+            page_index=2,
+            page_total=2,
+        )
+        composite = FrameMeta(
+            runtime=FrameRuntime(
+                frame_id=str(uuid.uuid4()),
+                source_file=Path("test.dxf"),
+                outer_bbox=BBox(
+                    xmin=-1,
+                    ymin=-1,
+                    xmax=2 * _A4_W + 6,
+                    ymax=_A4_H + 1,
+                ),
+                paper_variant_id="CNPE_A2",
+                sx=1.0,
+                sy=1.0,
+            ),
+            titleblock=TitleblockFields(
+                internal_code=master.titleblock.internal_code,
+                page_index=2,
+                page_total=2,
+            ),
+        )
+
+        remaining, sheet_sets = grouper.group_a4_pages([master, slave, composite])
+
+        assert len(sheet_sets) == 1
+        assert remaining == []
+
 
 class TestSeparateClusters:
     """远距离 A4 图框分属不同簇"""

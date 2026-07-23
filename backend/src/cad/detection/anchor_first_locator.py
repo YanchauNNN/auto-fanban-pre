@@ -67,6 +67,17 @@ class AnchorFirstLocator:
         self.paper_fitter = paper_fitter
         self.paper_variants = self.spec.get_paper_variants()
         self.max_candidates = max_candidates
+        internal_field = self.spec.get_field_definitions().get("internal_code")
+        internal_patterns = internal_field.parse.get("patterns", {}) if internal_field else {}
+        self.internal_code_001_search_re = re.compile(
+            str(
+                internal_patterns.get(
+                    "search_001",
+                    r"[A-Z0-9]{7}-[A-Z0-9]{5}-001",
+                )
+            ),
+            flags=re.IGNORECASE,
+        )
 
         anchor_cfg = self.spec.titleblock_extract.get("anchor", {})
         texts = anchor_cfg.get("search_text", [])
@@ -607,8 +618,9 @@ class AnchorFirstLocator:
             bbox, self.paper_variants
         ):
             scale = (sx + sy) / 2.0
+            scale_matches_candidate = self._scale_matches_candidate(scale)
             # ① 强制校验：比例必须接近 scale_candidates 中的某个整数值
-            if not self._scale_matches_candidate(scale):
+            if not scale_matches_candidate:
                 self.logger.debug(
                     "候选矩形比例 %.3f 不在 scale_candidates 中，跳过 paper=%s",
                     scale,
@@ -642,7 +654,11 @@ class AnchorFirstLocator:
                     roi_profile_id=profile_id,
                     anchor_roi=anchor_roi,
                     fit_error=error,
-                    localized_fallback=relax_scale_candidate_gate,
+                    # Local scanning only relaxes the search scope.  A geometrically
+                    # valid rectangle remains the source of truth for the plot window.
+                    localized_fallback=(
+                        relax_scale_candidate_gate and not scale_matches_candidate
+                    ),
                 )
             )
         return candidates
@@ -1115,7 +1131,7 @@ class AnchorFirstLocator:
         has_later_page_marker = False
         for text in marker_texts:
             compact = self._normalize_anchor(text).upper()
-            if re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact):
+            if self.internal_code_001_search_re.search(compact):
                 has_001_code = True
 
             if self._is_later_page_marker_text(text):
@@ -1157,10 +1173,9 @@ class AnchorFirstLocator:
             windows.append(window)
         return windows
 
-    @staticmethod
-    def _is_001_marker_code_text(text: str) -> bool:
-        compact = AnchorFirstLocator._normalize_anchor(text).upper()
-        return bool(re.search(r"[A-Z0-9]{7}-[A-Z0-9]{5}-001(?:\([A-Z0-9]+\))?", compact))
+    def _is_001_marker_code_text(self, text: str) -> bool:
+        compact = self._normalize_anchor(text).upper()
+        return bool(self.internal_code_001_search_re.search(compact))
 
     @staticmethod
     def _is_later_page_marker_text(text: str) -> bool:

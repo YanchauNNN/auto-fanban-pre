@@ -34,6 +34,8 @@ _NAME_LEADING_SEPARATORS = " \t\r\n:：,，、;-－–—"
 _NAME_TRAILING_SEPARATORS = " \t\r\n:：,，、;-－–—.。"
 _SAME_TEXT_NAME_END_RE = re.compile(r"[;；\r\n]+")
 _YEAR_CAPTURE_PATTERN = r"[\(\[（【]?\s*(?P<year>\d{4})\s*[\)\]）】]?"
+_BRACKETED_STANDARD_NAME_RE = re.compile(r"《(?P<name>[^》\r\n]+)》")
+_EDITION_MARKER_RE = re.compile(r"[\(\[]?\s*(?P<edition>\d{4}\s*年版)\s*[\)\]]?")
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,11 +170,25 @@ class StandardReviewEngine:
         same_line_y_tolerance: float,
         same_text_pairing_enabled: bool = True,
         format_variant_compatibility_enabled: bool = True,
+        same_entity_name_before_code_enabled: bool = True,
+        same_entity_code_before_name_enabled: bool = True,
+        multiple_pairs_in_one_entity_enabled: bool = True,
+        fallback_name_keywords: list[str] | None = None,
+        fallback_min_name_length: int = 4,
     ) -> None:
         self.entries = entries
         self.same_line_y_tolerance = float(same_line_y_tolerance)
         self.same_text_pairing_enabled = bool(same_text_pairing_enabled)
         self.format_variant_compatibility_enabled = bool(format_variant_compatibility_enabled)
+        self.same_entity_name_before_code_enabled = bool(same_entity_name_before_code_enabled)
+        self.same_entity_code_before_name_enabled = bool(same_entity_code_before_name_enabled)
+        self.multiple_pairs_in_one_entity_enabled = bool(multiple_pairs_in_one_entity_enabled)
+        self.fallback_name_keywords = tuple(
+            _normalize_name_key(keyword)
+            for keyword in (fallback_name_keywords or ["标准", "规范", "规程", "图集"])
+            if _normalize_name_key(keyword)
+        )
+        self.fallback_min_name_length = max(1, int(fallback_min_name_length))
         self._base_entries: dict[str, list[StandardEntry]] = {}
         for entry in entries:
             self._base_entries.setdefault(_normalize_code_key(entry.code_without_year), []).append(entry)
@@ -319,6 +335,8 @@ class StandardReviewEngine:
             text = str(item.raw_text or "").strip()
             if not text or self._looks_like_standard_code(text):
                 continue
+            if not self._looks_like_standard_name(text, candidate.entry.expected_name):
+                continue
             item_y = _item_y(item)
             if item_y is None:
                 continue
@@ -335,6 +353,17 @@ class StandardReviewEngine:
     def _looks_like_standard_code(self, text: str) -> bool:
         normalized = _normalize_code_text(text)
         return any(pattern.search(normalized) for _, pattern in self._base_patterns)
+
+    def _looks_like_standard_name(self, text: str, expected_name: str) -> bool:
+        normalized = _normalize_name_key(text)
+        if len(normalized) < self.fallback_min_name_length:
+            return False
+        if _name_matches(text, expected_name):
+            return True
+        stripped = text.strip()
+        if stripped.startswith("《") and "》" in stripped:
+            return True
+        return any(keyword in normalized for keyword in self.fallback_name_keywords)
 
     @staticmethod
     def _compile_code_pattern(
@@ -360,6 +389,81 @@ class StandardReviewEngine:
 
     def _same_item_name(self, candidate: _CodeCandidate) -> str | None:
         normalized = _normalize_code_text(candidate.item.raw_text)
+        bracketed_name = self._bracketed_name_in_same_item(candidate, normalized)
+        if bracketed_name is not None:
+            return bracketed_name
+        if not self.same_entity_code_before_name_enabled:
+            return None
+        return self._name_after_code_in_same_item(candidate, normalized)
+
+    def _bracketed_name_in_same_item(
+        self,
+        candidate: _CodeCandidate,
+        normalized: str,
+    ) -> str | None:
+        matches = list(_BRACKETED_STANDARD_NAME_RE.finditer(normalized))
+        if not matches:
+            return None
+        if not self.multiple_pairs_in_one_entity_enabled:
+            code_count = sum(1 for _, pattern in self._base_patterns for _ in pattern.finditer(normalized))
+            if code_count > 1:
+                return None
+
+        if self.same_entity_name_before_code_enabled:
+            preceding = [
+                match
+                for match in matches
+                if match.end() <= candidate.start
+                and not self._has_standard_code(normalized[match.end() : candidate.start])
+            ]
+            if preceding:
+                return self._name_with_edition_marker(
+                    candidate=candidate,
+                    normalized=normalized,
+                    name=preceding[-1].group("name").strip(),
+                )
+
+        if self.same_entity_code_before_name_enabled:
+            following = [
+                match
+                for match in matches
+                if match.start() >= candidate.end
+                and not self._has_standard_code(normalized[candidate.end : match.start()])
+            ]
+            if following:
+                return self._name_with_edition_marker(
+                    candidate=candidate,
+                    normalized=normalized,
+                    name=following[0].group("name").strip(),
+                )
+        return None
+
+    def _has_standard_code(self, text: str) -> bool:
+        return any(pattern.search(text) for _, pattern in self._base_patterns)
+
+    @staticmethod
+    def _name_with_edition_marker(
+        *,
+        candidate: _CodeCandidate,
+        normalized: str,
+        name: str,
+    ) -> str:
+        expected_key = _normalize_name_key(candidate.entry.expected_name)
+        name_key = _normalize_name_key(name)
+        if not name_key or not expected_key.startswith(name_key):
+            return name
+        expected_suffix = expected_key[len(name_key) :]
+        if not re.fullmatch(r"\d{4}年版", expected_suffix):
+            return name
+        edition_match = _EDITION_MARKER_RE.search(normalized[candidate.end :])
+        if edition_match is None:
+            return name
+        edition = edition_match.group("edition")
+        if _normalize_name_key(edition) != expected_suffix:
+            return name
+        return f"{name}（{edition}）"
+
+    def _name_after_code_in_same_item(self, candidate: _CodeCandidate, normalized: str) -> str | None:
         if candidate.end >= len(normalized):
             return None
         tail = normalized[candidate.end :]

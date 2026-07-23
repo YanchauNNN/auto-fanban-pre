@@ -51,6 +51,7 @@ class _SpecStub:
         self.titleblock_extract = {
             "paper_variants": {
                 "CNPE_A1": {"打印PDF2.pc3文件中对应纸张": "A1"},
+                "CNPE_A1+1/4": {"打印PDF2.pc3文件中对应纸张": "A1+0.25"},
                 "CNPE_A2+1/2": {
                     "打印PDF2.pc3文件中对应纸张": A2_HALF_MEDIA,
                     "打印PDF3.pc3文件中对应纸张": PDF3_A2_HALF_MEDIA,
@@ -72,6 +73,7 @@ class _SpecStub:
     def get_paper_variants(self):
         return {
             "CNPE_A1": self._Variant(841.0, 594.0),
+            "CNPE_A1+1/4": self._Variant(1051.0, 594.0),
             "CNPE_A2+1/2": self._Variant(891.0, 420.0),
             "CNPE_A2+0.5": self._Variant(891.0, 420.0),
         }
@@ -867,6 +869,50 @@ def test_build_task_json_from_frames_and_sheet_sets(tmp_path: Path):
     assert task["sheet_sets"][0]["pages"][0]["paper_media_name"] == "A1"
 
 
+def test_a1_plus_quarter_uses_yaml_window_override_without_changing_global_default(
+    tmp_path: Path,
+):
+    source = tmp_path / "src.dwg"
+    source.write_bytes(b"AC1027rest-of-file")
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="19150003JGS01-001",
+        external_code="HP000311001B25C42SD",
+    )
+    frame.runtime.paper_variant_id = "CNPE_A1+1/4"
+    sheet_set = _make_sheet_set("cluster-1", frame)
+    config = RuntimeConfig.model_validate(
+        {
+            "module5_export": {
+                "plot": {
+                    "paper_variant_window_expand_overrides": {
+                        "CNPE_A1+1/4": {
+                            "bottom_left_expand_ratio": 0.0,
+                            "top_right_expand_ratio": 0.0,
+                        },
+                    },
+                },
+            },
+        },
+    )
+    executor = _make_executor(config=config)
+
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[sheet_set],
+        output_dir=tmp_path / "out",
+    )
+
+    expected_bbox = {"xmin": 0.0, "ymin": 0.0, "xmax": 1000.0, "ymax": 600.0}
+    assert task["plot"]["plot_window_bottom_left_expand_ratio"] == 0.0001
+    assert task["plot"]["plot_window_top_right_expand_ratio"] == 0.0002
+    assert task["frames"][0]["plot_window_bbox"] == expected_bbox
+    assert task["sheet_sets"][0]["pages"][0]["plot_window_bbox"] == expected_bbox
+
+
 def test_a2_half_variant_uses_pdf3_override_for_task_and_plot_resources(
     tmp_path: Path,
     monkeypatch,
@@ -1544,7 +1590,7 @@ def test_default_plot_path_uses_source_window_not_split_dwg(tmp_path: Path):
     assert "PLOT_FROM_SPLIT_DWG" not in result["frames"][0]["flags"]
 
 
-def test_dotnet_engine_error_auto_falls_back_to_lisp(tmp_path: Path):
+def test_dotnet_engine_error_does_not_automatically_fall_back_to_lisp(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")
     frame = _make_frame(
@@ -1555,19 +1601,17 @@ def test_dotnet_engine_error_auto_falls_back_to_lisp(tmp_path: Path):
     )
     runner = _RunnerDotnetFailThenLispSuccessStub()
     executor = _make_executor(runner=runner)
-    result = executor.execute_source_dxf(
-        job_id="job-1",
-        source_dxf=source,
-        frames=[frame],
-        sheet_sets=[],
-        output_dir=tmp_path / "drawings",
-        task_root=tmp_path / "tasks",
-    )
-    assert result["frames"][0]["status"] == "ok"
-    assert any(
-        isinstance(err, str) and err.startswith("DOTNET_TO_LISP_FALLBACK:")
-        for err in result["errors"]
-    )
+    with pytest.raises(RuntimeError, match="dotnet bridge unavailable"):
+        executor.execute_source_dxf(
+            job_id="job-1",
+            source_dxf=source,
+            frames=[frame],
+            sheet_sets=[],
+            output_dir=tmp_path / "drawings",
+            task_root=tmp_path / "tasks",
+        )
+
+    assert len(runner.calls) == 1
 
 
 def test_sheet_page_window_failure_falls_back_only_failed_pages(tmp_path: Path):

@@ -81,7 +81,6 @@ class FactoryIndexMapBridge:
                     "netload_each_run": bool(
                         self.config.module5_export.dotnet_bridge.netload_each_run,
                     ),
-                    "fallback_to_lisp_on_error": False,
                 },
             },
             "factory_index_map": plan.to_bridge_payload(),

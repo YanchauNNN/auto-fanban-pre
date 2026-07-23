@@ -472,6 +472,8 @@ internal sealed class BridgePageTask
 {
     public int PageIndex { get; private set; }
     public BridgeBBox BBox { get; private set; } = BridgeBBox.Empty;
+    public bool HasPlotWindowBBox { get; private set; }
+    public BridgeBBox PlotWindowBBox { get; private set; } = BridgeBBox.Empty;
     public List<BridgePoint> Vertices { get; private set; } = new();
     public string PaperVariantId { get; private set; } = string.Empty;
     public string PaperMediaName { get; private set; } = string.Empty;
@@ -486,6 +488,10 @@ internal sealed class BridgePageTask
         {
             PageIndex = BridgeValue.GetInt(data, "page_index", 0),
             BBox = BridgeBBox.FromObject(data.TryGetValue("bbox", out var bboxObj) ? bboxObj : null),
+            PlotWindowBBox = BridgeBBox.FromObject(
+                data.TryGetValue("plot_window_bbox", out var plotWindowObj) ? plotWindowObj : null
+            ),
+            HasPlotWindowBBox = data.TryGetValue("plot_window_bbox", out var _),
             Vertices = BridgePoint.FromObjectList(data.TryGetValue("vertices", out var verticesObj) ? verticesObj : null),
             PaperVariantId = BridgeValue.GetString(data, "paper_variant_id", string.Empty),
             PaperMediaName = BridgeValue.GetString(data, "paper_media_name", string.Empty),

@@ -159,6 +159,7 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001
         assert runtime_config.module5_export.plot.plot_window_top_right_expand_ratio == 0.0002
+        assert runtime_config.module5_export.plot.paper_variant_window_expand_overrides == {}
         assert runtime_config.module5_export.plot.scale_mode == "manual_integer_from_geometry"
         assert runtime_config.module5_export.plot.scale_integer_rounding == "round"
         assert runtime_config.module5_export.plot.margins_mm == {
@@ -209,6 +210,12 @@ class TestRuntimeConfig:
         config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
 
         assert config.module5_export.plot.paper_variant_pc3_overrides == {}
+        assert config.module5_export.plot.paper_variant_window_expand_overrides == {
+            "CNPE_A1+1/4": {
+                "bottom_left_expand_ratio": 0.0,
+                "top_right_expand_ratio": 0.0,
+            },
+        }
 
     def test_unit_consistency_business_values_are_not_python_defaults(
         self,
@@ -635,6 +642,15 @@ runtime_options:
         assert standard_review.same_line_y_tolerance == 5.0
         assert standard_review.same_text_pairing_enabled is True
         assert standard_review.format_variant_compatibility_enabled is True
+        assert standard_review.pairing.same_entity_name_before_code_enabled is True
+        assert standard_review.pairing.same_entity_code_before_name_enabled is True
+        assert standard_review.pairing.multiple_pairs_in_one_entity_enabled is True
+        assert standard_review.pairing.fallback_name_keywords == ["标准", "规范", "规程", "图集"]
+        assert standard_review.pairing.fallback_min_name_length == 4
+        assert config.audit_check.matching_policy.project_no_date_contexts == [
+            "date_like",
+            "titleblock_date",
+        ]
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""

@@ -276,3 +276,92 @@ def test_standard_review_accepts_standard_code_format_variants() -> None:
     )
 
     assert findings == []
+
+
+def test_standard_review_accepts_bracketed_name_before_code_in_same_entity() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 51058-2014",
+            code_without_year="GB 51058",
+            expected_year="2014",
+            expected_name="核电厂抗震设计标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate([_item("《核电厂抗震设计标准》（GB 51058-2014）")])
+
+    assert findings == []
+
+
+def test_standard_review_pairs_multiple_bracketed_names_in_one_entity() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB/T 14685-2022",
+            code_without_year="GB/T 14685",
+            expected_year="2022",
+            expected_name="建设用卵石、碎石",
+            source_sheet="DatStdItem",
+            source_row=1,
+        ),
+        StandardEntry(
+            canonical_code="GB/T 14684-2022",
+            code_without_year="GB/T 14684",
+            expected_year="2022",
+            expected_name="建设用砂",
+            source_sheet="DatStdItem",
+            source_row=2,
+        ),
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("《建设用卵石、碎石》GB/T 14685-2022、《建设用砂》GB/T 14684-2022")]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_does_not_use_unrelated_nearby_note_when_same_entity_has_name() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50108-2008",
+            code_without_year="GB 50108",
+            expected_year="2008",
+            expected_name="地下工程防水技术规范",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [
+            _item("《地下工程防水技术规范》（GB 50108-2008）", x=0.0, y=100.0),
+            _item("2根DN50钢套管", x=30.0, y=100.0),
+        ]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_accepts_same_entity_name_with_edition_after_code() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB/T 50010-2010",
+            code_without_year="GB/T 50010",
+            expected_year="2010",
+            expected_name="混凝土结构设计标准（2024年版）",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("《混凝土结构设计标准》 (GB/T 50010-2010)（2024年版）")]
+    )
+
+    assert findings == []

@@ -84,12 +84,81 @@ class A4MultipageGrouper(IA4MultipageGrouper):
 
         # 5. 返回未成组的图框（含回退帧） + 成组结果
         remaining_frames = [f for f in frames if f.frame_id not in processed_frame_ids]
+        remaining_frames = self._exclude_composite_frames_for_a4_sheet_sets(
+            remaining_frames,
+            sheet_sets,
+        )
         remaining_frames, marker_sheet_sets = self._group_non_a4_001_marker_pages(
             remaining_frames,
         )
         sheet_sets.extend(marker_sheet_sets)
 
         return remaining_frames, sheet_sets
+
+    def _exclude_composite_frames_for_a4_sheet_sets(
+        self,
+        frames: list[FrameMeta],
+        sheet_sets: list[SheetSet],
+    ) -> list[FrameMeta]:
+        config = self.a4_config.get("composite_frame_filter", {})
+        if not bool(config.get("enabled", True)):
+            return frames
+
+        minimum_contained_pages = max(
+            2,
+            int(config.get("minimum_contained_a4_pages", 2)),
+        )
+        tolerance_ratio = max(
+            0.0,
+            float(config.get("bbox_relative_tolerance", 0.002)),
+        )
+        pages_by_internal: dict[str, list[FrameMeta]] = defaultdict(list)
+        for sheet_set in sheet_sets:
+            master = sheet_set.master_page.frame_meta if sheet_set.master_page else None
+            internal_code = str(master.titleblock.internal_code or "").strip() if master else ""
+            if not internal_code:
+                continue
+            pages_by_internal[internal_code].extend(
+                page.frame_meta
+                for page in sheet_set.pages
+                if page.frame_meta is not None
+            )
+
+        if not pages_by_internal:
+            return frames
+
+        filtered: list[FrameMeta] = []
+        for frame in frames:
+            if self._is_a4_frame(frame):
+                filtered.append(frame)
+                continue
+            internal_code = str(frame.titleblock.internal_code or "").strip()
+            family_pages = pages_by_internal.get(internal_code, [])
+            contained_pages = sum(
+                1
+                for page in family_pages
+                if self._frame_contains(frame, page, tolerance_ratio)
+            )
+            if contained_pages >= minimum_contained_pages:
+                continue
+            filtered.append(frame)
+        return filtered
+
+    @staticmethod
+    def _frame_contains(
+        container: FrameMeta,
+        child: FrameMeta,
+        tolerance_ratio: float,
+    ) -> bool:
+        outer = container.runtime.outer_bbox
+        inner = child.runtime.outer_bbox
+        tolerance = max(0.001, min(outer.width, outer.height) * tolerance_ratio)
+        return (
+            outer.xmin <= inner.xmin + tolerance
+            and outer.ymin <= inner.ymin + tolerance
+            and outer.xmax >= inner.xmax - tolerance
+            and outer.ymax >= inner.ymax - tolerance
+        )
 
     def _is_a4_frame(self, frame: FrameMeta) -> bool:
         """判断是否为A4图框"""

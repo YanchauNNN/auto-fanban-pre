@@ -60,17 +60,24 @@ class TitleblockConsistencyService:
     _SCALE_RE = re.compile(r"1\s*:\s*\d+(?:\.\d+)?", re.IGNORECASE)
     _PAPER_TEXT_RE = re.compile(r"^A\d(?:\+\d(?:/\d+)?)?H?$", re.IGNORECASE)
     _PAPER_SUFFIX_RE = re.compile(r"^\d(?:\+\d(?:/\d+)?)?H?$", re.IGNORECASE)
-    _A4_MARKER_FULL_RE = re.compile(
-        r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})"
-        r"\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|(?P<colon>[：:])\s*(?P<rev_colon>[A-Z0-9]+))",
-        re.IGNORECASE,
-    )
     _A4_MARKER_PAREN_ONLY_RE = re.compile(r"^\(\s*(?P<rev>[A-Z0-9]+)\s*\)$", re.IGNORECASE)
     _A4_MARKER_COLON_ONLY_RE = re.compile(r"^(?P<colon>[：:])\s*(?P<rev>[A-Z0-9]+)$", re.IGNORECASE)
 
     def __init__(self) -> None:
         self.spec = load_spec()
         self.config = get_config()
+        internal_field = self.spec.get_field_definitions().get("internal_code")
+        internal_patterns = internal_field.parse.get("patterns", {}) if internal_field else {}
+        internal_code_search = str(
+            internal_patterns.get(
+                "search_full",
+                r"(?P<code>[A-Z0-9]{7}-[A-Z0-9]{5}-[0-9]{3})",
+            )
+        )
+        self._a4_marker_full_re = re.compile(
+            rf"{internal_code_search}\s*(?:\(\s*(?P<rev_paren>[A-Z0-9]+)\s*\)|(?P<colon>[：:])\s*(?P<rev_colon>[A-Z0-9]+))",
+            re.IGNORECASE,
+        )
         anchor_cfg = self.spec.titleblock_extract.get("anchor", {})
         scale_candidates = anchor_cfg.get("scale_candidates")
         if isinstance(scale_candidates, list) and scale_candidates:
@@ -702,9 +709,8 @@ class TitleblockConsistencyService:
             return expected_text
         return f"{original[:match.start()]}{expected_text}{original[match.end():]}"
 
-    @classmethod
-    def _rewrite_a4_marker_revision(cls, original: str, expected_revision: str) -> str | None:
-        match = cls._A4_MARKER_FULL_RE.search(original or "")
+    def _rewrite_a4_marker_revision(self, original: str, expected_revision: str) -> str | None:
+        match = self._a4_marker_full_re.search(original or "")
         if match is not None:
             if match.group("rev_paren"):
                 replacement = f"{match.group('code')}({expected_revision})"
@@ -713,11 +719,11 @@ class TitleblockConsistencyService:
                 replacement = f"{match.group('code')}{colon}{expected_revision}"
             return f"{original[:match.start()]}{replacement}{original[match.end():]}"
 
-        match = cls._A4_MARKER_PAREN_ONLY_RE.fullmatch((original or "").strip())
+        match = self._A4_MARKER_PAREN_ONLY_RE.fullmatch((original or "").strip())
         if match is not None:
             return f"({expected_revision})"
 
-        match = cls._A4_MARKER_COLON_ONLY_RE.fullmatch((original or "").strip())
+        match = self._A4_MARKER_COLON_ONLY_RE.fullmatch((original or "").strip())
         if match is not None:
             colon = match.group("colon") or "："
             return f"{colon}{expected_revision}"

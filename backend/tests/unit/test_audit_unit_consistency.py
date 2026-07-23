@@ -35,6 +35,7 @@ def test_infer_unit_no_from_project_code_filename() -> None:
     assert infer_unit_no_from_path("20261NS-JGS01.dwg", "2026") == "1"
     assert infer_unit_no_from_path("20261RB-SBS01.dwg", "2026") == "1"
     assert infer_unit_no_from_path("19151NS-JGS01.dwg", "1915") == "1"
+    assert infer_unit_no_from_path("20260SC2JGS01.dwg", "2026") == "0"
 
 
 def test_unit_consistency_flags_wrong_code_and_explicit_unit_text() -> None:
@@ -151,6 +152,21 @@ def test_unit_consistency_supports_2016_album_code() -> None:
 
     assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
         ("20161RC-JGS09-001", "unit_consistency"),
+    ]
+
+
+def test_unit_consistency_supports_compact_internal_code() -> None:
+    findings = _engine().evaluate(
+        project_no="2026",
+        unit_no="0",
+        items=[
+            ScanTextItem(raw_text="20260SC2JGS01-001", entity_type="TEXT"),
+            ScanTextItem(raw_text="20261SC2JGS01-001", entity_type="TEXT"),
+        ],
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("20261SC2JGS01-001", "unit_consistency"),
     ]
 
 

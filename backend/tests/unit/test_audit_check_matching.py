@@ -101,6 +101,22 @@ def test_match_engine_uses_field_context_to_promote_project_sensitive_hits(tmp_p
     assert findings[0].confidence == "high"
 
 
+def test_match_engine_suppresses_project_number_inside_titleblock_date(tmp_path: Path) -> None:
+    workbook = _build_lexicon_workbook(tmp_path / "lexicon.xlsx")
+    lexicon = AuditLexiconLoader().load(workbook)
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="1418",
+        items=[
+            ScanTextItem(raw_text="2026.02", entity_type="ATTRIB", field_context="titleblock_date"),
+            ScanTextItem(raw_text="2026/02", entity_type="ATTRIB", field_context="titleblock_date"),
+        ],
+    )
+
+    assert findings == []
+
+
 def test_match_engine_reports_project_no_inside_digit_prefix_when_suffix_turns_non_ascii(
     tmp_path: Path,
 ) -> None:

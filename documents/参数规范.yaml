@@ -106,7 +106,7 @@ doc_generation:
     module5_dotnet_bridge_dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
     module5_dotnet_bridge_command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
     module5_dotnet_bridge_netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
-    module5_dotnet_bridge_fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
+    module5_plot_paper_variant_window_expand_overrides: { type: object, default: { "CNPE_A1+1/4": { bottom_left_expand_ratio: 0.0, top_right_expand_ratio: 0.0 } }, desc: "按图幅覆盖窗口外扩比例；A1+0.25 固定为原图框窗口" }
     module5_selection_engine: { type: str, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
     module5_selection_mode: { type: str, default: "database", desc: "选集模式：database/crossing（默认database，数据库级几何相交）" }
     module5_bbox_margin_percent: { type: float, default: 0.015, desc: "图框 bbox 扩边比例（用于选集）" }
@@ -536,7 +536,7 @@ doc_generation:
         subitem_name:        { cell: "I15", label: "D15" }
         design_phase:        { cell: "I17", label: "D17" }
         discipline:          { cell: "I19", label: "D19" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25:S25", merge: true }
         album_internal_code: { cell: "N3:S3", merge: true }
         cover_revision:      { cell: "N5:P5", merge: true, write_mode: "append_after_label", label: "版次：" }
@@ -556,8 +556,8 @@ doc_generation:
         design_phase_en:     { cell: "I17", label: "D17", desc: "设计阶段（英文），由映射表生成" }
         discipline:          { cell: "I18", label: "D18", desc: "专业（中文）" }
         discipline_en:       { cell: "I19:S19", label: "D19", desc: "专业（英文），由映射表生成" }
-        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [14, 13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
-        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half", font_sizes: [10, 9, 8, 7, 6, 5], min_font_size: 5, max_chars_per_line: 38, shrink_to_fit_fallback: true }
+        album_title_cn:      { cell: "I21+I22", split_rule: "cn_split_prefer_right_is_cjk_near_half", font_sizes: [13, 12, 11, 10, 9, 8], min_font_size: 8, max_chars_per_line: 16, shrink_to_fit_fallback: true }
+        album_title_en:      { cell: "I23+I24", split_rule: "en_split_on_whitespace_between_words_near_half", font_sizes: [9, 8, 7, 6, 5], min_font_size: 5, max_chars_per_line: 38, shrink_to_fit_fallback: true }
         album_code:          { cell: "I25", label: "D25/D26" }
         album_internal_code: { cell: "M3:S3", merge: true, label: "M2" }
         cover_revision:      { cell: "M5", write_mode: "append_after_label", label: "Rev.:" }
@@ -1002,8 +1002,12 @@ titleblock_extract:
         patterns:
           full:  "^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
           short: "^(?P<prefix>[A-Z0-9]{7})-(?P<mid>[A-Z0-9]{5})$"
+          compact_full: "^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})-(?P<seq>[0-9]{3})$"
+          compact_short: "^(?P<project_no>[0-9]{4})(?P<unit_no>[0-9])(?P<subitem>[A-Z0-9]{3})(?P<mid>[A-Z0-9]{5})$"
+          search_full: "(?P<code>(?:[A-Z0-9]{7}-[A-Z0-9]{5}|[0-9]{5}[A-Z0-9]{8})-[0-9]{3})"
+          search_001: "(?:[A-Z0-9]{7}-[A-Z0-9]{5}|[0-9]{5}[A-Z0-9]{8})-001"
           mid_album: "^(?P<mid3>[A-Z0-9]{3})(?P<album>[0-9]{2})$"
-        note: "mid_album用于从mid字段的末2位提取album_code(图册编号)"
+        note: "full/short用于常规7-5分段编码；compact_full/compact_short用于20260SC2JGS01-001一类紧凑编码；search_full/search_001供续页标记与一致性检测复用；mid_album用于从mid字段的末2位提取album_code(图册编号)"
 
     engineering_no:
       roi: 工程号
@@ -1040,6 +1044,14 @@ titleblock_extract:
       roi: 图纸标题
       parse:
         type: bilingual_split
+        standalone_tilde_merge:
+          enabled: true
+          tokens: ["~", "～"]
+          numeric_gap_pattern: "(?<=\\d)\\s+(?=\\d)"
+          numeric_token_pattern: "\\d+(?:\\.\\d+)?"
+          allow_nonspace_numeric_boundary: true
+          require_host_bbox_overlap: true
+          note: "独立波浪号文字落在同一行宿主文字包围盒内时，将其写回最接近的数字区间（优先替换数字间空格，也支持0°120°）；未安全命中时保留原文字"
         rules:
           - "按y坐标聚类成行"
           - "含CJK字符的行归为中文候选"
@@ -1178,6 +1190,12 @@ a4_multipage:
     gap_threshold_formula: "gap_threshold_factor * min(W_obs, H_obs)"
     gap_threshold_factor: 1.0
     edge_rule: "min_dx < gap_threshold AND min_dy < gap_threshold"
+
+  composite_frame_filter:
+    enabled: true
+    minimum_contained_a4_pages: 2
+    bbox_relative_tolerance: 0.002
+    desc: "A4图族完成后，剔除同内部编码且包住多个A4页的组合外框候选，避免被误拆为独立图纸。"
 
   # --------------------------------------------------------------------------
   # 4.3 Master Page定位

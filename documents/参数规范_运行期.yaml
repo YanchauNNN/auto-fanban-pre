@@ -124,7 +124,6 @@ runtime_options:
       dll_path: { type: str, default: "..\\backend\\src\\cad\\dotnet\\Module5CadBridge\\bin\\Release\\net48\\Module5CadBridge.dll", desc: ".NET 桥接 DLL 路径（可相对运行期配置目录）" }
       command_name: { type: str, default: "M5BRIDGE_RUN", desc: "插件命令名（由 SCR 调用）" }
       netload_each_run: { type: bool, default: true, desc: "每次 CAD 任务前是否执行 NETLOAD" }
-      fallback_to_lisp_on_error: { type: bool, default: true, desc: ".NET 执行失败时是否自动回退 LISP" }
     selection:
       engine: { type: enum, default: "dotnet", desc: "选中+写块执行引擎：dotnet/lisp" }
       mode: { type: enum, default: "database", desc: "选集模式：database/crossing（默认database，采用数据库级几何相交选集）" }
@@ -158,6 +157,11 @@ runtime_options:
         desc: "打印偏移（毫米）；模块5 CAD 路径固定为 0,0"
       plot_window_bottom_left_expand_ratio: { type: float, default: 0.0001, desc: "打印窗口左下角比例外扩；xmin -= width*ratio，ymin -= height*ratio；用于缓解左边/下边压边，默认万分之一" }
       plot_window_top_right_expand_ratio: { type: float, default: 0.0002, desc: "仅打印窗口右上角比例外扩；xmax += width*ratio，ymax += height*ratio；用于缓解上边/右边压边，默认万分之二" }
+      paper_variant_window_expand_overrides:
+        type: object
+        default:
+          CNPE_A1+1/4: { bottom_left_expand_ratio: 0.0, top_right_expand_ratio: 0.0 }
+        desc: "按图幅覆盖打印窗口外扩比例；A1+0.25 使用原图框窗口，避免全局外扩裁切其外框"
       scale_mode: { type: enum, default: "manual_integer_from_geometry", desc: "比例策略：manual_integer_from_geometry/scale_to_fit，默认按几何实测比例取整手动输入" }
       scale_integer_rounding: { type: enum, default: "round", desc: "manual_integer_from_geometry 的整数化方式：floor/round/ceil；先按小数点后1位四舍五入，再执行整数化，默认 round" }
       margins_mm:
@@ -247,6 +251,10 @@ runtime_options:
       allow_embedded_match_in_titleblock: { type: bool, default: true, desc: "titleblock_* 语义中允许嵌入命中" }
       suppress_project_no_in_date_like: { type: bool, default: true, desc: "日期语义中抑制项目号命中" }
       suppress_project_no_in_dimension_like: { type: bool, default: true, desc: "尺寸语义中抑制项目号命中" }
+      project_no_date_contexts:
+        type: "list[str]"
+        default: ["date_like", "titleblock_date"]
+        desc: "项目号日期抑制适用的语义上下文；仅当全文同时满足 date_like 正则时生效"
     unit_consistency:
       enabled: { type: bool, default: true, desc: "是否启用项目号+机组号一致性纠错" }
       project_units:
@@ -277,8 +285,8 @@ runtime_options:
         desc: "前端翻版目标机组号/岛号选项默认标签后缀；仅用于显示，不参与纠错搜索"
       code_pattern:
         type: str
-        default: "(?<!\\d){project_no}(?P<unit_no>[0-9])(?P<factory_code>[A-Z0-9]{2,4})-[A-Z]{3}\\d{2}(?:-\\d{3})?"
-        desc: "内部编码中的机组号提取规则；{project_no} 会替换为当前项目号；支持 JGS/SBS 等三字母图册类型"
+        default: "(?<!\\d){project_no}(?P<unit_no>[0-9])(?P<factory_code>[A-Z0-9]{2,4})-?[A-Z]{3}\\d{2}(?:-\\d{3})?"
+        desc: "内部编码中的机组号提取规则；{project_no} 会替换为当前项目号；支持常规20261RB-JGS11及紧凑20260SC2JGS01格式"
       explicit_unit_text_pattern:
         type: str
         default: "(?P<unit_no>[0-9])\\s*号\\s*(?:机组|岛)"
@@ -324,6 +332,27 @@ runtime_options:
         type: bool
         default: true
         desc: "标准号格式兼容：允许空格/换行、全角或缺失斜杠、常见连字符/破折号、括号年限等写法差异"
+      pairing:
+        same_entity_name_before_code_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中《标准名称》（标准号）的名称在前写法"
+        same_entity_code_before_name_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中标准号：标准名称的名称在后写法"
+        multiple_pairs_in_one_entity_enabled:
+          type: bool
+          default: true
+          desc: "支持同一完整文本实体中连续多组标准名称和标准号按顺序一一配对"
+        fallback_name_keywords:
+          type: "list[str]"
+          default: ["标准", "规范", "规程", "图集"]
+          desc: "跨实体同 y 值兜底时可作为规范名称候选的关键词；实际期望名称始终可参与匹配"
+        fallback_min_name_length:
+          type: int
+          default: 4
+          desc: "跨实体同 y 值兜底名称候选的最小规范化字符数"
 
   # --------------------------------------------------------------------------
   # 5) 翻版厂房索引图模板映射

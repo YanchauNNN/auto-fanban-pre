@@ -71,7 +71,6 @@ class Module5DotNetBridgeConfig(BaseModel):
     )
     command_name: str = "M5BRIDGE_RUN"
     netload_each_run: bool = True
-    fallback_to_lisp_on_error: bool = True
 
 
 class Module5SelectionConfig(BaseModel):
@@ -109,6 +108,9 @@ class Module5PlotConfig(BaseModel):
     )
     plot_window_bottom_left_expand_ratio: float = 0.0001
     plot_window_top_right_expand_ratio: float = 0.0002
+    paper_variant_window_expand_overrides: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+    )
     scale_mode: str = "manual_integer_from_geometry"
     scale_integer_rounding: str = "round"
     margins_mm: dict[str, float] = Field(
@@ -210,6 +212,9 @@ class AuditCheckMatchingPolicyConfig(BaseModel):
     allow_embedded_match_in_titleblock: bool = True
     suppress_project_no_in_date_like: bool = True
     suppress_project_no_in_dimension_like: bool = True
+    project_no_date_contexts: list[str] = Field(
+        default_factory=lambda: ["date_like", "titleblock_date"],
+    )
 
 
 class AuditCheckUnitConsistencyConfig(BaseModel):
@@ -229,6 +234,18 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     short_factory_code_requires_observed_album_factory: bool = True
 
 
+class AuditCheckStandardReviewPairingConfig(BaseModel):
+    """规范审查的标准号-名称配对策略。"""
+
+    same_entity_name_before_code_enabled: bool = True
+    same_entity_code_before_name_enabled: bool = True
+    multiple_pairs_in_one_entity_enabled: bool = True
+    fallback_name_keywords: list[str] = Field(
+        default_factory=lambda: ["标准", "规范", "规程", "图集"],
+    )
+    fallback_min_name_length: int = 4
+
+
 class AuditCheckStandardReviewConfig(BaseModel):
     """纠错规范审查配置"""
 
@@ -238,6 +255,9 @@ class AuditCheckStandardReviewConfig(BaseModel):
     same_line_y_tolerance: float = 5.0
     same_text_pairing_enabled: bool = True
     format_variant_compatibility_enabled: bool = True
+    pairing: AuditCheckStandardReviewPairingConfig = Field(
+        default_factory=AuditCheckStandardReviewPairingConfig,
+    )
 
 
 class AuditCheckConfig(BaseModel):
