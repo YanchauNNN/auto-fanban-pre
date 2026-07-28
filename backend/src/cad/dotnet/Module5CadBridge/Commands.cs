@@ -176,6 +176,8 @@ internal sealed class BridgeTask
     public Dictionary<string, string> FontCompatibilityReplacements { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public List<string> FontCompatibilityExemptStyleNames { get; private set; } = new();
+    public List<BridgeTitleblockStyleReplacement> TitleblockPrintStyleReplacements { get; private set; } = new();
+    public List<BridgeEmptyStyleTargetRegion> TitleblockPrintRegions { get; private set; } = new();
     public Dictionary<string, string> EmptyStyleReplacement { get; private set; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     public List<BridgeEmptyStyleTargetRegion> EmptyStyleTargetRegions { get; private set; } = new();
@@ -256,6 +258,36 @@ internal sealed class BridgeTask
             if (targetDict != null)
             {
                 task.ReplacementTargets.Add(BridgeReplacementTarget.FromDictionary(targetDict));
+            }
+        }
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(
+            root.TryGetValue("titleblock_print_style_replacements", out var titleblockReplacementsObj)
+                ? titleblockReplacementsObj
+                : null
+        ))
+        {
+            var replacementDict = BridgeValue.AsDictionary(item);
+            if (replacementDict != null)
+            {
+                task.TitleblockPrintStyleReplacements.Add(
+                    BridgeTitleblockStyleReplacement.FromDictionary(replacementDict)
+                );
+            }
+        }
+
+        foreach (var item in BridgeValue.AsObjectEnumerable(
+            root.TryGetValue("titleblock_print_regions", out var titleblockRegionsObj)
+                ? titleblockRegionsObj
+                : null
+        ))
+        {
+            var regionDict = BridgeValue.AsDictionary(item);
+            if (regionDict != null)
+            {
+                task.TitleblockPrintRegions.Add(
+                    BridgeEmptyStyleTargetRegion.FromDictionary(regionDict)
+                );
             }
         }
 
@@ -445,6 +477,23 @@ internal sealed class BridgeReplacementTarget
             BigFontName = BridgeValue.GetString(data, "bigfont_name", string.Empty),
             Kind = BridgeValue.GetString(data, "kind", string.Empty),
             UsedInBlock = BridgeValue.GetBool(data, "used_in_block", false),
+        };
+    }
+}
+
+internal sealed class BridgeTitleblockStyleReplacement
+{
+    public string StyleName { get; private set; } = string.Empty;
+    public string Font { get; private set; } = string.Empty;
+    public string BigFont { get; private set; } = string.Empty;
+
+    public static BridgeTitleblockStyleReplacement FromDictionary(Dictionary<string, object> data)
+    {
+        return new BridgeTitleblockStyleReplacement
+        {
+            StyleName = BridgeValue.GetString(data, "style_name", string.Empty),
+            Font = BridgeValue.GetString(data, "font", string.Empty),
+            BigFont = BridgeValue.GetString(data, "bigfont", string.Empty),
         };
     }
 }

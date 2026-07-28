@@ -96,6 +96,7 @@ class Module5PlotConfig(BaseModel):
         default_factory=lambda: {
             "red_wider": "fanban_monochrome.ctb",
             "same_width": "fanban_monochrome-same width.ctb",
+            "grayscale": "fanban_monochrome-huidu.ctb",
             "review_white": "打白图.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
@@ -407,6 +408,10 @@ class FontPreflightRuntimeConfig(BaseModel):
     font_compatibility_exempt_style_names: list[str] = Field(
         default_factory=lambda: ["宋体", "ST"],
     )
+    titleblock_print_style_replacements: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+    )
+    titleblock_print_region_padding_mm: float = 1.0
     enable_fontmap: bool = True
     verify_after_replace: bool = True
     default_fontalt_by_kind: dict[str, str] = Field(
@@ -437,6 +442,7 @@ class PlotAssetsConfig(BaseModel):
         default_factory=lambda: [
             "fanban_monochrome.ctb",
             "fanban_monochrome-same width.ctb",
+            "fanban_monochrome-huidu.ctb",
             "打白图.ctb",
             "结构二室大图.ctb",
         ],

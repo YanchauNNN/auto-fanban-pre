@@ -537,6 +537,62 @@ describe("recent jobs area", () => {
     expect(mockListJobs).toHaveBeenCalledWith("succeeded", 0, 100, "created_at");
   });
 
+  it("shows the developer contact notice inside failed cards in the all-jobs view", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 2,
+      items: [
+        {
+          ...makeSingleJob(1, "failed-job.dwg"),
+          status: "failed" as const,
+        },
+        makeSingleJob(2, "success-job.dwg"),
+      ],
+    });
+
+    render(<App />);
+
+    await screen.findAllByTestId("recent-job-card");
+    const failedCard = screen
+      .getByText("failed-job.dwg")
+      .closest<HTMLElement>('[data-testid="recent-job-card"]');
+    const succeededCard = screen
+      .getByText("success-job.dwg")
+      .closest<HTMLElement>('[data-testid="recent-job-card"]');
+    if (!failedCard || !succeededCard) {
+      throw new Error("expected recent job cards");
+    }
+
+    expect(
+      within(failedCard).getByText(
+        "点击“查看任务”查看错误原因进行检查，如有需要请联系开发人员：王任超。",
+      ),
+    ).toBeInTheDocument();
+    expect(within(succeededCard).queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("does not duplicate the developer contact notice when failed jobs are selected", async () => {
+    mockListJobs.mockResolvedValue({
+      total: 1,
+      items: [
+        {
+          ...makeSingleJob(1, "failed-job.dwg"),
+          status: "failed" as const,
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findAllByTestId("recent-job-card");
+    await user.click(screen.getByRole("button", { name: "失败" }));
+    expect(
+      await screen.findAllByText(
+        "点击“查看任务”查看错误原因进行检查，如有需要请联系开发人员：王任超。",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("shows eight cards by default and opens the rest in a modal", async () => {
     const jobs = Array.from({ length: 10 }, (_, index) =>
       makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
@@ -869,7 +925,26 @@ describe("job cards", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { level: 2, name: "问题原因" })).toBeInTheDocument();
+    const diagnosticsHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "问题原因",
+    });
+    const quickDownloadsHeading = screen.getByRole("heading", {
+      level: 2,
+      name: "快捷下载",
+    });
+    const overviewHeading = screen.getByRole("heading", {
+      level: 2,
+      name: "任务包概览",
+    });
+    expect(
+      diagnosticsHeading.compareDocumentPosition(quickDownloadsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      diagnosticsHeading.compareDocumentPosition(overviewHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.getByText("检测到重复编码")).toBeInTheDocument();
     expect(screen.getByText("外部编码 PC5NPM12004B25C42SD")).toBeInTheDocument();
     expect(screen.getByText("18185NP-JGS44-024")).toBeInTheDocument();
@@ -913,6 +988,49 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
+  it("shows failure diagnostics before quick downloads on single-job detail pages", async () => {
+    window.history.pushState({}, "", "/jobs/failed-single-job");
+    mockGetJobDetail.mockResolvedValue({
+      ...makeSingleJob(20, "18185HL.dwg"),
+      jobId: "failed-single-job",
+      status: "failed",
+      stage: "PACKAGE_ZIP",
+      message: "CAD 导出失败",
+      startedAt: "2026-07-27T09:00:10+08:00",
+      currentFile: "18185HL.dwg",
+      flags: ["CAD结果错误:打印媒体缺失"],
+      errors: [],
+      diagnostics: [
+        {
+          kind: "cad_output_missing",
+          severity: "error",
+          title: "CAD 导出或产物缺失",
+          summary: "1 张图纸存在 CAD 导出、PDF 或 DWG 产物缺失问题。",
+          suggestion: "请检查 CAD 环境和打印资源。",
+          details: [],
+          rawItems: ["CAD结果错误:打印媒体缺失"],
+        },
+      ],
+      topWrongTexts: [],
+      topInternalCodes: [],
+    });
+
+    render(<App />);
+
+    const diagnosticsHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "问题原因",
+    });
+    const quickDownloadsHeading = screen.getByRole("heading", {
+      level: 2,
+      name: "快捷下载",
+    });
+    expect(
+      diagnosticsHeading.compareDocumentPosition(quickDownloadsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
     window.history.pushState({}, "", "/jobs/group-downloads");
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);

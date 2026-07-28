@@ -153,6 +153,16 @@ class FontPreflightService:
             if font_compatibility_mode
             else []
         )
+        titleblock_print_style_replacements = (
+            self._resolve_titleblock_print_style_replacements()
+            if font_compatibility_mode
+            else []
+        )
+        titleblock_print_regions = (
+            self._build_titleblock_print_regions(frames or [])
+            if titleblock_print_style_replacements
+            else []
+        )
         empty_style_replacement = (
             self._resolve_empty_style_replacement()
             if font_compatibility_mode
@@ -198,6 +208,9 @@ class FontPreflightService:
             and bool(list(preflight_result.get("missing_fonts") or []))
         )
         should_run_replace_pass = should_replace_missing or bool(font_compatibility_replacements)
+        should_run_replace_pass = should_run_replace_pass or bool(
+            titleblock_print_style_replacements and titleblock_print_regions
+        )
         should_run_replace_pass = should_run_replace_pass or bool(empty_style_replacement)
         if should_replace_missing:
             effective_replacements = self.resolve_replacement_fonts(
@@ -227,6 +240,8 @@ class FontPreflightService:
                 replacement_targets=replacement_targets,
                 font_compatibility_replacements=font_compatibility_replacements,
                 font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
+                titleblock_print_style_replacements=titleblock_print_style_replacements,
+                titleblock_print_regions=titleblock_print_regions,
                 empty_style_replacement=empty_style_replacement,
                 empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
@@ -243,6 +258,8 @@ class FontPreflightService:
                 replacement_targets=[],
                 font_compatibility_replacements=font_compatibility_replacements,
                 font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
+                titleblock_print_style_replacements=titleblock_print_style_replacements,
+                titleblock_print_regions=titleblock_print_regions,
                 empty_style_replacement=empty_style_replacement,
                 empty_style_target_regions=empty_style_target_regions,
                 workspace_dir=workspace,
@@ -268,6 +285,19 @@ class FontPreflightService:
         normalized_result["font_compatibility_exempt_style_names"] = list(
             raw.get("font_compatibility_exempt_style_names")
             or font_compatibility_exempt_style_names
+        )
+        normalized_result["titleblock_print_style_replacements"] = list(
+            raw.get("titleblock_print_style_replacements")
+            or titleblock_print_style_replacements
+        )
+        normalized_result["titleblock_print_regions_count"] = int(
+            raw.get("titleblock_print_regions_count", len(titleblock_print_regions)) or 0
+        )
+        normalized_result["titleblock_print_entity_replaced_count"] = int(
+            raw.get("titleblock_print_entity_replaced_count", 0) or 0
+        )
+        normalized_result["titleblock_print_shared_skipped_count"] = int(
+            raw.get("titleblock_print_shared_skipped_count", 0) or 0
         )
         normalized_result["empty_style_replacement"] = dict(
             raw.get("empty_style_replacement") or empty_style_replacement
@@ -404,6 +434,82 @@ class FontPreflightService:
             seen.add(key)
             results.append(style_name)
         return results
+
+    def _resolve_titleblock_print_style_replacements(self) -> list[dict[str, str]]:
+        configured = getattr(
+            self.config.font_preflight,
+            "titleblock_print_style_replacements",
+            {},
+        )
+        if not isinstance(configured, dict):
+            return []
+        results: list[dict[str, str]] = []
+        for raw_style_name, raw_replacement in configured.items():
+            style_name = str(raw_style_name or "").strip()
+            if not style_name or not isinstance(raw_replacement, dict):
+                continue
+            font_name = Path(str(raw_replacement.get("font") or "").strip()).name
+            bigfont_name = Path(str(raw_replacement.get("bigfont") or "").strip()).name
+            if not font_name and not bigfont_name:
+                continue
+            for candidate in (font_name, bigfont_name):
+                if candidate and not self._is_runtime_font_available(candidate):
+                    raise ValueError(
+                        f"titleblock_print_style_replacements target is unavailable: {candidate}"
+                    )
+            results.append(
+                {
+                    "style_name": style_name,
+                    "font": font_name,
+                    "bigfont": bigfont_name,
+                }
+            )
+        return results
+
+    def _build_titleblock_print_regions(
+        self,
+        frames: list[FrameMeta],
+    ) -> list[dict[str, Any]]:
+        if not frames:
+            return []
+
+        spec = load_spec()
+        padding_mm = max(
+            0.0,
+            float(
+                getattr(
+                    self.config.font_preflight,
+                    "titleblock_print_region_padding_mm",
+                    0.0,
+                )
+                or 0.0
+            ),
+        )
+        regions: list[dict[str, Any]] = []
+        for frame in frames:
+            profile_id = frame.runtime.roi_profile_id or "BASE10"
+            profile = spec.get_roi_profile(profile_id)
+            if profile is None or not profile.fields:
+                continue
+            sx = float(frame.runtime.sx or 1.0)
+            sy = float(frame.runtime.sy or 1.0)
+            max_left = max(float(offset[1]) for offset in profile.fields.values())
+            max_top = max(float(offset[3]) for offset in profile.fields.values())
+            outer = frame.runtime.outer_bbox
+            regions.append(
+                {
+                    "frame_id": frame.frame_id,
+                    "field_key": "titleblock_print",
+                    "roi_name": "titleblock",
+                    "bbox": {
+                        "xmin": outer.xmax - (max_left + padding_mm) * sx,
+                        "ymin": outer.ymin,
+                        "xmax": outer.xmax,
+                        "ymax": outer.ymin + (max_top + padding_mm) * sy,
+                    },
+                }
+            )
+        return regions
 
     def _build_empty_style_target_regions(
         self,

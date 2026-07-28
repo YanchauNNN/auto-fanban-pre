@@ -95,6 +95,21 @@ class TitleblockExtractor(ITitleblockExtractor):
         self.standalone_tilde_require_bbox_overlap = bool(
             tilde_merge.get("require_host_bbox_overlap", True)
         )
+        external_parse = (
+            self.field_defs.get("external_code").parse
+            if self.field_defs.get("external_code")
+            else {}
+        )
+        external_duplicate = external_parse.get("overlap_duplicate", {})
+        self.external_duplicate_min_bbox_overlap_ratio = float(
+            external_duplicate.get("min_bbox_overlap_ratio", 0.80)
+        )
+        self.external_duplicate_min_center_tolerance = float(
+            external_duplicate.get("min_center_tolerance", 0.5)
+        )
+        self.external_duplicate_center_height_ratio = float(
+            external_duplicate.get("center_tolerance_height_ratio", 0.05)
+        )
         internal_parse = (
             self.field_defs.get("internal_code").parse
             if self.field_defs.get("internal_code")
@@ -907,18 +922,18 @@ class TitleblockExtractor(ITitleblockExtractor):
         right_text = self._normalize_external_candidate(right.text or "", header_hint)
         if not left_text or left_text != right_text:
             return False
+        if left.bbox is not None and right.bbox is not None:
+            return self._bbox_overlap_ratio(left.bbox, right.bbox) >= (
+                self.external_duplicate_min_bbox_overlap_ratio
+            )
         left_x, left_y = self._item_center(left)
         right_x, right_y = self._item_center(right)
         tol = max(
-            0.5,
-            (left.text_height or 0.0) * 0.05,
-            (right.text_height or 0.0) * 0.05,
+            self.external_duplicate_min_center_tolerance,
+            (left.text_height or 0.0) * self.external_duplicate_center_height_ratio,
+            (right.text_height or 0.0) * self.external_duplicate_center_height_ratio,
         )
-        if abs(left_x - right_x) > tol or abs(left_y - right_y) > tol:
-            return False
-        if left.bbox is None or right.bbox is None:
-            return True
-        return self._bbox_overlap_ratio(left.bbox, right.bbox) >= 0.80
+        return abs(left_x - right_x) <= tol and abs(left_y - right_y) <= tol
 
     @staticmethod
     def _prefer_external_code_item(candidate: TextItem, existing: TextItem) -> bool:

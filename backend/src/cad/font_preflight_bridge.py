@@ -41,6 +41,8 @@ class FontPreflightBridge:
         replacement_targets: list[dict[str, Any]] | None,
         font_compatibility_replacements: dict[str, str] | None = None,
         font_compatibility_exempt_style_names: list[str] | None = None,
+        titleblock_print_style_replacements: list[dict[str, str]] | None = None,
+        titleblock_print_regions: list[dict[str, Any]] | None = None,
         empty_style_replacement: dict[str, str] | None = None,
         empty_style_target_regions: list[dict[str, Any]] | None = None,
         workspace_dir: Path,
@@ -56,6 +58,8 @@ class FontPreflightBridge:
             replacement_targets=replacement_targets,
             font_compatibility_replacements=font_compatibility_replacements,
             font_compatibility_exempt_style_names=font_compatibility_exempt_style_names,
+            titleblock_print_style_replacements=titleblock_print_style_replacements,
+            titleblock_print_regions=titleblock_print_regions,
             empty_style_replacement=empty_style_replacement,
             empty_style_target_regions=empty_style_target_regions,
         )
@@ -72,6 +76,8 @@ class FontPreflightBridge:
         replacement_targets: list[dict[str, Any]] | None = None,
         font_compatibility_replacements: dict[str, str] | None = None,
         font_compatibility_exempt_style_names: list[str] | None = None,
+        titleblock_print_style_replacements: list[dict[str, str]] | None = None,
+        titleblock_print_regions: list[dict[str, Any]] | None = None,
         empty_style_replacement: dict[str, str] | None = None,
         empty_style_target_regions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -83,6 +89,7 @@ class FontPreflightBridge:
             bool(replacement_font)
             or bool(replacement_fonts)
             or bool(font_compatibility_replacements)
+            or bool(titleblock_print_style_replacements and titleblock_print_regions)
             or bool(empty_style_replacement)
         )
 
@@ -99,6 +106,8 @@ class FontPreflightBridge:
             "replacement_targets": replacement_targets or [],
             "font_compatibility_replacements": font_compatibility_replacements or {},
             "font_compatibility_exempt_style_names": font_compatibility_exempt_style_names or [],
+            "titleblock_print_style_replacements": titleblock_print_style_replacements or [],
+            "titleblock_print_regions": titleblock_print_regions or [],
             "empty_style_replacement": empty_style_replacement or {},
             "empty_style_target_regions": empty_style_target_regions or [],
             "engines": {

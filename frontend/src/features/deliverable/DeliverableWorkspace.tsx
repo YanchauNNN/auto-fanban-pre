@@ -85,6 +85,7 @@ const LAST_FONT_REPLACEMENTS_STORAGE_KEY = "auto-fanban.last-font-replacements";
 const PLOT_STYLE_OPTIONS = [
   { key: "red_wider", label: "红色更宽" },
   { key: "same_width", label: "同线宽" },
+  { key: "grayscale", label: "灰度" },
   { key: "review_white", label: "交审图" },
 ] as const;
 

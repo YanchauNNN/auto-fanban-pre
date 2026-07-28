@@ -1225,6 +1225,32 @@ def test_build_task_json_allows_explicit_plot_style_override(tmp_path: Path):
     assert task["plot"]["ctb_name"] == "打白图.ctb"
 
 
+def test_build_task_json_allows_grayscale_plot_style_override(tmp_path: Path):
+    source = tmp_path / "src.dxf"
+    source.write_text("0\nEOF\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    frame = _make_frame(
+        frame_id="f-1",
+        source_file=source,
+        internal_code="I-001",
+        external_code="E001",
+    )
+
+    executor = _make_executor(config=RuntimeConfig())
+    task = executor.build_task_json(
+        job_id="job-1",
+        source_dxf=source,
+        frames=[frame],
+        sheet_sets=[],
+        output_dir=output_dir,
+        plot_style_key="grayscale",
+    )
+
+    assert task["plot"]["plot_style_key"] == "grayscale"
+    assert task["plot"]["ctb_name"] == "fanban_monochrome-huidu.ctb"
+
+
 def test_result_json_backfill_paths(tmp_path: Path):
     source = tmp_path / "src.dxf"
     source.write_text("0\nEOF\n", encoding="utf-8")

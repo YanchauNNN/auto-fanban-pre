@@ -152,9 +152,11 @@ class TestRuntimeConfig:
         assert runtime_config.module5_export.plot.plot_style_profiles == {
             "red_wider": "fanban_monochrome.ctb",
             "same_width": "fanban_monochrome-same width.ctb",
+            "grayscale": "fanban_monochrome-huidu.ctb",
             "review_white": "打白图.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
+        assert "fanban_monochrome-huidu.ctb" in runtime_config.plot_assets.managed_ctb_names
         assert runtime_config.module5_export.plot.paper_variant_pc3_overrides == {}
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001
@@ -577,6 +579,38 @@ runtime_options:
             "internal_code",
             "page_info",
         ]
+
+    def test_runtime_config_reads_titleblock_print_style_replacements(
+        self,
+        tmp_path: Path,
+    ):
+        """图签打印字体替换及区域外扩应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    titleblock_print_style_replacements:
+      type: object
+      default:
+        "宋体": { font: "tssdeng.shx", bigfont: "tssdchn.shx" }
+    titleblock_print_region_padding_mm:
+      type: float
+      default: 1.5
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.titleblock_print_style_replacements == {
+            "宋体": {
+                "font": "tssdeng.shx",
+                "bigfont": "tssdchn.shx",
+            }
+        }
+        assert config.font_preflight.titleblock_print_region_padding_mm == 1.5
 
     def test_runtime_config_reads_font_compatibility_exempt_style_names(
         self,

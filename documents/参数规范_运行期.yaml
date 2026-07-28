@@ -86,7 +86,7 @@ runtime_options:
     pmp_name: { type: str, default: "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp", desc: "托管打印资源使用的 PMP 文件名" }
     managed_ctb_names:
       type: "list[str]"
-      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "打白图.ctb", "结构二室大图.ctb"]
+      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "fanban_monochrome-huidu.ctb", "打白图.ctb", "结构二室大图.ctb"]
       desc: "系统需要确保部署到 AutoCAD 可见目录的托管 CTB 文件名集合"
     min_valid_ctb_bytes: { type: int, default: 512, desc: "CTB 文件最小有效体积；小于该阈值视为无效资源" }
     source_priority:
@@ -139,12 +139,13 @@ runtime_options:
         default: {}
         desc: "特殊图幅到备用 PC3 的映射；打印PDF2 已包含 A2+0.5(921.00 x 450.00 毫米) 媒体，默认无需切换备用 PC3"
       ctb_name: { type: str, default: "fanban_monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
-      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/review_white/steel_liner" }
+      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/grayscale/review_white/steel_liner" }
       plot_style_profiles:
         type: object
         default:
           red_wider: "fanban_monochrome.ctb"
           same_width: "fanban_monochrome-same width.ctb"
+          grayscale: "fanban_monochrome-huidu.ctb"
           review_white: "打白图.ctb"
           steel_liner: "结构二室大图.ctb"
         desc: "打印样式 key 到 CTB 文件名的映射"
@@ -561,6 +562,15 @@ runtime_options:
       type: "list[str]"
       default: ["宋体", "ST"]
       desc: "字体兼容模式启用时的文字样式名豁免列表；命中后不执行 hztxt 等兼容映射，也不执行空 FileName 样式兜底写入"
+    titleblock_print_style_replacements:
+      type: object
+      default:
+        "宋体": { font: "tssdeng.shx", bigfont: "tssdchn.shx" }
+      desc: "仅在字体兼容模式的任务副本中，对图签范围内使用指定样式且 FileName 为空的文字切换到专用克隆样式；不改原图、不全局修改宋体/ST、不改变文字内容、坐标、对齐、宽度或插入点，用于避免 AutoCAD 打印时按系统宋体重新排版"
+    titleblock_print_region_padding_mm:
+      type: float
+      default: 1.0
+      desc: "图签字体打印一致性目标区域相对当前 ROI profile 全字段包络的外扩量，单位 mm"
     enable_fontmap:
       type: bool
       default: true

@@ -46,6 +46,8 @@ internal sealed class FontPreflightProcessor
         var missingFonts = new List<Dictionary<string, object>>();
         var replacedStyleCount = 0;
         var replacedEntityCount = 0;
+        var titleblockPrintEntityReplacedCount = 0;
+        var titleblockPrintSharedSkippedCount = 0;
         var emptyStyleStylePatchedCount = 0;
         var emptyStyleSharedSkippedCount = 0;
         var emptyStyleSharedStyles = new List<string>();
@@ -135,6 +137,12 @@ internal sealed class FontPreflightProcessor
 
             if (replaceMissing)
             {
+                titleblockPrintEntityReplacedCount = ApplyTitleblockPrintStyleReplacements(
+                    db,
+                    tr,
+                    result,
+                    out titleblockPrintSharedSkippedCount
+                );
                 replacedEntityCount = ApplyEmptyStyleEntityReplacements(
                     db,
                     tr,
@@ -176,7 +184,12 @@ internal sealed class FontPreflightProcessor
         result.AdditionalData["detected_style_count"] = detectedStyleCount;
         result.AdditionalData["missing_style_count"] = missingFonts.Count;
         result.AdditionalData["missing_fonts"] = missingFonts;
-        result.AdditionalData["font_replacement_applied"] = replaceMissing && (replacedStyleCount > 0 || replacedEntityCount > 0);
+        result.AdditionalData["font_replacement_applied"] = replaceMissing
+            && (
+                replacedStyleCount > 0
+                || replacedEntityCount > 0
+                || titleblockPrintEntityReplacedCount > 0
+            );
         result.AdditionalData["replacement_font"] = string.IsNullOrWhiteSpace(_task.ReplacementFont)
             ? string.Empty
             : _task.ReplacementFont;
@@ -185,6 +198,20 @@ internal sealed class FontPreflightProcessor
             new Dictionary<string, string>(_task.FontCompatibilityReplacements);
         result.AdditionalData["font_compatibility_exempt_style_names"] =
             _task.FontCompatibilityExemptStyleNames.ToList();
+        result.AdditionalData["titleblock_print_style_replacements"] =
+            _task.TitleblockPrintStyleReplacements
+                .Select(item => new Dictionary<string, string>
+                {
+                    ["style_name"] = item.StyleName,
+                    ["font"] = item.Font,
+                    ["bigfont"] = item.BigFont,
+                })
+                .ToList();
+        result.AdditionalData["titleblock_print_regions_count"] = _task.TitleblockPrintRegions.Count;
+        result.AdditionalData["titleblock_print_entity_replaced_count"] =
+            titleblockPrintEntityReplacedCount;
+        result.AdditionalData["titleblock_print_shared_skipped_count"] =
+            titleblockPrintSharedSkippedCount;
         result.AdditionalData["empty_style_replacement"] =
             new Dictionary<string, string>(_task.EmptyStyleReplacement);
         result.AdditionalData["empty_style_target_regions_count"] = _task.EmptyStyleTargetRegions.Count;
@@ -471,6 +498,483 @@ internal sealed class FontPreflightProcessor
         }
 
         return true;
+    }
+
+    private int ApplyTitleblockPrintStyleReplacements(
+        Database db,
+        Transaction tr,
+        BridgeResultEnvelope result,
+        out int sharedSkippedCount
+    )
+    {
+        sharedSkippedCount = 0;
+        if (_task.TitleblockPrintStyleReplacements.Count == 0
+            || _task.TitleblockPrintRegions.Count == 0)
+        {
+            return 0;
+        }
+
+        var replacementByStyle = new Dictionary<string, BridgeTitleblockStyleReplacement>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        foreach (var replacement in _task.TitleblockPrintStyleReplacements)
+        {
+            var styleName = (replacement.StyleName ?? string.Empty).Trim();
+            var font = (replacement.Font ?? string.Empty).Trim();
+            var bigfont = (replacement.BigFont ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(styleName)
+                || (string.IsNullOrWhiteSpace(font) && string.IsNullOrWhiteSpace(bigfont)))
+            {
+                continue;
+            }
+
+            var unavailable = new[] { font, bigfont }
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .FirstOrDefault(item => !IsFontResourceAvailable(item, db));
+            if (!string.IsNullOrWhiteSpace(unavailable))
+            {
+                result.Errors.Add(
+                    $"FONT_TITLEBLOCK_REPLACEMENT_UNAVAILABLE:{styleName}:{unavailable}"
+                );
+                continue;
+            }
+
+            replacementByStyle[styleName] = replacement;
+        }
+
+        if (replacementByStyle.Count == 0)
+        {
+            return 0;
+        }
+
+        var usageByEntity = new Dictionary<ObjectId, TitleblockEntityUsagePlan>();
+        var blockTable = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+        foreach (ObjectId recordId in blockTable)
+        {
+            if (!TryGetObject(
+                tr,
+                recordId,
+                OpenMode.ForRead,
+                out BlockTableRecord record,
+                "titleblock_print_layout_record"
+            ))
+            {
+                continue;
+            }
+
+            if (!TryRead(
+                () => record.IsLayout,
+                "titleblock_print_layout_record.IsLayout",
+                out var isLayout
+            ) || !isLayout)
+            {
+                continue;
+            }
+
+            CollectTitleblockPrintUsageInRecord(
+                tr,
+                record,
+                Matrix3d.Identity,
+                replacementByStyle,
+                usageByEntity,
+                depth: 0
+            );
+        }
+
+        var cloneByStyle = new Dictionary<ObjectId, ObjectId>();
+        var replacedCount = 0;
+        foreach (var usage in usageByEntity.Values)
+        {
+            if (usage.TargetMatchedCount == 0)
+            {
+                continue;
+            }
+
+            if (usage.OutsideTargetCount > 0)
+            {
+                sharedSkippedCount += 1;
+                _trace.Log(
+                    $"[DOTNET][FONT][TITLEBLOCK_SHARED_SKIP] entity={usage.EntityId.Handle} style={usage.StyleName} target={usage.TargetMatchedCount} outside={usage.OutsideTargetCount}"
+                );
+                continue;
+            }
+
+            if (!TryGetObject(
+                tr,
+                usage.StyleId,
+                OpenMode.ForRead,
+                out TextStyleTableRecord sourceStyle,
+                "titleblock_print_source_style"
+            ))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(sourceStyle.FileName))
+            {
+                _trace.Log(
+                    $"[DOTNET][FONT][TITLEBLOCK_NONEMPTY_SKIP] entity={usage.EntityId.Handle} style={usage.StyleName} font={sourceStyle.FileName}"
+                );
+                continue;
+            }
+
+            if (!cloneByStyle.TryGetValue(usage.StyleId, out var cloneStyleId))
+            {
+                cloneStyleId = GetOrCreateTitleblockPrintStyle(
+                    db,
+                    tr,
+                    sourceStyle,
+                    usage.Replacement,
+                    result
+                );
+                if (cloneStyleId.IsNull)
+                {
+                    continue;
+                }
+                cloneByStyle[usage.StyleId] = cloneStyleId;
+            }
+
+            if (!TryGetObject(
+                tr,
+                usage.EntityId,
+                OpenMode.ForWrite,
+                out Entity entity,
+                "titleblock_print_target_entity"
+            ))
+            {
+                continue;
+            }
+
+            if (!SetEntityTextStyleId(entity, cloneStyleId))
+            {
+                continue;
+            }
+
+            replacedCount += 1;
+            _trace.Log(
+                $"[DOTNET][FONT][TITLEBLOCK_ENTITY_STYLE] entity={usage.EntityId.Handle} source={usage.StyleName} clone={cloneStyleId.Handle}"
+            );
+        }
+
+        return replacedCount;
+    }
+
+    private void CollectTitleblockPrintUsageInRecord(
+        Transaction tr,
+        BlockTableRecord record,
+        Matrix3d worldTransform,
+        Dictionary<string, BridgeTitleblockStyleReplacement> replacementByStyle,
+        Dictionary<ObjectId, TitleblockEntityUsagePlan> usageByEntity,
+        int depth
+    )
+    {
+        if (depth > 12)
+        {
+            return;
+        }
+
+        foreach (ObjectId entityId in record)
+        {
+            if (!TryGetObject(
+                tr,
+                entityId,
+                OpenMode.ForRead,
+                out Entity entity,
+                "titleblock_print_entity"
+            ))
+            {
+                continue;
+            }
+
+            if (entity is BlockReference blockReference)
+            {
+                CollectTitleblockPrintUsageInBlockReference(
+                    tr,
+                    blockReference,
+                    worldTransform,
+                    replacementByStyle,
+                    usageByEntity,
+                    depth + 1
+                );
+                continue;
+            }
+
+            RegisterTitleblockPrintUsage(
+                tr,
+                entity,
+                worldTransform,
+                replacementByStyle,
+                usageByEntity
+            );
+        }
+    }
+
+    private void CollectTitleblockPrintUsageInBlockReference(
+        Transaction tr,
+        BlockReference blockReference,
+        Matrix3d parentTransform,
+        Dictionary<string, BridgeTitleblockStyleReplacement> replacementByStyle,
+        Dictionary<ObjectId, TitleblockEntityUsagePlan> usageByEntity,
+        int depth
+    )
+    {
+        try
+        {
+            foreach (ObjectId attributeId in blockReference.AttributeCollection.Cast<ObjectId>().ToList())
+            {
+                if (!TryGetObject(
+                    tr,
+                    attributeId,
+                    OpenMode.ForRead,
+                    out AttributeReference attributeReference,
+                    "titleblock_print_block_attribute"
+                ))
+                {
+                    continue;
+                }
+
+                RegisterTitleblockPrintUsage(
+                    tr,
+                    attributeReference,
+                    parentTransform,
+                    replacementByStyle,
+                    usageByEntity
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            RegisterSkippedObject("titleblock_print_block_reference.AttributeCollection", ex);
+        }
+
+        if (!TryRead(
+            () => blockReference.BlockTableRecord,
+            "titleblock_print_block_reference.BlockTableRecord",
+            out var blockRecordId
+        ))
+        {
+            return;
+        }
+
+        if (!TryGetObject(
+            tr,
+            blockRecordId,
+            OpenMode.ForRead,
+            out BlockTableRecord record,
+            "titleblock_print_block_definition"
+        ))
+        {
+            return;
+        }
+
+        if (TryRead(
+            () => record.IsFromExternalReference,
+            "titleblock_print_block_definition.IsFromExternalReference",
+            out var isXref
+        ) && isXref)
+        {
+            return;
+        }
+
+        var childTransform = parentTransform * blockReference.BlockTransform;
+        CollectTitleblockPrintUsageInRecord(
+            tr,
+            record,
+            childTransform,
+            replacementByStyle,
+            usageByEntity,
+            depth
+        );
+    }
+
+    private void RegisterTitleblockPrintUsage(
+        Transaction tr,
+        Entity entity,
+        Matrix3d worldTransform,
+        Dictionary<string, BridgeTitleblockStyleReplacement> replacementByStyle,
+        Dictionary<ObjectId, TitleblockEntityUsagePlan> usageByEntity
+    )
+    {
+        if (!TryGetTextStyleId(entity, out var styleId) || styleId.IsNull)
+        {
+            return;
+        }
+
+        if (!TryGetObject(
+            tr,
+            styleId,
+            OpenMode.ForRead,
+            out TextStyleTableRecord styleRecord,
+            "titleblock_print_entity_style"
+        ))
+        {
+            return;
+        }
+
+        var styleName = (styleRecord.Name ?? string.Empty).Trim();
+        if (!replacementByStyle.TryGetValue(styleName, out var replacement)
+            || !string.IsNullOrWhiteSpace(styleRecord.FileName))
+        {
+            return;
+        }
+
+        var entityId = entity.ObjectId;
+        if (entityId.IsNull)
+        {
+            return;
+        }
+
+        if (!usageByEntity.TryGetValue(entityId, out var usage))
+        {
+            usage = new TitleblockEntityUsagePlan(
+                entityId,
+                styleId,
+                styleName,
+                replacement
+            );
+            usageByEntity[entityId] = usage;
+        }
+
+        if (TryMatchTitleblockPrintRegion(entity, worldTransform))
+        {
+            usage.TargetMatchedCount += 1;
+        }
+        else
+        {
+            usage.OutsideTargetCount += 1;
+        }
+    }
+
+    private bool TryMatchTitleblockPrintRegion(Entity entity, Matrix3d worldTransform)
+    {
+        if (string.IsNullOrWhiteSpace(GetEntityText(entity))
+            || !TryGetWorldCenter(entity, worldTransform, out var center))
+        {
+            return false;
+        }
+
+        return _task.TitleblockPrintRegions.Any(region => PointInside(region.BBox, center));
+    }
+
+    private ObjectId GetOrCreateTitleblockPrintStyle(
+        Database db,
+        Transaction tr,
+        TextStyleTableRecord sourceStyle,
+        BridgeTitleblockStyleReplacement replacement,
+        BridgeResultEnvelope result
+    )
+    {
+        var styleTable = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForWrite);
+        var baseName = BuildTitleblockPrintStyleName(sourceStyle.Name ?? string.Empty);
+        for (var suffix = 0; suffix < 100; suffix += 1)
+        {
+            var candidateName = suffix == 0 ? baseName : $"{baseName}_{suffix + 1}";
+            if (styleTable.Has(candidateName))
+            {
+                var existingId = styleTable[candidateName];
+                if (TryGetObject(
+                    tr,
+                    existingId,
+                    OpenMode.ForRead,
+                    out TextStyleTableRecord existing,
+                    "titleblock_print_existing_style"
+                ) && StyleUsesReplacement(existing, replacement))
+                {
+                    return existingId;
+                }
+                continue;
+            }
+
+            try
+            {
+                var clone = (TextStyleTableRecord)sourceStyle.Clone();
+                clone.Name = candidateName;
+                if (!string.IsNullOrWhiteSpace(replacement.Font))
+                {
+                    clone.FileName = replacement.Font.Trim();
+                }
+                if (!string.IsNullOrWhiteSpace(replacement.BigFont))
+                {
+                    clone.BigFontFileName = replacement.BigFont.Trim();
+                }
+
+                var cloneId = styleTable.Add(clone);
+                tr.AddNewlyCreatedDBObject(clone, true);
+                _trace.Log(
+                    $"[DOTNET][FONT][TITLEBLOCK_STYLE_CLONE] source={sourceStyle.Name} clone={candidateName} font={clone.FileName} bigfont={clone.BigFontFileName}"
+                );
+                return cloneId;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add(
+                    $"FONT_TITLEBLOCK_STYLE_CLONE_FAILED:{sourceStyle.Name}:{ex.Message}"
+                );
+                return ObjectId.Null;
+            }
+        }
+
+        result.Errors.Add($"FONT_TITLEBLOCK_STYLE_NAME_EXHAUSTED:{sourceStyle.Name}");
+        return ObjectId.Null;
+    }
+
+    private static bool StyleUsesReplacement(
+        TextStyleTableRecord style,
+        BridgeTitleblockStyleReplacement replacement
+    )
+    {
+        var fontMatches = string.IsNullOrWhiteSpace(replacement.Font)
+            || string.Equals(
+                NormalizeFontFileName(style.FileName ?? string.Empty),
+                NormalizeFontFileName(replacement.Font),
+                StringComparison.OrdinalIgnoreCase
+            );
+        var bigfontMatches = string.IsNullOrWhiteSpace(replacement.BigFont)
+            || string.Equals(
+                NormalizeFontFileName(style.BigFontFileName ?? string.Empty),
+                NormalizeFontFileName(replacement.BigFont),
+                StringComparison.OrdinalIgnoreCase
+            );
+        return fontMatches && bigfontMatches;
+    }
+
+    private static string BuildTitleblockPrintStyleName(string sourceName)
+    {
+        var normalized = new string(
+            (sourceName ?? string.Empty)
+                .Select(ch => char.IsLetterOrDigit(ch) || ch == '_' ? ch : '_')
+                .ToArray()
+        ).Trim('_');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            normalized = "STYLE";
+        }
+        if (normalized.Length > 40)
+        {
+            normalized = normalized.Substring(0, 40);
+        }
+        return $"AFB_PLOT_{normalized}";
+    }
+
+    private static bool SetEntityTextStyleId(Entity entity, ObjectId styleId)
+    {
+        switch (entity)
+        {
+            case AttributeReference attributeReference:
+                attributeReference.TextStyleId = styleId;
+                return true;
+            case AttributeDefinition attributeDefinition:
+                attributeDefinition.TextStyleId = styleId;
+                return true;
+            case DBText dbText:
+                dbText.TextStyleId = styleId;
+                return true;
+            case MText mText:
+                mText.TextStyleId = styleId;
+                return true;
+            default:
+                return false;
+        }
     }
 
     private int ApplyEmptyStyleEntityReplacements(
@@ -1177,6 +1681,29 @@ internal sealed class FontPreflightProcessor
 
         public ObjectId StyleId { get; }
         public string StyleName { get; }
+        public int TargetMatchedCount { get; set; }
+        public int OutsideTargetCount { get; set; }
+    }
+
+    private sealed class TitleblockEntityUsagePlan
+    {
+        public TitleblockEntityUsagePlan(
+            ObjectId entityId,
+            ObjectId styleId,
+            string styleName,
+            BridgeTitleblockStyleReplacement replacement
+        )
+        {
+            EntityId = entityId;
+            StyleId = styleId;
+            StyleName = string.IsNullOrWhiteSpace(styleName) ? "<unnamed>" : styleName;
+            Replacement = replacement;
+        }
+
+        public ObjectId EntityId { get; }
+        public ObjectId StyleId { get; }
+        public string StyleName { get; }
+        public BridgeTitleblockStyleReplacement Replacement { get; }
         public int TargetMatchedCount { get; set; }
         public int OutsideTargetCount { get; set; }
     }

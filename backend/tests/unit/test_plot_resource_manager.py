@@ -41,6 +41,10 @@ def _write_all_managed_ctbs(plot_styles_asset: Path, content: str = "managed-ctb
         (plot_styles_asset / name).write_text(_valid_ctb_text(content), encoding="utf-8")
 
 
+def test_all_managed_ctbs_include_grayscale_style() -> None:
+    assert "fanban_monochrome-huidu.ctb" in ALL_MANAGED_CTB_NAMES
+
+
 def _path_info(
     plotters_dir: Path,
     plot_styles_dir: Path,

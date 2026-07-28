@@ -994,6 +994,11 @@ titleblock_extract:
         header: "DOC.NO"
         charset: "A-Z0-9"
         length: 19
+        overlap_duplicate:
+          min_bbox_overlap_ratio: 0.80
+          min_center_tolerance: 0.5
+          center_tolerance_height_ratio: 0.05
+          note: "相同字符同时由真实TEXT与块内虚拟MTEXT读取时，优先按包围盒重叠比例去重；仅在缺少包围盒时使用中心点与字高容差，避免误删合法连续重复字符"
 
     internal_code:
       roi: 内部编码
@@ -1401,7 +1406,7 @@ submission_contracts:
           type: str
           required: false
           default: "red_wider"
-          allowed_values: ["red_wider", "same_width", "review_white"]
+          allowed_values: ["red_wider", "same_width", "grayscale", "review_white"]
           desc: "本次出图打印样式 key；空值时回退 runtime_options.module5_export.plot.default_plot_style_key"
     response:
       batch_id: "批次号"
@@ -1466,7 +1471,7 @@ submission_contracts:
                   type: str
                   required: false
                   default: "red_wider"
-                  allowed_values: ["red_wider", "same_width", "review_white"]
+                  allowed_values: ["red_wider", "same_width", "grayscale", "review_white"]
                   desc: "翻版后交付阶段使用的打印样式 key"
               normalization:
                 - "后端会将 deliverable_params.project_no 强制改写为 target_project_no"

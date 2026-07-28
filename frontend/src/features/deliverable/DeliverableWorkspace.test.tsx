@@ -591,6 +591,7 @@ describe("DeliverableWorkspace", () => {
 
     expect(screen.getByText("子项名称（中文），例如：反应堆厂房")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "红色更宽" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "灰度" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("shows all file category candidates inside a scrollable dropdown menu", async () => {

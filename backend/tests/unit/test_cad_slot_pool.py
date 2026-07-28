@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from src.cad.plot_resource_manager import (
     MANAGED_CTB_NAME,
+    MANAGED_GRAYSCALE_CTB_NAME,
     MANAGED_REVIEW_WHITE_CTB_NAME,
     MANAGED_SAME_WIDTH_CTB_NAME,
     PDF2_PC3_NAME,
@@ -51,6 +52,7 @@ def _build_slot_pool_config(tmp_path: Path) -> SimpleNamespace:
             managed_ctb_names=[
                 MANAGED_CTB_NAME,
                 MANAGED_SAME_WIDTH_CTB_NAME,
+                MANAGED_GRAYSCALE_CTB_NAME,
                 MANAGED_REVIEW_WHITE_CTB_NAME,
             ],
             min_valid_ctb_bytes=512,
@@ -108,6 +110,7 @@ def test_cad_slot_pool_preloads_all_managed_plot_styles(tmp_path: Path, monkeypa
     for name in (
         MANAGED_CTB_NAME,
         MANAGED_SAME_WIDTH_CTB_NAME,
+        MANAGED_GRAYSCALE_CTB_NAME,
         MANAGED_REVIEW_WHITE_CTB_NAME,
     ):
         (plot_styles_root / name).write_text(_valid_ctb_text(name), encoding="utf-8")
@@ -124,6 +127,7 @@ def test_cad_slot_pool_preloads_all_managed_plot_styles(tmp_path: Path, monkeypa
     assert (slot.pmp_dir / PDF2_PMP_NAME).exists()
     assert (slot.plot_styles_dir / MANAGED_CTB_NAME).exists()
     assert (slot.plot_styles_dir / MANAGED_SAME_WIDTH_CTB_NAME).exists()
+    assert (slot.plot_styles_dir / MANAGED_GRAYSCALE_CTB_NAME).exists()
     assert (slot.plot_styles_dir / MANAGED_REVIEW_WHITE_CTB_NAME).exists()
 
 

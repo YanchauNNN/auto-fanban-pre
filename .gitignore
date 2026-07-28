@@ -32,6 +32,7 @@ node_modules/
 
 # Locally generated manual reports and visual QA artifacts.
 # Historical reports already tracked by Git remain available; new runs stay local.
+/outputs/
 /outputs/manual-*/
 /outputs/qa-form*/
 
@@ -42,11 +43,15 @@ node_modules/
 /*-flow.png
 /*-redesign.png
 /*-smoke.png
+/*-option.png
 /tools/*.rar
 
 # Local dependency mirrors (do not commit)
 Dependency Library/
 backend/.venv/
+
+# Standalone local calculation-book/OCR prototype and bundled runtime.
+backend/jisuanshu/
 
 # .NET build intermediates (do not commit)
 backend/src/cad/dotnet/Module5CadBridge/obj/

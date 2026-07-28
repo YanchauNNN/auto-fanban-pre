@@ -20,6 +20,7 @@ def _item(
     *,
     bbox: BBox | None = None,
     height: float = 2.5,
+    source: str = "test",
 ) -> TextItem:
     return TextItem(
         x=x,
@@ -27,7 +28,7 @@ def _item(
         text=text,
         bbox=bbox,
         text_height=height,
-        source="test",
+        source=source,
     )
 
 
@@ -337,6 +338,56 @@ def test_parse_external_code_deduplicates_overlapping_virtual_text() -> None:
                 xmax=duplicate_x + 2.02,
                 ymax=2.01,
             ),
+        )
+    )
+
+    code = extractor._parse_external_code(items, parse_cfg)
+
+    assert code == expected
+
+
+def test_parse_external_code_deduplicates_overlapping_text_with_different_anchors() -> None:
+    extractor = TitleblockExtractor()
+    parse_cfg = extractor.field_defs["external_code"].parse
+    expected = "XZ1PCF11004B25C42SD"
+    items = [
+        _item(
+            "DOC.NO",
+            x=0.0,
+            y=0.0,
+            bbox=BBox(xmin=0.0, ymin=0.0, xmax=8.0, ymax=4.0),
+        )
+    ]
+    for idx, char in enumerate(expected):
+        x = 12.0 + idx * 10.0
+        items.append(
+            _item(
+                char,
+                x=x,
+                y=0.0,
+                bbox=BBox(xmin=x, ymin=0.0, xmax=x + 6.0, ymax=12.0),
+                height=10.0,
+                source="msp:TEXT",
+            )
+        )
+
+    # A centered virtual MTEXT and a left-aligned TEXT can represent the same
+    # glyph while reporting noticeably different centers. Their rendered
+    # extents still overlap almost completely.
+    duplicate_x = 12.0 + 1 * 10.0
+    items.append(
+        _item(
+            "Z",
+            x=duplicate_x + 1.0,
+            y=0.0,
+            bbox=BBox(
+                xmin=duplicate_x + 1.0,
+                ymin=0.0,
+                xmax=duplicate_x + 7.0,
+                ymax=12.0,
+            ),
+            height=10.0,
+            source="msp:virtual:MTEXT",
         )
     )
 

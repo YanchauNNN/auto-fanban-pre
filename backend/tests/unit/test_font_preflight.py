@@ -115,6 +115,13 @@ class _OkBridge:
             "font_replacement_applied": True,
             "replacement_fonts": kwargs.get("replacement_fonts") or {},
             "font_compatibility_replacements": kwargs.get("font_compatibility_replacements") or {},
+            "titleblock_print_style_replacements": (
+                kwargs.get("titleblock_print_style_replacements") or []
+            ),
+            "titleblock_print_regions": kwargs.get("titleblock_print_regions") or [],
+            "titleblock_print_regions_count": len(
+                kwargs.get("titleblock_print_regions") or []
+            ),
             "empty_style_replacement": kwargs.get("empty_style_replacement") or {},
             "empty_style_target_regions": kwargs.get("empty_style_target_regions") or [],
             "empty_style_target_regions_count": len(kwargs.get("empty_style_target_regions") or []),
@@ -158,6 +165,29 @@ def test_dotnet_empty_style_compatibility_does_not_mutate_text_entities() -> Non
     assert "EMPTY_STYLE_SHARED_SKIP" not in empty_style_section
     assert "OutsideTargetCount > 0" not in empty_style_section
     assert "TargetMatchedCount <= 0" not in empty_style_section
+
+
+def test_dotnet_titleblock_print_replacement_only_switches_entity_style() -> None:
+    source_path = (
+        Path(__file__).parents[2]
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "FontPreflightProcessor.cs"
+    )
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index("private int ApplyTitleblockPrintStyleReplacements(")
+    end = source.index("private int ApplyEmptyStyleEntityReplacements(", start)
+    section = source[start:end]
+
+    assert "sourceStyle.Clone()" in section
+    assert "SetEntityTextStyleId(entity, cloneStyleId)" in section
+    assert "sourceStyle.FileName =" not in section
+    assert ".Position =" not in section
+    assert ".Location =" not in section
+    assert ".AlignmentPoint =" not in section
+    assert "TransformBy(Matrix3d.Displacement" not in section
 
 
 def test_font_preflight_service_requires_known_replacement_font(tmp_path: Path) -> None:
@@ -366,6 +396,85 @@ def test_font_preflight_service_passes_exempt_style_names_to_replace_pass(
         "宋体",
         "ST",
     ]
+
+
+def test_font_preflight_service_builds_titleblock_print_replacement_regions(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdeng.shx",
+                        "value": "tssdeng.shx",
+                        "family": "tssdeng",
+                        "path": r"D:\AutoCAD\Fonts\tssdeng.shx",
+                        "kind": "shx",
+                    },
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.empty_style_replacement = {}
+    service.config.font_preflight.titleblock_print_style_replacements = {
+        "宋体": {
+            "font": "tssdeng.shx",
+            "bigfont": "tssdchn.shx",
+        }
+    }
+    service.config.font_preflight.titleblock_print_region_padding_mm = 1.0
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-titleblock",
+            source_file=tmp_path / "sample.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1189, ymax=841),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        ),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+        frames=[frame],
+    )
+
+    replace_call = bridge.calls[1]
+    assert replace_call["titleblock_print_style_replacements"] == [
+        {
+            "style_name": "宋体",
+            "font": "tssdeng.shx",
+            "bigfont": "tssdchn.shx",
+        }
+    ]
+    region = replace_call["titleblock_print_regions"][0]
+    assert region["frame_id"] == "frame-titleblock"
+    assert region["field_key"] == "titleblock_print"
+    assert region["roi_name"] == "titleblock"
+    assert region["bbox"] == {
+        "xmin": pytest.approx(997.8),
+        "ymin": pytest.approx(0.0),
+        "xmax": pytest.approx(1189.0),
+        "ymax": pytest.approx(142.8),
+    }
+    assert result["titleblock_print_regions_count"] == 1
 
 
 def test_font_preflight_service_skips_empty_style_replacement_without_target_regions(

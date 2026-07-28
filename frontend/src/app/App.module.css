@@ -921,6 +921,17 @@
   color: #6c7f93;
 }
 
+.failedJobContactNotice {
+  margin: 0.15rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid #bd2f2f;
+  background: rgba(189, 47, 47, 0.08);
+  color: #8f2020;
+  font-size: 0.88rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .packageMeta {
   margin: 0;
   color: #557696;

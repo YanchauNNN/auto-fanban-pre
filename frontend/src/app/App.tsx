@@ -100,6 +100,9 @@ const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "失败", value: "failed" },
 ];
 
+const FAILED_JOB_CONTACT_NOTICE =
+  "点击“查看任务”查看错误原因进行检查，如有需要请联系开发人员：王任超。";
+
 const MODULE_OPTIONS = [
   { key: "business", label: "业务模块" },
   { key: "account", label: "账号模块" },
@@ -1535,6 +1538,12 @@ function JobCard({
         </>
       )}
 
+      {card.status === "failed" ? (
+        <p className={styles.failedJobContactNotice} role="note">
+          {FAILED_JOB_CONTACT_NOTICE}
+        </p>
+      ) : null}
+
       <div className={styles.progressBar}>
         <div style={{ width: `${card.percent}%` }} />
       </div>
@@ -1793,6 +1802,8 @@ function SingleJobDetailPanel({
         <StatusPill status={detail.status} />
       </header>
 
+      {detail.status === "failed" ? <JobDiagnosticsSection detail={detail} /> : null}
+
       {hasWarnings ? (
         <section className={styles.warningBanner}>
           <strong>
@@ -1881,10 +1892,7 @@ function SingleJobDetailPanel({
         </section>
       ) : null}
 
-      <section className={styles.detailSection}>
-        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
-        <DiagnosticPanel detail={detail} />
-      </section>
+      {detail.status !== "failed" ? <JobDiagnosticsSection detail={detail} /> : null}
 
       <section className={styles.detailSection}>
         <h2>后续动作</h2>
@@ -1942,6 +1950,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         </div>
         <StatusPill status={detail.status} />
       </header>
+
+      {detail.status === "failed" ? <JobDiagnosticsSection detail={detail} /> : null}
 
       {quickDownloadItems.length > 0 ? (
         <section className={styles.quickDownloadSection}>
@@ -2024,10 +2034,7 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         </div>
       </section>
 
-      <section className={styles.detailSection}>
-        <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
-        <DiagnosticPanel detail={detail} />
-      </section>
+      {detail.status !== "failed" ? <JobDiagnosticsSection detail={detail} /> : null}
 
       {previewRequest ? (
         <Suspense fallback={null}>
@@ -2574,6 +2581,15 @@ function DiagnosticPanel({ detail }: { detail: JobDetail }) {
         </div>
       </details>
     </div>
+  );
+}
+
+function JobDiagnosticsSection({ detail }: { detail: JobDetail }) {
+  return (
+    <section className={styles.detailSection}>
+      <h2>{hasStructuredDiagnostics(detail) ? "问题原因" : "告警与错误"}</h2>
+      <DiagnosticPanel detail={detail} />
+    </section>
   );
 }
 
