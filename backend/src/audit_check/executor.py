@@ -215,4 +215,11 @@ class AuditCheckExecutor:
             ),
             fallback_name_keywords=standard_cfg.pairing.fallback_name_keywords,
             fallback_min_name_length=standard_cfg.pairing.fallback_min_name_length,
+            continuation_line_enabled=standard_cfg.pairing.continuation_line_enabled,
+            continuation_line_y_height_factor=(
+                standard_cfg.pairing.continuation_line_y_height_factor
+            ),
+            continuation_line_x_height_factor=(
+                standard_cfg.pairing.continuation_line_x_height_factor
+            ),
         ).evaluate(items)

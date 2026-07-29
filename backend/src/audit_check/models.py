@@ -10,6 +10,7 @@ from ..models import BBox
 class ScanTextItem:
     raw_text: str
     entity_type: str
+    layer_name: str | None = None
     field_context: str | None = None
     internal_code: str | None = None
     layout_name: str | None = None

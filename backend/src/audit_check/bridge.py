@@ -66,6 +66,7 @@ class AuditDotNetScanner:
                 ScanTextItem(
                     raw_text=str(row.get("raw_text", "")),
                     entity_type=str(row.get("entity_type", "")),
+                    layer_name=row.get("layer_name"),
                     layout_name=row.get("layout_name"),
                     entity_handle=row.get("entity_handle"),
                     block_path=row.get("block_path"),

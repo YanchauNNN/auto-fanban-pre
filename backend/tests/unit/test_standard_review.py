@@ -5,7 +5,11 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from src.audit_check.models import ScanTextItem
-from src.audit_check.standard_review import StandardEntry, StandardLibraryLoader, StandardReviewEngine
+from src.audit_check.standard_review import (
+    StandardEntry,
+    StandardLibraryLoader,
+    StandardReviewEngine,
+)
 from src.models import BBox
 
 
@@ -362,6 +366,88 @@ def test_standard_review_accepts_same_entity_name_with_edition_after_code() -> N
 
     findings = engine.evaluate(
         [_item("《混凝土结构设计标准》 (GB/T 50010-2010)（2024年版）")]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_accepts_ascii_double_angle_brackets() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50204-2015",
+            code_without_year="GB 50204",
+            expected_year="2015",
+            expected_name="混凝土结构工程施工质量验收规范",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("GB50204-2015<<混凝土结构工程施工质量验收规范>>的要求。")]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_pairs_code_at_line_end_with_bracketed_name_on_next_line() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50108-2008",
+            code_without_year="GB 50108",
+            expected_year="2008",
+            expected_name="地下工程防水技术规范",
+            source_sheet="DatStdItem",
+            source_row=1,
+        ),
+        StandardEntry(
+            canonical_code="GB 50208-2011",
+            code_without_year="GB 50208",
+            expected_year="2011",
+            expected_name="地下防水工程质量验收规范",
+            source_sheet="DatStdItem",
+            source_row=2,
+        ),
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [
+            _item(
+                "尚应满足GB 50108-2008《地下工程防水技术规范》及GB 50208-2011",
+                x=10.0,
+                y=100.0,
+            ),
+            _item("《地下防水工程质量验收规范》的相关要求。", x=10.0, y=94.0),
+        ]
+    )
+
+    assert findings == []
+
+
+def test_standard_review_joins_bracketed_name_split_across_adjacent_text_entities() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB/T 50476-2019",
+            code_without_year="GB/T 50476",
+            expected_year="2019",
+            expected_name="混凝土结构耐久性设计标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [
+            _item(
+                "混凝土浇筑后实测保护层厚度验收应满足GB/T 50476-2019《混凝土结构耐久",
+                x=10.0,
+                y=100.0,
+            ),
+            _item("性设计标准》3.6.3条的要求。", x=10.0, y=94.0),
+        ]
     )
 
     assert findings == []

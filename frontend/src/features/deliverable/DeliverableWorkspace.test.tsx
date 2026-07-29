@@ -571,7 +571,7 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "翻版" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "标准化出图" })).not.toBeInTheDocument();
   });
 
   it("shows helper copy and defaults plot style to red_wider", () => {

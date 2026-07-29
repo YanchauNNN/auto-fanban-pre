@@ -527,6 +527,13 @@ internal sealed class FontPreflightProcessor
             {
                 continue;
             }
+            if (IsFontCompatibilityExemptStyle(styleName))
+            {
+                _trace.Log(
+                    $"[DOTNET][FONT][TITLEBLOCK_EXEMPT_SKIP] style={styleName}"
+                );
+                continue;
+            }
 
             var unavailable = new[] { font, bigfont }
                 .Where(item => !string.IsNullOrWhiteSpace(item))

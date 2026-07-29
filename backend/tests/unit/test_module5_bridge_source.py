@@ -33,6 +33,14 @@ def test_font_preflight_bridge_honors_exempt_style_names() -> None:
     assert "FontCompatibilityExemptStyleNames" in commands_source
     assert "IsFontCompatibilityExemptStyle(styleName)" in processor_source
     assert "IsFontCompatibilityExemptStyle(usage.StyleName)" in processor_source
+    titleblock_method = processor_source.split(
+        "private int ApplyTitleblockPrintStyleReplacements",
+        maxsplit=1,
+    )[1].split(
+        "private void CollectTitleblockPrintUsageInRecord",
+        maxsplit=1,
+    )[0]
+    assert "IsFontCompatibilityExemptStyle(styleName)" in titleblock_method
 
 
 def test_release_bridge_build_disables_debug_symbols() -> None:

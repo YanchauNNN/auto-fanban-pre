@@ -216,6 +216,17 @@ class AuditCheckMatchingPolicyConfig(BaseModel):
     project_no_date_contexts: list[str] = Field(
         default_factory=lambda: ["date_like", "titleblock_date"],
     )
+    project_no_numeric_run_whitelist_enabled: bool = True
+    project_no_numeric_run_min_digits: int = 5
+    project_no_numeric_run_requires_non_letter_suffix: bool = True
+    project_no_exact_numeric_semantic_gate_enabled: bool = True
+    project_no_exact_numeric_detection_contexts: list[str] = Field(
+        default_factory=lambda: ["titleblock_engineering_no"],
+    )
+    project_no_exact_numeric_semantic_gate_requires_frame: bool = True
+    project_no_numeric_annotation_layer_patterns: list[str] = Field(
+        default_factory=lambda: [r"^NHJTTT_OpenLine$"],
+    )
 
 
 class AuditCheckUnitConsistencyConfig(BaseModel):
@@ -245,6 +256,9 @@ class AuditCheckStandardReviewPairingConfig(BaseModel):
         default_factory=lambda: ["标准", "规范", "规程", "图集"],
     )
     fallback_min_name_length: int = 4
+    continuation_line_enabled: bool = True
+    continuation_line_y_height_factor: float = 2.2
+    continuation_line_x_height_factor: float = 1.0
 
 
 class AuditCheckStandardReviewConfig(BaseModel):

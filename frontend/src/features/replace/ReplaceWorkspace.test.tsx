@@ -61,6 +61,8 @@ const schema: FormSchema = {
       "2016": ["1", "2"],
     },
   },
+  auditReplaceBatchFilenameIdentityRegex:
+    String.raw`(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}`,
 };
 
 function createAdapter(): ApiAdapter {
@@ -100,9 +102,9 @@ describe("ReplaceWorkspace", () => {
       />,
     );
 
-    const replaceOnlyButton = screen.getByRole("button", { name: "仅翻版" });
+    const replaceOnlyButton = screen.getByRole("button", { name: "仅标准化出图" });
     const replaceWithDeliverableButton = screen.getByRole("button", {
-      name: "同步出图和翻版",
+      name: "标准化后继续出图",
     });
 
     expect(replaceOnlyButton).toHaveAttribute("aria-pressed", "true");
@@ -133,6 +135,58 @@ describe("ReplaceWorkspace", () => {
     expect(fileInput).not.toHaveAttribute("aria-hidden");
   });
 
+  it("uses user-facing standardization wording without exposing backend field names", () => {
+    render(
+      <ReplaceWorkspace
+        adapter={createAdapter()}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    expect(screen.getByRole("dialog", { name: "标准化出图配置" })).toBeInTheDocument();
+    expect(screen.getByText(/同一批文件须来自同一项目、同一机组号或岛号和同一厂房代码/)).toBeInTheDocument();
+    expect(screen.queryByText(/source_project_no|source_island_no|target_project_no|target_island_no/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/翻版/)).not.toBeInTheDocument();
+  });
+
+  it("rejects a batch containing different source projects or factory codes", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.createAuditReplace = vi.fn();
+    const schemaWithBatchIdentity = {
+      ...schema,
+      auditReplaceBatchFilenameIdentityRegex:
+        String.raw`(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}`,
+      auditReplaceUnitFactoryCodes: ["RC", "RB"],
+    } as FormSchema;
+
+    render(
+      <ReplaceWorkspace
+        adapter={adapter}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onContinueToDeliverable={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithBatchIdentity}
+      />,
+    );
+
+    await user.upload(screen.getByTestId("replace-file-input"), [
+      new File(["dwg"], "20161RC-JGS01-A.dwg", { type: "application/acad" }),
+      new File(["dwg"], "18185RB-JGS02-A.dwg", { type: "application/acad" }),
+    ]);
+
+    expect(await screen.findByText("同一批文件只能来自同一个来源项目。")).toBeInTheDocument();
+    expect(screen.getByText("同一批文件只能使用同一个厂房代码。")).toBeInTheDocument();
+    expect(adapter.createAuditReplace).not.toHaveBeenCalled();
+  });
+
   it("restores the persisted replace draft after remounting", async () => {
     const user = userEvent.setup();
     const firstRender = render(
@@ -147,7 +201,7 @@ describe("ReplaceWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "同步出图和翻版" }));
+    await user.click(screen.getByRole("button", { name: "标准化后继续出图" }));
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "2");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
@@ -171,7 +225,7 @@ describe("ReplaceWorkspace", () => {
     expect(screen.getByLabelText("来源机组号/岛号")).toHaveValue("2");
     expect(screen.getByLabelText("目标项目号")).toHaveValue("1916");
     expect(screen.getByLabelText("目标机组号/岛号")).toHaveValue("3");
-    expect(screen.getByRole("button", { name: "同步出图和翻版" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "标准化后继续出图" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -328,7 +382,7 @@ describe("ReplaceWorkspace", () => {
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20161RC-JGS09-A.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledWith({
@@ -336,7 +390,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "1915",
         targetIslandNo: "2",
-        unitFactoryCodes: [],
+        unitFactoryCodes: ["RC"],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -371,7 +425,7 @@ describe("ReplaceWorkspace", () => {
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20261RB-JGS11-A.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledWith({
@@ -379,7 +433,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "2026",
         targetIslandNo: "2",
-        unitFactoryCodes: [],
+        unitFactoryCodes: ["RB"],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -411,9 +465,11 @@ describe("ReplaceWorkspace", () => {
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20262RB-JGS11-A.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
-    expect(await screen.findByText("must_differ_from_source_island_no")).toBeInTheDocument();
+    expect(
+      await screen.findByText("同项目标准化时，目标机组号或岛号必须与来源不同。"),
+    ).toBeInTheDocument();
     expect(adapter.createAuditReplace).not.toHaveBeenCalled();
   });
 
@@ -467,7 +523,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "2",
         targetProjectNo: "1907",
         targetIslandNo: "7",
-        unitFactoryCodes: [],
+        unitFactoryCodes: ["RC"],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -501,29 +557,29 @@ describe("ReplaceWorkspace", () => {
       />,
     );
 
-    expect(screen.getByLabelText("涉及厂房代码")).toBeInTheDocument();
+    expect(screen.getByLabelText("厂房代码")).toBeInTheDocument();
     expect(screen.getByText("RC")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("原始项目号"), "2026");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "1");
     await user.type(screen.getByLabelText("目标项目号"), "2026");
     await user.type(screen.getByLabelText("目标机组号/岛号"), "2");
-    await user.type(screen.getByLabelText("涉及厂房代码"), "HL, RX");
+    await user.type(screen.getByLabelText("厂房代码"), "HL");
     await user.upload(
       screen.getByTestId("replace-file-input"),
       new File(["dwg"], "20261HL-JGS01-A.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
     await waitFor(() => {
-      expect(adapter.rememberAuditReplaceFactoryCodes).toHaveBeenCalledWith(["HL", "RX"]);
+      expect(adapter.rememberAuditReplaceFactoryCodes).toHaveBeenCalledWith(["HL"]);
     });
     expect(adapter.createAuditReplace).toHaveBeenCalledWith({
       sourceProjectNo: "2026",
       sourceIslandNo: "1",
       targetProjectNo: "2026",
       targetIslandNo: "2",
-      unitFactoryCodes: ["HL", "RX"],
+      unitFactoryCodes: ["HL"],
       files: expect.any(Array),
       runDeliverable: false,
     });
@@ -555,9 +611,9 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
-      new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
+      new File(["dwg"], "20162NH-JGS51-B合并版.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledTimes(1);
@@ -580,7 +636,7 @@ describe("ReplaceWorkspace", () => {
     expect(screen.getByLabelText("原始项目号")).toHaveValue("");
     expect(screen.getByLabelText("目标项目号")).toHaveValue("");
     expect(screen.queryByLabelText("目标机组号/岛号")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "仅翻版" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "仅标准化出图" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -672,9 +728,9 @@ describe("ReplaceWorkspace", () => {
     await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
-      new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
+      new File(["dwg"], "20162NH-JGS51-B合并版.dwg", { type: "application/acad" }),
     );
-    await user.click(screen.getByRole("button", { name: "开始翻版" }));
+    await user.click(screen.getByRole("button", { name: "开始标准化出图" }));
 
     await waitFor(() => {
       expect(adapter.createAuditReplace).toHaveBeenCalledWith({
@@ -682,7 +738,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "2",
         targetProjectNo: "1916",
         targetIslandNo: "3",
-        unitFactoryCodes: [],
+        unitFactoryCodes: ["NH"],
         files: expect.any(Array),
         runDeliverable: false,
       });
@@ -708,14 +764,14 @@ describe("ReplaceWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "同步出图和翻版" }));
+    await user.click(screen.getByRole("button", { name: "标准化后继续出图" }));
     await user.type(screen.getByLabelText("原始项目号"), "2016");
     await user.selectOptions(screen.getByLabelText("来源机组号/岛号"), "1");
     await user.type(screen.getByLabelText("目标项目号"), "1916");
     await user.type(screen.getByLabelText("目标机组号/岛号"), "3");
     await user.upload(
       screen.getByTestId("replace-file-input"),
-      new File(["dwg"], "20261NH-JGS51-B合并版.dwg", { type: "application/acad" }),
+      new File(["dwg"], "20161NH-JGS51-B合并版.dwg", { type: "application/acad" }),
     );
     await user.click(screen.getByRole("button", { name: "出图" }));
 
@@ -727,7 +783,7 @@ describe("ReplaceWorkspace", () => {
         sourceIslandNo: "1",
         targetProjectNo: "1916",
         targetIslandNo: "3",
-        unitFactoryCodes: [],
+        unitFactoryCodes: ["NH"],
         runDeliverable: true,
       },
     });

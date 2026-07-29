@@ -34,7 +34,9 @@ _NAME_LEADING_SEPARATORS = " \t\r\n:：,，、;-－–—"
 _NAME_TRAILING_SEPARATORS = " \t\r\n:：,，、;-－–—.。"
 _SAME_TEXT_NAME_END_RE = re.compile(r"[;；\r\n]+")
 _YEAR_CAPTURE_PATTERN = r"[\(\[（【]?\s*(?P<year>\d{4})\s*[\)\]）】]?"
-_BRACKETED_STANDARD_NAME_RE = re.compile(r"《(?P<name>[^》\r\n]+)》")
+_BRACKETED_STANDARD_NAME_RE = re.compile(
+    r"(?:《|<<)(?P<name>.*?)(?:》|>>)"
+)
 _EDITION_MARKER_RE = re.compile(r"[\(\[]?\s*(?P<edition>\d{4}\s*年版)\s*[\)\]]?")
 
 
@@ -175,6 +177,9 @@ class StandardReviewEngine:
         multiple_pairs_in_one_entity_enabled: bool = True,
         fallback_name_keywords: list[str] | None = None,
         fallback_min_name_length: int = 4,
+        continuation_line_enabled: bool = True,
+        continuation_line_y_height_factor: float = 2.2,
+        continuation_line_x_height_factor: float = 1.0,
     ) -> None:
         self.entries = entries
         self.same_line_y_tolerance = float(same_line_y_tolerance)
@@ -189,6 +194,15 @@ class StandardReviewEngine:
             if _normalize_name_key(keyword)
         )
         self.fallback_min_name_length = max(1, int(fallback_min_name_length))
+        self.continuation_line_enabled = bool(continuation_line_enabled)
+        self.continuation_line_y_height_factor = max(
+            1.0,
+            float(continuation_line_y_height_factor),
+        )
+        self.continuation_line_x_height_factor = max(
+            0.0,
+            float(continuation_line_x_height_factor),
+        )
         self._base_entries: dict[str, list[StandardEntry]] = {}
         for entry in entries:
             self._base_entries.setdefault(_normalize_code_key(entry.code_without_year), []).append(entry)
@@ -268,24 +282,35 @@ class StandardReviewEngine:
         ]
 
     def _name_findings(self, candidate: _CodeCandidate, items: list[ScanTextItem]) -> list[AuditFinding]:
+        same_item_name: str | None = None
         if self.same_text_pairing_enabled:
             same_item_name = self._same_item_name(candidate)
-            if same_item_name is not None:
-                if _name_matches(same_item_name, candidate.entry.expected_name):
-                    return []
-                return [
-                    self._finding(
-                        candidate=candidate,
-                        context_kind="standard_review_name",
-                        details={
-                            "issue_type": "name_mismatch",
-                            "actual_code": candidate.actual_code,
-                            "expected_code": candidate.entry.canonical_code,
-                            "actual_name": same_item_name,
-                            "expected_name": candidate.entry.expected_name,
-                        },
-                    )
-                ]
+            if (
+                same_item_name is not None
+                and _name_matches(same_item_name, candidate.entry.expected_name)
+            ):
+                return []
+
+        continued_name = self._continued_name(candidate, items)
+        if continued_name is not None:
+            if _name_matches(continued_name, candidate.entry.expected_name):
+                return []
+            same_item_name = continued_name
+
+        if same_item_name is not None:
+            return [
+                self._finding(
+                    candidate=candidate,
+                    context_kind="standard_review_name",
+                    details={
+                        "issue_type": "name_mismatch",
+                        "actual_code": candidate.actual_code,
+                        "expected_code": candidate.entry.canonical_code,
+                        "actual_name": same_item_name,
+                        "expected_name": candidate.entry.expected_name,
+                    },
+                )
+            ]
 
         name_item = self._nearest_name_item(candidate, items)
         if name_item is None:
@@ -361,7 +386,7 @@ class StandardReviewEngine:
         if _name_matches(text, expected_name):
             return True
         stripped = text.strip()
-        if stripped.startswith("《") and "》" in stripped:
+        if _BRACKETED_STANDARD_NAME_RE.search(stripped):
             return True
         return any(keyword in normalized for keyword in self.fallback_name_keywords)
 
@@ -417,11 +442,17 @@ class StandardReviewEngine:
                 and not self._has_standard_code(normalized[match.end() : candidate.start])
             ]
             if preceding:
-                return self._name_with_edition_marker(
+                match = preceding[-1]
+                if self._bracketed_name_belongs_to_candidate(
                     candidate=candidate,
                     normalized=normalized,
-                    name=preceding[-1].group("name").strip(),
-                )
+                    name_match=match,
+                ):
+                    return self._name_with_edition_marker(
+                        candidate=candidate,
+                        normalized=normalized,
+                        name=match.group("name").strip(),
+                    )
 
         if self.same_entity_code_before_name_enabled:
             following = [
@@ -431,11 +462,97 @@ class StandardReviewEngine:
                 and not self._has_standard_code(normalized[candidate.end : match.start()])
             ]
             if following:
-                return self._name_with_edition_marker(
+                match = following[0]
+                if self._bracketed_name_belongs_to_candidate(
                     candidate=candidate,
                     normalized=normalized,
-                    name=following[0].group("name").strip(),
-                )
+                    name_match=match,
+                ):
+                    return self._name_with_edition_marker(
+                        candidate=candidate,
+                        normalized=normalized,
+                        name=match.group("name").strip(),
+                    )
+        return None
+
+    def _bracketed_name_belongs_to_candidate(
+        self,
+        *,
+        candidate: _CodeCandidate,
+        normalized: str,
+        name_match: re.Match[str],
+    ) -> bool:
+        if name_match.end() <= candidate.start:
+            candidate_distance = candidate.start - name_match.end()
+        else:
+            candidate_distance = name_match.start() - candidate.end
+
+        other_distances: list[int] = []
+        seen_spans: set[tuple[int, int]] = set()
+        for _, pattern in self._base_patterns:
+            for code_match in pattern.finditer(normalized):
+                span = code_match.span()
+                if span in seen_spans or span == (candidate.start, candidate.end):
+                    continue
+                seen_spans.add(span)
+                if code_match.end() <= name_match.start():
+                    other_distances.append(name_match.start() - code_match.end())
+                elif code_match.start() >= name_match.end():
+                    other_distances.append(code_match.start() - name_match.end())
+
+        return not other_distances or candidate_distance < min(other_distances)
+
+    def _continued_name(
+        self,
+        candidate: _CodeCandidate,
+        items: list[ScanTextItem],
+    ) -> str | None:
+        if not self.continuation_line_enabled:
+            return None
+        candidate_y = _item_y(candidate.item)
+        candidate_left = _item_left(candidate.item)
+        if candidate_y is None or candidate_left is None:
+            return None
+
+        aligned: list[tuple[float, float, ScanTextItem]] = []
+        for item in items:
+            if item is candidate.item:
+                continue
+            if item.internal_code != candidate.item.internal_code:
+                continue
+            if item.layout_name != candidate.item.layout_name:
+                continue
+            item_y = _item_y(item)
+            item_left = _item_left(item)
+            if item_y is None or item_left is None:
+                continue
+
+            y_gap = candidate_y - item_y
+            if y_gap <= self.same_line_y_tolerance:
+                continue
+            reference_height = max(
+                _item_height(candidate.item) or self.same_line_y_tolerance,
+                _item_height(item) or self.same_line_y_tolerance,
+            )
+            max_y_gap = reference_height * self.continuation_line_y_height_factor
+            if y_gap > max_y_gap:
+                continue
+            x_gap = abs(candidate_left - item_left)
+            max_x_gap = max(
+                self.same_line_y_tolerance,
+                reference_height * self.continuation_line_x_height_factor,
+            )
+            if x_gap > max_x_gap:
+                continue
+            aligned.append((y_gap, x_gap, item))
+
+        for _, _, item in sorted(aligned, key=lambda row: (row[0], row[1])):
+            current_text = _normalize_code_text(candidate.item.raw_text)
+            continued_text = _normalize_code_text(item.raw_text)
+            combined = f"{current_text[candidate.end:]}{continued_text}"
+            match = _BRACKETED_STANDARD_NAME_RE.search(combined)
+            if match is not None:
+                return match.group("name").strip()
         return None
 
     def _has_standard_code(self, text: str) -> bool:
@@ -580,6 +697,20 @@ def _item_x(item: ScanTextItem) -> float | None:
     if item.position_x is not None:
         return float(item.position_x)
     return None
+
+
+def _item_left(item: ScanTextItem) -> float | None:
+    if item.text_bbox is not None:
+        return float(item.text_bbox.xmin)
+    if item.position_x is not None:
+        return float(item.position_x)
+    return None
+
+
+def _item_height(item: ScanTextItem) -> float | None:
+    if item.text_bbox is None:
+        return None
+    return max(0.0, float(item.text_bbox.ymax - item.text_bbox.ymin))
 
 
 def _item_y(item: ScanTextItem) -> float | None:

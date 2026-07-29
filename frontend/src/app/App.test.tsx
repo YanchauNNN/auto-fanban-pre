@@ -238,7 +238,7 @@ describe("homepage shell", () => {
     });
     expect(screen.getByRole("button", { name: "出图" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "纠错" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "标准化出图" })).toBeEnabled();
   });
 
   it("keeps entries available when ping succeeds but backend business health is not ready", async () => {
@@ -261,7 +261,7 @@ describe("homepage shell", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "纠错" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "标准化出图" })).toBeEnabled();
   });
 
   it("shows connection interruption only after repeated ping failures without a recent success", async () => {
@@ -275,7 +275,7 @@ describe("homepage shell", () => {
     expect(mockPing).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("button", { name: "出图" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "纠错" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "标准化出图" })).toBeDisabled();
   });
 
   it("does not escalate a health probe failure while ping still succeeds", async () => {
@@ -302,7 +302,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "翻版" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "标准化出图" })).toBeInTheDocument();
 
     const toolbar = screen.getByTestId("module-toolbar");
     expect(within(toolbar).getByRole("button", { name: "业务模块" })).toHaveAttribute(
@@ -358,8 +358,28 @@ describe("homepage shell", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "翻版" }));
-    expect(await screen.findByRole("dialog", { name: "翻版配置" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "标准化出图" }));
+    expect(await screen.findByRole("dialog", { name: "标准化出图配置" })).toBeInTheDocument();
+  });
+
+  it("removes the continue-draft entry immediately after clearing a deliverable draft", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.upload(
+      await screen.findByLabelText("选择出图 DWG 文件"),
+      new File(["dwg"], "20261PC-JGS01-A.dwg", { type: "application/acad" }),
+    );
+
+    expect(await screen.findByRole("dialog", { name: "任务配置" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "继续草稿" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "清空草稿" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "任务配置" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "继续草稿" })).not.toBeInTheDocument();
+    });
   });
 
   it("opens tutorial mode and walks through the real deliverable flow preview", async () => {
@@ -2068,7 +2088,7 @@ describe("job detail pages", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("翻版摘要")).toBeInTheDocument();
+    expect(await screen.findByText("标准化出图摘要")).toBeInTheDocument();
     expect(screen.getByText("51")).toBeInTheDocument();
     expect(screen.getByText("2016")).toBeInTheDocument();
     expect(screen.getByText("2号机组/岛")).toBeInTheDocument();

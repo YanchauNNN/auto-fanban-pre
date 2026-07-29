@@ -22,6 +22,7 @@ class FormMetadataService:
 
     def build_form_schema(self) -> dict[str, Any]:
         params_cfg = self.spec.doc_generation.get("params", {})
+        mechanism_spec = load_mechanism_spec()
         sections: list[dict[str, Any]] = []
 
         for section_id, section in params_cfg.items():
@@ -67,7 +68,10 @@ class FormMetadataService:
                 "source_unit_options": self._resolve_source_unit_options(),
                 "target_unit_options": self._resolve_target_unit_options(),
                 "unit_factory_codes": normalize_audit_replace_factory_codes(
-                    load_mechanism_spec().audit_replace.unit_factory_codes,
+                    mechanism_spec.audit_replace.unit_factory_codes,
+                ),
+                "batch_filename_identity_regex": (
+                    mechanism_spec.audit_replace.batch_filename_identity_regex
                 ),
                 "factory_index_maps": {
                     "source_variant_options": {

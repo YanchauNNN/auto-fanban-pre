@@ -4,6 +4,7 @@ import yaml
 
 from src.pipeline.project_no_inference import (
     infer_project_no_from_path,
+    infer_replace_batch_identity,
     infer_unit_no_from_path,
     resolve_project_no,
 )
@@ -45,3 +46,18 @@ def test_project_no_inference_finds_album_code_not_at_filename_start() -> None:
 
     assert infer_project_no_from_path(filename) == "1818"
     assert infer_unit_no_from_path(filename, "1818") == "5"
+
+
+def test_replace_batch_identity_reads_project_unit_and_factory_code() -> None:
+    assert infer_replace_batch_identity("出图版--20260SC2JGS01-A.dwg") == (
+        infer_replace_batch_identity("20260SC2-JGS01-A.dwg")
+    )
+    assert infer_replace_batch_identity("出图版--20260SC2JGS01-A.dwg").project_no == "2026"
+    assert infer_replace_batch_identity("出图版--20260SC2JGS01-A.dwg").unit_no == "0"
+    assert infer_replace_batch_identity("出图版--20260SC2JGS01-A.dwg").factory_code == "SC2"
+
+    numeric_factory = infer_replace_batch_identity("19150003JGS01-202603.dwg")
+    assert numeric_factory is not None
+    assert numeric_factory.project_no == "1915"
+    assert numeric_factory.unit_no == "0"
+    assert numeric_factory.factory_code == "003"

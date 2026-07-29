@@ -197,7 +197,7 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
       return "纠错完成";
     }
     if (job.taskKind === "audit_replace") {
-      return "翻版完成";
+      return "标准化出图完成";
     }
     return "出图完成";
   }
@@ -210,7 +210,7 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
       return "纠错失败";
     }
     if (job.taskKind === "audit_replace") {
-      return "翻版失败";
+      return "标准化出图失败";
     }
     return "出图失败";
   }
@@ -223,7 +223,7 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
       return "纠错已取消";
     }
     if (job.taskKind === "audit_replace") {
-      return "翻版已取消";
+      return "标准化出图已取消";
     }
     return "出图已取消";
   }
@@ -239,7 +239,7 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     return "纠错处理中";
   }
   if (job.taskKind === "audit_replace") {
-    return "翻版处理中";
+    return "标准化出图处理中";
   }
   return "出图处理中";
 }
@@ -258,7 +258,7 @@ export function getMessageLabel(job: PresentableJob): string {
       return "纠错任务已完成";
     }
     if (job.taskKind === "audit_replace") {
-      return "翻版任务已完成";
+      return "标准化出图任务已完成";
     }
     return "交付任务已完成";
   }
@@ -271,7 +271,7 @@ export function getMessageLabel(job: PresentableJob): string {
       return "纠错任务已取消";
     }
     if (job.taskKind === "audit_replace") {
-      return "翻版任务已取消";
+      return "标准化出图任务已取消";
     }
     return "交付任务已取消";
   }
@@ -296,7 +296,7 @@ export function getMessageLabel(job: PresentableJob): string {
     return job.status === "succeeded" ? "纠错任务已完成" : "纠错任务进行中";
   }
   if (job.taskKind === "audit_replace") {
-    return job.status === "succeeded" ? "翻版任务已完成" : "翻版任务进行中";
+    return job.status === "succeeded" ? "标准化出图任务已完成" : "标准化出图任务进行中";
   }
   return job.status === "succeeded" ? "交付任务已完成" : "交付任务进行中";
 }
@@ -310,7 +310,7 @@ export function getTaskKindLabel(kind: TaskKind): string {
     return "纠错";
   }
   if (kind === "audit_replace") {
-    return "翻版";
+    return "标准化出图";
   }
   return "交付";
 }

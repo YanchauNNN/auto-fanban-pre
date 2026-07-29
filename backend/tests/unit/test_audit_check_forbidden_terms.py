@@ -80,3 +80,27 @@ def test_match_engine_reads_forbidden_terms_from_mechanism_yaml(tmp_path, monkey
     assert findings[0].matched_text == "禁词"
     assert build_summary(findings)["top_wrong_texts"][0] == "禁词"
     assert build_finding_groups([{"matched_text": "禁词", "internal_code": "001"}])[0]["matched_text"] == "禁词"
+
+
+def test_match_engine_whitelists_forbidden_term_connected_to_han_characters_on_both_sides() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": set()},
+        token_projects={},
+    )
+
+    findings = AuditMatchEngine(lexicon).evaluate(
+        project_no="1907",
+        items=[
+            ScanTextItem(raw_text="各工种留洞", entity_type="DBText"),
+            ScanTextItem(raw_text="专业工种相互配合", entity_type="DBText"),
+            ScanTextItem(raw_text="工种负责人", entity_type="DBText"),
+            ScanTextItem(raw_text="各工种", entity_type="DBText"),
+        ],
+    )
+
+    assert [finding.raw_text for finding in findings] == [
+        "工种负责人",
+        "各工种",
+    ]

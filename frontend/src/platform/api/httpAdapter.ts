@@ -274,6 +274,7 @@ type RawFormSchema = {
     source_unit_options?: Record<string, { value: string; label: string }[]>;
     target_unit_options?: Record<string, { value: string; label: string }[]>;
     unit_factory_codes?: string[];
+    batch_filename_identity_regex?: string;
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;

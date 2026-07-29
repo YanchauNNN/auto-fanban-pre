@@ -713,6 +713,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
     assert payload["upload_limits"]["max_files"] == 3
     assert payload["deliverable"]["sections"]
     assert "2016" in payload["audit_replace"]["project_options"]
+    assert payload["audit_replace"]["batch_filename_identity_regex"]
     assert payload["audit_replace"]["factory_index_maps"]["source_variant_options"]["2016"] == [
         "1",
         "2",
@@ -1737,6 +1738,7 @@ def test_create_audit_replace_allows_same_project_when_unit_changes(
                         "source_island_no": "1",
                         "target_project_no": "2026",
                         "target_island_no": "2",
+                        "unit_factory_codes": ["RB"],
                         "run_deliverable": False,
                     },
                     ensure_ascii=False,
@@ -1748,6 +1750,73 @@ def test_create_audit_replace_allows_same_project_when_unit_changes(
     assert response.status_code == 201
     payload = response.json()
     assert payload["jobs"][0]["task_kind"] == "audit_replace"
+
+
+def test_create_audit_replace_rejects_mixed_source_projects_and_factory_codes(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/audit-replace",
+            data={
+                "mode": "replace",
+                "params_json": json.dumps(
+                    {
+                        "source_project_no": "2016",
+                        "source_island_no": "1",
+                        "target_project_no": "2026",
+                        "target_island_no": "2",
+                        "unit_factory_codes": ["RC"],
+                        "run_deliverable": False,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            files=[
+                ("files[]", ("20161RC-JGS01-A.dwg", b"dwg-1", "application/acad")),
+                ("files[]", ("18185RB-JGS02-A.dwg", b"dwg-2", "application/acad")),
+            ],
+        )
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]["param_errors"]
+    assert errors["source_project_no"] == ["mixed_source_projects"]
+    assert errors["source_island_no"] == ["mixed_source_units"]
+    assert errors["unit_factory_codes"] == ["mixed_factory_codes"]
+
+
+def test_create_audit_replace_requires_exactly_one_factory_code(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    for factory_codes, expected_error in (
+        ([], "required_for_replace"),
+        (["RC", "RB"], "single_factory_code_required"),
+    ):
+        with _create_client(monkeypatch, tmp_path) as client:
+            response = client.post(
+                "/api/jobs/audit-replace",
+                data={
+                    "mode": "replace",
+                    "params_json": json.dumps(
+                        {
+                            "source_project_no": "2016",
+                            "source_island_no": "1",
+                            "target_project_no": "2026",
+                            "target_island_no": "2",
+                            "unit_factory_codes": factory_codes,
+                            "run_deliverable": False,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+                files=[("files[]", ("20161RC-JGS01-A.dwg", b"dwg", "application/acad"))],
+            )
+
+        assert response.status_code == 422
+        errors = response.json()["detail"]["param_errors"]
+        assert errors["unit_factory_codes"] == [expected_error]
 
 
 def test_create_audit_replace_processes_job_without_deliverable(
@@ -1765,6 +1834,7 @@ def test_create_audit_replace_processes_job_without_deliverable(
                         "source_island_no": "1",
                         "target_project_no": "1916",
                         "target_island_no": "3",
+                        "unit_factory_codes": ["RC"],
                         "run_deliverable": False,
                     },
                     ensure_ascii=False,
@@ -1846,6 +1916,7 @@ def test_create_audit_replace_creates_group_when_run_deliverable_enabled(
                         "source_project_no": "2016",
                         "source_island_no": "1",
                         "target_project_no": "1818",
+                        "unit_factory_codes": ["RC"],
                         "run_deliverable": True,
                         "deliverable_params": params,
                     },
@@ -1934,6 +2005,7 @@ def test_create_audit_replace_with_deliverable_runs_replace_before_deliverable(
                         "source_project_no": "2016",
                         "source_island_no": "1",
                         "target_project_no": "1818",
+                        "unit_factory_codes": ["RC"],
                         "run_deliverable": True,
                         "deliverable_params": params,
                     },

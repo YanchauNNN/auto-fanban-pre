@@ -1,9 +1,17 @@
 ﻿from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import load_mechanism_spec
+
+
+@dataclass(frozen=True)
+class ReplaceBatchIdentity:
+    project_no: str
+    unit_no: str
+    factory_code: str
 
 
 def _project_no_prefix_re() -> re.Pattern[str]:
@@ -66,3 +74,30 @@ def infer_unit_no_from_path(
     if expected_project_no and match.group("project_no") != expected_project_no:
         return None
     return match.group("unit_no")
+
+
+def infer_replace_batch_identity(
+    path_or_name: str | Path | None,
+) -> ReplaceBatchIdentity | None:
+    if path_or_name is None:
+        return None
+    stem = Path(str(path_or_name)).stem.strip()
+    if not stem:
+        return None
+    pattern = str(
+        load_mechanism_spec().audit_replace.batch_filename_identity_regex or ""
+    ).strip()
+    if not pattern:
+        return None
+    try:
+        match = re.search(pattern, stem, flags=re.IGNORECASE)
+    except re.error:
+        return None
+    if match is None or len(match.groups()) < 3:
+        return None
+    project_no, unit_no, factory_code = match.group(1, 2, 3)
+    return ReplaceBatchIdentity(
+        project_no=str(project_no).strip(),
+        unit_no=str(unit_no).strip(),
+        factory_code=str(factory_code).strip().upper(),
+    )

@@ -681,10 +681,34 @@ runtime_options:
         assert standard_review.pairing.multiple_pairs_in_one_entity_enabled is True
         assert standard_review.pairing.fallback_name_keywords == ["标准", "规范", "规程", "图集"]
         assert standard_review.pairing.fallback_min_name_length == 4
+        assert standard_review.pairing.continuation_line_enabled is True
+        assert standard_review.pairing.continuation_line_y_height_factor == 2.2
+        assert standard_review.pairing.continuation_line_x_height_factor == 1.0
         assert config.audit_check.matching_policy.project_no_date_contexts == [
             "date_like",
             "titleblock_date",
         ]
+        assert config.audit_check.matching_policy.project_no_numeric_run_whitelist_enabled is True
+        assert config.audit_check.matching_policy.project_no_numeric_run_min_digits == 5
+        assert (
+            config.audit_check.matching_policy.project_no_numeric_run_requires_non_letter_suffix
+            is True
+        )
+        assert (
+            config.audit_check.matching_policy.project_no_exact_numeric_semantic_gate_enabled
+            is True
+        )
+        assert config.audit_check.matching_policy.project_no_exact_numeric_detection_contexts == [
+            "titleblock_engineering_no",
+        ]
+        assert (
+            config.audit_check.matching_policy.project_no_exact_numeric_semantic_gate_requires_frame
+            is True
+        )
+        assert config.audit_check.matching_policy.project_no_numeric_annotation_layer_patterns == [
+            r"^NHJTTT_OpenLine$",
+        ]
+        assert config.font_preflight.titleblock_print_style_replacements == {}
 
     def test_runtime_project_no_context_whitelist_reads_from_yaml(self):
         """项目号上下文白名单应从运行期 YAML 读取，便于后续业务补充。"""

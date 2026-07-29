@@ -36,6 +36,7 @@ from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
 from src.pipeline.project_no_inference import (
     infer_project_no_from_path,
+    infer_replace_batch_identity,
     infer_unit_no_from_path,
     resolve_project_no,
 )
@@ -601,6 +602,14 @@ class DeliverableApiRuntime:
         else:
             resolved_submissions = [(upload, self._resolve_replace_params(raw_params)) for upload in files]
             param_errors = self._collect_replace_param_errors(raw_params)
+            for field_name, field_errors in self._collect_replace_batch_identity_errors(
+                files,
+                raw_params,
+            ).items():
+                bucket = param_errors.setdefault(field_name, [])
+                for error in field_errors:
+                    if error not in bucket:
+                        bucket.append(error)
         if upload_errors or param_errors:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -778,6 +787,59 @@ class DeliverableApiRuntime:
 
     def _collect_replace_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
         return self.validator.validate_replace_frontend_params(raw_params)
+
+    @staticmethod
+    def _collect_replace_batch_identity_errors(
+        files: list[UploadedFilePayload],
+        raw_params: dict[str, Any],
+    ) -> dict[str, list[str]]:
+        errors: dict[str, list[str]] = {}
+        raw_factory_codes = raw_params.get("unit_factory_codes")
+        selected_factory_codes = {
+            str(value).strip().upper()
+            for value in (raw_factory_codes if isinstance(raw_factory_codes, list) else [])
+            if str(value).strip()
+        }
+        if not selected_factory_codes:
+            errors.setdefault("unit_factory_codes", []).append("required_for_replace")
+        elif len(selected_factory_codes) != 1:
+            errors.setdefault("unit_factory_codes", []).append("single_factory_code_required")
+
+        identities = [
+            identity
+            for upload in files
+            if (identity := infer_replace_batch_identity(upload.filename)) is not None
+        ]
+        if not identities:
+            return errors
+
+        projects = {identity.project_no for identity in identities}
+        units = {identity.unit_no for identity in identities}
+        factory_codes = {identity.factory_code for identity in identities}
+
+        if len(projects) > 1:
+            errors.setdefault("source_project_no", []).append("mixed_source_projects")
+        if len(units) > 1:
+            errors.setdefault("source_island_no", []).append("mixed_source_units")
+        if len(factory_codes) > 1:
+            errors.setdefault("unit_factory_codes", []).append("mixed_factory_codes")
+
+        source_project_no = str(raw_params.get("source_project_no") or "").strip()
+        if len(projects) == 1 and source_project_no and source_project_no not in projects:
+            errors.setdefault("source_project_no", []).append("source_project_mismatch")
+
+        source_unit_no = str(raw_params.get("source_island_no") or "").strip()
+        if len(units) == 1 and source_unit_no and source_unit_no not in units:
+            errors.setdefault("source_island_no", []).append("source_unit_mismatch")
+
+        if (
+            len(factory_codes) == 1
+            and len(selected_factory_codes) == 1
+            and selected_factory_codes != factory_codes
+        ):
+            errors.setdefault("unit_factory_codes", []).append("factory_code_mismatch")
+
+        return errors
 
     def _collect_font_param_errors(self, raw_params: dict[str, Any]) -> dict[str, list[str]]:
         errors: dict[str, list[str]] = {}

@@ -366,7 +366,7 @@ export function DeliverableWorkspace({
         submitMode === "split_only"
           ? "仅拆图任务已创建。"
           : pendingReplaceConfig?.runDeliverable
-          ? "翻版与出图任务包已创建。"
+          ? "标准化出图与交付任务包已创建。"
           : draft.runAuditCheck
             ? "出图与纠错任务包已创建。"
             : "出图任务已创建。",
@@ -770,6 +770,7 @@ export function DeliverableWorkspace({
     setDraft(createTaskConfigDraft(schema));
     setShowAdvanced(false);
     setPresetError(null);
+    onDraftAvailabilityChange(false);
     onClearPendingReplaceFlow?.();
     onClose();
   }
@@ -1057,7 +1058,7 @@ export function DeliverableWorkspace({
                   <h3>次级任务开关</h3>
                   <span>
                     {pendingReplaceConfig?.runDeliverable
-                      ? "翻版+交付"
+                      ? "标准化出图+交付"
                       : splitOnlyMode
                         ? "仅拆图"
                         : draft.runAuditCheck
@@ -1094,7 +1095,7 @@ export function DeliverableWorkspace({
                 <div className={styles.intentHelp}>
                   {pendingReplaceConfig?.runDeliverable ? (
                     <p>
-                      当前将以翻版+出图模式提交。
+                      当前将以标准化出图+交付模式提交。
                       <strong>{` ${pendingReplaceConfig.sourceProjectNo} -> ${pendingReplaceConfig.targetProjectNo}`}</strong>
                       {pendingReplaceConfig.sourceIslandNo ? (
                         <strong>{`（来源${formatUnitOrIslandLabel(pendingReplaceConfig.sourceIslandNo)}）`}</strong>

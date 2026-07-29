@@ -443,10 +443,16 @@ class FontPreflightService:
         )
         if not isinstance(configured, dict):
             return []
+        exempt_style_names = {
+            name.casefold()
+            for name in self._resolve_font_compatibility_exempt_style_names()
+        }
         results: list[dict[str, str]] = []
         for raw_style_name, raw_replacement in configured.items():
             style_name = str(raw_style_name or "").strip()
             if not style_name or not isinstance(raw_replacement, dict):
+                continue
+            if style_name.casefold() in exempt_style_names:
                 continue
             font_name = Path(str(raw_replacement.get("font") or "").strip()).name
             bigfont_name = Path(str(raw_replacement.get("bigfont") or "").strip()).name

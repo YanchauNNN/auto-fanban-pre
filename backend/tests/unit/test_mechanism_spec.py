@@ -65,6 +65,15 @@ def test_mechanism_spec_loader_uses_env_override(tmp_path: Path, monkeypatch) ->
     assert spec.project_inference.default_project_no == "2026"
 
 
+def test_repo_mechanism_spec_whitelists_connected_han_forbidden_term() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(repo_root / "documents" / "参数规范-3.yaml")
+
+    assert spec.audit_display.forbidden_term_connected_han_whitelist == ["工种"]
+
+
 def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> None:
     spec_path = _write_mechanism_spec(
         tmp_path / "documents" / "参数规范-3.yaml",
@@ -73,6 +82,9 @@ def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> Non
             "backend_mechanism": {
                 "audit_replace": {
                     "unit_factory_codes": ["RC", "HL"],
+                    "batch_filename_identity_regex": (
+                        r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
+                    ),
                 },
             },
         },
@@ -82,6 +94,9 @@ def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> Non
     spec = MechanismSpecLoader.load(spec_path)
 
     assert spec.audit_replace.unit_factory_codes == ["RC", "HL"]
+    assert spec.audit_replace.batch_filename_identity_regex == (
+        r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
+    )
 
 
 def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> None:

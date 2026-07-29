@@ -6,7 +6,7 @@ from openpyxl import Workbook
 
 from src.audit_check.lexicon import AuditLexiconLoader
 from src.audit_check.matcher import AuditMatchEngine
-from src.audit_check.models import ScanTextItem
+from src.audit_check.models import AuditLexicon, ScanTextItem
 
 
 def _build_lexicon_workbook(path: Path) -> Path:
@@ -117,7 +117,7 @@ def test_match_engine_suppresses_project_number_inside_titleblock_date(tmp_path:
     assert findings == []
 
 
-def test_match_engine_reports_project_no_inside_digit_prefix_when_suffix_turns_non_ascii(
+def test_match_engine_suppresses_project_no_inside_long_numeric_run_before_han_text(
     tmp_path: Path,
 ) -> None:
     wb = Workbook()
@@ -143,7 +143,7 @@ def test_match_engine_reports_project_no_inside_digit_prefix_when_suffix_turns_n
         ],
     )
 
-    assert any(item.matched_text == "1907" for item in findings)
+    assert all(item.matched_text != "1907" for item in findings)
 
 
 def test_match_engine_only_whitelists_exact_three_letters_plus_project_no_plus_one_letter(
@@ -217,3 +217,148 @@ def test_match_engine_ignores_spaces_when_matching_project_name(tmp_path: Path) 
         and item.raw_text.startswith("3.根据浙江金七门核电厂1、2号机组")
         for item in findings
     )
+
+
+def test_match_engine_suppresses_project_number_inside_long_numeric_run_but_keeps_album_code() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "1818", "1915", "2026", "2035"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": {"1818", "1915", "2026", "2035"}},
+        token_projects={
+            "1818": {"1818"},
+            "1915": {"1915"},
+            "2026": {"2026"},
+            "2035": {"2035"},
+        },
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            ScanTextItem(raw_text="18187", entity_type="DBText"),
+            ScanTextItem(raw_text="20350", entity_type="DBText"),
+            ScanTextItem(raw_text="120261", entity_type="DBText"),
+            ScanTextItem(raw_text="20261NH-JGS03-001", entity_type="DBText"),
+        ],
+    )
+
+    assert [(finding.raw_text, finding.matched_text) for finding in findings] == [
+        ("20261NH-JGS03-001", "2026"),
+    ]
+
+
+def test_match_engine_suppresses_plain_four_digit_project_token_on_configured_annotation_layer() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "1915", "2035"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": {"1915", "2035"}},
+        token_projects={"1915": {"1915"}, "2035": {"2035"}},
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            ScanTextItem(
+                raw_text="2035",
+                entity_type="DBText",
+                layer_name="NHJTTT_OpenLine",
+            ),
+            ScanTextItem(
+                raw_text="1915",
+                entity_type="DBText",
+                layer_name="NHJTTT_OpenLine",
+            ),
+            ScanTextItem(raw_text="2035", entity_type="MText", layer_name="NHJTTT_OpenLine"),
+            ScanTextItem(raw_text="1915", entity_type="DBText", layer_name="0"),
+        ],
+    )
+
+    assert [(finding.raw_text, finding.entity_type) for finding in findings] == [
+        ("2035", "MText"),
+        ("1915", "DBText"),
+    ]
+
+
+def test_match_engine_uses_frame_and_roi_semantics_for_exact_four_digit_project_tokens() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "1915", "2026", "2035"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": {"1915", "2026", "2035"}},
+        token_projects={"1915": {"1915"}, "2026": {"2026"}, "2035": {"2035"}},
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            ScanTextItem(
+                raw_text="2035",
+                entity_type="DBText",
+                layer_name="0",
+                internal_code="19076NH-JGS03-013",
+            ),
+            ScanTextItem(
+                raw_text="1915",
+                entity_type="MText",
+                layer_name="任意图层",
+                internal_code="19076NH-JGS03-023",
+            ),
+            ScanTextItem(
+                raw_text="2026",
+                entity_type="MText",
+                layer_name="0",
+                field_context="titleblock_engineering_no",
+                internal_code="19076NH-JGS03-024",
+            ),
+            ScanTextItem(
+                raw_text="设计依据1915",
+                entity_type="MText",
+                layer_name="0",
+                internal_code="19076NH-JGS03-025",
+            ),
+            ScanTextItem(
+                raw_text="20261NH-JGS03-001",
+                entity_type="MText",
+                layer_name="0",
+                internal_code="19076NH-JGS03-026",
+            ),
+        ],
+    )
+
+    assert [(finding.raw_text, finding.matched_text) for finding in findings] == [
+        ("2026", "2026"),
+        ("设计依据1915", "1915"),
+        ("20261NH-JGS03-001", "2026"),
+    ]
+
+
+def test_match_engine_keeps_layer_fallback_when_frame_semantics_are_unavailable() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "1915", "2035"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": {"1915", "2035"}},
+        token_projects={"1915": {"1915"}, "2035": {"2035"}},
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            ScanTextItem(
+                raw_text="2035",
+                entity_type="DBText",
+                layer_name="NHJTTT_OpenLine",
+            ),
+            ScanTextItem(
+                raw_text="1915",
+                entity_type="DBText",
+                layer_name="0",
+            ),
+        ],
+    )
+
+    assert [(finding.raw_text, finding.matched_text) for finding in findings] == [
+        ("1915", "1915"),
+    ]

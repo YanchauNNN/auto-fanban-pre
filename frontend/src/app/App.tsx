@@ -1063,7 +1063,7 @@ function WorkspacePage() {
                       type="button"
                       onClick={() => setReplaceConfigOpen(true)}
                     >
-                      翻版
+                      标准化出图
                     </button>
                     {deliverableDraftAvailable ? (
                       <button
@@ -1860,7 +1860,7 @@ function SingleJobDetailPanel({
 
       {detail.taskKind === "audit_replace" ? (
         <section className={styles.detailSection}>
-          <h2>翻版摘要</h2>
+          <h2>标准化出图摘要</h2>
           <ReplaceResultCard
             affectedDrawingsCount={detail.affectedDrawingsCount}
             replaceSummary={detail.replaceSummary}
@@ -2421,7 +2421,7 @@ function ReplaceResultCard({
   replaceSummary: JobDetail["replaceSummary"];
 }) {
   if (!replaceSummary) {
-    return <p className={styles.muted}>正在整理翻版结果。</p>;
+    return <p className={styles.muted}>正在整理标准化出图结果。</p>;
   }
 
   return (

@@ -43,6 +43,7 @@ type RawFormSchema = {
     source_unit_options?: Record<string, readonly { value: string; label: string }[]>;
     target_unit_options?: Record<string, readonly { value: string; label: string }[]>;
     unit_factory_codes?: readonly string[];
+    batch_filename_identity_regex?: string;
     factory_index_maps?: {
       source_variant_options?: Record<string, readonly string[]>;
       target_variant_options?: Record<string, readonly string[]>;
@@ -222,6 +223,8 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
     auditReplaceUnitFactoryCodes: normalizeCodeOptions(
       payload.audit_replace?.unit_factory_codes,
     ),
+    auditReplaceBatchFilenameIdentityRegex:
+      payload.audit_replace?.batch_filename_identity_regex?.trim() || undefined,
     auditReplaceFactoryIndexMaps: normalizeAuditReplaceFactoryIndexMaps(
       payload.audit_replace?.factory_index_maps,
     ),

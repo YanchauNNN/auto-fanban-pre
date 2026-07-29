@@ -41,6 +41,7 @@ export type FormSchema = {
   auditReplaceSourceUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
   auditReplaceTargetUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
   auditReplaceUnitFactoryCodes?: readonly string[];
+  auditReplaceBatchFilenameIdentityRegex?: string;
   auditReplaceFactoryIndexMaps?: {
     sourceVariantOptions: Record<string, readonly string[]>;
     targetVariantOptions: Record<string, readonly string[]>;

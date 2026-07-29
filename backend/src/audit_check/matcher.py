@@ -14,7 +14,22 @@ class AuditMatchEngine:
         audit_cfg = get_config().audit_check
         mechanism_cfg = load_mechanism_spec().audit_display
         self.forbidden_terms = [str(term) for term in mechanism_cfg.forbidden_terms if str(term)]
+        self.forbidden_term_connected_han_whitelist = {
+            str(term)
+            for term in mechanism_cfg.forbidden_term_connected_han_whitelist
+            if str(term)
+        }
         self.matching_policy = audit_cfg.matching_policy
+        self._project_no_numeric_annotation_layer_patterns = [
+            re.compile(pattern, re.IGNORECASE)
+            for pattern in self.matching_policy.project_no_numeric_annotation_layer_patterns
+            if str(pattern or "").strip()
+        ]
+        self._project_no_exact_numeric_detection_contexts = {
+            str(context).strip()
+            for context in self.matching_policy.project_no_exact_numeric_detection_contexts
+            if str(context).strip()
+        }
         self._date_patterns = [re.compile(pattern) for pattern in audit_cfg.context_rules.date_like]
         self._project_no_date_contexts = {
             str(context).strip()
@@ -77,7 +92,10 @@ class AuditMatchEngine:
 
             context_kind = self._classify_context(item.field_context, normalized_text)
             for forbidden_term in self.forbidden_terms:
-                if forbidden_term in normalized_text:
+                if self._contains_unwhitelisted_forbidden_term(
+                    forbidden_term,
+                    normalized_text,
+                ):
                     findings.append(
                         AuditFinding(
                             raw_text=item.raw_text,
@@ -121,7 +139,12 @@ class AuditMatchEngine:
             for token in foreign_tokens:
                 if token in matched_tokens:
                     continue
-                if self._matches_token(token=token, text=normalized_text, context_kind=context_kind):
+                if self._matches_token(
+                    token=token,
+                    text=normalized_text,
+                    context_kind=context_kind,
+                    item=item,
+                ):
                     matched_tokens.add(token)
                     findings.append(
                         AuditFinding(
@@ -238,6 +261,7 @@ class AuditMatchEngine:
                 ScanTextItem(
                     raw_text=code,
                     entity_type="TEXT_GROUP",
+                    layer_name=ordered[0].layer_name,
                     field_context="titleblock_external_code",
                     internal_code=ordered[0].internal_code,
                     layout_name=ordered[0].layout_name,
@@ -436,12 +460,21 @@ class AuditMatchEngine:
             str(field_context or "").strip() in self._project_no_date_contexts
         )
 
-    def _matches_token(self, *, token: str, text: str, context_kind: str) -> bool:
+    def _matches_token(
+        self,
+        *,
+        token: str,
+        text: str,
+        context_kind: str,
+        item: ScanTextItem,
+    ) -> bool:
         if self._is_whitelisted_project_identifier(text, token):
             return False
         if token.isdigit() and not self._contains_project_no_token_outside_context_whitelist(
             token,
             text,
+            item=item,
+            context_kind=context_kind,
         ):
             return False
 
@@ -457,15 +490,134 @@ class AuditMatchEngine:
             return False
         return any(pattern.fullmatch(text) for pattern in self._project_identifier_whitelist_patterns)
 
-    def _contains_project_no_token_outside_context_whitelist(self, token: str, text: str) -> bool:
+    def _contains_project_no_token_outside_context_whitelist(
+        self,
+        token: str,
+        text: str,
+        *,
+        item: ScanTextItem,
+        context_kind: str,
+    ) -> bool:
         start = 0
         while True:
             index = text.find(token, start)
             if index < 0:
                 return False
-            if not self._is_project_no_context_whitelisted_at(text, index):
+            is_whitelisted = self._is_project_no_context_whitelisted_at(text, index)
+            is_whitelisted = is_whitelisted or self._is_project_no_numeric_run_whitelisted_at(
+                text=text,
+                token_index=index,
+                token_length=len(token),
+            )
+            is_whitelisted = (
+                is_whitelisted
+                or self._is_project_no_exact_numeric_semantically_whitelisted(
+                    token=token,
+                    text=text,
+                    item=item,
+                    context_kind=context_kind,
+                )
+            )
+            is_whitelisted = is_whitelisted or self._is_project_no_annotation_layer_whitelisted(
+                token=token,
+                text=text,
+                item=item,
+                context_kind=context_kind,
+            )
+            if not is_whitelisted:
                 return True
             start = index + len(token)
+
+    def _is_project_no_numeric_run_whitelisted_at(
+        self,
+        *,
+        text: str,
+        token_index: int,
+        token_length: int,
+    ) -> bool:
+        if not self.matching_policy.project_no_numeric_run_whitelist_enabled:
+            return False
+        run_start = token_index
+        while run_start > 0 and text[run_start - 1].isdigit():
+            run_start -= 1
+        run_end = token_index + token_length
+        while run_end < len(text) and text[run_end].isdigit():
+            run_end += 1
+        min_digits = max(1, int(self.matching_policy.project_no_numeric_run_min_digits))
+        if run_end - run_start < min_digits:
+            return False
+        if not self.matching_policy.project_no_numeric_run_requires_non_letter_suffix:
+            return True
+        suffix = text[run_end] if run_end < len(text) else ""
+        return not (suffix.isascii() and suffix.isalpha())
+
+    def _is_project_no_exact_numeric_semantically_whitelisted(
+        self,
+        *,
+        token: str,
+        text: str,
+        item: ScanTextItem,
+        context_kind: str,
+    ) -> bool:
+        if not self.matching_policy.project_no_exact_numeric_semantic_gate_enabled:
+            return False
+        if len(token) != 4 or not token.isdigit() or text != token:
+            return False
+        if (
+            context_kind in self._project_no_exact_numeric_detection_contexts
+            or str(item.field_context or "").strip()
+            in self._project_no_exact_numeric_detection_contexts
+        ):
+            return False
+        return not (
+            self.matching_policy.project_no_exact_numeric_semantic_gate_requires_frame
+            and not str(item.internal_code or "").strip()
+        )
+
+    def _is_project_no_annotation_layer_whitelisted(
+        self,
+        *,
+        token: str,
+        text: str,
+        item: ScanTextItem,
+        context_kind: str,
+    ) -> bool:
+        if context_kind.startswith("titleblock_"):
+            return False
+        if item.entity_type.casefold() != "dbtext":
+            return False
+        if text != token:
+            return False
+        layer_name = str(item.layer_name or "").strip()
+        if not layer_name:
+            return False
+        return any(
+            pattern.fullmatch(layer_name)
+            for pattern in self._project_no_numeric_annotation_layer_patterns
+        )
+
+    def _contains_unwhitelisted_forbidden_term(self, term: str, text: str) -> bool:
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                return False
+            end = index + len(term)
+            if term not in self.forbidden_term_connected_han_whitelist:
+                return True
+            left = text[index - 1] if index > 0 else ""
+            right = text[end] if end < len(text) else ""
+            if not (self._is_han_character(left) and self._is_han_character(right)):
+                return True
+            start = index + len(term)
+
+    @staticmethod
+    def _is_han_character(value: str) -> bool:
+        return bool(value) and (
+            "\u3400" <= value <= "\u4dbf"
+            or "\u4e00" <= value <= "\u9fff"
+            or "\uf900" <= value <= "\ufaff"
+        )
 
     def _is_project_no_context_whitelisted_at(self, text: str, token_index: int) -> bool:
         if self._project_no_context_whitelist_re is None:

@@ -1,8 +1,11 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 
 import type { ApiAdapter, CreateBatchPayload, FormSchema } from "../../platform/api/types";
 import { TaskConfigModal } from "../deliverable/TaskConfigModal";
-import { inferProjectNumbers } from "../deliverable/uploadInference";
+import {
+  inferProjectNumbers,
+  inferReplaceBatchIdentity,
+} from "../deliverable/uploadInference";
 import styles from "../audit-check/AuditCheckWorkspace.module.css";
 
 type ReplaceMode = "replace_only" | "replace_with_deliverable";
@@ -55,6 +58,7 @@ export function ReplaceWorkspace({
   const [manualFields, setManualFields] = useState({
     sourceProjectNo: false,
     sourceIslandNo: false,
+    factoryCode: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const projectOptions = (schema.auditReplaceProjectOptions ?? []).filter((option) => option.trim());
@@ -66,6 +70,14 @@ export function ReplaceWorkspace({
   const islandSelectionRequired = targetIslandOptions.length > 0;
   const factoryCodeOptions = schema.auditReplaceUnitFactoryCodes ?? [];
   const unitFactoryCodes = parseFactoryCodes(draft.factoryCodesText);
+  const batchIdentity = useMemo(
+    () =>
+      inferReplaceBatchIdentity(
+        draft.files,
+        schema.auditReplaceBatchFilenameIdentityRegex,
+      ),
+    [draft.files, schema.auditReplaceBatchFilenameIdentityRegex],
+  );
 
   useEffect(() => {
     onDraftAvailabilityChange(
@@ -127,8 +139,10 @@ export function ReplaceWorkspace({
     ) {
       nextFieldErrors.target_island_no = ["required"];
     }
-    if (draft.factoryCodesText.trim() && unitFactoryCodes.length === 0) {
-      nextFieldErrors.unit_factory_codes = ["invalid_factory_code"];
+    if (unitFactoryCodes.length !== 1) {
+      nextFieldErrors.unit_factory_codes = [
+        unitFactoryCodes.length === 0 ? "required" : "single_factory_code_required",
+      ];
     }
     const normalizedSourceProjectNo = draft.sourceProjectNo.trim();
     const normalizedTargetProjectNo = draft.targetProjectNo.trim();
@@ -160,17 +174,28 @@ export function ReplaceWorkspace({
     if (draft.files.length === 0) {
       nextFormErrors.push("请至少上传一个 DWG 文件。");
     }
+    if (draft.files.length > schema.uploadLimits.maxFiles) {
+      nextFormErrors.push(`单次最多上传 ${schema.uploadLimits.maxFiles} 个 DWG 文件。`);
+    }
+    nextFormErrors.push(
+      ...buildBatchIdentityErrors({
+        inference: batchIdentity,
+        sourceProjectNo: normalizedSourceProjectNo,
+        sourceUnitNo: normalizedSourceIslandNo,
+        factoryCode: unitFactoryCodes[0] ?? "",
+      }),
+    );
 
     const invalidFiles = draft.files.filter(
       (file) => !schema.uploadLimits.allowedExts.includes(getExtension(file.name)),
     );
     if (invalidFiles.length > 0) {
-      nextFormErrors.push("only .dwg files are allowed");
+      nextFormErrors.push("只能上传 DWG 文件。");
     }
 
     const totalBytes = draft.files.reduce((sum, file) => sum + file.size, 0);
     if (totalBytes > schema.uploadLimits.maxTotalMb * 1024 * 1024) {
-      nextFormErrors.push(`total upload exceeds ${schema.uploadLimits.maxTotalMb} MB`);
+      nextFormErrors.push(`文件总大小不能超过 ${schema.uploadLimits.maxTotalMb} MB。`);
     }
 
     if (Object.keys(nextFieldErrors).length > 0 || nextFormErrors.length > 0) {
@@ -240,7 +265,7 @@ export function ReplaceWorkspace({
       });
       clearPersistedReplaceDraft();
       setDraft(createReplaceDraft());
-      setManualFields({ sourceProjectNo: false, sourceIslandNo: false });
+      setManualFields({ sourceProjectNo: false, sourceIslandNo: false, factoryCode: false });
       startTransition(() => onBatchCreated(payload));
       onClose();
     } catch (error) {
@@ -275,10 +300,14 @@ export function ReplaceWorkspace({
     field: "sourceProjectNo" | "sourceIslandNo" | "targetProjectNo" | "targetIslandNo" | "factoryCodesText",
     value: string,
   ) {
-    if (field === "sourceProjectNo" || field === "sourceIslandNo") {
+    if (
+      field === "sourceProjectNo" ||
+      field === "sourceIslandNo" ||
+      field === "factoryCodesText"
+    ) {
       setManualFields((current) => ({
         ...current,
-        [field]: true,
+        [field === "factoryCodesText" ? "factoryCode" : field]: true,
       }));
     }
     const errorKey =
@@ -317,24 +346,34 @@ export function ReplaceWorkspace({
       return;
     }
     const inference = inferProjectNumbers(files);
+    const identity = inferReplaceBatchIdentity(
+      files,
+      schema.auditReplaceBatchFilenameIdentityRegex,
+    );
     setDraft((current) => {
       const shouldUseInferredProjectNo =
-        Boolean(inference.primaryProjectNo) &&
+        Boolean(identity.primaryProjectNo || inference.primaryProjectNo) &&
         (!manualFields.sourceProjectNo || !current.sourceProjectNo.trim());
+      const inferredProjectNo = identity.primaryProjectNo || inference.primaryProjectNo;
       const nextSourceProjectNo = shouldUseInferredProjectNo
-        ? inference.primaryProjectNo
+        ? inferredProjectNo
         : current.sourceProjectNo;
       const nextSourceIslandOptions = getSourceIslandOptions(schema, nextSourceProjectNo);
       const inferredSourceIslandNo = nextSourceIslandOptions.some(
-        (option) => option.value === inference.primaryUnitNo,
+        (option) => option.value === (identity.primaryUnitNo || inference.primaryUnitNo),
       )
-        ? inference.primaryUnitNo
+        ? identity.primaryUnitNo || inference.primaryUnitNo
         : "";
       const shouldUseInferredSourceIslandNo =
         Boolean(inferredSourceIslandNo) &&
         (!manualFields.sourceIslandNo || !current.sourceIslandNo.trim());
       const keepCurrentSourceIsland =
         !shouldUseInferredSourceIslandNo && nextSourceProjectNo === current.sourceProjectNo;
+      const nextFactoryCode =
+        identity.primaryFactoryCode &&
+        (!manualFields.factoryCode || !current.factoryCodesText.trim())
+          ? identity.primaryFactoryCode
+          : current.factoryCodesText;
 
       return {
         ...current,
@@ -345,7 +384,23 @@ export function ReplaceWorkspace({
           : keepCurrentSourceIsland
             ? current.sourceIslandNo
             : "",
-        formErrors: [],
+        factoryCodesText: nextFactoryCode,
+        fieldErrors: {
+          ...current.fieldErrors,
+          source_project_no: [],
+          source_island_no: [],
+          unit_factory_codes: [],
+        },
+        formErrors: buildBatchIdentityErrors({
+          inference: identity,
+          sourceProjectNo: shouldUseInferredProjectNo
+            ? inferredProjectNo
+            : current.sourceProjectNo.trim(),
+          sourceUnitNo: shouldUseInferredSourceIslandNo
+            ? inferredSourceIslandNo
+            : current.sourceIslandNo.trim(),
+          factoryCode: nextFactoryCode.trim().toUpperCase(),
+        }),
       };
     });
   }
@@ -353,24 +408,25 @@ export function ReplaceWorkspace({
   function handleClearDraft() {
     clearPersistedReplaceDraft();
     setDraft(createReplaceDraft());
-    setManualFields({ sourceProjectNo: false, sourceIslandNo: false });
+    setManualFields({ sourceProjectNo: false, sourceIslandNo: false, factoryCode: false });
+    onDraftAvailabilityChange(false);
     onClose();
   }
 
   return (
-    <TaskConfigModal title="翻版配置" onRequestClose={onClose}>
+    <TaskConfigModal title="标准化出图配置" onRequestClose={onClose}>
       <div className={`${styles.layout} ${styles.replaceLayout}`}>
         <header className={styles.header}>
           <div>
-            <p className={styles.kicker}>Audit Replace</p>
-            <h2>翻版配置</h2>
+            <p className={styles.kicker}>Drawing Standardization</p>
+            <h2>标准化出图配置</h2>
             <p className={styles.description}>
-              本轮只接现有翻版 MVP，不做块替换配置。可选择仅翻版，或先翻版再进入现有出图配置。
+              支持单批最多 {schema.uploadLimits.maxFiles} 个 DWG。同一批文件须来自同一项目、同一机组号或岛号和同一厂房代码，并统一转换到同一目标项目。
             </p>
           </div>
           <div className={styles.headerActions}>
             <button className={styles.ghostButton} type="button" onClick={onClose}>
-              关闭翻版配置
+              关闭标准化出图配置
             </button>
           </div>
         </header>
@@ -396,14 +452,14 @@ export function ReplaceWorkspace({
                   ))}
                 </ul>
               ) : (
-                <p className={styles.emptyState}>当前还没有翻版文件草稿。</p>
+                <p className={styles.emptyState}>当前还没有待标准化的文件。</p>
               )}
               <div className={styles.summaryActions}>
                 <label className={`${styles.fileButton} ${styles.filePickerButton}`}>
-                  <span>选择翻版 DWG 文件</span>
+                  <span>选择标准化出图 DWG 文件</span>
                   <input
                     accept=".dwg"
-                    aria-label="选择翻版 DWG 文件"
+                    aria-label="选择标准化出图 DWG 文件"
                     className={styles.fileInputOverlay}
                     data-testid="replace-file-input"
                     multiple
@@ -421,15 +477,15 @@ export function ReplaceWorkspace({
               <div className={styles.replaceFactoryCodes}>
                 <div className={styles.fieldHeader}>
                   <label className={styles.fieldLabel} htmlFor="replace-factory-codes">
-                    <span>涉及厂房代码</span>
+                    <span>厂房代码</span>
                   </label>
                 </div>
                 <input
-                  aria-label="涉及厂房代码"
+                  aria-label="厂房代码"
                   className={styles.input}
                   id="replace-factory-codes"
                   list="replace-factory-code-options"
-                  placeholder="例如 RC, RX, HL"
+                  placeholder="例如 RC"
                   type="text"
                   value={draft.factoryCodesText}
                   onChange={(event) => handleFieldChange("factoryCodesText", event.target.value)}
@@ -447,10 +503,7 @@ export function ReplaceWorkspace({
                         className={styles.recommendationChip}
                         type="button"
                         onClick={() =>
-                          handleFieldChange(
-                            "factoryCodesText",
-                            appendFactoryCodeText(draft.factoryCodesText, code),
-                          )
+                          handleFieldChange("factoryCodesText", code)
                         }
                       >
                         {code}
@@ -459,21 +512,23 @@ export function ReplaceWorkspace({
                   </div>
                 ) : null}
                 <span className={styles.helperText}>
-                  只对“机组号数字 + 这些厂房代码”做机组转换。
+                  每批只能填写一个厂房代码，系统会将同一批图纸按统一规则处理。
                 </span>
                 {draft.fieldErrors.unit_factory_codes?.[0] ? (
-                  <span className={styles.errorText}>{draft.fieldErrors.unit_factory_codes[0]}</span>
+                  <span className={styles.errorText}>
+                    {formatReplaceValidationMessage(draft.fieldErrors.unit_factory_codes[0])}
+                  </span>
                 ) : null}
               </div>
             </section>
 
             <section className={`${styles.formCard} ${styles.replaceFormCard}`}>
-              <h3>翻版参数</h3>
+              <h3>标准化参数</h3>
 
               {draft.formErrors.length > 0 ? (
                 <div className={styles.formErrorPanel}>
                   {draft.formErrors.map((error) => (
-                    <p key={error}>{error}</p>
+                    <p key={error}>{formatReplaceValidationMessage(error)}</p>
                   ))}
                 </div>
               ) : null}
@@ -490,7 +545,7 @@ export function ReplaceWorkspace({
                       type="button"
                       onClick={() => handleModeChange("replace_only")}
                     >
-                      仅翻版
+                      仅标准化出图
                     </button>
                     <button
                       aria-pressed={draft.mode === "replace_with_deliverable"}
@@ -502,13 +557,13 @@ export function ReplaceWorkspace({
                       type="button"
                       onClick={() => handleModeChange("replace_with_deliverable")}
                     >
-                      同步出图和翻版
+                      标准化后继续出图
                     </button>
                   </div>
                   <span className={styles.helperText}>
                     {draft.mode === "replace_only"
-                      ? "提交后直接创建翻版任务。"
-                      : "先确认源/目标项目号，再进入现有出图配置，最终由后端统一执行翻版+出图。"}
+                      ? "提交后直接创建标准化出图任务。"
+                      : "先确认来源和目标信息，再进入出图配置，系统将依次完成标准化处理和出图。"}
                   </span>
                 </div>
 
@@ -528,10 +583,12 @@ export function ReplaceWorkspace({
                     onChange={(event) => handleFieldChange("sourceProjectNo", event.target.value)}
                   />
                   <span className={styles.helperText}>
-                    与后端 `source_project_no` 对应。
+                    同一批文件必须来自这里选择的项目。
                   </span>
                   {draft.fieldErrors.source_project_no?.[0] ? (
-                    <span className={styles.errorText}>{draft.fieldErrors.source_project_no[0]}</span>
+                    <span className={styles.errorText}>
+                      {formatReplaceValidationMessage(draft.fieldErrors.source_project_no[0])}
+                    </span>
                   ) : null}
                 </div>
 
@@ -557,10 +614,12 @@ export function ReplaceWorkspace({
                       ))}
                     </select>
                     <span className={styles.helperText}>
-                      当前来源项目需要区分机组或岛号，提交时会一并发送 <code>source_island_no</code>。
+                      同一批文件必须使用这里选择的来源机组号或岛号。
                     </span>
                     {draft.fieldErrors.source_island_no?.[0] ? (
-                      <span className={styles.errorText}>{draft.fieldErrors.source_island_no[0]}</span>
+                      <span className={styles.errorText}>
+                        {formatReplaceValidationMessage(draft.fieldErrors.source_island_no[0])}
+                      </span>
                     ) : null}
                   </div>
                 ) : null}
@@ -581,10 +640,12 @@ export function ReplaceWorkspace({
                     onChange={(event) => handleFieldChange("targetProjectNo", event.target.value)}
                   />
                   <span className={styles.helperText}>
-                    与后端 `target_project_no` 对应。
+                    同一批文件将统一转换到这里选择的目标项目。
                   </span>
                   {draft.fieldErrors.target_project_no?.[0] ? (
-                    <span className={styles.errorText}>{draft.fieldErrors.target_project_no[0]}</span>
+                    <span className={styles.errorText}>
+                      {formatReplaceValidationMessage(draft.fieldErrors.target_project_no[0])}
+                    </span>
                   ) : null}
                 </div>
 
@@ -613,10 +674,12 @@ export function ReplaceWorkspace({
                       ))}
                     </datalist>
                     <span className={styles.helperText}>
-                      当前目标项目需要区分机组或岛号，提交时会一并发送 <code>target_island_no</code>。
+                      同一批文件将统一转换为这里选择的目标机组号或岛号。
                     </span>
                     {draft.fieldErrors.target_island_no?.[0] ? (
-                      <span className={styles.errorText}>{draft.fieldErrors.target_island_no[0]}</span>
+                      <span className={styles.errorText}>
+                        {formatReplaceValidationMessage(draft.fieldErrors.target_island_no[0])}
+                      </span>
                     ) : null}
                   </div>
                 ) : null}
@@ -651,7 +714,7 @@ export function ReplaceWorkspace({
               {draft.mode === "replace_only"
                 ? isSubmitting
                   ? "创建中..."
-                  : "开始翻版"
+                  : "开始标准化出图"
                 : "出图"}
             </button>
           </footer>
@@ -825,7 +888,7 @@ function parseFactoryCodes(value: string) {
   const codes: string[] = [];
   for (const part of value.split(/[\s,，;；、]+/)) {
     const normalized = part.trim().toUpperCase();
-    if (!/^[A-Z][A-Z0-9]{1,3}$/.test(normalized) || seen.has(normalized)) {
+    if (!/^(?:[A-Z][A-Z0-9]{1,3}|\d{3})$/.test(normalized) || seen.has(normalized)) {
       continue;
     }
     seen.add(normalized);
@@ -834,13 +897,69 @@ function parseFactoryCodes(value: string) {
   return codes;
 }
 
-function appendFactoryCodeText(currentText: string, code: string) {
-  const currentCodes = parseFactoryCodes(currentText);
-  const normalizedCode = code.trim().toUpperCase();
-  if (!normalizedCode || currentCodes.includes(normalizedCode)) {
-    return currentCodes.join(", ");
+function buildBatchIdentityErrors({
+  inference,
+  sourceProjectNo,
+  sourceUnitNo,
+  factoryCode,
+}: {
+  inference: ReturnType<typeof inferReplaceBatchIdentity>;
+  sourceProjectNo: string;
+  sourceUnitNo: string;
+  factoryCode: string;
+}) {
+  const errors: string[] = [];
+  if (inference.hasProjectConflict) {
+    errors.push("同一批文件只能来自同一个来源项目。");
+  } else if (
+    inference.primaryProjectNo &&
+    sourceProjectNo &&
+    inference.primaryProjectNo !== sourceProjectNo
+  ) {
+    errors.push(`文件名识别到的来源项目为 ${inference.primaryProjectNo}，与当前选择不一致。`);
   }
-  return [...currentCodes, normalizedCode].join(", ");
+  if (inference.hasUnitConflict) {
+    errors.push("同一批文件只能来自同一个机组号或岛号。");
+  } else if (
+    inference.primaryUnitNo &&
+    sourceUnitNo &&
+    inference.primaryUnitNo !== sourceUnitNo
+  ) {
+    errors.push(`文件名识别到的来源机组号或岛号为 ${inference.primaryUnitNo}，与当前选择不一致。`);
+  }
+  if (inference.hasFactoryConflict) {
+    errors.push("同一批文件只能使用同一个厂房代码。");
+  } else if (
+    inference.primaryFactoryCode &&
+    factoryCode &&
+    inference.primaryFactoryCode !== factoryCode
+  ) {
+    errors.push(`文件名识别到的厂房代码为 ${inference.primaryFactoryCode}，与当前选择不一致。`);
+  }
+  return errors;
+}
+
+function formatReplaceValidationMessage(message: string) {
+  const messages: Record<string, string> = {
+    required: "此项为必填项。",
+    required_for_replace: "此项为标准化出图必填项。",
+    required_for_source_project: "请选择来源机组号或岛号。",
+    required_for_target_project: "请选择目标机组号或岛号。",
+    single_factory_code_required: "每批只能填写一个厂房代码。",
+    invalid_factory_code: "厂房代码格式不正确。",
+    remember_failed: "厂房代码保存失败，请重试。",
+    must_differ_from_source_project_no: "目标项目必须与来源项目不同。",
+    must_differ_from_source_island_no: "同项目标准化时，目标机组号或岛号必须与来源不同。",
+    unsupported_source_island_no: "来源机组号或岛号不在当前项目的可选范围内。",
+    unsupported_target_island_no: "目标机组号或岛号不在当前项目的可选范围内。",
+    mixed_source_projects: "同一批文件只能来自同一个来源项目。",
+    mixed_source_units: "同一批文件只能来自同一个机组号或岛号。",
+    mixed_factory_codes: "同一批文件只能使用同一个厂房代码。",
+    source_project_mismatch: "文件来源项目与当前选择不一致。",
+    source_unit_mismatch: "文件来源机组号或岛号与当前选择不一致。",
+    factory_code_mismatch: "文件厂房代码与当前选择不一致。",
+  };
+  return messages[message] ?? message;
 }
 
 function normalizeSourceIslandNo(schema: FormSchema, sourceProjectNo: string, sourceIslandNo: string) {

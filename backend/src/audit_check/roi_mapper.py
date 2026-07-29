@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from ..config import load_spec
 from ..models import BBox, FrameMeta, SheetSet
@@ -48,6 +48,7 @@ class AuditFieldContextMapper:
         return ScanTextItem(
             raw_text=item.raw_text,
             entity_type=item.entity_type,
+            layer_name=item.layer_name,
             field_context=field_context,
             internal_code=internal_code,
             layout_name=item.layout_name,

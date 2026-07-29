@@ -53,6 +53,40 @@ def test_audit_dotnet_scanner_reads_utf8_bom_result_json(monkeypatch, tmp_path: 
     assert items[0].text_bbox.xmax == 40.0
 
 
+def test_audit_dotnet_scanner_preserves_entity_layer_for_annotation_whitelist(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    scanner = AuditDotNetScanner()
+    source_dwg = tmp_path / "1907-A01.dwg"
+    source_dwg.write_bytes(b"dwg")
+
+    def fake_run(*, result_json: Path, **_: object) -> None:
+        payload = {
+            "texts": [
+                {
+                    "raw_text": "2035",
+                    "entity_type": "DBText",
+                    "layer_name": "NHJTTT_OpenLine",
+                    "layout_name": "Model",
+                }
+            ]
+        }
+        result_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8-sig")
+
+    monkeypatch.setattr(scanner.runner, "run", fake_run)
+
+    items = scanner.scan(
+        job_id="job-audit-layer",
+        source_dwg=source_dwg,
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert items[0].layer_name == "NHJTTT_OpenLine"
+
+
 def test_audit_dotnet_scanner_preserves_block_path_from_nested_blocks(
     monkeypatch,
     tmp_path: Path,

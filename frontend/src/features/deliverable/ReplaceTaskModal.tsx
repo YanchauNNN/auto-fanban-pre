@@ -28,17 +28,17 @@ export function ReplaceTaskModal({
 
   return (
     <div className={styles.backdrop}>
-      <div aria-label="翻版配置" aria-modal="true" className={styles.dialog} role="dialog">
+      <div aria-label="标准化出图配置" aria-modal="true" className={styles.dialog} role="dialog">
         <header className={styles.header}>
           <div>
             <p className={styles.kicker}>Replace Config</p>
-            <h2>翻版配置</h2>
+            <h2>标准化出图配置</h2>
             <p className={styles.description}>
               原始项目号默认来自本次 DWG 文件名识别结果，但允许人工修正以覆盖特殊情况。
             </p>
           </div>
           <button className={styles.ghostButton} type="button" onClick={onClose}>
-            关闭翻版配置
+            关闭标准化出图配置
           </button>
         </header>
 
@@ -105,7 +105,7 @@ export function ReplaceTaskModal({
             取消
           </button>
           <button className={styles.primaryButton} type="button" onClick={onConfirm}>
-            保存翻版配置
+            保存标准化出图配置
           </button>
         </footer>
       </div>

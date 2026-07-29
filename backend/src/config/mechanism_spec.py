@@ -18,7 +18,6 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
 _FORBIDDEN_TOP_LEVEL_KEYS = {
@@ -27,7 +26,7 @@ _FORBIDDEN_TOP_LEVEL_KEYS = {
     "doc_generation",
     "titleblock_extract",
 }
-_FACTORY_CODE_RE = re.compile(r"^[A-Z][A-Z0-9]{1,3}$")
+_FACTORY_CODE_RE = re.compile(r"^(?:[A-Z][A-Z0-9]{1,3}|\d{3})$")
 
 
 class PermissionsConfig(BaseModel):
@@ -61,6 +60,9 @@ class WorkloadSettlementConfig(BaseModel):
 
 class AuditDisplayConfig(BaseModel):
     forbidden_terms: list[str] = Field(default_factory=lambda: ["工种"])
+    forbidden_term_connected_han_whitelist: list[str] = Field(
+        default_factory=lambda: ["工种"],
+    )
     forbidden_term_priority: dict[str, int] = Field(default_factory=lambda: {"工种": 0})
     finding_group_priority: dict[str, int] = Field(default_factory=lambda: {"工种": 0})
     directly_filtered_flag_codes: list[str] = Field(
@@ -84,6 +86,9 @@ class ProjectInferenceConfig(BaseModel):
 
 class AuditReplaceMechanismConfig(BaseModel):
     unit_factory_codes: list[str] = Field(default_factory=list)
+    batch_filename_identity_regex: str = (
+        r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
+    )
 
 
 class ApiRuntimeMechanismConfig(BaseModel):

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { inferProjectNumbers } from "./uploadInference";
+import { inferProjectNumbers, inferReplaceBatchIdentity } from "./uploadInference";
 
 describe("inferProjectNumbers", () => {
   it("extracts project numbers from the first four digits of each filename", () => {
@@ -41,5 +41,41 @@ describe("inferProjectNumbers", () => {
     expect(inference.inferredUnitNos).toEqual(["1"]);
     expect(inference.primaryUnitNo).toBe("1");
     expect(inference.hasUnitConflict).toBe(false);
+  });
+
+  it("extracts a shared replace identity from album codes anywhere in filenames", () => {
+    const inference = inferReplaceBatchIdentity(
+      [
+        new File(["dwg"], "出图版--20261PC-JGS01-A.dwg", { type: "application/acad" }),
+        new File(["dwg"], "20261PC-JGS02-B.dwg", { type: "application/acad" }),
+      ],
+      String.raw`(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}`,
+    );
+
+    expect(inference).toMatchObject({
+      inferredProjectNos: ["2026"],
+      inferredUnitNos: ["1"],
+      inferredFactoryCodes: ["PC"],
+      primaryProjectNo: "2026",
+      primaryUnitNo: "1",
+      primaryFactoryCode: "PC",
+      hasProjectConflict: false,
+      hasUnitConflict: false,
+      hasFactoryConflict: false,
+    });
+  });
+
+  it("detects mixed source projects and factory codes in one replace batch", () => {
+    const inference = inferReplaceBatchIdentity(
+      [
+        new File(["dwg"], "20161RC-JGS01-A.dwg", { type: "application/acad" }),
+        new File(["dwg"], "18185RB-JGS02-A.dwg", { type: "application/acad" }),
+      ],
+      String.raw`(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}`,
+    );
+
+    expect(inference.hasProjectConflict).toBe(true);
+    expect(inference.hasUnitConflict).toBe(true);
+    expect(inference.hasFactoryConflict).toBe(true);
   });
 });

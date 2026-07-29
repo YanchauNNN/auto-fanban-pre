@@ -429,7 +429,7 @@ def test_font_preflight_service_builds_titleblock_print_replacement_regions(
     service.config.font_preflight.verify_after_replace = False
     service.config.font_preflight.empty_style_replacement = {}
     service.config.font_preflight.titleblock_print_style_replacements = {
-        "宋体": {
+        "图签缺失样式": {
             "font": "tssdeng.shx",
             "bigfont": "tssdchn.shx",
         }
@@ -459,7 +459,7 @@ def test_font_preflight_service_builds_titleblock_print_replacement_regions(
     replace_call = bridge.calls[1]
     assert replace_call["titleblock_print_style_replacements"] == [
         {
-            "style_name": "宋体",
+            "style_name": "图签缺失样式",
             "font": "tssdeng.shx",
             "bigfont": "tssdchn.shx",
         }
@@ -475,6 +475,69 @@ def test_font_preflight_service_builds_titleblock_print_replacement_regions(
         "ymax": pytest.approx(142.8),
     }
     assert result["titleblock_print_regions_count"] == 1
+
+
+def test_font_preflight_service_never_applies_titleblock_replacement_to_exempt_style(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdeng.shx",
+                        "value": "tssdeng.shx",
+                        "family": "tssdeng",
+                        "path": r"D:\AutoCAD\Fonts\tssdeng.shx",
+                        "kind": "shx",
+                    },
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    },
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.empty_style_replacement = {}
+    service.config.font_preflight.font_compatibility_replacements = {}
+    service.config.font_preflight.font_compatibility_exempt_style_names = ["宋体", "ST"]
+    service.config.font_preflight.titleblock_print_style_replacements = {
+        "宋体": {
+            "font": "tssdeng.shx",
+            "bigfont": "tssdchn.shx",
+        }
+    }
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-titleblock-exempt",
+            source_file=tmp_path / "sample.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1189, ymax=841),
+            sx=1.0,
+            sy=1.0,
+            roi_profile_id="BASE10",
+        ),
+    )
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+        frames=[frame],
+    )
+
+    assert [call["method"] for call in bridge.calls] == ["preflight"]
+    assert result["titleblock_print_style_replacements"] == []
 
 
 def test_font_preflight_service_skips_empty_style_replacement_without_target_regions(
