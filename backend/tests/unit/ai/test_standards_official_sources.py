@@ -67,6 +67,24 @@ def test_parse_openstd_replaced_records_replacement_and_no_fulltext() -> None:
     assert evidence.official_fulltext_url == ""
 
 
+def test_parse_openstd_online_reading_only_does_not_invent_download_url() -> None:
+    html = """
+    <h1>标准号：GB 15763.3-2009</h1>
+    <button class="yl_btn" data-value="ONLINE">在线预览</button>
+    <script>document.querySelector('.xz_btn')</script>
+    <p>由于涉及版权保护问题，本系统仅提供在线阅读服务。</p>
+    """
+
+    evidence = parse_openstd_detail(
+        html,
+        "https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=ONLINE",
+    )
+
+    assert evidence.downloadability == "仅在线阅读"
+    assert evidence.authorization == "仅允许在线阅读"
+    assert evidence.official_fulltext_url == ""
+
+
 def test_parse_industry_result_returns_metadata_only() -> None:
     payload = json.loads((FIXTURES / "industry_result.json").read_text(encoding="utf-8"))
 

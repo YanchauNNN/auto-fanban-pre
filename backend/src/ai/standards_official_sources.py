@@ -141,7 +141,8 @@ def parse_openstd_detail(html: str, detail_url: str) -> OfficialEvidence:
     parser.feed(html)
     table = {key.strip("：: "): value.strip() for key, value in parser.table_rows}
     hcno = parser.download_hcno or _query_value(detail_url, "hcno")
-    has_download = bool(parser.download_hcno or "xz_btn" in html)
+    has_download = bool(parser.download_hcno)
+    online_reading_only = "\u4ec5\u63d0\u4f9b\u5728\u7ebf\u9605\u8bfb\u670d\u52a1" in html
     fulltext_url = (
         f"{OPENSTD_BASE_URL}/bzgk/std/showGb?type=download&hcno={hcno}"
         if has_download and hcno
@@ -155,7 +156,7 @@ def parse_openstd_detail(html: str, detail_url: str) -> OfficialEvidence:
     def value(*labels: str) -> str:
         return _first(table, *labels) or _metadata_value(parser.texts, *labels)
 
-    return OfficialEvidence(
+    evidence = OfficialEvidence(
         standard_code=value("标准号", "标准编号"),
         standard_name=value("中文标准名称", "标准名称"),
         official_status=value("标准状态", "状态"),
@@ -172,6 +173,14 @@ def parse_openstd_detail(html: str, detail_url: str) -> OfficialEvidence:
         evidence_checked_at=_checked_at(),
         evidence_note=note,
     )
+    if online_reading_only:
+        evidence.downloadability = "\u4ec5\u5728\u7ebf\u9605\u8bfb"
+        evidence.authorization = "\u4ec5\u5141\u8bb8\u5728\u7ebf\u9605\u8bfb"
+        evidence.evidence_note = (
+            "\u5b98\u65b9\u9875\u9762\u660e\u786e\u4ec5\u63d0\u4f9b\u5728\u7ebf\u9605\u8bfb\uff0c"
+            "\u4e0d\u5141\u8bb8\u79bb\u7ebf\u4e0b\u8f7d\u3002"
+        )
+    return evidence
 
 
 def parse_industry_result(
