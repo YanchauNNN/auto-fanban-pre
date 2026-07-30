@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
+from docx import Document as WordDocument
 from docx.shared import Mm
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 from docxtpl import DocxTemplate, InlineImage
 
 from .archive import ArchiveLimits, validate_and_extract_archive
@@ -20,6 +24,7 @@ from .matching import (
 from .models import CalculationBookParams
 from .narrative import (
     build_reinforcement_narrative,
+    build_slab_reinforcement_narrative,
     select_calculation_reference,
 )
 from .ocr import StressLegendReading, recognize_stress_legend
@@ -27,6 +32,12 @@ from .reinforcement_input import (
     NormalizedReinforcementRow,
     ParsedRebarCell,
     load_reinforcement_schedule,
+    load_slab_reinforcement_schedule,
+)
+from .slab import (
+    RecognizedSlabFigure,
+    SlabMatchingPlan,
+    match_slab_reinforcement,
 )
 from .templates import resolve_template_path, validate_template_context
 
@@ -202,6 +213,7 @@ def _reinforcement_figure_rows(
     document: DocxTemplate,
     assignments: tuple[ReinforcementAssignment, ...],
     chapter: str,
+    start_index: int = 1,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     direction_labels = {"X": "水平向", "Y": "竖向", "Z": "拉筋"}
@@ -213,7 +225,7 @@ def _reinforcement_figure_rows(
             )
             rows.append(
                 {
-                    "figure_number": f"{chapter}-{len(rows) + 1}",
+                    "figure_number": f"{chapter}-{start_index + len(rows)}",
                     "image": InlineImage(
                         document,
                         str(figure.source.path),
@@ -241,6 +253,93 @@ def _reinforcement_figure_rows(
                 }
             )
     return rows
+
+
+_SLAB_LAYER_LABELS = {
+    "top_x": "顶层水平",
+    "middle_x": "中层水平",
+    "bottom_x": "底层水平",
+    "top_y": "顶层竖向",
+    "middle_y": "中层竖向",
+    "bottom_y": "底层竖向",
+    "z": "纵向拉筋",
+}
+
+
+def _slab_figure_rows(
+    *,
+    document: DocxTemplate,
+    plan: SlabMatchingPlan,
+    chapter: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for assignment in plan.assignments:
+        label = _SLAB_LAYER_LABELS[assignment.key]
+        cell = assignment.rebar_cell
+        rows.append(
+            {
+                "figure_number": f"{chapter}-{len(rows) + 1}",
+                "image": InlineImage(
+                    document,
+                    str(assignment.figure.source.path),
+                    width=Mm(140),
+                ),
+                "caption": f"{assignment.elevation}m 楼板{label}",
+                "narrative": build_slab_reinforcement_narrative(
+                    elevation=assignment.elevation,
+                    layer_label=label,
+                    reading=assignment.figure.reading,
+                    rebar_specification=(
+                        cell.selected.narrative_specification
+                    ),
+                    actual_area=cell.selected.actual_area,
+                    is_z=assignment.direction == "Z",
+                ),
+            }
+        )
+    return rows
+
+
+_MM2_PATTERN = re.compile(r"mm(?:2|²)")
+
+
+def _superscript_mm2(path: Path) -> None:
+    document = WordDocument(str(path))
+    paragraph_elements = list(document.element.body.iter())
+    for section in document.sections:
+        paragraph_elements.extend(section.header._element.iter())
+        paragraph_elements.extend(section.footer._element.iter())
+
+    seen: set[int] = set()
+    for element in paragraph_elements:
+        if not element.tag.endswith("}p") or id(element) in seen:
+            continue
+        seen.add(id(element))
+        paragraph = Paragraph(element, element.getparent())
+        for run in list(paragraph.runs):
+            if _MM2_PATTERN.search(run.text) is None:
+                continue
+            pieces = _MM2_PATTERN.split(run.text)
+            matches = list(_MM2_PATTERN.finditer(run.text))
+            replacement: list[tuple[str, bool]] = []
+            for index, piece in enumerate(pieces):
+                if piece:
+                    replacement.append((piece, False))
+                if index < len(matches):
+                    replacement.extend((("mm", False), ("2", True)))
+
+            parent = run._r.getparent()
+            insertion_index = parent.index(run._r)
+            for text, superscript in replacement:
+                clone = deepcopy(run._r)
+                clone_run = Run(clone, paragraph)
+                clone_run.text = text
+                if superscript:
+                    clone_run.font.superscript = True
+                parent.insert(insertion_index, clone)
+                insertion_index += 1
+            parent.remove(run._r)
+    document.save(str(path))
 
 
 def _safe_output_name(params: CalculationBookParams) -> str:
@@ -316,10 +415,38 @@ class CalculationBookProcessor:
             for direction in ("X", "Y", "Z")
         )
 
+        slab_plan = SlabMatchingPlan(assignments=())
+        recognized_slabs: list[RecognizedSlabFigure] = []
+        if params.include_slab_stress:
+            slab_schedule = load_slab_reinforcement_schedule(
+                contents.reinforcement_workbook,
+                required=True,
+            )
+            assert slab_schedule is not None
+            recognized_slabs = [
+                RecognizedSlabFigure(
+                    source=figure,
+                    reading=self.ocr_recognizer(
+                        figure.path,
+                        figure.direction,
+                    ),
+                )
+                for figure in contents.slab_figures
+            ]
+            slab_plan = match_slab_reinforcement(
+                recognized_slabs,
+                slab_schedule,
+            )
+
         report(CalculationBookStage.RENDER_CALCULATION_BOOK, 75, "正在渲染 Word 计算书", {})
         template_path = resolve_template_path(self.assets.template_root, params.template_type)
         document = DocxTemplate(template_path)
         context = params.model_dump(mode="python")
+        slab_figure_rows = _slab_figure_rows(
+            document=document,
+            plan=slab_plan,
+            chapter=self.mechanism.chapter,
+        )
         context.update(
             {
                 "record_1_version": params.version,
@@ -332,10 +459,12 @@ class CalculationBookProcessor:
                 ),
                 "actual_rebar_rows": _actual_rebar_rows(assignments),
                 "wall_table_rows": _wall_rows(assignments),
+                "slab_figures": slab_figure_rows,
                 "reinforcement_figures": _reinforcement_figure_rows(
                     document=document,
                     assignments=assignments,
                     chapter=self.mechanism.chapter,
+                    start_index=len(slab_figure_rows) + 1,
                 ),
             }
         )
@@ -346,6 +475,7 @@ class CalculationBookProcessor:
         final_path = output_dir / _safe_output_name(params)
         temporary_path = final_path.with_suffix(".docx.tmp")
         document.save(temporary_path)
+        _superscript_mm2(temporary_path)
         temporary_path.replace(final_path)
 
         report(
@@ -353,14 +483,14 @@ class CalculationBookProcessor:
             95,
             "计算书生成完成",
             {
-                "figure_count": len(recognized),
+                "figure_count": len(recognized) + len(recognized_slabs),
                 "output_filename": final_path.name,
                 "template_type": params.template_type.value,
             },
         )
         return CalculationBookResult(
             output_path=final_path,
-            figure_count=len(recognized),
+            figure_count=len(recognized) + len(recognized_slabs),
             template_type=params.template_type.value,
             selections=selections,
         )

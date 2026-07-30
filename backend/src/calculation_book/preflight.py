@@ -11,7 +11,9 @@ from .reinforcement_input import (
     NormalizedReinforcementRow,
     ParsedRebarCell,
     load_reinforcement_schedule,
+    load_slab_reinforcement_schedule,
 )
+from .slab import RecognizedSlabFigure, match_slab_reinforcement
 
 OcrRecognizer = Callable[[Path, str], StressLegendReading]
 
@@ -83,6 +85,25 @@ def run_calculation_book_preflight(
         for figure in contents.reinforcement_figures
     ]
     plan = match_reinforcement(recognized, schedule)
+    slab_plan = None
+    recognized_slabs: list[RecognizedSlabFigure] = []
+    if include_slab_stress:
+        slab_schedule = load_slab_reinforcement_schedule(
+            contents.reinforcement_workbook,
+            required=True,
+        )
+        assert slab_schedule is not None
+        recognized_slabs = [
+            RecognizedSlabFigure(
+                source=figure,
+                reading=recognize(figure.path, figure.direction),
+            )
+            for figure in contents.slab_figures
+        ]
+        slab_plan = match_slab_reinforcement(
+            recognized_slabs,
+            slab_schedule,
+        )
 
     rows_by_wall: dict[str, list[NormalizedReinforcementRow]] = {}
     for row in schedule.rows:
@@ -132,11 +153,49 @@ def run_calculation_book_preflight(
         )
 
     ignored = [path.name for path in contents.ignored_root_images]
-    warnings = (
-        [{"code": "ignored_root_images", "filenames": ignored}]
-        if ignored
-        else []
-    )
+    warnings = []
+    if ignored:
+        warnings.append(
+            {"code": "ignored_root_images", "filenames": ignored}
+        )
+    if contents.slab_figures and not include_slab_stress:
+        warnings.append(
+            {
+                "code": "slab_ignored_by_choice",
+                "filenames": [
+                    figure.path.name for figure in contents.slab_figures
+                ],
+            }
+        )
+
+    slabs = []
+    if slab_plan is not None:
+        for slab_assignment in slab_plan.assignments:
+            cell = slab_assignment.rebar_cell
+            reading = slab_assignment.figure.reading
+            slabs.append(
+                {
+                    "elevation": slab_assignment.elevation,
+                    "key": slab_assignment.key,
+                    "position": slab_assignment.position,
+                    "direction": slab_assignment.direction,
+                    "image_filename": slab_assignment.figure.source.path.name,
+                    "smn": reading.smn,
+                    "smx": reading.smx,
+                    "legend_values": list(reading.legend_values),
+                    "is_zero_result": reading.is_zero_result,
+                    "source_row": slab_assignment.source_row,
+                    "source_cell": slab_assignment.source_cell,
+                    "original_text": cell.original_text,
+                    "canonical_specification": (
+                        cell.selected.canonical_specification
+                    ),
+                    "narrative_specification": (
+                        cell.selected.narrative_specification
+                    ),
+                    "actual_area": round(cell.selected.actual_area, 1),
+                }
+            )
     return {
         "figure_count": len(recognized),
         "zero_figure_count": sum(
@@ -147,5 +206,10 @@ def run_calculation_book_preflight(
         "requires_manual_confirmation": plan.requires_manual_confirmation,
         "confirmations": confirmations,
         "walls": walls,
+        "slab_figure_count": len(recognized_slabs),
+        "slab_elevation_count": (
+            slab_plan.elevation_count if slab_plan is not None else 0
+        ),
+        "slabs": slabs,
         "warnings": warnings,
     }

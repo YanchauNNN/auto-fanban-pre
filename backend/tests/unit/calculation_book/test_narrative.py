@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import math
 
-from src.calculation_book.narrative import build_reinforcement_narrative
+from src.calculation_book.narrative import (
+    build_reinforcement_narrative,
+    build_slab_reinforcement_narrative,
+)
 from src.calculation_book.ocr import StressLegendReading
 
 
@@ -80,5 +83,48 @@ def test_z_without_smx_uses_constructor_reinforcement_wording() -> None:
     ) == (
         "墙N5012-拉筋钢筋计算配筋面积为0mm²/m。"
         "选用钢筋1排14@400x400（配筋面积为962.1 mm²/m）作为构造钢筋。 "
+        "配筋结果包络计算结果。"
+    )
+
+
+def test_builds_slab_layer_narrative_with_exact_actual_area() -> None:
+    reading = StressLegendReading(
+        smn=0,
+        smx=4888,
+        legend_values=(0, 543, 1086, 1629, 2172, 2715, 3259, 3802, 4345, 4888),
+    )
+
+    assert build_slab_reinforcement_narrative(
+        elevation="11.45",
+        layer_label="顶层水平",
+        reading=reading,
+        rebar_specification="1排36@200",
+        actual_area=math.pi * 18**2 * 5,
+        is_z=False,
+    ) == (
+        "11.45m楼板顶层水平钢筋计算配筋面积的最大值为4888 mm²/m。"
+        "选用钢筋1排36@200（配筋面积为5089.4 mm²/m）。 "
+        "配筋结果包络计算结果。"
+    )
+
+
+def test_builds_zero_slab_z_narrative_as_constructor_reinforcement() -> None:
+    reading = StressLegendReading(
+        smn=0,
+        smx=0,
+        legend_values=(),
+        is_zero_result=True,
+    )
+
+    assert build_slab_reinforcement_narrative(
+        elevation="11.45",
+        layer_label="纵向拉筋",
+        reading=reading,
+        rebar_specification="1排16@200",
+        actual_area=math.pi * 8**2 * 5,
+        is_z=True,
+    ) == (
+        "11.45m楼板纵向拉筋计算配筋面积为0mm²/m。"
+        "选用钢筋1排16@200（配筋面积为1005.3 mm²/m）作为构造钢筋。 "
         "配筋结果包络计算结果。"
     )

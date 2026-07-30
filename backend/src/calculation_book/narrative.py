@@ -89,3 +89,48 @@ def build_reinforcement_narrative(
         f"{selection}。"
         f"{conclusion}"
     )
+
+
+def build_slab_reinforcement_narrative(
+    *,
+    elevation: str,
+    layer_label: str,
+    reading: StressLegendReading,
+    rebar_specification: str,
+    actual_area: float | int,
+    is_z: bool,
+) -> str:
+    actual = float(actual_area)
+    actual_text = _format_actual_area(actual)
+    prefix = (
+        f"{elevation}m楼板{layer_label}"
+        f"{'' if is_z else '钢筋'}"
+    )
+    selection = (
+        f"选用钢筋{rebar_specification}"
+        f"（配筋面积为{actual_text} mm²/m）"
+    )
+    conclusion = " 配筋结果包络计算结果。"
+
+    if reading.is_zero_result:
+        if not is_z:
+            raise ValueError("只有楼板纵向拉筋图可以使用无 SMX 的零值结果")
+        return (
+            f"{prefix}计算配筋面积为0mm²/m。"
+            f"{selection}作为构造钢筋。"
+            f"{conclusion}"
+        )
+
+    if actual >= reading.smx:
+        return (
+            f"{prefix}计算配筋面积的最大值为{_format_number(reading.smx)} mm²/m。"
+            f"{selection}。"
+            f"{conclusion}"
+        )
+
+    reference = select_calculation_reference(reading, actual_area=actual)
+    return (
+        f"{prefix}计算配筋面积大部分小于{_format_number(reference)} mm²/m。"
+        f"{selection}。"
+        f"{conclusion}"
+    )

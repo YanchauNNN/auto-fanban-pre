@@ -3,11 +3,13 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 from PIL import Image
 
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.preflight import run_calculation_book_preflight
+from src.calculation_book.reinforcement_input import InvalidReinforcementWorkbook
 
 
 def _build_duplicate_archive(tmp_path: Path) -> Path:
@@ -28,6 +30,77 @@ def _build_duplicate_archive(tmp_path: Path) -> Path:
     sheet.append(["构件编号及位置", "水平筋", "竖向筋", "拉筋"])
     sheet.append(["S7157墙", "1D36间距200", "1D36间距200", "1C14间距400*400"])
     sheet.append(["S7157墙", "1D32间距200", "1D32间距200", "1C14间距400*400"])
+    workbook.save(source / "计算书模板文件.xlsx")
+
+    archive_path = tmp_path / "input.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in source.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(source).as_posix())
+    return archive_path
+
+
+def _build_slab_archive(
+    tmp_path: Path,
+    *,
+    include_middle: bool = False,
+    include_slab_sheet: bool = True,
+) -> Path:
+    source = tmp_path / "source"
+    source.mkdir()
+    for direction in ("X", "Y", "Z"):
+        Image.new("RGB", (1200, 800), "white").save(
+            source / f"S7159-{direction}.png"
+        )
+    slab_names = [
+        "11.45-TOP-X",
+        "11.45-BOTTOM-X",
+        "11.45-TOP-Y",
+        "11.45-BOTTOM-Y",
+        "11.45-Z",
+    ]
+    if include_middle:
+        slab_names.extend(("11.45-MIDDLE-X", "11.45-MIDDLE-Y"))
+    for stem in slab_names:
+        Image.new("RGB", (1200, 800), "white").save(source / f"{stem}.png")
+
+    (source / "01").mkdir()
+    (source / "02").mkdir()
+    Image.new("RGB", (1200, 800), "white").save(source / "01" / "layout.png")
+    Image.new("RGB", (1200, 800), "white").save(source / "02" / "model.png")
+
+    workbook = Workbook()
+    wall_sheet = workbook.active
+    wall_sheet.append(["构件编号及位置", "水平筋", "竖向筋", "拉筋"])
+    wall_sheet.append(
+        ["S7159墙", "1D28间距200", "1D28间距200", "1C12间距200*400"]
+    )
+    if include_slab_sheet:
+        slab_sheet = workbook.create_sheet("楼板配筋")
+        slab_sheet.append(
+            [
+                "标高",
+                "顶层水平",
+                "顶层竖向",
+                "中层水平",
+                "中层竖向",
+                "底层水平",
+                "底层竖向",
+                "纵向拉筋",
+            ]
+        )
+        slab_sheet.append(
+            [
+                11.45,
+                "1D36@200",
+                "1D40@200",
+                "1D32@200" if include_middle else None,
+                "1D34@200" if include_middle else None,
+                "1D30@200",
+                "1D28@200",
+                "1D16@200",
+            ]
+        )
     workbook.save(source / "计算书模板文件.xlsx")
 
     archive_path = tmp_path / "input.zip"
@@ -72,3 +145,94 @@ def test_preflight_returns_structured_evidence_and_manual_confirmation_candidate
     } == {"1排32@200", "1排36@200"}
     assert result["walls"][0]["directions"]["X"]["legend_values"][0] == 0
     assert result["walls"][0]["directions"]["X"]["source_cell"] == "B3"
+
+
+def test_preflight_ignores_slab_ocr_when_option_is_disabled(
+    tmp_path: Path,
+) -> None:
+    archive_path = _build_slab_archive(tmp_path)
+    recognized_names: list[str] = []
+
+    def recognize(path: Path, _direction: str) -> StressLegendReading:
+        recognized_names.append(path.name)
+        return StressLegendReading(
+            smn=0,
+            smx=1000,
+            legend_values=tuple(1000 * index / 9 for index in range(10)),
+        )
+
+    result = run_calculation_book_preflight(
+        archive_path=archive_path,
+        extraction_root=tmp_path / "extracted",
+        include_slab_stress=False,
+        ocr_recognizer=recognize,
+    )
+
+    assert recognized_names == ["S7159-X.png", "S7159-Y.png", "S7159-Z.png"]
+    assert result["slabs"] == []
+    assert result["slab_figure_count"] == 0
+    assert result["warnings"] == [
+        {
+            "code": "slab_ignored_by_choice",
+            "filenames": [
+                "11.45-TOP-X.png",
+                "11.45-TOP-Y.png",
+                "11.45-BOTTOM-X.png",
+                "11.45-BOTTOM-Y.png",
+                "11.45-Z.png",
+            ],
+        }
+    ]
+
+
+def test_preflight_returns_seven_ordered_slab_evidence_items(
+    tmp_path: Path,
+) -> None:
+    archive_path = _build_slab_archive(tmp_path, include_middle=True)
+
+    result = run_calculation_book_preflight(
+        archive_path=archive_path,
+        extraction_root=tmp_path / "extracted",
+        include_slab_stress=True,
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 1000,
+            legend_values=(
+                () if direction == "Z" else tuple(1000 * index / 9 for index in range(10))
+            ),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    assert result["slab_figure_count"] == 7
+    assert result["slab_elevation_count"] == 1
+    assert [item["key"] for item in result["slabs"]] == [
+        "top_x",
+        "middle_x",
+        "bottom_x",
+        "top_y",
+        "middle_y",
+        "bottom_y",
+        "z",
+    ]
+    assert result["slabs"][0]["source_cell"] == "B2"
+    assert result["slabs"][0]["canonical_specification"] == "1D36间距200"
+    assert result["slabs"][-1]["is_zero_result"] is True
+
+
+def test_preflight_requires_slab_sheet_only_when_option_is_enabled(
+    tmp_path: Path,
+) -> None:
+    archive_path = _build_slab_archive(tmp_path, include_slab_sheet=False)
+
+    with pytest.raises(InvalidReinforcementWorkbook, match="楼板配筋"):
+        run_calculation_book_preflight(
+            archive_path=archive_path,
+            extraction_root=tmp_path / "extracted",
+            include_slab_stress=True,
+            ocr_recognizer=lambda _path, _direction: StressLegendReading(
+                smn=0,
+                smx=1000,
+                legend_values=tuple(1000 * index / 9 for index in range(10)),
+            ),
+        )

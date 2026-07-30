@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import cast
 
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
@@ -454,13 +455,13 @@ def load_slab_reinforcement_schedule(
             rows.append(
                 NormalizedSlabReinforcementRow(
                     elevation=elevation,
-                    top_x=parsed["top_x"],
-                    top_y=parsed["top_y"],
+                    top_x=cast(ParsedRebarCell, parsed["top_x"]),
+                    top_y=cast(ParsedRebarCell, parsed["top_y"]),
                     middle_x=parsed["middle_x"],
                     middle_y=parsed["middle_y"],
-                    bottom_x=parsed["bottom_x"],
-                    bottom_y=parsed["bottom_y"],
-                    z=parsed["z"],
+                    bottom_x=cast(ParsedRebarCell, parsed["bottom_x"]),
+                    bottom_y=cast(ParsedRebarCell, parsed["bottom_y"]),
+                    z=cast(ParsedRebarCell, parsed["z"]),
                     source_sheet=sheet.title,
                     source_row=row_number,
                     source_cells=source_cells,
