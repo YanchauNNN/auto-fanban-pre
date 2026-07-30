@@ -14,6 +14,7 @@ import type {
   CalculationBookDirectionEvidence,
   CalculationBookField,
   CalculationBookPreflightResult,
+  CalculationBookSlabEvidence,
   CreateBatchPayload,
   FormSchema,
   SubmissionParams,
@@ -51,6 +52,114 @@ const CONFIRMATION_REASON_LABELS: Record<string, string> = {
   duplicate_reinforcement_rows: "配筋表存在重复墙号",
   split_image_group: "图片采用 -1/-2 分组",
 };
+
+const SLAB_GROUP_ORDER = [
+  "top_x",
+  "top_y",
+  "middle_x",
+  "middle_y",
+  "bottom_x",
+  "bottom_y",
+  "z",
+] as const;
+
+const SLAB_GROUP_LABELS: Record<string, string> = {
+  top_x: "TOP-X · 上表面 X 向",
+  top_y: "TOP-Y · 上表面 Y 向",
+  middle_x: "MIDDLE-X · 中部 X 向",
+  middle_y: "MIDDLE-Y · 中部 Y 向",
+  bottom_x: "BOTTOM-X · 下表面 X 向",
+  bottom_y: "BOTTOM-Y · 下表面 Y 向",
+  z: "Z · Z 向",
+};
+
+const FIVE_SLAB_GROUPS = ["top_x", "top_y", "bottom_x", "bottom_y", "z"] as const;
+
+type SlabEvidenceGroup = {
+  elevation: string;
+  items: CalculationBookSlabEvidence[];
+  expectedCount: 5 | 7;
+  hasMiddle: boolean;
+  sourceRows: number[];
+  issues: string[];
+  complete: boolean;
+};
+
+function formatSlabKey(key: string): string {
+  return key.toUpperCase().replace("_", "-");
+}
+
+function compareElevations(left: string, right: string): number {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return left.localeCompare(right, "zh-CN", { numeric: true });
+}
+
+function buildSlabEvidenceGroups(
+  slabs: readonly CalculationBookSlabEvidence[],
+): SlabEvidenceGroup[] {
+  const grouped = slabs.reduce((groups, item) => {
+    const current = groups.get(item.elevation) ?? [];
+    current.push(item);
+    groups.set(item.elevation, current);
+    return groups;
+  }, new Map<string, CalculationBookSlabEvidence[]>());
+
+  return Array.from(grouped, ([elevation, rawItems]) => {
+    const counts = rawItems.reduce((result, item) => {
+      const key = item.key.toLowerCase();
+      result.set(key, (result.get(key) ?? 0) + 1);
+      return result;
+    }, new Map<string, number>());
+    const hasMiddle = counts.has("middle_x") || counts.has("middle_y");
+    const expectedCount: 5 | 7 = hasMiddle ? 7 : 5;
+    const expectedKeys = hasMiddle ? SLAB_GROUP_ORDER : FIVE_SLAB_GROUPS;
+    const missingKeys = expectedKeys.filter((key) => !counts.has(key));
+    const duplicateKeys = Array.from(counts)
+      .filter(([, count]) => count > 1)
+      .map(([key]) => key);
+    const unexpectedKeys = Array.from(counts.keys()).filter(
+      (key) => !SLAB_GROUP_ORDER.includes(key as (typeof SLAB_GROUP_ORDER)[number]),
+    );
+    const sourceRows = Array.from(new Set(rawItems.map((item) => item.sourceRow))).sort(
+      (left, right) => left - right,
+    );
+    const issues = [
+      ...(missingKeys.length > 0
+        ? [`缺少 ${missingKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(duplicateKeys.length > 0
+        ? [`重复 ${duplicateKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(unexpectedKeys.length > 0
+        ? [`存在未知组 ${unexpectedKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(sourceRows.length > 1
+        ? [`同一标高来自配筋表多行：${sourceRows.join("、")}`]
+        : []),
+    ];
+    const order = new Map<string, number>(
+      SLAB_GROUP_ORDER.map((key, index) => [key, index]),
+    );
+    const items = [...rawItems].sort((left, right) => {
+      const leftOrder = order.get(left.key.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = order.get(right.key.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.key.localeCompare(right.key);
+    });
+    return {
+      elevation,
+      items,
+      expectedCount,
+      hasMiddle,
+      sourceRows,
+      issues,
+      complete: issues.length === 0 && items.length === expectedKeys.length,
+    };
+  }).sort((left, right) => compareElevations(left.elevation, right.elevation));
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes >= 1024 ** 3) {
@@ -128,12 +237,27 @@ export function CalculationBookWorkspace({
   }
 
   const activeSchema = calculationSchema;
-  const projectFields = calculationSchema.fields.filter((field) => !NUMERIC_FIELDS.has(field.key));
+  const slabField = calculationSchema.fields.find(
+    (field) => field.key === "include_slab_stress",
+  );
+  const projectFields = calculationSchema.fields.filter(
+    (field) => !NUMERIC_FIELDS.has(field.key) && field.key !== "include_slab_stress",
+  );
   const workshopFields = calculationSchema.fields.filter((field) => NUMERIC_FIELDS.has(field.key));
   const fieldErrorCount = Object.values(fieldErrors).filter((messages) => messages.length > 0).length;
   const hasValidationErrors = fieldErrorCount > 0 || formErrors.length > 0;
   const allRequiredWallsConfirmed =
     preflight?.confirmations.every((item) => confirmedWalls[item.wallId]) ?? true;
+  const slabEvidenceGroups = buildSlabEvidenceGroups(preflight?.slabs ?? []);
+  const slabEvidenceIssues =
+    preflight && values.include_slab_stress === "true"
+      ? slabEvidenceGroups.length > 0
+        ? slabEvidenceGroups.flatMap((group) =>
+            group.issues.map((issue) => `${group.elevation}m：${issue}`),
+          )
+        : ["已勾选楼板应力，但预检结果未返回楼板云图证据"]
+      : [];
+  const slabEvidenceComplete = slabEvidenceIssues.length === 0;
   const busy = busyAction !== null;
 
   function updateValue(field: CalculationBookField, nextValue: string) {
@@ -146,6 +270,9 @@ export function CalculationBookWorkspace({
       return next;
     });
     setFieldErrors((current) => ({ ...current, [field.key]: [] }));
+    if (field.key === "include_slab_stress" && preflight) {
+      resetPreflight();
+    }
   }
 
   function resetPreflight() {
@@ -236,7 +363,14 @@ export function CalculationBookWorkspace({
     return Object.fromEntries(
       activeSchema.fields.map((field) => {
         const raw = String(values[field.key] ?? "").trim();
-        return [field.key, field.type === "number" ? Number(raw) : raw];
+        return [
+          field.key,
+          field.type === "number"
+            ? Number(raw)
+            : field.type === "checkbox"
+              ? raw === "true"
+              : raw,
+        ];
       }),
     );
   }
@@ -275,7 +409,13 @@ export function CalculationBookWorkspace({
       if (!adapter.preflightCalculationBook) {
         throw new Error("当前后台不支持计算书预检。");
       }
-      const result = await adapter.preflightCalculationBook(archive as File);
+      const result = await adapter.preflightCalculationBook(
+        archive as File,
+        {
+          includeSlabStress:
+            String(values.include_slab_stress ?? "false") === "true",
+        },
+      );
       setPreflight(result);
       setSelectedRows(
         Object.fromEntries(
@@ -293,7 +433,13 @@ export function CalculationBookWorkspace({
   }
 
   async function handleCreate() {
-    if (busy || !preflight || !archive || !allRequiredWallsConfirmed) {
+    if (
+      busy ||
+      !preflight ||
+      !archive ||
+      !allRequiredWallsConfirmed ||
+      !slabEvidenceComplete
+    ) {
       return;
     }
     setBusyAction("submit");
@@ -336,6 +482,9 @@ export function CalculationBookWorkspace({
         void handlePreflight();
       }
     } else if (phase === "review") {
+      if (!slabEvidenceComplete) {
+        return;
+      }
       setPhase("confirm");
       window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
     } else {
@@ -415,6 +564,29 @@ export function CalculationBookWorkspace({
                   <div><span>├─</span> 01 / 厂房标高布置图</div>
                   <div><span>└─</span> 02 / 墙体有限元模型图</div>
                 </div>
+                {slabField ? (
+                  <label className={styles.slabToggle}>
+                    <input
+                      aria-describedby="calculation-book-slab-toggle-help"
+                      aria-labelledby="calculation-book-slab-toggle-label"
+                      checked={values[slabField.key] === "true"}
+                      type="checkbox"
+                      onChange={(event) =>
+                        updateValue(
+                          slabField,
+                          String(event.currentTarget.checked),
+                        )}
+                    />
+                    <span>
+                      <strong id="calculation-book-slab-toggle-label">{slabField.label}</strong>
+                      <small id="calculation-book-slab-toggle-help">
+                        勾选后，每个标高识别 TOP-X、TOP-Y、BOTTOM-X、BOTTOM-Y、Z，共 5 组；
+                        同时包含 MIDDLE-X 和 MIDDLE-Y 时为 7 组。楼板实配钢筋仅从 Excel
+                        的“楼板配筋”工作表读取，页面不提供手工输入。
+                      </small>
+                    </span>
+                  </label>
+                ) : null}
                 <label className={styles.uploadBox}>
                   <span>{archive ? archive.name : "选择 ZIP 文件"}</span>
                   <small>{archive ? formatFileSize(archive.size) : "仅支持单个 .zip 文件"}</small>
@@ -477,6 +649,8 @@ export function CalculationBookWorkspace({
               onConfirm={(wallId, checked) =>
                 setConfirmedWalls((current) => ({ ...current, [wallId]: checked }))
               }
+              slabEvidenceGroups={slabEvidenceGroups}
+              slabEvidenceIssues={slabEvidenceIssues}
             />
           ) : null}
 
@@ -500,7 +674,9 @@ export function CalculationBookWorkspace({
                       : phase === "input"
                       ? "先预检，再创建任务"
                       : phase === "review"
-                        ? "核验完成，进入确认提交"
+                        ? slabEvidenceComplete
+                          ? "核验完成，进入确认提交"
+                          : "楼板证据不完整，不能提交"
                         : allRequiredWallsConfirmed
                         ? "核验完成，可以创建任务"
                         : "请完成所有人工确认"}
@@ -534,7 +710,11 @@ export function CalculationBookWorkspace({
               </button>
               <button
                 className={styles.primaryButton}
-                disabled={busy || (phase === "confirm" && !allRequiredWallsConfirmed)}
+                disabled={
+                  busy ||
+                  (phase !== "input" && !slabEvidenceComplete) ||
+                  (phase === "confirm" && !allRequiredWallsConfirmed)
+                }
                 type="submit"
               >
                 {busyAction === "preflight"
@@ -562,6 +742,8 @@ function ReviewPanel({
   confirmedWalls,
   onSelectRow,
   onConfirm,
+  slabEvidenceGroups,
+  slabEvidenceIssues,
   headingRef,
 }: {
   phase: Exclude<Phase, "input">;
@@ -570,6 +752,8 @@ function ReviewPanel({
   confirmedWalls: Record<string, boolean>;
   onSelectRow: (wallId: string, row: number) => void;
   onConfirm: (wallId: string, checked: boolean) => void;
+  slabEvidenceGroups: SlabEvidenceGroup[];
+  slabEvidenceIssues: string[];
   headingRef: RefObject<HTMLHeadingElement>;
 }) {
   return (
@@ -596,12 +780,26 @@ function ReviewPanel({
           <span aria-label={`共 ${preflight.zeroFigureCount} 张 Z 向零值图`}>
             <strong>{preflight.zeroFigureCount}</strong><small>Z 向零值</small>
           </span>
+          {preflight.slabFigureCount > 0 ? (
+            <>
+              <span aria-label={`共 ${preflight.slabElevationCount} 个楼板标高`}>
+                <strong>{preflight.slabElevationCount}</strong><small>楼板标高</small>
+              </span>
+              <span aria-label={`共 ${preflight.slabFigureCount} 张楼板云图`}>
+                <strong>{preflight.slabFigureCount}</strong><small>楼板云图</small>
+              </span>
+            </>
+          ) : null}
         </div>
       </div>
 
       {preflight.warnings.map((warning) => (
         <div className={styles.warningPanel} key={warning.code} role="status">
-          <strong>以下根目录图片未按墙号-X/Y/Z规则进入计算</strong>
+          <strong>
+            {warning.code === "slab_ignored_by_choice"
+              ? "压缩包包含楼板云图，本次未勾选楼板应力，已跳过"
+              : "以下根目录图片未按墙号-X/Y/Z规则进入计算"}
+          </strong>
           <p>{warning.filenames.join("、")}</p>
         </div>
       ))}
@@ -650,6 +848,52 @@ function ReviewPanel({
         <div className={styles.successPanel}>未发现重复配筋行或 -1/-2 图片组，无需额外人工映射。</div>
       ) : null}
 
+      {slabEvidenceIssues.length > 0 ? (
+        <div className={styles.slabEvidenceError} role="alert">
+          <strong>楼板云图证据不完整，已阻止进入提交</strong>
+          {slabEvidenceIssues.map((issue) => <p key={issue}>{issue}</p>)}
+        </div>
+      ) : null}
+
+      {slabEvidenceGroups.length > 0 ? (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐标高楼板识别证据</h3>
+            <p>
+              这里只核对图片、Excel 单元格和精确公式结果；实配钢筋不在页面重复录入。
+            </p>
+          </div>
+          {slabEvidenceGroups.map((group, groupIndex) => (
+            <details
+              className={styles.wallEvidence}
+              key={`slab-${group.elevation}`}
+              open={groupIndex === 0}
+            >
+              <summary>
+                <strong>{group.elevation}m 楼板</strong>
+                <span>
+                  <b data-complete={group.complete ? "true" : "false"}>
+                    {group.items.length}/{group.expectedCount}{" "}
+                    {group.complete ? "完整" : "异常"}
+                    {group.hasMiddle ? " · 含 MIDDLE" : ""}
+                  </b>
+                  {" · "}
+                  配筋表第 {group.sourceRows.join("、")} 行
+                </span>
+              </summary>
+              <div className={styles.slabDirectionGrid}>
+                {group.items.map((item) => (
+                  <SlabEvidenceCard
+                    evidence={item}
+                    key={`${item.elevation}-${item.key}`}
+                  />
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      ) : null}
+
       <div className={styles.evidenceSection}>
         <div>
           <h3>逐墙识别证据</h3>
@@ -691,6 +935,48 @@ function ReviewPanel({
         })}
       </div>
     </section>
+  );
+}
+
+function SlabEvidenceCard({
+  evidence,
+}: {
+  evidence: CalculationBookSlabEvidence;
+}) {
+  return (
+    <article className={styles.directionCard}>
+      <header>
+        <h4>{SLAB_GROUP_LABELS[evidence.key] ?? evidence.key}</h4>
+        <span>{evidence.sourceCell}</span>
+      </header>
+      <p>{evidence.imageFilename}</p>
+      <dl>
+        <div>
+          <dt>计算范围</dt>
+          <dd>
+            {evidence.isZeroResult
+              ? "无 SMX，计算值按 0 处理"
+              : `${evidence.smn} → ${evidence.smx} mm²/m`}
+          </dd>
+        </div>
+        <div>
+          <dt>Excel 写法</dt>
+          <dd>{evidence.originalText}</dd>
+        </div>
+        <div>
+          <dt>规范写法</dt>
+          <dd>{evidence.canonicalSpecification}</dd>
+        </div>
+        <div>
+          <dt>计算书用语</dt>
+          <dd>{evidence.narrativeSpecification}</dd>
+        </div>
+        <div>
+          <dt>实配面积</dt>
+          <dd>{evidence.actualArea} mm²/m</dd>
+        </div>
+      </dl>
+    </article>
   );
 }
 

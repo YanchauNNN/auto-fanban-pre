@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from openpyxl import Workbook
@@ -197,6 +199,59 @@ def test_loads_standard_four_column_workbook_and_flags_duplicate_wall(
     assert schedule.duplicate_wall_ids == ("S7157",)
     assert schedule.requires_manual_confirmation
     assert schedule.rows[2].z.selected.canonical_specification == "1C8间距400*400"
+
+
+def test_loads_workbook_without_optional_worksheet_dimensions(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    wall_sheet = workbook.active
+    wall_sheet.append(
+        [
+            "构件编号\n及位置",
+            "单侧水平钢筋\n(对称配筋)",
+            "单侧竖向钢筋\n(对称配筋)",
+            "拉筋",
+        ]
+    )
+    wall_sheet.append(["S7157 墙", "1 36@200", "1 36@200", "12@200x400"])
+    _add_slab_sheet(
+        workbook,
+        [
+            "11.20m",
+            "1D36@200",
+            "1D40@200",
+            None,
+            None,
+            "1D36@200",
+            "1D40@200",
+            "1D16@200",
+        ],
+    )
+    source_path = tmp_path / "with-dimensions.xlsx"
+    dimensionless_path = tmp_path / "without-dimensions.xlsx"
+    workbook.save(source_path)
+
+    with ZipFile(source_path) as source, ZipFile(
+        dimensionless_path,
+        "w",
+        ZIP_DEFLATED,
+    ) as target:
+        for entry in source.infolist():
+            content = source.read(entry.filename)
+            if entry.filename.startswith("xl/worksheets/"):
+                content = re.sub(br"<dimension\b[^>]*/>", b"", content)
+            target.writestr(entry, content)
+
+    wall_schedule = load_reinforcement_schedule(dimensionless_path)
+    slab_schedule = load_slab_reinforcement_schedule(
+        dimensionless_path,
+        required=True,
+    )
+
+    assert [row.wall_id for row in wall_schedule.rows] == ["S7157"]
+    assert slab_schedule is not None
+    assert [row.elevation for row in slab_schedule.rows] == ["11.2"]
 
 
 def test_selects_canonical_wall_number_column_in_wide_workbook(tmp_path: Path) -> None:

@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiAdapter, FormSchema } from "../../platform/api/types";
+import type {
+  ApiAdapter,
+  CalculationBookSlabEvidence,
+  FormSchema,
+} from "../../platform/api/types";
 import { CalculationBookWorkspace } from "./CalculationBookWorkspace";
 
 const calculationFields = [
@@ -23,6 +27,13 @@ const calculationFields = [
   { key: "factory_extreme_min_temperature", label: "历史最低温度", type: "number", required: true, unit: "℃" },
   { key: "factory_extreme_max_temperature", label: "历史最高温度", type: "number", required: true, unit: "℃" },
   { key: "site_soil_temperature", label: "场地土温", type: "number", required: true, unit: "℃" },
+  {
+    key: "include_slab_stress",
+    label: "包含楼板应力",
+    type: "checkbox",
+    required: false,
+    defaultValue: "false",
+  },
 ] as const;
 
 const schema = {
@@ -43,6 +54,17 @@ const schema = {
   },
 } satisfies FormSchema;
 
+const minimalSlabSchema: FormSchema = {
+  ...schema,
+  calculationBook: {
+    ...schema.calculationBook,
+    fields: [
+      calculationFields[0],
+      calculationFields[calculationFields.length - 1],
+    ],
+  },
+};
+
 const preflightResult = {
   preflightToken: "calculation-preflight-1",
   figureCount: 3,
@@ -50,6 +72,9 @@ const preflightResult = {
   wallCount: 1,
   reinforcementWorkbook: "计算书模板文件.xlsx",
   requiresManualConfirmation: false,
+  slabFigureCount: 0,
+  slabElevationCount: 0,
+  slabs: [],
   confirmations: [],
   warnings: [],
   walls: [
@@ -100,6 +125,40 @@ const preflightResult = {
   ],
 } as const;
 
+const slabGroupMetadata = {
+  top_x: { position: "TOP", direction: "X", sourceCell: "B2" },
+  top_y: { position: "TOP", direction: "Y", sourceCell: "C2" },
+  middle_x: { position: "MIDDLE", direction: "X", sourceCell: "D2" },
+  middle_y: { position: "MIDDLE", direction: "Y", sourceCell: "E2" },
+  bottom_x: { position: "BOTTOM", direction: "X", sourceCell: "F2" },
+  bottom_y: { position: "BOTTOM", direction: "Y", sourceCell: "G2" },
+  z: { position: null, direction: "Z", sourceCell: "H2" },
+} as const;
+
+function slabEvidence(
+  key: keyof typeof slabGroupMetadata,
+  elevation = "11.45",
+): CalculationBookSlabEvidence {
+  const metadata = slabGroupMetadata[key];
+  return {
+    elevation,
+    key,
+    position: metadata.position,
+    direction: metadata.direction,
+    imageFilename: `${elevation}-${key.toUpperCase().replace("_", "-")}.png`,
+    smn: 0,
+    smx: key === "z" ? 0 : 4888,
+    legendValues: key === "z" ? [] : [0, 543, 1086, 1629, 2172, 2715, 3259, 3802, 4345, 4888],
+    isZeroResult: key === "z",
+    sourceRow: 2,
+    sourceCell: metadata.sourceCell,
+    originalText: key === "z" ? "1C14间距400*400" : "1D36@200",
+    canonicalSpecification: key === "z" ? "1C14间距400*400" : "1D36间距200",
+    narrativeSpecification: key === "z" ? "1排14@400x400" : "1排36@200",
+    actualArea: key === "z" ? 961.6 : 5089.4,
+  };
+}
+
 function Harness({ adapter }: { adapter: ApiAdapter }) {
   const [open, setOpen] = useState(false);
   return (
@@ -132,6 +191,12 @@ describe("CalculationBookWorkspace", () => {
     expect(screen.getByText("墙体01-Z.png")).toBeInTheDocument();
     expect(screen.getByText("01 / 厂房标高布置图")).toBeInTheDocument();
     expect(screen.getByText("02 / 墙体有限元模型图")).toBeInTheDocument();
+    const slabToggle = screen.getByRole("checkbox", { name: "包含楼板应力" });
+    expect(slabToggle).not.toBeChecked();
+    expect(slabToggle).toHaveAccessibleDescription(
+      /共 5 组.*楼板配筋.*页面不提供手工输入/,
+    );
+    expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByLabelText("计算书模板")).toHaveFocus(),
     );
@@ -203,7 +268,9 @@ describe("CalculationBookWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "进入确认提交" }));
     await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
 
-    expect(preflightCalculationBook).toHaveBeenCalledWith(archive);
+    expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
+      includeSlabStress: false,
+    });
     await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
     expect(createCalculationBook).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -211,6 +278,7 @@ describe("CalculationBookWorkspace", () => {
         project_no: "2016",
         project_name: "浙江金七门核电厂1、2号机组",
         workshop_length: 72.5,
+        include_slab_stress: false,
         preflight_token: "calculation-preflight-1",
         manual_confirmations: {},
       }),
@@ -387,5 +455,181 @@ describe("CalculationBookWorkspace", () => {
         manual_confirmations: { "S7157-1": 28 },
       }),
     );
+  });
+
+  it("preflights and displays optional slab evidence without asking for rebar inputs", async () => {
+    const user = userEvent.setup();
+    const slabPreflight = {
+      ...preflightResult,
+      slabFigureCount: 5,
+      slabElevationCount: 1,
+      slabs: [
+        slabEvidence("z"),
+        slabEvidence("bottom_y"),
+        slabEvidence("top_y"),
+        slabEvidence("bottom_x"),
+        slabEvidence("top_x"),
+      ],
+    };
+    const preflightCalculationBook = vi.fn().mockResolvedValue(slabPreflight);
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-calc",
+      jobs: [],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook,
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
+    await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByLabelText("共 5 张楼板云图")).toBeInTheDocument();
+    expect(screen.getByText("11.45m 楼板")).toBeInTheDocument();
+    expect(screen.getByText("5/5 完整")).toBeInTheDocument();
+    const orderedGroups = screen.getAllByRole("heading", { level: 4 }).map((node) => node.textContent);
+    expect(orderedGroups).toEqual([
+      "TOP-X · 上表面 X 向",
+      "TOP-Y · 上表面 Y 向",
+      "BOTTOM-X · 下表面 X 向",
+      "BOTTOM-Y · 下表面 Y 向",
+      "Z · Z 向",
+    ]);
+    expect(screen.getAllByText("1D36间距200")).toHaveLength(4);
+    expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
+    expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
+      includeSlabStress: true,
+    });
+
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+    expect(createCalculationBook).toHaveBeenCalledWith(
+      expect.objectContaining({ include_slab_stress: true }),
+    );
+  });
+
+  it("sorts elevations and expands paired MIDDLE groups into a complete seven-group set", async () => {
+    const user = userEvent.setup();
+    const slabs = [
+      ...(["z", "middle_y", "bottom_y", "top_x", "middle_x", "bottom_x", "top_y"] as const)
+        .map((key) => slabEvidence(key, "15.95")),
+      ...(["z", "bottom_y", "top_y", "bottom_x", "top_x"] as const)
+        .map((key) => slabEvidence(key, "11.45")),
+    ];
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...preflightResult,
+      slabFigureCount: slabs.length,
+      slabElevationCount: 2,
+      slabs,
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.upload(
+      screen.getByLabelText("选择计算图片 ZIP"),
+      new File(["zip"], "calculation.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    const elevationLabels = await screen.findAllByText(/m 楼板$/);
+    expect(elevationLabels.map((node) => node.textContent)).toEqual([
+      "11.45m 楼板",
+      "15.95m 楼板",
+    ]);
+    expect(screen.getByText("7/7 完整 · 含 MIDDLE")).toBeInTheDocument();
+  });
+
+  it("blocks confirmation when slab evidence is missing a required group", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...preflightResult,
+      slabFigureCount: 4,
+      slabElevationCount: 1,
+      slabs: [
+        slabEvidence("top_x"),
+        slabEvidence("top_y"),
+        slabEvidence("bottom_x"),
+        slabEvidence("z"),
+      ],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.upload(
+      screen.getByLabelText("选择计算图片 ZIP"),
+      new File(["zip"], "calculation.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("缺少 BOTTOM-Y");
+    expect(screen.getByRole("button", { name: "进入确认提交" })).toBeDisabled();
+  });
+
+  it("invalidates a prior preflight when the slab option changes", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(preflightResult);
+    const minimalSchema: FormSchema = {
+      ...schema,
+      calculationBook: {
+        ...schema.calculationBook!,
+        fields: [
+          calculationFields[0],
+          calculationFields[calculationFields.length - 1],
+        ],
+      },
+    };
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook: vi.fn(),
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
+    await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+    await screen.findByRole("button", { name: "进入确认提交" });
+    await user.click(screen.getByRole("button", { name: "返回修改" }));
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+
+    expect(screen.getByRole("button", { name: "预检并核对" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+    await waitFor(() => expect(preflightCalculationBook).toHaveBeenCalledTimes(2));
+    expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
+      includeSlabStress: true,
+    });
   });
 });

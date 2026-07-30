@@ -200,6 +200,57 @@
   font-weight: 700;
 }
 
+.slabToggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  border: 1px solid rgba(37, 112, 190, 0.16);
+  border-radius: 16px;
+  background: rgba(235, 244, 253, 0.76);
+  padding: 0.8rem;
+  cursor: pointer;
+}
+
+.slabToggle:has(input:checked) {
+  border-color: rgba(37, 112, 190, 0.42);
+  background: linear-gradient(
+    145deg,
+    rgba(222, 238, 253, 0.94),
+    rgba(246, 251, 255, 0.96)
+  );
+  box-shadow: 0 0 0 3px rgba(37, 112, 190, 0.08);
+}
+
+.slabToggle input {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.12rem;
+  accent-color: #2673b9;
+}
+
+.slabToggle > span {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.slabToggle strong {
+  color: #174b80;
+  font-size: 0.88rem;
+}
+
+.slabToggle small {
+  color: #627f9d;
+  font-size: 0.77rem;
+  line-height: 1.5;
+}
+
+.slabToggle:focus-within {
+  outline: 3px solid rgba(37, 112, 190, 0.2);
+  outline-offset: 2px;
+}
+
 .uploadBox {
   display: flex;
   flex-direction: column;
@@ -418,7 +469,7 @@
 
 .summaryCards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(82px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
   gap: 0.55rem;
   min-width: min(360px, 42%);
 }
@@ -627,9 +678,25 @@
   font-size: 0.78rem;
 }
 
+.wallEvidence summary b {
+  color: #267044;
+  font-weight: 800;
+}
+
+.wallEvidence summary b[data-complete="false"] {
+  color: #a23b31;
+}
+
 .directionGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  padding: 0 0.8rem 0.8rem;
+}
+
+.slabDirectionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
   padding: 0 0.8rem 0.8rem;
 }
@@ -649,8 +716,12 @@
   gap: 0.5rem;
 }
 
-.directionCard header strong {
+.directionCard header strong,
+.directionCard header h4 {
+  margin: 0;
   color: #1b568e;
+  font-size: 0.86rem;
+  line-height: 1.35;
 }
 
 .directionCard header span {
@@ -693,6 +764,24 @@
   color: #2b4f73;
   font-size: 0.78rem;
   font-weight: 650;
+}
+
+.slabEvidenceError {
+  margin: 0 1.5rem;
+  border: 1px solid rgba(176, 59, 49, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 239, 236, 0.94);
+  color: #8d3028;
+  padding: 0.82rem 0.95rem;
+}
+
+.slabEvidenceError strong {
+  font-size: 0.88rem;
+}
+
+.slabEvidenceError p {
+  margin: 0.32rem 0 0;
+  font-size: 0.8rem;
 }
 
 .reviewErrors {
@@ -794,6 +883,10 @@
   .directionGrid {
     grid-template-columns: 1fr;
   }
+
+  .slabDirectionGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 620px) {
@@ -819,7 +912,7 @@
   }
 
   .summaryCards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .confirmationCard > header,

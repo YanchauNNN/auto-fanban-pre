@@ -62,7 +62,7 @@ type RawFormSchema = {
       label?: string | null;
       type?: string | null;
       required?: boolean | null;
-      default?: string | number | null;
+      default?: string | number | boolean | null;
       unit?: string | null;
       placeholder?: string | null;
       options?: readonly string[] | null;
@@ -315,7 +315,11 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
               key: String(field.key ?? ""),
               label: String(field.label ?? ""),
               type: (
-                field.type === "number" || field.type === "select" ? field.type : "text"
+                field.type === "number" ||
+                field.type === "select" ||
+                field.type === "checkbox"
+                  ? field.type
+                  : "text"
               ) as CalculationBookField["type"],
               required: Boolean(field.required),
               defaultValue: field.default == null ? undefined : String(field.default),

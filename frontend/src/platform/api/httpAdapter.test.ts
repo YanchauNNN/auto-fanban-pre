@@ -282,6 +282,8 @@ describe("HttpAdapter", () => {
           figure_count: 3,
           zero_figure_count: 1,
           wall_count: 1,
+          slab_figure_count: 1,
+          slab_elevation_count: 1,
           reinforcement_workbook: "计算书模板文件.xlsx",
           requires_manual_confirmation: false,
           confirmations: [],
@@ -295,13 +297,34 @@ describe("HttpAdapter", () => {
               directions,
             },
           ],
+          slabs: [
+            {
+              elevation: "11.45",
+              key: "top_x",
+              position: "TOP",
+              direction: "X",
+              image_filename: "11.45-TOP-X.png",
+              smn: 0,
+              smx: 4888,
+              legend_values: [0, 4888],
+              is_zero_result: false,
+              source_row: 2,
+              source_cell: "B2",
+              original_text: "1D36@200",
+              canonical_specification: "1D36间距200",
+              narrative_specification: "1排36@200",
+              actual_area: 5089.4,
+            },
+          ],
         }),
     });
     vi.stubGlobal("fetch", fetchMock);
     const adapter = new HttpAdapter("http://127.0.0.1:8000");
     const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
 
-    const result = await adapter.preflightCalculationBook(archive);
+    const result = await adapter.preflightCalculationBook(archive, {
+      includeSlabStress: true,
+    });
 
     expect(result.preflightToken).toBe("preflight-1");
     expect(result.walls[0]?.directions.Z).toEqual(
@@ -312,9 +335,18 @@ describe("HttpAdapter", () => {
         actualArea: 962.1,
       }),
     );
+    expect(result.slabs[0]).toEqual(
+      expect.objectContaining({
+        elevation: "11.45",
+        key: "top_x",
+        imageFilename: "11.45-TOP-X.png",
+        canonicalSpecification: "1D36间距200",
+      }),
+    );
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books/preflight");
     expect((init.body as FormData).get("archive")).toBe(archive);
+    expect((init.body as FormData).get("include_slab_stress")).toBe("true");
   });
 
   it("uses a normalized API base URL and resolves relative artifact links", async () => {

@@ -14,7 +14,7 @@ export type FormFieldType =
 export type CalculationBookField = {
   key: string;
   label: string;
-  type: "text" | "number" | "select";
+  type: "text" | "number" | "select" | "checkbox";
   required: boolean;
   defaultValue?: string;
   unit?: string;
@@ -50,6 +50,14 @@ export type CalculationBookDirectionEvidence = {
   actualArea: number;
 };
 
+export type CalculationBookSlabEvidence = CalculationBookDirectionEvidence & {
+  elevation: string;
+  key: string;
+  position: "TOP" | "MIDDLE" | "BOTTOM" | null;
+  direction: "X" | "Y" | "Z";
+  sourceRow: number;
+};
+
 export type CalculationBookConfirmationCandidate = {
   sourceRow: number;
   sourceSheet: string;
@@ -71,6 +79,8 @@ export type CalculationBookPreflightResult = {
   figureCount: number;
   zeroFigureCount: number;
   wallCount: number;
+  slabFigureCount: number;
+  slabElevationCount: number;
   reinforcementWorkbook: string;
   requiresManualConfirmation: boolean;
   confirmations: readonly {
@@ -87,6 +97,7 @@ export type CalculationBookPreflightResult = {
     suggestedSourceRow: number;
     directions: Record<"X" | "Y" | "Z", CalculationBookDirectionEvidence>;
   }[];
+  slabs: readonly CalculationBookSlabEvidence[];
   warnings: readonly {
     code: string;
     filenames: readonly string[];
@@ -928,6 +939,7 @@ export type ApiAdapter = {
   ) => Promise<CreateBatchPayload>;
   preflightCalculationBook?: (
     archive: File,
+    options: { includeSlabStress: boolean },
   ) => Promise<CalculationBookPreflightResult>;
   listTaskGroups?: () => Promise<TaskGroupList>;
   getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;

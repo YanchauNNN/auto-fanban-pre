@@ -241,6 +241,12 @@ def _header_text(value: object) -> str:
     return re.sub(r"\s+", "", str(value)).replace("（", "(").replace("）", ")")
 
 
+def _ensure_worksheet_dimensions(sheet) -> tuple[int, int]:
+    if sheet.max_row is None or sheet.max_column is None:
+        sheet.calculate_dimension(force=True)
+    return sheet.max_row or 0, sheet.max_column or 0
+
+
 def _wall_column_score(sheet, column: int, header_row: int) -> int:
     score = 0
     end_row = min(sheet.max_row, header_row + 100)
@@ -251,10 +257,11 @@ def _wall_column_score(sheet, column: int, header_row: int) -> int:
 
 
 def _find_columns(sheet) -> tuple[int, int, int, int, int] | None:
-    for row in range(1, min(sheet.max_row, 20) + 1):
+    max_row, max_column = _ensure_worksheet_dimensions(sheet)
+    for row in range(1, min(max_row, 20) + 1):
         headers = {
             column: _header_text(sheet.cell(row=row, column=column).value)
-            for column in range(1, sheet.max_column + 1)
+            for column in range(1, max_column + 1)
         }
         x_columns = [
             column
@@ -375,10 +382,11 @@ _SLAB_HEADERS = {
 
 def _find_slab_columns(sheet) -> tuple[int, dict[str, int]] | None:
     expected = set(_SLAB_HEADERS.values())
-    for row in range(1, min(sheet.max_row, 20) + 1):
+    max_row, max_column = _ensure_worksheet_dimensions(sheet)
+    for row in range(1, min(max_row, 20) + 1):
         headers = {
             _header_text(sheet.cell(row=row, column=column).value): column
-            for column in range(1, sheet.max_column + 1)
+            for column in range(1, max_column + 1)
         }
         if not expected.issubset(headers):
             continue

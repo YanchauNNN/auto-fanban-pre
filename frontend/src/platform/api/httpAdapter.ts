@@ -336,7 +336,7 @@ type RawFormSchema = {
       label?: string | null;
       type?: string | null;
       required?: boolean | null;
-      default?: string | number | null;
+      default?: string | number | boolean | null;
       unit?: string | null;
       placeholder?: string | null;
       options?: string[] | null;
@@ -1054,14 +1054,21 @@ export class HttpAdapter implements ApiAdapter {
 
   async preflightCalculationBook(
     archive: File,
+    options: { includeSlabStress: boolean },
   ): Promise<CalculationBookPreflightResult> {
     const formData = new FormData();
     formData.append("archive", archive);
+    formData.append(
+      "include_slab_stress",
+      String(options.includeSlabStress),
+    );
     const payload = await this.fetchJson<{
       preflight_token: string;
       figure_count: number;
       zero_figure_count: number;
       wall_count: number;
+      slab_figure_count: number;
+      slab_elevation_count: number;
       reinforcement_workbook: string;
       requires_manual_confirmation: boolean;
       confirmations: Array<{
@@ -1098,6 +1105,23 @@ export class HttpAdapter implements ApiAdapter {
           narrative_specification: string;
           actual_area: number;
         }>;
+      }>;
+      slabs: Array<{
+        elevation: string;
+        key: string;
+        position: "TOP" | "MIDDLE" | "BOTTOM" | null;
+        direction: "X" | "Y" | "Z";
+        image_filename: string;
+        smn: number;
+        smx: number;
+        legend_values: number[];
+        is_zero_result: boolean;
+        source_row: number;
+        source_cell: string;
+        original_text: string;
+        canonical_specification: string;
+        narrative_specification: string;
+        actual_area: number;
       }>;
       warnings: Array<{ code: string; filenames: string[] }>;
     }>("/api/jobs/calculation-books/preflight", {
@@ -1148,6 +1172,8 @@ export class HttpAdapter implements ApiAdapter {
       figureCount: payload.figure_count,
       zeroFigureCount: payload.zero_figure_count,
       wallCount: payload.wall_count,
+      slabFigureCount: payload.slab_figure_count ?? 0,
+      slabElevationCount: payload.slab_elevation_count ?? 0,
       reinforcementWorkbook: payload.reinforcement_workbook,
       requiresManualConfirmation: payload.requires_manual_confirmation,
       confirmations: payload.confirmations.map((confirmation) => ({
@@ -1167,6 +1193,23 @@ export class HttpAdapter implements ApiAdapter {
         groupIndex: wall.group_index,
         suggestedSourceRow: wall.suggested_source_row,
         directions: mapDirections(wall.directions),
+      })),
+      slabs: (payload.slabs ?? []).map((item) => ({
+        elevation: item.elevation,
+        key: item.key,
+        position: item.position,
+        direction: item.direction,
+        imageFilename: item.image_filename,
+        smn: item.smn,
+        smx: item.smx,
+        legendValues: item.legend_values,
+        isZeroResult: item.is_zero_result,
+        sourceRow: item.source_row,
+        sourceCell: item.source_cell,
+        originalText: item.original_text,
+        canonicalSpecification: item.canonical_specification,
+        narrativeSpecification: item.narrative_specification,
+        actualArea: item.actual_area,
       })),
       warnings: payload.warnings.map((warning) => ({
         code: warning.code,

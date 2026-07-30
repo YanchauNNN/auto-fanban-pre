@@ -449,6 +449,36 @@ describe("normalizeFormSchema", () => {
       "河北分公司-建筑结构所-建筑总图室",
     ]);
   });
+  it("preserves the calculation-book slab checkbox and its boolean default", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "include_slab_stress",
+            label: "包含楼板应力",
+            type: "checkbox",
+            required: false,
+            default: false,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields).toEqual([
+      expect.objectContaining({
+        key: "include_slab_stress",
+        type: "checkbox",
+        defaultValue: "false",
+      }),
+    ]);
+  });
 });
 
 describe("evaluateRequiredWhen", () => {
