@@ -46,6 +46,71 @@ def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> Non
     assert all(path.is_relative_to(contents.root) for path in contents.extracted_files)
 
 
+def test_extracts_five_slab_figures_without_treating_them_as_ignored(
+    tmp_path: Path,
+) -> None:
+    entries = _valid_entries()
+    for name in (
+        "11.2-top-x.JPEG",
+        "11.2-top-y.JPEG",
+        "11.2-BOTTOM-x.JPEG",
+        "11.2-BOTTOM-y.JPEG",
+        "11.2-Z.JPEG",
+    ):
+        entries[name] = name.encode()
+    archive = _write_archive(tmp_path / "slab-five.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    assert [
+        (figure.elevation, figure.position, figure.direction)
+        for figure in contents.slab_figures
+    ] == [
+        ("11.2", "TOP", "X"),
+        ("11.2", "TOP", "Y"),
+        ("11.2", "BOTTOM", "X"),
+        ("11.2", "BOTTOM", "Y"),
+        ("11.2", None, "Z"),
+    ]
+    assert not {
+        figure.path.name for figure in contents.slab_figures
+    }.intersection(path.name for path in contents.ignored_root_images)
+
+
+def test_extracts_mixed_case_middle_as_seven_slab_figures(
+    tmp_path: Path,
+) -> None:
+    entries = _valid_entries()
+    for name in (
+        "11.20-top-x.JPEG",
+        "11.20-top-y.JPEG",
+        "11.20-Middle-x.JPEG",
+        "11.20-mIDDLE-y.JPEG",
+        "11.20-bottom-x.JPEG",
+        "11.20-bottom-y.JPEG",
+        "11.20-z.JPEG",
+    ):
+        entries[name] = name.encode()
+    archive = _write_archive(tmp_path / "slab-seven.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    assert len(contents.slab_figures) == 7
+    assert {figure.elevation for figure in contents.slab_figures} == {"11.2"}
+    assert {
+        (figure.position, figure.direction)
+        for figure in contents.slab_figures
+    } == {
+        ("TOP", "X"),
+        ("TOP", "Y"),
+        ("MIDDLE", "X"),
+        ("MIDDLE", "Y"),
+        ("BOTTOM", "X"),
+        ("BOTTOM", "Y"),
+        (None, "Z"),
+    }
+
+
 @pytest.mark.parametrize(
     "unsafe_name",
     [
@@ -160,4 +225,17 @@ def test_rejects_multiple_root_reinforcement_workbooks(tmp_path: Path) -> None:
     archive = _write_archive(tmp_path / "multiple-workbooks.zip", entries)
 
     with pytest.raises(InvalidCalculationArchive, match="只能包含一个"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+@pytest.mark.parametrize("folder", ["01", "02"])
+def test_rejects_multiple_images_in_layout_or_model_folder(
+    tmp_path: Path,
+    folder: str,
+) -> None:
+    entries = _valid_entries()
+    entries[f"{folder}/second.png"] = b"second"
+    archive = _write_archive(tmp_path / f"multiple-{folder}.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match=f"{folder}.*只能包含一张"):
         validate_and_extract_archive(archive, tmp_path / "extracted")

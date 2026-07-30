@@ -5,12 +5,22 @@ import shutil
 import stat
 import zipfile
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path, PurePosixPath
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 _FIGURE_NAME = re.compile(
     r"^(?P<prefix>[A-Za-z]+)(?P<number>\d+)(?P<suffix>[A-Za-z]?)"
     r"(?:-(?P<group>[12]))?-(?P<direction>[XYZ])$",
+    re.IGNORECASE,
+)
+_SLAB_LAYER_FIGURE_NAME = re.compile(
+    r"^(?P<elevation>[+-]?\d+(?:\.\d+)?)-"
+    r"(?P<position>TOP|MIDDLE|BOTTOM)-(?P<direction>[XY])$",
+    re.IGNORECASE,
+)
+_SLAB_Z_FIGURE_NAME = re.compile(
+    r"^(?P<elevation>[+-]?\d+(?:\.\d+)?)-Z$",
     re.IGNORECASE,
 )
 
@@ -38,9 +48,19 @@ class ReinforcementFigure:
 
 
 @dataclass(frozen=True)
+class SlabReinforcementFigure:
+    elevation: str
+    position: str | None
+    direction: str
+    path: Path
+    sort_key: tuple[Decimal, int, int]
+
+
+@dataclass(frozen=True)
 class CalculationArchiveContents:
     root: Path
     reinforcement_figures: tuple[ReinforcementFigure, ...]
+    slab_figures: tuple[SlabReinforcementFigure, ...]
     ignored_root_images: tuple[Path, ...]
     reinforcement_workbook: Path
     layout_image: Path
@@ -71,13 +91,25 @@ def _safe_member_path(info: zipfile.ZipInfo) -> PurePosixPath:
     return member
 
 
-def _first_image(folder: Path, label: str) -> Path:
+def _single_image(folder: Path, label: str) -> Path:
     images = sorted(
         path for path in folder.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     )
     if not images:
         raise InvalidCalculationArchive(f"ZIP 的 {label} 目录中没有支持的图片")
+    if len(images) > 1:
+        raise InvalidCalculationArchive(f"ZIP 的 {label} 目录只能包含一张支持的图片")
     return images[0]
+
+
+def _normalize_elevation(value: str) -> tuple[str, Decimal]:
+    decimal_value = Decimal(value)
+    normalized = format(decimal_value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    if normalized in {"-0", "+0"}:
+        normalized = "0"
+    return normalized, decimal_value
 
 
 def validate_and_extract_archive(
@@ -130,10 +162,48 @@ def validate_and_extract_archive(
             extracted.append(resolved_target)
 
     figures: list[ReinforcementFigure] = []
+    slab_figures: list[SlabReinforcementFigure] = []
     ignored_root_images: list[Path] = []
     direction_order = {"X": 0, "Y": 1, "Z": 2}
+    slab_position_order = {"TOP": 0, "MIDDLE": 1, "BOTTOM": 2}
     for path in extracted:
         if path.parent != resolved_root or path.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        slab_layer_match = _SLAB_LAYER_FIGURE_NAME.fullmatch(path.stem)
+        if slab_layer_match is not None:
+            position = slab_layer_match.group("position").upper()
+            direction = slab_layer_match.group("direction").upper()
+            elevation, elevation_value = _normalize_elevation(
+                slab_layer_match.group("elevation")
+            )
+            slab_figures.append(
+                SlabReinforcementFigure(
+                    elevation=elevation,
+                    position=position,
+                    direction=direction,
+                    path=path,
+                    sort_key=(
+                        elevation_value,
+                        slab_position_order[position],
+                        direction_order[direction],
+                    ),
+                )
+            )
+            continue
+        slab_z_match = _SLAB_Z_FIGURE_NAME.fullmatch(path.stem)
+        if slab_z_match is not None:
+            elevation, elevation_value = _normalize_elevation(
+                slab_z_match.group("elevation")
+            )
+            slab_figures.append(
+                SlabReinforcementFigure(
+                    elevation=elevation,
+                    position=None,
+                    direction="Z",
+                    path=path,
+                    sort_key=(elevation_value, 3, 0),
+                )
+            )
             continue
         match = _FIGURE_NAME.fullmatch(path.stem)
         if match is None:
@@ -168,6 +238,7 @@ def validate_and_extract_archive(
             )
         )
     figures.sort(key=lambda item: item.sort_key)
+    slab_figures.sort(key=lambda item: item.sort_key)
     figure_groups: dict[str, set[str]] = {}
     for figure in figures:
         figure_groups.setdefault(figure.wall_id, set()).add(figure.direction)
@@ -207,9 +278,10 @@ def validate_and_extract_archive(
     return CalculationArchiveContents(
         root=resolved_root,
         reinforcement_figures=tuple(figures),
+        slab_figures=tuple(slab_figures),
         ignored_root_images=tuple(sorted(ignored_root_images)),
         reinforcement_workbook=reinforcement_workbooks[0],
-        layout_image=_first_image(folder_01, "01"),
-        model_image=_first_image(folder_02, "02"),
+        layout_image=_single_image(folder_01, "01"),
+        model_image=_single_image(folder_02, "02"),
         extracted_files=tuple(extracted),
     )
