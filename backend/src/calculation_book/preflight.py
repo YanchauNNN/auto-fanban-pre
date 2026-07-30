@@ -59,6 +59,7 @@ def run_calculation_book_preflight(
     *,
     archive_path: Path,
     extraction_root: Path,
+    include_slab_stress: bool = False,
     ocr_recognizer: OcrRecognizer | None = None,
     archive_limits: ArchiveLimits | None = None,
 ) -> dict[str, Any]:

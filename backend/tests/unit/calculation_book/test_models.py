@@ -31,10 +31,20 @@ def test_calculation_params_are_strict_and_derive_template_values() -> None:
     params = CalculationBookParams.model_validate(_valid_payload())
 
     assert params.template_type is CalculationBookTemplate.INTERNAL_STRUCTURE
+    assert params.include_slab_stress is False
     assert params.project_number == "JQ"
     assert params.document_serial_number == "01"
     assert params.plant_elevation_range == "0.000m~15.000m"
     assert "RX" not in params.other_plants
+
+
+def test_calculation_params_accept_optional_slab_stress() -> None:
+    payload = _valid_payload()
+    payload["include_slab_stress"] = True
+
+    params = CalculationBookParams.model_validate(payload)
+
+    assert params.include_slab_stress is True
 
 
 def test_persisted_params_exclude_computed_template_values_and_can_be_revalidated() -> None:

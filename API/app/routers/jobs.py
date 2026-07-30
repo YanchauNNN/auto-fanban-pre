@@ -157,6 +157,7 @@ async def create_calculation_book(
 async def preflight_calculation_book(
     request: Request,
     archive: UploadFile = File(...),
+    include_slab_stress: bool = Form(False),
     _=Depends(require_current_account),
 ) -> JSONResponse:
     upload = UploadedFilePayload(
@@ -167,6 +168,7 @@ async def preflight_calculation_book(
     payload = await run_in_threadpool(
         request.app.state.runtime.preflight_calculation_book,
         archive=upload,
+        include_slab_stress=include_slab_stress,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 

@@ -2128,7 +2128,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             assert job.job_type == JobType.CALCULATION_BOOK
             assert job.slot_id is None
             assert "project_number" not in job.params
-            assert CalculationBookParams.model_validate(job.params).project_no == "JQ"
+            validated = CalculationBookParams.model_validate(job.params)
+            assert validated.project_no == "JQ"
+            assert validated.include_slab_stress is True
             job.mark_running(stage="VALIDATE_ARCHIVE")
             job.progress.percent = 80
             job.progress.details.update(
@@ -2149,9 +2151,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         sys.path.insert(0, str(repo_root))
     from API.app.main import create_app
 
-    monkeypatch.setattr(
-        "API.app.runtime.run_calculation_book_preflight",
-        lambda **_kwargs: {
+    def fake_calculation_book_preflight(**kwargs):
+        assert kwargs["include_slab_stress"] is True
+        return {
             "figure_count": 3,
             "zero_figure_count": 1,
             "wall_count": 1,
@@ -2160,7 +2162,11 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             "confirmations": [],
             "walls": [],
             "warnings": [],
-        },
+        }
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        fake_calculation_book_preflight,
     )
     params = {
         "template_type": "internal_structure",
@@ -2179,6 +2185,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         "factory_extreme_min_temperature": -18.0,
         "factory_extreme_max_temperature": 39.0,
         "site_soil_temperature": 15.0,
+        "include_slab_stress": True,
     }
     with TestClient(
         create_app(
@@ -2190,6 +2197,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         archive_bytes = b"PK\x03\x04test"
         preflight_response = client.post(
             "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
             files={
                 "archive": (
                     "calculation-images.zip",
@@ -2201,12 +2209,49 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert preflight_response.status_code == 200, preflight_response.text
         params["preflight_token"] = preflight_response.json()["preflight_token"]
         runtime = client.app.state.runtime
+        assert runtime._calculation_preflight_tokens[params["preflight_token"]][
+            "include_slab_stress"
+        ] is True
         cached_archive = Path(
             runtime._calculation_preflight_tokens[params["preflight_token"]][
                 "archive_path"
             ]
         )
         assert cached_archive.is_file()
+
+        mismatch_params = {
+            **params,
+            "include_slab_stress": False,
+        }
+        mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(mismatch_params, ensure_ascii=False)},
+        )
+        assert mismatch_response.status_code == 422
+        assert mismatch_response.json()["detail"]["param_errors"][
+            "include_slab_stress"
+        ] == ["楼板应力选项已变化，请重新预检"]
+        assert not cached_archive.exists()
+
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.zip",
+                    archive_bytes,
+                    "application/zip",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+
         response = client.post(
             "/api/jobs/calculation-books",
             data={"params_json": json.dumps(params, ensure_ascii=False)},

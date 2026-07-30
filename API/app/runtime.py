@@ -648,6 +648,20 @@ class DeliverableApiRuntime:
             )
         cached_archive_path = Path(str(preflight["archive_path"]))
         try:
+            if bool(preflight.get("include_slab_stress", False)) != (
+                params.include_slab_stress
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "include_slab_stress": [
+                                "楼板应力选项已变化，请重新预检"
+                            ]
+                        },
+                    },
+                )
             try:
                 cached_content = cached_archive_path.read_bytes()
             except OSError as exc:
@@ -742,6 +756,7 @@ class DeliverableApiRuntime:
         self,
         *,
         archive: UploadedFilePayload,
+        include_slab_stress: bool = False,
     ) -> dict[str, Any]:
         upload_errors: dict[str, list[str]] = {}
         if Path(archive.filename).suffix.lower() != ".zip":
@@ -770,6 +785,7 @@ class DeliverableApiRuntime:
                 payload = run_calculation_book_preflight(
                     archive_path=archive_path,
                     extraction_root=work_dir / "extracted",
+                    include_slab_stress=include_slab_stress,
                     archive_limits=ArchiveLimits(
                         max_files=runtime.max_archive_files,
                         max_total_bytes=runtime.max_archive_mb * 1024 * 1024,
@@ -836,6 +852,7 @@ class DeliverableApiRuntime:
                         "content_type": (
                             archive.content_type or "application/zip"
                         ),
+                        "include_slab_stress": include_slab_stress,
                         "confirmation_candidates": confirmation_candidates,
                     }
                 for path in expired_archive_paths:
