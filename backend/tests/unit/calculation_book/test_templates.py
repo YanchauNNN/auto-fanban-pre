@@ -9,7 +9,6 @@ from src.calculation_book.templates import (
     validate_template_context,
 )
 
-
 ASSET_ROOT = Path(__file__).resolve().parents[4] / "documents_bin" / "calculation_book"
 
 
@@ -25,6 +24,6 @@ def test_both_external_templates_are_present_and_have_known_variables() -> None:
 
 def test_internal_template_accepts_a_complete_context() -> None:
     path = ASSET_ROOT / TEMPLATE_FILENAMES[CalculationBookTemplate.INTERNAL_STRUCTURE]
-    context = {name: "test" for name in get_template_variables(path)}
+    context = dict.fromkeys(get_template_variables(path), "test")
 
     validate_template_context(path, context)

@@ -106,7 +106,12 @@ class DeliverableWorkerRuntime:
             if item_type == "job":
                 self.runtime._run_job(item_id)
                 latest = self.runtime.job_manager.reload_job(item_id)
-                if latest is not None and latest.status == JobStatus.RUNNING:
+                terminal_statuses = {
+                    JobStatus.SUCCEEDED,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                }
+                if latest is not None and latest.status not in terminal_statuses:
                     self.runtime._wait_for_job_completion(item_id)
             elif item_type == "group":
                 self.runtime._process_group(item_id)

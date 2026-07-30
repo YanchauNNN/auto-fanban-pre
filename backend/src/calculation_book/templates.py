@@ -7,7 +7,6 @@ from docxtpl import DocxTemplate
 
 from .models import CalculationBookTemplate
 
-
 TEMPLATE_FILENAMES = {
     CalculationBookTemplate.INTERNAL_STRUCTURE: "内部结构计算书.docx",
     CalculationBookTemplate.NUCLEAR_ISLAND_PLANT: "核岛厂房计算书.docx",

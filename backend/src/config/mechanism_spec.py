@@ -18,7 +18,6 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field
 
-
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
 _FORBIDDEN_TOP_LEVEL_KEYS = {
@@ -103,11 +102,24 @@ class AuditReplaceMechanismConfig(BaseModel):
 
 
 class CalculationBookMechanismConfig(BaseModel):
-    extra_ratio: float = 0.2
-    row_counts: list[int] = Field(default_factory=lambda: [1, 2])
-    spacings: list[int] = Field(default_factory=lambda: [200, 250])
-    max_diameter: int = 40
-    ocr_threshold: int = 160
+    ocr_threshold: int = Field(default=160, ge=0, le=255)
+    ocr_legend_value_count: int = Field(default=10, ge=2)
+    ocr_min_confidence: float = Field(default=50.0, ge=0, le=100)
+    ocr_min_vertical_ratio: float = Field(default=0.35, ge=0, le=1)
+    ocr_endpoint_absolute_tolerance: float = Field(default=1.0, ge=0)
+    ocr_endpoint_relative_tolerance: float = Field(default=0.002, ge=0)
+    ocr_header_crop: list[float] = Field(
+        default_factory=lambda: [0.025, 0.02, 0.20, 0.24],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_legend_crop: list[float] = Field(
+        default_factory=lambda: [0.06, 0.84, 0.88, 1.0],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_header_scale: int = Field(default=4, ge=1)
+    ocr_legend_scale: int = Field(default=3, ge=1)
     chapter: str = "7.1"
 
 

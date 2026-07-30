@@ -87,11 +87,16 @@ backend_mechanism:
       - "RX"
 
   calculation_book:
-    extra_ratio: 0.20
-    row_counts: [1, 2]
-    spacings: [200, 250]
-    max_diameter: 40
     ocr_threshold: 160
+    ocr_legend_value_count: 10
+    ocr_min_confidence: 50.0
+    ocr_min_vertical_ratio: 0.35
+    ocr_endpoint_absolute_tolerance: 1.0
+    ocr_endpoint_relative_tolerance: 0.002
+    ocr_header_crop: [0.025, 0.02, 0.20, 0.24]
+    ocr_legend_crop: [0.06, 0.84, 0.88, 1.0]
+    ocr_header_scale: 4
+    ocr_legend_scale: 3
     chapter: "7.1"
 
   project_inference:
@@ -130,8 +135,8 @@ backend_mechanism:
       AUDIT_REPLACE: "执行翻版替换"
       EXPORT_REPORT: "导出纠错报告"
       VALIDATE_ARCHIVE: "校验计算图片 ZIP"
-      OCR_REINFORCEMENT: "识别配筋图 SM 数值"
-      SELECT_REBAR: "自动选择钢筋组合"
+      OCR_REINFORCEMENT: "识别底部应力图例"
+      SELECT_REBAR: "匹配并核验实配钢筋"
       RENDER_CALCULATION_BOOK: "渲染 Word 计算书"
       FINALIZE_ARTIFACT: "整理计算书产物"
 

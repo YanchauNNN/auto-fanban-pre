@@ -43,6 +43,63 @@ const schema = {
   },
 } satisfies FormSchema;
 
+const preflightResult = {
+  preflightToken: "calculation-preflight-1",
+  figureCount: 3,
+  zeroFigureCount: 1,
+  wallCount: 1,
+  reinforcementWorkbook: "计算书模板文件.xlsx",
+  requiresManualConfirmation: false,
+  confirmations: [],
+  warnings: [],
+  walls: [
+    {
+      wallId: "N5012",
+      baseWallId: "N5012",
+      groupIndex: null,
+      suggestedSourceRow: 2,
+      directions: {
+        X: {
+          imageFilename: "N5012-X.JPEG",
+          smn: 0,
+          smx: 2504,
+          legendValues: [0, 278, 556, 835, 1113, 1391, 1669, 1948, 2226, 2504],
+          isZeroResult: false,
+          sourceCell: "B2",
+          originalText: "1D32间距200",
+          canonicalSpecification: "1D32间距200",
+          narrativeSpecification: "1排32@200",
+          actualArea: 4021.2,
+        },
+        Y: {
+          imageFilename: "N5012-Y.JPEG",
+          smn: 0,
+          smx: 2208,
+          legendValues: [0, 245, 491, 736, 981, 1227, 1472, 1717, 1963, 2208],
+          isZeroResult: false,
+          sourceCell: "C2",
+          originalText: "1D28间距200",
+          canonicalSpecification: "1D28间距200",
+          narrativeSpecification: "1排28@200",
+          actualArea: 3078.8,
+        },
+        Z: {
+          imageFilename: "N5012-Z.JPEG",
+          smn: 0,
+          smx: 0,
+          legendValues: [],
+          isZeroResult: true,
+          sourceCell: "D2",
+          originalText: "1A14间距400*400#",
+          canonicalSpecification: "1C14间距400*400",
+          narrativeSpecification: "1排14@400x400",
+          actualArea: 962.1,
+        },
+      },
+    },
+  ],
+} as const;
+
 function Harness({ adapter }: { adapter: ApiAdapter }) {
   const [open, setOpen] = useState(false);
   return (
@@ -62,7 +119,10 @@ function Harness({ adapter }: { adapter: ApiAdapter }) {
 describe("CalculationBookWorkspace", () => {
   it("keeps the required ZIP tree visible and restores focus after Escape", async () => {
     const user = userEvent.setup();
-    const adapter = { createCalculationBook: vi.fn() } as unknown as ApiAdapter;
+    const adapter = {
+      preflightCalculationBook: vi.fn(),
+      createCalculationBook: vi.fn(),
+    } as unknown as ApiAdapter;
     render(<Harness adapter={adapter} />);
     const trigger = screen.getByRole("button", { name: "计算书" });
     await user.click(trigger);
@@ -83,13 +143,17 @@ describe("CalculationBookWorkspace", () => {
 
   it("submits normalized parameters and one ZIP without duplicate submission", async () => {
     const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(preflightResult);
     const createCalculationBook = vi.fn().mockResolvedValue({
       batchId: "batch-calc",
       jobs: [],
     });
     const onBatchCreated = vi.fn();
-    const adapter = { createCalculationBook } as unknown as ApiAdapter;
-    render(
+    const adapter = {
+      preflightCalculationBook,
+      createCalculationBook,
+    } as unknown as ApiAdapter;
+    const { rerender } = render(
       <CalculationBookWorkspace
         adapter={adapter}
         isOpen
@@ -119,8 +183,27 @@ describe("CalculationBookWorkspace", () => {
     }
     const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
     await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByLabelText("共 1 面墙")).toBeInTheDocument();
+    expect(screen.getByText("1C14间距400*400")).toBeInTheDocument();
+    expect(screen.getByText("Z 向无 SMX，计算值按 0 处理")).toBeInTheDocument();
+    rerender(
+      <CalculationBookWorkspace
+        adapter={adapter}
+        isOpen
+        schema={{
+          ...schema,
+          calculationBook: { ...schema.calculationBook! },
+        }}
+        onBatchCreated={onBatchCreated}
+        onClose={() => undefined}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
     await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
 
+    expect(preflightCalculationBook).toHaveBeenCalledWith(archive);
     await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
     expect(createCalculationBook).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -128,15 +211,19 @@ describe("CalculationBookWorkspace", () => {
         project_no: "2016",
         project_name: "浙江金七门核电厂1、2号机组",
         workshop_length: 72.5,
+        preflight_token: "calculation-preflight-1",
+        manual_confirmations: {},
       }),
-      archive,
     );
     expect(onBatchCreated).toHaveBeenCalledWith({ batchId: "batch-calc", jobs: [] });
   });
 
   it("announces validation errors and focuses the first required field", async () => {
     const user = userEvent.setup();
-    const adapter = { createCalculationBook: vi.fn() } as unknown as ApiAdapter;
+    const adapter = {
+      preflightCalculationBook: vi.fn(),
+      createCalculationBook: vi.fn(),
+    } as unknown as ApiAdapter;
     render(
       <CalculationBookWorkspace
         adapter={adapter}
@@ -151,22 +238,22 @@ describe("CalculationBookWorkspace", () => {
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
 
-    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("请修正 15 个参数");
     await waitFor(() =>
       expect(screen.getByLabelText("计算书模板")).toHaveFocus(),
     );
     expect(screen.getByLabelText("计算书模板")).toHaveAttribute("aria-required", "true");
-    expect(adapter.createCalculationBook).not.toHaveBeenCalled();
+    expect(adapter.preflightCalculationBook).not.toHaveBeenCalled();
   });
 
-  it("locks close, cancel, and Escape while the create request is pending", async () => {
+  it("locks close, cancel, and Escape while preflight is pending", async () => {
     const user = userEvent.setup();
-    let resolveRequest: ((value: { batchId: string; jobs: [] }) => void) | undefined;
-    const createCalculationBook = vi.fn(
+    let resolveRequest: ((value: typeof preflightResult) => void) | undefined;
+    const preflightCalculationBook = vi.fn(
       () =>
-        new Promise<{ batchId: string; jobs: [] }>((resolve) => {
+        new Promise<typeof preflightResult>((resolve) => {
           resolveRequest = resolve;
         }),
     );
@@ -181,7 +268,10 @@ describe("CalculationBookWorkspace", () => {
     };
     render(
       <CalculationBookWorkspace
-        adapter={{ createCalculationBook } as unknown as ApiAdapter}
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook: vi.fn(),
+        } as unknown as ApiAdapter}
         isOpen
         schema={minimalSchema}
         onBatchCreated={onBatchCreated}
@@ -193,14 +283,109 @@ describe("CalculationBookWorkspace", () => {
       screen.getByLabelText("选择计算图片 ZIP"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
-    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(screen.getByRole("button", { name: "关闭创建计算书" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
     await user.keyboard("{Escape}");
     expect(onClose).not.toHaveBeenCalled();
 
-    resolveRequest?.({ batchId: "batch-calc", jobs: [] });
-    await waitFor(() => expect(onBatchCreated).toHaveBeenCalled());
+    resolveRequest?.(preflightResult);
+    await waitFor(() => expect(screen.getByLabelText("共 1 面墙")).toBeInTheDocument());
+    expect(onBatchCreated).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit checkbox for every duplicate or split wall", async () => {
+    const user = userEvent.setup();
+    const manualPreflight = {
+      ...preflightResult,
+      requiresManualConfirmation: true,
+      confirmations: [
+        {
+          wallId: "S7157-1",
+          baseWallId: "S7157",
+          reasons: ["duplicate_reinforcement_rows", "split_image_group"],
+          suggestedSourceRow: 29,
+          candidates: [
+            {
+              sourceRow: 28,
+              sourceSheet: "Sheet1",
+              directions: {
+                ...preflightResult.walls[0].directions,
+                Y: {
+                  ...preflightResult.walls[0].directions.Y,
+                  sourceCell: "C28",
+                  originalText: "1D25间距200",
+                  canonicalSpecification: "1D25间距200",
+                  narrativeSpecification: "1排25@200",
+                  actualArea: 2454.4,
+                },
+              },
+            },
+            {
+              sourceRow: 29,
+              sourceSheet: "Sheet1",
+              directions: preflightResult.walls[0].directions,
+            },
+          ],
+        },
+      ],
+      walls: [
+        {
+          ...preflightResult.walls[0],
+          wallId: "S7157-1",
+          baseWallId: "S7157",
+          groupIndex: 1,
+          suggestedSourceRow: 29,
+        },
+      ],
+    };
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-calc",
+      jobs: [],
+    });
+    const adapter = {
+      preflightCalculationBook: vi.fn().mockResolvedValue(manualPreflight),
+      createCalculationBook,
+    } as unknown as ApiAdapter;
+    const minimalSchema: FormSchema = {
+      ...schema,
+      calculationBook: {
+        ...schema.calculationBook!,
+        fields: [calculationFields[0]],
+      },
+    };
+    render(
+      <CalculationBookWorkspace
+        adapter={adapter}
+        isOpen
+        schema={minimalSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.upload(
+      screen.getByLabelText("选择计算图片 ZIP"),
+      new File(["zip"], "calculation.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByRole("button", { name: "进入确认提交" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+    expect(await screen.findByText("S7157-1 需要人工确认")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建计算书任务" })).toBeDisabled();
+    await user.click(screen.getByRole("radio", { name: /Sheet1 · 第 28 行/ }));
+    expect(screen.getByText("配筋表第 28 行")).toBeInTheDocument();
+    expect(screen.getByText("1排25@200")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("已核对 S7157-1 的图片与配筋对应关系"));
+    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+    expect(createCalculationBook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        manual_confirmations: { "S7157-1": 28 },
+      }),
+    );
   });
 });

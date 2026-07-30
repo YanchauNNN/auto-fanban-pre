@@ -7,10 +7,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 _FIGURE_NAME = re.compile(
-    r"^(?P<prefix>[A-Za-z]+)(?P<number>\d+)-(?P<direction>[XYZ])$",
+    r"^(?P<prefix>[A-Za-z]+)(?P<number>\d+)(?P<suffix>[A-Za-z]?)"
+    r"(?:-(?P<group>[12]))?-(?P<direction>[XYZ])$",
     re.IGNORECASE,
 )
 
@@ -22,26 +22,37 @@ class InvalidCalculationArchive(ValueError):
 @dataclass(frozen=True)
 class ArchiveLimits:
     max_files: int = 500
-    max_total_bytes: int = 500 * 1024 * 1024
+    max_total_bytes: int = 1024 * 1024 * 1024
     max_single_file_bytes: int = 50 * 1024 * 1024
-    max_compression_ratio: float = 200.0
+    max_compression_ratio: float = 250.0
 
 
 @dataclass(frozen=True)
 class ReinforcementFigure:
     wall_id: str
+    base_wall_id: str
+    group_index: int | None
     direction: str
     path: Path
-    sort_key: tuple[int, int, str]
+    sort_key: tuple[int, str, int, int, str]
 
 
 @dataclass(frozen=True)
 class CalculationArchiveContents:
     root: Path
     reinforcement_figures: tuple[ReinforcementFigure, ...]
+    ignored_root_images: tuple[Path, ...]
+    reinforcement_workbook: Path
     layout_image: Path
     model_image: Path
     extracted_files: tuple[Path, ...]
+
+    @property
+    def requires_manual_confirmation(self) -> bool:
+        return any(
+            figure.group_index is not None
+            for figure in self.reinforcement_figures
+        )
 
 
 def _safe_member_path(info: zipfile.ZipInfo) -> PurePosixPath:
@@ -119,31 +130,72 @@ def validate_and_extract_archive(
             extracted.append(resolved_target)
 
     figures: list[ReinforcementFigure] = []
+    ignored_root_images: list[Path] = []
     direction_order = {"X": 0, "Y": 1, "Z": 2}
     for path in extracted:
         if path.parent != resolved_root or path.suffix.lower() not in IMAGE_EXTENSIONS:
             continue
         match = _FIGURE_NAME.fullmatch(path.stem)
         if match is None:
+            ignored_root_images.append(path)
             continue
         direction = match.group("direction").upper()
         number = int(match.group("number"))
         prefix = match.group("prefix").upper()
+        suffix = match.group("suffix").upper()
+        group_text = match.group("group")
+        group_index = int(group_text) if group_text is not None else None
+        base_wall_id = f"{prefix}{number}{suffix}"
+        wall_id = (
+            f"{base_wall_id}-{group_index}"
+            if group_index is not None
+            else base_wall_id
+        )
         figures.append(
             ReinforcementFigure(
-                wall_id=f"{prefix}{number}",
+                wall_id=wall_id,
+                base_wall_id=base_wall_id,
+                group_index=group_index,
                 direction=direction,
                 path=path,
-                sort_key=(number, direction_order[direction], prefix),
+                sort_key=(
+                    number,
+                    suffix,
+                    group_index or 0,
+                    direction_order[direction],
+                    prefix,
+                ),
             )
         )
     figures.sort(key=lambda item: item.sort_key)
-    directions = {item.direction for item in figures}
-    missing_directions = [direction for direction in ("X", "Y", "Z") if direction not in directions]
-    if missing_directions:
-        raise InvalidCalculationArchive(
-            f"ZIP 根目录缺少 {'/'.join(missing_directions)} 方向配筋图片"
+    figure_groups: dict[str, set[str]] = {}
+    for figure in figures:
+        figure_groups.setdefault(figure.wall_id, set()).add(figure.direction)
+    if not figure_groups:
+        raise InvalidCalculationArchive("ZIP 根目录没有可识别的墙体 X/Y/Z 配筋图片")
+    for wall_id, directions in figure_groups.items():
+        missing_directions = [
+            direction for direction in ("X", "Y", "Z") if direction not in directions
+        ]
+        if missing_directions:
+            raise InvalidCalculationArchive(
+                f"ZIP 根目录的 {wall_id} 缺少 "
+                f"{'/'.join(missing_directions)} 方向配筋图片"
+            )
+
+    reinforcement_workbooks = sorted(
+        path
+        for path in extracted
+        if (
+            path.parent == resolved_root
+            and path.suffix.lower() == ".xlsx"
+            and not path.name.startswith("~$")
         )
+    )
+    if not reinforcement_workbooks:
+        raise InvalidCalculationArchive("ZIP 根目录缺少墙体配筋表")
+    if len(reinforcement_workbooks) > 1:
+        raise InvalidCalculationArchive("ZIP 根目录只能包含一个墙体配筋表")
 
     folder_01 = resolved_root / "01"
     folder_02 = resolved_root / "02"
@@ -155,6 +207,8 @@ def validate_and_extract_archive(
     return CalculationArchiveContents(
         root=resolved_root,
         reinforcement_figures=tuple(figures),
+        ignored_root_images=tuple(sorted(ignored_root_images)),
+        reinforcement_workbook=reinforcement_workbooks[0],
         layout_image=_first_image(folder_01, "01"),
         model_image=_first_image(folder_02, "02"),
         extracted_files=tuple(extracted),

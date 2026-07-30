@@ -20,6 +20,8 @@ import type {
   ApiAdapter,
   ApiError,
   ArchiveState,
+  CalculationBookDirectionEvidence,
+  CalculationBookPreflightResult,
   CreateAuditReplaceParams,
   CreateBatchPayload,
   CurrentAccount,
@@ -1009,11 +1011,9 @@ export class HttpAdapter implements ApiAdapter {
 
   async createCalculationBook(
     params: SubmissionParams,
-    archive: File,
   ): Promise<CreateBatchPayload> {
     const formData = new FormData();
     formData.append("params_json", JSON.stringify(params));
-    formData.append("archive", archive);
     const payload = await this.fetchJson<{
       batch_id: string;
       jobs: RawJobSummary[];
@@ -1024,6 +1024,129 @@ export class HttpAdapter implements ApiAdapter {
     return {
       batchId: payload.batch_id,
       jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
+  async preflightCalculationBook(
+    archive: File,
+  ): Promise<CalculationBookPreflightResult> {
+    const formData = new FormData();
+    formData.append("archive", archive);
+    const payload = await this.fetchJson<{
+      preflight_token: string;
+      figure_count: number;
+      zero_figure_count: number;
+      wall_count: number;
+      reinforcement_workbook: string;
+      requires_manual_confirmation: boolean;
+      confirmations: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        reasons: string[];
+        suggested_source_row: number;
+        candidates: Array<{
+          source_row: number;
+          source_sheet: string;
+          directions: Record<string, {
+            source_cell: string;
+            original_text: string;
+            canonical_specification: string;
+            narrative_specification: string;
+            actual_area: number;
+          }>;
+        }>;
+      }>;
+      walls: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        group_index: number | null;
+        suggested_source_row: number;
+        directions: Record<string, {
+          image_filename: string;
+          smn: number;
+          smx: number;
+          legend_values: number[];
+          is_zero_result: boolean;
+          source_cell: string;
+          original_text: string;
+          canonical_specification: string;
+          narrative_specification: string;
+          actual_area: number;
+        }>;
+      }>;
+      warnings: Array<{ code: string; filenames: string[] }>;
+    }>("/api/jobs/calculation-books/preflight", {
+      method: "POST",
+      body: formData,
+    }, {
+      timeoutMs: 10 * 60 * 1000,
+    });
+    const mapDirections = (
+      directions: Record<string, {
+        image_filename?: string;
+        smn?: number;
+        smx?: number;
+        legend_values?: number[];
+        is_zero_result?: boolean;
+        source_cell: string;
+        original_text: string;
+        canonical_specification: string;
+        narrative_specification?: string;
+        actual_area: number;
+      }>,
+    ) => {
+      const mapDirection = (
+        direction: "X" | "Y" | "Z",
+      ): CalculationBookDirectionEvidence => {
+        const item = directions[direction];
+        return {
+          imageFilename: item?.image_filename ?? "",
+          smn: item?.smn ?? 0,
+          smx: item?.smx ?? 0,
+          legendValues: item?.legend_values ?? [],
+          isZeroResult: item?.is_zero_result ?? false,
+          sourceCell: item?.source_cell ?? "",
+          originalText: item?.original_text ?? "",
+          canonicalSpecification: item?.canonical_specification ?? "",
+          narrativeSpecification: item?.narrative_specification ?? "",
+          actualArea: item?.actual_area ?? 0,
+        };
+      };
+      return {
+        X: mapDirection("X"),
+        Y: mapDirection("Y"),
+        Z: mapDirection("Z"),
+      };
+    };
+    return {
+      preflightToken: payload.preflight_token,
+      figureCount: payload.figure_count,
+      zeroFigureCount: payload.zero_figure_count,
+      wallCount: payload.wall_count,
+      reinforcementWorkbook: payload.reinforcement_workbook,
+      requiresManualConfirmation: payload.requires_manual_confirmation,
+      confirmations: payload.confirmations.map((confirmation) => ({
+        wallId: confirmation.wall_id,
+        baseWallId: confirmation.base_wall_id,
+        reasons: confirmation.reasons,
+        suggestedSourceRow: confirmation.suggested_source_row,
+        candidates: confirmation.candidates.map((candidate) => ({
+          sourceRow: candidate.source_row,
+          sourceSheet: candidate.source_sheet,
+          directions: mapDirections(candidate.directions),
+        })),
+      })),
+      walls: payload.walls.map((wall) => ({
+        wallId: wall.wall_id,
+        baseWallId: wall.base_wall_id,
+        groupIndex: wall.group_index,
+        suggestedSourceRow: wall.suggested_source_row,
+        directions: mapDirections(wall.directions),
+      })),
+      warnings: payload.warnings.map((warning) => ({
+        code: warning.code,
+        filenames: warning.filenames,
+      })),
     };
   }
 

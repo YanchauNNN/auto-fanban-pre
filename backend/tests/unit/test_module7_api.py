@@ -2077,6 +2077,19 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         sys.path.insert(0, str(repo_root))
     from API.app.main import create_app
 
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        lambda **_kwargs: {
+            "figure_count": 3,
+            "zero_figure_count": 1,
+            "wall_count": 1,
+            "reinforcement_workbook": "计算书模板文件.xlsx",
+            "requires_manual_confirmation": False,
+            "confirmations": [],
+            "walls": [],
+            "warnings": [],
+        },
+    )
     params = {
         "template_type": "internal_structure",
         "project_no": "JQ",
@@ -2102,13 +2115,33 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             font_preflight_service=FakeFontPreflightService(),
         )
     ) as client:
+        archive_bytes = b"PK\x03\x04test"
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "calculation-images.zip",
+                    archive_bytes,
+                    "application/zip",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        runtime = client.app.state.runtime
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+        assert cached_archive.is_file()
         response = client.post(
             "/api/jobs/calculation-books",
             data={"params_json": json.dumps(params, ensure_ascii=False)},
-            files={"archive": ("calculation-images.zip", b"PK\x03\x04test", "application/zip")},
         )
 
         assert response.status_code == 201, response.text
+        assert not cached_archive.exists()
         job_id = response.json()["jobs"][0]["job_id"]
         detail = _poll_job(client, job_id)
         assert detail["status"] == "succeeded"
@@ -2123,6 +2156,15 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         download = client.get(f"/api/jobs/{job_id}/download/calculation-book")
         assert download.status_code == 200
         assert download.content == b"docx"
+
+        replay = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+        assert replay.status_code == 422
+        assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
+            "请先完成计算书文件预检"
+        ]
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(

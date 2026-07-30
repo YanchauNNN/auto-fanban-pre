@@ -342,12 +342,16 @@ class CalculationBookRuntimeConfig(BaseModel):
 
     template_dir: Path = Path("documents_bin/calculation_book")
     rebar_table: Path = Path("documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx")
-    tesseract_exe: Path = Path("backend/jisuanshu/Tesseract-OCR/tesseract.exe")
-    tessdata_dir: Path = Path("backend/jisuanshu/Tesseract-OCR/tessdata")
-    max_archive_mb: int = 500
+    tesseract_exe: Path = Path(
+        "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe"
+    )
+    tessdata_dir: Path = Path(
+        "documents_bin/calculation_book/Tesseract-OCR/tessdata"
+    )
+    max_archive_mb: int = 1024
     max_archive_files: int = 500
     max_single_file_mb: int = 50
-    max_compression_ratio: float = 200.0
+    max_compression_ratio: float = 250.0
 
 
 class LifecycleConfig(BaseModel):

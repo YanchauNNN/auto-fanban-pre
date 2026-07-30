@@ -37,6 +37,62 @@ export type CalculationBookSchema = {
   };
 };
 
+export type CalculationBookDirectionEvidence = {
+  imageFilename: string;
+  smn: number;
+  smx: number;
+  legendValues: readonly number[];
+  isZeroResult: boolean;
+  sourceCell: string;
+  originalText: string;
+  canonicalSpecification: string;
+  narrativeSpecification: string;
+  actualArea: number;
+};
+
+export type CalculationBookConfirmationCandidate = {
+  sourceRow: number;
+  sourceSheet: string;
+  directions: Record<
+    "X" | "Y" | "Z",
+    Pick<
+      CalculationBookDirectionEvidence,
+      | "sourceCell"
+      | "originalText"
+      | "canonicalSpecification"
+      | "narrativeSpecification"
+      | "actualArea"
+    >
+  >;
+};
+
+export type CalculationBookPreflightResult = {
+  preflightToken: string;
+  figureCount: number;
+  zeroFigureCount: number;
+  wallCount: number;
+  reinforcementWorkbook: string;
+  requiresManualConfirmation: boolean;
+  confirmations: readonly {
+    wallId: string;
+    baseWallId: string;
+    reasons: readonly string[];
+    suggestedSourceRow: number;
+    candidates: readonly CalculationBookConfirmationCandidate[];
+  }[];
+  walls: readonly {
+    wallId: string;
+    baseWallId: string;
+    groupIndex: number | null;
+    suggestedSourceRow: number;
+    directions: Record<"X" | "Y" | "Z", CalculationBookDirectionEvidence>;
+  }[];
+  warnings: readonly {
+    code: string;
+    filenames: readonly string[];
+  }[];
+};
+
 export type UploadLimits = {
   maxFiles: number;
   allowedExts: readonly string[];
@@ -842,8 +898,10 @@ export type ApiAdapter = {
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
   createCalculationBook?: (
     params: SubmissionParams,
-    archive: File,
   ) => Promise<CreateBatchPayload>;
+  preflightCalculationBook?: (
+    archive: File,
+  ) => Promise<CalculationBookPreflightResult>;
   listTaskGroups?: () => Promise<TaskGroupList>;
   getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;
   submitTaskGroup?: (

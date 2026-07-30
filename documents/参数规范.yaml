@@ -855,10 +855,22 @@ calculation_book:
     - { key: "site_soil_temperature", label: "场地土温", type: "number", required: true, unit: "℃" }
   archive:
     accept: [".zip"]
-    root_figure_pattern: "<墙号>-X|Y|Z.(png|jpg|jpeg|bmp)"
+    root_figure_pattern: "<墙号><可选字母后缀><可选-1或-2>-X|Y|Z.(png|jpg|jpeg|bmp)"
     required_root_directions: ["X", "Y", "Z"]
+    required_root_workbook: "根目录必须且只能包含 1 个 .xlsx 墙体配筋表"
     required_folders: ["01", "02"]
-    description: "ZIP 根目录保留 X/Y/Z 配筋图，并保留含首图的 01、02 子目录"
+    description: "ZIP 根目录保留 X/Y/Z 应力图和 1 个墙体配筋表，并保留含首图的 01、02 子目录；字母后缀墙号独立处理，重复配筋行或 -1/-2 图片组必须人工确认"
+  reinforcement_normalization:
+    wall_id: "统一转大写；S7157A 与 S7157 为不同墙体"
+    horizontal_vertical: "统一为 <层数>D<直径>间距<间距>，例如 1D25间距200"
+    tie: "统一为 <层数>C<直径>间距<间距1>*<间距2>；A 标记强制改为 C"
+    actual_area_formula:
+      X_Y: "层数 * π * (直径/2)^2 * (1000/间距)"
+      Z: "层数 * π * (直径/2)^2 * (1000/间距1) * (1000/间距2)"
+      precision: "内部使用 math.pi 未舍入值计算；页面和计算书显示到 1 位小数"
+    parenthetical_value: "存在括号内配置时以括号内配置为实配；多个括号内配置取实际配筋面积最大值"
+    forbidden_output_marker: "#"
+    manual_confirmation: "出现重复配筋行或 -1/-2 图片组时，一律要求用户逐墙人工确认"
 
 # ============================================================================
 # 三、图签提取模块 (titleblock_extract)
@@ -1509,12 +1521,18 @@ submission_contracts:
   calculation_book:
     endpoint: "POST /api/jobs/calculation-books"
     desc: "创建计算书异步任务；不占用 CAD 槽，成功后产出一个 DOCX"
+    preflight_endpoint: "POST /api/jobs/calculation-books/preflight"
+    preflight_desc: "上传并暂存 ZIP，识别底部应力图例、规范化配筋表并返回逐墙证据；创建任务必须携带对应的一次性预检令牌"
     transport:
       content_type: "multipart/form-data"
-      archive_field: "archive"
+      preflight_archive_field: "archive"
+      create_archive_field: "可选兼容字段；正常流程不重复上传，由预检令牌读取服务端暂存 ZIP"
       params_field: "params_json"
     params_json:
       extends: "calculation_book.fields"
+      extra:
+        preflight_token: "预检接口返回的一次性令牌"
+        manual_confirmations: "重复配筋行或 -1/-2 图片组对应的墙号到 Excel 源行号映射"
     response:
       batch_id: "批次号"
       jobs: "单个 calculation_book JobSummary"

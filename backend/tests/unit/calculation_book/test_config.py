@@ -5,7 +5,6 @@ from pathlib import Path
 from src.config.mechanism_spec import MechanismSpecLoader
 from src.config.runtime_config import RuntimeConfig
 
-
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -16,18 +15,19 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
         REPO_ROOT / "documents_bin" / "calculation_book"
     ).resolve()
     assert config.calculation_book.rebar_table.name == "钢筋的公称直径、公称面积表.xlsx"
-    assert config.calculation_book.max_archive_mb == 500
+    assert config.calculation_book.max_archive_mb == 1024
     assert config.calculation_book.max_archive_files == 500
+    assert config.calculation_book.max_compression_ratio == 250.0
 
 
-def test_calculation_book_formula_and_ocr_settings_come_from_mechanism_yaml() -> None:
+def test_calculation_book_ocr_settings_come_from_mechanism_yaml() -> None:
     spec = MechanismSpecLoader.load(REPO_ROOT / "documents" / "参数规范-3.yaml")
 
-    assert spec.calculation_book.extra_ratio == 0.2
-    assert spec.calculation_book.row_counts == [1, 2]
-    assert spec.calculation_book.spacings == [200, 250]
-    assert spec.calculation_book.max_diameter == 40
     assert spec.calculation_book.ocr_threshold == 160
+    assert spec.calculation_book.ocr_legend_value_count == 10
+    assert spec.calculation_book.ocr_min_confidence == 50.0
+    assert spec.calculation_book.ocr_endpoint_relative_tolerance == 0.002
+    assert spec.calculation_book.ocr_legend_crop == [0.06, 0.84, 0.88, 1.0]
 
 
 def test_calculation_book_runtime_paths_resolve_in_terminal_package_layout(
@@ -42,8 +42,8 @@ runtime_options:
   calculation_book:
     template_dir: { type: str, default: "documents_bin/calculation_book" }
     rebar_table: { type: str, default: "documents_bin/calculation_book/rebar.xlsx" }
-    tesseract_exe: { type: str, default: "backend/jisuanshu/Tesseract-OCR/tesseract.exe" }
-    tessdata_dir: { type: str, default: "backend/jisuanshu/Tesseract-OCR/tessdata" }
+    tesseract_exe: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe" }
+    tessdata_dir: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tessdata" }
 """.strip(),
         encoding="utf-8",
     )
@@ -54,5 +54,9 @@ runtime_options:
         deploy_root / "documents_bin" / "calculation_book"
     ).resolve()
     assert config.calculation_book.tesseract_exe == (
-        deploy_root / "backend" / "jisuanshu" / "Tesseract-OCR" / "tesseract.exe"
+        deploy_root
+        / "documents_bin"
+        / "calculation_book"
+        / "Tesseract-OCR"
+        / "tesseract.exe"
     ).resolve()

@@ -24,6 +24,7 @@ def _valid_entries() -> dict[str, bytes]:
         "RX1-X.png": b"x",
         "RX1-Y.png": b"y",
         "RX1-Z.png": b"z",
+        "计算书模板文件.xlsx": b"xlsx",
         "01/layout.png": b"layout",
         "02/model.png": b"model",
     }
@@ -41,6 +42,7 @@ def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> Non
     assert [figure.direction for figure in contents.reinforcement_figures] == ["X", "Y", "Z"]
     assert contents.layout_image.name == "layout.png"
     assert contents.model_image.name == "model.png"
+    assert contents.reinforcement_workbook.name == "计算书模板文件.xlsx"
     assert all(path.is_relative_to(contents.root) for path in contents.extracted_files)
 
 
@@ -73,6 +75,7 @@ def test_rejects_path_traversal_and_absolute_members(
         ("RX1-X.png", "X"),
         ("RX1-Y.png", "Y"),
         ("RX1-Z.png", "Z"),
+        ("计算书模板文件.xlsx", "配筋表"),
         ("01/layout.png", "01"),
         ("02/model.png", "02"),
     ],
@@ -99,3 +102,62 @@ def test_rejects_archive_limits_before_extraction(tmp_path: Path) -> None:
             tmp_path / "extracted",
             limits=ArchiveLimits(max_files=20, max_total_bytes=1024, max_single_file_bytes=2),
         )
+
+
+def test_alpha_suffix_wall_is_independent_and_normalized_to_uppercase(
+    tmp_path: Path,
+) -> None:
+    entries = _valid_entries()
+    for direction in ("X", "Y", "Z"):
+        entries[f"S7157a-{direction}.JPEG"] = direction.encode()
+    archive = _write_archive(tmp_path / "alpha.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    alpha_figures = [
+        figure
+        for figure in contents.reinforcement_figures
+        if figure.wall_id == "S7157A"
+    ]
+    assert [figure.direction for figure in alpha_figures] == ["X", "Y", "Z"]
+    assert all(figure.group_index is None for figure in alpha_figures)
+
+
+def test_minus_one_and_minus_two_are_separate_groups_requiring_confirmation(
+    tmp_path: Path,
+) -> None:
+    entries = _valid_entries()
+    for direction in ("X", "Y", "Z"):
+        entries[f"S7157-1-{direction}.JPEG"] = f"1{direction}".encode()
+        entries[f"S7157-2-{direction}.JPEG"] = f"2{direction}".encode()
+    archive = _write_archive(tmp_path / "groups.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    grouped = [
+        figure
+        for figure in contents.reinforcement_figures
+        if figure.base_wall_id == "S7157"
+    ]
+    assert {figure.wall_id for figure in grouped} == {"S7157-1", "S7157-2"}
+    assert {figure.group_index for figure in grouped} == {1, 2}
+    assert contents.requires_manual_confirmation
+
+
+def test_rejects_incomplete_minus_group(tmp_path: Path) -> None:
+    entries = _valid_entries()
+    entries["S7157-1-X.JPEG"] = b"x"
+    entries["S7157-1-Y.JPEG"] = b"y"
+    archive = _write_archive(tmp_path / "incomplete-group.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="S7157-1.*Z"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_rejects_multiple_root_reinforcement_workbooks(tmp_path: Path) -> None:
+    entries = _valid_entries()
+    entries["另一个配筋表.xlsx"] = b"xlsx"
+    archive = _write_archive(tmp_path / "multiple-workbooks.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="只能包含一个"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")

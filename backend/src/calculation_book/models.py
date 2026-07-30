@@ -37,14 +37,34 @@ class CalculationBookParams(BaseModel):
     factory_extreme_min_temperature: float = Field(ge=-100, le=100)
     factory_extreme_max_temperature: float = Field(ge=-100, le=100)
     site_soil_temperature: float = Field(ge=-100, le=100)
+    manual_confirmations: dict[str, int] = Field(default_factory=dict)
+    preflight_token: str = Field(default="", max_length=100)
 
     @field_validator("project_no", "version", "subproject_code")
     @classmethod
     def normalize_codes(cls, value: str) -> str:
         return value.strip().upper()
 
+    @field_validator("manual_confirmations", mode="before")
+    @classmethod
+    def normalize_manual_confirmations(
+        cls,
+        value: object,
+    ) -> dict[str, int]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("人工确认映射必须是墙号到配筋表行号的对象")
+        normalized: dict[str, int] = {}
+        for wall_id, source_row in value.items():
+            row_number = int(source_row)
+            if row_number <= 0:
+                raise ValueError("人工确认的配筋表行号必须大于 0")
+            normalized[str(wall_id).strip().upper()] = row_number
+        return normalized
+
     @model_validator(mode="after")
-    def validate_relationships(self) -> "CalculationBookParams":
+    def validate_relationships(self) -> CalculationBookParams:
         if self.factory_extreme_min_temperature >= self.factory_extreme_max_temperature:
             raise ValueError("历史最低温度必须小于历史最高温度")
         if self.raft_slab_top_elevation >= self.roof_top_elevation:

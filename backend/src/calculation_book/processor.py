@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -10,10 +10,24 @@ from pathlib import Path
 from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
 
-from .archive import ArchiveLimits, ReinforcementFigure, validate_and_extract_archive
+from .archive import ArchiveLimits, validate_and_extract_archive
+from .matching import (
+    RecognizedFigure,
+    ReinforcementAssignment,
+    ReinforcementMatchingPlan,
+    match_reinforcement,
+)
 from .models import CalculationBookParams
-from .ocr import recognize_sm
-from .reinforcement import RebarSelection, load_rebar_area_table, select_rebar
+from .narrative import (
+    build_reinforcement_narrative,
+    select_calculation_reference,
+)
+from .ocr import StressLegendReading, recognize_stress_legend
+from .reinforcement_input import (
+    NormalizedReinforcementRow,
+    ParsedRebarCell,
+    load_reinforcement_schedule,
+)
 from .templates import resolve_template_path, validate_template_context
 
 
@@ -25,24 +39,34 @@ class CalculationBookStage(StrEnum):
     FINALIZE_ARTIFACT = "FINALIZE_ARTIFACT"
 
 
+class ManualConfirmationRequired(ValueError):
+    pass
+
+
 ProgressCallback = Callable[[CalculationBookStage, int, str, dict[str, object]], None]
-OcrRecognizer = Callable[[Path], int]
+OcrRecognizer = Callable[[Path, str], StressLegendReading]
 
 
 @dataclass(frozen=True)
 class CalculationBookAssets:
     template_root: Path
-    rebar_table: Path
+    rebar_table: Path | None = None
 
 
 @dataclass(frozen=True)
 class CalculationBookMechanism:
     archive_limits: ArchiveLimits = ArchiveLimits()
-    row_counts: tuple[int, ...] = (1, 2)
-    spacings: tuple[int, ...] = (200, 250)
-    max_diameter: int = 40
-    extra_ratio: float = 0.2
     chapter: str = "7.1"
+
+
+@dataclass(frozen=True)
+class AppliedReinforcement:
+    wall_id: str
+    direction: str
+    specification: str
+    actual_area: float
+    calculation_area: float
+    margin_percent: float | None
 
 
 @dataclass(frozen=True)
@@ -50,44 +74,173 @@ class CalculationBookResult:
     output_path: Path
     figure_count: int
     template_type: str
-    selections: tuple[RebarSelection, ...]
+    selections: tuple[AppliedReinforcement, ...]
 
 
-@dataclass(frozen=True)
-class _RecognizedFigure:
-    source: ReinforcementFigure
-    sm_value: int
-    selection: RebarSelection
+def _format_number(value: float | int) -> str:
+    return f"{float(value):g}"
 
 
-def _wall_rows(figures: list[_RecognizedFigure]) -> list[dict[str, str]]:
-    rows: dict[str, dict[str, str]] = {}
-    for figure in figures:
-        row = rows.setdefault(
-            figure.source.wall_id,
-            {
-                "id": figure.source.wall_id,
-                "x_calc": "0",
-                "x_actual": "",
-                "x_margin": "",
-                "y_calc": "0",
-                "y_actual": "",
-                "y_margin": "",
-                "z_calc": "0",
-                "z_actual": "",
-                "z_margin": "",
-            },
+def _format_actual_area(value: float | int) -> str:
+    return f"{round(float(value), 1):g}"
+
+
+def _cell_for_direction(
+    row: NormalizedReinforcementRow,
+    direction: str,
+) -> ParsedRebarCell:
+    return {
+        "X": row.x,
+        "Y": row.y,
+        "Z": row.z,
+    }[direction]
+
+
+def _apply_manual_confirmations(
+    plan: ReinforcementMatchingPlan,
+    *,
+    confirmations: dict[str, int],
+    schedule_rows: tuple[NormalizedReinforcementRow, ...],
+) -> tuple[ReinforcementAssignment, ...]:
+    if not plan.requires_manual_confirmation:
+        return plan.assignments
+
+    rows_by_wall: dict[str, list[NormalizedReinforcementRow]] = {}
+    for row in schedule_rows:
+        rows_by_wall.setdefault(row.wall_id, []).append(row)
+    confirmation_by_output = {
+        confirmation.output_wall_id: confirmation
+        for confirmation in plan.confirmations
+    }
+    applied: list[ReinforcementAssignment] = []
+    for assignment in plan.assignments:
+        requirement = confirmation_by_output.get(assignment.output_wall_id)
+        if requirement is None:
+            applied.append(assignment)
+            continue
+        selected_row = confirmations.get(assignment.output_wall_id)
+        if selected_row is None:
+            raise ManualConfirmationRequired(
+                f"{assignment.output_wall_id} 存在重复配筋行或 -1/-2 图片组，"
+                "必须人工确认后才能创建任务"
+            )
+        candidates = rows_by_wall[assignment.base_wall_id]
+        selected = next(
+            (row for row in candidates if row.source_row == selected_row),
+            None,
         )
-        prefix = figure.source.direction.lower()
-        row[f"{prefix}_calc"] = str(figure.sm_value)
-        row[f"{prefix}_actual"] = str(figure.selection.actual_area)
-        row[f"{prefix}_margin"] = f"{figure.selection.margin_percent:.1f}%"
+        if selected is None:
+            raise ManualConfirmationRequired(
+                f"{assignment.output_wall_id} 的人工确认行 {selected_row} "
+                f"不在候选行 {requirement.candidate_source_rows} 中"
+            )
+        applied.append(replace(assignment, rebar_row=selected))
+    return tuple(applied)
 
-    def wall_key(row: dict[str, str]) -> tuple[int, str]:
-        match = re.search(r"(\d+)", row["id"])
-        return (int(match.group(1)) if match else 0, row["id"])
 
-    return sorted(rows.values(), key=wall_key)
+def _selection(
+    assignment: ReinforcementAssignment,
+    direction: str,
+) -> AppliedReinforcement:
+    figure = assignment.figure_for(direction)
+    config = _cell_for_direction(assignment.rebar_row, direction).selected
+    calculation_area = select_calculation_reference(
+        figure.reading,
+        actual_area=config.actual_area,
+    )
+    margin = (
+        None
+        if calculation_area == 0
+        else (config.actual_area - calculation_area) / calculation_area * 100
+    )
+    return AppliedReinforcement(
+        wall_id=assignment.output_wall_id,
+        direction=direction,
+        specification=config.canonical_specification,
+        actual_area=config.actual_area,
+        calculation_area=calculation_area,
+        margin_percent=margin,
+    )
+
+
+def _wall_rows(
+    assignments: tuple[ReinforcementAssignment, ...],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for assignment in assignments:
+        row = {"id": assignment.output_wall_id}
+        for direction in ("X", "Y", "Z"):
+            selection = _selection(assignment, direction)
+            prefix = direction.lower()
+            row[f"{prefix}_calc"] = _format_number(selection.calculation_area)
+            row[f"{prefix}_actual"] = _format_actual_area(selection.actual_area)
+            row[f"{prefix}_margin"] = (
+                "-"
+                if selection.margin_percent is None
+                else f"{selection.margin_percent:.1f}%"
+            )
+        rows.append(row)
+    return rows
+
+
+def _actual_rebar_rows(
+    assignments: tuple[ReinforcementAssignment, ...],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "id": assignment.output_wall_id,
+            "x_spec": assignment.rebar_row.x.selected.canonical_specification,
+            "y_spec": assignment.rebar_row.y.selected.canonical_specification,
+            "z_spec": assignment.rebar_row.z.selected.canonical_specification,
+        }
+        for assignment in assignments
+    ]
+
+
+def _reinforcement_figure_rows(
+    *,
+    document: DocxTemplate,
+    assignments: tuple[ReinforcementAssignment, ...],
+    chapter: str,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    direction_labels = {"X": "水平向", "Y": "竖向", "Z": "拉筋"}
+    for assignment in assignments:
+        for figure in assignment.figures:
+            cell = _cell_for_direction(
+                assignment.rebar_row,
+                figure.source.direction,
+            )
+            rows.append(
+                {
+                    "figure_number": f"{chapter}-{len(rows) + 1}",
+                    "image": InlineImage(
+                        document,
+                        str(figure.source.path),
+                        width=Mm(140),
+                    ),
+                    "caption": (
+                        f"{assignment.output_wall_id}-"
+                        f"{direction_labels[figure.source.direction]}"
+                    ),
+                    "narrative": build_reinforcement_narrative(
+                        wall_id=assignment.output_wall_id,
+                        direction=figure.source.direction,
+                        reading=figure.reading,
+                        rebar_specification=cell.selected.narrative_specification,
+                        actual_area=cell.selected.actual_area,
+                    ),
+                    "sm_value": _format_number(
+                        select_calculation_reference(
+                            figure.reading,
+                            actual_area=cell.selected.actual_area,
+                        )
+                    ),
+                    "rebar_spec": cell.selected.narrative_specification,
+                    "rebar_area": _format_actual_area(cell.selected.actual_area),
+                }
+            )
+    return rows
 
 
 def _safe_output_name(params: CalculationBookParams) -> str:
@@ -110,7 +263,12 @@ class CalculationBookProcessor:
     ) -> None:
         self.assets = assets
         self.mechanism = mechanism or CalculationBookMechanism()
-        self.ocr_recognizer = ocr_recognizer or recognize_sm
+        self.ocr_recognizer = ocr_recognizer or (
+            lambda path, direction: recognize_stress_legend(
+                path,
+                direction=direction,
+            )
+        )
 
     def process(
         self,
@@ -129,35 +287,34 @@ class CalculationBookProcessor:
             extraction_root,
             limits=self.mechanism.archive_limits,
         )
+        schedule = load_reinforcement_schedule(contents.reinforcement_workbook)
 
         report(
             CalculationBookStage.OCR_REINFORCEMENT,
             30,
-            "正在识别配筋图 SM 数值",
+            "正在识别底部应力图例",
             {"figure_count": len(contents.reinforcement_figures)},
         )
-        recognized_values = [
-            (figure, self.ocr_recognizer(figure.path))
+        recognized = [
+            RecognizedFigure(
+                source=figure,
+                reading=self.ocr_recognizer(figure.path, figure.direction),
+            )
             for figure in contents.reinforcement_figures
         ]
 
-        report(CalculationBookStage.SELECT_REBAR, 55, "正在自动选择钢筋组合", {})
-        rebar_table = load_rebar_area_table(self.assets.rebar_table)
-        figures = [
-            _RecognizedFigure(
-                source=figure,
-                sm_value=sm_value,
-                selection=select_rebar(
-                    sm_value,
-                    rebar_table,
-                    row_counts=self.mechanism.row_counts,
-                    spacings=self.mechanism.spacings,
-                    max_diameter=self.mechanism.max_diameter,
-                    extra_ratio=self.mechanism.extra_ratio,
-                ),
-            )
-            for figure, sm_value in recognized_values
-        ]
+        report(CalculationBookStage.SELECT_REBAR, 55, "正在匹配并核验实配钢筋", {})
+        plan = match_reinforcement(recognized, schedule)
+        assignments = _apply_manual_confirmations(
+            plan,
+            confirmations=params.manual_confirmations,
+            schedule_rows=schedule.rows,
+        )
+        selections = tuple(
+            _selection(assignment, direction)
+            for assignment in assignments
+            for direction in ("X", "Y", "Z")
+        )
 
         report(CalculationBookStage.RENDER_CALCULATION_BOOK, 75, "正在渲染 Word 计算书", {})
         template_path = resolve_template_path(self.assets.template_root, params.template_type)
@@ -173,25 +330,13 @@ class CalculationBookProcessor:
                 "image_wall_fem_calculation_model": InlineImage(
                     document, str(contents.model_image), width=Mm(160)
                 ),
-                "wall_table_rows": _wall_rows(figures),
-                "reinforcement_figures": [
-                    {
-                        "figure_number": f"{self.mechanism.chapter}-{index}",
-                        "image": InlineImage(document, str(figure.source.path), width=Mm(140)),
-                        "caption": (
-                            f"{figure.source.wall_id}-"
-                            f"{ {'X': '水平向', 'Y': '竖向', 'Z': '拉筋'}[figure.source.direction] }"
-                        ),
-                        "sm_value": str(figure.sm_value),
-                        "rebar_spec": figure.selection.specification,
-                        "rebar_area": str(figure.selection.actual_area),
-                        "rebar_target_area": str(figure.selection.target_area),
-                        "rebar_diameter": str(figure.selection.diameter),
-                        "rebar_row_count": str(figure.selection.row_count),
-                        "rebar_spacing": str(figure.selection.spacing),
-                    }
-                    for index, figure in enumerate(figures, start=1)
-                ],
+                "actual_rebar_rows": _actual_rebar_rows(assignments),
+                "wall_table_rows": _wall_rows(assignments),
+                "reinforcement_figures": _reinforcement_figure_rows(
+                    document=document,
+                    assignments=assignments,
+                    chapter=self.mechanism.chapter,
+                ),
             }
         )
         validate_template_context(template_path, context)
@@ -208,14 +353,14 @@ class CalculationBookProcessor:
             95,
             "计算书生成完成",
             {
-                "figure_count": len(figures),
+                "figure_count": len(recognized),
                 "output_filename": final_path.name,
                 "template_type": params.template_type.value,
             },
         )
         return CalculationBookResult(
             output_path=final_path,
-            figure_count=len(figures),
+            figure_count=len(recognized),
             template_type=params.template_type.value,
-            selections=tuple(figure.selection for figure in figures),
+            selections=selections,
         )

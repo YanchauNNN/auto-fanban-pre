@@ -8,7 +8,7 @@ from src.models import Job
 
 from .archive import ArchiveLimits
 from .models import CalculationBookParams
-from .ocr import recognize_sm
+from .ocr import recognize_stress_legend
 from .processor import (
     CalculationBookAssets,
     CalculationBookMechanism,
@@ -34,7 +34,6 @@ class CalculationBookJobExecutor:
         processor = CalculationBookProcessor(
             assets=CalculationBookAssets(
                 template_root=runtime.template_dir,
-                rebar_table=runtime.rebar_table,
             ),
             mechanism=CalculationBookMechanism(
                 archive_limits=ArchiveLimits(
@@ -43,17 +42,27 @@ class CalculationBookJobExecutor:
                     max_single_file_bytes=runtime.max_single_file_mb * 1024 * 1024,
                     max_compression_ratio=runtime.max_compression_ratio,
                 ),
-                row_counts=tuple(mechanism_spec.row_counts),
-                spacings=tuple(mechanism_spec.spacings),
-                max_diameter=mechanism_spec.max_diameter,
-                extra_ratio=mechanism_spec.extra_ratio,
                 chapter=mechanism_spec.chapter,
             ),
-            ocr_recognizer=lambda path: recognize_sm(
+            ocr_recognizer=lambda path, direction: recognize_stress_legend(
                 path,
+                direction=direction,
                 tesseract_exe=runtime.tesseract_exe,
                 tessdata_dir=runtime.tessdata_dir,
                 threshold=mechanism_spec.ocr_threshold,
+                expected_count=mechanism_spec.ocr_legend_value_count,
+                min_confidence=mechanism_spec.ocr_min_confidence,
+                min_vertical_ratio=mechanism_spec.ocr_min_vertical_ratio,
+                endpoint_absolute_tolerance=(
+                    mechanism_spec.ocr_endpoint_absolute_tolerance
+                ),
+                endpoint_relative_tolerance=(
+                    mechanism_spec.ocr_endpoint_relative_tolerance
+                ),
+                header_crop=tuple(mechanism_spec.ocr_header_crop),
+                legend_crop=tuple(mechanism_spec.ocr_legend_crop),
+                header_scale=mechanism_spec.ocr_header_scale,
+                legend_scale=mechanism_spec.ocr_legend_scale,
             ),
         )
 
@@ -87,10 +96,16 @@ class CalculationBookJobExecutor:
                     "output_filename": result.output_path.name,
                     "rebar_selections": [
                         {
+                            "wall_id": selection.wall_id,
+                            "direction": selection.direction,
                             "specification": selection.specification,
-                            "target_area": selection.target_area,
                             "actual_area": selection.actual_area,
-                            "margin_percent": round(selection.margin_percent, 1),
+                            "calculation_area": selection.calculation_area,
+                            "margin_percent": (
+                                round(selection.margin_percent, 1)
+                                if selection.margin_percent is not None
+                                else None
+                            ),
                         }
                         for selection in result.selections
                     ],
