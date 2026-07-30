@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -53,6 +54,26 @@ class ReinforcementSchedule:
     @property
     def requires_manual_confirmation(self) -> bool:
         return bool(self.duplicate_wall_ids)
+
+
+@dataclass(frozen=True)
+class NormalizedSlabReinforcementRow:
+    elevation: str
+    top_x: ParsedRebarCell
+    top_y: ParsedRebarCell
+    middle_x: ParsedRebarCell | None
+    middle_y: ParsedRebarCell | None
+    bottom_x: ParsedRebarCell
+    bottom_y: ParsedRebarCell
+    z: ParsedRebarCell
+    source_sheet: str
+    source_row: int
+    source_cells: dict[str, str]
+
+
+@dataclass(frozen=True)
+class SlabReinforcementSchedule:
+    rows: tuple[NormalizedSlabReinforcementRow, ...]
 
 
 _SPEC_PATTERN = re.compile(
@@ -187,6 +208,26 @@ def parse_rebar_cell(value: object, *, direction: str) -> ParsedRebarCell:
     )
 
 
+def parse_linear_rebar_cell(value: object) -> ParsedRebarCell:
+    return parse_rebar_cell(value, direction="X")
+
+
+def normalize_slab_elevation(value: object) -> str:
+    text = str(value).strip()
+    if text.lower().endswith("m"):
+        text = text[:-1].strip()
+    try:
+        decimal_value = Decimal(text)
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidReinforcementWorkbook(f"无法识别楼板标高：{value}") from exc
+    if not decimal_value.is_finite():
+        raise InvalidReinforcementWorkbook(f"楼板标高必须是有限数值：{value}")
+    normalized = format(decimal_value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return "0" if normalized in {"-0", "+0"} else normalized
+
+
 def normalize_wall_id(value: object) -> str | None:
     text = _normalized_cell_text(value).replace("墙", "").replace(" ", "")
     match = _WALL_ID_PATTERN.search(text)
@@ -317,3 +358,117 @@ def load_reinforcement_schedule(path: Path) -> ReinforcementSchedule:
         rows=tuple(rows),
         duplicate_wall_ids=duplicates,
     )
+
+
+_SLAB_HEADERS = {
+    "elevation": "标高",
+    "top_x": "顶层水平",
+    "top_y": "顶层竖向",
+    "middle_x": "中层水平",
+    "middle_y": "中层竖向",
+    "bottom_x": "底层水平",
+    "bottom_y": "底层竖向",
+    "z": "纵向拉筋",
+}
+
+
+def _find_slab_columns(sheet) -> tuple[int, dict[str, int]] | None:
+    expected = set(_SLAB_HEADERS.values())
+    for row in range(1, min(sheet.max_row, 20) + 1):
+        headers = {
+            _header_text(sheet.cell(row=row, column=column).value): column
+            for column in range(1, sheet.max_column + 1)
+        }
+        if not expected.issubset(headers):
+            continue
+        return row, {
+            key: headers[header]
+            for key, header in _SLAB_HEADERS.items()
+        }
+    return None
+
+
+def load_slab_reinforcement_schedule(
+    path: Path,
+    *,
+    required: bool,
+) -> SlabReinforcementSchedule | None:
+    if not path.is_file():
+        raise FileNotFoundError(f"未找到配筋表：{path}")
+    try:
+        workbook = load_workbook(path, data_only=False, read_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise InvalidReinforcementWorkbook(f"无法读取楼板配筋表：{path.name}") from exc
+
+    try:
+        if "楼板配筋" not in workbook.sheetnames:
+            if required:
+                raise InvalidReinforcementWorkbook("未找到“楼板配筋”Sheet")
+            return None
+        sheet = workbook["楼板配筋"]
+        found = _find_slab_columns(sheet)
+        if found is None:
+            raise InvalidReinforcementWorkbook(
+                "楼板配筋Sheet缺少标高、顶层/中层/底层水平竖向或纵向拉筋表头"
+            )
+        header_row, columns = found
+        rows: list[NormalizedSlabReinforcementRow] = []
+        seen_elevations: set[str] = set()
+        for row_number in range(header_row + 1, sheet.max_row + 1):
+            raw_elevation = sheet.cell(
+                row=row_number,
+                column=columns["elevation"],
+            ).value
+            if raw_elevation in (None, ""):
+                continue
+            elevation = normalize_slab_elevation(raw_elevation)
+            if elevation in seen_elevations:
+                raise InvalidReinforcementWorkbook(f"楼板配筋存在重复标高：{elevation}")
+            seen_elevations.add(elevation)
+
+            source_cells = {
+                key: f"{get_column_letter(column)}{row_number}"
+                for key, column in columns.items()
+            }
+            parsed: dict[str, ParsedRebarCell | None] = {}
+            for key in (
+                "top_x",
+                "top_y",
+                "middle_x",
+                "middle_y",
+                "bottom_x",
+                "bottom_y",
+                "z",
+            ):
+                value = sheet.cell(row=row_number, column=columns[key]).value
+                if key in {"middle_x", "middle_y"} and value in (None, ""):
+                    parsed[key] = None
+                    continue
+                try:
+                    parsed[key] = parse_linear_rebar_cell(value)
+                except InvalidReinforcementWorkbook as exc:
+                    raise InvalidReinforcementWorkbook(
+                        f"{sheet.title}!{source_cells[key]}（标高{elevation}）：{exc}"
+                    ) from exc
+
+            rows.append(
+                NormalizedSlabReinforcementRow(
+                    elevation=elevation,
+                    top_x=parsed["top_x"],
+                    top_y=parsed["top_y"],
+                    middle_x=parsed["middle_x"],
+                    middle_y=parsed["middle_y"],
+                    bottom_x=parsed["bottom_x"],
+                    bottom_y=parsed["bottom_y"],
+                    z=parsed["z"],
+                    source_sheet=sheet.title,
+                    source_row=row_number,
+                    source_cells=source_cells,
+                )
+            )
+    finally:
+        workbook.close()
+
+    if not rows:
+        raise InvalidReinforcementWorkbook("楼板配筋Sheet没有可识别的数据行")
+    return SlabReinforcementSchedule(rows=tuple(rows))

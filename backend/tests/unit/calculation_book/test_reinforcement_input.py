@@ -9,6 +9,8 @@ from openpyxl import Workbook
 from src.calculation_book.reinforcement_input import (
     InvalidReinforcementWorkbook,
     load_reinforcement_schedule,
+    load_slab_reinforcement_schedule,
+    parse_linear_rebar_cell,
     parse_rebar_cell,
 )
 
@@ -67,6 +69,107 @@ def test_largest_parenthetical_configuration_is_selected() -> None:
 def test_rejects_tie_without_two_direction_spacings() -> None:
     with pytest.raises(InvalidReinforcementWorkbook, match="两个方向"):
         parse_rebar_cell("1C14间距400", direction="Z")
+
+
+def test_linear_rebar_uses_exact_per_meter_area_and_rejects_grid_spacing() -> None:
+    parsed = parse_linear_rebar_cell("1D16@200")
+
+    assert parsed.selected.canonical_specification == "1D16间距200"
+    assert parsed.selected.actual_area == pytest.approx(math.pi * 8**2 * 5)
+
+    with pytest.raises(InvalidReinforcementWorkbook, match="一个方向"):
+        parse_linear_rebar_cell("1C16@200x400")
+
+
+def _add_slab_sheet(
+    workbook: Workbook,
+    *rows: list[object],
+) -> None:
+    sheet = workbook.create_sheet("楼板配筋")
+    sheet.append(
+        [
+            "标高",
+            "顶层水平",
+            "顶层竖向",
+            "中层水平",
+            "中层竖向",
+            "底层水平",
+            "底层竖向",
+            "纵向拉筋",
+        ]
+    )
+    for row in rows:
+        sheet.append(row)
+
+
+def test_loads_slab_reinforcement_sheet_with_optional_middle(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    _add_slab_sheet(
+        workbook,
+        [
+            "11.20m",
+            "1D36@200",
+            "1D40@200",
+            None,
+            None,
+            "1D36@200",
+            "1D40@200",
+            "1D16@200",
+        ],
+    )
+    path = tmp_path / "slab-schedule.xlsx"
+    workbook.save(path)
+
+    schedule = load_slab_reinforcement_schedule(path, required=True)
+
+    assert schedule is not None
+    assert len(schedule.rows) == 1
+    row = schedule.rows[0]
+    assert row.elevation == "11.2"
+    assert row.middle_x is None
+    assert row.middle_y is None
+    assert row.top_x.selected.canonical_specification == "1D36间距200"
+    assert row.z.selected.actual_area == pytest.approx(math.pi * 8**2 * 5)
+    assert row.source_cells["top_x"] == "B2"
+    assert row.source_cells["bottom_y"] == "G2"
+    assert row.source_cells["z"] == "H2"
+
+
+def test_missing_slab_sheet_is_optional_until_slab_stress_is_enabled(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    path = tmp_path / "wall-only.xlsx"
+    workbook.save(path)
+
+    assert load_slab_reinforcement_schedule(path, required=False) is None
+    with pytest.raises(InvalidReinforcementWorkbook, match="楼板配筋"):
+        load_slab_reinforcement_schedule(path, required=True)
+
+
+def test_rejects_duplicate_normalized_slab_elevation(tmp_path: Path) -> None:
+    workbook = Workbook()
+    values = [
+        "1D36@200",
+        "1D40@200",
+        None,
+        None,
+        "1D36@200",
+        "1D40@200",
+        "1D16@200",
+    ]
+    _add_slab_sheet(
+        workbook,
+        ["11.2", *values],
+        ["11.20m", *values],
+    )
+    path = tmp_path / "duplicate-slab.xlsx"
+    workbook.save(path)
+
+    with pytest.raises(InvalidReinforcementWorkbook, match="重复标高.*11.2"):
+        load_slab_reinforcement_schedule(path, required=True)
 
 
 def test_loads_standard_four_column_workbook_and_flags_duplicate_wall(
