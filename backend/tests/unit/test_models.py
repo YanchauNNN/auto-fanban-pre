@@ -13,6 +13,7 @@ from src.models import (
     GlobalDocParams,
     Job,
     JobStatus,
+    JobType,
     PageInfo,
     SheetSet,
     TitleblockFields,
@@ -83,6 +84,16 @@ class TestJob:
         temp_job.add_flag("测试警告")
         temp_job.add_flag("测试警告")  # 重复添加
         assert temp_job.flags == ["测试警告"]
+
+    def test_calculation_book_supports_a_docx_artifact(self):
+        job = Job(
+            job_id="calc-1",
+            job_type=JobType.CALCULATION_BOOK,
+            project_no="JQ",
+        )
+
+        assert job.job_type.value == "calculation_book"
+        assert job.artifacts.calculation_docx is None
 
 
 class TestSheetSet:

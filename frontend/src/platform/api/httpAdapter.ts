@@ -21,6 +21,8 @@ import type {
   ApiAdapter,
   ApiError,
   ArchiveState,
+  CalculationBookDirectionEvidence,
+  CalculationBookPreflightResult,
   CreateAuditReplaceParams,
   CreateBatchPayload,
   CurrentAccount,
@@ -82,11 +84,13 @@ type RawArtifacts = {
   preview_mode?: "plain" | "annotated" | null;
   report_available: boolean;
   replaced_dwg_available: boolean;
+  calculation_docx_available?: boolean | null;
   package_download_url?: string | null;
   ied_download_url?: string | null;
   preview_download_url?: string | null;
   report_download_url?: string | null;
   replaced_dwg_download_url?: string | null;
+  calculation_docx_download_url?: string | null;
 };
 
 type RawJobSummary = {
@@ -102,7 +106,7 @@ type RawJobSummary = {
   creator_name?: string | null;
   creator_account?: string | null;
   creator_office?: string | null;
-  task_kind?: "deliverable" | "audit_check" | "audit_replace" | null;
+  task_kind?: "deliverable" | "audit_check" | "audit_replace" | "calculation_book" | null;
   job_mode?: string | null;
   project_no: string | null;
   status: string;
@@ -207,6 +211,11 @@ type RawJobDetail = RawJobSummary & {
     action_count?: number | null;
     report_json?: string | null;
     message?: string | null;
+  } | null;
+  calculation_book_output?: {
+    figure_count?: number | null;
+    template_type?: string | null;
+    output_filename?: string | null;
   } | null;
 };
 
@@ -317,6 +326,29 @@ type RawFormSchema = {
     factory_index_maps?: {
       source_variant_options?: Record<string, string[]>;
       target_variant_options?: Record<string, string[]>;
+    };
+  };
+  calculation_book?: {
+    templates?: Array<{ value?: string | null; label?: string | null }>;
+    project_options?: Array<{ value?: string | null; label?: string | null }>;
+    fields?: Array<{
+      key?: string | null;
+      label?: string | null;
+      type?: string | null;
+      required?: boolean | null;
+      default?: string | number | null;
+      unit?: string | null;
+      placeholder?: string | null;
+      options?: string[] | null;
+      options_from?: string | null;
+      derived_from?: string | null;
+    }>;
+    archive?: {
+      accept?: string[] | null;
+      required_root_directions?: string[] | null;
+      required_folders?: string[] | null;
+      root_figure_pattern?: string | null;
+      description?: string | null;
     };
   };
 };
@@ -1002,6 +1034,147 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createCalculationBook(
+    params: SubmissionParams,
+  ): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("params_json", JSON.stringify(params));
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/calculation-books", {
+      method: "POST",
+      body: formData,
+    });
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
+  async preflightCalculationBook(
+    archive: File,
+  ): Promise<CalculationBookPreflightResult> {
+    const formData = new FormData();
+    formData.append("archive", archive);
+    const payload = await this.fetchJson<{
+      preflight_token: string;
+      figure_count: number;
+      zero_figure_count: number;
+      wall_count: number;
+      reinforcement_workbook: string;
+      requires_manual_confirmation: boolean;
+      confirmations: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        reasons: string[];
+        suggested_source_row: number;
+        candidates: Array<{
+          source_row: number;
+          source_sheet: string;
+          directions: Record<string, {
+            source_cell: string;
+            original_text: string;
+            canonical_specification: string;
+            narrative_specification: string;
+            actual_area: number;
+          }>;
+        }>;
+      }>;
+      walls: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        group_index: number | null;
+        suggested_source_row: number;
+        directions: Record<string, {
+          image_filename: string;
+          smn: number;
+          smx: number;
+          legend_values: number[];
+          is_zero_result: boolean;
+          source_cell: string;
+          original_text: string;
+          canonical_specification: string;
+          narrative_specification: string;
+          actual_area: number;
+        }>;
+      }>;
+      warnings: Array<{ code: string; filenames: string[] }>;
+    }>("/api/jobs/calculation-books/preflight", {
+      method: "POST",
+      body: formData,
+    }, {
+      timeoutMs: 10 * 60 * 1000,
+    });
+    const mapDirections = (
+      directions: Record<string, {
+        image_filename?: string;
+        smn?: number;
+        smx?: number;
+        legend_values?: number[];
+        is_zero_result?: boolean;
+        source_cell: string;
+        original_text: string;
+        canonical_specification: string;
+        narrative_specification?: string;
+        actual_area: number;
+      }>,
+    ) => {
+      const mapDirection = (
+        direction: "X" | "Y" | "Z",
+      ): CalculationBookDirectionEvidence => {
+        const item = directions[direction];
+        return {
+          imageFilename: item?.image_filename ?? "",
+          smn: item?.smn ?? 0,
+          smx: item?.smx ?? 0,
+          legendValues: item?.legend_values ?? [],
+          isZeroResult: item?.is_zero_result ?? false,
+          sourceCell: item?.source_cell ?? "",
+          originalText: item?.original_text ?? "",
+          canonicalSpecification: item?.canonical_specification ?? "",
+          narrativeSpecification: item?.narrative_specification ?? "",
+          actualArea: item?.actual_area ?? 0,
+        };
+      };
+      return {
+        X: mapDirection("X"),
+        Y: mapDirection("Y"),
+        Z: mapDirection("Z"),
+      };
+    };
+    return {
+      preflightToken: payload.preflight_token,
+      figureCount: payload.figure_count,
+      zeroFigureCount: payload.zero_figure_count,
+      wallCount: payload.wall_count,
+      reinforcementWorkbook: payload.reinforcement_workbook,
+      requiresManualConfirmation: payload.requires_manual_confirmation,
+      confirmations: payload.confirmations.map((confirmation) => ({
+        wallId: confirmation.wall_id,
+        baseWallId: confirmation.base_wall_id,
+        reasons: confirmation.reasons,
+        suggestedSourceRow: confirmation.suggested_source_row,
+        candidates: confirmation.candidates.map((candidate) => ({
+          sourceRow: candidate.source_row,
+          sourceSheet: candidate.source_sheet,
+          directions: mapDirections(candidate.directions),
+        })),
+      })),
+      walls: payload.walls.map((wall) => ({
+        wallId: wall.wall_id,
+        baseWallId: wall.base_wall_id,
+        groupIndex: wall.group_index,
+        suggestedSourceRow: wall.suggested_source_row,
+        directions: mapDirections(wall.directions),
+      })),
+      warnings: payload.warnings.map((warning) => ({
+        code: warning.code,
+        filenames: warning.filenames,
+      })),
+    };
+  }
+
   async listTaskGroups(): Promise<TaskGroupList> {
     const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
       "/api/task-groups",
@@ -1145,6 +1318,13 @@ export class HttpAdapter implements ApiAdapter {
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
       replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
       factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
+      calculationBookOutput: payload.calculation_book_output
+        ? {
+            figureCount: Number(payload.calculation_book_output.figure_count ?? 0),
+            templateType: payload.calculation_book_output.template_type ?? "",
+            outputFilename: payload.calculation_book_output.output_filename ?? "",
+          }
+        : undefined,
     };
   }
 
@@ -1351,11 +1531,15 @@ export class HttpAdapter implements ApiAdapter {
         previewMode: payload.artifacts.preview_mode ?? null,
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
+        calculationDocxAvailable: payload.artifacts.calculation_docx_available ?? false,
         packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
         iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
         previewDownloadUrl: this.resolveUrl(payload.artifacts.preview_download_url),
         reportDownloadUrl: this.resolveUrl(payload.artifacts.report_download_url),
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
+        calculationDocxDownloadUrl: this.resolveUrl(
+          payload.artifacts.calculation_docx_download_url,
+        ),
       },
       retryAvailable: payload.retry_available,
       taskRole: payload.task_role ?? null,

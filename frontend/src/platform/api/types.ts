@@ -1,8 +1,97 @@
-export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
+export type TaskKind = "deliverable" | "audit_check" | "audit_replace" | "calculation_book";
 export type TaskIntent = TaskKind;
 export type PreviewMode = "plain" | "annotated";
 
-export type FormFieldType = "text" | "select" | "combobox" | "date" | "nameId" | "checkbox";
+export type FormFieldType =
+  | "text"
+  | "number"
+  | "select"
+  | "combobox"
+  | "date"
+  | "nameId"
+  | "checkbox";
+
+export type CalculationBookField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select";
+  required: boolean;
+  defaultValue?: string;
+  unit?: string;
+  placeholder?: string;
+  options?: readonly string[];
+  optionsFrom?: string;
+  derivedFrom?: string;
+};
+
+export type CalculationBookSchema = {
+  templates: readonly { value: string; label: string }[];
+  projectOptions: readonly { value: string; label: string }[];
+  fields: readonly CalculationBookField[];
+  archive: {
+    accept: readonly string[];
+    requiredRootDirections: readonly string[];
+    requiredFolders: readonly string[];
+    rootFigurePattern: string;
+    description: string;
+  };
+};
+
+export type CalculationBookDirectionEvidence = {
+  imageFilename: string;
+  smn: number;
+  smx: number;
+  legendValues: readonly number[];
+  isZeroResult: boolean;
+  sourceCell: string;
+  originalText: string;
+  canonicalSpecification: string;
+  narrativeSpecification: string;
+  actualArea: number;
+};
+
+export type CalculationBookConfirmationCandidate = {
+  sourceRow: number;
+  sourceSheet: string;
+  directions: Record<
+    "X" | "Y" | "Z",
+    Pick<
+      CalculationBookDirectionEvidence,
+      | "sourceCell"
+      | "originalText"
+      | "canonicalSpecification"
+      | "narrativeSpecification"
+      | "actualArea"
+    >
+  >;
+};
+
+export type CalculationBookPreflightResult = {
+  preflightToken: string;
+  figureCount: number;
+  zeroFigureCount: number;
+  wallCount: number;
+  reinforcementWorkbook: string;
+  requiresManualConfirmation: boolean;
+  confirmations: readonly {
+    wallId: string;
+    baseWallId: string;
+    reasons: readonly string[];
+    suggestedSourceRow: number;
+    candidates: readonly CalculationBookConfirmationCandidate[];
+  }[];
+  walls: readonly {
+    wallId: string;
+    baseWallId: string;
+    groupIndex: number | null;
+    suggestedSourceRow: number;
+    directions: Record<"X" | "Y" | "Z", CalculationBookDirectionEvidence>;
+  }[];
+  warnings: readonly {
+    code: string;
+    filenames: readonly string[];
+  }[];
+};
 
 export type UploadLimits = {
   maxFiles: number;
@@ -98,6 +187,7 @@ export type FormSchema = {
     allowUnlistedUnitNo?: boolean;
     unitNoPattern?: string;
   };
+  calculationBook?: CalculationBookSchema;
 };
 
 export type HealthStatus = {
@@ -388,11 +478,19 @@ export type JobArtifacts = {
   previewMode?: PreviewMode | null;
   reportAvailable: boolean;
   replacedDwgAvailable: boolean;
+  calculationDocxAvailable?: boolean;
   packageDownloadUrl?: string | null;
   iedDownloadUrl?: string | null;
   previewDownloadUrl?: string | null;
   reportDownloadUrl?: string | null;
   replacedDwgDownloadUrl?: string | null;
+  calculationDocxDownloadUrl?: string | null;
+};
+
+export type CalculationBookOutput = {
+  figureCount: number;
+  templateType: string;
+  outputFilename: string;
 };
 
 export type DeliverableDrawingOutput = {
@@ -615,6 +713,7 @@ export type JobDetail = JobSummary & {
   findingGroups?: FindingGroup[];
   replaceSummary?: ReplaceSummary;
   factoryIndexMap?: FactoryIndexMapSummary | null;
+  calculationBookOutput?: CalculationBookOutput;
 };
 
 export type JobList = {
@@ -824,6 +923,12 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
+  createCalculationBook?: (
+    params: SubmissionParams,
+  ) => Promise<CreateBatchPayload>;
+  preflightCalculationBook?: (
+    archive: File,
+  ) => Promise<CalculationBookPreflightResult>;
   listTaskGroups?: () => Promise<TaskGroupList>;
   getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;
   submitTaskGroup?: (

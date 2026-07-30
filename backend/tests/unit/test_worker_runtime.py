@@ -82,6 +82,20 @@ class BlockingSlotBoundProcessor:
         return None
 
 
+class BlockingCalculationProcessor:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, job: Job) -> None:
+        self.started.set()
+        if not self.release.wait(timeout=3):
+            raise TimeoutError("calculation processor was not released")
+        job.mark_running(stage="RENDER_CALCULATION_BOOK")
+        job.progress.message = "calculation book ready"
+        job.mark_succeeded()
+
+
 class DeferredDocProcessor:
     def __init__(self, package_path: Path) -> None:
         self.package_path = package_path
@@ -509,3 +523,57 @@ def test_worker_waits_for_deferred_doc_phase_before_completing_queue_item(
     assert summary["status"] == "succeeded"
     assert summary["stage"] == "PACKAGE_ZIP"
     assert summary["artifacts"]["package_available"] is True
+
+
+def test_worker_waits_when_calculation_doc_thread_has_not_persisted_running_status(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="2016",
+        options={"mode": "calculation_book"},
+        params={},
+    )
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    queue_store.enqueue("job", job.job_id)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    processor = BlockingCalculationProcessor()
+    worker = DeliverableWorkerRuntime(
+        worker_id="worker-test",
+        job_processor=processor,
+        heartbeat_interval_seconds=0.05,
+    )
+    result: dict[str, bool] = {}
+    worker_thread = threading.Thread(
+        target=lambda: result.setdefault("processed", worker.run_once()),
+        daemon=True,
+    )
+    worker_thread.start()
+
+    assert processor.started.wait(timeout=2)
+    time.sleep(0.1)
+    assert result == {}
+    assert queue_store.list_queue_items(status="claimed")
+
+    processor.release.set()
+    worker_thread.join(timeout=2)
+    worker.stop()
+
+    assert result == {"processed": True}
+    summary = queue_store.list_summaries()["items"][0]
+    assert summary["status"] == "succeeded"
+    assert summary["stage"] == "RENDER_CALCULATION_BOOK"

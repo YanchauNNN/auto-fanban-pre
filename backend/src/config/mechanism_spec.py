@@ -107,6 +107,28 @@ class AuditReplaceMechanismConfig(BaseModel):
     )
 
 
+class CalculationBookMechanismConfig(BaseModel):
+    ocr_threshold: int = Field(default=160, ge=0, le=255)
+    ocr_legend_value_count: int = Field(default=10, ge=2)
+    ocr_min_confidence: float = Field(default=50.0, ge=0, le=100)
+    ocr_min_vertical_ratio: float = Field(default=0.35, ge=0, le=1)
+    ocr_endpoint_absolute_tolerance: float = Field(default=1.0, ge=0)
+    ocr_endpoint_relative_tolerance: float = Field(default=0.002, ge=0)
+    ocr_header_crop: list[float] = Field(
+        default_factory=lambda: [0.025, 0.02, 0.20, 0.24],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_legend_crop: list[float] = Field(
+        default_factory=lambda: [0.06, 0.84, 0.88, 1.0],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_header_scale: int = Field(default=4, ge=1)
+    ocr_legend_scale: int = Field(default=3, ge=1)
+    chapter: str = "7.1"
+
+
 class ApiRuntimeMechanismConfig(BaseModel):
     stage_labels: dict[str, str] = Field(
         default_factory=lambda: {
@@ -225,6 +247,9 @@ class BackendMechanismConfig(BaseModel):
     management_ui: ManagementUiConfig = Field(default_factory=ManagementUiConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
     audit_replace: AuditReplaceMechanismConfig = Field(default_factory=AuditReplaceMechanismConfig)
+    calculation_book: CalculationBookMechanismConfig = Field(
+        default_factory=CalculationBookMechanismConfig
+    )
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
     api_runtime: ApiRuntimeMechanismConfig = Field(default_factory=ApiRuntimeMechanismConfig)
     cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(default_factory=CadRuntimeMechanismConfig)
@@ -267,6 +292,10 @@ class MechanismSpec(BaseModel):
     @property
     def audit_replace(self) -> AuditReplaceMechanismConfig:
         return self.backend_mechanism.audit_replace
+
+    @property
+    def calculation_book(self) -> CalculationBookMechanismConfig:
+        return self.backend_mechanism.calculation_book
 
     @property
     def project_inference(self) -> ProjectInferenceConfig:

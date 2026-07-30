@@ -1,4 +1,9 @@
-import type { FormField, FormFieldType, FormSchema } from "../../platform/api/types";
+import type {
+  CalculationBookField,
+  FormField,
+  FormFieldType,
+  FormSchema,
+} from "../../platform/api/types";
 
 type RawField = {
   key: string;
@@ -47,6 +52,29 @@ type RawFormSchema = {
     factory_index_maps?: {
       source_variant_options?: Record<string, readonly string[]>;
       target_variant_options?: Record<string, readonly string[]>;
+    };
+  };
+  calculation_book?: {
+    templates?: readonly { value?: string | null; label?: string | null }[];
+    project_options?: readonly { value?: string | null; label?: string | null }[];
+    fields?: readonly {
+      key?: string | null;
+      label?: string | null;
+      type?: string | null;
+      required?: boolean | null;
+      default?: string | number | null;
+      unit?: string | null;
+      placeholder?: string | null;
+      options?: readonly string[] | null;
+      options_from?: string | null;
+      derived_from?: string | null;
+    }[];
+    archive?: {
+      accept?: readonly string[] | null;
+      required_root_directions?: readonly string[] | null;
+      required_folders?: readonly string[] | null;
+      root_figure_pattern?: string | null;
+      description?: string | null;
     };
   };
   management?: {
@@ -268,6 +296,47 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
     auditCheckUnitConsistency: normalizeAuditCheckUnitConsistency(
       payload.audit_check?.unit_consistency,
     ),
+    calculationBook: payload.calculation_book
+      ? {
+          templates: (payload.calculation_book.templates ?? [])
+            .map((item) => ({
+              value: String(item.value ?? ""),
+              label: String(item.label ?? ""),
+            }))
+            .filter((item) => item.value && item.label),
+          projectOptions: (payload.calculation_book.project_options ?? [])
+            .map((item) => ({
+              value: String(item.value ?? ""),
+              label: String(item.label ?? ""),
+            }))
+            .filter((item) => item.value && item.label),
+          fields: (payload.calculation_book.fields ?? [])
+            .map((field) => ({
+              key: String(field.key ?? ""),
+              label: String(field.label ?? ""),
+              type: (
+                field.type === "number" || field.type === "select" ? field.type : "text"
+              ) as CalculationBookField["type"],
+              required: Boolean(field.required),
+              defaultValue: field.default == null ? undefined : String(field.default),
+              unit: field.unit ?? undefined,
+              placeholder: field.placeholder ?? undefined,
+              options: field.options ?? undefined,
+              optionsFrom: field.options_from ?? undefined,
+              derivedFrom: field.derived_from ?? undefined,
+            }))
+            .filter((field) => field.key && field.label),
+          archive: {
+            accept: payload.calculation_book.archive?.accept ?? [".zip"],
+            requiredRootDirections:
+              payload.calculation_book.archive?.required_root_directions ?? ["X", "Y", "Z"],
+            requiredFolders: payload.calculation_book.archive?.required_folders ?? ["01", "02"],
+            rootFigurePattern:
+              payload.calculation_book.archive?.root_figure_pattern ?? "<墙号>-X|Y|Z.png",
+            description: payload.calculation_book.archive?.description ?? "",
+          },
+        }
+      : undefined,
     management: normalizeManagementSchema(payload.management),
   };
 }

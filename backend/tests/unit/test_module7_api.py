@@ -12,6 +12,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 
+from src.calculation_book.models import CalculationBookParams
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
@@ -2116,6 +2117,126 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
         assert preview_download.status_code == 200
         assert preview_download.content == b"%PDF-plain"
+
+
+def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class CalculationProcessor:
+        def __call__(self, job: Job) -> None:
+            assert job.job_type == JobType.CALCULATION_BOOK
+            assert job.slot_id is None
+            assert "project_number" not in job.params
+            assert CalculationBookParams.model_validate(job.params).project_no == "JQ"
+            job.mark_running(stage="VALIDATE_ARCHIVE")
+            job.progress.percent = 80
+            job.progress.details.update(
+                {
+                    "figure_count": 3,
+                    "template_type": "internal_structure",
+                    "output_filename": "JQ计算书.docx",
+                }
+            )
+            output_path = cast(Path, job.work_dir) / "JQ计算书.docx"
+            output_path.write_bytes(b"docx")
+            job.artifacts.calculation_docx = output_path
+            job.mark_succeeded()
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        lambda **_kwargs: {
+            "figure_count": 3,
+            "zero_figure_count": 1,
+            "wall_count": 1,
+            "reinforcement_workbook": "计算书模板文件.xlsx",
+            "requires_manual_confirmation": False,
+            "confirmations": [],
+            "walls": [],
+            "warnings": [],
+        },
+    )
+    params = {
+        "template_type": "internal_structure",
+        "project_no": "JQ",
+        "project_name": "浙江金七门核电厂1、2号机组",
+        "internal_code": "JQ00-NN-001",
+        "version": "A",
+        "subproject_code": "RX",
+        "subproject_name": "内部结构",
+        "design_phase": "施工图设计",
+        "document_name": "0.000m~15.000m配筋计算书",
+        "workshop_length": 72.5,
+        "workshop_width": 48.0,
+        "raft_slab_top_elevation": -8.5,
+        "roof_top_elevation": 31.2,
+        "factory_extreme_min_temperature": -18.0,
+        "factory_extreme_max_temperature": 39.0,
+        "site_soil_temperature": 15.0,
+    }
+    with TestClient(
+        create_app(
+            job_processor=CalculationProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        archive_bytes = b"PK\x03\x04test"
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "calculation-images.zip",
+                    archive_bytes,
+                    "application/zip",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        runtime = client.app.state.runtime
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+        assert cached_archive.is_file()
+        response = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+
+        assert response.status_code == 201, response.text
+        assert not cached_archive.exists()
+        job_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert detail["status"] == "succeeded"
+        assert detail["task_kind"] == "calculation_book"
+        assert detail["slot_id"] is None
+        assert detail["calculation_book_output"]["figure_count"] == 3
+        assert detail["artifacts"]["calculation_docx_available"] is True
+        assert detail["artifacts"]["calculation_docx_download_url"] == (
+            f"/api/jobs/{job_id}/download/calculation-book"
+        )
+
+        download = client.get(f"/api/jobs/{job_id}/download/calculation-book")
+        assert download.status_code == 200
+        assert download.content == b"docx"
+
+        replay = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+        assert replay.status_code == 422
+        assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
+            "请先完成计算书文件预检"
+        ]
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(

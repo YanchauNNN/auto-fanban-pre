@@ -42,6 +42,11 @@ from src.ai.building_standards_skill import (
 from src.ai.context_skills import ContextSkill
 from src.ai.owner_identity import resolve_client_ip
 from src.ai.read_only_tools import ReadOnlyHostTools
+from src.ai.reinforcement_table_skill import (
+    REINFORCEMENT_TABLE_SKILL_ID,
+    ReinforcementTableSkill,
+    ReinforcementTableSkillConfig,
+)
 from src.config import get_config, load_ai_spec
 from src.config.ai.ai_spec import AiSpec
 
@@ -408,6 +413,7 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
     result: list[ContextSkill] = []
     ansys_defaults = AnsysMapdlSkillConfig()
     standards_defaults = BuildingStandardsSkillConfig()
+    reinforcement_defaults = ReinforcementTableSkillConfig()
     for skill in spec.ai_layer.chat.skills:
         if not skill.enabled:
             continue
@@ -444,6 +450,23 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
                         max_results=skill.max_results,
                         max_context_chars=skill.max_context_chars,
                         query_timeout_seconds=skill.query_timeout_seconds,
+                        history_followup_messages=skill.history_followup_messages,
+                    ),
+                )
+            )
+        elif skill.handler == REINFORCEMENT_TABLE_SKILL_ID:
+            result.append(
+                ReinforcementTableSkill(
+                    root=root,
+                    config=ReinforcementTableSkillConfig(
+                        skill_id=skill.skill_id,
+                        auto_trigger=skill.auto_trigger,
+                        trigger_terms=(
+                            tuple(skill.trigger_terms)
+                            or reinforcement_defaults.trigger_terms
+                        ),
+                        max_results=skill.max_results,
+                        max_context_chars=skill.max_context_chars,
                         history_followup_messages=skill.history_followup_messages,
                     ),
                 )

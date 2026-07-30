@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import logging
 import queue
@@ -10,27 +10,40 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, cast
+from tempfile import TemporaryDirectory
+from typing import Any, cast
 
 from fastapi import HTTPException, status
-
-from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
 from src.cad import FrameDetector, ODAConverter
-from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
+from src.cad.slot_pool import CADSlotPool
+from src.calculation_book.archive import ArchiveLimits
+from src.calculation_book.executor import CalculationBookJobExecutor
+from src.calculation_book.models import CalculationBookParams
+from src.calculation_book.ocr import recognize_stress_legend
+from src.calculation_book.preflight import run_calculation_book_preflight
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
 from src.job_diagnostics import build_job_diagnostics
-from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup, TaskOwnerSnapshot
+from src.models import (
+    AccountSnapshot,
+    Job,
+    JobArtifacts,
+    JobStatus,
+    JobType,
+    TaskGroup,
+    TaskOwnerSnapshot,
+)
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
@@ -47,6 +60,7 @@ from src.task_groups.visibility import TaskGroupVisibility
 from src.workload.calculator import WorkloadCalculator
 from src.workload.models import WorkloadSummary
 
+from .metadata import FormMetadataService
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +96,9 @@ class PipelineJobProcessor:
         return PipelineExecutor(font_preflight_service=self.font_preflight_service)
 
     def __call__(self, job: Job) -> None:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            CalculationBookJobExecutor().execute(job)
+            return
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()
             if mode == "replace":
@@ -166,6 +183,8 @@ class DeliverableApiRuntime:
         self._future_lock = threading.Lock()
         self._job_completion_events: dict[str, threading.Event] = {}
         self._job_completion_lock = threading.Lock()
+        self._calculation_preflight_tokens: dict[str, dict[str, Any]] = {}
+        self._calculation_preflight_lock = threading.Lock()
 
     def start(self) -> None:
         self.queue_store.initialize()
@@ -573,6 +592,267 @@ class DeliverableApiRuntime:
             jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
 
+    def create_calculation_book(
+        self,
+        *,
+        archive: UploadedFilePayload | None,
+        raw_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
+    ) -> dict[str, Any]:
+        param_errors: dict[str, list[str]] = {}
+        params: CalculationBookParams | None = None
+        try:
+            params = CalculationBookParams.model_validate(raw_params)
+        except Exception as exc:  # noqa: BLE001
+            errors_method = getattr(exc, "errors", None)
+            if callable(errors_method):
+                for error in errors_method():
+                    location = error.get("loc") or ("params_json",)
+                    field = str(location[-1])
+                    param_errors.setdefault(field, []).append(
+                        str(error.get("msg") or "invalid")
+                    )
+            else:
+                param_errors.setdefault("params_json", []).append(str(exc))
+
+        if param_errors or params is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": {}, "param_errors": param_errors},
+            )
+
+        preflight_token = params.preflight_token.strip()
+        expired_archive_paths: list[Path] = []
+        with self._calculation_preflight_lock:
+            now = time.monotonic()
+            for token, entry in list(self._calculation_preflight_tokens.items()):
+                if now - float(entry["created_at"]) <= 1800:
+                    continue
+                self._calculation_preflight_tokens.pop(token, None)
+                expired_archive_paths.append(Path(str(entry["archive_path"])))
+            preflight = self._calculation_preflight_tokens.pop(
+                preflight_token,
+                None,
+            )
+        for path in expired_archive_paths:
+            path.unlink(missing_ok=True)
+        if preflight is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "preflight_token": ["请先完成计算书文件预检"]
+                    },
+                },
+            )
+        cached_archive_path = Path(str(preflight["archive_path"]))
+        try:
+            try:
+                cached_content = cached_archive_path.read_bytes()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {
+                            "archive": ["预检文件已失效，请重新选择 ZIP 并预检"]
+                        },
+                        "param_errors": {},
+                    },
+                ) from exc
+            archive_digest = hashlib.sha256(cached_content).hexdigest()
+            if preflight["archive_digest"] != archive_digest:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {
+                            "archive": ["预检暂存文件校验失败，请重新预检"]
+                        },
+                        "param_errors": {},
+                    },
+                )
+            if archive is not None:
+                provided_digest = hashlib.sha256(archive.content).hexdigest()
+                if preflight["archive_digest"] != provided_digest:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "upload_errors": {
+                                "archive": [
+                                    "当前 ZIP 与预检时的文件不一致，请重新预检"
+                                ]
+                            },
+                            "param_errors": {},
+                        },
+                    )
+
+            confirmation_errors: list[str] = []
+            for wall_id, candidate_rows in preflight[
+                "confirmation_candidates"
+            ].items():
+                selected_row = params.manual_confirmations.get(wall_id)
+                if selected_row is None:
+                    confirmation_errors.append(f"{wall_id} 尚未人工确认")
+                elif selected_row not in candidate_rows:
+                    confirmation_errors.append(
+                        f"{wall_id} 的确认行 {selected_row} 不在候选范围内"
+                    )
+            if confirmation_errors:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "manual_confirmations": confirmation_errors
+                        },
+                    },
+                )
+
+            cached_archive = UploadedFilePayload(
+                filename=str(preflight["archive_filename"]),
+                content=cached_content,
+                content_type=str(preflight["content_type"]),
+            )
+            batch_id = self._new_batch_id()
+            source_filename = (
+                Path(cached_archive.filename).name or "calculation-images.zip"
+            )
+            job = self.job_manager.create_job(
+                job_type=JobType.CALCULATION_BOOK.value,
+                project_no=params.project_no,
+                options={"mode": "calculation_book"},
+                params=params.model_dump(
+                    mode="json",
+                    exclude_computed_fields=True,
+                ),
+                batch_id=batch_id,
+                source_filename=source_filename,
+                task_role="计算书",
+                creator_snapshot=creator_snapshot,
+            )
+            self._store_job_upload(job, cached_archive)
+            self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
+            self._enqueue_job(job.job_id)
+            return {"batch_id": batch_id, "jobs": [summary]}
+        finally:
+            cached_archive_path.unlink(missing_ok=True)
+
+    def preflight_calculation_book(
+        self,
+        *,
+        archive: UploadedFilePayload,
+    ) -> dict[str, Any]:
+        upload_errors: dict[str, list[str]] = {}
+        if Path(archive.filename).suffix.lower() != ".zip":
+            upload_errors.setdefault("archive", []).append("only .zip files are allowed")
+        if not archive.content:
+            upload_errors.setdefault("archive", []).append("archive is empty")
+        runtime = self.config.calculation_book
+        if len(archive.content) > runtime.max_archive_mb * 1024 * 1024:
+            upload_errors.setdefault("archive", []).append(
+                f"archive exceeds {runtime.max_archive_mb} MB"
+            )
+        if upload_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": upload_errors, "param_errors": {}},
+            )
+
+        mechanism = load_mechanism_spec().calculation_book
+        try:
+            with TemporaryDirectory(prefix="fanban-calculation-preflight-") as temp_dir:
+                work_dir = Path(temp_dir)
+                archive_path = work_dir / (
+                    Path(archive.filename).name or "calculation-images.zip"
+                )
+                archive_path.write_bytes(archive.content)
+                payload = run_calculation_book_preflight(
+                    archive_path=archive_path,
+                    extraction_root=work_dir / "extracted",
+                    archive_limits=ArchiveLimits(
+                        max_files=runtime.max_archive_files,
+                        max_total_bytes=runtime.max_archive_mb * 1024 * 1024,
+                        max_single_file_bytes=runtime.max_single_file_mb * 1024 * 1024,
+                        max_compression_ratio=runtime.max_compression_ratio,
+                    ),
+                    ocr_recognizer=lambda path, direction: recognize_stress_legend(
+                        path,
+                        direction=direction,
+                        tesseract_exe=runtime.tesseract_exe,
+                        tessdata_dir=runtime.tessdata_dir,
+                        threshold=mechanism.ocr_threshold,
+                        expected_count=mechanism.ocr_legend_value_count,
+                        min_confidence=mechanism.ocr_min_confidence,
+                        min_vertical_ratio=mechanism.ocr_min_vertical_ratio,
+                        endpoint_absolute_tolerance=(
+                            mechanism.ocr_endpoint_absolute_tolerance
+                        ),
+                        endpoint_relative_tolerance=(
+                            mechanism.ocr_endpoint_relative_tolerance
+                        ),
+                        header_crop=tuple(mechanism.ocr_header_crop),
+                        legend_crop=tuple(mechanism.ocr_legend_crop),
+                        header_scale=mechanism.ocr_header_scale,
+                        legend_scale=mechanism.ocr_legend_scale,
+                    ),
+                )
+                token = f"calculation-preflight-{uuid.uuid4().hex}"
+                confirmation_candidates = {
+                    str(item["wall_id"]): {
+                        int(candidate["source_row"])
+                        for candidate in item["candidates"]
+                    }
+                    for item in payload["confirmations"]
+                }
+                cache_root = (
+                    self.config.storage_dir
+                    / "runtime"
+                    / "calculation-preflight"
+                )
+                cache_root.mkdir(parents=True, exist_ok=True)
+                cached_archive_path = cache_root / f"{token}.zip"
+                cached_archive_path.write_bytes(archive.content)
+                expired_archive_paths: list[Path] = []
+                with self._calculation_preflight_lock:
+                    now = time.monotonic()
+                    for old_token, entry in list(
+                        self._calculation_preflight_tokens.items()
+                    ):
+                        if now - float(entry["created_at"]) <= 1800:
+                            continue
+                        self._calculation_preflight_tokens.pop(old_token, None)
+                        expired_archive_paths.append(
+                            Path(str(entry["archive_path"]))
+                        )
+                    self._calculation_preflight_tokens[token] = {
+                        "created_at": now,
+                        "archive_digest": hashlib.sha256(archive.content).hexdigest(),
+                        "archive_path": str(cached_archive_path),
+                        "archive_filename": (
+                            Path(archive.filename).name
+                            or "calculation-images.zip"
+                        ),
+                        "content_type": (
+                            archive.content_type or "application/zip"
+                        ),
+                        "confirmation_candidates": confirmation_candidates,
+                    }
+                for path in expired_archive_paths:
+                    path.unlink(missing_ok=True)
+                payload["preflight_token"] = token
+                return payload
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {"archive": [str(exc)]},
+                    "param_errors": {},
+                },
+            ) from exc
+
     def create_audit_batch(
         self,
         *,
@@ -962,6 +1242,7 @@ class DeliverableApiRuntime:
             'preview': job.artifacts.preview_pdf,
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
+            'calculation_book': job.artifacts.calculation_docx,
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
@@ -1402,6 +1683,12 @@ class DeliverableApiRuntime:
         slot = None
         completion_deferred = False
         try:
+            if job.job_type == JobType.CALCULATION_BOOK:
+                job.work_dir = self.config.get_job_dir(job.job_id)
+                job.work_dir.mkdir(parents=True, exist_ok=True)
+                self._submit_doc_job(job.job_id, lambda: self.job_processor(job))
+                completion_deferred = True
+                return
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
             resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
             job.slot_id = slot.slot_id
@@ -1696,7 +1983,10 @@ class DeliverableApiRuntime:
         owner = job.owner_snapshot.model_dump(mode='json') if job.owner_snapshot else None
         task_kind = 'deliverable'
         job_mode = 'deliverable'
-        if job.job_type == JobType.AUDIT_REPLACE:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            task_kind = 'calculation_book'
+            job_mode = 'calculation_book'
+        elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
                 task_kind = 'audit_check'
@@ -1788,6 +2078,12 @@ class DeliverableApiRuntime:
         })
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
+        elif job.job_type == JobType.CALCULATION_BOOK:
+            payload['calculation_book_output'] = {
+                'figure_count': int(job.progress.details.get('figure_count', 0) or 0),
+                'template_type': str(job.progress.details.get('template_type') or ''),
+                'output_filename': str(job.progress.details.get('output_filename') or ''),
+            }
         elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
@@ -1820,6 +2116,9 @@ class DeliverableApiRuntime:
         report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
         preview_available = bool(job.artifacts.preview_pdf and Path(job.artifacts.preview_pdf).exists())
+        calculation_docx_available = bool(
+            job.artifacts.calculation_docx and Path(job.artifacts.calculation_docx).exists()
+        )
         payload: dict[str, Any] = {
             'package_available': package_available,
             'ied_available': ied_available,
@@ -1827,6 +2126,7 @@ class DeliverableApiRuntime:
             'preview_mode': job.artifacts.preview_mode if preview_available else None,
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
+            'calculation_docx_available': calculation_docx_available,
         }
         if include_urls and job_id is not None:
             payload.update({
@@ -1835,6 +2135,11 @@ class DeliverableApiRuntime:
                 'preview_download_url': f'/api/jobs/{job_id}/download/preview' if preview_available else None,
                 'report_download_url': f'/api/jobs/{job_id}/download/report' if report_available else None,
                 'replaced_dwg_download_url': f'/api/jobs/{job_id}/download/replaced' if replaced_dwg_available else None,
+                'calculation_docx_download_url': (
+                    f'/api/jobs/{job_id}/download/calculation-book'
+                    if calculation_docx_available
+                    else None
+                ),
             })
         return payload
     def _serialize_group_summary(self, group: TaskGroup) -> dict[str, Any]:

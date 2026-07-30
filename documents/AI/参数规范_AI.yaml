@@ -442,6 +442,27 @@ ai_layer:
         max_context_chars: 20000
         query_timeout_seconds: 20
         history_followup_messages: 6
+      - skill_id: "reinforcement_table_normalizer"
+        name: "墙体配筋表规范化"
+        description: "确定性读取墙体配筋 XLSX，统一 D/C 写法并按精确公式计算实际配筋面积；歧义和重复行必须人工确认。"
+        enabled: true
+        read_only: true
+        handler: "reinforcement_table_normalizer"
+        root: "storage/ai/skills/reinforcement-table-normalizer"
+        auto_trigger: true
+        trigger_terms:
+          - "配筋表"
+          - "墙体配筋"
+          - "配筋结果"
+          - "配筋规范"
+          - "规范化配筋"
+          - "水平筋"
+          - "竖向筋"
+          - "拉筋"
+        max_results: 10000
+        max_context_chars: 120000
+        query_timeout_seconds: 20
+        history_followup_messages: 6
     mcp_servers: []
     read_only_host_access:
       enabled:

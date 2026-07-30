@@ -21,6 +21,10 @@ from ..ai.building_standards_skill import (
 from ..ai.building_standards_skill import (
     install_skill_archive as install_building_standards_skill_archive,
 )
+from ..ai.reinforcement_table_skill import (
+    REINFORCEMENT_TABLE_SKILL_DIR,
+    REINFORCEMENT_TABLE_SKILL_ID,
+)
 from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
 from ..cad.plot_resource_manager import PDF2_PMP_NAME
 from ..config.ai.ai_spec import AiSpecLoader
@@ -350,6 +354,53 @@ def _materialize_building_standards_skill(
             "请先运行 tools/ai/package_building_standards_skill.py。"
         )
     install_building_standards_skill_archive(archives[-1], target)
+
+
+def _materialize_reinforcement_table_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == REINFORCEMENT_TABLE_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError(
+            "Reinforcement table Skill root must be a package-relative path"
+        )
+    target = output_root / relative_root
+    candidates = (
+        repo_root / relative_root,
+        repo_root / "tools" / "ai" / REINFORCEMENT_TABLE_SKILL_DIR,
+    )
+    source = next((candidate for candidate in candidates if candidate.is_dir()), None)
+    required_files = (
+        Path("SKILL.md"),
+        Path("references") / "normalization-rules.md",
+    )
+    if source is None or not all(
+        (source / relative).is_file() for relative in required_files
+    ):
+        raise FileNotFoundError(
+            "墙体配筋表规范化 Skill 已启用，但本地规则包不完整。"
+            "请检查 tools/ai/reinforcement-table-normalizer。"
+        )
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+    )
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -3447,6 +3498,7 @@ def build_terminal_deploy_package(
 
     _materialize_ansys_mapdl_skill(repo_root, output_root)
     _materialize_building_standards_skill(repo_root, output_root)
+    _materialize_reinforcement_table_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)

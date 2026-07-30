@@ -391,7 +391,11 @@ class AiChatService:
                 limit=self.runtime.max_history_messages,
             )
             resolved_agent = self._resolve_agent(agent_id)
-            skill_contexts = self._retrieve_skill_contexts(normalized_content, history)
+            skill_contexts = self._retrieve_skill_contexts(
+                normalized_content,
+                history,
+                attachments,
+            )
             auto_skill_ids = [context.skill_id for context in skill_contexts]
             effective_skill_ids = _unique_strings([*(skill_ids or []), *auto_skill_ids])
             skill_context_metadata = [dict(context.metadata) for context in skill_contexts]
@@ -765,10 +769,24 @@ class AiChatService:
         self,
         content: str,
         history: list[AiChatMessage],
+        attachments: list[AiAttachment] | tuple[AiAttachment, ...] = (),
     ) -> list[SkillContext]:
         contexts: list[SkillContext] = []
         for skill in self.context_skills:
-            context = skill.retrieve_if_applicable(content, history)
+            attachment_retriever = getattr(
+                skill,
+                "retrieve_from_attachments",
+                None,
+            )
+            if callable(attachment_retriever):
+                context = attachment_retriever(
+                    content,
+                    history,
+                    attachments,
+                    self.attachment_store.read_bytes,
+                )
+            else:
+                context = skill.retrieve_if_applicable(content, history)
             if context is not None:
                 contexts.append(context)
         return contexts

@@ -79,6 +79,14 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "frontend" / "dist" / "assets" / "pdf.worker.min-test.mjs", "worker")
     _write_file(repo_root / "API" / "app" / "main.py", "app = None")
     _write_file(repo_root / "backend" / "pyproject.toml", "[project]\nname = 'demo'\n")
+    _write_file(
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "Tesseract-OCR"
+        / "tesseract.exe",
+        "portable tesseract",
+    )
     _write_file(repo_root / "backend" / "src" / "config" / "runtime_config.py", "CONFIG = 1")
     _write_file(
         repo_root / "backend" / "src" / "deploy" / "__pycache__" / "terminal_package.cpython-313.pyc",
@@ -457,6 +465,13 @@ ai_layer:
     assert (output_root / "documents" / "AI" / AI_SPEC_NAME).exists()
     assert (output_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()
+    assert (
+        output_root
+        / "documents_bin"
+        / "calculation_book"
+        / "Tesseract-OCR"
+        / "tesseract.exe"
+    ).exists()
     assert (output_root / "scripts" / "start_backend.ps1").exists()
     assert (output_root / "scripts" / "check_health.ps1").exists()
     assert (output_root / "scripts" / "deep_check_terminal.ps1").exists()
@@ -493,6 +508,48 @@ ai_layer:
     assert ".NET Framework 4.8" in text
     assert "VC++ 2015-2022 x64" in text
     assert "NSSM" not in text
+
+
+def test_terminal_package_materializes_reinforcement_table_skill(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+    ai_spec = repo_root / "documents" / "AI" / AI_SPEC_NAME
+    _write_file(
+        ai_spec,
+        """
+schema_version: "0.1"
+ai_layer:
+  enabled: true
+  chat:
+    skills:
+      - skill_id: "reinforcement_table_normalizer"
+        name: "墙体配筋表规范化"
+        enabled: true
+        handler: "reinforcement_table_normalizer"
+        root: "storage/ai/skills/reinforcement-table-normalizer"
+""".strip(),
+    )
+    source = repo_root / "tools" / "ai" / "reinforcement-table-normalizer"
+    _write_file(source / "SKILL.md", "skill")
+    _write_file(source / "references" / "normalization-rules.md", "rules")
+
+    build_terminal_deploy_package(
+        repo_root=repo_root,
+        output_root=output_root,
+    )
+
+    installed = (
+        output_root
+        / "storage"
+        / "ai"
+        / "skills"
+        / "reinforcement-table-normalizer"
+    )
+    assert (installed / "SKILL.md").is_file()
+    assert (installed / "references" / "normalization-rules.md").is_file()
 
 
 def test_build_terminal_deploy_package_requires_pdf_preview_worker_asset(tmp_path: Path) -> None:

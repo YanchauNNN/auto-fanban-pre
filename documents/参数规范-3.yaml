@@ -88,6 +88,19 @@ backend_mechanism:
       - "RX"
     batch_filename_identity_regex: '(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}'
 
+  calculation_book:
+    ocr_threshold: 160
+    ocr_legend_value_count: 10
+    ocr_min_confidence: 50.0
+    ocr_min_vertical_ratio: 0.35
+    ocr_endpoint_absolute_tolerance: 1.0
+    ocr_endpoint_relative_tolerance: 0.002
+    ocr_header_crop: [0.025, 0.02, 0.20, 0.24]
+    ocr_legend_crop: [0.06, 0.84, 0.88, 1.0]
+    ocr_header_scale: 4
+    ocr_legend_scale: 3
+    chapter: "7.1"
+
   project_inference:
     project_no_prefix_regex: '(?P<project_no>\d{4})(?=[0-9][A-Z0-9]{2,4}-?[A-Z]{3}\d{2})|^(\d{4})(?=[-_A-Z0-9]|$)'
     unit_no_by_project_prefix_regex: '(?P<project_no>\d{4})(?P<unit_no>[0-9])(?=[A-Z0-9]{2,4}-?[A-Z]{3}\d{2})'
@@ -123,6 +136,11 @@ backend_mechanism:
       AUDIT_CHECK: "执行纠错识别"
       AUDIT_REPLACE: "执行翻版替换"
       EXPORT_REPORT: "导出纠错报告"
+      VALIDATE_ARCHIVE: "校验计算图片 ZIP"
+      OCR_REINFORCEMENT: "识别底部应力图例"
+      SELECT_REBAR: "匹配并核验实配钢筋"
+      RENDER_CALCULATION_BOOK: "渲染 Word 计算书"
+      FINALIZE_ARTIFACT: "整理计算书产物"
 
   cad_runtime_mechanism:
     min_supported_autocad_year: 2010

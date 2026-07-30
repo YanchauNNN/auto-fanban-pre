@@ -56,6 +56,11 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
             "building_structure_standards",
             True,
         ),
+        (
+            "reinforcement_table_normalizer",
+            "reinforcement_table_normalizer",
+            True,
+        ),
     ]
     assert chat.skills[0].root == "storage/ai/skills/ansys-mapdl-18-2"
     assert chat.skills[0].root_env_var == "FANBAN_ANSYS_MAPDL_SKILL_ROOT"
@@ -65,6 +70,10 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
     assert chat.skills[1].root_env_var == (
         "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
     )
+    assert chat.skills[2].root == (
+        "storage/ai/skills/reinforcement-table-normalizer"
+    )
+    assert chat.skills[2].root_env_var == ""
     assert chat.mcp_servers == []
     assert chat.response_format.enabled is True
     assert "GitHub Flavored Markdown" in chat.response_format.system_prompt_suffix

@@ -29,6 +29,7 @@ class JobType(StrEnum):
     """任务类型"""
     DELIVERABLE = "deliverable"       # 流水线A: 交付包生成
     AUDIT_REPLACE = "audit_replace"   # 流水线B: 词库检查/替换
+    CALCULATION_BOOK = "calculation_book"
 
 
 class JobArtifacts(BaseModel):
@@ -43,6 +44,7 @@ class JobArtifacts(BaseModel):
     report_xlsx: Path | None = None
     report_json: Path | None = None
     replaced_dwg: Path | None = None
+    calculation_docx: Path | None = None
 
 
 class JobProgress(BaseModel):

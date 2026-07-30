@@ -146,7 +146,7 @@ def test_install_archive_extracts_only_standards_skill_payload(tmp_path: Path) -
     assert not (installed / "INSTALL-ZH-CN.txt").exists()
 
 
-def test_router_builds_both_configured_local_context_skills() -> None:
+def test_router_builds_all_configured_local_context_skills() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     sys.path.insert(0, str(repo_root))
     from API.app.routers.ai import build_context_skills
@@ -163,4 +163,5 @@ def test_router_builds_both_configured_local_context_skills() -> None:
     assert [skill.skill_id for skill in skills] == [
         "ansys_mapdl_18_2",
         "building_structure_standards",
+        "reinforcement_table_normalizer",
     ]

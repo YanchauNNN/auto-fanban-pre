@@ -182,6 +182,141 @@ describe("HttpAdapter", () => {
     });
   });
 
+  it("creates a calculation-book task with params_json and one ZIP archive", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-calc-1",
+          jobs: [
+            {
+              job_id: "calc-1",
+              batch_id: "batch-calc-1",
+              source_filename: "calculation.zip",
+              task_kind: "calculation_book",
+              job_mode: "calculation_book",
+              project_no: "2016",
+              status: "queued",
+              stage: "INIT",
+              percent: 0,
+              message: "",
+              created_at: "2026-07-23T10:00:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+                calculation_docx_available: false,
+              },
+              retry_available: false,
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000");
+
+    const result = await adapter.createCalculationBook({
+      project_no: "2016",
+      template_type: "internal_structure",
+    });
+
+    expect(result.jobs[0]?.taskKind).toBe("calculation_book");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books");
+    const formData = init.body as FormData;
+    expect(formData.has("archive")).toBe(false);
+    expect(JSON.parse(String(formData.get("params_json")))).toEqual({
+      project_no: "2016",
+      template_type: "internal_structure",
+    });
+  });
+
+  it("preflights a calculation-book archive and normalizes review evidence", async () => {
+    const directions = {
+      X: {
+        image_filename: "N5012-X.JPEG",
+        smn: 0,
+        smx: 2504,
+        legend_values: [0, 278, 556, 835, 1113, 1391, 1669, 1948, 2226, 2504],
+        is_zero_result: false,
+        source_cell: "B2",
+        original_text: "1D32间距200",
+        canonical_specification: "1D32间距200",
+        narrative_specification: "1排32@200",
+        actual_area: 4021.2,
+      },
+      Y: {
+        image_filename: "N5012-Y.JPEG",
+        smn: 0,
+        smx: 2208,
+        legend_values: [0, 245, 491, 736, 981, 1227, 1472, 1717, 1963, 2208],
+        is_zero_result: false,
+        source_cell: "C2",
+        original_text: "1D28间距200",
+        canonical_specification: "1D28间距200",
+        narrative_specification: "1排28@200",
+        actual_area: 3078.8,
+      },
+      Z: {
+        image_filename: "N5012-Z.JPEG",
+        smn: 0,
+        smx: 0,
+        legend_values: [],
+        is_zero_result: true,
+        source_cell: "D2",
+        original_text: "1A14间距400*400#",
+        canonical_specification: "1C14间距400*400",
+        narrative_specification: "1排14@400x400",
+        actual_area: 962.1,
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          preflight_token: "preflight-1",
+          figure_count: 3,
+          zero_figure_count: 1,
+          wall_count: 1,
+          reinforcement_workbook: "计算书模板文件.xlsx",
+          requires_manual_confirmation: false,
+          confirmations: [],
+          warnings: [],
+          walls: [
+            {
+              wall_id: "N5012",
+              base_wall_id: "N5012",
+              group_index: null,
+              suggested_source_row: 2,
+              directions,
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000");
+    const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
+
+    const result = await adapter.preflightCalculationBook(archive);
+
+    expect(result.preflightToken).toBe("preflight-1");
+    expect(result.walls[0]?.directions.Z).toEqual(
+      expect.objectContaining({
+        imageFilename: "N5012-Z.JPEG",
+        isZeroResult: true,
+        canonicalSpecification: "1C14间距400*400",
+        actualArea: 962.1,
+      }),
+    );
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books/preflight");
+    expect((init.body as FormData).get("archive")).toBe(archive);
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
