@@ -1,9 +1,18 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { JobDetail } from "../../platform/api/types";
 import { AuditCheckSummaryModal } from "./AuditCheckSummaryModal";
 import styles from "./AuditCheckSummaryModal.module.css";
+
+const mockDownloadArtifact = vi.fn();
+
+vi.mock("../../platform/api/useApiAdapter", () => ({
+  useApiAdapter: () => ({
+    downloadArtifact: mockDownloadArtifact,
+  }),
+}));
 
 const job: JobDetail = {
   jobId: "audit-job-1",
@@ -44,11 +53,28 @@ const job: JobDetail = {
 };
 
 describe("AuditCheckSummaryModal", () => {
+  beforeEach(() => {
+    mockDownloadArtifact.mockReset();
+    mockDownloadArtifact.mockResolvedValue(undefined);
+  });
+
   it("uses a dedicated summary dialog size class", () => {
     render(<AuditCheckSummaryModal job={job} onClose={vi.fn()} />);
 
     expect(screen.getByRole("dialog", { name: "纠错结果摘要" })).toHaveClass(
       styles.summaryDialog,
+    );
+  });
+
+  it("downloads the full report through the API adapter", async () => {
+    const user = userEvent.setup();
+    render(<AuditCheckSummaryModal job={job} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "下载完整报告" }));
+
+    expect(mockDownloadArtifact).toHaveBeenCalledWith(
+      "/api/jobs/audit-job-1/download/report",
+      "下载完整报告",
     );
   });
 });

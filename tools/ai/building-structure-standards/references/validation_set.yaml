@@ -1,0 +1,138 @@
+schema_version: 1
+name: 建筑结构总图规范离线技能第一版验证集
+source_workbook: documents_bin/规范库.xlsx
+selection_date: 2026-07-20
+selection_policy:
+  target_count: 20
+  required_families:
+    - GB
+    - GB/T
+    - NB/T
+    - JGJ
+    - HAF
+    - 正版图集
+    - 内部JT
+    - 内部CP
+  authorization_gate: 未取得合法源文件和离线使用授权的条目不得进入正式语料
+
+items:
+  - source_id: 1751
+    code: GB 12955-2024
+    family: GB
+    major: 建筑
+    purpose: 现行强制性产品标准和精确条款验证
+    acquisition_status: 待获取官方授权全文
+  - source_id: 1722
+    code: GB 50207-2012
+    family: GB
+    major: 建筑
+    purpose: 官方站点失败和证据不足场景
+    acquisition_status: 官方核验失败，待重试并获取合法全文
+  - source_id: 2115
+    code: GB 6722-2014(2017局部修订)
+    family: GB
+    major: 结构
+    purpose: 局部修订、版本归一化和版本冲突验证
+    acquisition_status: 待获取含局部修订的合法全文
+  - source_id: 1719
+    code: GB/T 14684-2022
+    family: GB/T
+    major: 结构
+    purpose: 现行推荐性标准、官方人工下载入口和表格验证
+    acquisition_status: 已核验官方入口，待确认离线索引授权
+  - source_id: 2069
+    code: GB/T 50010-2010
+    family: GB/T
+    major: 结构
+    purpose: 2024年版与基础版本号冲突验证
+    acquisition_status: 待获取含2024年版修订的合法全文
+  - source_id: 1738
+    code: GB/T 50011-2010
+    family: GB/T
+    major: 建筑
+    purpose: 建筑抗震跨规范建议和版本核验
+    acquisition_status: 待获取合法全文
+  - source_id: 1741
+    code: NB/T 20401-2017
+    family: NB/T
+    major: 建筑
+    purpose: 核电厂初步设计文件深度和行业备案元数据验证
+    acquisition_status: 已核验现行元数据，待合法全文
+  - source_id: 2060
+    code: NB/T 20308-2024
+    family: NB/T
+    major: 结构
+    purpose: 核安全相关厂房地基基础和新版本验证
+    acquisition_status: 已核验现行元数据，待合法全文
+  - source_id: 2142
+    code: NB/T 20200-2013
+    family: NB/T
+    major: 总图
+    purpose: 外部人为事件、总图选址和跨规范建议验证
+    acquisition_status: 已核验现行元数据，待合法全文
+  - source_id: 1721
+    code: JGJ 63-2006
+    family: JGJ
+    major: 结构
+    purpose: 混凝土用水精确条款和行业标准查询验证
+    acquisition_status: 官方未匹配，待发布部门合法全文
+  - source_id: 1763
+    code: JGJ 133-2001
+    family: JGJ
+    major: 建筑
+    purpose: 旧版幕墙规程、废止或替代关系验证
+    acquisition_status: 官方未匹配，待发布部门合法全文
+  - source_id: 2134
+    code: JGJ 180-2009
+    family: JGJ
+    major: 总图
+    purpose: 土石方施工安全和跨专业建议验证
+    acquisition_status: 官方未匹配，待发布部门合法全文
+  - source_id: 2139
+    code: HAF 101-2023
+    family: HAF
+    major: 总图
+    purpose: 核动力厂厂址评价安全规定和法规优先级验证
+    acquisition_status: 待国家核安全局官方页面人工核验和合法全文
+  - source_id: 1787
+    code: 23J909
+    family: 正版图集
+    major: 建筑
+    purpose: 建筑工程做法、图集页码和图像页锚定验证
+    acquisition_status: 待单位提供正版授权副本
+  - source_id: 2101
+    code: 22SG813
+    family: 正版图集
+    major: 结构
+    purpose: 灌注桩构造、图集表格和图像页锚定验证
+    acquisition_status: 待单位提供正版授权副本
+  - source_id: 2203
+    code: 15MR201
+    family: 正版图集
+    major: 总图
+    purpose: 城市道路沥青路面和总图图集验证
+    acquisition_status: 待单位提供正版授权副本
+  - source_id: 1845
+    code: 1907JT0106
+    family: 内部JT
+    major: 建筑
+    purpose: 历史内部混凝土技术规格和版本冲突验证
+    acquisition_status: 待内部文控提供受控副本和授权
+  - source_id: 1847
+    code: 2026JT0106
+    family: 内部JT
+    major: 建筑
+    purpose: 当前内部混凝土技术规格和历史版本替代验证
+    acquisition_status: 待内部文控提供受控副本和授权
+  - source_id: 1836
+    code: CP 05JT0101
+    family: 内部CP
+    major: 建筑
+    purpose: 内部混凝土总则和保密访问控制验证
+    acquisition_status: 待内部文控提供受控副本和授权
+  - source_id: 1857
+    code: CP 05JT0111
+    family: 内部CP
+    major: 建筑
+    purpose: 生物防护重混凝土和核电跨规范建议验证
+    acquisition_status: 待内部文控提供受控副本和授权

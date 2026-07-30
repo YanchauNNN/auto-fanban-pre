@@ -1,5 +1,6 @@
 import type { JobDetail } from "../../platform/api/types";
-import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { useApiAdapter } from "../../platform/api/useApiAdapter";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import styles from "./AuditCheckSummaryModal.module.css";
 
 type AuditCheckSummaryModalProps = {
@@ -8,6 +9,24 @@ type AuditCheckSummaryModalProps = {
 };
 
 export function AuditCheckSummaryModal({ job, onClose }: AuditCheckSummaryModalProps) {
+  const adapter = useApiAdapter();
+  const reportDownloadUrl = job.artifacts.reportDownloadUrl;
+
+  const handleReportDownload = () => {
+    if (!reportDownloadUrl) {
+      return;
+    }
+
+    if (adapter.downloadArtifact) {
+      void adapter.downloadArtifact(reportDownloadUrl, "下载完整报告").catch((error: unknown) => {
+        console.error("Failed to download audit report", error);
+      });
+      return;
+    }
+
+    window.location.href = reportDownloadUrl;
+  };
+
   return (
     <TaskConfigModal
       dialogClassName={styles.summaryDialog}
@@ -63,13 +82,14 @@ export function AuditCheckSummaryModal({ job, onClose }: AuditCheckSummaryModalP
         </section>
 
         <footer className={styles.actions}>
-          {job.artifacts.reportDownloadUrl ? (
-            <a
+          {reportDownloadUrl ? (
+            <button
               className={styles.downloadButton}
-              href={job.artifacts.reportDownloadUrl}
+              onClick={handleReportDownload}
+              type="button"
             >
               下载完整报告
-            </a>
+            </button>
           ) : null}
           <button className={styles.ghostButton} type="button" onClick={onClose}>
             关闭

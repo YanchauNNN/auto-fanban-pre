@@ -16,6 +16,7 @@ import {
 } from "@tanstack/react-query";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useDeferredValue,
   useLayoutEffect,
@@ -25,11 +26,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import {
   BrowserRouter,
   Link,
+  Navigate,
   Route,
   Routes,
   useNavigate,
@@ -37,8 +40,10 @@ import {
 } from "react-router-dom";
 
 import groupLogoUrl from "../assets/group-logo.jpg";
+import loginPlantHeroUrl from "../assets/login-plant-hero.jpg";
 import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
+import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
 import type {
   ApiAdapter,
   CreateBatchPayload,
@@ -53,7 +58,10 @@ import type {
 } from "../platform/api/types";
 import { useApiAdapter } from "../platform/api/useApiAdapter";
 import "../shared/global.css";
+import { SessionProvider, useSession } from "../shared/session/SessionContext";
 import styles from "./App.module.css";
+import { AccountModulePanel, WorkloadModulePanel, type AccountPanelMode } from "./ModulePanels";
+import { RoutePlaceholder } from "./RoutePlaceholder";
 import {
   buildJobCardModels,
   getMessageLabel,
@@ -114,6 +122,22 @@ type PreviewRequest = {
   title: string;
   url: string;
 };
+type ArtifactDownloadHandler = (url: string, label: string) => void;
+
+function useArtifactDownload(adapter: ApiAdapter): ArtifactDownloadHandler {
+  return useCallback(
+    (url, label) => {
+      if (adapter.downloadArtifact) {
+        void adapter.downloadArtifact(url, label).catch((error: unknown) => {
+          console.error("Failed to download job artifact", error);
+        });
+        return;
+      }
+      window.location.href = url;
+    },
+    [adapter],
+  );
+}
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   queued: { label: "排队中", tone: "queued" },
@@ -474,6 +498,38 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
     }
     return detail;
   },
+  getAiState: async () => ({
+    enabled: false,
+    profile: "tutorial",
+    model: "",
+    ownerKey: "tutorial",
+    defaultAgent: "platform_assistant",
+    attachments: {
+      enabled: false,
+      allowedExtensions: [],
+      maxFilesPerMessage: 0,
+      maxImageSizeMb: 0,
+      maxFileSizeMb: 0,
+      maxTotalSizeMbPerMessage: 0,
+    },
+    agents: [],
+    skills: [],
+    mcpServers: [],
+  }),
+  listAiConversations: async () => [],
+  createAiConversation: async () => {
+    throw new Error("Tutorial preview cannot create AI conversations.");
+  },
+  getAiConversation: async () => {
+    throw new Error("Tutorial preview cannot load AI conversations.");
+  },
+  renameAiConversation: async () => {
+    throw new Error("Tutorial preview cannot rename AI conversations.");
+  },
+  sendAiMessage: async () => {
+    throw new Error("Tutorial preview cannot send AI messages.");
+  },
+  clearAiConversation: async () => {},
 };
 
 type TutorialStep = (typeof DELIVERABLE_TUTORIAL_STEPS)[number];
@@ -502,6 +558,7 @@ function getTutorialTargetSelector(stepId: TutorialStepId): string {
 }
 
 export function App() {
+  const adapter = useApiAdapter();
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -515,23 +572,135 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter
-        future={{
-          v7_relativeSplatPath: true,
-          v7_startTransition: true,
-        }}
-      >
-        <Routes>
-          <Route element={<WorkspacePage />} path="/" />
-          <Route element={<JobDetailPage />} path="/jobs/:jobId" />
-        </Routes>
-      </BrowserRouter>
+      <SessionProvider adapter={adapter}>
+        <BrowserRouter
+          future={{
+            v7_relativeSplatPath: true,
+            v7_startTransition: true,
+          }}
+        >
+          <Routes>
+            <Route element={<LoginPage />} path="/login" />
+            <Route element={<RequireSession><WorkspacePage /></RequireSession>} path="/" />
+            <Route
+              element={<RequireSession><JobDetailPage /></RequireSession>}
+              path="/jobs/:jobId"
+            />
+            <Route
+              element={<RequireSession><JobDetailPage /></RequireSession>}
+              path="/task-groups/:jobId"
+            />
+          </Routes>
+        </BrowserRouter>
+      </SessionProvider>
     </QueryClientProvider>
+  );
+}
+
+function RequireSession({ children }: { children: ReactNode }) {
+  const { sessionStatus } = useSession();
+  if (sessionStatus === "loading") {
+    return <RoutePlaceholder description="正在确认登录状态..." title="正在进入平台" />;
+  }
+  if (sessionStatus === "anonymous") {
+    return <Navigate replace to="/login" />;
+  }
+  return <>{children}</>;
+}
+
+function LoginPage() {
+  const adapter = useApiAdapter();
+  const navigate = useNavigate();
+  const { currentAccount, login, sessionStatus } = useSession();
+  const [accountId, setAccountId] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (sessionStatus === "authenticated" && currentAccount) {
+      navigate("/", { replace: true });
+    }
+  }, [currentAccount, navigate, sessionStatus]);
+
+  const schemaQuery = useQuery({
+    queryKey: ["form-schema"],
+    queryFn: () => adapter.getFormSchema(),
+    staleTime: 60000,
+  });
+  const defaultPassword = schemaQuery.data?.management?.account.adminCreatedDefaultPassword.trim();
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedAccountId = accountId.trim();
+    if (!normalizedAccountId || !password) {
+      setError("请输入账号和密码。");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await login({ accountId: normalizedAccountId, password });
+      navigate("/", { replace: true });
+    } catch {
+      setError("登录失败，请确认账号和密码。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main
+      className={styles.loginPage}
+      style={{ "--login-hero": `url("${loginPlantHeroUrl}")` } as CSSProperties}
+    >
+      <section className={styles.loginHeroPanel}>
+        <div className={styles.loginHeroContent}>
+          <img alt="" className={styles.loginLogo} src={groupLogoUrl} />
+          <p className={styles.loginEyebrow}>Nuclear Design Workflow</p>
+          <h1 className={styles.loginHeroTitle}>核电图纸业务协同平台</h1>
+          <p className={styles.loginHeroBody}>统一进入出图、任务审批、账号管理和工作量结算。</p>
+        </div>
+      </section>
+      <section className={styles.loginCardPanel}>
+        <form className={styles.loginCard} onSubmit={handleSubmit}>
+          <p className={styles.loginCardEyebrow}>Account Login</p>
+          <h2>登录平台</h2>
+          <label className={styles.loginField} htmlFor="login-account-id">
+            账号
+            <input
+              autoComplete="username"
+              className={styles.loginInput}
+              id="login-account-id"
+              onChange={(event) => setAccountId(event.currentTarget.value)}
+              value={accountId}
+            />
+          </label>
+          <label className={styles.loginField} htmlFor="login-password">
+            密码
+            <input
+              autoComplete="current-password"
+              className={styles.loginInput}
+              id="login-password"
+              onChange={(event) => setPassword(event.currentTarget.value)}
+              type="password"
+              value={password}
+            />
+          </label>
+          {error ? <p className={styles.loginError} role="alert">{error}</p> : null}
+          {defaultPassword ? <p className={styles.loginHelper}>管理员新建账号默认密码：{defaultPassword}</p> : null}
+          <button className={styles.loginPrimaryButton} disabled={submitting} type="submit">
+            {submitting ? "正在登录..." : "登录"}
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 
 function WorkspacePage() {
   const adapter = useApiAdapter();
+  const { currentAccount, logout } = useSession();
   const subscribeJobsActivity = adapter.subscribeJobsActivity;
   const reactQueryClient = useQueryClient();
   const deliverableFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -544,6 +713,7 @@ function WorkspacePage() {
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
   const [activeModule, setActiveModule] = useState<HomeModule>("business");
+  const [accountPanelMode, setAccountPanelMode] = useState<AccountPanelMode>("self");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
 
@@ -596,6 +766,8 @@ function WorkspacePage() {
     staleTime: 60000,
   });
   const actionsReady = Boolean(schemaQuery.data);
+  const accountAdminRoles = schemaQuery.data?.management?.account.adminRoles ?? [];
+  const isAdmin = Boolean(currentAccount && accountAdminRoles.includes(currentAccount.role));
   const [lastConnectionSuccessAt, setLastConnectionSuccessAt] = useState<number | null>(null);
 
   useEffect(() => {
@@ -926,13 +1098,21 @@ function WorkspacePage() {
           <section className={styles.titleStripStatus} data-testid="title-strip-status">
             <div className={styles.titleStripStatusTop}>
               <p className={styles.titleStripStatusLabel}>System Status</p>
-              <button
-                className={styles.tutorialEntryButton}
-                type="button"
-                onClick={handleOpenTutorial}
-              >
-                教程
-              </button>
+              <div className={styles.titleStripAccountActions}>
+                <span className={styles.titleStripAccountName}>
+                  {currentAccount?.displayName ?? "未登录"}
+                </span>
+                <button
+                  className={styles.tutorialEntryButton}
+                  type="button"
+                  onClick={handleOpenTutorial}
+                >
+                  教程
+                </button>
+                <button className={styles.tutorialEntryButton} type="button" onClick={() => void logout()}>
+                  退出
+                </button>
+              </div>
             </div>
             {backendConnectionInterrupted ? (
               <p className={styles.titleStripHealthWarning}>后台连接不可达</p>
@@ -1006,7 +1186,12 @@ function WorkspacePage() {
               }`}
               key={module.key}
               type="button"
-              onClick={() => setActiveModule(module.key)}
+              onClick={() => {
+                setActiveModule(module.key);
+                if (module.key === "account") {
+                  setAccountPanelMode("self");
+                }
+              }}
             >
               {module.label}
             </button>
@@ -1194,15 +1379,13 @@ function WorkspacePage() {
               </section>
             </section>
           ) : activeModule === "account" ? (
-            <section className={styles.placeholderPanel} data-testid="module-account-panel">
-              <p className={styles.brandTop}>Account Module</p>
-              <h2>账号模块预留</h2>
-            </section>
+            <AccountModulePanel
+              isAdmin={isAdmin}
+              mode={accountPanelMode}
+              onModeChange={setAccountPanelMode}
+            />
           ) : (
-            <section className={styles.placeholderPanel} data-testid="module-workload-panel">
-              <p className={styles.brandTop}>Workload Module</p>
-              <h2>工作量模块预留</h2>
-            </section>
+            <WorkloadModulePanel />
           )}
         </main>
       </div>
@@ -1297,6 +1480,8 @@ function WorkspacePage() {
           onPrevious={handlePreviousTutorialStep}
         />
       ) : null}
+
+      <AiChatDrawer adapter={adapter} />
     </div>
   );
 }
@@ -1768,7 +1953,7 @@ function JobDetailPage() {
         detail.isGroup ? (
           <GroupDetailPanel adapter={adapter} detail={detail} />
         ) : (
-          <SingleJobDetailPanel detail={detail} hasWarnings={hasWarnings} />
+          <SingleJobDetailPanel adapter={adapter} detail={detail} hasWarnings={hasWarnings} />
         )
       ) : (
         <section className={styles.detailPanel}>
@@ -1780,16 +1965,24 @@ function JobDetailPage() {
 }
 
 function SingleJobDetailPanel({
+  adapter,
   detail,
   hasWarnings,
 }: {
+  adapter: ApiAdapter;
   detail: JobDetail;
   hasWarnings: boolean;
 }) {
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
+  const downloadArtifact = useArtifactDownload(adapter);
+  const readArtifact = adapter.readArtifact;
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const artifactButtons = renderArtifactButtons(
+    detail,
+    setPreviewRequest,
+    adapter.downloadArtifact ? downloadArtifact : undefined,
+  );
   const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
 
   return (
@@ -1909,6 +2102,8 @@ function SingleJobDetailPanel({
       {previewRequest ? (
         <Suspense fallback={null}>
           <PreviewPdfModal
+            readArtifact={readArtifact}
+            onDownload={adapter.downloadArtifact ? downloadArtifact : undefined}
             title={previewRequest.title}
             url={previewRequest.url}
             onClose={() => setPreviewRequest(null)}
@@ -1921,10 +2116,16 @@ function SingleJobDetailPanel({
 
 function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: JobDetail }) {
   const [previewRequest, setPreviewRequest] = useState<PreviewRequest | null>(null);
+  const downloadArtifact = useArtifactDownload(adapter);
+  const readArtifact = adapter.readArtifact;
   const childJobs = detail.children ?? [];
   const stageLabel = getStageLabel(detail.stage, detail);
   const messageLabel = getMessageLabel(detail);
-  const artifactButtons = renderArtifactButtons(detail, setPreviewRequest);
+  const artifactButtons = renderArtifactButtons(
+    detail,
+    setPreviewRequest,
+    adapter.downloadArtifact ? downloadArtifact : undefined,
+  );
   const quickDownloadItems = buildQuickDownloadItems(detail, artifactButtons);
   const childDetailQueries = useQueries({
     queries: childJobs.map((child) => ({
@@ -2039,6 +2240,8 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
       {previewRequest ? (
         <Suspense fallback={null}>
           <PreviewPdfModal
+            readArtifact={readArtifact}
+            onDownload={adapter.downloadArtifact ? downloadArtifact : undefined}
             title={previewRequest.title}
             url={previewRequest.url}
             onClose={() => setPreviewRequest(null)}
@@ -2374,7 +2577,15 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ArtifactButton({ href, label }: { href?: string; label: string }) {
+function ArtifactButton({
+  href,
+  label,
+  onDownload,
+}: {
+  href?: string;
+  label: string;
+  onDownload?: ArtifactDownloadHandler;
+}) {
   if (!href) {
     return (
       <button className={styles.disabledAction} disabled type="button">
@@ -2383,10 +2594,13 @@ function ArtifactButton({ href, label }: { href?: string; label: string }) {
     );
   }
 
+  if (!onDownload) {
+    return <a className={styles.downloadButton} href={href}>{label}</a>;
+  }
   return (
-    <a className={styles.downloadButton} href={href}>
+    <button className={styles.downloadButton} type="button" onClick={() => onDownload(href, label)}>
       {label}
-    </a>
+    </button>
   );
 }
 
@@ -2671,7 +2885,11 @@ function formatUnitOrIslandLabel(unitOrIslandNo: string) {
   return `${normalizedIslandNo}号机组/岛`;
 }
 
-function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: PreviewRequest) => void) {
+function renderArtifactButtons(
+  job: JobSummary,
+  onOpenPreview?: (request: PreviewRequest) => void,
+  onDownload?: ArtifactDownloadHandler,
+) {
   const labels = {
     package: "下载 package.zip",
     ied: "下载 IED计划.xlsx",
@@ -2715,6 +2933,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.previewDownloadUrl}
               key="merged-preview-pdf"
               label="下载合并版PDF"
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -2722,6 +2941,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
         label="下载任务包"
+        onDownload={onDownload}
       />,
       ...(job.artifacts.iedAvailable
         ? [
@@ -2729,6 +2949,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.iedDownloadUrl ?? undefined}
               key="ied"
               label="下载 IED"
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -2736,11 +2957,13 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
         label="下载 report.xlsx"
+        onDownload={onDownload}
       />,
       <ArtifactButton
         href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
         key="replaced-dwg"
         label="下载替换后 DWG"
+        onDownload={onDownload}
       />,
     ];
   }
@@ -2752,6 +2975,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.packageDownloadUrl ?? undefined}
         key="package"
         label={labels.package}
+        onDownload={onDownload}
       />,
       ...(job.artifacts.iedAvailable
         ? [
@@ -2759,6 +2983,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
               href={job.artifacts.iedDownloadUrl ?? undefined}
               key="ied"
               label={labels.ied}
+              onDownload={onDownload}
             />,
           ]
         : []),
@@ -2772,6 +2997,7 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
         href={job.artifacts.reportDownloadUrl ?? undefined}
         key="report"
         label={labels.report}
+        onDownload={onDownload}
       />,
     ];
   }
@@ -2786,11 +3012,13 @@ function renderArtifactButtons(job: JobSummary, onOpenPreview?: (request: Previe
       href={job.artifacts.reportDownloadUrl ?? undefined}
       key="report"
       label={labels.report}
+      onDownload={onDownload}
     />,
     <ArtifactButton
       href={job.artifacts.replacedDwgDownloadUrl ?? undefined}
       key="replaced-dwg"
       label={labels.replacedDwg}
+      onDownload={onDownload}
     />,
   ];
 }

@@ -416,7 +416,7 @@ class SQLiteQueueStore:
         *,
         status: str | None = None,
         offset: int = 0,
-        limit: int = 100,
+        limit: int | None = 100,
         sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         params: list[Any] = []
@@ -432,16 +432,27 @@ class SQLiteQueueStore:
                     "count"
                 ]
             )
-            rows = conn.execute(
-                f"""
-                SELECT *
-                FROM job_summaries
-                {where}
-                ORDER BY {sort_column} DESC, item_id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (*params, limit, offset),
-            ).fetchall()
+            if limit is None:
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM job_summaries
+                    {where}
+                    ORDER BY {sort_column} DESC, item_id DESC
+                    """,
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM job_summaries
+                    {where}
+                    ORDER BY {sort_column} DESC, item_id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*params, limit, offset),
+                ).fetchall()
         return {"total": total, "items": [_summary_row_to_dict(row) for row in rows]}
 
     def activity(self) -> dict[str, Any]:

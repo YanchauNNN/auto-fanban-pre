@@ -58,3 +58,4 @@ def test_task_group_service_applies_workload_factors_from_yaml_factor_key(monkey
 
     assert group.workload.one_review_factor == 1.0
     assert group.workload.two_review_factor == 1.08
+    assert group.workload.node_factors == {"custom_review": 1.08}

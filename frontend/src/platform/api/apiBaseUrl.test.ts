@@ -12,12 +12,12 @@ describe("resolveApiBaseUrl", () => {
     ).toBe("http://192.168.1.10:9000");
   });
 
-  it("falls back to the local FastAPI address in development", () => {
+  it("uses same-origin requests in development when no override is provided", () => {
     expect(
       resolveApiBaseUrl({
         DEV: true,
       }),
-    ).toBe("http://127.0.0.1:8000");
+    ).toBe("");
   });
 
   it("uses same-origin requests in production when no override is provided", () => {

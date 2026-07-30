@@ -19,7 +19,7 @@ class TaskOwnerSnapshot(BaseModel):
     creator_name: str
     creator_role: str
     creator_office: str | None = None
-    created_by_scope: str = "current_login_user"
+    created_by_scope: str = ""
     submitted_at: datetime | None = None
 
 

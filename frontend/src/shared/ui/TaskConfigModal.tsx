@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-import { lockBodyScroll } from "../../shared/documentScrollLock";
+import { lockBodyScroll } from "../documentScrollLock";
 import styles from "./TaskConfigModal.module.css";
 
 type TaskConfigModalProps = {

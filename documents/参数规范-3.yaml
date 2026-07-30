@@ -31,6 +31,45 @@ backend_mechanism:
     include_approved_nodes: true
     node_role_key_source: "node_key"
 
+  workflow_runtime:
+    approval_terminal_status: "three_review_approved"
+    archive_trigger_status: "three_review_approved"
+    active_conflict_statuses:
+      - "submitted"
+      - "in_review"
+      - "three_review_approved"
+      - "archiving"
+      - "archive_failed"
+
+  workload_runtime:
+    status_options:
+      - { label: "全部状态", value: "" }
+      - { label: "已结算", value: "settled" }
+      - { label: "待结算", value: "pending" }
+      - { label: "无效", value: "invalid" }
+
+  management_ui:
+    workload_scope_labels:
+      me: "个人"
+      office: "科室"
+      institute: "全所"
+      admin: "管理员"
+    workflow_status_labels:
+      draft: "草稿"
+      submitted: "已提交"
+      in_review: "审批中"
+      three_review_approved: "三审通过"
+      archiving: "归档中"
+      archived: "已归档"
+      archive_failed: "归档失败"
+      cancelled: "已取消"
+    archive_status_labels:
+      pending: "待归档"
+      running: "归档中"
+      succeeded: "已归档"
+      failed: "归档失败"
+    empty_current_node_label: "未进入审批"
+
   audit_display:
     forbidden_terms: ["工种"]
     forbidden_term_connected_han_whitelist: ["工种"]

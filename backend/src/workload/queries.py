@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from ..models import AccountSnapshot, TaskGroup
+from ..task_groups.display_name import build_task_group_display_fields
 
 
 @dataclass(frozen=True)
@@ -35,11 +36,14 @@ class WorkloadQueries:
         for group in groups:
             if not self._group_matches(group, active_filters):
                 continue
+            group_display_fields = build_task_group_display_fields(group)
             for entry in group.workload.contributor_entries:
                 if entry.account_id != account.account_id or not self._entry_matches(entry.settled_at, active_filters):
                     continue
                 payload = entry.model_dump(mode='json')
                 payload['group_id'] = group.group_id
+                payload['group_display_name'] = group_display_fields['display_name']
+                payload['album_internal_code'] = group_display_fields['album_internal_code']
                 payload['settlement_status'] = group.workload.settlement_status.value
                 entries.append(payload)
                 total += float(entry.workload_a1)
@@ -64,11 +68,14 @@ class WorkloadQueries:
                 continue
             if not self._group_matches(group, active_filters):
                 continue
+            group_display_fields = build_task_group_display_fields(group)
             for entry in group.workload.contributor_entries:
                 if not self._entry_matches(entry.settled_at, active_filters):
                     continue
                 payload = entry.model_dump(mode='json')
                 payload['group_id'] = group.group_id
+                payload['group_display_name'] = group_display_fields['display_name']
+                payload['album_internal_code'] = group_display_fields['album_internal_code']
                 payload['settlement_status'] = group.workload.settlement_status.value
                 entries.append(payload)
                 total += float(entry.workload_a1)
@@ -91,11 +98,14 @@ class WorkloadQueries:
         for group in groups:
             if not self._group_matches(group, active_filters):
                 continue
+            group_display_fields = build_task_group_display_fields(group)
             for entry in group.workload.contributor_entries:
                 if not self._entry_matches(entry.settled_at, active_filters):
                     continue
                 payload = entry.model_dump(mode='json')
                 payload['group_id'] = group.group_id
+                payload['group_display_name'] = group_display_fields['display_name']
+                payload['album_internal_code'] = group_display_fields['album_internal_code']
                 payload['settlement_status'] = group.workload.settlement_status.value
                 entries.append(payload)
                 total += float(entry.workload_a1)
@@ -117,6 +127,7 @@ class WorkloadQueries:
         for group in groups:
             if not self._group_matches(group, active_filters):
                 continue
+            group_display_fields = build_task_group_display_fields(group)
             for entry in group.workload.contributor_entries:
                 if not self._entry_matches(entry.settled_at, active_filters):
                     continue
@@ -124,6 +135,8 @@ class WorkloadQueries:
                 totals[key] = round(totals.get(key, 0.0) + float(entry.workload_a1), 2)
                 payload = entry.model_dump(mode='json')
                 payload['group_id'] = group.group_id
+                payload['group_display_name'] = group_display_fields['display_name']
+                payload['album_internal_code'] = group_display_fields['album_internal_code']
                 payload['settlement_status'] = group.workload.settlement_status.value
                 entries.append(payload)
         return {

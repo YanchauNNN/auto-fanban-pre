@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from ..config import BusinessSpec, load_spec
+from ..config import BusinessSpec, load_mechanism_spec, load_spec
 from ..models import AccountSnapshot, TaskGroup, TaskOwnerSnapshot
 from .assignee_resolver import WorkflowAssigneeResolver
 from .models import WorkflowNodeStatus, WorkflowState, WorkflowStatus
@@ -12,6 +12,7 @@ class WorkflowService:
     def __init__(self, resolver: WorkflowAssigneeResolver | None = None, spec: BusinessSpec | None = None) -> None:
         self.spec = spec or load_spec()
         self.workflow_cfg = dict(self.spec.get_management_features().get("workflow") or {})
+        self.workflow_runtime_cfg = load_mechanism_spec().workflow_runtime
         self.resolver = resolver or WorkflowAssigneeResolver(self.spec)
 
     def start(self, group: TaskGroup, initiator: AccountSnapshot) -> TaskGroup:
@@ -23,7 +24,7 @@ class WorkflowService:
             creator_name=initiator.display_name,
             creator_role=initiator.role,
             creator_office=initiator.office_name,
-            created_by_scope=str((self.workflow_cfg.get('submit_rule') or {}).get('initiator_binding') or 'current_login_user'),
+            created_by_scope=str((self.workflow_cfg.get('submit_rule') or {})['initiator_binding']),
             submitted_at=datetime.now(),
         )
         group.workflow = WorkflowState(
@@ -55,9 +56,9 @@ class WorkflowService:
         if current.assignee_account != acting_account.account_id:
             raise ValueError('only current assignee can approve')
         factor_cfg = dict(self.workflow_cfg.get('factor') or {})
-        min_factor = float(factor_cfg.get('min') or 0.8)
-        max_factor = float(factor_cfg.get('max') or 1.1)
-        precision = int(factor_cfg.get('precision') or 2)
+        min_factor = float(factor_cfg['min'])
+        max_factor = float(factor_cfg['max'])
+        precision = int(factor_cfg['precision'])
         if factor < min_factor or factor > max_factor:
             raise ValueError('factor out of range')
         current.status = WorkflowNodeStatus.APPROVED
@@ -68,7 +69,7 @@ class WorkflowService:
         next_node = self._next_pending_node(group, current_index)
         if next_node is None:
             group.workflow.current_node_key = None
-            group.workflow.status = WorkflowStatus.THREE_REVIEW_APPROVED
+            group.workflow.status = _workflow_status(self.workflow_runtime_cfg.approval_terminal_status)
             return group
         next_node.status = WorkflowNodeStatus.CURRENT
         group.workflow.current_node_key = next_node.node_key
@@ -96,3 +97,10 @@ class WorkflowService:
             if node.status == WorkflowNodeStatus.PENDING:
                 return node
         return None
+
+
+def _workflow_status(value: str) -> WorkflowStatus:
+    try:
+        return WorkflowStatus(str(value))
+    except ValueError:
+        raise ValueError(f"invalid workflow terminal status: {value}") from None

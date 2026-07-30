@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from ..models import TaskGroup
+from .display_name import build_task_group_display_fields
 
 
 class TaskGroupSerializers:
@@ -15,8 +16,10 @@ class TaskGroupSerializers:
     ) -> dict[str, object]:
         effective_workload = float(group.workload.final_workload_a1 or group.workload.initial_workload_a1 or 0.0)
         owner = group.owner_snapshot.model_dump(mode="json") if group.owner_snapshot else None
+        display_fields = build_task_group_display_fields(group)
         return {
             "group_id": group.group_id,
+            **display_fields,
             "batch_id": group.batch_id,
             "project_no": group.project_no,
             "status": group.status.value,

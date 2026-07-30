@@ -77,3 +77,5 @@ def test_workload_queries_support_basic_filters(monkeypatch, tmp_path) -> None:
         assert settled_only.json()["filters"]["status"] == "settled"
         assert settled_only.json()["filters"]["valid_only"] is True
         assert settled_only.json()["entries"]
+        assert settled_only.json()["entries"][0]["group_display_name"] == "2016-JG001"
+        assert settled_only.json()["entries"][0]["album_internal_code"] == "2016-JG001"

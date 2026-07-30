@@ -9,12 +9,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
+
+
+class TestClient(FastApiTestClient):
+    """Use the default administrator for tests of protected job endpoints."""
+
+    def __enter__(self):
+        client = super().__enter__()
+        response = client.post(
+            "/api/auth/login",
+            json={"account_id": "hbjjswd", "password": "password"},
+        )
+        assert response.status_code == 200, response.text
+        client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+        return client
 
 
 class FakeFontPreflightService:

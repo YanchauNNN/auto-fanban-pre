@@ -1,0 +1,396 @@
+.page {
+  position: relative;
+  isolation: isolate;
+  min-height: 0;
+  padding: 0.75rem;
+  overflow: hidden;
+  color: #10243d;
+}
+
+.page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    linear-gradient(90deg, rgba(8, 22, 38, 0.76), rgba(17, 52, 86, 0.42) 42%, rgba(240, 246, 252, 0.9)),
+    url("../../assets/nuclear-plant-hero.jpg") center / cover;
+}
+
+.page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgba(245, 249, 253, 0.72), rgba(232, 240, 248, 0.86));
+  -webkit-backdrop-filter: blur(0.8px);
+  backdrop-filter: blur(0.8px);
+}
+
+.surface {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0.9rem;
+  border: 1px solid rgba(210, 225, 240, 0.45);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(247, 251, 255, 0.92), rgba(229, 238, 247, 0.82)),
+    rgba(255, 255, 255, 0.72);
+  box-shadow: 0 22px 64px rgba(12, 34, 60, 0.18);
+}
+
+.surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(245, 250, 254, 0.96) 0%, rgba(243, 249, 253, 0.88) 46%, rgba(243, 249, 253, 0.58) 100%),
+    url("../../assets/nuclear-plant-hero.jpg") right center / 56% 100% no-repeat;
+  opacity: 0.95;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(1280px, 100%);
+  margin-bottom: 0.7rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: #5076ae;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.header h1,
+.panelHeader h2 {
+  margin: 0;
+  color: #102f57;
+  letter-spacing: 0;
+}
+
+.header h1 {
+  font-size: 1.85rem;
+}
+
+.panelHeader h2 {
+  font-size: 1.1rem;
+}
+
+.description {
+  max-width: 720px;
+  margin: 0.25rem 0 0;
+  color: #42617f;
+  line-height: 1.4;
+}
+
+.headerMetric {
+  min-width: 8.5rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(85, 124, 170, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(230, 239, 248, 0.9));
+  text-align: right;
+}
+
+.headerMetric span,
+.profileLabel,
+.cardLabel,
+.panelHint,
+.label,
+.workloadLabel {
+  display: block;
+  color: #607c9d;
+  font-size: 0.84rem;
+}
+
+.headerMetric strong {
+  display: block;
+  margin-top: 0.2rem;
+  color: #0e365f;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.accountShell {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.82fr) minmax(16rem, 0.78fr) minmax(22rem, 1.15fr);
+  gap: 0.75rem;
+  align-items: stretch;
+  width: min(1280px, 100%);
+}
+
+.profilePanel,
+.panel,
+.entryCard {
+  border: 1px solid rgba(86, 122, 168, 0.18);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(238, 246, 252, 0.88)),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 42px rgba(20, 53, 91, 0.1);
+}
+
+.profilePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 18rem;
+  padding: 0.95rem;
+  background:
+    linear-gradient(180deg, rgba(16, 50, 86, 0.88), rgba(19, 83, 130, 0.78)),
+    rgba(16, 50, 86, 0.86);
+  color: #fff;
+}
+
+.profileLabel {
+  color: rgba(220, 235, 249, 0.78);
+}
+
+.profileName {
+  display: block;
+  margin-top: 0.35rem;
+  color: #fff;
+  font-size: 1.9rem;
+  line-height: 1.15;
+}
+
+.profileMeta {
+  margin: 0.55rem 0 0;
+  color: rgba(232, 242, 252, 0.78);
+  font-family: "JetBrains Mono", "Noto Sans SC", monospace;
+}
+
+.identityGrid {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+
+.infoCard {
+  min-height: 3.85rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(222, 236, 249, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.infoCard .cardLabel {
+  color: rgba(222, 236, 249, 0.78);
+}
+
+.cardValue {
+  display: block;
+  margin-top: 0.35rem;
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.cardSupporting {
+  margin: 0.35rem 0 0;
+  color: rgba(232, 242, 252, 0.72);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+  padding: 0.85rem;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.65rem;
+}
+
+.panelHint {
+  margin-top: 0.25rem;
+  white-space: nowrap;
+}
+
+.form {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: auto;
+}
+
+.label {
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-height: 2.45rem;
+  padding: 0 0.9rem;
+  border: 1px solid rgba(82, 122, 170, 0.28);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #14375f;
+  font-size: 1rem;
+}
+
+.input:focus {
+  outline: 2px solid rgba(43, 111, 214, 0.18);
+  border-color: #356fcb;
+}
+
+.helpText,
+.muted,
+.workloadMeta,
+.entryMeta {
+  color: #5d7794;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.primaryButton {
+  min-height: 2.45rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0f4c83, #238aa5);
+  color: #fff;
+  font-size: 0.98rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 24px rgba(21, 94, 132, 0.18);
+}
+
+.primaryButton:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.feedbackSuccess,
+.feedbackError {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.feedbackSuccess {
+  background: rgba(47, 149, 102, 0.12);
+  color: #136947;
+}
+
+.feedbackError {
+  background: rgba(190, 52, 52, 0.12);
+  color: #a22c2c;
+}
+
+.workloadHero {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 1fr;
+  gap: 0.8rem;
+  align-items: end;
+  padding: 0.75rem;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(18, 61, 102, 0.13), rgba(33, 138, 165, 0.06)),
+    rgba(240, 247, 252, 0.78);
+}
+
+.workloadValue {
+  display: block;
+  margin-top: 0.25rem;
+  color: #102f57;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.workloadMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.entryList {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.entryCard {
+  padding: 0.65rem 0.75rem;
+}
+
+.entryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  color: #14375f;
+}
+
+.entryHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  margin-top: 0.45rem;
+}
+
+@media (max-width: 1080px) {
+  .page {
+    overflow: visible;
+  }
+
+  .accountShell {
+    grid-template-columns: 1fr;
+  }
+
+  .profilePanel,
+  .panel {
+    min-height: auto;
+  }
+
+  .identityGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 0.75rem;
+  }
+
+  .surface {
+    padding: 0.85rem;
+  }
+
+  .header,
+  .workloadHero {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .identityGrid {
+    grid-template-columns: 1fr;
+  }
+}

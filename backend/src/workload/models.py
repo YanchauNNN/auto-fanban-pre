@@ -25,6 +25,7 @@ class WorkloadSummary(BaseModel):
     one_review_factor: float = 1.0
     two_review_factor: float = 1.0
     three_review_factor: float = 1.0
+    node_factors: dict[str, float] = Field(default_factory=dict)
     settlement_status: WorkloadSettlementStatus = WorkloadSettlementStatus.PENDING
     settled_at: datetime | None = None
     contributor_entries: list[WorkloadContributorEntry] = Field(default_factory=list)

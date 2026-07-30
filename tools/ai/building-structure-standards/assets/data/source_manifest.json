@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-20",
+  "authorization_policy": "Only entries whose authorization explicitly contains 已授权 are indexed.",
+  "sources": [
+    {
+      "standard_code": "HAF 101-2023",
+      "standard_name": "核动力厂厂址评价安全规定",
+      "version": "2023",
+      "source_path": "sources/HAF101-2023-核动力厂厂址评价安全规定.pdf",
+      "official_source_url": "https://www.mee.gov.cn/xxgk2018/xxgk/xxgk09/202303/t20230303_1018320.html",
+      "authorization": "官方社会公开，内部离线检索已授权",
+      "confidentiality": "公开",
+      "official_status": "现行",
+      "replacement_standard": "",
+      "major": "总图"
+    }
+  ],
+  "missing_validation_sources": [
+    "GB 12955-2024",
+    "GB 50207-2012",
+    "GB 6722-2014(2017局部修订)",
+    "GB/T 14684-2022",
+    "GB/T 50010-2010",
+    "GB/T 50011-2010",
+    "NB/T 20401-2017",
+    "NB/T 20308-2024",
+    "NB/T 20200-2013",
+    "JGJ 63-2006",
+    "JGJ 133-2001",
+    "JGJ 180-2009",
+    "23J909",
+    "22SG813",
+    "15MR201",
+    "1907JT0106",
+    "2026JT0106",
+    "CP 05JT0101",
+    "CP 05JT0111"
+  ]
+}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..config import BusinessSpec, load_spec
-from ..models import AccountSnapshot, TaskGroup
+from ..models import AccountSnapshot, Job, TaskGroup, TaskOwnerSnapshot
 
 
 class TaskGroupVisibility:
@@ -12,12 +12,25 @@ class TaskGroupVisibility:
         self.legacy_default_scope = str(visibility_cfg.get("legacy_default_scope") or "admin_only")
 
     def can_view(self, group: TaskGroup, account: AccountSnapshot) -> bool:
+        legacy_scope = str(group.legacy_visibility.scope or self.legacy_default_scope)
+        return self.can_view_owner_snapshot(group.owner_snapshot, account, legacy_scope=legacy_scope)
+
+    def can_view_job(self, job: Job, account: AccountSnapshot) -> bool:
+        return self.can_view_owner_snapshot(job.owner_snapshot, account)
+
+    def can_view_owner_snapshot(
+        self,
+        owner_snapshot: TaskOwnerSnapshot | None,
+        account: AccountSnapshot,
+        *,
+        legacy_scope: str | None = None,
+    ) -> bool:
         role_scope = self.role_scopes.get(account.role, "self_only")
         if role_scope == "all":
             return True
-        if group.owner_snapshot is None:
-            legacy_scope = str(group.legacy_visibility.scope or self.legacy_default_scope)
+        if owner_snapshot is None:
+            legacy_scope = str(legacy_scope or self.legacy_default_scope)
             return legacy_scope == "all"
         if role_scope == "office_only":
-            return account.office_name == group.owner_snapshot.creator_office
-        return account.account_id == group.owner_snapshot.creator_account
+            return account.office_name == owner_snapshot.creator_office
+        return account.account_id == owner_snapshot.creator_account

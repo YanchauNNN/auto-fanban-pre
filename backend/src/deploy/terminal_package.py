@@ -8,19 +8,41 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..ai.ansys_mapdl_skill import (
+    ANSYS_MAPDL_SKILL_ID,
+)
+from ..ai.ansys_mapdl_skill import (
+    install_skill_archive as install_ansys_mapdl_skill_archive,
+)
+from ..ai.building_standards_skill import (
+    BUILDING_STANDARDS_SKILL_DIR,
+    BUILDING_STANDARDS_SKILL_ID,
+)
+from ..ai.building_standards_skill import (
+    install_skill_archive as install_building_standards_skill_archive,
+)
+from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
+from ..cad.plot_resource_manager import PDF2_PMP_NAME
+from ..config.ai.ai_spec import AiSpecLoader
 from ..config.mechanism_spec import (
     DeploymentMechanismConfig,
     MechanismSpecLoader,
     load_mechanism_spec,
 )
-from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
-from ..cad.plot_resource_manager import PDF2_PMP_NAME
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
 RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
 MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
 TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
+AI_SPEC_NAME = "参数规范_AI.yaml"
+AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB = "ansys-mapdl-18-2-private-offline-*.zip"
+ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
+BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB = (
+    "building-structure-standards-private-offline-*.zip"
+)
+BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -36,6 +58,8 @@ DEPLOY_IGNORE_PATTERNS = (
     "*.lscache",
     ".build_packages",
     "~$*",
+    ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB,
+    BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB,
 )
 PACKAGE_MANIFEST = "package-manifest.json"
 DELTA_DIR_NAME = "_delta"
@@ -123,6 +147,15 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME,
             Path("documents") / TERMINAL_INSTALL_PLAN_NAME,
         ),
+        CopyPlanEntry(repo_root / "documents" / "AI", Path("documents") / "AI"),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_SPEC_NAME,
+            Path("documents") / "AI" / AI_SPEC_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_GATEWAY_CONFIG_NAME,
+            Path("documents") / "AI" / AI_GATEWAY_CONFIG_NAME,
+        ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
         CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
@@ -130,6 +163,18 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         CopyPlanEntry(
             repo_root / "tools" / "diagnose_iis_frontend_503.ps1",
             Path("tools") / "diagnose_iis_frontend_503.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1",
+            Path("scripts") / "test_ai_model_connectivity.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+            Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+            Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         ),
     ]
 
@@ -216,6 +261,95 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(entry.source, target)
+
+
+def _materialize_ansys_mapdl_skill(repo_root: Path, output_root: Path) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == ANSYS_MAPDL_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError("ANSYS MAPDL Skill root must be a package-relative path")
+    target = output_root / relative_root
+    source = repo_root / relative_root
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS))
+        return
+
+    archives = sorted((repo_root / "documents" / "AI").glob(ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB))
+    if not archives:
+        raise FileNotFoundError(
+            "ANSYS MAPDL 18.2 Skill 已启用，但未找到 storage 语料或私人离线包。"
+            "请先运行 tools/ai/install_ansys_mapdl_skill.ps1。"
+        )
+    install_ansys_mapdl_skill_archive(archives[-1], target)
+
+
+def _materialize_building_standards_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == BUILDING_STANDARDS_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError(
+            "Building standards Skill root must be a package-relative path"
+        )
+    target = output_root / relative_root
+    candidates = (
+        repo_root / relative_root,
+        repo_root / "tools" / "ai" / BUILDING_STANDARDS_SKILL_DIR,
+    )
+    source = next((candidate for candidate in candidates if candidate.is_dir()), None)
+    if source is not None:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(
+            source,
+            target,
+            ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+        )
+        return
+
+    archives = sorted(
+        [
+            *repo_root.glob(
+                f"build/{BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB}"
+            ),
+            *(repo_root / "documents" / "AI").glob(
+                BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB
+            ),
+        ]
+    )
+    if not archives:
+        raise FileNotFoundError(
+            "建筑结构总图规范 Skill 已启用，但未找到 storage 语料、"
+            "tools/ai 源目录或私人离线包。"
+            "请先运行 tools/ai/package_building_standards_skill.py。"
+        )
+    install_building_standards_skill_archive(archives[-1], target)
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -495,7 +629,7 @@ def _write_support_files(
 ) -> None:
     deployment = _deployment_mechanism(output_root)
     storage_root = output_root / "storage"
-    for rel in [Path("jobs"), Path("groups"), Path("runtime")]:
+    for rel in [Path("jobs"), Path("groups"), Path("runtime"), Path("ai") / "skills"]:
         (storage_root / rel).mkdir(parents=True, exist_ok=True)
 
     start_backend = r'''param(
@@ -611,6 +745,8 @@ function Set-BackendRuntimeEnvironment {
         [string]$SpecPath,
         [string]$RuntimeSpecPath,
         [string]$MechanismSpecPath,
+        [string]$AiSpecPath,
+        [string]$AiGatewayConfigPath,
         [string]$CadScriptDir,
         [string]$DotNetBridgeDllPath,
         [string]$CtbName
@@ -634,6 +770,20 @@ function Set-BackendRuntimeEnvironment {
         }
     }
 
+    if ((-not $env:FANBAN_AI_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_SPEC_PATH" -Value $AiSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_AI_GATEWAY_CONFIG_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_GATEWAY_CONFIG_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiGatewayConfigPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_GATEWAY_CONFIG_PATH" -Value $AiGatewayConfigPath
+        }
+    }
+
+    Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE" -Value "terminal_cnpe_intranet_qwen_fast"
+
     if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
         Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
     }
@@ -650,6 +800,8 @@ function Set-BackendRuntimeEnvironment {
         @("FANBAN_SPEC_PATH", $env:FANBAN_SPEC_PATH),
         @("FANBAN_RUNTIME_SPEC_PATH", $env:FANBAN_RUNTIME_SPEC_PATH),
         @("FANBAN_MECHANISM_SPEC_PATH", $env:FANBAN_MECHANISM_SPEC_PATH),
+        @("FANBAN_AI_SPEC_PATH", $env:FANBAN_AI_SPEC_PATH),
+        @("FANBAN_AI_GATEWAY_CONFIG_PATH", $env:FANBAN_AI_GATEWAY_CONFIG_PATH),
         @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
         @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
     )
@@ -663,6 +815,10 @@ function Set-BackendRuntimeEnvironment {
         ("backend-env: {0}={1}" -f $name, $value) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
     }
     ("backend-env: FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME={0}" -f $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_CONFIG_PATH={0}" -f $env:FANBAN_AI_GATEWAY_CONFIG_PATH) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_PROFILE={0}" -f $env:FANBAN_AI_GATEWAY_PROFILE) |
         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 }
 
@@ -681,13 +837,34 @@ backend_runtime_root = str(Path.cwd())
 if backend_runtime_root not in sys.path:
     sys.path.insert(0, backend_runtime_root)
 
-required = ("FANBAN_SPEC_PATH", "FANBAN_RUNTIME_SPEC_PATH", "FANBAN_MECHANISM_SPEC_PATH")
+required = (
+    "FANBAN_SPEC_PATH",
+    "FANBAN_RUNTIME_SPEC_PATH",
+    "FANBAN_MECHANISM_SPEC_PATH",
+    "FANBAN_AI_SPEC_PATH",
+    "FANBAN_AI_GATEWAY_CONFIG_PATH",
+)
 for name in required:
     value = os.environ.get(name, "")
     if not value or not Path(value).is_file():
         raise SystemExit(f"{name} invalid: {value}")
 
 import API.app.main as main
+from src.config import load_ai_spec
+
+ai_spec = load_ai_spec(os.environ["FANBAN_AI_SPEC_PATH"])
+gateway = ai_spec.resolve_gateway()
+models = ai_spec.resolve_models()
+profile_name = ai_spec.resolve_gateway_profile_name()
+if profile_name != "terminal_cnpe_intranet_qwen_fast":
+    raise SystemExit(f"terminal AI gateway profile invalid: {profile_name}")
+ai_spec.validate_gateway_network_policy(required_network_mode="intranet_only")
+print(
+    "ai-config-preflight-ok",
+    f"profile={profile_name}",
+    f"model={models.chat.model}",
+    f"auth_required={bool(gateway.api_key_env_var)}",
+)
 print("backend-import-preflight-ok", main.create_app)
 '@
 
@@ -1126,6 +1303,8 @@ try {
     $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
     $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
     $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedAiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+    $managedAiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
     $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
     $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
     $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
@@ -1134,6 +1313,8 @@ try {
         -SpecPath $managedSpecPath `
         -RuntimeSpecPath $managedRuntimeSpecPath `
         -MechanismSpecPath $managedMechanismSpecPath `
+        -AiSpecPath $managedAiSpecPath `
+        -AiGatewayConfigPath $managedAiGatewayConfigPath `
         -CadScriptDir $managedCadScriptDir `
         -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
         -CtbName $managedCtbName
@@ -1163,7 +1344,12 @@ try {
             "--host",
             $ListenHost,
             "--port",
-            [string]$Port
+            [string]$Port,
+            "--workers",
+            "1",
+            "--proxy-headers",
+            "--forwarded-allow-ips",
+            "127.0.0.1"
         )
         $workerArgs = @(
             "-X",
@@ -1464,7 +1650,8 @@ $dirs = @(
     "jobs",
     "groups",
     "runtime",
-    "runtime\cad-slots"
+    "runtime\cad-slots",
+    "ai\skills"
 )
 
 foreach ($dir in $dirs) {
@@ -1525,6 +1712,27 @@ foreach ($prop in $envMap.PSObject.Properties) {
     }
     $escaped = $value.Replace("'", "''")
     $lines += ("Set-Item -Path 'Env:{0}' -Value '{1}'" -f $name, $escaped)
+}
+$aiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+if (Test-Path -LiteralPath $aiSpecPath -PathType Leaf) {
+    $escapedAiSpecPath = $aiSpecPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_SPEC_PATH' -Value '{0}'" -f $escapedAiSpecPath)
+}
+$aiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
+if (Test-Path -LiteralPath $aiGatewayConfigPath -PathType Leaf) {
+    $escapedAiGatewayConfigPath = $aiGatewayConfigPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_GATEWAY_CONFIG_PATH' -Value '{0}'" -f $escapedAiGatewayConfigPath)
+    $lines += "Set-Item -Path 'Env:FANBAN_AI_GATEWAY_PROFILE' -Value 'terminal_cnpe_intranet_qwen_fast'"
+}
+$ansysSkillRoot = Join-Path $root "storage\ai\skills\ansys-mapdl-18-2"
+if (Test-Path -LiteralPath $ansysSkillRoot -PathType Container) {
+    $escapedAnsysSkillRoot = $ansysSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_ANSYS_MAPDL_SKILL_ROOT' -Value '{0}'" -f $escapedAnsysSkillRoot)
+}
+$buildingStandardsSkillRoot = Join-Path $root "storage\ai\skills\building-structure-standards"
+if (Test-Path -LiteralPath $buildingStandardsSkillRoot -PathType Container) {
+    $escapedBuildingStandardsSkillRoot = $buildingStandardsSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_BUILDING_STANDARDS_SKILL_ROOT' -Value '{0}'" -f $escapedBuildingStandardsSkillRoot)
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
@@ -3059,6 +3267,7 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 - `python-packages/`: 随包分发的 Python site-packages
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
 - `documents/Resources/`: 受管打印和校准资源
+- `documents/AI/`: AI 模型接入配置
 - `documents_bin/`: 模板与词库资源
 - `scripts/`: 启动、探测、健康检查脚本
 - `install/`: 离线运行时安装脚本和安装器目录
@@ -3099,6 +3308,30 @@ if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查
 - `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
 - `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
 - `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
+
+## AI 模型接入检查
+
+- AI 接入参数集中在 `documents\AI\ai_model_gateway.yaml`。
+- 开发/测试环境默认使用 `development_minimax` profile，通过 MiniMax OpenAI-compatible API 验证。
+- 终端内网部署使用 `terminal_cnpe_intranet_qwen_fast` profile，对应 `http://models.ai.cnpe.cc/qwen_fast/v1/chat/completions`、模型 `Qwen3.6-35A3`、流式输出、无鉴权头。
+- `prepare_terminal.ps1` 会把 `FANBAN_AI_GATEWAY_CONFIG_PATH` 和 `FANBAN_AI_GATEWAY_PROFILE=terminal_cnpe_intranet_qwen_fast` 写入 `scripts\runtime.env.ps1`，后端启动时会自动加载。
+- 部署机上可执行 `scripts\test_ai_model_connectivity.ps1` 生成连通性诊断 JSON；默认输出到 `storage\ai\diagnostics\ai-connectivity-*.json`。
+- 诊断 JSON 的 `script.sha256` 应与同包 `package-manifest.json` 中 `scripts/test_ai_model_connectivity.ps1` 的 SHA-256 一致，`environment.config_sha256` 用于确认实际读取的网关配置版本。
+- 流式检查会重组多个 SSE delta 后再校验标记；部分兼容网关在完整响应后直接关闭连接而不发送 `[DONE]`，因此 `done_received=false` 不能单独判定为失败，应结合 `status_code`、`response_contains_expected`、`invalid_data_line_count` 和总状态判断。
+
+开发/测试环境验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1
+```
+
+终端内网链路验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1 -Profile terminal_cnpe_intranet_qwen_fast
+```
+
+脚本会检查配置解析、DNS、TCP、模型列表、非流式对话和流式对话；不会把 API key 明文写入控制台或 JSON。
 
 ## 一致性边界
 
@@ -3212,6 +3445,8 @@ def build_terminal_deploy_package(
     for entry in copy_plan:
         _copy_entry(entry, output_root)
 
+    _materialize_ansys_mapdl_skill(repo_root, output_root)
+    _materialize_building_standards_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)

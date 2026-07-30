@@ -1,0 +1,18 @@
+{
+  "current": 1,
+  "pages": 1,
+  "records": [
+    {
+      "actDate": 1498838400000,
+      "chName": "核电厂初步设计文件内容深度规定",
+      "chargeDept": "国家能源局",
+      "code": "NB/T 20401-2017",
+      "industry": "能源",
+      "issueDate": 1486656000000,
+      "pk": "c7e0abc898abe7e5a56099227d3de07f",
+      "status": "现行"
+    }
+  ],
+  "size": 15,
+  "total": 1
+}

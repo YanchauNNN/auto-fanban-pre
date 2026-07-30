@@ -10,6 +10,7 @@ from . import bootstrap  # noqa: F401
 from .management_services import ManagementServices
 from .routers.accounts import router as accounts_router
 from .routers.admin import router as admin_router
+from .routers.ai import router as ai_router
 from .routers.auth import router as auth_router
 from .routers.jobs import router as jobs_router
 from .routers.meta import router as meta_router
@@ -74,6 +75,7 @@ def create_app(
     app.include_router(workflow_router)
     app.include_router(workload_router)
     app.include_router(admin_router)
+    app.include_router(ai_router)
     return app
 
 

@@ -10,11 +10,25 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastApiTestClient
 
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
 from src.pipeline.sqlite_queue import SQLiteQueueStore
+
+
+class TestClient(FastApiTestClient):
+    """Use the default administrator for tests of protected job endpoints."""
+
+    def __enter__(self):
+        client = super().__enter__()
+        response = client.post(
+            "/api/auth/login",
+            json={"account_id": "hbjjswd", "password": "password"},
+        )
+        assert response.status_code == 200, response.text
+        client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+        return client
 
 
 class RecordingProcessor:

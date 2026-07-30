@@ -79,6 +79,13 @@ function createAdapter(): ApiAdapter {
     listJobs: vi.fn(),
     getJobsActivity: vi.fn(),
     getJobDetail: vi.fn(),
+    getAiState: vi.fn(),
+    listAiConversations: vi.fn(),
+    createAiConversation: vi.fn(),
+    getAiConversation: vi.fn(),
+    renameAiConversation: vi.fn(),
+    sendAiMessage: vi.fn(),
+    clearAiConversation: vi.fn(),
   };
 }
 

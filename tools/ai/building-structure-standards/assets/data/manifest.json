@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "skill_id": "building_structure_standards",
+  "skill_directory": "building-structure-standards",
+  "generated_at": "2026-07-20T10:34:27+00:00",
+  "package_scope": "私有内部离线检索",
+  "authorization_notice": "仅收录官方社会公开或已明确授权用于内部离线检索的全文；审计目录中无授权全文的条目不进入正文索引。",
+  "confidentiality": "内部；受控 JT/CP 语料如后续加入应实施最小权限",
+  "audit": {
+    "record_count": 509,
+    "major_counts": {
+      "建筑": 338,
+      "总图": 104,
+      "结构": 67
+    },
+    "source_type_counts": {
+      "内部CP标准": 94,
+      "内部JT技术规格": 126,
+      "团体标准": 1,
+      "国家建筑标准设计图集": 112,
+      "国家强制性标准": 39,
+      "国家推荐性标准": 63,
+      "核安全法规": 1,
+      "行业标准": 51,
+      "项目文件或待分类": 22
+    }
+  },
+  "corpus": {
+    "source_count": 1,
+    "page_count": 36,
+    "clause_count": 110,
+    "table_count": 0,
+    "warnings": [],
+    "database_sha256": "01eef258d3ec05739347f9082dbb7d0b07b917f896f5b9e2f778a8fa3206f040",
+    "skipped_sources": [],
+    "manifest_sha256": "bbecde00f0a0e53e98f79a7fb4e1da26942a5d9018a68d35fb52d6bafab2ecec"
+  },
+  "validation": {
+    "case_count": 72,
+    "passed_count": 72,
+    "failed_count": 0,
+    "pass_rate": 1.0,
+    "categories": {
+      "概念检索": {
+        "case_count": 12,
+        "passed_count": 12
+      },
+      "版本与废止状态": {
+        "case_count": 8,
+        "passed_count": 8
+      },
+      "精确条款": {
+        "case_count": 36,
+        "passed_count": 36
+      },
+      "证据不足": {
+        "case_count": 10,
+        "passed_count": 10
+      },
+      "跨规范建议": {
+        "case_count": 6,
+        "passed_count": 6
+      }
+    },
+    "database_sha256": "01eef258d3ec05739347f9082dbb7d0b07b917f896f5b9e2f778a8fa3206f040",
+    "catalog_sha256": "c140e4a808c3c2034d7ba1ce0af09629920d66dfacb3f6036aa92d5df0d1abe6",
+    "cases_sha256": "d863134de205bfbf3ab5a412c3d188928bcb55c235fc50da7b6de014fa23bfcd"
+  },
+  "source_manifest_sha256": "bbecde00f0a0e53e98f79a7fb4e1da26942a5d9018a68d35fb52d6bafab2ecec",
+  "authorized_source_count": 1,
+  "files": [
+    {
+      "path": "agents/openai.yaml",
+      "size": 352,
+      "sha256": "101e817dd2fd94cb358c445710228da3ba5f2468d6e323ca66e17c723301e135"
+    },
+    {
+      "path": "assets/data/audit_catalog.json",
+      "size": 580538,
+      "sha256": "c140e4a808c3c2034d7ba1ce0af09629920d66dfacb3f6036aa92d5df0d1abe6"
+    },
+    {
+      "path": "assets/data/parse_report.json",
+      "size": 316,
+      "sha256": "17339112d383e1cdbd99fe46e068cef553665c74e00bd64a4caeb38d62ba4161"
+    },
+    {
+      "path": "assets/data/source_manifest.json",
+      "size": 1149,
+      "sha256": "bbecde00f0a0e53e98f79a7fb4e1da26942a5d9018a68d35fb52d6bafab2ecec"
+    },
+    {
+      "path": "assets/data/sources/HAF101-2023-核动力厂厂址评价安全规定.pdf",
+      "size": 607999,
+      "sha256": "9ba15fd47970b286f7af01ece2c2c7b88dac407dda9af87bcb56fd799ef8b93c"
+    },
+    {
+      "path": "assets/data/standards.sqlite",
+      "size": 344064,
+      "sha256": "01eef258d3ec05739347f9082dbb7d0b07b917f896f5b9e2f778a8fa3206f040"
+    },
+    {
+      "path": "assets/data/validation_report.json",
+      "size": 23807,
+      "sha256": "75172fb1bc3ee7b920c925f407b3045f77855cd227a82dbf249d6336e2236707"
+    },
+    {
+      "path": "assets/reports/建筑结构总图规范语料获取审计表.xlsx",
+      "size": 79102,
+      "sha256": "4aa44d8bf1969ec6bec5c6cd8d19bd19e948afb217703fc9381d9985560d5f69"
+    },
+    {
+      "path": "references/authorization-boundary.md",
+      "size": 1335,
+      "sha256": "b964304240efa2443ccf9b0fd725e9ac117b50947b87f3dd9a0be4537db8d0c0"
+    },
+    {
+      "path": "references/gold_cases.json",
+      "size": 21984,
+      "sha256": "d863134de205bfbf3ab5a412c3d188928bcb55c235fc50da7b6de014fa23bfcd"
+    },
+    {
+      "path": "references/query-guide.md",
+      "size": 2459,
+      "sha256": "bae203be3b73689305dbf33585733ad1a2971c0bc781c029aeffddcbec173548"
+    },
+    {
+      "path": "references/validation_set.yaml",
+      "size": 4657,
+      "sha256": "52c7bf185b837f9c9c2632f48531f7e317c59d23ca1a4b5b555385362549be75"
+    },
+    {
+      "path": "scripts/build_corpus.py",
+      "size": 23706,
+      "sha256": "5ad0d90f7ecae646297019f8cb8ef26b77f25b8496093dba524ab2f7fc2e2a6f"
+    },
+    {
+      "path": "scripts/generate_gold_cases.py",
+      "size": 7408,
+      "sha256": "205206adcf7fc4006b846e56fd67e3c0387221b33ca2ec87ed1013b020a535b4"
+    },
+    {
+      "path": "scripts/standards_query.py",
+      "size": 16718,
+      "sha256": "51721ffc5a5442e2777a58ed1931b21b4cb753a8a8850b3619a3eefa401cac51"
+    },
+    {
+      "path": "scripts/validate_skill.py",
+      "size": 6404,
+      "sha256": "7bdf353f5a23e8f1bd390db741713bfa0f0aed7bb5fe04390302225a96c955d3"
+    },
+    {
+      "path": "SKILL.md",
+      "size": 5176,
+      "sha256": "8271fcc4d3248d5d58c0d53a8e378573a2914e14515a5f877ca450159b5d1db1"
+    }
+  ]
+}

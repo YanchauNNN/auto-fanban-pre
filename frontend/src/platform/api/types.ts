@@ -32,10 +32,56 @@ export type AuditReplaceUnitOption = {
   label: string;
 };
 
+export type WorkflowFactorSchema = {
+  default: number;
+  min: number;
+  max: number;
+  precision: number;
+};
+
+export type WorkloadStatusOption = {
+  label: string;
+  value: string;
+};
+
+export type ManagementSchema = {
+  account: {
+    fieldMap: {
+      officeCode: string;
+      officeName: string;
+      accountId: string;
+      displayName: string;
+      role: string;
+      password: string;
+    };
+    validRoles: readonly string[];
+    adminRoles: readonly string[];
+    adminCreatedDefaultPassword: string;
+  };
+  workflow: {
+    terminalStatus: string;
+    archiveTriggerStatus?: string;
+    factor: WorkflowFactorSchema;
+    statusLabels: Record<string, string>;
+    nodeLabels: Record<string, string>;
+    emptyCurrentNodeLabel: string;
+  };
+  workload: {
+    settlementTrigger: string;
+    scopeRoles: Record<string, readonly string[]>;
+    scopeLabels: Record<string, string>;
+    statusOptions: readonly WorkloadStatusOption[];
+  };
+  archive?: {
+    statusLabels: Record<string, string>;
+  };
+};
+
 export type FormSchema = {
   schemaVersion: string;
   uploadLimits: UploadLimits;
   sections: readonly FormSection[];
+  management?: ManagementSchema;
   auditReplaceProjectOptions?: readonly string[];
   auditReplaceProjectUnits?: Record<string, readonly string[]>;
   auditReplaceSourceUnitOptions?: Record<string, readonly AuditReplaceUnitOption[]>;
@@ -72,6 +118,267 @@ export type PingStatus = {
   ok: boolean;
   serverTime: string;
   version?: string | null;
+};
+
+export type CurrentAccount = {
+  accountId: string;
+  displayName: string;
+  role: string;
+  officeCode: string | null;
+  officeName: string | null;
+  valid: boolean;
+  pendingTodoCount: number;
+};
+
+export type LoginRequest = {
+  accountId: string;
+  password: string;
+};
+
+export type LoginResponse = {
+  token: string;
+  account: CurrentAccount;
+};
+
+export type AccountRecord = {
+  officeCode: string | null;
+  officeName: string | null;
+  accountId: string;
+  displayName: string;
+  role: string;
+  password: string;
+  valid: boolean;
+  rowNumber: number | null;
+  errors: string[];
+};
+
+export type AccountListResponse = {
+  items: AccountRecord[];
+};
+
+export type InvalidAccountRow = {
+  rowNumber: number;
+  raw: Record<string, string>;
+  errors: string[];
+};
+
+export type InvalidAccountRowList = {
+  items: InvalidAccountRow[];
+};
+
+export type AdminConfig = {
+  archiveRootPath: string | null;
+};
+
+export type AccountCreatePayload = {
+  officeCode: string | null;
+  officeName: string | null;
+  accountId: string;
+  displayName: string;
+  role: string;
+  password: string;
+};
+
+export type AccountUpdatePayload = {
+  officeCode?: string | null;
+  officeName?: string | null;
+  accountId?: string;
+  displayName?: string;
+  role?: string;
+  password?: string;
+};
+
+export type PersonnelCandidate = {
+  accountId: string;
+  displayName: string;
+  role: string;
+  officeCode: string | null;
+  officeName: string | null;
+  valid: boolean;
+};
+
+export type NormalizedPersonnel = {
+  fieldName: string;
+  rawValue: string | null;
+  normalizedValue: string | null;
+  matchedAccount: string | null;
+  matchedName: string | null;
+  matchStrategy: string | null;
+  status: string;
+  errors: string[];
+};
+
+export type PersonnelNormalizationResult = {
+  normalized: NormalizedPersonnel;
+  candidates: PersonnelCandidate[];
+};
+
+export type PersonnelSnapshot = {
+  members: Record<string, NormalizedPersonnel>;
+};
+
+export type TaskOwnerSnapshot = {
+  creatorAccount: string;
+  creatorName: string;
+  creatorRole: string;
+  creatorOffice: string | null;
+  createdByScope: string;
+  submittedAt: string | null;
+};
+
+export type WorkflowNodeState = {
+  nodeKey: string;
+  nodeLabel: string;
+  assigneeAccount: string | null;
+  assigneeName: string | null;
+  status: string;
+  factor: number;
+  approvedAt: string | null;
+  actedByAccount: string | null;
+  actedByName: string | null;
+};
+
+export type WorkflowState = {
+  status: string;
+  initiatedAt: string | null;
+  initiatedByAccount: string | null;
+  initiatedByName: string | null;
+  duplicatePolicy: string | null;
+  overwriteArchiveTarget: string | null;
+  currentNodeKey: string | null;
+  nodes: WorkflowNodeState[];
+  archiveStatus: string | null;
+  archiveRetryCount: number;
+  archiveLastError: string | null;
+  archiveLastAttemptAt: string | null;
+};
+
+export type ArchiveState = {
+  archiveRootPath: string | null;
+  targetDir: string | null;
+  status: string;
+  overwriteMode: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
+  retryCount: number;
+  lastAttemptAt: string | null;
+  archivedFiles: string[];
+};
+
+export type ReplacementState = {
+  albumInternalCode: string | null;
+  revision: string | null;
+  replacedGroupId: string | null;
+  replacedRecordPendingDelete: boolean;
+};
+
+export type LegacyVisibilityState = {
+  scope: string;
+  reason: string | null;
+};
+
+export type WorkloadContributorEntry = {
+  roleKey: string;
+  accountId: string | null;
+  displayName: string | null;
+  workloadA1: number;
+  settledAt: string | null;
+};
+
+export type WorkloadQueryParams = {
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  validOnly?: boolean;
+};
+
+export type WorkloadQueryFilters = {
+  startDate: string | null;
+  endDate: string | null;
+  status: string | null;
+  validOnly: boolean;
+};
+
+export type WorkloadScopeEntry = {
+  roleKey: string;
+  accountId: string | null;
+  displayName: string | null;
+  workloadA1: number;
+  settledAt: string | null;
+  groupId: string;
+  groupDisplayName: string | null;
+  albumInternalCode: string | null;
+  settlementStatus: string;
+};
+
+export type WorkloadScopeResponse = {
+  scope: string;
+  filters: WorkloadQueryFilters;
+  officeName: string | null;
+  totalWorkloadA1: number;
+  totalsByAccount: Record<string, number>;
+  entries: WorkloadScopeEntry[];
+};
+
+export type TaskGroupSummary = {
+  groupId: string;
+  displayName: string | null;
+  albumInternalCode: string | null;
+  batchId: string | null;
+  projectNo: string | null;
+  status: string;
+  createdAt: string;
+  sourceFilenames: string[];
+  ownerSnapshot: TaskOwnerSnapshot | null;
+  creatorName: string | null;
+  creatorAccount: string | null;
+  creatorOffice: string | null;
+  workflowStatus: string;
+  currentNodeKey: string | null;
+  archiveStatus: string;
+  workload: WorkloadSummary;
+  effectiveWorkload: number;
+  canViewDetail: boolean;
+  canSubmit: boolean;
+  canApprove: boolean;
+  isRelatedToCurrentUser: boolean;
+};
+
+export type TaskGroupDetail = TaskGroupSummary & {
+  childJobIds: string[];
+  personnelSnapshot: PersonnelSnapshot;
+  workflow: WorkflowState;
+  archive: ArchiveState;
+  replacement: ReplacementState;
+  legacyVisibility: LegacyVisibilityState;
+};
+
+export type TaskGroupList = {
+  total: number;
+  items: TaskGroupSummary[];
+};
+
+export type TaskGroupSubmitPayload = {
+  overwriteArchiveExisting: boolean;
+  cancelExistingInProgress: boolean;
+};
+
+export type WorkflowMonitorItem = TaskGroupSummary;
+
+export type WorkflowMonitorList = {
+  total: number;
+  items: WorkflowMonitorItem[];
+};
+
+export type WorkflowApprovePayload = {
+  factor: number;
+  nodeKey?: string | null;
+};
+
+export type WorkflowRepairPayload = {
+  replaceWithAccountId?: string;
+  createAccountPayload?: AccountCreatePayload;
 };
 
 export type JobArtifacts = {
@@ -211,8 +518,10 @@ export type WorkloadSummary = {
   oneReviewFactor: number;
   twoReviewFactor: number;
   threeReviewFactor: number;
+  nodeFactors: Record<string, number>;
   settlementStatus: string;
   settledAt: string | null;
+  contributorEntries: WorkloadContributorEntry[];
 };
 
 export type SubmissionParams = Record<string, unknown>;
@@ -235,6 +544,10 @@ export type JobSummary = {
   groupId: string | null;
   sourceFilename: string;
   sourceFilenames: string[];
+  ownerSnapshot?: TaskOwnerSnapshot | null;
+  creatorName?: string | null;
+  creatorAccount?: string | null;
+  creatorOffice?: string | null;
   taskKind: TaskKind | null;
   jobMode: string | null;
   projectNo: string | null;
@@ -317,6 +630,103 @@ export type JobsActivity = {
   lastChangedAt: string | null;
 };
 
+export type AiAgent = {
+  agentId: string;
+  name: string;
+  description: string;
+};
+
+export type AiSkill = {
+  skillId: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  readOnly: boolean;
+};
+
+export type AiMcpServer = {
+  serverId: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  readOnly: boolean;
+  transport?: string;
+};
+
+export type AiAttachmentCapabilities = {
+  enabled: boolean;
+  allowedExtensions: string[];
+  maxFilesPerMessage: number;
+  maxImageSizeMb: number;
+  maxFileSizeMb: number;
+  maxTotalSizeMbPerMessage: number;
+};
+
+export type AiAttachment = {
+  attachmentId: string;
+  conversationId: string;
+  messageId?: string | null;
+  originalName: string;
+  mediaType: string;
+  kind: "image" | "document" | "drawing" | "unknown" | string;
+  sizeBytes: number;
+  sha256: string;
+  status: "uploaded" | "ready" | "failed" | string;
+  metadata: Record<string, unknown>;
+  errorCode?: string | null;
+  createdAt: string;
+};
+
+export type AiState = {
+  enabled: boolean;
+  profile: string;
+  model: string;
+  ownerKey: string;
+  defaultAgent: string;
+  attachments: AiAttachmentCapabilities;
+  agents: AiAgent[];
+  skills: AiSkill[];
+  mcpServers: AiMcpServer[];
+};
+
+export type AiConversationSummary = {
+  conversationId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+};
+
+export type AiMessage = {
+  messageId: string;
+  role: "system" | "user" | "assistant" | string;
+  content: string;
+  createdAt: string;
+  modelProfile?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type AiConversationDetail = AiConversationSummary & {
+  messages: AiMessage[];
+};
+
+export type SendAiMessagePayload = {
+  content: string;
+  agentId?: string | null;
+  skillIds?: string[];
+  mcpServerIds?: string[];
+  attachmentIds?: string[];
+};
+
+export type AiSendMessageResult = {
+  conversationId: string;
+  userMessage: AiMessage;
+  assistantMessage: AiMessage;
+  memory: {
+    usedHistoryMessages: number;
+  };
+};
+
 export type CreateBatchPayload = {
   batchId: string;
   jobs: JobSummary[];
@@ -373,6 +783,28 @@ export type ApiError = {
 
 export type ApiAdapter = {
   ping: () => Promise<PingStatus>;
+  login?: (payload: LoginRequest) => Promise<LoginResponse>;
+  logout?: () => Promise<{ ok: boolean }>;
+  getMe?: () => Promise<CurrentAccount>;
+  changePassword?: (newPassword: string) => Promise<CurrentAccount>;
+  normalizePersonnel?: (
+    fieldName: string,
+    rawValue: string | null,
+  ) => Promise<PersonnelNormalizationResult>;
+  getWorkloadMe?: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadOffice?: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadInstitute?: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkloadAdmin?: (filters?: WorkloadQueryParams) => Promise<WorkloadScopeResponse>;
+  getWorkflowMonitor?: () => Promise<WorkflowMonitorList>;
+  approveWorkflow?: (groupId: string, payload: WorkflowApprovePayload) => Promise<void>;
+  repairCurrentNode?: (groupId: string, payload: WorkflowRepairPayload) => Promise<void>;
+  listAccounts?: () => Promise<AccountListResponse>;
+  listInvalidAccountRows?: () => Promise<InvalidAccountRowList>;
+  createAccount?: (payload: AccountCreatePayload) => Promise<AccountRecord>;
+  updateAccount?: (accountId: string, payload: AccountUpdatePayload) => Promise<AccountRecord>;
+  updateAccountRow?: (rowNumber: number, payload: AccountUpdatePayload) => Promise<AccountRecord>;
+  getAdminConfig?: () => Promise<AdminConfig>;
+  patchAdminConfig?: (payload: AdminConfig) => Promise<AdminConfig>;
   getHealth: () => Promise<HealthStatus>;
   getFormSchema: () => Promise<FormSchema>;
   preflightFonts: (files: File[]) => Promise<FontPreflightResult>;
@@ -392,6 +824,16 @@ export type ApiAdapter = {
     batchId?: string,
   ) => Promise<CreateBatchPayload>;
   createAuditReplace: (params: CreateAuditReplaceParams) => Promise<CreateBatchPayload>;
+  listTaskGroups?: () => Promise<TaskGroupList>;
+  getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;
+  submitTaskGroup?: (
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ) => Promise<TaskGroupDetail>;
+  restartSubmitTaskGroup?: (
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ) => Promise<TaskGroupDetail>;
   rememberAuditReplaceFactoryCodes: (
     codes: readonly string[],
   ) => Promise<{ factoryCodes: readonly string[] }>;
@@ -402,4 +844,30 @@ export type ApiAdapter = {
     onError?: (event: Event) => void,
   ) => () => void;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
+  readArtifact?: (url: string) => Promise<Blob>;
+  downloadArtifact?: (url: string, fallbackFilename?: string) => Promise<void>;
+  getAiState: (signal?: AbortSignal) => Promise<AiState>;
+  listAiConversations: (signal?: AbortSignal) => Promise<AiConversationSummary[]>;
+  createAiConversation: (title?: string) => Promise<AiConversationSummary>;
+  getAiConversation: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<AiConversationDetail>;
+  renameAiConversation: (
+    conversationId: string,
+    title: string,
+  ) => Promise<AiConversationSummary>;
+  sendAiMessage: (
+    conversationId: string,
+    payload: SendAiMessagePayload,
+    signal?: AbortSignal,
+  ) => Promise<AiSendMessageResult>;
+  clearAiConversation: (conversationId: string) => Promise<void>;
+  deleteAiConversation?: (conversationId: string) => Promise<void>;
+  uploadAiAttachment?: (conversationId: string, file: File) => Promise<AiAttachment>;
+  listAiAttachments?: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<AiAttachment[]>;
+  deleteAiAttachment?: (conversationId: string, attachmentId: string) => Promise<void>;
 };

@@ -20,6 +20,18 @@ const mockListJobs = vi.fn();
 const mockGetJobsActivity = vi.fn();
 const mockSubscribeJobsActivity = vi.fn();
 const mockGetJobDetail = vi.fn();
+const mockGetMe = vi.fn();
+const mockLogin = vi.fn();
+const mockLogout = vi.fn();
+const mockReadArtifact = vi.fn();
+const mockGetAiState = vi.fn();
+const mockListAiConversations = vi.fn();
+const mockCreateAiConversation = vi.fn();
+const mockGetAiConversation = vi.fn();
+const mockRenameAiConversation = vi.fn();
+const mockSendAiMessage = vi.fn();
+const mockClearAiConversation = vi.fn();
+const mockDeleteAiConversation = vi.fn();
 const mockFetch = vi.fn();
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
@@ -56,6 +68,10 @@ vi.mock("react-pdf", () => ({
 
 vi.mock("../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
+    login: mockLogin,
+    logout: mockLogout,
+    getMe: mockGetMe,
+    readArtifact: mockReadArtifact,
     ping: mockPing,
     getHealth: mockGetHealth,
     getFormSchema: mockGetFormSchema,
@@ -67,11 +83,20 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     getJobsActivity: mockGetJobsActivity,
     subscribeJobsActivity: mockSubscribeJobsActivity,
     getJobDetail: mockGetJobDetail,
+    getAiState: mockGetAiState,
+    listAiConversations: mockListAiConversations,
+    createAiConversation: mockCreateAiConversation,
+    getAiConversation: mockGetAiConversation,
+    renameAiConversation: mockRenameAiConversation,
+    sendAiMessage: mockSendAiMessage,
+    clearAiConversation: mockClearAiConversation,
+    deleteAiConversation: mockDeleteAiConversation,
   }),
 }));
 
 beforeEach(() => {
   window.history.pushState({}, "", "/");
+  window.localStorage.clear();
 
   mockPing.mockReset();
   mockGetHealth.mockReset();
@@ -84,10 +109,35 @@ beforeEach(() => {
   mockGetJobsActivity.mockReset();
   mockSubscribeJobsActivity.mockReset();
   mockGetJobDetail.mockReset();
+  mockGetMe.mockReset();
+  mockLogin.mockReset();
+  mockLogout.mockReset();
+  mockReadArtifact.mockReset();
+  window.localStorage.setItem("auth_token", "test-access-token");
+  mockGetAiState.mockReset();
+  mockListAiConversations.mockReset();
+  mockCreateAiConversation.mockReset();
+  mockGetAiConversation.mockReset();
+  mockRenameAiConversation.mockReset();
+  mockSendAiMessage.mockReset();
+  mockClearAiConversation.mockReset();
+  mockDeleteAiConversation.mockReset();
 
   mockPing.mockResolvedValue({
     ok: true,
     serverTime: "2026-03-08T10:20:29+08:00",
+  });
+  mockGetMe.mockResolvedValue({
+    accountId: "test-user",
+    displayName: "测试用户",
+    role: "管理员",
+    officeCode: "25C0",
+    officeName: "建筑结构所",
+    valid: true,
+    pendingTodoCount: 0,
+  });
+  mockReadArtifact.mockResolvedValue({
+    arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
   });
   mockGetHealth.mockResolvedValue({
     status: "ok",
@@ -143,6 +193,90 @@ beforeEach(() => {
     replacementOptions: [],
     requiresConfirmation: false,
   });
+  mockGetAiState.mockResolvedValue({
+    enabled: true,
+    profile: "development_minimax",
+    model: "MiniMax-M3",
+    ownerKey: "ip:127.0.0.1",
+    defaultAgent: "general_assistant",
+    agents: [
+      {
+        agentId: "general_assistant",
+        name: "通用对话",
+        description: "自由对话与只读信息查询",
+      },
+      {
+        agentId: "business_agent",
+        name: "业务 Agent",
+        description: "统一处理图纸、任务与模板业务",
+      },
+    ],
+    skills: [],
+    mcpServers: [],
+  });
+  mockListAiConversations.mockResolvedValue([
+    {
+      conversationId: "conv-1",
+      title: "记忆验证",
+      createdAt: "2026-07-11T10:00:00+08:00",
+      updatedAt: "2026-07-11T10:02:00+08:00",
+      messageCount: 2,
+    },
+  ]);
+  mockGetAiConversation.mockResolvedValue({
+    conversationId: "conv-1",
+    title: "记忆验证",
+    createdAt: "2026-07-11T10:00:00+08:00",
+    updatedAt: "2026-07-11T10:02:00+08:00",
+    messages: [
+      {
+        messageId: "msg-1",
+        role: "user",
+        content: "请记住我的测试编号是 AI-0711",
+        createdAt: "2026-07-11T10:01:00+08:00",
+      },
+      {
+        messageId: "msg-2",
+        role: "assistant",
+        content: "我已记住 AI-0711",
+        createdAt: "2026-07-11T10:01:04+08:00",
+      },
+    ],
+  });
+  mockCreateAiConversation.mockResolvedValue({
+    conversationId: "conv-new",
+    title: "新会话",
+    createdAt: "2026-07-11T10:03:00+08:00",
+    updatedAt: "2026-07-11T10:03:00+08:00",
+    messageCount: 0,
+  });
+  mockRenameAiConversation.mockResolvedValue({
+    conversationId: "conv-1",
+    title: "规则提炼会话",
+    createdAt: "2026-07-11T10:00:00+08:00",
+    updatedAt: "2026-07-11T10:04:00+08:00",
+    messageCount: 2,
+  });
+  mockSendAiMessage.mockResolvedValue({
+    conversationId: "conv-1",
+    userMessage: {
+      messageId: "msg-3",
+      role: "user",
+      content: "我刚才的测试编号是什么？",
+      createdAt: "2026-07-11T10:03:00+08:00",
+    },
+    assistantMessage: {
+      messageId: "msg-4",
+      role: "assistant",
+      content: "你的测试编号是 AI-0711。",
+      createdAt: "2026-07-11T10:03:02+08:00",
+    },
+    memory: {
+      usedHistoryMessages: 2,
+    },
+  });
+  mockClearAiConversation.mockResolvedValue(undefined);
+  mockDeleteAiConversation.mockResolvedValue(undefined);
 
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
@@ -322,6 +456,545 @@ describe("homepage shell", () => {
     expect(screen.queryByText("平台概览")).not.toBeInTheDocument();
     expect(screen.queryByText("账号模块预留")).not.toBeInTheDocument();
     expect(screen.queryByText("工作量模块预留")).not.toBeInTheDocument();
+    expect(within(toolbar).queryByRole("button", { name: "AI 助手" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开 AI 助手" })).toBeInTheDocument();
+  });
+
+  it("opens the floating AI drawer and sends a message with conversation memory", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(document.body.style.overflow).toBe("");
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    expect(document.body.style.overflow).toBe("hidden");
+
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    expect(within(drawer).getByText("MiniMax-M3")).toBeInTheDocument();
+    expect(within(drawer).getByText("development_minimax")).toBeInTheDocument();
+    const modeSelect = within(drawer).getByRole("combobox", { name: "对话模式" });
+    expect(within(modeSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "通用对话",
+      "业务 Agent",
+    ]);
+    expect(within(drawer).queryByText("能力设置")).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText("技能")).not.toBeInTheDocument();
+    expect(within(drawer).queryByLabelText("MCP 能力")).not.toBeInTheDocument();
+    expect(within(drawer).getAllByText("记忆验证")).toHaveLength(1);
+    expect(within(drawer).getByText("请记住我的测试编号是 AI-0711")).toBeInTheDocument();
+    expect(within(drawer).getByText("我已记住 AI-0711")).toBeInTheDocument();
+
+    await user.type(within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" }), "我刚才的测试编号是什么？");
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockSendAiMessage).toHaveBeenCalledWith(
+        "conv-1",
+        {
+          content: "我刚才的测试编号是什么？",
+          agentId: "general_assistant",
+          skillIds: [],
+          mcpServerIds: [],
+        },
+        expect.any(AbortSignal),
+      );
+    });
+    expect(await within(drawer).findByText("你的测试编号是 AI-0711。")).toBeInTheDocument();
+    expect(within(drawer).getByText("已使用 2 条历史消息")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "关闭 AI 助手" }));
+    await screen.findByRole("button", { name: "打开 AI 助手" });
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("renders assistant Markdown while keeping user messages as literal text", async () => {
+    const user = userEvent.setup();
+    mockGetAiConversation.mockResolvedValueOnce({
+      conversationId: "conv-1",
+      title: "格式验证",
+      createdAt: "2026-07-20T09:00:00+08:00",
+      updatedAt: "2026-07-20T09:01:00+08:00",
+      messages: [
+        {
+          messageId: "format-user",
+          role: "user",
+          content: "**用户输入不加粗**",
+          createdAt: "2026-07-20T09:00:00+08:00",
+        },
+        {
+          messageId: "format-assistant",
+          role: "assistant",
+          content: [
+            "## APDL 示例",
+            "",
+            "- 保留列表",
+            "",
+            "```apdl",
+            "/PREP7",
+            "ET,1,SOLID185",
+            "```",
+          ].join("\n"),
+          createdAt: "2026-07-20T09:01:00+08:00",
+        },
+      ],
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    const userText = await within(drawer).findByText("**用户输入不加粗**");
+    expect(userText.tagName).toBe("P");
+    expect(userText.closest("article")?.querySelector("strong")).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("heading", { name: "APDL 示例" })).toBeInTheDocument();
+    expect(within(drawer).getByText("保留列表").closest("li")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "复制 APDL 代码" })).toBeInTheDocument();
+  });
+
+  it("keeps keyboard focus in the AI dialog and restores the collapsed trigger", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+
+    const backgroundButton = screen.getByRole("button", { name: "教程" });
+    backgroundButton.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(drawer).toContainElement(document.activeElement as HTMLElement);
+
+    backgroundButton.focus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    const collapsedTrigger = await screen.findByRole("button", { name: "打开 AI 助手" });
+    await waitFor(() => expect(collapsedTrigger).toHaveFocus());
+  });
+
+  it("resizes the AI drawer from its accessible resize handle and remembers the size", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    const handle = within(drawer).getByRole("separator", { name: "调整 AI 助手窗口大小" });
+    const initialWidth = drawer.style.getPropertyValue("--ai-drawer-width");
+    const initialHeight = drawer.style.getPropertyValue("--ai-drawer-height");
+
+    expect(Number.parseInt(initialWidth, 10)).toBeGreaterThanOrEqual(700);
+    expect(Number.parseInt(initialHeight, 10)).toBe(window.innerHeight);
+
+    fireEvent.pointerDown(handle, { clientX: 960, clientY: 80 });
+    expect(handle).toHaveFocus();
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+
+    expect(drawer.style.getPropertyValue("--ai-drawer-width")).not.toBe(initialWidth);
+    expect(window.localStorage.getItem("fanban.ai.drawerSize")).toContain("width");
+  });
+
+  it("shows a user message and thinking state immediately and cancels the browser wait", async () => {
+    const user = userEvent.setup();
+    let requestSignal: AbortSignal | undefined;
+    mockSendAiMessage.mockImplementation(
+      (_conversationId: string, _payload: unknown, signal?: AbortSignal) => {
+        requestSignal = signal;
+        return new Promise((_, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("The request was aborted.", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    const composer = within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" });
+    await user.type(composer, "请立即显示这条消息");
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+
+    expect(await within(drawer).findByText("请立即显示这条消息")).toBeInTheDocument();
+    expect(within(drawer).getByText("AI 正在思考")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "停止等待" }));
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    expect(within(drawer).queryByText("AI 正在思考")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("已停止等待")).toBeInTheDocument();
+    await waitFor(() => expect(composer).not.toBeDisabled());
+    expect(mockGetAiConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the displayed memory count when switching AI conversations", async () => {
+    const user = userEvent.setup();
+    const firstConversation = await mockGetAiConversation();
+    mockListAiConversations.mockResolvedValue([
+      {
+        conversationId: "conv-1",
+        title: "会话一",
+        createdAt: "2026-07-11T10:00:00+08:00",
+        updatedAt: "2026-07-11T10:02:00+08:00",
+        messageCount: 2,
+      },
+      {
+        conversationId: "conv-2",
+        title: "会话二",
+        createdAt: "2026-07-11T11:00:00+08:00",
+        updatedAt: "2026-07-11T11:01:00+08:00",
+        messageCount: 1,
+      },
+    ]);
+    mockGetAiConversation.mockReset();
+    mockGetAiConversation.mockImplementation((conversationId: string) =>
+      Promise.resolve(
+        conversationId === "conv-2"
+          ? {
+              conversationId: "conv-2",
+              title: "会话二",
+              createdAt: "2026-07-11T11:00:00+08:00",
+              updatedAt: "2026-07-11T11:01:00+08:00",
+              messageCount: 1,
+              messages: [
+                {
+                  messageId: "conv-2-msg",
+                  role: "assistant",
+                  content: "第二个会话",
+                  createdAt: "2026-07-11T11:01:00+08:00",
+                },
+              ],
+            }
+          : { ...firstConversation, title: "会话一" },
+      ),
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    await user.type(
+      within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" }),
+      "记忆测试",
+    );
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+    expect(await within(drawer).findByText("已使用 2 条历史消息")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "会话二" }));
+    expect(await within(drawer).findByText("第二个会话")).toBeInTheDocument();
+    expect(within(drawer).queryByText("已使用 2 条历史消息")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("记忆 2")).not.toBeInTheDocument();
+  });
+
+  it("does not apply an old in-flight response memory count to a newly selected conversation", async () => {
+    const user = userEvent.setup();
+    const firstConversation = await mockGetAiConversation();
+    mockListAiConversations.mockResolvedValue([
+      {
+        conversationId: "conv-1",
+        title: "会话一",
+        createdAt: "2026-07-11T10:00:00+08:00",
+        updatedAt: "2026-07-11T10:02:00+08:00",
+        messageCount: 2,
+      },
+      {
+        conversationId: "conv-2",
+        title: "会话二",
+        createdAt: "2026-07-11T11:00:00+08:00",
+        updatedAt: "2026-07-11T11:01:00+08:00",
+        messageCount: 1,
+      },
+    ]);
+    mockGetAiConversation.mockReset();
+    mockGetAiConversation.mockImplementation((conversationId: string) =>
+      Promise.resolve(
+        conversationId === "conv-2"
+          ? {
+              conversationId: "conv-2",
+              title: "会话二",
+              createdAt: "2026-07-11T11:00:00+08:00",
+              updatedAt: "2026-07-11T11:01:00+08:00",
+              messageCount: 1,
+              messages: [
+                {
+                  messageId: "conv-2-msg",
+                  role: "assistant",
+                  content: "第二个会话",
+                  createdAt: "2026-07-11T11:01:00+08:00",
+                },
+              ],
+            }
+          : { ...firstConversation, title: "会话一" },
+      ),
+    );
+
+    let resolveSend!: (value: Awaited<ReturnType<typeof mockSendAiMessage>>) => void;
+    mockSendAiMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    await user.type(
+      within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" }),
+      "仍在生成的会话一问题",
+    );
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(mockSendAiMessage).toHaveBeenCalledTimes(1));
+
+    await user.click(within(drawer).getByRole("button", { name: "会话二" }));
+    expect(await within(drawer).findByText("第二个会话")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSend({
+        conversationId: "conv-1",
+        userMessage: {
+          messageId: "msg-late-user",
+          role: "user",
+          content: "仍在生成的会话一问题",
+          createdAt: "2026-07-11T11:02:00+08:00",
+        },
+        assistantMessage: {
+          messageId: "msg-late-assistant",
+          role: "assistant",
+          content: "会话一的迟到回复",
+          createdAt: "2026-07-11T11:02:01+08:00",
+        },
+        memory: { usedHistoryMessages: 2 },
+      });
+    });
+
+    expect(within(drawer).queryByText("已使用 2 条历史消息")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("记忆 2")).not.toBeInTheDocument();
+  });
+
+  it("manages an AI conversation from its context menu without adding a module tab", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    expect(within(drawer).queryByRole("button", { name: "重命名会话" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "清空" })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    expect(drawer).not.toContainElement(menu);
+    await user.click(within(menu).getByRole("menuitem", { name: "重命名会话" }));
+    const titleInput = within(drawer).getByRole("textbox", { name: "会话标题" });
+    await user.clear(titleInput);
+    await user.type(titleInput, "规则提炼会话");
+    await user.click(within(drawer).getByRole("button", { name: "保存会话标题" }));
+
+    await waitFor(() => {
+      expect(mockRenameAiConversation).toHaveBeenCalledWith("conv-1", "规则提炼会话");
+    });
+    await waitFor(() => {
+      expect(within(drawer).getAllByText("规则提炼会话").length).toBeGreaterThan(0);
+    });
+    expect(
+      within(screen.getByTestId("module-toolbar")).queryByRole("button", { name: "AI 助手" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps conversation management in the context menu without a visible ellipsis button", async () => {
+    render(<App />);
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    expect(
+      within(drawer).queryByRole("button", { name: "打开 记忆验证 会话操作" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    expect(drawer).not.toContainElement(menu);
+  });
+
+  it("clears an AI conversation from its context menu", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "清空消息" }));
+
+    await waitFor(() => expect(mockClearAiConversation).toHaveBeenCalledWith("conv-1"));
+  });
+
+  it("deletes an AI conversation from its context menu", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.contextMenu(await within(drawer).findByRole("button", { name: "记忆验证" }), {
+      clientX: 240,
+      clientY: 160,
+    });
+    const menu = await screen.findByRole("menu", { name: "会话操作" });
+    await user.click(within(menu).getByRole("menuitem", { name: "删除会话" }));
+
+    await waitFor(() => expect(mockDeleteAiConversation).toHaveBeenCalledWith("conv-1"));
+    expect(within(drawer).queryByRole("button", { name: "记忆验证" })).not.toBeInTheDocument();
+  });
+
+  it("recovers from a stale listed AI conversation without exposing a not-found error", async () => {
+    window.localStorage.setItem("fanban.ai.selectedConversationId", "conv-stale");
+    mockListAiConversations
+      .mockResolvedValueOnce([
+        {
+          conversationId: "conv-stale",
+          title: "已失效会话",
+          createdAt: "2026-07-11T10:00:00+08:00",
+          updatedAt: "2026-07-11T10:01:00+08:00",
+          messageCount: 2,
+        },
+      ])
+      .mockResolvedValue([
+        {
+          conversationId: "conv-live",
+          title: "仍可用会话",
+          createdAt: "2026-07-11T10:02:00+08:00",
+          updatedAt: "2026-07-11T10:03:00+08:00",
+          messageCount: 1,
+        },
+      ]);
+    mockGetAiConversation.mockImplementation((conversationId: string) => {
+      if (conversationId === "conv-stale") {
+        return Promise.reject({ status: 404, detail: "conversation_not_found" });
+      }
+      return Promise.resolve({
+        conversationId: "conv-live",
+        title: "仍可用会话",
+        createdAt: "2026-07-11T10:02:00+08:00",
+        updatedAt: "2026-07-11T10:03:00+08:00",
+        messageCount: 1,
+        messages: [
+          {
+            messageId: "live-message",
+            role: "assistant",
+            content: "这是可恢复的会话。",
+            createdAt: "2026-07-11T10:03:00+08:00",
+          },
+        ],
+      });
+    });
+
+    render(<App />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+
+    expect(await within(drawer).findByText("这是可恢复的会话。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockListAiConversations).toHaveBeenCalledTimes(2);
+      expect(window.localStorage.getItem("fanban.ai.selectedConversationId")).toBe("conv-live");
+    });
+    expect(within(drawer).queryByText("conversation_not_found")).not.toBeInTheDocument();
+  });
+
+  it("drops a stale stored AI conversation before sending for a new owner", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("fanban.ai.selectedConversationId", "conv-from-old-ip");
+    mockListAiConversations.mockResolvedValue([]);
+    mockGetAiConversation.mockRejectedValue({ status: 404, detail: "conversation_not_found" });
+    mockSendAiMessage.mockResolvedValue({
+      conversationId: "conv-new",
+      userMessage: {
+        messageId: "msg-new-user",
+        role: "user",
+        content: "新用户的问题",
+        createdAt: "2026-07-12T12:00:00+08:00",
+      },
+      assistantMessage: {
+        messageId: "msg-new-assistant",
+        role: "assistant",
+        content: "新用户回复",
+        createdAt: "2026-07-12T12:00:01+08:00",
+      },
+      memory: { usedHistoryMessages: 0 },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    await user.type(
+      within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" }),
+      "新用户的问题",
+    );
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockCreateAiConversation).toHaveBeenCalledWith("新用户的问题");
+    });
+    expect(mockSendAiMessage).toHaveBeenCalledWith(
+      "conv-new",
+      expect.objectContaining({ content: "新用户的问题" }),
+      expect.any(AbortSignal),
+    );
+    expect(mockGetAiConversation).not.toHaveBeenCalledWith("conv-from-old-ip");
+  });
+
+  it("refreshes and marks a persisted AI message after a gateway failure", async () => {
+    const user = userEvent.setup();
+    const initialConversation = await mockGetAiConversation();
+    mockGetAiConversation.mockReset();
+    mockGetAiConversation
+      .mockResolvedValueOnce(initialConversation)
+      .mockResolvedValue({
+        ...initialConversation,
+        messageCount: 4,
+        messages: [
+          ...initialConversation.messages,
+          {
+            messageId: "msg-failed",
+            role: "user",
+            content: "这条消息发送失败",
+            createdAt: "2026-07-12T12:10:00+08:00",
+            metadata: { status: "failed", error_code: "ai_gateway_error" },
+          },
+          {
+            messageId: "msg-pending",
+            role: "user",
+            content: "进程中断时未完成",
+            createdAt: "2026-07-12T12:10:01+08:00",
+            metadata: { status: "pending" },
+          },
+        ],
+      });
+    mockSendAiMessage.mockRejectedValue({
+      status: 502,
+      detail: { code: "ai_gateway_error", message: "model gateway request failed" },
+    });
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
+    const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
+    const composer = within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" });
+    await user.type(composer, "这条消息发送失败");
+    await user.click(within(drawer).getByRole("button", { name: "发送" }));
+
+    expect(await within(drawer).findByText("model gateway request failed")).toBeInTheDocument();
+    expect((await within(drawer).findAllByText("发送失败")).length).toBeGreaterThan(0);
+    expect(await within(drawer).findByText("未完成")).toBeInTheDocument();
+    expect(composer).toHaveValue("这条消息发送失败");
+    expect(mockGetAiConversation).toHaveBeenCalledTimes(2);
   });
 
   it("switches visible module panels from the toolbar", async () => {
@@ -386,7 +1059,7 @@ describe("homepage shell", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "教程" }));
+    await user.click(await screen.findByRole("button", { name: "教程" }));
 
     expect(screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下一步" })).toBeInTheDocument();
@@ -447,7 +1120,9 @@ describe("homepage shell", () => {
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByText("任务包概览")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "退出" }));
+    const tutorialPanel = screen.getByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。").closest("aside");
+    expect(tutorialPanel).not.toBeNull();
+    await user.click(within(tutorialPanel!).getByRole("button", { name: "退出" }));
     expect(screen.queryByText("任务包概览")).not.toBeInTheDocument();
     expect(screen.queryByText("当前为演示模式，不会创建真实任务，也不会改动任务记录。")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "教程文件选择" })).not.toBeInTheDocument();
@@ -827,7 +1502,7 @@ describe("job cards", () => {
   });
 
   it("returns from a task group detail page with Escape", async () => {
-    window.history.pushState({}, "", "/jobs/group-esc");
+    window.history.pushState({}, "", "/task-groups/group-esc");
     mockGetJobDetail.mockResolvedValue({
       jobId: "group-esc",
       batchId: "batch-esc",
@@ -1635,10 +2310,7 @@ describe("job detail pages", () => {
     await user.click(await screen.findByRole("button", { name: "预览 PDF（纠错标注）" }));
 
     expect(await screen.findByRole("dialog", { name: "预览 PDF（纠错标注）" })).toBeInTheDocument();
-    const downloadLink = screen.getByRole("link", { name: "下载预览 PDF" });
-    expect(downloadLink).toHaveAttribute("href", "/api/jobs/audit-preview/download/preview");
-    expect(downloadLink).toHaveAttribute("download");
-    expect(mockFetch).toHaveBeenCalledWith("/api/jobs/audit-preview/download/preview", expect.any(Object));
+    expect(screen.getByRole("button", { name: "下载预览 PDF" })).toBeEnabled();
     expect(await screen.findByTestId("pdf-document")).toBeInTheDocument();
     expect(mockPdfDocument).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1746,11 +2418,7 @@ describe("job detail pages", () => {
         },
       ],
     });
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      blob: () => Promise.resolve(new Blob()),
-    });
+    mockReadArtifact.mockRejectedValue(new Error("preview request failed with status 500"));
 
     const user = userEvent.setup();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

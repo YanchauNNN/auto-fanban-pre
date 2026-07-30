@@ -30,7 +30,7 @@ from src.cad.font_replacement_plan import normalize_replacement_map
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
 from src.job_diagnostics import build_job_diagnostics
-from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
+from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup, TaskOwnerSnapshot
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
@@ -43,6 +43,7 @@ from src.pipeline.project_no_inference import (
 from src.pipeline.shared_prep import SharedPrepService
 from src.pipeline.sqlite_queue import SQLiteQueueStore
 from src.result_views import normalize_user_flags
+from src.task_groups.visibility import TaskGroupVisibility
 from src.workload.calculator import WorkloadCalculator
 from src.workload.models import WorkloadSummary
 
@@ -115,6 +116,7 @@ class DeliverableApiRuntime:
         )
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
+        self.task_visibility = TaskGroupVisibility()
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
@@ -562,6 +564,7 @@ class DeliverableApiRuntime:
                 batch_id=batch_id,
                 source_filename=source_filename,
                 task_role='仅拆图' if split_only else None,
+                creator_snapshot=creator_snapshot,
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
@@ -647,6 +650,7 @@ class DeliverableApiRuntime:
                     batch_id=batch_id,
                     source_filename=source_filename,
                     task_role='audit_replace',
+                    creator_snapshot=creator_snapshot,
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
@@ -665,6 +669,7 @@ class DeliverableApiRuntime:
                 batch_id=batch_id,
                 source_filename=source_filename,
                 task_role='audit_check',
+                creator_snapshot=creator_snapshot,
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
@@ -871,27 +876,40 @@ class DeliverableApiRuntime:
     def list_jobs(
         self,
         *,
+        account: AccountSnapshot,
         status_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
         sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         if not self.process_jobs_in_api:
-            return self.queue_store.list_summaries(
+            indexed = self.queue_store.list_summaries(
                 status=status_filter,
-                limit=max(limit, 0),
-                offset=max(offset, 0),
+                limit=None,
+                offset=0,
                 sort_by=sort_by,
             )
+            visible_items = [
+                item for item in indexed["items"] if self._can_view_summary(item, account)
+            ]
+            normalized_limit = max(limit, 0)
+            normalized_offset = max(offset, 0)
+            return {
+                "items": visible_items[normalized_offset:normalized_offset + normalized_limit],
+                "total": len(visible_items),
+            }
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
-            if status_filter is None or group.status.value == status_filter
+            if self.task_visibility.can_view(group, account)
+            and (status_filter is None or group.status.value == status_filter)
         ]
         standalone_jobs = [
             self._serialize_job_summary(job)
             for job in self.job_manager.load_all_jobs()
-            if job.group_id is None and (status_filter is None or job.status.value == status_filter)
+            if job.group_id is None
+            and self.task_visibility.can_view_job(job, account)
+            and (status_filter is None or job.status.value == status_filter)
         ]
         sort_key = 'created_at' if sort_by == 'created_at' else 'updated_at'
         all_items = sorted(
@@ -907,26 +925,37 @@ class DeliverableApiRuntime:
     def jobs_activity(self) -> dict[str, Any]:
         return self.queue_store.activity()
 
-    def get_job_detail(self, job_id: str) -> dict[str, Any]:
+    def get_job_detail(self, job_id: str, *, account: AccountSnapshot) -> dict[str, Any]:
         group = self._get_group_for_read(job_id)
         if group is not None:
+            if not self.task_visibility.can_view(group, account):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
             return self._serialize_group_detail(group)
         job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
+        if not self.task_visibility.can_view_job(job, account):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
         return self._serialize_job_detail(job)
 
-    def get_artifact_path(self, job_id: str, artifact: str) -> Path:
+    def get_artifact_path(self, job_id: str, artifact: str, *, account: AccountSnapshot) -> Path:
         group = self._get_group_for_read(job_id)
         if group is not None:
+            if not self.task_visibility.can_view(group, account):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
             owner_job = self._resolve_group_artifact_owner(group, artifact)
             if owner_job is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
-            return self.get_artifact_path(owner_job.job_id, artifact)
+            return self._get_job_artifact_path(owner_job, artifact)
 
         job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
+        if not self.task_visibility.can_view_job(job, account):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
+        return self._get_job_artifact_path(job, artifact)
+
+    def _get_job_artifact_path(self, job: Job, artifact: str) -> Path:
         path = {
             'package': job.artifacts.package_zip,
             'ied': job.artifacts.ied_xlsx,
@@ -937,6 +966,24 @@ class DeliverableApiRuntime:
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
         return Path(path)
+
+    def _can_view_summary(self, summary: dict[str, Any], account: AccountSnapshot) -> bool:
+        owner_payload = summary.get('owner_snapshot')
+        owner_snapshot: TaskOwnerSnapshot | None = None
+        if isinstance(owner_payload, dict):
+            try:
+                owner_snapshot = TaskOwnerSnapshot.model_validate(owner_payload)
+            except Exception:  # noqa: BLE001
+                owner_snapshot = None
+        legacy_scope = None
+        legacy_visibility = summary.get('legacy_visibility')
+        if isinstance(legacy_visibility, dict):
+            legacy_scope = str(legacy_visibility.get('scope') or '') or None
+        return self.task_visibility.can_view_owner_snapshot(
+            owner_snapshot,
+            account,
+            legacy_scope=legacy_scope,
+        )
 
     def _get_job_for_read(self, job_id: str) -> Job | None:
         if self.process_jobs_in_api:
@@ -978,6 +1025,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='deliverable_main',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         audit_job = self.job_manager.create_job(
             job_type=JobType.AUDIT_REPLACE.value,
@@ -989,6 +1037,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='audit_check',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         for child in (deliverable_job, audit_job):
             child.input_files = [upload_path.resolve()]
@@ -1032,6 +1081,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='audit_replace',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         deliverable_job = self.job_manager.create_job(
             job_type=JobType.DELIVERABLE.value,
@@ -1043,6 +1093,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='deliverable_main',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         for child in (replace_job, deliverable_job):
             child.input_files = [upload_path.resolve()]
@@ -1642,6 +1693,7 @@ class DeliverableApiRuntime:
         return workload.model_dump(mode="json"), round(effective, 2)
 
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
+        owner = job.owner_snapshot.model_dump(mode='json') if job.owner_snapshot else None
         task_kind = 'deliverable'
         job_mode = 'deliverable'
         if job.job_type == JobType.AUDIT_REPLACE:
@@ -1667,6 +1719,10 @@ class DeliverableApiRuntime:
             'group_id': job.group_id,
             'shared_run_id': job.shared_run_id,
             'task_role': job.task_role,
+            'owner_snapshot': owner,
+            'creator_name': job.owner_snapshot.creator_name if job.owner_snapshot else None,
+            'creator_account': job.owner_snapshot.creator_account if job.owner_snapshot else None,
+            'creator_office': job.owner_snapshot.creator_office if job.owner_snapshot else None,
             'plot_style_key': job.plot_style_key,
             'plot_resource_mode': job.plot_resource_mode,
             'slot_id': job.slot_id,
@@ -1782,6 +1838,7 @@ class DeliverableApiRuntime:
             })
         return payload
     def _serialize_group_summary(self, group: TaskGroup) -> dict[str, Any]:
+        owner = group.owner_snapshot.model_dump(mode='json') if group.owner_snapshot else None
         source_filename = group.source_filenames[0] if group.source_filenames else None
         findings_count = 0
         affected_drawings_count = 0
@@ -1809,6 +1866,11 @@ class DeliverableApiRuntime:
             'is_group': True,
             'source_filename': source_filename,
             'source_filenames': list(group.source_filenames),
+            'owner_snapshot': owner,
+            'creator_name': group.owner_snapshot.creator_name if group.owner_snapshot else None,
+            'creator_account': group.owner_snapshot.creator_account if group.owner_snapshot else None,
+            'creator_office': group.owner_snapshot.creator_office if group.owner_snapshot else None,
+            'legacy_visibility': group.legacy_visibility.model_dump(mode='json'),
             'project_no': group.project_no,
             'status': group.status.value,
             'stage': group.progress.stage,

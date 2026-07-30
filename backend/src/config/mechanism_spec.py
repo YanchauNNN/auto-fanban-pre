@@ -30,15 +30,9 @@ _FACTORY_CODE_RE = re.compile(r"^(?:[A-Z][A-Z0-9]{1,3}|\d{3})$")
 
 
 class PermissionsConfig(BaseModel):
-    account_admin_roles: list[str] = Field(default_factory=lambda: ["管理员"])
-    workflow_admin_roles: list[str] = Field(default_factory=lambda: ["管理员"])
-    workload_scope_roles: dict[str, list[str]] = Field(
-        default_factory=lambda: {
-            "office": ["室主任", "所领导", "管理员"],
-            "institute": ["所领导", "管理员"],
-            "admin": ["管理员"],
-        },
-    )
+    account_admin_roles: list[str] = Field(default_factory=list)
+    workflow_admin_roles: list[str] = Field(default_factory=list)
+    workload_scope_roles: dict[str, list[str]] = Field(default_factory=dict)
 
     def roles_for_scope(self, scope: str) -> set[str]:
         return {str(role) for role in self.workload_scope_roles.get(scope, [])}
@@ -56,6 +50,28 @@ class WorkloadSettlementConfig(BaseModel):
     initiator_role_key: str = "initiator"
     include_approved_nodes: bool = True
     node_role_key_source: str = "node_key"
+
+
+class WorkflowRuntimeConfig(BaseModel):
+    approval_terminal_status: str = ""
+    archive_trigger_status: str = ""
+    active_conflict_statuses: list[str] = Field(default_factory=list)
+
+
+class WorkloadStatusOptionConfig(BaseModel):
+    label: str
+    value: str
+
+
+class WorkloadRuntimeConfig(BaseModel):
+    status_options: list[WorkloadStatusOptionConfig] = Field(default_factory=list)
+
+
+class ManagementUiConfig(BaseModel):
+    workload_scope_labels: dict[str, str] = Field(default_factory=dict)
+    workflow_status_labels: dict[str, str] = Field(default_factory=dict)
+    archive_status_labels: dict[str, str] = Field(default_factory=dict)
+    empty_current_node_label: str = ""
 
 
 class AuditDisplayConfig(BaseModel):
@@ -204,6 +220,9 @@ class BackendMechanismConfig(BaseModel):
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
     archive_defaults: ArchiveDefaultsConfig = Field(default_factory=ArchiveDefaultsConfig)
     workload_settlement: WorkloadSettlementConfig = Field(default_factory=WorkloadSettlementConfig)
+    workflow_runtime: WorkflowRuntimeConfig = Field(default_factory=WorkflowRuntimeConfig)
+    workload_runtime: WorkloadRuntimeConfig = Field(default_factory=WorkloadRuntimeConfig)
+    management_ui: ManagementUiConfig = Field(default_factory=ManagementUiConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
     audit_replace: AuditReplaceMechanismConfig = Field(default_factory=AuditReplaceMechanismConfig)
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
@@ -228,6 +247,18 @@ class MechanismSpec(BaseModel):
     @property
     def workload_settlement(self) -> WorkloadSettlementConfig:
         return self.backend_mechanism.workload_settlement
+
+    @property
+    def workflow_runtime(self) -> WorkflowRuntimeConfig:
+        return self.backend_mechanism.workflow_runtime
+
+    @property
+    def workload_runtime(self) -> WorkloadRuntimeConfig:
+        return self.backend_mechanism.workload_runtime
+
+    @property
+    def management_ui(self) -> ManagementUiConfig:
+        return self.backend_mechanism.management_ui
 
     @property
     def audit_display(self) -> AuditDisplayConfig:

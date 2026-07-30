@@ -75,6 +75,113 @@ describe("HttpAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards a caller cancellation signal for AI message POST requests", async () => {
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) =>
+      new Promise((_, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("The request was aborted.", "AbortError")),
+          { once: true },
+        );
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const controller = new AbortController();
+    const request = adapter.sendAiMessage(
+      "conversation-1",
+      { content: "请停止等待" },
+      controller.signal,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conversation-1/messages",
+      expect.objectContaining({ method: "POST", signal: expect.any(AbortSignal) }),
+    );
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+  });
+
+  it("uploads an AI attachment with browser-managed multipart headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          attachment_id: "attachment-1",
+          conversation_id: "conversation-1",
+          message_id: null,
+          original_name: "说明.txt",
+          media_type: "text/plain",
+          kind: "document",
+          size_bytes: 12,
+          sha256: "abc123",
+          status: "ready",
+          metadata: {},
+          error_code: null,
+          created_at: "2026-07-22T10:00:00+08:00",
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const file = new File(["AI-FILE-0711"], "说明.txt", { type: "text/plain" });
+
+    const attachment = await adapter.uploadAiAttachment("conversation-1", file);
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://127.0.0.1:8000/api/ai/conversations/conversation-1/attachments",
+    );
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get("file")).toBe(file);
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false);
+    expect(attachment).toMatchObject({
+      attachmentId: "attachment-1",
+      originalName: "说明.txt",
+      status: "ready",
+    });
+  });
+
+  it("includes attachment ids in an AI message request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          conversation_id: "conversation-1",
+          user_message: {
+            message_id: "user-1",
+            role: "user",
+            content: "",
+            created_at: "2026-07-22T10:00:00+08:00",
+          },
+          assistant_message: {
+            message_id: "assistant-1",
+            role: "assistant",
+            content: "已读取",
+            created_at: "2026-07-22T10:00:01+08:00",
+          },
+          memory: { used_history_messages: 0 },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    await adapter.sendAiMessage("conversation-1", {
+      content: "",
+      attachmentIds: ["attachment-1"],
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      content: "",
+      attachment_ids: ["attachment-1"],
+    });
+  });
+
   it("uses a normalized API base URL and resolves relative artifact links", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -219,6 +326,26 @@ describe("HttpAdapter", () => {
       ],
       rawItems: ["检测到重复编码"],
     });
+  });
+
+  it("reads protected artifacts with the current bearer token", async () => {
+    const artifact = new Blob(["zip-content"], { type: "application/zip" });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => artifact,
+      headers: new Headers({ "Content-Disposition": 'attachment; filename="package.zip"' }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
+      getAccessToken: () => "access-token",
+    });
+
+    await expect(adapter.readArtifact("/api/jobs/job-1/download/package")).resolves.toBe(artifact);
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8000/api/jobs/job-1/download/package");
+    expect(new Headers(request.headers).get("Authorization")).toBe("Bearer access-token");
   });
 
   it("creates audit check jobs with mode=check and can attach them to an existing batch", async () => {
@@ -385,6 +512,116 @@ describe("HttpAdapter", () => {
       active: 2,
       lastChangedAt: "2026-07-05T12:34:56+08:00",
     });
+  });
+
+  it("renames an AI conversation with a mutating PATCH request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          conversation_id: "conv-1",
+          title: "规则提炼会话",
+          created_at: "2026-07-11T10:00:00+08:00",
+          updated_at: "2026-07-11T10:04:00+08:00",
+          message_count: 2,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const renamed = await adapter.renameAiConversation("conv-1", "规则提炼会话");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conv-1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ title: "规则提炼会话" }),
+      }),
+    );
+    expect(renamed).toEqual({
+      conversationId: "conv-1",
+      title: "规则提炼会话",
+      createdAt: "2026-07-11T10:00:00+08:00",
+      updatedAt: "2026-07-11T10:04:00+08:00",
+      messageCount: 2,
+    });
+  });
+
+  it("deletes an AI conversation with a bounded DELETE request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    await adapter.deleteAiConversation("conv-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/ai/conversations/conv-1",
+      expect.objectContaining({ method: "DELETE", signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("propagates an external abort signal to AI GET requests", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let resolveFetch: ((value: unknown) => void) | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    const pending = adapter.getAiState(controller.signal);
+    controller.abort();
+    const abortWasPropagated = requestSignal?.aborted;
+    resolveFetch?.({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          enabled: true,
+          profile: "development_minimax",
+          model: "MiniMax-M3",
+          owner_key: "ip:127.0.0.1",
+          default_agent: "platform_assistant",
+          agents: [],
+          skills: [],
+          mcp_servers: [],
+        }),
+    });
+    await pending;
+
+    expect(abortWasPropagated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a timeout signal to AI control mutations", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return Promise.resolve({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            conversation_id: "conv-new",
+            title: "新会话",
+            created_at: "2026-07-12T12:00:00+08:00",
+            updated_at: "2026-07-12T12:00:00+08:00",
+            message_count: 0,
+          }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    await adapter.createAiConversation("新会话");
+
+    expect(requestSignal).toBeInstanceOf(AbortSignal);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("subscribes to jobs activity SSE and closes cleanly", () => {

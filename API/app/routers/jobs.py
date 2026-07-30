@@ -6,10 +6,11 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from ..auth_helpers import require_current_account
 from ..runtime import UploadedFilePayload
 
 from src.config import load_mechanism_spec
@@ -17,23 +18,12 @@ from src.config import load_mechanism_spec
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-
-def _resolve_optional_account(request: Request, authorization: str | None):
-    if authorization is None:
-        return None
-    account = request.app.state.management.session_service.resolve_account(authorization)
-    if account is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
-    return account
-
-
 @router.post("/preflight-fonts")
 async def preflight_fonts(
     request: Request,
-    authorization: str | None = Header(default=None),
+    _=Depends(require_current_account),
     files: list[UploadFile] = File(..., alias="files[]"),
 ) -> JSONResponse:
-    _resolve_optional_account(request, authorization)
     uploads = [
         UploadedFilePayload(
             filename=upload.filename or "upload.dwg",
@@ -49,11 +39,11 @@ async def preflight_fonts(
 @router.post("/batch")
 async def create_batch(
     request: Request,
-    authorization: str | None = Header(default=None),
     params_json: str = Form(...),
     run_audit_check: bool = Form(False),
     split_only: bool = Form(False),
     files: list[UploadFile] = File(..., alias="files[]"),
+    account=Depends(require_current_account),
 ) -> JSONResponse:
     try:
         params = json.loads(params_json)
@@ -83,7 +73,7 @@ async def create_batch(
         raw_params=params,
         run_audit_check=run_audit_check,
         split_only=split_only,
-        creator_snapshot=_resolve_optional_account(request, authorization),
+        creator_snapshot=account,
     )
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
 
@@ -91,10 +81,10 @@ async def create_batch(
 @router.post("/audit-replace")
 async def create_audit_batch(
     request: Request,
-    authorization: str | None = Header(default=None),
     mode: str = Form(...),
     params_json: str = Form(...),
     files: list[UploadFile] = File(..., alias="files[]"),
+    account=Depends(require_current_account),
 ) -> JSONResponse:
     try:
         params = json.loads(params_json)
@@ -123,7 +113,7 @@ async def create_audit_batch(
         mode=mode,
         files=uploads,
         raw_params=params,
-        creator_snapshot=_resolve_optional_account(request, authorization),
+        creator_snapshot=account,
     )
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
 
@@ -135,8 +125,15 @@ def list_jobs(
     limit: int = 100,
     offset: int = 0,
     sort: str = "updated_at",
+    account=Depends(require_current_account),
 ) -> dict:
-    return request.app.state.runtime.list_jobs(status_filter=status, limit=limit, offset=offset, sort_by=sort)
+    return request.app.state.runtime.list_jobs(
+        account=account,
+        status_filter=status,
+        limit=limit,
+        offset=offset,
+        sort_by=sort,
+    )
 
 
 @router.get("/activity")
@@ -210,19 +207,19 @@ def jobs_activity_stream(request: Request) -> StreamingResponse:
 
 
 @router.get("/{job_id}")
-def get_job_detail(request: Request, job_id: str) -> dict:
-    return request.app.state.runtime.get_job_detail(job_id)
+def get_job_detail(request: Request, job_id: str, account=Depends(require_current_account)) -> dict:
+    return request.app.state.runtime.get_job_detail(job_id, account=account)
 
 
 @router.get("/{job_id}/download/package")
-def download_package(request: Request, job_id: str) -> FileResponse:
-    path = request.app.state.runtime.get_artifact_path(job_id, "package")
+def download_package(request: Request, job_id: str, account=Depends(require_current_account)) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "package", account=account)
     return FileResponse(path=path, filename=path.name, media_type="application/zip")
 
 
 @router.get("/{job_id}/download/ied")
-def download_ied(request: Request, job_id: str) -> FileResponse:
-    path = request.app.state.runtime.get_artifact_path(job_id, "ied")
+def download_ied(request: Request, job_id: str, account=Depends(require_current_account)) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "ied", account=account)
     return FileResponse(
         path=path,
         filename=path.name,
@@ -231,8 +228,8 @@ def download_ied(request: Request, job_id: str) -> FileResponse:
 
 
 @router.get("/{job_id}/download/preview")
-def download_preview(request: Request, job_id: str) -> FileResponse:
-    path = request.app.state.runtime.get_artifact_path(job_id, "preview")
+def download_preview(request: Request, job_id: str, account=Depends(require_current_account)) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "preview", account=account)
     return FileResponse(
         path=path,
         filename=path.name,
@@ -241,8 +238,8 @@ def download_preview(request: Request, job_id: str) -> FileResponse:
 
 
 @router.get("/{job_id}/download/report")
-def download_report(request: Request, job_id: str) -> FileResponse:
-    path = request.app.state.runtime.get_artifact_path(job_id, "report")
+def download_report(request: Request, job_id: str, account=Depends(require_current_account)) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "report", account=account)
     return FileResponse(
         path=path,
         filename=path.name,
@@ -251,8 +248,8 @@ def download_report(request: Request, job_id: str) -> FileResponse:
 
 
 @router.get("/{job_id}/download/replaced")
-def download_replaced_dwg(request: Request, job_id: str) -> FileResponse:
-    path = request.app.state.runtime.get_artifact_path(job_id, "replaced")
+def download_replaced_dwg(request: Request, job_id: str, account=Depends(require_current_account)) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(job_id, "replaced", account=account)
     return FileResponse(
         path=path,
         filename=path.name,
