@@ -40,6 +40,11 @@ public class Commands
                 var selectionEngine = new SelectionEngine(task, trace);
                 selectionEngine.Execute(doc.Database, result);
             }
+            else if (task.WorkflowStage.Equals("dwg_to_dxf", StringComparison.OrdinalIgnoreCase))
+            {
+                var exporter = new DwgToDxfExporter(task, trace);
+                exporter.Execute(doc.Database, result);
+            }
             else if (task.WorkflowStage.Equals("audit_check_scan", StringComparison.OrdinalIgnoreCase))
             {
                 var auditScanner = new AuditCheckScanner(task, trace);
@@ -161,6 +166,9 @@ internal sealed class BridgeTask
     public string SourceDwgVersion { get; private set; } = string.Empty;
     public string OutputDir { get; private set; } = string.Empty;
     public string OutputDwg { get; private set; } = string.Empty;
+    public string OutputDxf { get; private set; } = string.Empty;
+    public string DxfVersion { get; private set; } = "AC1032";
+    public int DxfPrecision { get; private set; } = 16;
 
     public BridgePlotConfig Plot { get; private set; } = new();
     public BridgeSelectionConfig Selection { get; private set; } = new();
@@ -200,6 +208,9 @@ internal sealed class BridgeTask
             SourceDwgVersion = BridgeValue.GetString(root, "source_dwg_version", string.Empty),
             OutputDir = BridgeValue.GetString(root, "output_dir", string.Empty),
             OutputDwg = BridgeValue.GetString(root, "output_dwg", string.Empty),
+            OutputDxf = BridgeValue.GetString(root, "output_dxf", string.Empty),
+            DxfVersion = BridgeValue.GetString(root, "dxf_version", "AC1032"),
+            DxfPrecision = BridgeValue.GetInt(root, "dxf_precision", 16),
             ReplacementFont = BridgeValue.GetString(root, "replacement_font", string.Empty),
             ReplacementFonts = BridgeValue.GetStringMap(
                 root.TryGetValue("replacement_fonts", out var replacementFontsObj) ? replacementFontsObj : null

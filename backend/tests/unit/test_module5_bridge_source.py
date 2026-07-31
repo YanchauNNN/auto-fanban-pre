@@ -51,3 +51,17 @@ def test_release_bridge_build_disables_debug_symbols() -> None:
     assert 'Condition="\'$(Configuration)\' == \'Release\'"' in project_source
     assert "<DebugType>none</DebugType>" in project_source
     assert "<DebugSymbols>false</DebugSymbols>" in project_source
+
+
+def test_bridge_supports_native_dwg_to_dxf_export() -> None:
+    commands_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/Commands.cs"
+    ).read_text(encoding="utf-8")
+    exporter_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/DwgToDxfExporter.cs"
+    ).read_text(encoding="utf-8")
+
+    assert 'WorkflowStage.Equals("dwg_to_dxf"' in commands_source
+    assert "new DwgToDxfExporter(task, trace)" in commands_source
+    assert ".DxfOut(" in exporter_source
+    assert 'AdditionalData["output_dxf"]' in exporter_source

@@ -269,6 +269,7 @@ class AcCoreConsoleRunner:
         )
         use_dotnet = bool(dotnet_bridge.get("enabled", False)) and (
             (workflow_stage == "split_only" and selection_engine == "dotnet")
+            or workflow_stage == "dwg_to_dxf"
             or workflow_stage == "audit_check_scan"
             or workflow_stage == "font_preflight"
             or workflow_stage == "font_replace_missing"

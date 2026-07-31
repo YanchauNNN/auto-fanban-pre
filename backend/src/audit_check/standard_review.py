@@ -34,6 +34,8 @@ _NAME_LEADING_SEPARATORS = " \t\r\n:：,，、;-－–—"
 _NAME_TRAILING_SEPARATORS = " \t\r\n:：,，、;-－–—.。"
 _SAME_TEXT_NAME_END_RE = re.compile(r"[;；\r\n]+")
 _YEAR_CAPTURE_PATTERN = r"[\(\[（【]?\s*(?P<year>\d{4})\s*[\)\]）】]?"
+_CODE_TRAILING_CLOSERS = ")]】"
+_CODE_OPEN_YEAR_SUFFIX_RE = re.compile(r"[\(\[【]\s*(?P<year>\d{4})$")
 _BRACKETED_STANDARD_NAME_RE = re.compile(
     r"(?:《|<<)(?P<name>.*?)(?:》|>>)"
 )
@@ -238,7 +240,7 @@ class StandardReviewEngine:
                     actual_year = str(match.group("year") or "")
                     entries = self._base_entries.get(_normalize_code_key(pattern_entry.code_without_year), [])
                     entry = self._select_expected_entry(entries, actual_year) or pattern_entry
-                    actual_code = _normalize_standard_code_display(match.group(0))
+                    actual_code = _normalize_actual_standard_code(match.group(0))
                     key = (item.entity_handle, actual_code, entry.canonical_code)
                     if key in seen:
                         continue
@@ -584,7 +586,15 @@ class StandardReviewEngine:
         if candidate.end >= len(normalized):
             return None
         tail = normalized[candidate.end :]
-        if not tail or tail[0] not in _NAME_LEADING_SEPARATORS:
+        matched_segment = normalized[candidate.start : candidate.end]
+        consumed_closing_parenthesis = matched_segment.endswith(tuple(_CODE_TRAILING_CLOSERS))
+        if (
+            not tail
+            or (
+                tail[0] not in _NAME_LEADING_SEPARATORS
+                and not consumed_closing_parenthesis
+            )
+        ):
             return None
         tail = tail.lstrip(_NAME_LEADING_SEPARATORS)
         if not tail:
@@ -673,6 +683,14 @@ def _normalize_code_text(value: str) -> str:
 
 def _normalize_standard_code_display(value: str) -> str:
     return _normalize_code_text(value)
+
+
+def _normalize_actual_standard_code(value: str) -> str:
+    normalized = _normalize_standard_code_display(value).rstrip(_CODE_TRAILING_CLOSERS)
+    return _CODE_OPEN_YEAR_SUFFIX_RE.sub(
+        lambda match: f"-{match.group('year')}",
+        normalized,
+    )
 
 
 def _normalize_code_key(value: str) -> str:
