@@ -67,6 +67,20 @@ def _rewrite_first_worksheet_xml(
     target: Path,
     transform,
 ) -> None:
+    _rewrite_xlsx_entry(
+        source,
+        target,
+        "xl/worksheets/sheet1.xml",
+        transform,
+    )
+
+
+def _rewrite_xlsx_entry(
+    source: Path,
+    target: Path,
+    entry_name: str,
+    transform,
+) -> None:
     with ZipFile(source) as input_archive, ZipFile(
         target,
         "w",
@@ -74,7 +88,7 @@ def _rewrite_first_worksheet_xml(
     ) as output_archive:
         for info in input_archive.infolist():
             payload = input_archive.read(info.filename)
-            if info.filename == "xl/worksheets/sheet1.xml":
+            if info.filename == entry_name:
                 payload = transform(payload)
             output_archive.writestr(info, payload)
 
@@ -408,6 +422,56 @@ def test_snapshot_rejects_huge_merge_before_loading_workbook(
 
     with pytest.raises(ValueError, match="merged range .* exceeds snapshot limit"):
         subject.build_workbook_snapshot(path, max_non_empty_cells=10)
+
+
+def test_snapshot_rejects_highly_compressed_xlsx_resource_before_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = _subject()
+    source = tmp_path / "source.xlsx"
+    workbook = Workbook()
+    workbook.active["A1"] = "value"
+    workbook.save(source)
+    path = tmp_path / "inflated-styles.xlsx"
+
+    def inflate_styles(payload: bytes) -> bytes:
+        inflated_comment = b"<!--" + (b"A" * (8 * 1024 * 1024)) + b"-->"
+        return payload.replace(
+            b"</styleSheet>",
+            inflated_comment + b"</styleSheet>",
+        )
+
+    _rewrite_xlsx_entry(source, path, "xl/styles.xml", inflate_styles)
+    with ZipFile(path) as archive:
+        styles_info = archive.getinfo("xl/styles.xml")
+        assert styles_info.file_size > 8 * 1024 * 1024
+        assert styles_info.compress_size < 64 * 1024
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe XLSX must be rejected before openpyxl load")
+
+    monkeypatch.setattr(subject, "load_workbook", fail_if_called)
+
+    with pytest.raises(ValueError, match="XLSX internal resource limit"):
+        subject.build_workbook_snapshot(path, max_non_empty_cells=1)
+
+
+def test_snapshot_allows_normal_xlsx_resources_with_large_budget(
+    tmp_path: Path,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.active["A1"] = "value"
+    path = tmp_path / "normal.xlsx"
+    workbook.save(path)
+
+    snapshot = subject.build_workbook_snapshot(
+        path,
+        max_non_empty_cells=10_000,
+    )
+
+    assert snapshot["non_empty_cell_count"] == 1
 
 
 def test_snapshot_rejects_excessive_cell_records_before_loading_workbook(

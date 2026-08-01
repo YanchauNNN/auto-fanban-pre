@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal, Protocol, cast
 from xml.etree.ElementTree import ParseError, iterparse
 from zipfile import BadZipFile, ZipFile, is_zipfile
@@ -435,6 +435,87 @@ def _xml_local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
+def _validate_xlsx_archive_resources(
+    archive: ZipFile,
+    *,
+    max_non_empty_cells: int,
+) -> None:
+    max_files = min(2048, max(128, 128 + max_non_empty_cells // 50))
+    max_single_bytes = min(
+        64 * 1024 * 1024,
+        max(2 * 1024 * 1024, max_non_empty_cells * 8 * 1024),
+    )
+    max_total_bytes = min(
+        256 * 1024 * 1024,
+        max(8 * 1024 * 1024, max_non_empty_cells * 32 * 1024),
+    )
+    max_single_ratio = 250.0
+    max_total_ratio = 150.0
+
+    seen_paths: set[str] = set()
+    file_count = 0
+    total_bytes = 0
+    total_compressed_bytes = 0
+    for info in archive.infolist():
+        normalized_name = info.filename.replace("\\", "/")
+        member = PurePosixPath(normalized_name)
+        if (
+            not normalized_name
+            or normalized_name.startswith("/")
+            or re.match(r"^[A-Za-z]:/", normalized_name)
+            or ".." in member.parts
+        ):
+            raise ValueError(
+                "XLSX internal resource limit: unsafe entry path "
+                f"{info.filename}"
+            )
+        normalized_path = member.as_posix()
+        if normalized_path in seen_paths:
+            raise ValueError(
+                "XLSX internal resource limit: duplicate entry "
+                f"{normalized_path}"
+            )
+        seen_paths.add(normalized_path)
+        if info.flag_bits & 0x1:
+            raise ValueError(
+                "XLSX internal resource limit: encrypted entry "
+                f"{normalized_path}"
+            )
+        if info.is_dir():
+            continue
+
+        file_count += 1
+        if file_count > max_files:
+            raise ValueError(
+                f"XLSX internal resource limit: file count exceeds {max_files}"
+            )
+        if info.file_size > max_single_bytes:
+            raise ValueError(
+                "XLSX internal resource limit: entry size exceeds "
+                f"{max_single_bytes} bytes: {normalized_path}"
+            )
+        compression_ratio = info.file_size / max(info.compress_size, 1)
+        if compression_ratio > max_single_ratio:
+            raise ValueError(
+                "XLSX internal resource limit: entry compression ratio exceeds "
+                f"{max_single_ratio:g}: {normalized_path}"
+            )
+        total_bytes += info.file_size
+        total_compressed_bytes += info.compress_size
+        if total_bytes > max_total_bytes:
+            raise ValueError(
+                "XLSX internal resource limit: total size exceeds "
+                f"{max_total_bytes} bytes"
+            )
+
+    total_ratio = total_bytes / max(total_compressed_bytes, 1)
+    if total_ratio > max_total_ratio:
+        raise ValueError(
+            "XLSX internal resource limit: total compression ratio exceeds "
+            f"{max_total_ratio:g}"
+        )
+
+
 def _preflight_snapshot_xlsx(path: Path, *, max_non_empty_cells: int) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"workbook does not exist: {path}")
@@ -453,6 +534,10 @@ def _preflight_snapshot_xlsx(path: Path, *, max_non_empty_cells: int) -> None:
     merged_span_cell_count = 0
     try:
         with ZipFile(path) as archive:
+            _validate_xlsx_archive_resources(
+                archive,
+                max_non_empty_cells=max_non_empty_cells,
+            )
             worksheet_infos = [
                 info
                 for info in archive.infolist()
