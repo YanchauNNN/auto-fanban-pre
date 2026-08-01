@@ -623,6 +623,7 @@ class DeliverableApiRuntime:
 
         preflight_token = params.preflight_token.strip()
         expired_archive_paths: list[Path] = []
+        requires_ai_confirmation = False
         with self._calculation_preflight_lock:
             now = time.monotonic()
             for token, entry in list(self._calculation_preflight_tokens.items()):
@@ -630,12 +631,33 @@ class DeliverableApiRuntime:
                     continue
                 self._calculation_preflight_tokens.pop(token, None)
                 expired_archive_paths.append(Path(str(entry["archive_path"])))
-            preflight = self._calculation_preflight_tokens.pop(
+            preflight = self._calculation_preflight_tokens.get(
                 preflight_token,
-                None,
             )
+            requires_ai_confirmation = bool(
+                preflight is not None
+                and preflight.get("requires_ai_normalization", False)
+                and not params.confirm_ai_normalization
+            )
+            if not requires_ai_confirmation:
+                preflight = self._calculation_preflight_tokens.pop(
+                    preflight_token,
+                    None,
+                )
         for path in expired_archive_paths:
             path.unlink(missing_ok=True)
+        if requires_ai_confirmation:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "confirm_ai_normalization": [
+                            "请确认启动人工智能规范化非标准配筋表"
+                        ]
+                    },
+                },
+            )
         if preflight is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -703,22 +725,6 @@ class DeliverableApiRuntime:
             requires_ai_normalization = bool(
                 preflight.get("requires_ai_normalization", False)
             )
-            if (
-                requires_ai_normalization
-                and not params.confirm_ai_normalization
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail={
-                        "upload_errors": {},
-                        "param_errors": {
-                            "confirm_ai_normalization": [
-                                "请确认启动人工智能规范化非标准配筋表"
-                            ]
-                        },
-                    },
-                )
-
             confirmation_errors: list[str] = []
             if (
                 bool(preflight.get("requires_wall_count_confirmation", False))

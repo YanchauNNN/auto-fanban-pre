@@ -2295,6 +2295,12 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             **params,
             "preflight_token": nonstandard_preflight.json()["preflight_token"],
         }
+        nonstandard_token = nonstandard_params["preflight_token"]
+        nonstandard_archive = Path(
+            runtime._calculation_preflight_tokens[nonstandard_token][
+                "archive_path"
+            ]
+        )
         unconfirmed_ai_response = client.post(
             "/api/jobs/calculation-books",
             data={
@@ -2308,21 +2314,11 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert unconfirmed_ai_response.json()["detail"]["param_errors"][
             "confirm_ai_normalization"
         ] == ["请确认启动人工智能规范化非标准配筋表"]
+        assert nonstandard_token in runtime._calculation_preflight_tokens
+        assert nonstandard_archive.is_file()
 
-        nonstandard_preflight = client.post(
-            "/api/jobs/calculation-books/preflight",
-            data={"include_slab_stress": "true"},
-            files={
-                "archive": (
-                    "nonstandard-calculation-images.rar",
-                    archive_bytes,
-                    "application/vnd.rar",
-                )
-            },
-        )
         confirmed_ai_params = {
             **nonstandard_params,
-            "preflight_token": nonstandard_preflight.json()["preflight_token"],
             "confirm_ai_normalization": True,
         }
         confirmed_ai_response = client.post(
@@ -2341,6 +2337,22 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         )
         assert confirmed_ai_detail["status"] == "succeeded"
         assert observed_ai_options == [True]
+        assert nonstandard_token not in runtime._calculation_preflight_tokens
+        assert not nonstandard_archive.exists()
+
+        replay_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    confirmed_ai_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert replay_ai_response.status_code == 422
+        assert replay_ai_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
 
         preflight_response = client.post(
             "/api/jobs/calculation-books/preflight",
