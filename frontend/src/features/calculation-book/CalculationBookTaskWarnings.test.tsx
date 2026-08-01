@@ -35,14 +35,14 @@ const aiOutput: CalculationBookOutput = {
       blankFields: ["Y"],
     },
     {
-      code: "image_only_slab",
+      code: "needs_review",
       scope: "slab" as const,
       identity: "11.45",
       direction: "top_x",
       sourceSheet: null,
       sourceRow: null,
       sourceCells: {},
-      reason: "应力图中存在该楼板标高，但配筋表没有对应数据，相关配筋字段已留空",
+      reason: "楼板 11.45 的 top_x 向配筋信息无法确定，相关字段已留空",
       blankFields: ["top_x"],
     },
   ],
@@ -84,8 +84,12 @@ describe("CalculationBookTaskWarnings", () => {
     expect(slabDisclosure).toHaveTextContent("1 项");
     await user.click(slabDisclosure as HTMLElement);
     expect(screen.getByText("方向：顶层水平向")).toBeInTheDocument();
+    expect(
+      screen.getByText("楼板 11.45m 的顶层水平向配筋信息无法确定，顶层水平向已留空"),
+    ).toBeInTheDocument();
     expect(screen.getByText("仅图片证据")).toBeInTheDocument();
     expect(region).not.toHaveTextContent("第 0 行");
+    expect(region).not.toHaveTextContent("top_x");
   });
 
   it("renders nothing for a standard task without warnings", () => {

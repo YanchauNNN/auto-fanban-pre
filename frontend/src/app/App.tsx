@@ -2111,7 +2111,10 @@ function SingleJobDetailPanel({
       {detail.taskKind === "calculation_book" ? (
         <section className={styles.detailSection}>
           <h2>计算书结果</h2>
-          <CalculationBookResultCard output={detail.calculationBookOutput} />
+          <CalculationBookResultCard
+            output={detail.calculationBookOutput}
+            status={detail.status}
+          />
         </section>
       ) : null}
 
@@ -2450,8 +2453,10 @@ function DeliverableResultCard({
 
 function CalculationBookResultCard({
   output,
+  status,
 }: {
   output: CalculationBookOutput | undefined;
+  status: JobDetail["status"];
 }) {
   if (!output) {
     return <p className={styles.muted}>正在整理计算书结果。</p>;
@@ -2471,7 +2476,7 @@ function CalculationBookResultCard({
         <InfoBlock label="配筋图数量" value={`${output.figureCount} 张`} />
         <InfoBlock label="生成文件" value={output.outputFilename} />
       </div>
-      <CalculationBookTaskWarnings output={output} />
+      {status === "succeeded" ? <CalculationBookTaskWarnings output={output} /> : null}
     </div>
   );
 }

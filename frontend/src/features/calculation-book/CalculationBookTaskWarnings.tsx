@@ -27,7 +27,7 @@ type WarningGroup = {
 };
 
 function fieldLabel(field: string): string {
-  return DIRECTION_LABELS[field] ?? field;
+  return DIRECTION_LABELS[field] ?? "相关配筋";
 }
 
 function groupLabel(warning: CalculationBookWarning): string {
@@ -57,6 +57,35 @@ function groupWarnings(warnings: readonly CalculationBookWarning[]): WarningGrou
     }
   }
   return Array.from(groups.values());
+}
+
+function warningMessage(warning: CalculationBookWarning): string {
+  if (warning.code === "duplicate_reinforcement_rows") {
+    return "同一墙体存在重复配筋行，相关配筋字段已留空";
+  }
+  if (warning.code === "split_image_group") {
+    return "墙体存在 -1/-2 应力图组，配筋对应关系需人工补充，相关配筋字段已留空";
+  }
+  if (warning.code === "image_only_wall") {
+    return "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空";
+  }
+  if (warning.code === "workbook_only_wall") {
+    return "配筋表中存在该墙体，但应力图中没有对应图组，未生成对应图片段落";
+  }
+  if (warning.code === "image_only_slab") {
+    return "应力图中存在该楼板标高，但配筋表没有对应数据，相关配筋字段已留空";
+  }
+  if (warning.code === "workbook_only_slab") {
+    return "配筋表中存在该楼板标高，但应力图中没有对应图组，未生成对应图片段落";
+  }
+
+  const direction = warning.direction
+    ? `${fieldLabel(warning.direction)}配筋`
+    : "部分配筋";
+  const blankResult = warning.blankFields.length > 0
+    ? `${warning.blankFields.map(fieldLabel).join("、")}已留空`
+    : "相关字段已留空";
+  return `${groupLabel(warning)} 的${direction}信息无法确定，${blankResult}`;
 }
 
 function WarningEvidence({ warning }: { warning: CalculationBookWarning }) {
@@ -130,7 +159,7 @@ export function CalculationBookTaskWarnings({
                       </strong>
                       <span>待补充</span>
                     </div>
-                    <p>{warning.reason}</p>
+                    <p>{warningMessage(warning)}</p>
                     {warning.blankFields.length > 0 ? (
                       <p className={styles.blankFields}>
                         留空字段：{warning.blankFields.map(fieldLabel).join("、")}

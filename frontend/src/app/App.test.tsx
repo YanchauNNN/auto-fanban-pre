@@ -1915,6 +1915,92 @@ describe("job detail pages", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each(["running", "failed"] as const)(
+    "hides AI completion and supplement reminders while a calculation task is %s",
+    async (status) => {
+      window.history.pushState({}, "", `/jobs/calculation-book-ai-${status}`);
+      mockGetJobDetail.mockResolvedValue({
+        jobId: `calculation-book-ai-${status}`,
+        batchId: `batch-calculation-book-ai-${status}`,
+        groupId: null,
+        isGroup: false,
+        sourceFilename: "非标准配筋表.rar",
+        sourceFilenames: ["非标准配筋表.rar"],
+        taskKind: "calculation_book",
+        taskRole: null,
+        jobMode: "calculation_book",
+        projectNo: "2016",
+        status,
+        stage: status === "running" ? "AI_REINFORCEMENT_NORMALIZING" : "FAILED",
+        percent: status === "running" ? 62 : 100,
+        message: "",
+        createdAt: "2026-08-01T10:00:00+08:00",
+        finishedAt: status === "failed" ? "2026-08-01T10:03:00+08:00" : null,
+        startedAt: "2026-08-01T10:00:10+08:00",
+        currentFile: null,
+        runAuditCheck: false,
+        childJobIds: [],
+        findingsCount: 0,
+        affectedDrawingsCount: 0,
+        artifacts: {
+          packageAvailable: false,
+          iedAvailable: false,
+          reportAvailable: false,
+          replacedDwgAvailable: false,
+          calculationDocxAvailable: false,
+          calculationDocxDownloadUrl: null,
+        },
+        retryAvailable: status === "failed",
+        sharedRunId: null,
+        flags: [],
+        errors: [],
+        topWrongTexts: [],
+        topInternalCodes: [],
+        calculationBookOutput: {
+          figureCount: 174,
+          templateType: "internal_structure",
+          outputFilename: "AI规范化计算书.docx",
+          aiNormalized: true,
+          warningCount: 1,
+          warnings: [
+            {
+              code: "needs_review",
+              scope: "slab",
+              identity: "11.45",
+              direction: "top_x",
+              sourceSheet: "楼板配筋",
+              sourceRow: 12,
+              sourceCells: { top_x: "B12" },
+              reason: "楼板 11.45 的 top_x 向配筋信息无法确定",
+              blankFields: ["top_x"],
+            },
+          ],
+          aiNormalization: {
+            skillId: "reinforcement_table_normalizer",
+            model: "structured-test",
+            profile: "intranet-test",
+            callCount: 1,
+            sourceRowCount: 315,
+            normalizedWallCount: 314,
+            normalizedSlabCount: 0,
+            reviewWarningCount: 1,
+            durationMs: 125,
+            validation: "passed",
+          },
+        },
+      });
+
+      render(<App />);
+
+      expect(await screen.findByRole("heading", { name: "计算书结果" })).toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "配筋表人工补充提醒" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("AI 已规范化非标准配筋表")).not.toBeInTheDocument();
+      expect(screen.queryByText("需人工补充 1 项")).not.toBeInTheDocument();
+    },
+  );
+
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {
     window.history.pushState({}, "", "/jobs/group-downloads");
     const clipboardWrite = vi.fn().mockResolvedValue(undefined);
