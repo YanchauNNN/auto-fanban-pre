@@ -60,6 +60,36 @@ def test_calculation_book_ai_normalization_rejects_unsafe_limits(
         )
 
 
+def test_calculation_book_ai_normalization_rejects_invalid_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FANBAN_CALCULATION_BOOK__AI_NORMALIZATION__REQUEST_TIMEOUT_SECONDS",
+        "0",
+    )
+
+    try:
+        with pytest.raises(ValidationError):
+            RuntimeConfig.from_yaml(REPO_ROOT / "documents" / "参数规范_运行期.yaml")
+    finally:
+        monkeypatch.delenv(
+            "FANBAN_CALCULATION_BOOK__AI_NORMALIZATION__REQUEST_TIMEOUT_SECONDS"
+        )
+
+
+def test_calculation_book_ai_normalization_accepts_valid_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FANBAN_CALCULATION_BOOK__AI_NORMALIZATION__REQUEST_TIMEOUT_SECONDS",
+        "45",
+    )
+
+    config = RuntimeConfig.from_yaml(REPO_ROOT / "documents" / "参数规范_运行期.yaml")
+
+    assert config.calculation_book.ai_normalization.request_timeout_seconds == 45
+
+
 def test_calculation_book_ocr_settings_come_from_mechanism_yaml() -> None:
     spec = MechanismSpecLoader.load(REPO_ROOT / "documents" / "参数规范-3.yaml")
 

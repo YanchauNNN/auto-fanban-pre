@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings
 
 
@@ -354,6 +354,8 @@ class UploadLimitsConfig(BaseModel):
 
 class CalculationBookAiNormalizationRuntimeConfig(BaseModel):
     """计算书非标准配筋表 Worker 模型调用限制。"""
+
+    model_config = ConfigDict(validate_assignment=True)
 
     enabled: bool = True
     skill_root: Path = Path("tools/ai/reinforcement-table-normalizer")
