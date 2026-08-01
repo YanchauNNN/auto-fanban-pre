@@ -287,7 +287,7 @@ def test_preflight_reports_normalization_and_wall_count_audit_without_blocking(
     assert result["image_only_wall_ids"] == ["NDTJ1"]
     assert result["workbook_only_wall_ids"] == ["S7160"]
     assert result["requires_wall_count_confirmation"] is True
-    assert result["requires_manual_confirmation"] is True
+    assert result["requires_manual_confirmation"] is False
 
 
 def test_preflight_ignores_slab_ocr_when_option_is_disabled(

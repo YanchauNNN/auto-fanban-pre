@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -11,6 +13,7 @@ from typing import Any, cast
 
 from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
+from PIL import Image
 
 from src.calculation_book.models import CalculationBookParams
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
@@ -2263,7 +2266,6 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                     {
                         **params,
                         "preflight_token": expired_token,
-                        "confirm_wall_count_mismatch": True,
                     },
                     ensure_ascii=False,
                 )
@@ -2405,37 +2407,8 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         )
         assert preflight_response.status_code == 200, preflight_response.text
         assert preflight_response.json()["requires_ai_normalization"] is False
+        assert preflight_response.json()["requires_wall_count_confirmation"] is True
         params["preflight_token"] = preflight_response.json()["preflight_token"]
-        cached_archive = Path(
-            runtime._calculation_preflight_tokens[params["preflight_token"]][
-                "archive_path"
-            ]
-        )
-
-        unconfirmed_response = client.post(
-            "/api/jobs/calculation-books",
-            data={"params_json": json.dumps(params, ensure_ascii=False)},
-        )
-        assert unconfirmed_response.status_code == 422
-        assert unconfirmed_response.json()["detail"]["param_errors"][
-            "confirm_wall_count_mismatch"
-        ] == ["请确认仅按已匹配墙体生成计算书"]
-        assert not cached_archive.exists()
-
-        preflight_response = client.post(
-            "/api/jobs/calculation-books/preflight",
-            data={"include_slab_stress": "true"},
-            files={
-                "archive": (
-                    "calculation-images.rar",
-                    archive_bytes,
-                    "application/vnd.rar",
-                )
-            },
-        )
-        assert preflight_response.status_code == 200, preflight_response.text
-        params["preflight_token"] = preflight_response.json()["preflight_token"]
-        params["confirm_wall_count_mismatch"] = True
         params["confirm_ai_normalization"] = True
         cached_archive = Path(
             runtime._calculation_preflight_tokens[params["preflight_token"]][
@@ -2474,6 +2447,164 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
             "请先完成计算书文件预检"
         ]
+
+
+def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
+    tmp_path: Path,
+) -> None:
+    from API.app.runtime import _cleanup_calculation_preflight_cache
+
+    cache_root = tmp_path / "calculation-preflight"
+    cache_root.mkdir()
+    now = time.time()
+    old_zip = cache_root / "calculation-preflight-old.zip"
+    old_rar = cache_root / "calculation-preflight-old.rar"
+    fresh_zip = cache_root / "calculation-preflight-fresh.zip"
+    unrelated = cache_root / "user-upload.zip"
+    wrong_suffix = cache_root / "calculation-preflight-old.txt"
+    matching_directory = cache_root / "calculation-preflight-folder.zip"
+    for path in (old_zip, old_rar, fresh_zip, unrelated, wrong_suffix):
+        path.write_bytes(b"payload")
+    matching_directory.mkdir()
+    old_mtime = now - 1801
+    for path in (old_zip, old_rar, unrelated, wrong_suffix):
+        os.utime(path, (old_mtime, old_mtime))
+    os.utime(matching_directory, (old_mtime, old_mtime))
+
+    symlink_path = cache_root / "calculation-preflight-link.zip"
+    symlink_target = tmp_path / "outside.zip"
+    symlink_target.write_bytes(b"outside")
+    symlink_created = False
+    try:
+        symlink_path.symlink_to(symlink_target)
+        symlink_created = True
+    except OSError:
+        pass
+
+    _cleanup_calculation_preflight_cache(cache_root, now=now)
+
+    assert not old_zip.exists()
+    assert not old_rar.exists()
+    assert fresh_zip.is_file()
+    assert unrelated.is_file()
+    assert wrong_suffix.is_file()
+    assert matching_directory.is_dir()
+    assert symlink_target.is_file()
+    if symlink_created:
+        assert symlink_path.is_symlink()
+
+    outside_root = tmp_path / "outside-cache"
+    outside_root.mkdir()
+    outside_old = outside_root / "calculation-preflight-outside.zip"
+    outside_old.write_bytes(b"outside")
+    os.utime(outside_old, (old_mtime, old_mtime))
+    linked_root = tmp_path / "linked-cache"
+    try:
+        linked_root.symlink_to(outside_root, target_is_directory=True)
+    except OSError:
+        pass
+    else:
+        _cleanup_calculation_preflight_cache(linked_root, now=now)
+        assert outside_old.is_file()
+
+
+def _malicious_calculation_archive_bytes(tmp_path: Path) -> bytes:
+    source = tmp_path / "malicious-calculation-source"
+    source.mkdir()
+    for direction in ("X", "Y", "Z"):
+        Image.new("RGB", (32, 32), "white").save(
+            source / f"S7159-{direction}.png"
+        )
+    for folder_name in ("01", "02"):
+        folder = source / folder_name
+        folder.mkdir()
+        Image.new("RGB", (32, 32), "white").save(folder / "figure.png")
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "构件编号\n及位置",
+            "单侧水平钢筋\n(对称配筋)",
+            "单侧竖向钢筋\n(对称配筋)",
+            "拉筋",
+        ]
+    )
+    sheet.append(
+        ["S7159墙", "1D28间距200", "1D28间距200", "1C12间距200*400"]
+    )
+    safe_workbook = source / "safe.xlsx"
+    workbook.save(safe_workbook)
+    malicious_workbook = source / "计算书模板文件.xlsx"
+    with zipfile.ZipFile(safe_workbook) as source_archive, zipfile.ZipFile(
+        malicious_workbook,
+        "w",
+        zipfile.ZIP_DEFLATED,
+    ) as target_archive:
+        for info in source_archive.infolist():
+            target_archive.writestr(info, source_archive.read(info.filename))
+        target_archive.writestr(
+            "xl/sharedStrings.xml",
+            b"<sst><si><t>" + (b"A" * (8 * 1024 * 1024)) + b"</t></si></sst>",
+        )
+    safe_workbook.unlink()
+
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(
+        archive_buffer,
+        "w",
+        zipfile.ZIP_DEFLATED,
+    ) as archive:
+        for path in source.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(source).as_posix())
+    return archive_buffer.getvalue()
+
+
+def test_calculation_preflight_rejects_embedded_xlsx_bomb_before_ocr_ai_and_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizer
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe workbook must fail before OCR or AI")
+
+    monkeypatch.setattr(
+        "API.app.runtime.recognize_stress_legend",
+        fail_if_called,
+    )
+    monkeypatch.setattr(
+        ReinforcementTaskNormalizer,
+        "normalize",
+        fail_if_called,
+    )
+    with TestClient(
+        create_app(
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "malicious.zip",
+                    _malicious_calculation_archive_bytes(tmp_path),
+                    "application/zip",
+                )
+            },
+        )
+
+        assert response.status_code == 422
+        assert "XLSX internal resource limit" in response.text
+        assert client.app.state.runtime._calculation_preflight_tokens == {}
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(

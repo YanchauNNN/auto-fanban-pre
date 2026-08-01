@@ -54,6 +54,15 @@ class ManualConfirmation:
 class ReinforcementMatchingPlan:
     assignments: tuple[ReinforcementAssignment, ...]
     confirmations: tuple[ManualConfirmation, ...]
+    image_only_wall_ids: tuple[str, ...] = ()
+    workbook_only_wall_ids: tuple[str, ...] = ()
+    image_wall_group_count: int = 0
+    image_unique_wall_count: int = 0
+    matched_unique_wall_count: int = 0
+
+    @property
+    def requires_wall_count_confirmation(self) -> bool:
+        return bool(self.image_only_wall_ids or self.workbook_only_wall_ids)
 
     @property
     def requires_manual_confirmation(self) -> bool:
@@ -154,12 +163,12 @@ def match_reinforcement(
 
     assignments: list[ReinforcementAssignment] = []
     confirmations: list[ManualConfirmation] = []
+    image_only_wall_ids: list[str] = []
     for base_wall_id, groups in image_groups_by_base.items():
         rows = schedule_by_wall.get(base_wall_id, [])
         if not rows:
-            raise CalculationMatchingError(
-                f"墙体配筋表中未找到图片墙号 {base_wall_id}"
-            )
+            image_only_wall_ids.append(base_wall_id)
+            continue
         duplicate_rows = len(rows) > 1
         for group, row in _pair_groups_and_rows(groups, rows):
             assignment = ReinforcementAssignment(
@@ -192,7 +201,22 @@ def match_reinforcement(
     confirmations.sort(
         key=lambda confirmation: _wall_sort_key(confirmation.output_wall_id)
     )
+    image_base_wall_ids = set(image_groups_by_base)
+    workbook_wall_ids = set(schedule_by_wall)
+    matched_unique_wall_ids = {
+        assignment.base_wall_id
+        for assignment in assignments
+    }
     return ReinforcementMatchingPlan(
         assignments=tuple(assignments),
         confirmations=tuple(confirmations),
+        image_only_wall_ids=tuple(
+            sorted(set(image_only_wall_ids), key=_wall_sort_key)
+        ),
+        workbook_only_wall_ids=tuple(
+            sorted(workbook_wall_ids - image_base_wall_ids, key=_wall_sort_key)
+        ),
+        image_wall_group_count=len(image_groups),
+        image_unique_wall_count=len(image_base_wall_ids),
+        matched_unique_wall_count=len(matched_unique_wall_ids),
     )

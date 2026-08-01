@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 import re
+import stat
 import threading
 import time
 import unicodedata
@@ -63,6 +64,57 @@ from src.workload.models import WorkloadSummary
 from .metadata import FormMetadataService
 
 logger = logging.getLogger(__name__)
+_CALCULATION_PREFLIGHT_TTL_SECONDS = 1800
+
+
+def _cleanup_calculation_preflight_cache(
+    cache_root: Path,
+    *,
+    now: float | None = None,
+) -> None:
+    """Delete only stale, regular preflight archives from the flat cache."""
+    reference_time = time.time() if now is None else now
+    try:
+        root_stat = cache_root.lstat()
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or cache_root.is_symlink()
+            or (
+                hasattr(cache_root, "is_junction")
+                and cache_root.is_junction()
+            )
+        ):
+            return
+        candidates = tuple(cache_root.iterdir())
+    except OSError:
+        return
+    for candidate in candidates:
+        if (
+            not candidate.name.startswith("calculation-preflight-")
+            or candidate.suffix.lower() not in {".zip", ".rar"}
+        ):
+            continue
+        try:
+            first_stat = candidate.lstat()
+        except OSError:
+            continue
+        if (
+            not stat.S_ISREG(first_stat.st_mode)
+            or reference_time - first_stat.st_mtime
+            <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+        ):
+            continue
+        try:
+            second_stat = candidate.lstat()
+            if (
+                not stat.S_ISREG(second_stat.st_mode)
+                or (second_stat.st_dev, second_stat.st_ino)
+                != (first_stat.st_dev, first_stat.st_ino)
+            ):
+                continue
+            candidate.unlink()
+        except OSError:
+            continue
 
 
 @dataclass(frozen=True)
@@ -126,6 +178,9 @@ class DeliverableApiRuntime:
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
+        _cleanup_calculation_preflight_cache(
+            self.config.storage_dir / "runtime" / "calculation-preflight"
+        )
         self.process_jobs_in_api = process_jobs_in_api
         self.worker_process_mode = worker_process_mode
         self.queue_store = SQLiteQueueStore(
@@ -627,7 +682,10 @@ class DeliverableApiRuntime:
         with self._calculation_preflight_lock:
             now = time.monotonic()
             for token, entry in list(self._calculation_preflight_tokens.items()):
-                if now - float(entry["created_at"]) <= 1800:
+                if (
+                    now - float(entry["created_at"])
+                    <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+                ):
                     continue
                 self._calculation_preflight_tokens.pop(token, None)
                 expired_archive_paths.append(Path(str(entry["archive_path"])))
@@ -726,21 +784,6 @@ class DeliverableApiRuntime:
                 preflight.get("requires_ai_normalization", False)
             )
             confirmation_errors: list[str] = []
-            if (
-                bool(preflight.get("requires_wall_count_confirmation", False))
-                and not params.confirm_wall_count_mismatch
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail={
-                        "upload_errors": {},
-                        "param_errors": {
-                            "confirm_wall_count_mismatch": [
-                                "请确认仅按已匹配墙体生成计算书"
-                            ]
-                        },
-                    },
-                )
             for wall_id, candidate_rows in preflight[
                 "confirmation_candidates"
             ].items():
@@ -824,6 +867,13 @@ class DeliverableApiRuntime:
 
         mechanism = load_mechanism_spec().calculation_book
         try:
+            cache_root = (
+                self.config.storage_dir
+                / "runtime"
+                / "calculation-preflight"
+            )
+            cache_root.mkdir(parents=True, exist_ok=True)
+            _cleanup_calculation_preflight_cache(cache_root)
             with TemporaryDirectory(prefix="fanban-calculation-preflight-") as temp_dir:
                 work_dir = Path(temp_dir)
                 archive_path = work_dir / (
@@ -869,12 +919,6 @@ class DeliverableApiRuntime:
                     }
                     for item in payload["confirmations"]
                 }
-                cache_root = (
-                    self.config.storage_dir
-                    / "runtime"
-                    / "calculation-preflight"
-                )
-                cache_root.mkdir(parents=True, exist_ok=True)
                 cached_archive_path = cache_root / f"{token}{archive_suffix}"
                 cached_archive_path.write_bytes(archive.content)
                 expired_archive_paths: list[Path] = []
@@ -883,7 +927,10 @@ class DeliverableApiRuntime:
                     for old_token, entry in list(
                         self._calculation_preflight_tokens.items()
                     ):
-                        if now - float(entry["created_at"]) <= 1800:
+                        if (
+                            now - float(entry["created_at"])
+                            <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+                        ):
                             continue
                         self._calculation_preflight_tokens.pop(old_token, None)
                         expired_archive_paths.append(

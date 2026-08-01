@@ -2,14 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from src.calculation_book.archive import ReinforcementFigure
-from src.calculation_book.matching import (
-    CalculationMatchingError,
-    RecognizedFigure,
-    match_reinforcement,
-)
+from src.calculation_book.matching import RecognizedFigure, match_reinforcement
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.reinforcement_input import (
     NormalizedReinforcementRow,
@@ -163,11 +157,24 @@ def test_alpha_suffix_wall_does_not_merge_with_base_wall() -> None:
     } == {("S7157", "S7157"), ("S7157A", "S7157A")}
 
 
-def test_rejects_image_wall_missing_from_reinforcement_schedule() -> None:
+def test_records_image_and_workbook_only_walls_and_keeps_matched_subset() -> None:
     schedule = ReinforcementSchedule(
-        rows=(_row("S7159", diameter=28, source_row=2),),
+        rows=(
+            _row("S7159", diameter=28, source_row=2),
+            _row("S7160", diameter=32, source_row=3),
+        ),
         duplicate_wall_ids=(),
     )
 
-    with pytest.raises(CalculationMatchingError, match="NDTJ1"):
-        match_reinforcement(_group("NDTJ1", 1000), schedule)
+    plan = match_reinforcement(
+        [*_group("S7159", 2000), *_group("NDTJ1", 1000)],
+        schedule,
+    )
+
+    assert [item.output_wall_id for item in plan.assignments] == ["S7159"]
+    assert plan.image_only_wall_ids == ("NDTJ1",)
+    assert plan.workbook_only_wall_ids == ("S7160",)
+    assert plan.image_unique_wall_count == 2
+    assert plan.matched_unique_wall_count == 1
+    assert plan.requires_wall_count_confirmation is True
+    assert plan.requires_manual_confirmation is False

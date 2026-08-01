@@ -300,6 +300,7 @@ def inspect_reinforcement_workbook(
     *,
     include_slab: bool,
 ) -> WorkbookFormatInspection:
+    preflight_xlsx_resources(path)
     workbook = cast(
         _WorkbookLike,
         load_workbook(path, data_only=False, read_only=True),
@@ -418,17 +419,34 @@ def inspect_reinforcement_workbook(
     )
 
 
-def _snapshot_resource_limits(
+_XLSX_MAX_FILES = 2048
+_XLSX_MAX_SINGLE_ENTRY_BYTES = 64 * 1024 * 1024
+_XLSX_MAX_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+_XLSX_MAX_SINGLE_COMPRESSION_RATIO = 250.0
+_XLSX_MAX_TOTAL_COMPRESSION_RATIO = 150.0
+_XLSX_MAX_WORKSHEET_XML_BYTES = 128 * 1024 * 1024
+_XLSX_MAX_CELL_RECORDS = 1_000_000
+_XLSX_MAX_MERGE_RECORDS = 100_000
+_XLSX_MAX_MERGED_SPAN_CELLS = 1_000_000
+_FORMAT_INSPECTION_MAX_NON_EMPTY_CELLS = 100_000
+
+
+def _snapshot_logical_limits(
     max_non_empty_cells: int,
-) -> tuple[int, int, int, int]:
-    worksheet_xml_bytes = min(
-        128 * 1024 * 1024,
-        max(1024 * 1024, max_non_empty_cells * 16 * 1024),
+) -> tuple[int, int, int]:
+    cell_records = min(
+        _XLSX_MAX_CELL_RECORDS,
+        max(1024, max_non_empty_cells * 8),
     )
-    cell_records = min(1_000_000, max(1024, max_non_empty_cells * 8))
-    merge_records = min(100_000, max(256, max_non_empty_cells * 4))
-    merged_span_cells = min(1_000_000, max(10_000, max_non_empty_cells * 32))
-    return worksheet_xml_bytes, cell_records, merge_records, merged_span_cells
+    merge_records = min(
+        _XLSX_MAX_MERGE_RECORDS,
+        max(256, max_non_empty_cells * 4),
+    )
+    merged_span_cells = min(
+        _XLSX_MAX_MERGED_SPAN_CELLS,
+        max(10_000, max_non_empty_cells * 32),
+    )
+    return cell_records, merge_records, merged_span_cells
 
 
 def _xml_local_name(tag: str) -> str:
@@ -437,21 +455,7 @@ def _xml_local_name(tag: str) -> str:
 
 def _validate_xlsx_archive_resources(
     archive: ZipFile,
-    *,
-    max_non_empty_cells: int,
 ) -> None:
-    max_files = min(2048, max(128, 128 + max_non_empty_cells // 50))
-    max_single_bytes = min(
-        64 * 1024 * 1024,
-        max(2 * 1024 * 1024, max_non_empty_cells * 8 * 1024),
-    )
-    max_total_bytes = min(
-        256 * 1024 * 1024,
-        max(8 * 1024 * 1024, max_non_empty_cells * 32 * 1024),
-    )
-    max_single_ratio = 250.0
-    max_total_ratio = 150.0
-
     seen_paths: set[str] = set()
     file_count = 0
     total_bytes = 0
@@ -485,59 +489,63 @@ def _validate_xlsx_archive_resources(
             continue
 
         file_count += 1
-        if file_count > max_files:
+        if file_count > _XLSX_MAX_FILES:
             raise ValueError(
-                f"XLSX internal resource limit: file count exceeds {max_files}"
+                "XLSX internal resource limit: file count exceeds "
+                f"{_XLSX_MAX_FILES}"
             )
-        if info.file_size > max_single_bytes:
+        if info.file_size > _XLSX_MAX_SINGLE_ENTRY_BYTES:
             raise ValueError(
                 "XLSX internal resource limit: entry size exceeds "
-                f"{max_single_bytes} bytes: {normalized_path}"
+                f"{_XLSX_MAX_SINGLE_ENTRY_BYTES} bytes: {normalized_path}"
             )
         compression_ratio = info.file_size / max(info.compress_size, 1)
-        if compression_ratio > max_single_ratio:
+        if compression_ratio > _XLSX_MAX_SINGLE_COMPRESSION_RATIO:
             raise ValueError(
                 "XLSX internal resource limit: entry compression ratio exceeds "
-                f"{max_single_ratio:g}: {normalized_path}"
+                f"{_XLSX_MAX_SINGLE_COMPRESSION_RATIO:g}: {normalized_path}"
             )
         total_bytes += info.file_size
         total_compressed_bytes += info.compress_size
-        if total_bytes > max_total_bytes:
+        if total_bytes > _XLSX_MAX_TOTAL_UNCOMPRESSED_BYTES:
             raise ValueError(
                 "XLSX internal resource limit: total size exceeds "
-                f"{max_total_bytes} bytes"
+                f"{_XLSX_MAX_TOTAL_UNCOMPRESSED_BYTES} bytes"
             )
 
     total_ratio = total_bytes / max(total_compressed_bytes, 1)
-    if total_ratio > max_total_ratio:
+    if total_ratio > _XLSX_MAX_TOTAL_COMPRESSION_RATIO:
         raise ValueError(
             "XLSX internal resource limit: total compression ratio exceeds "
-            f"{max_total_ratio:g}"
+            f"{_XLSX_MAX_TOTAL_COMPRESSION_RATIO:g}"
         )
 
 
-def _preflight_snapshot_xlsx(path: Path, *, max_non_empty_cells: int) -> None:
+def preflight_xlsx_resources(
+    path: Path,
+    *,
+    max_non_empty_cells: int = _FORMAT_INSPECTION_MAX_NON_EMPTY_CELLS,
+) -> None:
+    """Reject unsafe XLSX resources before loading them with openpyxl."""
+    if max_non_empty_cells <= 0:
+        raise ValueError("max_non_empty_cells must be greater than 0")
     if not path.is_file():
         raise FileNotFoundError(f"workbook does not exist: {path}")
     if not is_zipfile(path):
         raise ValueError(f"workbook is not a valid XLSX zip: {path.name}")
 
     (
-        max_worksheet_xml_bytes,
         max_cell_records,
         max_merge_records,
         max_merged_span_cells,
-    ) = _snapshot_resource_limits(max_non_empty_cells)
+    ) = _snapshot_logical_limits(max_non_empty_cells)
     cell_record_count = 0
     non_empty_record_count = 0
     merge_record_count = 0
     merged_span_cell_count = 0
     try:
         with ZipFile(path) as archive:
-            _validate_xlsx_archive_resources(
-                archive,
-                max_non_empty_cells=max_non_empty_cells,
-            )
+            _validate_xlsx_archive_resources(archive)
             worksheet_infos = [
                 info
                 for info in archive.infolist()
@@ -549,10 +557,13 @@ def _preflight_snapshot_xlsx(path: Path, *, max_non_empty_cells: int) -> None:
             ]
             if not worksheet_infos:
                 raise ValueError("XLSX does not contain worksheet XML")
-            if sum(info.file_size for info in worksheet_infos) > max_worksheet_xml_bytes:
+            if (
+                sum(info.file_size for info in worksheet_infos)
+                > _XLSX_MAX_WORKSHEET_XML_BYTES
+            ):
                 raise ValueError(
                     "worksheet XML size exceeds snapshot limit "
-                    f"{max_worksheet_xml_bytes} bytes"
+                    f"{_XLSX_MAX_WORKSHEET_XML_BYTES} bytes"
                 )
 
             for info in worksheet_infos:
@@ -681,7 +692,7 @@ def build_workbook_snapshot(
     if max_non_empty_cells <= 0:
         raise ValueError("max_non_empty_cells must be greater than 0")
 
-    _preflight_snapshot_xlsx(
+    preflight_xlsx_resources(
         path,
         max_non_empty_cells=max_non_empty_cells,
     )

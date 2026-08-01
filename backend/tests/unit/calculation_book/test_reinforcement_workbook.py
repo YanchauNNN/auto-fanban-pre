@@ -93,6 +93,22 @@ def _rewrite_xlsx_entry(
             output_archive.writestr(info, payload)
 
 
+def _add_xlsx_entry(
+    source: Path,
+    target: Path,
+    entry_name: str,
+    payload: bytes,
+) -> None:
+    with ZipFile(source) as input_archive, ZipFile(
+        target,
+        "w",
+        ZIP_DEFLATED,
+    ) as output_archive:
+        for info in input_archive.infolist():
+            output_archive.writestr(info, input_archive.read(info.filename))
+        output_archive.writestr(entry_name, payload)
+
+
 def test_standard_template_format_does_not_require_ai(tmp_path: Path) -> None:
     subject = _subject()
     workbook = Workbook()
@@ -139,6 +155,63 @@ def test_format_inspection_does_not_invoke_area_calculation(
     inspection = subject.inspect_reinforcement_workbook(path, include_slab=True)
 
     assert inspection.requires_ai_normalization is False
+
+
+def test_format_inspection_rejects_compressed_shared_strings_before_openpyxl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_standard_wall_sheet(workbook)
+    source = tmp_path / "safe.xlsx"
+    workbook.save(source)
+    path = tmp_path / "shared-strings-bomb.xlsx"
+    _add_xlsx_entry(
+        source,
+        path,
+        "xl/sharedStrings.xml",
+        b"<sst><si><t>" + (b"A" * (8 * 1024 * 1024)) + b"</t></si></sst>",
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe XLSX must be rejected before openpyxl load")
+
+    monkeypatch.setattr(subject, "load_workbook", fail_if_called)
+
+    with pytest.raises(ValueError, match="XLSX internal resource limit"):
+        subject.inspect_reinforcement_workbook(path, include_slab=False)
+
+
+def test_format_inspection_rejects_compressed_worksheet_before_openpyxl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_standard_wall_sheet(workbook)
+    source = tmp_path / "safe.xlsx"
+    workbook.save(source)
+    path = tmp_path / "worksheet-bomb.xlsx"
+
+    def inflate_worksheet(payload: bytes) -> bytes:
+        inflated_comment = b"<!--" + (b"A" * (8 * 1024 * 1024)) + b"-->"
+        return payload.replace(
+            b"</worksheet>",
+            inflated_comment + b"</worksheet>",
+        )
+
+    _rewrite_first_worksheet_xml(source, path, inflate_worksheet)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe XLSX must be rejected before openpyxl load")
+
+    monkeypatch.setattr(subject, "load_workbook", fail_if_called)
+
+    with pytest.raises(ValueError, match="XLSX internal resource limit"):
+        subject.inspect_reinforcement_workbook(path, include_slab=False)
 
 
 @pytest.mark.parametrize(
