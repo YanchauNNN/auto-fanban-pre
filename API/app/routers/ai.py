@@ -8,11 +8,21 @@ from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile,
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from src.ai.ansys_mapdl_skill import (
+    ANSYS_MAPDL_SKILL_ID,
+    AnsysMapdlSkill,
+    AnsysMapdlSkillConfig,
+    resolve_skill_root,
+)
+from src.ai.building_standards_skill import (
+    BUILDING_STANDARDS_SKILL_ID,
+    BuildingStandardsSkill,
+    BuildingStandardsSkillConfig,
+)
 from src.ai.chat_client import (
-    ChatClientConfig,
     ChatClientTimeout,
     ChatGatewayError,
-    OpenAICompatibleChatClient,
+    build_chat_client,
 )
 from src.ai.chat_service import (
     AiAgentConfig,
@@ -28,17 +38,6 @@ from src.ai.chat_service import (
     AiSkillConfig,
 )
 from src.ai.chat_store import AiChatMessage, AiChatStore, AiConversation
-from src.ai.ansys_mapdl_skill import (
-    ANSYS_MAPDL_SKILL_ID,
-    AnsysMapdlSkill,
-    AnsysMapdlSkillConfig,
-    resolve_skill_root,
-)
-from src.ai.building_standards_skill import (
-    BUILDING_STANDARDS_SKILL_ID,
-    BuildingStandardsSkill,
-    BuildingStandardsSkillConfig,
-)
 from src.ai.context_skills import ContextSkill
 from src.ai.owner_identity import resolve_client_ip
 from src.ai.read_only_tools import ReadOnlyHostTools
@@ -49,7 +48,6 @@ from src.ai.reinforcement_table_skill import (
 )
 from src.config import get_config, load_ai_spec
 from src.config.ai.ai_spec import AiSpec
-
 
 logger = logging.getLogger(__name__)
 _service_init_lock = threading.Lock()
@@ -145,7 +143,7 @@ def update_conversation(
 async def upload_attachment(
     conversation_id: str,
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008 - FastAPI dependency declaration
 ) -> dict[str, Any]:
     service = _service(request)
     max_upload_bytes = max(
@@ -320,25 +318,6 @@ def delete_conversation(conversation_id: str, request: Request) -> dict[str, boo
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
     return {"ok": True}
-
-
-def build_chat_client(spec: AiSpec) -> OpenAICompatibleChatClient:
-    gateway = spec.resolve_gateway()
-    models = spec.resolve_models()
-    chat = spec.ai_layer.chat
-    return OpenAICompatibleChatClient(
-        ChatClientConfig(
-            base_url=gateway.base_url,
-            api_key=gateway.api_key,
-            authorization_scheme=gateway.authorization_scheme,
-            model=models.chat.model,
-            timeout_seconds=chat.request_timeout_seconds,
-            temperature=models.chat.temperature,
-            max_output_tokens=models.chat.max_output_tokens,
-            max_retries=0,
-            retry_backoff_ms=gateway.retry_backoff_ms,
-        )
-    )
 
 
 def build_runtime(

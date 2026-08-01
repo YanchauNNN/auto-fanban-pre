@@ -352,8 +352,22 @@ class UploadLimitsConfig(BaseModel):
     min_free_disk_mb: int = 10240
 
 
+class CalculationBookAiNormalizationRuntimeConfig(BaseModel):
+    """计算书非标准配筋表 Worker 模型调用限制。"""
+
+    enabled: bool = True
+    skill_root: Path = Path("tools/ai/reinforcement-table-normalizer")
+    max_non_empty_cells: int = 10_000
+    max_snapshot_chars: int = 500_000
+    max_skill_chars: int = 100_000
+    request_timeout_seconds: int = 120
+    max_output_tokens: int = 32_768
+    temperature: float = 0.0
+    max_retries: int = 0
+
+
 class CalculationBookRuntimeConfig(BaseModel):
-    """计算书业务资产、OCR 运行时和 ZIP 安全限制。"""
+    """计算书业务资产、OCR 运行时和 ZIP/RAR 安全限制。"""
 
     template_dir: Path = Path("documents_bin/calculation_book")
     rebar_table: Path = Path("documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx")
@@ -367,6 +381,9 @@ class CalculationBookRuntimeConfig(BaseModel):
     max_archive_files: int = 500
     max_single_file_mb: int = 50
     max_compression_ratio: float = 250.0
+    ai_normalization: CalculationBookAiNormalizationRuntimeConfig = Field(
+        default_factory=CalculationBookAiNormalizationRuntimeConfig
+    )
 
 
 class LifecycleConfig(BaseModel):
@@ -753,6 +770,10 @@ class RuntimeConfig(BaseSettings):
         )
         self.calculation_book.tessdata_dir = self._resolve_root_path(
             self.calculation_book.tessdata_dir,
+            self.base_dir,
+        )
+        self.calculation_book.ai_normalization.skill_root = self._resolve_root_path(
+            self.calculation_book.ai_normalization.skill_root,
             self.base_dir,
         )
 

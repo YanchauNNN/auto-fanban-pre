@@ -93,11 +93,11 @@ ai_layer:
       model:
         type: str
         default: "MiniMax-M3"
-        desc: "结构化 JSON 输出使用的 MiniMax 模型"
+        desc: "结构化 JSON 输出使用的 MiniMax 模型；计算书 Worker 规范化非标准配筋表时选择该模型"
       require_json_schema:
         type: bool
         default: true
-        desc: "要求后端用 JSON Schema 校验模型输出；模型不支持强约束时由后端重试/降级"
+        desc: "要求后端用 schema v1、来源证据和行守恒校验模型 JSON；失败时任务明确失败，不接受解释文字或猜测值"
     embedding:
       model:
         type: str
@@ -443,12 +443,12 @@ ai_layer:
         query_timeout_seconds: 20
         history_followup_messages: 6
       - skill_id: "reinforcement_table_normalizer"
-        name: "墙体配筋表规范化"
-        description: "确定性读取墙体配筋 XLSX，统一 D/C 写法并按精确公式计算实际配筋面积；歧义和重复行必须人工确认。"
+        name: "墙体与楼板配筋表规范化"
+        description: "用于计算书预检判定非标准且用户确认后的 Worker 结构化模型调用；标准表和 HTTP 预检不调用模型。"
         enabled: true
         read_only: true
         handler: "reinforcement_table_normalizer"
-        root: "storage/ai/skills/reinforcement-table-normalizer"
+        root: "tools/ai/reinforcement-table-normalizer"
         auto_trigger: true
         trigger_terms:
           - "配筋表"

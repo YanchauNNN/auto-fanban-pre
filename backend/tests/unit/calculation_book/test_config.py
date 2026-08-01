@@ -18,6 +18,17 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert config.calculation_book.max_archive_mb == 1024
     assert config.calculation_book.max_archive_files == 500
     assert config.calculation_book.max_compression_ratio == 250.0
+    assert config.calculation_book.ai_normalization.enabled is True
+    assert config.calculation_book.ai_normalization.skill_root == (
+        REPO_ROOT / "tools" / "ai" / "reinforcement-table-normalizer"
+    ).resolve()
+    assert config.calculation_book.ai_normalization.max_non_empty_cells == 10_000
+    assert config.calculation_book.ai_normalization.max_snapshot_chars == 500_000
+    assert config.calculation_book.ai_normalization.max_skill_chars == 100_000
+    assert config.calculation_book.ai_normalization.request_timeout_seconds == 120
+    assert config.calculation_book.ai_normalization.max_output_tokens == 32_768
+    assert config.calculation_book.ai_normalization.temperature == 0
+    assert config.calculation_book.ai_normalization.max_retries == 0
 
 
 def test_calculation_book_ocr_settings_come_from_mechanism_yaml() -> None:

@@ -1,37 +1,84 @@
 ---
 name: reinforcement-table-normalizer
-description: Deterministically read and normalize wall reinforcement XLSX workbooks, including non-standard D/C/A notation, parenthetical actual values, exact reinforcement-area calculations, duplicate-wall detection, and source-cell evidence. Use when a user uploads or asks to inspect, standardize, validate, compare, or calculate a wall reinforcement table.
+description: Use when a calculation-book task preflight has identified a non-standard reinforcement workbook and the user has confirmed AI normalization.
 ---
 
-# 墙体配筋表规范化
+# 墙体与楼板配筋表规范化
 
-## 工作流
+## 适用边界
 
-1. 要求用户提供原始 `.xlsx` 配筋表。没有附件时停止，不得根据文字描述补造表格值。
-2. 调用后端确定性解析器读取附件。不得让语言模型自行识别单元格、推算直径、间距或层数。
-3. 逐行输出墙号、X/Y/Z 原文、规范写法、精确实际配筋面积、来源工作表、行号和单元格地址。
-4. 将重复墙号和解析失败项明确列为人工确认项，不得自动消歧。
-5. 仅对已成功解析的证据做解释；缺失或不支持的写法必须原样报告错误。
+仅当计算书任务预检判定为非标准配筋表、并经用户确认后，Worker 才调用模型和本 Skill。标准表不调用，HTTP 预检不调用，也不得把普通 AI 对话当作任务规范化。
 
-## 强制规则
+输入是后端生成的安全 workbook snapshot。模型只识别规则字段并返回一个 schema v1 JSON 对象；模型不生成 Excel、不修改工作簿、不输出其他文件。
 
-- 墙号统一转为大写；`S7157A` 是独立墙体，不与 `S7157` 合并。
-- X、Y 方向统一为 `层数D直径间距间距值`，例如 `1 22@200` → `1D22间距200`。
-- Z 方向统一为 `层数C直径间距主间距*次间距`；`A` 只能作为输入兼容，输出强制改为 `C`。
-- 去除输入中的 `#`。
-- 单元格存在括号内配筋时，只在括号内候选中选择实际值；多个候选按未舍入实际面积取最大值。
-- X/Y 精确公式：`layers * math.pi * (diameter / 2) ** 2 * (1000 / spacing)`。
-- Z 精确公式：`layers * math.pi * (diameter / 2) ** 2 * (1000 / spacing_primary) * (1000 / spacing_secondary)`。
-- 计算、排序和包络全程使用未舍入浮点值。只有最终面向人的展示允许按项目规则四舍五入。
-- 同一墙号出现多行时保留每一行和每一个来源单元格，并强制人工确认。
+## 硬约束
 
-## 输出要求
+- 顶层必须是对象：`{"schema_version":"1","source_row_count":... ,"rows":[...]}`。禁止解释文字、多个代码块或 JSON 数组。
+- `rows` 同时支持 `kind="wall"` 和 `kind="slab"`。`include_slab=false` 时不得杜撰 slab 行。
+- 模型禁止返回、计算或解释 `actual_area`。后端确定性解析器使用精确公式产生实际配筋面积。
+- 每个输出行只能是 `normalized` 或 `needs_review`。确定字段必须保留；未确定字段必须为 `null`，并在 `blank_fields` 中列出，同时填写有限、可定位的 `reason`。
+- 每行必须引用 `source_sheet`、`source_row`、`source_cells`。同一个物理来源 `(source_sheet, source_row)` 只能出现一次，不能跨 kind 复制凑数。
+- 行守恒是任务硬约束：`source_row_count == len(rows)`。40 个物理数据行必须输出 40 行；不得静默丢行。
+- 未知值不得猜测。无效 JSON、schema、来源证据、行守恒，或模型网关失败，才使规范化任务失败。
 
-将后端返回的 JSON 视为唯一事实来源。回答时：
+## Schema v1 完整示例
 
-- 不修改 `actual_area` 的精确值，不用展示值反推精确值。
-- 明确区分“解析成功”“需要人工确认”“解析失败”。
-- 引用 `source_name`、`source_sheet`、`source_row` 和 `source_cells`，让用户能够回查。
-- 不声称对未知表格格式 100% 自动正确；不支持或有歧义时阻断并交人工确认。
+```json
+{
+  "schema_version": "1",
+  "source_row_count": 2,
+  "rows": [
+    {
+      "kind": "wall",
+      "status": "normalized",
+      "wall_id": "S7157A",
+      "X": "1D36间距200",
+      "Y": "1D32间距200",
+      "Z": "1C14间距400*400",
+      "reason": null,
+      "blank_fields": [],
+      "source_sheet": "墙体配筋",
+      "source_row": 2,
+      "source_cells": {"wall": "A2", "X": "B2", "Y": "C2", "Z": "D2"}
+    },
+    {
+      "kind": "slab",
+      "status": "needs_review",
+      "elevation": "11.2",
+      "top_x": "1D36间距200",
+      "top_y": "1D36间距200",
+      "middle_x": null,
+      "middle_y": null,
+      "bottom_x": "1D32间距200",
+      "bottom_y": null,
+      "z": "1D16间距200",
+      "reason": "底层 Y 单元格无法唯一识别",
+      "blank_fields": ["bottom_y"],
+      "source_sheet": "楼板配筋",
+      "source_row": 8,
+      "source_cells": {
+        "elevation": "A8",
+        "top_x": "B8",
+        "top_y": "C8",
+        "middle_x": null,
+        "middle_y": null,
+        "bottom_x": "D8",
+        "bottom_y": "E8",
+        "z": "F8"
+      }
+    }
+  ]
+}
+```
 
-读取详细的业务示例和公式时，使用 [references/normalization-rules.md](references/normalization-rules.md)。
+楼板 5 组字段为标高、顶层 X/Y、底层 X/Y、Z；楼板 7 组字段在此基础上增加中层 X/Y。不存在中层配筋时，`middle_x`、`middle_y` 和对应证据地址均为 `null`，这不属于 `needs_review`。
+
+## 识别与提醒规则
+
+- X/Y 使用 D，Z 使用 C；输入 Z 的 A→C，兼容 D/C、空格和 `@` 写法，去除 `#`。
+- 括号内值是实际候选；多个可识别候选按后端规则选择，但模型不计算面积。
+- `S7157A` 是独立墙号，不能合并到 `S7157`。
+- duplicate 墙号、`-1/-2` 后缀以及配筋表与图片墙号数量不一致，均保留确定值并作为后续人工提醒；不得因此暂停整个任务，也不得清空其他已确定行。
+- `needs_review` 只表示当前行存在留空提醒，不阻塞其他确定值继续生成，也不要求用户先改原工作簿再重启任务。
+
+详细规范见 [references/normalization-rules.md](references/normalization-rules.md)。

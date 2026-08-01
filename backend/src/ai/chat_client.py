@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from ..config.ai.ai_spec import AiSpec
 
 
 class ChatClientError(RuntimeError):
@@ -30,7 +32,7 @@ class _RejectRedirectHandler(HTTPRedirectHandler):
 _NO_REDIRECT_OPENER = build_opener(_RejectRedirectHandler())
 
 
-def urlopen(request: Request, *, timeout: float):
+def urlopen(request: Request, *, timeout: float) -> Any:
     return _NO_REDIRECT_OPENER.open(request, timeout=timeout)
 
 
@@ -75,6 +77,15 @@ class ChatCompletionResult:
     tool_calls: list[ChatToolCall] = field(default_factory=list)
 
 
+class ChatClientProtocol(Protocol):
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ChatCompletionResult: ...
+
+
 class OpenAICompatibleChatClient:
     def __init__(self, config: ChatClientConfig) -> None:
         self.config = config
@@ -117,7 +128,7 @@ class OpenAICompatibleChatClient:
                 if attempt >= attempts - 1:
                     raise last_error from exc
             except HTTPError as exc:
-                body = _read_error_body(exc)
+                body = _redact_secret(_read_error_body(exc), self.config.api_key)
                 last_error = ChatGatewayError(
                     f"model gateway returned HTTP {exc.code}: {body}",
                     status_code=exc.code,
@@ -125,7 +136,8 @@ class OpenAICompatibleChatClient:
                 if not _is_retryable_status(exc.code) or attempt >= attempts - 1:
                     raise last_error from exc
             except URLError as exc:
-                last_error = ChatGatewayError(f"model gateway request failed: {exc.reason}")
+                reason = _redact_secret(str(exc.reason), self.config.api_key)
+                last_error = ChatGatewayError(f"model gateway request failed: {reason}")
                 if attempt >= attempts - 1:
                     raise last_error from exc
             except json.JSONDecodeError as exc:
@@ -149,6 +161,48 @@ class OpenAICompatibleChatClient:
             else:
                 headers["Authorization"] = self.config.api_key
         return headers
+
+
+def build_chat_client(
+    spec: AiSpec,
+    *,
+    model_kind: Literal["chat", "structured"] = "chat",
+    timeout_seconds: int | None = None,
+    temperature: float | None = None,
+    max_output_tokens: int | None = None,
+    max_retries: int | None = None,
+) -> OpenAICompatibleChatClient:
+    """Build a gateway client without exposing gateway credentials."""
+
+    if model_kind not in {"chat", "structured"}:
+        raise ValueError(f"unsupported model_kind: {model_kind!r}")
+    gateway = spec.resolve_gateway()
+    models = spec.resolve_models()
+    chat = spec.ai_layer.chat
+    model = models.chat.model if model_kind == "chat" else models.structured.model
+    return OpenAICompatibleChatClient(
+        ChatClientConfig(
+            base_url=gateway.base_url,
+            api_key=gateway.api_key,
+            authorization_scheme=gateway.authorization_scheme,
+            model=model,
+            timeout_seconds=(
+                chat.request_timeout_seconds
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
+            temperature=(
+                models.chat.temperature if temperature is None else temperature
+            ),
+            max_output_tokens=(
+                models.chat.max_output_tokens
+                if max_output_tokens is None
+                else max_output_tokens
+            ),
+            max_retries=0 if max_retries is None else max_retries,
+            retry_backoff_ms=gateway.retry_backoff_ms,
+        )
+    )
 
 
 def _parse_completion_response(payload: dict[str, Any]) -> ChatCompletionResult:
@@ -218,6 +272,12 @@ def _read_error_body(exc: HTTPError) -> str:
     except Exception:
         body = ""
     return body[:500]
+
+
+def _redact_secret(value: str, secret: str | None) -> str:
+    if not secret:
+        return value
+    return value.replace(secret, "[REDACTED]")
 
 
 def _is_retryable_status(status_code: int) -> bool:

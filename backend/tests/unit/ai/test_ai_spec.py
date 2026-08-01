@@ -70,9 +70,7 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
     assert chat.skills[1].root_env_var == (
         "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
     )
-    assert chat.skills[2].root == (
-        "storage/ai/skills/reinforcement-table-normalizer"
-    )
+    assert chat.skills[2].root == "tools/ai/reinforcement-table-normalizer"
     assert chat.skills[2].root_env_var == ""
     assert chat.mcp_servers == []
     assert chat.response_format.enabled is True
