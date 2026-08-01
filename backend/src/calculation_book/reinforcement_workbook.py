@@ -500,9 +500,12 @@ def inspect_reinforcement_workbook(
     expected_source_row_count = (
         None
         if wall_source_row_count is None
-        or (include_slab and slab_source_row_count is None)
         else wall_source_row_count
-        + (slab_source_row_count if include_slab else 0)
+        + (
+            slab_source_row_count
+            if include_slab and slab_source_row_count is not None
+            else 0
+        )
     )
     return WorkbookFormatInspection(
         requires_ai_normalization=bool(reasons),

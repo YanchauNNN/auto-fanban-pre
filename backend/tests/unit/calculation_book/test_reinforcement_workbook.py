@@ -351,7 +351,7 @@ def test_physical_row_count_is_none_when_required_headers_are_unreliable(
     assert inspection.ai_reinforcement_expected_source_row_count is None
 
 
-def test_slab_count_is_required_only_when_slab_option_is_enabled(
+def test_missing_slab_sheet_keeps_strict_wall_row_count_for_ai(
     tmp_path: Path,
 ) -> None:
     subject = _subject()
@@ -372,7 +372,8 @@ def test_slab_count_is_required_only_when_slab_option_is_enabled(
 
     assert without_slab.ai_reinforcement_expected_source_row_count == 2
     assert with_slab.requires_ai_normalization is True
-    assert with_slab.ai_reinforcement_expected_source_row_count is None
+    assert with_slab.ai_reinforcement_expected_source_row_count == 2
+    assert "slab_sheet_missing" in {reason.code for reason in with_slab.reasons}
 
 
 def test_empty_standard_slab_sheet_requires_ai(tmp_path: Path) -> None:

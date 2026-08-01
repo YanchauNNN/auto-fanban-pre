@@ -487,6 +487,77 @@ def test_ai_review_only_slab_rows_do_not_fail_calculation_generation(
     assert "11.45m楼板底层水平钢筋" in text
 
 
+@pytest.mark.parametrize(
+    ("include_middle", "expected_keys"),
+    [
+        (
+            False,
+            ("top_x", "bottom_x", "top_y", "bottom_y", "z"),
+        ),
+        (
+            True,
+            (
+                "top_x",
+                "middle_x",
+                "bottom_x",
+                "top_y",
+                "middle_y",
+                "bottom_y",
+                "z",
+            ),
+        ),
+    ],
+)
+def test_ai_missing_slab_rows_keeps_named_groups_blank_and_completes(
+    monkeypatch,
+    tmp_path: Path,
+    include_middle: bool,
+    expected_keys: tuple[str, ...],
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("AI override must be used"),
+    )
+    validated = _validated_override(include_slab=False)
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    result = processor.process(
+        archive_path=_build_zip(
+            tmp_path,
+            include_slab=True,
+            include_middle=include_middle,
+        ),
+        output_dir=tmp_path / f"missing-slab-rows-{include_middle}",
+        params=_params(include_slab_stress=True),
+        reinforcement_normalizer=lambda _path, _include_slab: validated,
+    )
+
+    assert result.output_path.is_file()
+    [warning] = [
+        item for item in result.normalization_warnings
+        if item.code == "image_only_slab"
+    ]
+    assert warning.identity == "11.45"
+    assert warning.blank_fields == expected_keys
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
+    assert "11.45m 楼板顶层水平配筋云图" in text
+    assert "11.45m楼板顶层水平钢筋" not in text
+    if include_middle:
+        assert "11.45m 楼板中层水平配筋云图" in text
+
+
 def test_ai_partial_slab_schedule_matches_only_resolved_elevations(
     monkeypatch,
     tmp_path: Path,
