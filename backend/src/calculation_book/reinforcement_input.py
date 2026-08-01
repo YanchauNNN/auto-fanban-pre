@@ -48,13 +48,75 @@ class NormalizedReinforcementRow:
 
 
 @dataclass(frozen=True)
+class ReinforcementRowIssue:
+    source_sheet: str
+    source_row: int
+    source_cells: dict[str, str]
+    original_values: dict[str, str]
+    original_wall_text: str
+    wall_id: str | None
+    error: str
+
+
+@dataclass(frozen=True)
 class ReinforcementSchedule:
     rows: tuple[NormalizedReinforcementRow, ...]
     duplicate_wall_ids: tuple[str, ...]
+    issues: tuple[ReinforcementRowIssue, ...] = ()
+    source_row_count: int = 0
+    normalization_triggered: bool = False
+
+    def __post_init__(self) -> None:
+        audited_count = len(self.rows) + len(self.issues)
+        if self.source_row_count == 0 and audited_count:
+            object.__setattr__(self, "source_row_count", audited_count)
+        if self.source_row_count != audited_count:
+            raise ValueError(
+                "配筋表审计数量不守恒："
+                f"{self.source_row_count} != {len(self.rows)} + {len(self.issues)}"
+            )
 
     @property
     def requires_manual_confirmation(self) -> bool:
-        return bool(self.duplicate_wall_ids)
+        return bool(self.duplicate_wall_ids or self.issues)
+
+    @property
+    def normalized_row_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def issue_row_count(self) -> int:
+        return len(self.issues)
+
+    @property
+    def unique_wall_count(self) -> int:
+        return len({row.wall_id for row in self.rows})
+
+
+def build_reinforcement_schedule(
+    *,
+    rows: tuple[NormalizedReinforcementRow, ...],
+    issues: tuple[ReinforcementRowIssue, ...] = (),
+    source_row_count: int | None = None,
+    normalization_triggered: bool = False,
+) -> ReinforcementSchedule:
+    counts = Counter(
+        [row.wall_id for row in rows]
+        + [issue.wall_id for issue in issues if issue.wall_id is not None]
+    )
+    duplicates = tuple(
+        sorted(wall_id for wall_id, count in counts.items() if count > 1)
+    )
+    audited_count = len(rows) + len(issues)
+    return ReinforcementSchedule(
+        rows=rows,
+        duplicate_wall_ids=duplicates,
+        issues=issues,
+        source_row_count=(
+            audited_count if source_row_count is None else source_row_count
+        ),
+        normalization_triggered=normalization_triggered,
+    )
 
 
 @dataclass(frozen=True)
@@ -293,6 +355,27 @@ def _find_columns(sheet) -> tuple[int, int, int, int, int] | None:
     return None
 
 
+def _uses_standard_layout(
+    sheet,
+    columns: tuple[int, int, int, int, int],
+) -> bool:
+    header_row, wall_column, x_column, y_column, z_column = columns
+    expected = {
+        wall_column: "构件编号及位置",
+        x_column: "单侧水平钢筋(对称配筋)",
+        y_column: "单侧竖向钢筋(对称配筋)",
+        z_column: "拉筋",
+    }
+    return (
+        (wall_column, x_column, y_column, z_column) == (1, 2, 3, 4)
+        and all(
+            _header_text(sheet.cell(row=header_row, column=column).value)
+            == header
+            for column, header in expected.items()
+        )
+    )
+
+
 def load_reinforcement_schedule(path: Path) -> ReinforcementSchedule:
     if not path.is_file():
         raise FileNotFoundError(f"未找到墙体配筋表：{path}")
@@ -302,6 +385,9 @@ def load_reinforcement_schedule(path: Path) -> ReinforcementSchedule:
         raise InvalidReinforcementWorkbook(f"无法读取墙体配筋表：{path.name}") from exc
 
     rows: list[NormalizedReinforcementRow] = []
+    issues: list[ReinforcementRowIssue] = []
+    source_row_count = 0
+    normalization_triggered = False
     try:
         selected_sheet = None
         selected_columns = None
@@ -317,32 +403,82 @@ def load_reinforcement_schedule(path: Path) -> ReinforcementSchedule:
             )
 
         header_row, wall_column, x_column, y_column, z_column = selected_columns
+        normalization_triggered = not _uses_standard_layout(
+            selected_sheet,
+            selected_columns,
+        )
         for row_number in range(header_row + 1, selected_sheet.max_row + 1):
-            wall_id = normalize_wall_id(
-                selected_sheet.cell(row=row_number, column=wall_column).value
-            )
-            if wall_id is None:
-                continue
+            raw_wall = selected_sheet.cell(
+                row=row_number,
+                column=wall_column,
+            ).value
             raw_values = {
                 "X": selected_sheet.cell(row=row_number, column=x_column).value,
                 "Y": selected_sheet.cell(row=row_number, column=y_column).value,
                 "Z": selected_sheet.cell(row=row_number, column=z_column).value,
             }
+            if not any(
+                value is not None and str(value).strip()
+                for value in (raw_wall, *raw_values.values())
+            ):
+                continue
+            source_row_count += 1
             source_cells = {
                 "wall": f"{get_column_letter(wall_column)}{row_number}",
                 "X": f"{get_column_letter(x_column)}{row_number}",
                 "Y": f"{get_column_letter(y_column)}{row_number}",
                 "Z": f"{get_column_letter(z_column)}{row_number}",
             }
+            original_wall_text = "" if raw_wall is None else str(raw_wall).strip()
+            original_values = {
+                "wall": original_wall_text,
+                **{
+                    direction: "" if value is None else str(value).strip()
+                    for direction, value in raw_values.items()
+                },
+            }
+            wall_id = normalize_wall_id(raw_wall)
+            if wall_id is None:
+                normalization_triggered = True
+                issues.append(
+                    ReinforcementRowIssue(
+                        source_sheet=selected_sheet.title,
+                        source_row=row_number,
+                        source_cells=source_cells,
+                        original_values=original_values,
+                        original_wall_text=original_wall_text,
+                        wall_id=None,
+                        error="无法识别墙号",
+                    )
+                )
+                continue
             try:
                 parsed = {
                     direction: parse_rebar_cell(value, direction=direction)
                     for direction, value in raw_values.items()
                 }
             except InvalidReinforcementWorkbook as exc:
-                raise InvalidReinforcementWorkbook(
-                    f"{selected_sheet.title}!{source_cells['wall']}（{wall_id}）：{exc}"
-                ) from exc
+                normalization_triggered = True
+                issues.append(
+                    ReinforcementRowIssue(
+                        source_sheet=selected_sheet.title,
+                        source_row=row_number,
+                        source_cells=source_cells,
+                        original_values=original_values,
+                        original_wall_text=original_wall_text,
+                        wall_id=wall_id,
+                        error=str(exc),
+                    )
+                )
+                continue
+            if original_wall_text.upper() != wall_id:
+                normalization_triggered = True
+            if any(
+                parsed[direction].original_text
+                != parsed[direction].selected.canonical_specification
+                for direction in ("X", "Y", "Z")
+            ):
+                normalization_triggered = True
             rows.append(
                 NormalizedReinforcementRow(
                     wall_id=wall_id,
@@ -357,14 +493,14 @@ def load_reinforcement_schedule(path: Path) -> ReinforcementSchedule:
     finally:
         workbook.close()
 
-    if not rows:
+    if source_row_count == 0:
         raise InvalidReinforcementWorkbook("墙体配筋表没有可识别的数据行")
 
-    counts = Counter(row.wall_id for row in rows)
-    duplicates = tuple(sorted(wall_id for wall_id, count in counts.items() if count > 1))
-    return ReinforcementSchedule(
+    return build_reinforcement_schedule(
         rows=tuple(rows),
-        duplicate_wall_ids=duplicates,
+        issues=tuple(issues),
+        source_row_count=source_row_count,
+        normalization_triggered=normalization_triggered,
     )
 
 

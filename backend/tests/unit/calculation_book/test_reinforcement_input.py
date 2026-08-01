@@ -10,6 +10,9 @@ from openpyxl import Workbook
 
 from src.calculation_book.reinforcement_input import (
     InvalidReinforcementWorkbook,
+    NormalizedReinforcementRow,
+    ReinforcementRowIssue,
+    build_reinforcement_schedule,
     load_reinforcement_schedule,
     load_slab_reinforcement_schedule,
     parse_linear_rebar_cell,
@@ -198,7 +201,107 @@ def test_loads_standard_four_column_workbook_and_flags_duplicate_wall(
     assert [row.wall_id for row in schedule.rows] == ["S7157", "S7157", "S7157A"]
     assert schedule.duplicate_wall_ids == ("S7157",)
     assert schedule.requires_manual_confirmation
+    assert schedule.source_row_count == 3
+    assert schedule.normalized_row_count == 3
+    assert schedule.issue_row_count == 0
+    assert schedule.normalization_triggered is True
     assert schedule.rows[2].z.selected.canonical_specification == "1C8间距400*400"
+
+
+def test_preserves_every_nonempty_source_row_in_normalization_audit(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["构件编号及位置", "水平筋", "竖向筋", "拉筋"])
+    sheet.append(["S7157", "1D36间距200", "1D36间距200", "1C14间距400*400"])
+    sheet.append(["待确认墙", "1D32间距200", "1D32间距200", "1C14间距400*400"])
+    sheet.append(["S7158", "无法识别", "1D28间距200", "1C14间距400*400"])
+    path = tmp_path / "issues.xlsx"
+    workbook.save(path)
+
+    schedule = load_reinforcement_schedule(path)
+
+    assert schedule.source_row_count == 3
+    assert schedule.normalized_row_count == 1
+    assert schedule.issue_row_count == 2
+    assert schedule.source_row_count == (
+        schedule.normalized_row_count + schedule.issue_row_count
+    )
+    assert [issue.source_row for issue in schedule.issues] == [3, 4]
+    assert schedule.issues[0].wall_id is None
+    assert schedule.issues[0].original_wall_text == "待确认墙"
+    assert schedule.issues[0].original_values == {
+        "wall": "待确认墙",
+        "X": "1D32间距200",
+        "Y": "1D32间距200",
+        "Z": "1C14间距400*400",
+    }
+    assert schedule.issues[1].wall_id == "S7158"
+    assert schedule.issues[1].original_values["X"] == "无法识别"
+    assert schedule.requires_manual_confirmation is True
+
+
+def test_canonical_standard_template_does_not_trigger_normalization(
+    tmp_path: Path,
+) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "构件编号\n及位置",
+            "单侧水平钢筋\n(对称配筋)",
+            "单侧竖向钢筋\n(对称配筋)",
+            "拉筋",
+        ]
+    )
+    sheet.append(["S7157", "1D36间距200", "1D36间距200", "1C14间距400*400"])
+    path = tmp_path / "canonical.xlsx"
+    workbook.save(path)
+
+    schedule = load_reinforcement_schedule(path)
+
+    assert schedule.source_row_count == 1
+    assert schedule.normalization_triggered is False
+
+
+def test_build_reinforcement_schedule_preserves_issues_and_duplicate_ids() -> None:
+    parsed_x = parse_rebar_cell("1D36间距200", direction="X")
+    parsed_y = parse_rebar_cell("1D32间距200", direction="Y")
+    parsed_z = parse_rebar_cell("1C14间距400*400", direction="Z")
+    rows = tuple(
+        NormalizedReinforcementRow(
+            wall_id="S7157",
+            x=parsed_x,
+            y=parsed_y,
+            z=parsed_z,
+            source_sheet="墙体配筋",
+            source_row=source_row,
+            source_cells={"wall": f"A{source_row}", "X": f"B{source_row}", "Y": f"C{source_row}", "Z": f"D{source_row}"},
+        )
+        for source_row in (2, 3)
+    )
+    issue = ReinforcementRowIssue(
+        source_sheet="墙体配筋",
+        source_row=4,
+        source_cells={"wall": "A4", "X": "B4", "Y": "C4", "Z": "D4"},
+        original_values={"wall": "待确认墙", "X": "?", "Y": "", "Z": ""},
+        original_wall_text="待确认墙",
+        wall_id=None,
+        error="墙号不明确",
+    )
+
+    schedule = build_reinforcement_schedule(
+        rows=rows,
+        issues=(issue,),
+        source_row_count=3,
+        normalization_triggered=True,
+    )
+
+    assert schedule.duplicate_wall_ids == ("S7157",)
+    assert schedule.issues == (issue,)
+    assert schedule.source_row_count == 3
+    assert schedule.normalization_triggered is True
 
 
 def test_loads_workbook_without_optional_worksheet_dimensions(
