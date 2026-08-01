@@ -14,6 +14,10 @@ from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from docxtpl import DocxTemplate, InlineImage
 
+from .ai_reinforcement_schema import (
+    ReinforcementNormalizationWarning,
+    ValidatedAiReinforcement,
+)
 from .archive import ArchiveLimits, validate_and_extract_archive
 from .matching import (
     RecognizedFigure,
@@ -44,6 +48,7 @@ from .templates import resolve_template_path, validate_template_context
 
 class CalculationBookStage(StrEnum):
     VALIDATE_ARCHIVE = "VALIDATE_ARCHIVE"
+    AI_REINFORCEMENT_NORMALIZATION = "AI_REINFORCEMENT_NORMALIZATION"
     OCR_REINFORCEMENT = "OCR_REINFORCEMENT"
     SELECT_REBAR = "SELECT_REBAR"
     RENDER_CALCULATION_BOOK = "RENDER_CALCULATION_BOOK"
@@ -56,6 +61,10 @@ class ManualConfirmationRequired(ValueError):
 
 ProgressCallback = Callable[[CalculationBookStage, int, str, dict[str, object]], None]
 OcrRecognizer = Callable[[Path, str], StressLegendReading]
+ReinforcementNormalizationCallback = Callable[
+    [Path, bool],
+    ValidatedAiReinforcement,
+]
 
 
 @dataclass(frozen=True)
@@ -86,6 +95,7 @@ class CalculationBookResult:
     figure_count: int
     template_type: str
     selections: tuple[AppliedReinforcement, ...]
+    normalization_warnings: tuple[ReinforcementNormalizationWarning, ...] = ()
 
 
 def _format_number(value: float | int) -> str:
@@ -376,6 +386,7 @@ class CalculationBookProcessor:
         output_dir: Path,
         params: CalculationBookParams,
         progress: ProgressCallback | None = None,
+        reinforcement_normalizer: ReinforcementNormalizationCallback | None = None,
     ) -> CalculationBookResult:
         report = progress or (lambda _stage, _percent, _message, _details: None)
         extraction_root = output_dir / "extracted"
@@ -386,7 +397,19 @@ class CalculationBookProcessor:
             extraction_root,
             limits=self.mechanism.archive_limits,
         )
-        schedule = load_reinforcement_schedule(contents.reinforcement_workbook)
+        normalized = (
+            reinforcement_normalizer(
+                contents.reinforcement_workbook,
+                params.include_slab_stress,
+            )
+            if reinforcement_normalizer is not None
+            else None
+        )
+        schedule = (
+            normalized.wall_schedule
+            if normalized is not None
+            else load_reinforcement_schedule(contents.reinforcement_workbook)
+        )
 
         report(
             CalculationBookStage.OCR_REINFORCEMENT,
@@ -418,10 +441,18 @@ class CalculationBookProcessor:
         slab_plan = SlabMatchingPlan(assignments=())
         recognized_slabs: list[RecognizedSlabFigure] = []
         if params.include_slab_stress:
-            slab_schedule = load_slab_reinforcement_schedule(
-                contents.reinforcement_workbook,
-                required=True,
+            slab_schedule = (
+                normalized.slab_schedule
+                if normalized is not None
+                else load_slab_reinforcement_schedule(
+                    contents.reinforcement_workbook,
+                    required=True,
+                )
             )
+            if normalized is not None and slab_schedule is None:
+                raise ValueError(
+                    "AI reinforcement normalization did not return the required slab schedule"
+                )
             assert slab_schedule is not None
             recognized_slabs = [
                 RecognizedSlabFigure(
@@ -493,4 +524,7 @@ class CalculationBookProcessor:
             figure_count=len(recognized) + len(recognized_slabs),
             template_type=params.template_type.value,
             selections=selections,
+            normalization_warnings=(
+                normalized.warnings if normalized is not None else ()
+            ),
         )

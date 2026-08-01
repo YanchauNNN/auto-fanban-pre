@@ -40,6 +40,56 @@ class RecordingProcessor:
         raise AssertionError("API process must not execute queued work")
 
 
+def test_worker_processor_routes_calculation_job_through_injected_executor(
+    tmp_path: Path,
+) -> None:
+    from API.app.runtime import PipelineJobProcessor
+
+    calls: list[Job] = []
+    fake_executor = SimpleNamespace(execute=lambda job: calls.append(job))
+    processor = PipelineJobProcessor(
+        calculation_book_executor_factory=lambda: fake_executor,
+    )
+    job = Job(
+        job_id="calculation-worker-job",
+        job_type=JobType.CALCULATION_BOOK,
+        project_no="JQ",
+        work_dir=tmp_path,
+    )
+
+    processor(job)
+
+    assert calls == [job]
+
+
+def test_worker_processor_default_path_constructs_calculation_executor(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import API.app.runtime as runtime_module
+
+    calls: list[Job] = []
+    constructions: list[bool] = []
+
+    def build_executor():
+        constructions.append(True)
+        return SimpleNamespace(execute=lambda job: calls.append(job))
+
+    monkeypatch.setattr(runtime_module, "CalculationBookJobExecutor", build_executor)
+    processor = runtime_module.PipelineJobProcessor()
+    job = Job(
+        job_id="calculation-default-worker-job",
+        job_type=JobType.CALCULATION_BOOK,
+        project_no="JQ",
+        work_dir=tmp_path,
+    )
+
+    processor(job)
+
+    assert constructions == [True]
+    assert calls == [job]
+
+
 def _configure_api_env(monkeypatch: Any, tmp_path: Path) -> Path:
     repo_root = Path(__file__).resolve().parents[3]
     spec_path = repo_root / "documents" / "参数规范.yaml"
@@ -395,6 +445,7 @@ def test_api_mode_detail_and_download_reload_worker_written_job_json(
 ) -> None:
     _configure_api_env(monkeypatch, tmp_path)
     from API.app.main import create_app
+
     from src.pipeline.job_manager import JobManager
 
     app = create_app(job_processor=RecordingProcessor(), process_jobs_in_api=False)

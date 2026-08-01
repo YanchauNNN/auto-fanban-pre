@@ -158,8 +158,18 @@ def _summary_int(summary: dict[str, object], key: str) -> int:
 
 
 class PipelineJobProcessor:
-    def __init__(self, *, font_preflight_service: FontPreflightService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        font_preflight_service: FontPreflightService | None = None,
+        calculation_book_executor_factory: (
+            Callable[[], CalculationBookJobExecutor] | None
+        ) = None,
+    ) -> None:
         self.font_preflight_service = font_preflight_service
+        self.calculation_book_executor_factory = (
+            calculation_book_executor_factory or CalculationBookJobExecutor
+        )
 
     def _deliverable_executor(self) -> PipelineExecutor:
         if self.font_preflight_service is None:
@@ -168,7 +178,7 @@ class PipelineJobProcessor:
 
     def __call__(self, job: Job) -> None:
         if job.job_type == JobType.CALCULATION_BOOK:
-            CalculationBookJobExecutor().execute(job)
+            self.calculation_book_executor_factory().execute(job)
             return
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()

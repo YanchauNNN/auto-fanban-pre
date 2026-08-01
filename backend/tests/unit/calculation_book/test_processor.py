@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from docx import Document
@@ -15,6 +16,14 @@ from src.calculation_book.processor import (
     CalculationBookAssets,
     CalculationBookProcessor,
     CalculationBookStage,
+)
+from src.calculation_book.reinforcement_input import (
+    NormalizedReinforcementRow,
+    NormalizedSlabReinforcementRow,
+    SlabReinforcementSchedule,
+    build_reinforcement_schedule,
+    parse_linear_rebar_cell,
+    parse_rebar_cell,
 )
 
 ASSET_ROOT = Path(__file__).resolve().parents[4] / "documents_bin" / "calculation_book"
@@ -246,3 +255,162 @@ def test_processor_inserts_five_slab_groups_before_wall_results(
     assert "11.45m楼板纵向拉筋计算配筋面积为0mm2/m。" in text
     assert text.count("11.45m楼板") == 5
     _assert_mm2_uses_true_superscript(document)
+
+
+def _validated_override(*, include_slab: bool):
+    wall_row = NormalizedReinforcementRow(
+        wall_id="N5012",
+        x=parse_linear_rebar_cell("1D32@200"),
+        y=parse_linear_rebar_cell("1D28@200"),
+        z=parse_rebar_cell("1C14@400*400", direction="Z"),
+        source_sheet="AI",
+        source_row=2,
+        source_cells={"wall": "A2", "X": "B2", "Y": "C2", "Z": "D2"},
+    )
+    slab_schedule = None
+    if include_slab:
+        slab_schedule = SlabReinforcementSchedule(
+            rows=(
+                NormalizedSlabReinforcementRow(
+                    elevation="11.45",
+                    top_x=parse_linear_rebar_cell("1D36@200"),
+                    top_y=parse_linear_rebar_cell("1D40@200"),
+                    middle_x=None,
+                    middle_y=None,
+                    bottom_x=parse_linear_rebar_cell("1D30@200"),
+                    bottom_y=parse_linear_rebar_cell("1D28@200"),
+                    z=parse_rebar_cell("1C16@200*200", direction="Z"),
+                    source_sheet="AI-slab",
+                    source_row=2,
+                    source_cells={
+                        "elevation": "A2",
+                        "top_x": "B2",
+                        "top_y": "C2",
+                        "bottom_x": "F2",
+                        "bottom_y": "G2",
+                        "z": "H2",
+                    },
+                ),
+            )
+        )
+    return SimpleNamespace(
+        wall_schedule=build_reinforcement_schedule(
+            rows=(wall_row,),
+            source_row_count=1,
+            normalization_triggered=True,
+        ),
+        slab_schedule=slab_schedule,
+        warnings=(),
+        source_row_count=1 + int(include_slab),
+    )
+
+
+def test_processor_uses_ai_schedule_override_after_one_safe_extraction(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    archive_path = _build_zip(tmp_path, include_slab=True)
+    extraction_calls = 0
+    real_extract = processor_module.validate_and_extract_archive
+
+    def count_extract(*args, **kwargs):
+        nonlocal extraction_calls
+        extraction_calls += 1
+        return real_extract(*args, **kwargs)
+
+    monkeypatch.setattr(
+        processor_module,
+        "validate_and_extract_archive",
+        count_extract,
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail(
+            "AI override must bypass deterministic wall workbook loading"
+        ),
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "load_slab_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail(
+            "AI override must bypass deterministic slab workbook loading"
+        ),
+    )
+    callback_calls: list[tuple[Path, bool]] = []
+
+    def normalize(workbook_path: Path, include_slab: bool):
+        assert workbook_path.is_file()
+        callback_calls.append((workbook_path, include_slab))
+        return _validated_override(include_slab=True)
+
+    def recognize(_path: Path, direction: str) -> StressLegendReading:
+        return StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        )
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=recognize,
+    )
+
+    result = processor.process(
+        archive_path=archive_path,
+        output_dir=tmp_path / "override-output",
+        params=_params(include_slab_stress=True),
+        reinforcement_normalizer=normalize,
+    )
+
+    assert extraction_calls == 1
+    assert len(callback_calls) == 1
+    assert callback_calls[0][1] is True
+    assert result.figure_count == 8
+    assert result.normalization_warnings == ()
+
+
+def test_processor_does_not_require_ai_slab_schedule_when_slab_is_disabled(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("AI override must be used"),
+    )
+    monkeypatch.setattr(
+        processor_module,
+        "load_slab_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("slab is disabled"),
+    )
+    seen: list[bool] = []
+
+    def normalize(_workbook_path: Path, include_slab: bool):
+        seen.append(include_slab)
+        return _validated_override(include_slab=False)
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    result = processor.process(
+        archive_path=_build_zip(tmp_path, include_slab=True),
+        output_dir=tmp_path / "wall-only-output",
+        params=_params(include_slab_stress=False),
+        reinforcement_normalizer=normalize,
+    )
+
+    assert seen == [False]
+    assert result.figure_count == 3
