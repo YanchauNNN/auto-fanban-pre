@@ -221,6 +221,8 @@ class CalculationBookJobExecutor:
         def normalize(workbook_path: Path, include_slab: bool) -> Any:
             started_at = time.perf_counter()
             metadata = self._normalizer_metadata
+            validated = None
+            safe_failure: Exception | None = None
             update_progress(
                 CalculationBookStage.AI_REINFORCEMENT_NORMALIZATION,
                 20,
@@ -259,15 +261,16 @@ class CalculationBookJobExecutor:
                     },
                 )
                 if isinstance(exc, ReinforcementTaskNormalizationError):
-                    raise ReinforcementTaskNormalizationError(
+                    safe_failure = ReinforcementTaskNormalizationError(
                         exc.code,
                         "AI reinforcement normalization failed",
-                    ) from exc
-                raise ReinforcementNormalizationUnavailable(
-                    exc.code,
-                    "AI reinforcement normalization is unavailable",
-                ) from exc
-            except Exception as exc:
+                    )
+                else:
+                    safe_failure = ReinforcementNormalizationUnavailable(
+                        exc.code,
+                        "AI reinforcement normalization is unavailable",
+                    )
+            except Exception:
                 update_progress(
                     CalculationBookStage.AI_REINFORCEMENT_NORMALIZATION,
                     20,
@@ -281,10 +284,14 @@ class CalculationBookJobExecutor:
                         }
                     },
                 )
-                raise ReinforcementNormalizationUnavailable(
+                safe_failure = ReinforcementNormalizationUnavailable(
                     "normalizer_initialization_failed",
                     "AI reinforcement normalizer initialization failed",
-                ) from exc
+                )
+
+            if safe_failure is not None:
+                raise safe_failure
+            assert validated is not None
 
             audit = {
                 "skill_id": _SKILL_ID,

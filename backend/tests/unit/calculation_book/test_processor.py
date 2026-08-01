@@ -39,6 +39,7 @@ def _build_zip(
     *,
     include_slab: bool = False,
     include_middle: bool = False,
+    slab_elevations: tuple[str, ...] = ("11.45",),
 ) -> Path:
     source = tmp_path / "source"
     names = [
@@ -49,17 +50,22 @@ def _build_zip(
         "02/model.png",
     ]
     if include_slab:
-        names.extend(
-            [
-                "11.45-TOP-X.png",
-                "11.45-BOTTOM-X.png",
-                "11.45-TOP-Y.png",
-                "11.45-BOTTOM-Y.png",
-                "11.45-Z.png",
-            ]
-        )
+        for elevation in slab_elevations:
+            names.extend(
+                [
+                    f"{elevation}-TOP-X.png",
+                    f"{elevation}-BOTTOM-X.png",
+                    f"{elevation}-TOP-Y.png",
+                    f"{elevation}-BOTTOM-Y.png",
+                    f"{elevation}-Z.png",
+                ]
+            )
     if include_middle:
-        names.extend(("11.45-MIDDLE-X.png", "11.45-MIDDLE-Y.png"))
+        names.extend(
+            f"{elevation}-MIDDLE-{direction}.png"
+            for elevation in slab_elevations
+            for direction in ("X", "Y")
+        )
     for name in names:
         _write_png(source / name)
     workbook = Workbook()
@@ -305,6 +311,22 @@ def _validated_override(*, include_slab: bool):
     )
 
 
+def _slab_review_warning(*, elevation: str):
+    return SimpleNamespace(
+        code="needs_review",
+        scope="slab",
+        identity=elevation,
+        direction=None,
+        source_sheet="AI-slab",
+        source_row=3,
+        source_cells={"elevation": "A3", "top_x": "B3"},
+        original_values={"elevation": elevation, "top_x": "ambiguous"},
+        resolved_values={"elevation": elevation},
+        reason="slab reinforcement needs review",
+        blank_fields=("top_x",),
+    )
+
+
 def test_processor_uses_ai_schedule_override_after_one_safe_extraction(
     monkeypatch,
     tmp_path: Path,
@@ -414,3 +436,85 @@ def test_processor_does_not_require_ai_slab_schedule_when_slab_is_disabled(
 
     assert seen == [False]
     assert result.figure_count == 3
+
+
+def test_ai_review_only_slab_rows_do_not_fail_calculation_generation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("AI override must be used"),
+    )
+    warning = _slab_review_warning(elevation="11.45")
+    validated = _validated_override(include_slab=False)
+    validated.warnings = (warning,)
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    result = processor.process(
+        archive_path=_build_zip(tmp_path, include_slab=True),
+        output_dir=tmp_path / "review-only-slab-output",
+        params=_params(include_slab_stress=True),
+        reinforcement_normalizer=lambda _path, _include_slab: validated,
+    )
+
+    assert result.output_path.is_file()
+    assert result.figure_count == 8
+    assert result.normalization_warnings == (warning,)
+
+
+def test_ai_partial_slab_schedule_matches_only_resolved_elevations(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("AI override must be used"),
+    )
+    warning = _slab_review_warning(elevation="15.95")
+    validated = _validated_override(include_slab=True)
+    validated.warnings = (warning,)
+    validated.source_row_count = 3
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    result = processor.process(
+        archive_path=_build_zip(
+            tmp_path,
+            include_slab=True,
+            slab_elevations=("11.45", "15.95"),
+        ),
+        output_dir=tmp_path / "partial-slab-output",
+        params=_params(include_slab_stress=True),
+        reinforcement_normalizer=lambda _path, _include_slab: validated,
+    )
+
+    assert result.output_path.is_file()
+    assert result.figure_count == 13
+    assert result.normalization_warnings == (warning,)
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "11.45m楼板顶层水平钢筋" in text

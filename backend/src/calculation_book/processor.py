@@ -449,11 +449,6 @@ class CalculationBookProcessor:
                     required=True,
                 )
             )
-            if normalized is not None and slab_schedule is None:
-                raise ValueError(
-                    "AI reinforcement normalization did not return the required slab schedule"
-                )
-            assert slab_schedule is not None
             recognized_slabs = [
                 RecognizedSlabFigure(
                     source=figure,
@@ -464,10 +459,26 @@ class CalculationBookProcessor:
                 )
                 for figure in contents.slab_figures
             ]
-            slab_plan = match_slab_reinforcement(
-                recognized_slabs,
-                slab_schedule,
-            )
+            if normalized is None:
+                assert slab_schedule is not None
+                slab_plan = match_slab_reinforcement(
+                    recognized_slabs,
+                    slab_schedule,
+                )
+            elif slab_schedule is not None and slab_schedule.rows:
+                resolved_elevations = {
+                    row.elevation for row in slab_schedule.rows
+                }
+                resolved_slabs = [
+                    figure
+                    for figure in recognized_slabs
+                    if figure.source.elevation in resolved_elevations
+                ]
+                if resolved_slabs:
+                    slab_plan = match_slab_reinforcement(
+                        resolved_slabs,
+                        slab_schedule,
+                    )
 
         report(CalculationBookStage.RENDER_CALCULATION_BOOK, 75, "正在渲染 Word 计算书", {})
         template_path = resolve_template_path(self.assets.template_root, params.template_type)
