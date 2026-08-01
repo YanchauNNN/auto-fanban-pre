@@ -216,6 +216,31 @@ type RawJobDetail = RawJobSummary & {
     figure_count?: number | null;
     template_type?: string | null;
     output_filename?: string | null;
+    ai_normalized?: boolean | null;
+    warning_count?: number | null;
+    warnings?: Array<{
+      code?: string | null;
+      scope?: "wall" | "slab" | "reinforcement" | null;
+      identity?: string | null;
+      direction?: string | null;
+      source_sheet?: string | null;
+      source_row?: number | null;
+      source_cells?: Record<string, string> | null;
+      reason?: string | null;
+      blank_fields?: string[] | null;
+    }> | null;
+    ai_normalization?: {
+      skill_id?: string | null;
+      model?: string | null;
+      profile?: string | null;
+      call_count?: number | null;
+      source_row_count?: number | null;
+      normalized_wall_count?: number | null;
+      normalized_slab_count?: number | null;
+      review_warning_count?: number | null;
+      duration_ms?: number | null;
+      validation?: string | null;
+    } | null;
   } | null;
 };
 
@@ -1067,6 +1092,40 @@ export class HttpAdapter implements ApiAdapter {
       figure_count: number;
       zero_figure_count: number;
       wall_count: number;
+      reinforcement_source_row_count?: number;
+      reinforcement_normalized_row_count?: number;
+      reinforcement_issue_row_count?: number;
+      reinforcement_unique_wall_count?: number;
+      normalization_triggered?: boolean;
+      normalization_skill_id?: string | null;
+      requires_ai_normalization?: boolean;
+      ai_reinforcement_expected_source_row_count?: number | null;
+      ai_confirmation_message?: string | null;
+      format_inspection?: {
+        wall_sheet?: string | null;
+        slab_sheet?: string | null;
+        reasons?: Array<{
+          scope?: string | null;
+          code?: string | null;
+          sheet?: string | null;
+          message?: string | null;
+        }> | null;
+      } | null;
+      normalization_issues?: Array<{
+        source_sheet: string;
+        source_row: number;
+        source_cells: Record<"wall" | "X" | "Y" | "Z", string>;
+        original_values?: Record<"wall" | "X" | "Y" | "Z", string>;
+        original_wall_text: string;
+        wall_id: string | null;
+        error: string;
+      }>;
+      image_wall_group_count?: number;
+      image_unique_wall_count?: number;
+      matched_unique_wall_count?: number;
+      image_only_wall_ids?: string[];
+      workbook_only_wall_ids?: string[];
+      requires_wall_count_confirmation?: boolean;
       slab_figure_count: number;
       slab_elevation_count: number;
       reinforcement_workbook: string;
@@ -1172,6 +1231,54 @@ export class HttpAdapter implements ApiAdapter {
       figureCount: payload.figure_count,
       zeroFigureCount: payload.zero_figure_count,
       wallCount: payload.wall_count,
+      reinforcementSourceRowCount:
+        payload.reinforcement_source_row_count ?? payload.wall_count,
+      reinforcementNormalizedRowCount:
+        payload.reinforcement_normalized_row_count ?? payload.wall_count,
+      reinforcementIssueRowCount:
+        payload.reinforcement_issue_row_count ?? 0,
+      reinforcementUniqueWallCount:
+        payload.reinforcement_unique_wall_count ?? payload.wall_count,
+      normalizationTriggered: payload.normalization_triggered ?? false,
+      normalizationSkillId: payload.normalization_skill_id ?? null,
+      requiresAiNormalization: payload.requires_ai_normalization ?? false,
+      aiReinforcementExpectedSourceRowCount:
+        payload.ai_reinforcement_expected_source_row_count ?? null,
+      aiConfirmationMessage: payload.ai_confirmation_message ?? null,
+      formatInspection: {
+        wallSheet: payload.format_inspection?.wall_sheet ?? null,
+        slabSheet: payload.format_inspection?.slab_sheet ?? null,
+        reasons: (payload.format_inspection?.reasons ?? []).map((reason) => ({
+          scope: reason.scope ?? "",
+          code: reason.code ?? "",
+          sheet: reason.sheet ?? null,
+          message: reason.message ?? "",
+        })),
+      },
+      normalizationIssues: (payload.normalization_issues ?? []).map((issue) => ({
+        sourceSheet: issue.source_sheet,
+        sourceRow: issue.source_row,
+        sourceCells: issue.source_cells,
+        originalValues: issue.original_values ?? {
+          wall: issue.original_wall_text,
+          X: "",
+          Y: "",
+          Z: "",
+        },
+        originalWallText: issue.original_wall_text,
+        wallId: issue.wall_id,
+        error: issue.error,
+      })),
+      imageWallGroupCount:
+        payload.image_wall_group_count ?? payload.wall_count,
+      imageUniqueWallCount:
+        payload.image_unique_wall_count ?? payload.wall_count,
+      matchedUniqueWallCount:
+        payload.matched_unique_wall_count ?? payload.wall_count,
+      imageOnlyWallIds: payload.image_only_wall_ids ?? [],
+      workbookOnlyWallIds: payload.workbook_only_wall_ids ?? [],
+      requiresWallCountConfirmation:
+        payload.requires_wall_count_confirmation ?? false,
       slabFigureCount: payload.slab_figure_count ?? 0,
       slabElevationCount: payload.slab_elevation_count ?? 0,
       reinforcementWorkbook: payload.reinforcement_workbook,
@@ -1366,6 +1473,50 @@ export class HttpAdapter implements ApiAdapter {
             figureCount: Number(payload.calculation_book_output.figure_count ?? 0),
             templateType: payload.calculation_book_output.template_type ?? "",
             outputFilename: payload.calculation_book_output.output_filename ?? "",
+            aiNormalized: Boolean(payload.calculation_book_output.ai_normalized),
+            warningCount: Number(payload.calculation_book_output.warning_count ?? 0),
+            warnings: (payload.calculation_book_output.warnings ?? []).map((warning) => ({
+              code: warning.code ?? "needs_review",
+              scope:
+                warning.scope === "wall" || warning.scope === "slab"
+                  ? warning.scope
+                  : "reinforcement",
+              identity: warning.identity ?? null,
+              direction: warning.direction ?? null,
+              sourceSheet: warning.source_sheet ?? null,
+              sourceRow: warning.source_row ?? null,
+              sourceCells: warning.source_cells ?? {},
+              reason: warning.reason ?? "相关配筋字段需要人工补充",
+              blankFields: warning.blank_fields ?? [],
+            })),
+            aiNormalization: payload.calculation_book_output.ai_normalization
+              ? {
+                  skillId:
+                    payload.calculation_book_output.ai_normalization.skill_id ?? "",
+                  model: payload.calculation_book_output.ai_normalization.model ?? "",
+                  profile: payload.calculation_book_output.ai_normalization.profile ?? "",
+                  callCount: Number(
+                    payload.calculation_book_output.ai_normalization.call_count ?? 0,
+                  ),
+                  sourceRowCount: Number(
+                    payload.calculation_book_output.ai_normalization.source_row_count ?? 0,
+                  ),
+                  normalizedWallCount: Number(
+                    payload.calculation_book_output.ai_normalization.normalized_wall_count ?? 0,
+                  ),
+                  normalizedSlabCount: Number(
+                    payload.calculation_book_output.ai_normalization.normalized_slab_count ?? 0,
+                  ),
+                  reviewWarningCount: Number(
+                    payload.calculation_book_output.ai_normalization.review_warning_count ?? 0,
+                  ),
+                  durationMs: Number(
+                    payload.calculation_book_output.ai_normalization.duration_ms ?? 0,
+                  ),
+                  validation:
+                    payload.calculation_book_output.ai_normalization.validation ?? "",
+                }
+              : null,
           }
         : undefined,
     };

@@ -45,7 +45,7 @@ const schema = {
     projectOptions: [{ value: "2016", label: "浙江金七门核电厂1、2号机组" }],
     fields: calculationFields,
     archive: {
-      accept: [".zip"],
+      accept: [".zip", ".rar"],
       requiredRootDirections: ["X", "Y", "Z"],
       requiredFolders: ["01", "02"],
       rootFigurePattern: "<墙号>-X|Y|Z.png",
@@ -70,6 +70,27 @@ const preflightResult = {
   figureCount: 3,
   zeroFigureCount: 1,
   wallCount: 1,
+  reinforcementSourceRowCount: 1,
+  reinforcementNormalizedRowCount: 1,
+  reinforcementIssueRowCount: 0,
+  reinforcementUniqueWallCount: 1,
+  normalizationTriggered: true,
+  normalizationSkillId: "reinforcement_table_normalizer",
+  requiresAiNormalization: false,
+  aiReinforcementExpectedSourceRowCount: null,
+  aiConfirmationMessage: null,
+  formatInspection: {
+    wallSheet: "Sheet1",
+    slabSheet: "楼板配筋",
+    reasons: [],
+  },
+  imageWallGroupCount: 1,
+  imageUniqueWallCount: 1,
+  matchedUniqueWallCount: 1,
+  imageOnlyWallIds: [],
+  workbookOnlyWallIds: [],
+  requiresWallCountConfirmation: false,
+  normalizationIssues: [],
   reinforcementWorkbook: "计算书模板文件.xlsx",
   requiresManualConfirmation: false,
   slabFigureCount: 0,
@@ -247,7 +268,7 @@ describe("CalculationBookWorkspace", () => {
       await user.type(screen.getByLabelText(label), value);
     }
     const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
-    await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(await screen.findByLabelText("共 1 面墙")).toBeInTheDocument();
@@ -280,8 +301,13 @@ describe("CalculationBookWorkspace", () => {
         workshop_length: 72.5,
         include_slab_stress: false,
         preflight_token: "calculation-preflight-1",
-        manual_confirmations: {},
       }),
+    );
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "manual_confirmations",
+    );
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "confirm_ai_normalization",
     );
     expect(onBatchCreated).toHaveBeenCalledWith({ batchId: "batch-calc", jobs: [] });
   });
@@ -302,7 +328,7 @@ describe("CalculationBookWorkspace", () => {
       />,
     );
     await user.upload(
-      screen.getByLabelText("选择计算图片 ZIP"),
+      screen.getByLabelText("选择计算图片压缩包"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
 
@@ -348,7 +374,7 @@ describe("CalculationBookWorkspace", () => {
     );
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     await user.upload(
-      screen.getByLabelText("选择计算图片 ZIP"),
+      screen.getByLabelText("选择计算图片压缩包"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
@@ -363,7 +389,7 @@ describe("CalculationBookWorkspace", () => {
     expect(onBatchCreated).not.toHaveBeenCalled();
   });
 
-  it("requires an explicit checkbox for every duplicate or split wall", async () => {
+  it("does not ask for create-time confirmation for duplicate rows or split image groups", async () => {
     const user = userEvent.setup();
     const manualPreflight = {
       ...preflightResult,
@@ -434,26 +460,204 @@ describe("CalculationBookWorkspace", () => {
     );
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     await user.upload(
-      screen.getByLabelText("选择计算图片 ZIP"),
+      screen.getByLabelText("选择计算图片压缩包"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(await screen.findByRole("button", { name: "进入确认提交" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "进入确认提交" }));
-    expect(await screen.findByText("S7157-1 需要人工确认")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "创建计算书任务" })).toBeDisabled();
-    await user.click(screen.getByRole("radio", { name: /Sheet1 · 第 28 行/ }));
-    expect(screen.getByText("配筋表第 28 行")).toBeInTheDocument();
-    expect(screen.getByText("1排25@200")).toBeInTheDocument();
-    await user.click(screen.getByLabelText("已核对 S7157-1 的图片与配筋对应关系"));
+    expect(screen.queryByText("S7157-1 需要人工确认")).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建计算书任务" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "manual_confirmations",
+    );
+  });
+
+  it("starts an AI task only after the nonstandard workbook confirmation", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...preflightResult,
+      preflightToken: "ai-preflight-token",
+      figureCount: 174,
+      wallCount: 0,
+      reinforcementSourceRowCount: 0,
+      reinforcementNormalizedRowCount: 0,
+      reinforcementIssueRowCount: 1,
+      reinforcementUniqueWallCount: 0,
+      normalizationTriggered: false,
+      normalizationSkillId: null,
+      imageWallGroupCount: 58,
+      imageUniqueWallCount: 58,
+      matchedUniqueWallCount: 0,
+      slabFigureCount: 35,
+      slabElevationCount: 5,
+      slabs: [],
+      walls: [],
+      confirmations: [],
+      normalizationIssues: [
+        {
+          sourceSheet: "墙体配筋结果",
+          sourceRow: 8,
+          sourceCells: { wall: "A8", X: "B8", Y: "C8", Z: "D8" },
+          originalValues: { wall: "N5008", X: "", Y: "双层@二百", Z: "" },
+          originalWallText: "N5008",
+          wallId: "N5008",
+          error: "竖向配筋格式无法确定",
+        },
+      ],
+      requiresAiNormalization: true,
+      aiReinforcementExpectedSourceRowCount: 315,
+      aiConfirmationMessage: "您上传的墙体配筋表非标准格式，程序将启动人工智能。",
+      formatInspection: {
+        wallSheet: "墙体配筋结果",
+        slabSheet: "楼板配筋",
+        reasons: [
+          {
+            scope: "wall",
+            code: "wall_layout_nonstandard",
+            sheet: "墙体配筋结果",
+            message: "不是标准四列墙体配筋模板",
+          },
+        ],
+      },
+    });
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-ai",
+      jobs: [],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook,
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    const archive = new File(["rar"], "nonstandard-calculation.rar", {
+      type: "application/vnd.rar",
+    });
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(
+      await screen.findByText("您上传的墙体配筋表非标准格式，程序将启动人工智能。"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("03 确认提交")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByText("03 · AI 规范化确认")).toBeInTheDocument();
+    expect(screen.getByText("预计需规范化 315 行源数据")).toBeInTheDocument();
+    expect(screen.queryByLabelText("共 0 面墙")).not.toBeInTheDocument();
+    expect(screen.queryByText("0规范化行")).not.toBeInTheDocument();
+    expect(screen.queryByText("待修正行")).not.toBeInTheDocument();
+    expect(screen.queryByText("竖向配筋格式无法确定")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
+    expect(createCalculationBook).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "返回修改" }));
+    expect(screen.getByLabelText("选择计算图片压缩包")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "继续 AI 确认" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "继续 AI 确认" }));
+    expect(
+      await screen.findByText("您上传的墙体配筋表非标准格式，程序将启动人工智能。"),
+    ).toBeInTheDocument();
+    expect(createCalculationBook).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "确认并开始任务" }));
 
     await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
     expect(createCalculationBook).toHaveBeenCalledWith(
       expect.objectContaining({
-        manual_confirmations: { "S7157-1": 28 },
+        preflight_token: "ai-preflight-token",
+        include_slab_stress: true,
+        confirm_ai_normalization: true,
       }),
+    );
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "confirm_wall_count_mismatch",
+    );
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "manual_confirmations",
+    );
+  });
+
+  it("accepts RAR and keeps wall-count mismatches nonblocking", async () => {
+    const user = userEvent.setup();
+    const mismatchPreflight = {
+      ...preflightResult,
+      figureCount: 174,
+      wallCount: 54,
+      reinforcementSourceRowCount: 315,
+      reinforcementNormalizedRowCount: 315,
+      reinforcementIssueRowCount: 0,
+      reinforcementUniqueWallCount: 314,
+      imageWallGroupCount: 59,
+      imageUniqueWallCount: 58,
+      matchedUniqueWallCount: 54,
+      imageOnlyWallIds: ["N5003A", "N5003B", "N5022", "NDTJ1"],
+      workbookOnlyWallIds: ["N0001", "N0002"],
+      requiresWallCountConfirmation: true,
+      requiresManualConfirmation: true,
+    };
+    const preflightCalculationBook = vi.fn().mockResolvedValue(mismatchPreflight);
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-calc",
+      jobs: [],
+    });
+    const minimalSchema: FormSchema = {
+      ...schema,
+      calculationBook: {
+        ...schema.calculationBook!,
+        fields: [calculationFields[0]],
+      },
+    };
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook,
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    const archive = new File(["rar"], "calculation.rar", {
+      type: "application/vnd.rar",
+    });
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByText("配筋表与图片匹配")).toBeInTheDocument();
+    expect(screen.getByLabelText("配筋源行 315")).toBeInTheDocument();
+    expect(screen.getByLabelText("规范化行 315")).toBeInTheDocument();
+    expect(screen.getByLabelText("配筋表唯一墙号 314")).toBeInTheDocument();
+    expect(screen.getByLabelText("图片墙组 59")).toBeInTheDocument();
+    expect(screen.getByLabelText("已匹配墙号 54")).toBeInTheDocument();
+    expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+    expect(
+      screen.queryByRole("region", { name: "墙体数量存在差异，需要确认" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建计算书任务" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "confirm_wall_count_mismatch",
     );
   });
 
@@ -491,7 +695,7 @@ describe("CalculationBookWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
     const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
-    await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(await screen.findByLabelText("共 5 张楼板云图")).toBeInTheDocument();
@@ -545,7 +749,7 @@ describe("CalculationBookWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
     await user.upload(
-      screen.getByLabelText("选择计算图片 ZIP"),
+      screen.getByLabelText("选择计算图片压缩包"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
@@ -583,12 +787,97 @@ describe("CalculationBookWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
     await user.upload(
-      screen.getByLabelText("选择计算图片 ZIP"),
+      screen.getByLabelText("选择计算图片压缩包"),
       new File(["zip"], "calculation.zip", { type: "application/zip" }),
     );
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("缺少 BOTTOM-Y");
+    expect(screen.getByRole("button", { name: "进入确认提交" })).toBeDisabled();
+  });
+
+  it("does not ask the user to repair a row before the task can leave it blank", async () => {
+    const user = userEvent.setup();
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-partial",
+      jobs: [],
+    });
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...preflightResult,
+      reinforcementSourceRowCount: 2,
+      reinforcementNormalizedRowCount: 1,
+      reinforcementIssueRowCount: 1,
+      normalizationIssues: [
+        {
+          sourceSheet: "墙体配筋",
+          sourceRow: 3,
+          sourceCells: { wall: "A3", X: "B3", Y: "C3", Z: "D3" },
+          originalValues: {
+            wall: "N5002",
+            X: "1D22间距200",
+            Y: "直径22双层@二百",
+            Z: "1C8间距400*400",
+          },
+          originalWallText: "N5002",
+          wallId: "N5002",
+          error: "竖向配筋格式无法确定",
+        },
+      ],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook,
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["zip"], "calculation.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByText("配筋表与图片匹配")).toBeInTheDocument();
+    expect(screen.queryByText("竖向配筋格式无法确定")).not.toBeInTheDocument();
+    expect(screen.queryByText("查看待修正行")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+    expect(screen.getByRole("button", { name: "创建计算书任务" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+  });
+
+  it("blocks submission when normalization audit counts are not conserved", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...preflightResult,
+      reinforcementSourceRowCount: 40,
+      reinforcementNormalizedRowCount: 38,
+      reinforcementIssueRowCount: 0,
+      normalizationIssues: [],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["zip"], "calculation.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("规范化审计数据不守恒");
     expect(screen.getByRole("button", { name: "进入确认提交" })).toBeDisabled();
   });
 
@@ -619,7 +908,7 @@ describe("CalculationBookWorkspace", () => {
     );
     await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
     const archive = new File(["zip"], "calculation.zip", { type: "application/zip" });
-    await user.upload(screen.getByLabelText("选择计算图片 ZIP"), archive);
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
     await screen.findByRole("button", { name: "进入确认提交" });
     await user.click(screen.getByRole("button", { name: "返回修改" }));

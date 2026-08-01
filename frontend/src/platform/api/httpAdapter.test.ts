@@ -282,6 +282,49 @@ describe("HttpAdapter", () => {
           figure_count: 3,
           zero_figure_count: 1,
           wall_count: 1,
+          reinforcement_source_row_count: 315,
+          reinforcement_normalized_row_count: 314,
+          reinforcement_issue_row_count: 1,
+          reinforcement_unique_wall_count: 314,
+          normalization_triggered: true,
+          normalization_skill_id: "reinforcement_table_normalizer",
+          requires_ai_normalization: true,
+          ai_reinforcement_expected_source_row_count: 315,
+          ai_confirmation_message: "您上传的墙体配筋表非标准格式，程序将启动人工智能。",
+          format_inspection: {
+            wall_sheet: "墙体配筋",
+            slab_sheet: null,
+            reasons: [
+              {
+                scope: "wall",
+                code: "wall_layout_nonstandard",
+                sheet: "墙体配筋",
+                message: "不是标准四列墙体配筋模板",
+              },
+            ],
+          },
+          normalization_issues: [
+            {
+              source_sheet: "墙体配筋",
+              source_row: 8,
+              source_cells: { wall: "A8", X: "B8", Y: "C8", Z: "D8" },
+              original_values: {
+                wall: "N5008",
+                X: "1D22间距200",
+                Y: "直径22双层@二百",
+                Z: "1C8间距400*400",
+              },
+              original_wall_text: "N5008",
+              wall_id: "N5008",
+              error: "竖向配筋格式无法确定",
+            },
+          ],
+          image_wall_group_count: 58,
+          image_unique_wall_count: 58,
+          matched_unique_wall_count: 54,
+          image_only_wall_ids: ["N5003A"],
+          workbook_only_wall_ids: ["N0001"],
+          requires_wall_count_confirmation: true,
           slab_figure_count: 1,
           slab_elevation_count: 1,
           reinforcement_workbook: "计算书模板文件.xlsx",
@@ -327,6 +370,45 @@ describe("HttpAdapter", () => {
     });
 
     expect(result.preflightToken).toBe("preflight-1");
+    expect(result).toEqual(
+      expect.objectContaining({
+        reinforcementSourceRowCount: 315,
+        reinforcementNormalizedRowCount: 314,
+        reinforcementUniqueWallCount: 314,
+        imageUniqueWallCount: 58,
+        matchedUniqueWallCount: 54,
+        imageOnlyWallIds: ["N5003A"],
+        workbookOnlyWallIds: ["N0001"],
+        requiresWallCountConfirmation: true,
+        requiresAiNormalization: true,
+        aiReinforcementExpectedSourceRowCount: 315,
+        aiConfirmationMessage: "您上传的墙体配筋表非标准格式，程序将启动人工智能。",
+        formatInspection: {
+          wallSheet: "墙体配筋",
+          slabSheet: null,
+          reasons: [
+            {
+              scope: "wall",
+              code: "wall_layout_nonstandard",
+              sheet: "墙体配筋",
+              message: "不是标准四列墙体配筋模板",
+            },
+          ],
+        },
+      }),
+    );
+    expect(result.normalizationIssues[0]).toEqual(
+      expect.objectContaining({
+        sourceRow: 8,
+        sourceCells: { wall: "A8", X: "B8", Y: "C8", Z: "D8" },
+        originalValues: {
+          wall: "N5008",
+          X: "1D22间距200",
+          Y: "直径22双层@二百",
+          Z: "1C8间距400*400",
+        },
+      }),
+    );
     expect(result.walls[0]?.directions.Z).toEqual(
       expect.objectContaining({
         imageFilename: "N5012-Z.JPEG",
@@ -347,6 +429,91 @@ describe("HttpAdapter", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books/preflight");
     expect((init.body as FormData).get("archive")).toBe(archive);
     expect((init.body as FormData).get("include_slab_stress")).toBe("true");
+  });
+
+  it("maps calculation-book AI normalization warnings from completed task details", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        job_id: "calculation-ai-1",
+        batch_id: "batch-ai-1",
+        source_filename: "计算书.rar",
+        task_kind: "calculation_book",
+        job_mode: "calculation_book",
+        project_no: "2016",
+        status: "succeeded",
+        stage: "CALCULATION_BOOK_COMPLETE",
+        percent: 100,
+        message: "done",
+        created_at: "2026-08-01T12:00:00+08:00",
+        finished_at: "2026-08-01T12:01:00+08:00",
+        artifacts: {
+          package_available: false,
+          ied_available: false,
+          report_available: false,
+          replaced_dwg_available: false,
+          calculation_docx_available: true,
+        },
+        retry_available: false,
+        calculation_book_output: {
+          figure_count: 174,
+          template_type: "internal_structure",
+          output_filename: "计算书.docx",
+          ai_normalized: true,
+          warning_count: 1,
+          warnings: [
+            {
+              code: "image_only_wall",
+              scope: "wall",
+              identity: "N5012",
+              direction: null,
+              source_sheet: null,
+              source_row: null,
+              source_cells: {},
+              reason: "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+              blank_fields: ["X", "Y", "Z"],
+            },
+          ],
+          ai_normalization: {
+            skill_id: "reinforcement_table_normalizer",
+            model: "structured-test",
+            profile: "intranet-test",
+            call_count: 1,
+            source_row_count: 315,
+            normalized_wall_count: 314,
+            normalized_slab_count: 0,
+            review_warning_count: 1,
+            duration_ms: 125,
+            validation: "passed",
+          },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await new HttpAdapter("http://127.0.0.1:8000").getJobDetail(
+      "calculation-ai-1",
+    );
+
+    expect(detail.calculationBookOutput).toEqual(
+      expect.objectContaining({
+        aiNormalized: true,
+        warningCount: 1,
+        warnings: [
+          expect.objectContaining({
+            identity: "N5012",
+            sourceSheet: null,
+            sourceRow: null,
+            blankFields: ["X", "Y", "Z"],
+          }),
+        ],
+        aiNormalization: expect.objectContaining({
+          skillId: "reinforcement_table_normalizer",
+          sourceRowCount: 315,
+          normalizedWallCount: 314,
+        }),
+      }),
+    );
   });
 
   it("uses a normalized API base URL and resolves relative artifact links", async () => {

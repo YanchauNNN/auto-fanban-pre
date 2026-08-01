@@ -10,7 +10,6 @@ import {
 
 import type {
   ApiAdapter,
-  CalculationBookConfirmationCandidate,
   CalculationBookDirectionEvidence,
   CalculationBookField,
   CalculationBookPreflightResult,
@@ -47,11 +46,6 @@ const DIRECTION_LABELS = {
   Y: "竖向筋",
   Z: "拉筋",
 } as const;
-
-const CONFIRMATION_REASON_LABELS: Record<string, string> = {
-  duplicate_reinforcement_rows: "配筋表存在重复墙号",
-  split_image_group: "图片采用 -1/-2 分组",
-};
 
 const SLAB_GROUP_ORDER = [
   "top_x",
@@ -193,8 +187,6 @@ export function CalculationBookWorkspace({
   const [archive, setArchive] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>("input");
   const [preflight, setPreflight] = useState<CalculationBookPreflightResult | null>(null);
-  const [selectedRows, setSelectedRows] = useState<Record<string, number>>({});
-  const [confirmedWalls, setConfirmedWalls] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [busyAction, setBusyAction] = useState<"preflight" | "submit" | null>(null);
@@ -210,8 +202,6 @@ export function CalculationBookWorkspace({
       setArchive(null);
       setPhase("input");
       setPreflight(null);
-      setSelectedRows({});
-      setConfirmedWalls({});
       setFieldErrors({});
       setFormErrors([]);
       setBusyAction(null);
@@ -246,11 +236,9 @@ export function CalculationBookWorkspace({
   const workshopFields = calculationSchema.fields.filter((field) => NUMERIC_FIELDS.has(field.key));
   const fieldErrorCount = Object.values(fieldErrors).filter((messages) => messages.length > 0).length;
   const hasValidationErrors = fieldErrorCount > 0 || formErrors.length > 0;
-  const allRequiredWallsConfirmed =
-    preflight?.confirmations.every((item) => confirmedWalls[item.wallId]) ?? true;
   const slabEvidenceGroups = buildSlabEvidenceGroups(preflight?.slabs ?? []);
   const slabEvidenceIssues =
-    preflight && values.include_slab_stress === "true"
+    preflight && !preflight.requiresAiNormalization && values.include_slab_stress === "true"
       ? slabEvidenceGroups.length > 0
         ? slabEvidenceGroups.flatMap((group) =>
             group.issues.map((issue) => `${group.elevation}m：${issue}`),
@@ -258,6 +246,18 @@ export function CalculationBookWorkspace({
         : ["已勾选楼板应力，但预检结果未返回楼板云图证据"]
       : [];
   const slabEvidenceComplete = slabEvidenceIssues.length === 0;
+  const normalizationAuditConserved =
+    !preflight ||
+    (
+      preflight.reinforcementSourceRowCount
+        === preflight.reinforcementNormalizedRowCount
+          + preflight.reinforcementIssueRowCount
+      && preflight.normalizationIssues.length
+        === preflight.reinforcementIssueRowCount
+    );
+  const normalizationComplete =
+    preflight?.requiresAiNormalization
+    || normalizationAuditConserved;
   const busy = busyAction !== null;
 
   function updateValue(field: CalculationBookField, nextValue: string) {
@@ -278,8 +278,6 @@ export function CalculationBookWorkspace({
   function resetPreflight() {
     setPhase("input");
     setPreflight(null);
-    setSelectedRows({});
-    setConfirmedWalls({});
   }
 
   function handleArchive(file: File | null) {
@@ -346,9 +344,15 @@ export function CalculationBookWorkspace({
     }
     const nextFormErrors: string[] = [];
     if (!archive) {
-      nextFormErrors.push("请选择计算图片 ZIP。");
-    } else if (!archive.name.toLowerCase().endsWith(".zip")) {
-      nextFormErrors.push("计算图片必须使用 .zip 格式。");
+      nextFormErrors.push("请选择计算图片压缩包。");
+    } else if (
+      !activeSchema.archive.accept.some((extension) =>
+        archive.name.toLowerCase().endsWith(extension.toLowerCase()),
+      )
+    ) {
+      nextFormErrors.push(
+        `计算图片必须使用 ${activeSchema.archive.accept.join(" 或 ")} 格式。`,
+      );
     }
     setFieldErrors(nextFieldErrors);
     setFormErrors(nextFormErrors);
@@ -417,16 +421,10 @@ export function CalculationBookWorkspace({
         },
       );
       setPreflight(result);
-      setSelectedRows(
-        Object.fromEntries(
-          result.confirmations.map((item) => [item.wallId, item.suggestedSourceRow]),
-        ),
-      );
-      setConfirmedWalls({});
-      setPhase("review");
+      setPhase(result.requiresAiNormalization ? "confirm" : "review");
       window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
     } catch (error) {
-      applyApiError(error, "计算书预检失败，请根据提示修正 ZIP 后重试。");
+      applyApiError(error, "计算书预检失败，请根据提示修正压缩包后重试。");
     } finally {
       setBusyAction(null);
     }
@@ -437,8 +435,8 @@ export function CalculationBookWorkspace({
       busy ||
       !preflight ||
       !archive ||
-      !allRequiredWallsConfirmed ||
-      !slabEvidenceComplete
+      !slabEvidenceComplete ||
+      !normalizationComplete
     ) {
       return;
     }
@@ -452,12 +450,9 @@ export function CalculationBookWorkspace({
       const params: SubmissionParams = {
         ...buildParams(),
         preflight_token: preflight.preflightToken,
-        manual_confirmations: Object.fromEntries(
-          preflight.confirmations.map((item) => [
-            item.wallId,
-            selectedRows[item.wallId] ?? item.suggestedSourceRow,
-          ]),
-        ),
+        ...(preflight.requiresAiNormalization
+          ? { confirm_ai_normalization: true }
+          : {}),
       };
       const payload = await adapter.createCalculationBook(params);
       startTransition(() => onBatchCreated(payload));
@@ -476,13 +471,13 @@ export function CalculationBookWorkspace({
         return;
       }
       if (preflight) {
-        setPhase("review");
+        setPhase(preflight.requiresAiNormalization ? "confirm" : "review");
         window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
       } else {
         void handlePreflight();
       }
     } else if (phase === "review") {
-      if (!slabEvidenceComplete) {
+      if (!slabEvidenceComplete || !normalizationComplete) {
         return;
       }
       setPhase("confirm");
@@ -503,7 +498,7 @@ export function CalculationBookWorkspace({
           <div>
             <p className={styles.kicker}>Calculation Book</p>
             <h2>创建计算书</h2>
-            <p>上传、核验、人工确认后再进入后台任务队列。</p>
+            <p>上传文件并完成核验后，再进入后台任务队列。</p>
           </div>
           <button
             aria-label="关闭创建计算书"
@@ -553,10 +548,10 @@ export function CalculationBookWorkspace({
             <div className={styles.content}>
               <aside className={styles.archivePanel}>
                 <div className={styles.stepBadge}>01 · 任务文件</div>
-                <h3>ZIP 结构检查</h3>
+                <h3>ZIP / RAR 结构检查</h3>
                 <p className={styles.helper}>{calculationSchema.archive.description}</p>
-                <div className={styles.tree} aria-label="ZIP 必需结构">
-                  <div className={styles.treeRoot}>计算图片.zip</div>
+                <div className={styles.tree} aria-label="压缩包必需结构">
+                  <div className={styles.treeRoot}>计算图片.zip（或 .rar）</div>
                   <div><span>├─</span> 墙体01-X.png</div>
                   <div><span>├─</span> 墙体01-Y.png</div>
                   <div><span>├─</span> 墙体01-Z.png</div>
@@ -588,17 +583,17 @@ export function CalculationBookWorkspace({
                   </label>
                 ) : null}
                 <label className={styles.uploadBox}>
-                  <span>{archive ? archive.name : "选择 ZIP 文件"}</span>
-                  <small>{archive ? formatFileSize(archive.size) : "仅支持单个 .zip 文件"}</small>
+                  <span>{archive ? archive.name : "选择 ZIP 或 RAR 文件"}</span>
+                  <small>{archive ? formatFileSize(archive.size) : "仅支持单个 .zip 或 .rar 文件"}</small>
                   <input
                     accept={calculationSchema.archive.accept.join(",")}
-                    aria-label="选择计算图片 ZIP"
+                    aria-label="选择计算图片压缩包"
                     type="file"
                     onChange={(event) => handleArchive(event.currentTarget.files?.[0] ?? null)}
                   />
                 </label>
                 <div className={styles.validationList} aria-live="polite">
-                  <span data-ready={archive ? "true" : "false"}>单个 ZIP</span>
+                  <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR</span>
                   <span>根目录 X / Y / Z 图片</span>
                   <span>根目录墙体配筋表</span>
                   <span>01 与 02 子目录</span>
@@ -640,15 +635,6 @@ export function CalculationBookWorkspace({
               headingRef={reviewHeadingRef}
               phase={phase}
               preflight={preflight}
-              selectedRows={selectedRows}
-              confirmedWalls={confirmedWalls}
-              onSelectRow={(wallId, row) => {
-                setSelectedRows((current) => ({ ...current, [wallId]: row }));
-                setConfirmedWalls((current) => ({ ...current, [wallId]: false }));
-              }}
-              onConfirm={(wallId, checked) =>
-                setConfirmedWalls((current) => ({ ...current, [wallId]: checked }))
-              }
               slabEvidenceGroups={slabEvidenceGroups}
               slabEvidenceIssues={slabEvidenceIssues}
             />
@@ -666,27 +652,35 @@ export function CalculationBookWorkspace({
 
           <footer className={styles.footer}>
             <div aria-live="polite">
-              <strong>
+              <strong id="calculation-book-submit-status">
                 {busyAction === "preflight"
                   ? "正在核验文件…"
                   : busyAction === "submit"
                     ? "正在创建任务…"
                       : phase === "input"
-                      ? "先预检，再创建任务"
+                      ? preflight?.requiresAiNormalization
+                        ? "已完成格式检查，继续确认 AI 处理"
+                        : "先预检，再创建任务"
                       : phase === "review"
-                        ? slabEvidenceComplete
+                        ? !normalizationComplete
+                          ? "预检数据校验失败，不能提交"
+                          : slabEvidenceComplete
                           ? "核验完成，进入确认提交"
                           : "楼板证据不完整，不能提交"
-                        : allRequiredWallsConfirmed
-                        ? "核验完成，可以创建任务"
-                        : "请完成所有人工确认"}
+                        : preflight?.requiresAiNormalization
+                          ? "确认后，人工智能将在任务中规范化配筋表"
+                          : "核验完成，可以创建任务"}
               </strong>
               <span>
                 {phase === "input"
-                  ? "预检会读取图例、规范化配筋并检查图片对应关系。"
+                  ? preflight?.requiresAiNormalization
+                    ? "返回确认后才能启动任务。"
+                    : "预检会读取图例、规范化配筋并检查图片对应关系。"
                   : phase === "review"
-                    ? "确认识别证据无误后，再检查人工映射与最终摘要。"
-                    : "ZIP 已由预检暂存，创建时不会重复上传；完成后可下载 DOCX。"}
+                    ? "确认识别证据无误后，再检查最终提交摘要。"
+                    : preflight?.requiresAiNormalization
+                      ? "无法确定的字段会留空，任务仍会完成，并在任务详情中提醒补充。"
+                      : "压缩包已由预检暂存，创建时不会重复上传；完成后可下载 DOCX。"}
               </span>
             </div>
             <div className={styles.footerActions}>
@@ -695,9 +689,15 @@ export function CalculationBookWorkspace({
                   className={styles.secondaryButton}
                   disabled={busy}
                   type="button"
-                  onClick={() => setPhase(phase === "confirm" ? "review" : "input")}
+                  onClick={() => setPhase(
+                    preflight?.requiresAiNormalization
+                      ? "input"
+                      : phase === "confirm" ? "review" : "input",
+                  )}
                 >
-                  {phase === "confirm" ? "返回核验" : "返回修改"}
+                  {preflight?.requiresAiNormalization
+                    ? "返回修改"
+                    : phase === "confirm" ? "返回核验" : "返回修改"}
                 </button>
               ) : null}
               <button
@@ -709,11 +709,13 @@ export function CalculationBookWorkspace({
                 取消
               </button>
               <button
+                aria-describedby="calculation-book-submit-status"
                 className={styles.primaryButton}
+                data-busy={busy ? "true" : "false"}
                 disabled={
                   busy ||
-                  (phase !== "input" && !slabEvidenceComplete) ||
-                  (phase === "confirm" && !allRequiredWallsConfirmed)
+                  (phase !== "input" && !normalizationComplete) ||
+                  (phase !== "input" && !slabEvidenceComplete)
                 }
                 type="submit"
               >
@@ -722,7 +724,11 @@ export function CalculationBookWorkspace({
                   : busyAction === "submit"
                     ? "正在创建…"
                     : phase === "input"
-                      ? preflight ? "继续核对" : "预检并核对"
+                      ? preflight?.requiresAiNormalization
+                        ? "继续 AI 确认"
+                        : preflight ? "继续核对" : "预检并核对"
+                    : preflight?.requiresAiNormalization
+                      ? "确认并开始任务"
                       : phase === "review"
                         ? "进入确认提交"
                         : "创建计算书任务"}
@@ -735,39 +741,79 @@ export function CalculationBookWorkspace({
   );
 }
 
+function AiNormalizationConfirmation({
+  preflight,
+  headingRef,
+}: {
+  preflight: CalculationBookPreflightResult;
+  headingRef: RefObject<HTMLHeadingElement>;
+}) {
+  return (
+    <section
+      aria-labelledby="calculation-book-ai-confirmation-title"
+      className={styles.aiConfirmation}
+      role="region"
+    >
+      <p className={styles.stepBadge}>03 · AI 规范化确认</p>
+      <h3 id="calculation-book-ai-confirmation-title" ref={headingRef} tabIndex={-1}>
+        {preflight.aiConfirmationMessage
+          ?? "您上传的墙体配筋表非标准格式，程序将启动人工智能。"}
+      </h3>
+      <p>
+        系统将在任务生成过程中读取墙体及楼板配筋数据，并转换为后端可校验的结构化字段。
+      </p>
+      {preflight.aiReinforcementExpectedSourceRowCount !== null ? (
+        <strong>
+          预计需规范化 {preflight.aiReinforcementExpectedSourceRowCount} 行源数据
+        </strong>
+      ) : (
+        <strong>源数据行数将在任务中严格校验</strong>
+      )}
+      <p className={styles.aiConfirmationNote}>
+        对于无法确定的局部字段，计算书会保留空白并继续生成；任务完成后可在查看任务页面补充核对。
+      </p>
+    </section>
+  );
+}
+
 function ReviewPanel({
   phase,
   preflight,
-  selectedRows,
-  confirmedWalls,
-  onSelectRow,
-  onConfirm,
   slabEvidenceGroups,
   slabEvidenceIssues,
   headingRef,
 }: {
   phase: Exclude<Phase, "input">;
   preflight: CalculationBookPreflightResult;
-  selectedRows: Record<string, number>;
-  confirmedWalls: Record<string, boolean>;
-  onSelectRow: (wallId: string, row: number) => void;
-  onConfirm: (wallId: string, checked: boolean) => void;
   slabEvidenceGroups: SlabEvidenceGroup[];
   slabEvidenceIssues: string[];
   headingRef: RefObject<HTMLHeadingElement>;
 }) {
+  if (preflight.requiresAiNormalization) {
+    return <AiNormalizationConfirmation headingRef={headingRef} preflight={preflight} />;
+  }
+
+  const normalizationAuditConserved =
+    preflight.reinforcementSourceRowCount
+      === preflight.reinforcementNormalizedRowCount
+        + preflight.reinforcementIssueRowCount
+    && preflight.normalizationIssues.length
+      === preflight.reinforcementIssueRowCount;
   return (
     <section className={styles.reviewPanel}>
       <div className={styles.reviewHeader}>
         <div>
           <p className={styles.stepBadge}>02 · 规范化核验</p>
-          <h3 ref={headingRef} tabIndex={-1}>
+          <h3
+            ref={headingRef}
+            tabIndex={-1}
+          >
             {phase === "review" ? "文件与配筋对应结果" : "最终确认与提交"}
           </h3>
           <p>
             {phase === "review"
               ? "所有数值均保留图片和 Excel 单元格证据，请先核对识别结果。"
-              : `本次采用配筋表：${preflight.reinforcementWorkbook}。确认人工映射后才允许创建任务。`}
+              : `本次采用配筋表：${preflight.reinforcementWorkbook}。确认后即可创建任务。`}
           </p>
         </div>
         <div className={styles.summaryCards}>
@@ -793,6 +839,51 @@ function ReviewPanel({
         </div>
       </div>
 
+      <section
+        aria-labelledby="calculation-book-matching-audit"
+        className={styles.matchingAudit}
+      >
+        <div>
+          <h3 id="calculation-book-matching-audit">配筋表与图片匹配</h3>
+          <p>
+            {preflight.normalizationTriggered
+              ? "检测到非标准写法，已自动启用确定性配筋规范化。"
+              : "配筋表已符合标准写法，无需转换。"}
+          </p>
+        </div>
+        <div className={styles.matchingFlow}>
+          <span aria-label={`配筋源行 ${preflight.reinforcementSourceRowCount}`}>
+            <strong>{preflight.reinforcementSourceRowCount}</strong>
+            <small>配筋源行</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`规范化行 ${preflight.reinforcementNormalizedRowCount}`}>
+            <strong>{preflight.reinforcementNormalizedRowCount}</strong>
+            <small>规范化行</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`配筋表唯一墙号 ${preflight.reinforcementUniqueWallCount}`}>
+            <strong>{preflight.reinforcementUniqueWallCount}</strong>
+            <small>配筋表唯一墙号</small>
+          </span>
+          <i aria-hidden="true">↔</i>
+          <span aria-label={`图片墙组 ${preflight.imageWallGroupCount}`}>
+            <strong>{preflight.imageWallGroupCount}</strong>
+            <small>图片墙组</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`已匹配墙号 ${preflight.matchedUniqueWallCount}`}>
+            <strong>{preflight.matchedUniqueWallCount}</strong>
+            <small>已匹配墙号</small>
+          </span>
+        </div>
+        {!normalizationAuditConserved ? (
+          <p className={styles.auditIssue} role="alert">
+            规范化审计数据不守恒：源行数必须等于规范化行数与问题行数之和，且问题明细数量必须一致。已阻止提交，请重新预检。
+          </p>
+        ) : null}
+      </section>
+
       {preflight.warnings.map((warning) => (
         <div className={styles.warningPanel} key={warning.code} role="status">
           <strong>
@@ -803,50 +894,6 @@ function ReviewPanel({
           <p>{warning.filenames.join("、")}</p>
         </div>
       ))}
-
-      {phase === "confirm" && preflight.confirmations.length > 0 ? (
-        <div className={styles.confirmationSection}>
-          <div>
-            <p className={styles.stepBadge}>03 · 人工确认</p>
-            <h3>重复配筋行与分组图片</h3>
-          </div>
-          {preflight.confirmations.map((item) => (
-            <article className={styles.confirmationCard} key={item.wallId}>
-              <header>
-                <div>
-                  <h4>{item.wallId} 需要人工确认</h4>
-                  <p>
-                    {item.reasons.map((reason) => CONFIRMATION_REASON_LABELS[reason] ?? reason).join("；")}
-                  </p>
-                </div>
-                <span>建议第 {item.suggestedSourceRow} 行</span>
-              </header>
-              <fieldset>
-                <legend>选择与该图片组对应的配筋表行</legend>
-                {item.candidates.map((candidate) => (
-                  <CandidateOption
-                    candidate={candidate}
-                    checked={(selectedRows[item.wallId] ?? item.suggestedSourceRow) === candidate.sourceRow}
-                    key={candidate.sourceRow}
-                    name={`confirmation-${item.wallId}`}
-                    onChange={() => onSelectRow(item.wallId, candidate.sourceRow)}
-                  />
-                ))}
-              </fieldset>
-              <label className={styles.confirmCheckbox}>
-                <input
-                  checked={Boolean(confirmedWalls[item.wallId])}
-                  type="checkbox"
-                  onChange={(event) => onConfirm(item.wallId, event.currentTarget.checked)}
-                />
-                <span>已核对 {item.wallId} 的图片与配筋对应关系</span>
-              </label>
-            </article>
-          ))}
-        </div>
-      ) : phase === "confirm" ? (
-        <div className={styles.successPanel}>未发现重复配筋行或 -1/-2 图片组，无需额外人工映射。</div>
-      ) : null}
 
       {slabEvidenceIssues.length > 0 ? (
         <div className={styles.slabEvidenceError} role="alert">
@@ -899,40 +946,26 @@ function ReviewPanel({
           <h3>逐墙识别证据</h3>
           <p>展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。</p>
         </div>
-        {preflight.walls.map((wall) => {
-          const confirmation = preflight.confirmations.find(
-            (item) => item.wallId === wall.wallId,
-          );
-          const selectedRow =
-            selectedRows[wall.wallId] ?? confirmation?.suggestedSourceRow ?? wall.suggestedSourceRow;
-          const selectedCandidate = confirmation?.candidates.find(
-            (candidate) => candidate.sourceRow === selectedRow,
-          );
-          return (
+        {preflight.walls.map((wall) => (
             <details
               className={styles.wallEvidence}
-              open={phase === "confirm" && confirmation ? true : undefined}
               key={`${phase}-${wall.wallId}`}
             >
               <summary>
                 <strong>{wall.wallId}</strong>
-                <span>配筋表第 {selectedRow} 行</span>
+                <span>配筋表第 {wall.suggestedSourceRow} 行</span>
               </summary>
               <div className={styles.directionGrid}>
                 {(["X", "Y", "Z"] as const).map((direction) => (
                   <DirectionEvidence
                     direction={direction}
-                    evidence={{
-                      ...wall.directions[direction],
-                      ...selectedCandidate?.directions[direction],
-                    }}
+                    evidence={wall.directions[direction]}
                     key={direction}
                   />
                 ))}
               </div>
             </details>
-          );
-        })}
+        ))}
       </div>
     </section>
   );
@@ -977,39 +1010,6 @@ function SlabEvidenceCard({
         </div>
       </dl>
     </article>
-  );
-}
-
-function CandidateOption({
-  candidate,
-  name,
-  checked,
-  onChange,
-}: {
-  candidate: CalculationBookConfirmationCandidate;
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-}) {
-  return (
-    <label className={styles.candidateOption}>
-      <input checked={checked} name={name} type="radio" onChange={onChange} />
-      <span>
-        <strong>{candidate.sourceSheet} · 第 {candidate.sourceRow} 行</strong>
-        <small>
-          {(["X", "Y", "Z"] as const)
-            .map((direction) => {
-              const evidence = candidate.directions[direction];
-              const unit = direction === "Z" ? "mm²/m²" : "mm²/m";
-              return (
-                `${direction}: ${evidence.originalText} → ` +
-                `${evidence.canonicalSpecification}（${evidence.actualArea} ${unit}）`
-              );
-            })
-            .join(" · ")}
-        </small>
-      </span>
-    </label>
   );
 }
 

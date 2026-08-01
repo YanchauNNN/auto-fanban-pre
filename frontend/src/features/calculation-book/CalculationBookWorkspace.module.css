@@ -425,6 +425,53 @@
   padding: 1rem 1.5rem 1.25rem;
 }
 
+.aiConfirmation {
+  display: grid;
+  gap: 0.8rem;
+  margin: 1rem 1.5rem 1.25rem;
+  padding: 1.35rem;
+  border: 1px solid rgba(190, 126, 35, 0.3);
+  border-radius: 20px;
+  background: #fff9ef;
+}
+
+.aiConfirmation h3,
+.aiConfirmation p {
+  margin: 0;
+}
+
+.aiConfirmation h3 {
+  max-width: 760px;
+  color: #70420c;
+  font-size: 1.16rem;
+  line-height: 1.55;
+}
+
+.aiConfirmation h3:focus-visible {
+  outline: 3px solid rgba(190, 126, 35, 0.28);
+  outline-offset: 4px;
+  border-radius: 5px;
+}
+
+.aiConfirmation > p:not(.stepBadge) {
+  color: #6c5b46;
+  line-height: 1.7;
+}
+
+.aiConfirmation > strong {
+  width: fit-content;
+  padding: 0.45rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(190, 126, 35, 0.1);
+  color: #805013;
+}
+
+.aiConfirmationNote {
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(190, 126, 35, 0.16);
+  font-size: 0.88rem;
+}
+
 .reviewHeader {
   display: flex;
   align-items: flex-start;
@@ -440,9 +487,6 @@
 
 .reviewHeader h3,
 .reviewHeader p,
-.confirmationSection h3,
-.confirmationCard h4,
-.confirmationCard p,
 .evidenceSection h3,
 .evidenceSection p {
   margin: 0;
@@ -498,8 +542,78 @@
   font-size: 0.72rem;
 }
 
-.warningPanel,
-.successPanel {
+.matchingAudit {
+  display: grid;
+  gap: 0.75rem;
+  border-block: 1px solid rgba(20, 70, 128, 0.1);
+  padding: 0.95rem 0.15rem;
+}
+
+.matchingAudit h3,
+.matchingAudit p {
+  margin: 0;
+}
+
+.matchingAudit > div:first-child {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.matchingAudit h3 {
+  color: #174777;
+  font-size: 1.03rem;
+}
+
+.matchingAudit > div:first-child p {
+  color: #66819d;
+  font-size: 0.82rem;
+}
+
+.matchingFlow {
+  display: grid;
+  grid-template-columns:
+    minmax(98px, 1fr) auto minmax(98px, 1fr) auto
+    minmax(112px, 1fr) auto minmax(98px, 1fr) auto minmax(98px, 1fr);
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.matchingFlow span {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  border-bottom: 2px solid rgba(37, 112, 190, 0.18);
+  padding: 0.55rem 0.35rem;
+  text-align: center;
+}
+
+.matchingFlow strong {
+  color: #174c86;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 1.42rem;
+  line-height: 1;
+}
+
+.matchingFlow small {
+  color: #6c86a0;
+  font-size: 0.72rem;
+}
+
+.matchingFlow i {
+  color: #8aa5bf;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.auditIssue {
+  border-left: 3px solid #c27a1f;
+  background: rgba(255, 247, 226, 0.72);
+  color: #825512;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.warningPanel {
   border-radius: 14px;
   padding: 0.75rem 0.9rem;
 }
@@ -517,26 +631,16 @@
   font-size: 0.82rem;
 }
 
-.successPanel {
-  border: 1px solid rgba(32, 145, 102, 0.16);
-  background: rgba(233, 248, 241, 0.88);
-  color: #176d4f;
-  font-weight: 700;
-}
-
-.confirmationSection,
 .evidenceSection {
   display: grid;
   gap: 0.72rem;
 }
 
-.confirmationSection > div:first-child,
 .evidenceSection > div:first-child {
   display: grid;
   gap: 0.35rem;
 }
 
-.confirmationSection h3,
 .evidenceSection h3 {
   color: #174777;
   font-size: 1.05rem;
@@ -545,111 +649,6 @@
 .evidenceSection > div:first-child p {
   color: #66819d;
   font-size: 0.84rem;
-}
-
-.confirmationCard {
-  overflow: hidden;
-  border: 1px solid rgba(186, 115, 36, 0.22);
-  border-radius: 18px;
-  background: rgba(255, 251, 244, 0.94);
-}
-
-.confirmationCard > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 0.95rem;
-  border-bottom: 1px solid rgba(186, 115, 36, 0.12);
-}
-
-.confirmationCard h4 {
-  color: #70491c;
-}
-
-.confirmationCard header p {
-  margin-top: 0.2rem;
-  color: #906838;
-  font-size: 0.82rem;
-}
-
-.confirmationCard header > span {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(186, 115, 36, 0.12);
-  color: #7a511f;
-  padding: 0.32rem 0.58rem;
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
-.confirmationCard fieldset {
-  display: grid;
-  gap: 0.55rem;
-  margin: 0;
-  padding: 0.85rem 0.95rem;
-  border: 0;
-}
-
-.confirmationCard legend {
-  margin-bottom: 0.25rem;
-  color: #5c4a35;
-  font-size: 0.84rem;
-  font-weight: 750;
-}
-
-.candidateOption {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.7rem;
-  border: 1px solid rgba(20, 70, 128, 0.11);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.88);
-  padding: 0.68rem 0.75rem;
-  cursor: pointer;
-}
-
-.candidateOption:has(input:checked) {
-  border-color: rgba(37, 112, 190, 0.42);
-  box-shadow: 0 0 0 3px rgba(37, 112, 190, 0.09);
-}
-
-.candidateOption input,
-.confirmCheckbox input {
-  width: 1rem;
-  height: 1rem;
-  accent-color: #2673b9;
-}
-
-.candidateOption > span {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.candidateOption strong {
-  color: #274f77;
-}
-
-.candidateOption small {
-  overflow-wrap: anywhere;
-  color: #667f98;
-  line-height: 1.45;
-}
-
-.confirmCheckbox {
-  display: flex;
-  align-items: center;
-  gap: 0.58rem;
-  margin: 0 0.95rem 0.9rem;
-  border-radius: 12px;
-  background: rgba(246, 235, 216, 0.7);
-  color: #68461e;
-  padding: 0.68rem 0.75rem;
-  font-size: 0.84rem;
-  font-weight: 800;
-  cursor: pointer;
 }
 
 .wallEvidence {
@@ -832,6 +831,10 @@
 
 .primaryButton:disabled {
   opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.primaryButton[data-busy="true"]:disabled {
   cursor: wait;
 }
 
@@ -859,6 +862,10 @@
     padding-inline: 0.8rem;
   }
 
+  .aiConfirmation {
+    margin-inline: 0.8rem;
+  }
+
   .progress {
     margin-inline: 0.8rem;
   }
@@ -878,6 +885,16 @@
   .summaryCards {
     width: 100%;
     min-width: 0;
+  }
+
+  .matchingFlow {
+    grid-template-columns: repeat(5, minmax(92px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 0.35rem;
+  }
+
+  .matchingFlow i {
+    display: none;
   }
 
   .directionGrid {
@@ -915,7 +932,17 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .confirmationCard > header,
+  .matchingFlow {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .matchingFlow span {
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    align-items: baseline;
+    text-align: left;
+  }
+
   .wallEvidence summary {
     align-items: flex-start;
     flex-direction: column;

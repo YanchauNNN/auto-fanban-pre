@@ -74,11 +74,38 @@ export type CalculationBookConfirmationCandidate = {
   >;
 };
 
+export type CalculationBookNormalizationIssue = {
+  sourceSheet: string;
+  sourceRow: number;
+  sourceCells: Record<"wall" | "X" | "Y" | "Z", string>;
+  originalValues: Record<"wall" | "X" | "Y" | "Z", string>;
+  originalWallText: string;
+  wallId: string | null;
+  error: string;
+};
+
 export type CalculationBookPreflightResult = {
   preflightToken: string;
   figureCount: number;
   zeroFigureCount: number;
   wallCount: number;
+  reinforcementSourceRowCount: number;
+  reinforcementNormalizedRowCount: number;
+  reinforcementIssueRowCount: number;
+  reinforcementUniqueWallCount: number;
+  normalizationTriggered: boolean;
+  normalizationSkillId: string | null;
+  normalizationIssues: readonly CalculationBookNormalizationIssue[];
+  requiresAiNormalization: boolean;
+  aiReinforcementExpectedSourceRowCount: number | null;
+  aiConfirmationMessage: string | null;
+  formatInspection: CalculationBookFormatInspection;
+  imageWallGroupCount: number;
+  imageUniqueWallCount: number;
+  matchedUniqueWallCount: number;
+  imageOnlyWallIds: readonly string[];
+  workbookOnlyWallIds: readonly string[];
+  requiresWallCountConfirmation: boolean;
   slabFigureCount: number;
   slabElevationCount: number;
   reinforcementWorkbook: string;
@@ -101,6 +128,17 @@ export type CalculationBookPreflightResult = {
   warnings: readonly {
     code: string;
     filenames: readonly string[];
+  }[];
+};
+
+export type CalculationBookFormatInspection = {
+  wallSheet: string | null;
+  slabSheet: string | null;
+  reasons: readonly {
+    scope: string;
+    code: string;
+    sheet: string | null;
+    message: string;
   }[];
 };
 
@@ -502,6 +540,35 @@ export type CalculationBookOutput = {
   figureCount: number;
   templateType: string;
   outputFilename: string;
+  aiNormalized: boolean;
+  warningCount: number;
+  warnings: readonly CalculationBookWarning[];
+  aiNormalization: CalculationBookAiNormalization | null;
+};
+
+export type CalculationBookWarning = {
+  code: string;
+  scope: "wall" | "slab" | "reinforcement";
+  identity: string | null;
+  direction: string | null;
+  sourceSheet: string | null;
+  sourceRow: number | null;
+  sourceCells: Readonly<Record<string, string>>;
+  reason: string;
+  blankFields: readonly string[];
+};
+
+export type CalculationBookAiNormalization = {
+  skillId: string;
+  model: string;
+  profile: string;
+  callCount: number;
+  sourceRowCount: number;
+  normalizedWallCount: number;
+  normalizedSlabCount: number;
+  reviewWarningCount: number;
+  durationMs: number;
+  validation: string;
 };
 
 export type DeliverableDrawingOutput = {

@@ -492,7 +492,7 @@ describe("homepage shell", () => {
     await user.click(await screen.findByRole("button", { name: "计算书" }));
 
     expect(await screen.findByRole("dialog", { name: "创建计算书" })).toBeInTheDocument();
-    expect(screen.getByLabelText("ZIP 必需结构")).toBeInTheDocument();
+    expect(screen.getByLabelText("压缩包必需结构")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "打开 AI 助手" })).not.toBeInTheDocument();
   });
 
@@ -1806,6 +1806,10 @@ describe("job detail pages", () => {
         figureCount: 5,
         templateType: "internal_structure",
         outputFilename: "20160RX-JGS01-001-A计算书.docx",
+        aiNormalized: false,
+        warningCount: 0,
+        warnings: [],
+        aiNormalization: null,
       },
     });
 
@@ -1817,6 +1821,98 @@ describe("job detail pages", () => {
     expect(
       screen.getByRole("link", { name: "下载计算书 DOCX" }),
     ).toHaveAttribute("href", "/api/jobs/calculation-book-1/download/calculation-book");
+    expect(
+      screen.queryByRole("region", { name: "配筋表人工补充提醒" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps an AI-normalized calculation task successful while showing grouped supplement reminders", async () => {
+    window.history.pushState({}, "", "/jobs/calculation-book-ai-1");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "calculation-book-ai-1",
+      batchId: "batch-calculation-book-ai-1",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "非标准配筋表.rar",
+      sourceFilenames: ["非标准配筋表.rar"],
+      taskKind: "calculation_book",
+      taskRole: null,
+      jobMode: "calculation_book",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "CALCULATION_BOOK_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-08-01T10:00:00+08:00",
+      finishedAt: "2026-08-01T10:05:00+08:00",
+      startedAt: "2026-08-01T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        calculationDocxAvailable: true,
+        calculationDocxDownloadUrl:
+          "/api/jobs/calculation-book-ai-1/download/calculation-book",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      calculationBookOutput: {
+        figureCount: 174,
+        templateType: "internal_structure",
+        outputFilename: "AI规范化计算书.docx",
+        aiNormalized: true,
+        warningCount: 1,
+        warnings: [
+          {
+            code: "image_only_wall",
+            scope: "wall",
+            identity: "N5012",
+            direction: null,
+            sourceSheet: null,
+            sourceRow: null,
+            sourceCells: {},
+            reason: "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+            blankFields: ["X", "Y", "Z"],
+          },
+        ],
+        aiNormalization: {
+          skillId: "reinforcement_table_normalizer",
+          model: "structured-test",
+          profile: "intranet-test",
+          callCount: 1,
+          sourceRowCount: 315,
+          normalizedWallCount: 314,
+          normalizedSlabCount: 0,
+          reviewWarningCount: 1,
+          durationMs: 125,
+          validation: "passed",
+        },
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("AI 已规范化非标准配筋表")).toBeInTheDocument();
+    expect(screen.getByText("需人工补充 1 项")).toBeInTheDocument();
+    expect(screen.getByText("墙体 N5012")).toBeInTheDocument();
+    expect(screen.getByText("成功")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载计算书 DOCX" })).toHaveAttribute(
+      "href",
+      "/api/jobs/calculation-book-ai-1/download/calculation-book",
+    );
+    expect(
+      screen.queryByText("任务已完成，但仍有告警或缺失项需要处理。"),
+    ).not.toBeInTheDocument();
   });
 
   it("moves merged annotated PDF download to group quick downloads and hides child download buttons", async () => {

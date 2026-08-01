@@ -331,7 +331,7 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
             }))
             .filter((field) => field.key && field.label),
           archive: {
-            accept: payload.calculation_book.archive?.accept ?? [".zip"],
+            accept: payload.calculation_book.archive?.accept ?? [".zip", ".rar"],
             requiredRootDirections:
               payload.calculation_book.archive?.required_root_directions ?? ["X", "Y", "Z"],
             requiredFolders: payload.calculation_book.archive?.required_folders ?? ["01", "02"],

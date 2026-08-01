@@ -44,6 +44,7 @@ import loginPlantHeroUrl from "../assets/login-plant-hero.jpg";
 import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
+import { CalculationBookTaskWarnings } from "../features/calculation-book/CalculationBookTaskWarnings";
 import type {
   ApiAdapter,
   CalculationBookOutput,
@@ -2470,6 +2471,7 @@ function CalculationBookResultCard({
         <InfoBlock label="配筋图数量" value={`${output.figureCount} 张`} />
         <InfoBlock label="生成文件" value={output.outputFilename} />
       </div>
+      <CalculationBookTaskWarnings output={output} />
     </div>
   );
 }
