@@ -1843,6 +1843,7 @@
   }
 
   .titleStrip {
+    position: static;
     margin-inline: -0.85rem;
     padding-inline: 0.85rem;
   }
