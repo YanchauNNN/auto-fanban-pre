@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import FrozenInstanceError
 from datetime import date
 from typing import Any
 
@@ -300,6 +301,34 @@ def test_needs_review_returns_warning_and_snapshot_originals_without_raising() -
     assert warning.blank_fields == ("wall_id", "X")
 
 
+def test_wall_review_warning_preserves_only_deterministically_resolved_values() -> None:
+    row = _wall_row()
+    row.update(
+        {
+            "status": "needs_review",
+            "X": None,
+            "reason": "水平筋存在业务歧义",
+            "blank_fields": ["X"],
+        }
+    )
+    payload = _payload(row)
+
+    validated = validate_ai_reinforcement_payload(
+        payload,
+        snapshot=_snapshot(*_wall_cells()),
+    )
+
+    warning = validated.warnings[0]
+    assert warning.resolved_values == {
+        "wall_id": "S7157",
+        "Y": "1D32间距200",
+        "Z": "1C14间距400*400",
+    }
+    assert "X" not in warning.resolved_values
+    with pytest.raises(FrozenInstanceError):
+        warning.resolved_values = {}  # type: ignore[misc]
+
+
 def test_needs_review_blank_fields_require_source_cell_evidence() -> None:
     row = {
         "kind": "wall",
@@ -380,6 +409,14 @@ def test_slab_needs_review_keeps_partial_row_as_a_normalized_identity_warning() 
         "bottom_y": "底层竖向原文",
         "z": "纵向拉筋原文",
     }
+    assert warning.resolved_values == {
+        "elevation": "11.2",
+        "top_y": "1D40间距200",
+        "bottom_x": "1D30间距200",
+        "bottom_y": "1D28间距200",
+        "z": "1D16间距200",
+    }
+    assert "top_x" not in warning.resolved_values
 
 
 @pytest.mark.parametrize(
@@ -415,6 +452,12 @@ def test_duplicate_wall_ids_are_preserved_and_warned_without_failing() -> None:
     assert validated.wall_schedule.duplicate_wall_ids == ("S7157",)
     assert [warning.code for warning in validated.warnings] == ["duplicate_wall_id"]
     assert validated.warnings[0].identity == "S7157"
+    assert validated.warnings[0].resolved_values == {
+        "wall_id": "S7157",
+        "X": "1D36间距200",
+        "Y": "1D32间距200",
+        "Z": "1C14间距400*400",
+    }
 
 
 def test_known_wall_id_in_needs_review_still_participates_in_duplicate_detection() -> None:

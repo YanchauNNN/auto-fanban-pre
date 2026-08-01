@@ -225,6 +225,7 @@ class ReinforcementNormalizationWarning:
     source_row: int
     source_cells: dict[str, str]
     original_values: dict[str, str]
+    resolved_values: dict[str, str]
     reason: str
     blank_fields: tuple[str, ...]
 
@@ -343,10 +344,10 @@ def validate_ai_reinforcement_payload(
         if isinstance(row, AiWallReinforcementRow):
             wall_contexts[(row.source_sheet, row.source_row)] = evidence
             if row.status == "needs_review":
-                _validate_review_wall_rules(row, evidence)
-                warning = _review_warning(row, evidence)
+                resolved_values = _validate_review_wall_rules(row, evidence)
+                warning = _review_warning(row, evidence, resolved_values)
                 warnings.append(warning)
-                wall_id = normalize_wall_id(row.wall_id) if row.wall_id else None
+                wall_id = resolved_values.get("wall_id")
                 wall_issues.append(
                     ReinforcementRowIssue(
                         source_sheet=row.source_sheet,
@@ -364,8 +365,8 @@ def validate_ai_reinforcement_payload(
             continue
 
         if row.status == "needs_review":
-            _validate_review_slab_rules(row, evidence)
-            warnings.append(_review_warning(row, evidence))
+            resolved_values = _validate_review_slab_rules(row, evidence)
+            warnings.append(_review_warning(row, evidence, resolved_values))
             continue
         slab_rows.append(_normalized_slab_row(row, evidence))
 
@@ -496,17 +497,23 @@ def _normalized_wall_row(
 def _validate_review_wall_rules(
     row: AiWallReinforcementRow,
     evidence: _SourceEvidence,
-) -> None:
-    if row.wall_id is not None and normalize_wall_id(row.wall_id) is None:
-        raise _field_error(row, evidence.cells["wall"], "无法识别墙号")
+) -> dict[str, str]:
+    resolved_values: dict[str, str] = {}
+    if row.wall_id is not None:
+        wall_id = normalize_wall_id(row.wall_id)
+        if wall_id is None:
+            raise _field_error(row, evidence.cells["wall"], "无法识别墙号")
+        resolved_values["wall_id"] = wall_id
     for direction in ("X", "Y", "Z"):
         value = getattr(row, direction)
         if value is None:
             continue
         try:
-            parse_rebar_cell(value, direction=direction)
+            parsed = parse_rebar_cell(value, direction=direction)
         except InvalidReinforcementWorkbook as exc:
             raise _field_error(row, evidence.cells[direction], str(exc)) from exc
+        resolved_values[direction] = parsed.selected.canonical_specification
+    return resolved_values
 
 
 def _normalized_slab_row(
@@ -558,10 +565,11 @@ def _normalized_slab_row(
 def _validate_review_slab_rules(
     row: AiSlabReinforcementRow,
     evidence: _SourceEvidence,
-) -> None:
+) -> dict[str, str]:
+    resolved_values: dict[str, str] = {}
     if row.elevation is not None:
         try:
-            normalize_slab_elevation(row.elevation)
+            resolved_values["elevation"] = normalize_slab_elevation(row.elevation)
         except InvalidReinforcementWorkbook as exc:
             raise _field_error(row, evidence.cells["elevation"], str(exc)) from exc
     for field in (
@@ -577,9 +585,11 @@ def _validate_review_slab_rules(
         if value is None:
             continue
         try:
-            parse_linear_rebar_cell(value)
+            parsed = parse_linear_rebar_cell(value)
         except InvalidReinforcementWorkbook as exc:
             raise _field_error(row, evidence.cells[field], str(exc)) from exc
+        resolved_values[field] = parsed.selected.canonical_specification
+    return resolved_values
 
 
 def _field_error(
@@ -595,6 +605,7 @@ def _field_error(
 def _review_warning(
     row: AiWallReinforcementRow | AiSlabReinforcementRow,
     evidence: _SourceEvidence,
+    resolved_values: dict[str, str],
 ) -> ReinforcementNormalizationWarning:
     blank_fields = tuple(row.blank_fields)
     direction = (
@@ -603,17 +614,10 @@ def _review_warning(
         and blank_fields[0] not in {"wall_id", "elevation"}
         else None
     )
-    if isinstance(row, AiWallReinforcementRow):
-        identity_value = normalize_wall_id(row.wall_id) if row.wall_id else None
-    else:
-        try:
-            identity_value = (
-                normalize_slab_elevation(row.elevation)
-                if row.elevation is not None
-                else None
-            )
-        except InvalidReinforcementWorkbook:
-            identity_value = None
+    identity_key = (
+        "wall_id" if isinstance(row, AiWallReinforcementRow) else "elevation"
+    )
+    identity_value = resolved_values.get(identity_key)
     return ReinforcementNormalizationWarning(
         code="needs_review",
         scope=row.kind,
@@ -623,6 +627,7 @@ def _review_warning(
         source_row=row.source_row,
         source_cells=evidence.cells,
         original_values=evidence.originals,
+        resolved_values=resolved_values,
         reason=cast(str, row.reason),
         blank_fields=blank_fields,
     )
@@ -642,6 +647,15 @@ def _duplicate_wall_warnings(
         )
         first = duplicate_rows[0]
         evidence = contexts[(first.source_sheet, first.source_row)]
+        resolved_values = {"wall_id": wall_id}
+        if isinstance(first, NormalizedReinforcementRow):
+            resolved_values.update(
+                {
+                    "X": first.x.selected.canonical_specification,
+                    "Y": first.y.selected.canonical_specification,
+                    "Z": first.z.selected.canonical_specification,
+                }
+            )
         warnings.append(
             ReinforcementNormalizationWarning(
                 code="duplicate_wall_id",
@@ -652,6 +666,7 @@ def _duplicate_wall_warnings(
                 source_row=first.source_row,
                 source_cells=evidence.cells,
                 original_values=evidence.originals,
+                resolved_values=resolved_values,
                 reason=f"墙号 {wall_id} 来自多个源行，需要人工确认",
                 blank_fields=(),
             )
