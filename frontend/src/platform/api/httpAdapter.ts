@@ -1151,18 +1151,18 @@ export class HttpAdapter implements ApiAdapter {
         wall_id: string;
         base_wall_id: string;
         group_index: number | null;
-        suggested_source_row: number;
+        suggested_source_row: number | null;
         directions: Record<string, {
           image_filename: string;
           smn: number;
           smx: number;
           legend_values: number[];
           is_zero_result: boolean;
-          source_cell: string;
+          source_cell?: string | null;
           original_text: string;
           canonical_specification: string;
           narrative_specification: string;
-          actual_area: number;
+          actual_area: number | string | null;
         }>;
       }>;
       slabs: Array<{
@@ -1175,14 +1175,14 @@ export class HttpAdapter implements ApiAdapter {
         smx: number;
         legend_values: number[];
         is_zero_result: boolean;
-        source_row: number;
-        source_cell: string;
+        source_row: number | null;
+        source_cell?: string | null;
         original_text: string;
         canonical_specification: string;
         narrative_specification: string;
-        actual_area: number;
+        actual_area: number | string | null;
       }>;
-      warnings: Array<{ code: string; filenames: string[] }>;
+      warnings: Array<{ code: string; filenames?: string[] | null }>;
     }>("/api/jobs/calculation-books/preflight", {
       method: "POST",
       body: formData,
@@ -1196,13 +1196,15 @@ export class HttpAdapter implements ApiAdapter {
         smx?: number;
         legend_values?: number[];
         is_zero_result?: boolean;
-        source_cell: string;
+        source_cell?: string | null;
         original_text: string;
         canonical_specification: string;
         narrative_specification?: string;
-        actual_area: number;
+        actual_area: number | string | null;
       }>,
     ) => {
+      const finiteNumberOrNull = (value: unknown): number | null =>
+        typeof value === "number" && Number.isFinite(value) ? value : null;
       const mapDirection = (
         direction: "X" | "Y" | "Z",
       ): CalculationBookDirectionEvidence => {
@@ -1217,7 +1219,7 @@ export class HttpAdapter implements ApiAdapter {
           originalText: item?.original_text ?? "",
           canonicalSpecification: item?.canonical_specification ?? "",
           narrativeSpecification: item?.narrative_specification ?? "",
-          actualArea: item?.actual_area ?? 0,
+          actualArea: finiteNumberOrNull(item?.actual_area),
         };
       };
       return {
@@ -1298,7 +1300,11 @@ export class HttpAdapter implements ApiAdapter {
         wallId: wall.wall_id,
         baseWallId: wall.base_wall_id,
         groupIndex: wall.group_index,
-        suggestedSourceRow: wall.suggested_source_row,
+        suggestedSourceRow:
+          typeof wall.suggested_source_row === "number"
+          && Number.isFinite(wall.suggested_source_row)
+            ? wall.suggested_source_row
+            : null,
         directions: mapDirections(wall.directions),
       })),
       slabs: (payload.slabs ?? []).map((item) => ({
@@ -1311,16 +1317,22 @@ export class HttpAdapter implements ApiAdapter {
         smx: item.smx,
         legendValues: item.legend_values,
         isZeroResult: item.is_zero_result,
-        sourceRow: item.source_row,
-        sourceCell: item.source_cell,
+        sourceRow:
+          typeof item.source_row === "number" && Number.isFinite(item.source_row)
+            ? item.source_row
+            : null,
+        sourceCell: item.source_cell ?? "",
         originalText: item.original_text,
         canonicalSpecification: item.canonical_specification,
         narrativeSpecification: item.narrative_specification,
-        actualArea: item.actual_area,
+        actualArea:
+          typeof item.actual_area === "number" && Number.isFinite(item.actual_area)
+            ? item.actual_area
+            : null,
       })),
       warnings: payload.warnings.map((warning) => ({
         code: warning.code,
-        filenames: warning.filenames,
+        filenames: warning.filenames ?? [],
       })),
     };
   }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -393,6 +393,10 @@ describe("CalculationBookWorkspace", () => {
     const user = userEvent.setup();
     const manualPreflight = {
       ...preflightResult,
+      warnings: [
+        { code: "duplicate_reinforcement_rows", filenames: [] },
+        { code: "split_image_group", filenames: [] },
+      ],
       requiresManualConfirmation: true,
       confirmations: [
         {
@@ -430,7 +434,24 @@ describe("CalculationBookWorkspace", () => {
           wallId: "S7157-1",
           baseWallId: "S7157",
           groupIndex: 1,
-          suggestedSourceRow: 29,
+          suggestedSourceRow: null,
+          directions: {
+            X: {
+              ...preflightResult.walls[0].directions.X,
+              sourceCell: "",
+              actualArea: null,
+            },
+            Y: {
+              ...preflightResult.walls[0].directions.Y,
+              sourceCell: "",
+              actualArea: null,
+            },
+            Z: {
+              ...preflightResult.walls[0].directions.Z,
+              sourceCell: "",
+              actualArea: null,
+            },
+          },
         },
       ],
     };
@@ -466,6 +487,19 @@ describe("CalculationBookWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
     expect(await screen.findByRole("button", { name: "进入确认提交" })).toBeInTheDocument();
+    expect(
+      screen.queryAllByText("以下根目录图片未按墙号-X/Y/Z规则进入计算"),
+    ).toHaveLength(0);
+    const wallEvidence = screen.getByText("S7157-1").closest("details");
+    expect(wallEvidence).not.toBeNull();
+    expect(within(wallEvidence as HTMLElement).getByText("无对应配筋行")).toBeInTheDocument();
+    const xHeading = within(wallEvidence as HTMLElement).getByText("X · 水平筋");
+    expect(xHeading.closest("header")?.querySelector("span")).toBeNull();
+    for (const label of within(wallEvidence as HTMLElement).getAllByText("实配面积")) {
+      expect(label.closest("div")?.querySelector("dd")).toHaveTextContent("待补充");
+    }
+    expect(wallEvidence).not.toHaveTextContent("配筋表第  行");
+    expect(wallEvidence).not.toHaveTextContent("待补充 mm²/m");
     await user.click(screen.getByRole("button", { name: "进入确认提交" }));
     expect(screen.queryByText("S7157-1 需要人工确认")).not.toBeInTheDocument();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
@@ -673,7 +707,12 @@ describe("CalculationBookWorkspace", () => {
         slabEvidence("top_y"),
         slabEvidence("bottom_x"),
         slabEvidence("top_x"),
-      ],
+      ].map((evidence) => ({
+        ...evidence,
+        sourceRow: null,
+        sourceCell: "",
+        actualArea: null,
+      })),
     };
     const preflightCalculationBook = vi.fn().mockResolvedValue(slabPreflight);
     const createCalculationBook = vi.fn().mockResolvedValue({
@@ -701,6 +740,7 @@ describe("CalculationBookWorkspace", () => {
     expect(await screen.findByLabelText("共 5 张楼板云图")).toBeInTheDocument();
     expect(screen.getByText("11.45m 楼板")).toBeInTheDocument();
     expect(screen.getByText("5/5 完整")).toBeInTheDocument();
+    expect(screen.getByText("11.45m 楼板").closest("summary")).toHaveTextContent("无对应配筋行");
     const orderedGroups = screen.getAllByRole("heading", { level: 4 }).map((node) => node.textContent);
     expect(orderedGroups).toEqual([
       "TOP-X · 上表面 X 向",
@@ -710,6 +750,14 @@ describe("CalculationBookWorkspace", () => {
       "Z · Z 向",
     ]);
     expect(screen.getAllByText("1D36间距200")).toHaveLength(4);
+    const topSlabCard = screen
+      .getByRole("heading", { level: 4, name: "TOP-X · 上表面 X 向" })
+      .closest("article");
+    expect(topSlabCard).not.toBeNull();
+    expect(topSlabCard?.querySelector("header span")).toBeNull();
+    const actualAreaLabel = within(topSlabCard as HTMLElement).getByText("实配面积");
+    expect(actualAreaLabel.closest("div")?.querySelector("dd")).toHaveTextContent("待补充");
+    expect(topSlabCard).not.toHaveTextContent("待补充 mm²/m");
     expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: true,

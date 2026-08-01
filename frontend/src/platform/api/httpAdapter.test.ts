@@ -267,11 +267,11 @@ describe("HttpAdapter", () => {
         smx: 0,
         legend_values: [],
         is_zero_result: true,
-        source_cell: "D2",
+        source_cell: "",
         original_text: "1A14间距400*400#",
         canonical_specification: "1C14间距400*400",
         narrative_specification: "1排14@400x400",
-        actual_area: 962.1,
+        actual_area: "",
       },
     };
     const fetchMock = vi.fn().mockResolvedValue({
@@ -330,13 +330,25 @@ describe("HttpAdapter", () => {
           reinforcement_workbook: "计算书模板文件.xlsx",
           requires_manual_confirmation: false,
           confirmations: [],
-          warnings: [],
+          warnings: [
+            {
+              code: "duplicate_reinforcement_rows",
+              scope: "wall",
+              identity: "N5012",
+              direction: null,
+              source_sheet: "墙体配筋",
+              source_row: null,
+              source_cells: {},
+              reason: "同一墙体存在重复配筋行，相关配筋字段已留空",
+              blank_fields: ["X", "Y", "Z"],
+            },
+          ],
           walls: [
             {
               wall_id: "N5012",
               base_wall_id: "N5012",
               group_index: null,
-              suggested_source_row: 2,
+              suggested_source_row: null,
               directions,
             },
           ],
@@ -351,12 +363,12 @@ describe("HttpAdapter", () => {
               smx: 4888,
               legend_values: [0, 4888],
               is_zero_result: false,
-              source_row: 2,
-              source_cell: "B2",
+              source_row: null,
+              source_cell: "",
               original_text: "1D36@200",
               canonical_specification: "1D36间距200",
               narrative_specification: "1排36@200",
-              actual_area: 5089.4,
+              actual_area: null,
             },
           ],
         }),
@@ -414,17 +426,28 @@ describe("HttpAdapter", () => {
         imageFilename: "N5012-Z.JPEG",
         isZeroResult: true,
         canonicalSpecification: "1C14间距400*400",
-        actualArea: 962.1,
+        sourceCell: "",
+        actualArea: null,
       }),
     );
+    expect(result.walls[0]?.suggestedSourceRow).toBeNull();
     expect(result.slabs[0]).toEqual(
       expect.objectContaining({
         elevation: "11.45",
         key: "top_x",
         imageFilename: "11.45-TOP-X.png",
         canonicalSpecification: "1D36间距200",
+        sourceRow: null,
+        sourceCell: "",
+        actualArea: null,
       }),
     );
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: "duplicate_reinforcement_rows",
+        filenames: [],
+      }),
+    ]);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books/preflight");
     expect((init.body as FormData).get("archive")).toBe(archive);

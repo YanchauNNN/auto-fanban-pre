@@ -47,7 +47,7 @@ export type CalculationBookDirectionEvidence = {
   originalText: string;
   canonicalSpecification: string;
   narrativeSpecification: string;
-  actualArea: number;
+  actualArea: number | null;
 };
 
 export type CalculationBookSlabEvidence = CalculationBookDirectionEvidence & {
@@ -55,7 +55,7 @@ export type CalculationBookSlabEvidence = CalculationBookDirectionEvidence & {
   key: string;
   position: "TOP" | "MIDDLE" | "BOTTOM" | null;
   direction: "X" | "Y" | "Z";
-  sourceRow: number;
+  sourceRow: number | null;
 };
 
 export type CalculationBookConfirmationCandidate = {
@@ -121,7 +121,7 @@ export type CalculationBookPreflightResult = {
     wallId: string;
     baseWallId: string;
     groupIndex: number | null;
-    suggestedSourceRow: number;
+    suggestedSourceRow: number | null;
     directions: Record<"X" | "Y" | "Z", CalculationBookDirectionEvidence>;
   }[];
   slabs: readonly CalculationBookSlabEvidence[];

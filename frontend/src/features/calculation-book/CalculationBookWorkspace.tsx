@@ -118,9 +118,11 @@ function buildSlabEvidenceGroups(
     const unexpectedKeys = Array.from(counts.keys()).filter(
       (key) => !SLAB_GROUP_ORDER.includes(key as (typeof SLAB_GROUP_ORDER)[number]),
     );
-    const sourceRows = Array.from(new Set(rawItems.map((item) => item.sourceRow))).sort(
-      (left, right) => left - right,
-    );
+    const sourceRows = Array.from(
+      new Set(
+        rawItems.flatMap((item) => item.sourceRow === null ? [] : [item.sourceRow]),
+      ),
+    ).sort((left, right) => left - right);
     const issues = [
       ...(missingKeys.length > 0
         ? [`缺少 ${missingKeys.map(formatSlabKey).join("、")}`]
@@ -884,7 +886,7 @@ function ReviewPanel({
         ) : null}
       </section>
 
-      {preflight.warnings.map((warning) => (
+      {preflight.warnings.filter((warning) => warning.filenames.length > 0).map((warning) => (
         <div className={styles.warningPanel} key={warning.code} role="status">
           <strong>
             {warning.code === "slab_ignored_by_choice"
@@ -925,7 +927,9 @@ function ReviewPanel({
                     {group.hasMiddle ? " · 含 MIDDLE" : ""}
                   </b>
                   {" · "}
-                  配筋表第 {group.sourceRows.join("、")} 行
+                  {group.sourceRows.length > 0
+                    ? `配筋表第 ${group.sourceRows.join("、")} 行`
+                    : "无对应配筋行"}
                 </span>
               </summary>
               <div className={styles.slabDirectionGrid}>
@@ -953,7 +957,11 @@ function ReviewPanel({
             >
               <summary>
                 <strong>{wall.wallId}</strong>
-                <span>配筋表第 {wall.suggestedSourceRow} 行</span>
+                <span>
+                  {wall.suggestedSourceRow === null
+                    ? "无对应配筋行"
+                    : `配筋表第 ${wall.suggestedSourceRow} 行`}
+                </span>
               </summary>
               <div className={styles.directionGrid}>
                 {(["X", "Y", "Z"] as const).map((direction) => (
@@ -980,7 +988,7 @@ function SlabEvidenceCard({
     <article className={styles.directionCard}>
       <header>
         <h4>{SLAB_GROUP_LABELS[evidence.key] ?? evidence.key}</h4>
-        <span>{evidence.sourceCell}</span>
+        {evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
       </header>
       <p>{evidence.imageFilename}</p>
       <dl>
@@ -1006,7 +1014,11 @@ function SlabEvidenceCard({
         </div>
         <div>
           <dt>实配面积</dt>
-          <dd>{evidence.actualArea} mm²/m</dd>
+          <dd>
+            {evidence.actualArea === null
+              ? "待补充"
+              : `${evidence.actualArea} mm²/m`}
+          </dd>
         </div>
       </dl>
     </article>
@@ -1024,7 +1036,7 @@ function DirectionEvidence({
     <article className={styles.directionCard}>
       <header>
         <strong>{direction} · {DIRECTION_LABELS[direction]}</strong>
-        <span>{evidence.sourceCell}</span>
+        {evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
       </header>
       <p>{evidence.imageFilename}</p>
       <dl>
@@ -1051,7 +1063,9 @@ function DirectionEvidence({
         <div>
           <dt>实配面积</dt>
           <dd>
-            {evidence.actualArea} {direction === "Z" ? "mm²/m²" : "mm²/m"}
+            {evidence.actualArea === null
+              ? "待补充"
+              : `${evidence.actualArea} ${direction === "Z" ? "mm²/m²" : "mm²/m"}`}
           </dd>
         </div>
       </dl>
