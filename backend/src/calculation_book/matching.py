@@ -195,6 +195,25 @@ def match_reinforcement(
     matching_warnings: list[ReinforcementNormalizationWarning] = [
         warning for warning in normalization_warnings if warning.scope == "wall"
     ]
+    warned_duplicate_wall_ids: set[str] = set()
+    for wall_id in sorted(schedule.duplicate_wall_ids, key=_wall_sort_key):
+        rows = schedule_by_wall.get(wall_id, [])
+        reviews = review_by_wall.get(wall_id, [])
+        source_sheet, source_row, source_cells = _wall_source(rows, reviews)
+        matching_warnings.append(
+            _warning(
+                code="duplicate_reinforcement_rows",
+                scope="wall",
+                identity=wall_id,
+                source_sheet=source_sheet,
+                source_row=source_row,
+                source_cells=source_cells,
+                reason="同一墙体存在重复配筋行",
+                blank_fields=("X", "Y", "Z"),
+            )
+        )
+        warned_duplicate_wall_ids.add(wall_id)
+
     image_only_wall_ids: list[str] = []
     for base_wall_id, groups in image_groups_by_base.items():
         rows = schedule_by_wall.get(base_wall_id, [])
@@ -203,7 +222,7 @@ def match_reinforcement(
             base_wall_id in schedule.duplicate_wall_ids
             or len(rows) + len(reviews) > 1
         )
-        if duplicate_rows:
+        if duplicate_rows and base_wall_id not in warned_duplicate_wall_ids:
             source_sheet, source_row, source_cells = _wall_source(rows, reviews)
             matching_warnings.append(
                 _warning(
@@ -217,6 +236,7 @@ def match_reinforcement(
                     blank_fields=("X", "Y", "Z"),
                 )
             )
+            warned_duplicate_wall_ids.add(base_wall_id)
 
         if rows:
             pairs: list[tuple[_ImageGroup, NormalizedReinforcementRow | None]] = [

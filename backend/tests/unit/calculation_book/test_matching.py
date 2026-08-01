@@ -199,6 +199,34 @@ def test_records_image_and_workbook_only_walls_and_keeps_matched_subset() -> Non
     }
 
 
+def test_duplicate_workbook_only_wall_is_always_reported_for_review() -> None:
+    schedule = ReinforcementSchedule(
+        rows=(
+            _row("S7159", diameter=28, source_row=2),
+            _row("N7004A", diameter=32, source_row=3),
+            _row("N7004A", diameter=36, source_row=4),
+        ),
+        duplicate_wall_ids=("N7004A",),
+    )
+
+    plan = match_reinforcement(_group("S7159", 2000), schedule)
+
+    duplicate_warnings = [
+        warning
+        for warning in plan.warnings
+        if warning.code == "duplicate_reinforcement_rows"
+    ]
+    assert len(duplicate_warnings) == 1
+    assert duplicate_warnings[0].identity == "N7004A"
+    assert duplicate_warnings[0].blank_fields == ("X", "Y", "Z")
+    assert duplicate_warnings[0].source_row == 3
+    assert plan.workbook_only_wall_ids == ("N7004A",)
+    assert not any(
+        assignment.base_wall_id == "N7004A"
+        for assignment in plan.assignments
+    )
+
+
 def test_ai_review_row_keeps_resolved_directions_and_blanks_only_requested_field() -> None:
     warning = ReinforcementNormalizationWarning(
         code="needs_review",

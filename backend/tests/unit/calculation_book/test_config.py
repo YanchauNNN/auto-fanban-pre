@@ -31,8 +31,8 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert config.calculation_book.ai_normalization.max_non_empty_cells == 10_000
     assert config.calculation_book.ai_normalization.max_snapshot_chars == 500_000
     assert config.calculation_book.ai_normalization.max_skill_chars == 100_000
-    assert config.calculation_book.ai_normalization.request_timeout_seconds == 120
-    assert config.calculation_book.ai_normalization.max_output_tokens == 32_768
+    assert config.calculation_book.ai_normalization.request_timeout_seconds == 600
+    assert config.calculation_book.ai_normalization.max_output_tokens == 65_536
     assert config.calculation_book.ai_normalization.temperature == 0
     assert config.calculation_book.ai_normalization.max_retries == 0
 

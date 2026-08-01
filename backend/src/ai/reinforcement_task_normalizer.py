@@ -6,14 +6,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..calculation_book.ai_reinforcement_schema import (
     AiReinforcementPayload,
     AiSlabReinforcementRow,
+    AiWallReinforcementRow,
     InvalidAiReinforcementPayload,
     ValidatedAiReinforcement,
     validate_ai_reinforcement_payload,
+)
+from ..calculation_book.reinforcement_input import (
+    InvalidReinforcementWorkbook,
+    ReinforcementSchedule,
+    SlabReinforcementSchedule,
+    build_reinforcement_schedule,
+    load_reinforcement_schedule,
+    load_slab_reinforcement_schedule,
 )
 from ..calculation_book.reinforcement_workbook import build_workbook_snapshot
 from .chat_client import ChatClientError, ChatClientProtocol, ChatCompletionResult
@@ -27,6 +36,22 @@ NormalizationErrorCode = Literal[
     "model_schema_invalid",
     "model_gateway_failed",
 ]
+
+
+class _DeterministicAuditSource(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_sheet: str = Field(min_length=1)
+    source_row: int = Field(ge=1)
+
+
+class _HybridAuditPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["hybrid-1"]
+    source_row_count: int = Field(ge=1)
+    patch_rows: tuple[AiWallReinforcementRow, ...] = ()
+    review_sources: tuple[_DeterministicAuditSource, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -43,6 +68,12 @@ class ReinforcementTaskNormalizerLimits:
         ):
             if value <= 0:
                 raise ValueError(f"{name} must be greater than 0")
+
+
+@dataclass(frozen=True)
+class _DeterministicBaseline:
+    wall_schedule: ReinforcementSchedule
+    slab_schedule: SlabReinforcementSchedule | None
 
 
 class ReinforcementTaskNormalizationError(RuntimeError):
@@ -77,6 +108,20 @@ class ReinforcementTaskNormalizer:
         expected_source_row_count: int | None = None,
     ) -> ValidatedAiReinforcement:
         skill_text = self._load_skill_bundle()
+        baseline = self._deterministic_baseline(
+            Path(workbook_path),
+            include_slab=include_slab,
+            expected_source_row_count=expected_source_row_count,
+        )
+        if baseline is not None:
+            assert expected_source_row_count is not None
+            return self._audit_deterministic_baseline(
+                baseline,
+                workbook_path=Path(workbook_path),
+                skill_text=skill_text,
+                include_slab=include_slab,
+                expected_source_row_count=expected_source_row_count,
+            )
         snapshot_json, snapshot = self._build_snapshot_json(Path(workbook_path))
         messages = self._messages(
             skill_text=skill_text,
@@ -93,7 +138,6 @@ class ReinforcementTaskNormalizer:
                 "model_schema_invalid",
                 "model output does not match reinforcement schema v1",
             ) from exc
-
         if not include_slab and any(
             isinstance(row, AiSlabReinforcementRow) for row in payload.rows
         ):
@@ -112,6 +156,221 @@ class ReinforcementTaskNormalizer:
                 "model_schema_invalid",
                 "model output failed reinforcement evidence or row-conservation validation",
             ) from exc
+
+    @staticmethod
+    def _deterministic_baseline(
+        workbook_path: Path,
+        *,
+        include_slab: bool,
+        expected_source_row_count: int | None,
+    ) -> _DeterministicBaseline | None:
+        if expected_source_row_count is None:
+            return None
+        try:
+            wall_schedule = load_reinforcement_schedule(workbook_path)
+            slab_schedule = (
+                load_slab_reinforcement_schedule(
+                    workbook_path,
+                    required=False,
+                )
+                if include_slab
+                else None
+            )
+        except InvalidReinforcementWorkbook:
+            return None
+        total_source_rows = wall_schedule.source_row_count + (
+            len(slab_schedule.rows) if slab_schedule is not None else 0
+        )
+        if total_source_rows != expected_source_row_count:
+            return None
+        return _DeterministicBaseline(
+            wall_schedule=wall_schedule,
+            slab_schedule=slab_schedule,
+        )
+
+    def _audit_deterministic_baseline(
+        self,
+        baseline: _DeterministicBaseline,
+        *,
+        workbook_path: Path,
+        skill_text: str,
+        include_slab: bool,
+        expected_source_row_count: int,
+    ) -> ValidatedAiReinforcement:
+        schedule = baseline.wall_schedule
+        duplicate_ids = set(schedule.duplicate_wall_ids)
+        duplicate_rows = [
+            {
+                "source_sheet": row.source_sheet,
+                "source_row": row.source_row,
+                "source_cells": row.source_cells,
+                "wall_id": row.wall_id,
+                "X": row.x.original_text,
+                "Y": row.y.original_text,
+                "Z": row.z.original_text,
+            }
+            for row in schedule.rows
+            if row.wall_id in duplicate_ids
+        ]
+        issue_rows = [
+            {
+                "source_sheet": issue.source_sheet,
+                "source_row": issue.source_row,
+                "source_cells": issue.source_cells,
+                "original_values": issue.original_values,
+                "wall_id": issue.wall_id,
+            }
+            for issue in schedule.issues
+        ]
+        audit_json = json.dumps(
+            {
+                "source_row_count": expected_source_row_count,
+                "wall_source_row_count": schedule.source_row_count,
+                "normalized_row_count": len(schedule.rows),
+                "issue_row_count": len(schedule.issues),
+                "duplicate_wall_ids": list(schedule.duplicate_wall_ids),
+                "duplicate_rows": duplicate_rows,
+                "issues": issue_rows,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if len(audit_json) > self.limits.max_snapshot_chars:
+            raise ReinforcementTaskNormalizationError(
+                "snapshot_too_large",
+                "deterministic reinforcement audit exceeds its safe character limit",
+            )
+        messages = self._audit_messages(
+            skill_text=skill_text,
+            audit_json=audit_json,
+            include_slab=include_slab,
+            expected_source_row_count=expected_source_row_count,
+        )
+        completion = self._complete(messages)
+        raw_payload = self._decode_model_output(completion.content)
+        try:
+            audit = _HybridAuditPayload.model_validate(raw_payload)
+        except ValidationError as exc:
+            raise ReinforcementTaskNormalizationError(
+                "model_schema_invalid",
+                "model output does not match hybrid audit schema v1",
+            ) from exc
+        if audit.source_row_count != expected_source_row_count:
+            raise ReinforcementTaskNormalizationError(
+                "model_schema_invalid",
+                "deterministic audit row conservation failed",
+            )
+
+        duplicate_sources = {
+            (row.source_sheet, row.source_row)
+            for row in schedule.rows
+            if row.wall_id in duplicate_ids
+        }
+        reported_sources = {
+            (source.source_sheet, source.source_row)
+            for source in audit.review_sources
+        }
+        if (
+            len(reported_sources) != len(audit.review_sources)
+            or not reported_sources.issubset(duplicate_sources)
+        ):
+            raise ReinforcementTaskNormalizationError(
+                "model_schema_invalid",
+                "deterministic audit review sources are not duplicate-row evidence",
+            )
+
+        issue_sources = {
+            (issue.source_sheet, issue.source_row)
+            for issue in schedule.issues
+        }
+        patch_sources = {
+            (row.source_sheet, row.source_row)
+            for row in audit.patch_rows
+        }
+        if (
+            len(patch_sources) != len(audit.patch_rows)
+            or patch_sources != issue_sources
+        ):
+            raise ReinforcementTaskNormalizationError(
+                "model_schema_invalid",
+                "hybrid audit patches do not conserve deterministic issue rows",
+            )
+
+        patch_rows = ()
+        patch_issues = ()
+        patch_warnings = ()
+        if audit.patch_rows:
+            snapshot = build_workbook_snapshot(
+                workbook_path,
+                max_non_empty_cells=self.limits.max_non_empty_cells,
+            )
+            patch_payload = AiReinforcementPayload.model_validate(
+                {
+                    "schema_version": "1",
+                    "source_row_count": len(audit.patch_rows),
+                    "rows": [row.model_dump() for row in audit.patch_rows],
+                }
+            )
+            try:
+                validated_patch = validate_ai_reinforcement_payload(
+                    patch_payload,
+                    snapshot=snapshot,
+                    expected_source_row_count=len(audit.patch_rows),
+                )
+            except InvalidAiReinforcementPayload as exc:
+                raise ReinforcementTaskNormalizationError(
+                    "model_schema_invalid",
+                    "hybrid audit patch evidence validation failed",
+                ) from exc
+            patch_rows = validated_patch.wall_schedule.rows
+            patch_issues = validated_patch.wall_schedule.issues
+            patch_warnings = validated_patch.warnings
+
+        merged_schedule = build_reinforcement_schedule(
+            rows=(*schedule.rows, *patch_rows),
+            issues=patch_issues,
+            source_row_count=schedule.source_row_count,
+            normalization_triggered=True,
+        )
+        return ValidatedAiReinforcement(
+            wall_schedule=merged_schedule,
+            slab_schedule=baseline.slab_schedule,
+            warnings=patch_warnings,
+            source_row_count=expected_source_row_count,
+        )
+
+    @staticmethod
+    def _audit_messages(
+        *,
+        skill_text: str,
+        audit_json: str,
+        include_slab: bool,
+        expected_source_row_count: int,
+    ) -> list[dict[str, str]]:
+        system = (
+            f"执行 skill_id={_SKILL_ID} 的 deterministic-audit 模式。"
+            "后端确定性解析器已将已确定墙体行作为基线，issues 只允许 patch；"
+            "不得重复输出已确定的 rows，也不得回显已确定行的配筋字段；"
+            "patch_rows 仅可返回 issue 行的规范字段，仍禁止返回 actual_area。"
+            "只返回无换行紧凑 JSON："
+            '{"schema_version":"hybrid-1","source_row_count":N,'
+            '"patch_rows":[],"review_sources":[]}。'
+            "patch_rows 必须与 issues 的物理来源行一一守恒，"
+            "格式与 wall schema v1 行完全一致；"
+            "review_sources 只能列出 duplicate_wall_ids 对应的来源行；"
+            "没有额外复核行时必须返回空数组。完整 Skill 如下：\n\n"
+            f"{skill_text}"
+        )
+        user = (
+            f"include_slab={'true' if include_slab else 'false'}。"
+            f"source_row_count 必须等于 {expected_source_row_count}。"
+            "只审计以下 issue/duplicate 证据，禁止回显其他已确定行：\n"
+            f"{audit_json}"
+        )
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
 
     def _complete(self, messages: list[dict[str, str]]) -> ChatCompletionResult:
         try:
@@ -194,6 +453,7 @@ class ReinforcementTaskNormalizer:
     ) -> list[dict[str, str]]:
         system = (
             f"执行 skill_id={_SKILL_ID}。只返回 schema v1 的单个 JSON 对象；"
+            "必须返回无缩进、无换行的紧凑 JSON，不得输出不必要空白；"
             "不得返回/计算实际配筋面积（actual_area），不得输出文件或生成 Excel。"
             "未知值必须使用 status=needs_review，未确定字段保持 null，并填写 blank_fields 和 reason。"
             "必须保留 source_sheet/source_row/source_cells 证据和物理来源行守恒；"

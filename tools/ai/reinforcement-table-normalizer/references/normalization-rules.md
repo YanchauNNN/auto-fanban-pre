@@ -2,9 +2,11 @@
 
 ## 证据优先
 
+当后端确定性解析器已证明墙体源行数量严格守恒时，模型执行 `deterministic-audit`：只审计 issue 与 duplicate 来源行，不重复输出其余已确定字段。issue patch 必须与输入 issue 的物理来源行一一守恒；后端合并确定性基线与 patch 后，全局 `source_row_count` 仍必须等于预检值。
+
 模型只能使用 workbook snapshot 中的单元格值与地址。每条 `wall` 或 `slab` 行必须对应唯一物理来源 `(source_sheet, source_row)`，所有已填写字段都必须有同一行的 `source_cells` 地址；不得跨行、跨工作表或跨 kind 拼接证据。
 
-`source_row_count` 是源物理数据行数，不是非空单元格数。输入 40 行必须返回 40 行，且 `source_row_count == len(rows)`。标题、说明和纯空行不计入业务数据行。
+`source_row_count` 是源物理数据行数，不是非空单元格数。完整 schema v1 输入 40 行必须返回 40 行，且 `source_row_count == len(rows)`；`deterministic-audit` 只返回 issue patch，但其顶层 `source_row_count` 仍必须等于预检源行总数。标题、说明和纯空行不计入业务数据行。
 
 ## 墙体规则
 
@@ -23,7 +25,7 @@
 
 确定字段继续保留。只有无法唯一识别的字段设为 `null`，同时写入 `blank_fields` 并给出 `reason`；不得用猜测值填空。`needs_review` 是后续人工提醒，不暂停整个任务，其他确定值继续生成。
 
-duplicate 墙号、`-1/-2` 后缀、配筋表与图片墙号数量不一致属于后续提醒，不是整任务失败条件，也不能用复制行补足数量。只有无效 JSON/schema、无效来源证据、行守恒失败或网关失败使任务失败。
+duplicate 墙号、`-1/-2` 后缀、配筋表与图片墙号数量不一致属于后续提醒，不是整任务失败条件，也不能用复制行补足数量。duplicate 来源值保留作审计证据，但对应墙的生成字段必须全部留空；其他无关墙体的确定值继续生成。只有无效 JSON/schema、无效来源证据、行守恒失败或网关失败使任务失败。
 
 ## 后端计算边界
 

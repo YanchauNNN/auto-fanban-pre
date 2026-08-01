@@ -222,9 +222,9 @@ def test_formal_task_flow_normalizes_once_leaves_partial_fields_blank_and_downlo
     repo_root = _configure_api_env(monkeypatch, tmp_path)
     gateway = FakeStructuredGateway(
         {
-            "schema_version": "1",
+            "schema_version": "hybrid-1",
             "source_row_count": 1,
-            "rows": [
+            "patch_rows": [
                 {
                     "kind": "wall",
                     "status": "needs_review",
@@ -244,6 +244,7 @@ def test_formal_task_flow_normalizes_once_leaves_partial_fields_blank_and_downlo
                     },
                 }
             ],
+            "review_sources": [],
         }
     )
     normalizer = ReinforcementTaskNormalizer(
@@ -356,7 +357,8 @@ def test_formal_task_flow_normalizes_once_leaves_partial_fields_blank_and_downlo
             for message in gateway.calls[0]
         )
         assert "skill_id=reinforcement_table_normalizer" in prompt
-        assert "source_row_count 与 rows 数量都必须等于 1" in prompt
+        assert "deterministic-audit" in prompt
+        assert "source_row_count 必须等于 1" in prompt
         output = ai_detail["calculation_book_output"]
         assert output["ai_normalized"] is True
         assert output["ai_normalization"]["call_count"] == 1

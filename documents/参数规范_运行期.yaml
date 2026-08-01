@@ -91,8 +91,8 @@ runtime_options:
       max_non_empty_cells: { type: int, default: 10000, desc: "发送模型前安全快照允许的最大非空单元格数；覆盖当前 2549 单元格真实非标准表" }
       max_snapshot_chars: { type: int, default: 500000, desc: "发送模型前稳定紧凑 workbook snapshot 的最大字符数" }
       max_skill_chars: { type: int, default: 100000, desc: "SKILL.md 与 normalization-rules.md 合计最大字符数" }
-      request_timeout_seconds: { type: int, default: 120, desc: "计算书结构化模型单次请求独立超时秒数" }
-      max_output_tokens: { type: int, default: 32768, desc: "墙体加楼板逐行 schema v1 JSON 最大输出 token；覆盖 40 行以上结果" }
+      request_timeout_seconds: { type: int, default: 600, desc: "计算书结构化模型单次请求独立超时秒数；覆盖确定性审计和无法形成基线时的完整 schema v1 回退" }
+      max_output_tokens: { type: int, default: 65536, desc: "结构化模型紧凑 JSON 最大输出 token；确定性审计只返回 patch，完整表回退仍覆盖大批量源行" }
       temperature: { type: float, default: 0.0, desc: "计算书结构化规范化模型温度" }
       max_retries: { type: int, default: 0, desc: "计算书结构化规范化请求由共享客户端执行的重试次数；0 表示只调用一次" }
 

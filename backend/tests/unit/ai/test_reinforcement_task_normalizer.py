@@ -161,6 +161,62 @@ def _forty_row_workbook_and_payload(
     }
 
 
+def _mixed_issue_workbook(tmp_path: Path) -> Path:
+    path = tmp_path / "mixed-issue.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    wall.append(["N5007", "1D40间距200", "1D36间距200", "1C14间距400*400"])
+    wall.append(["N5008", "未知写法", "1D28间距200", "1C12间距400*400"])
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+def _standard_wall_and_slab_workbook(tmp_path: Path) -> Path:
+    path = tmp_path / "standard-wall-slab.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.append(
+        [
+            "构件编号及位置",
+            "单侧水平钢筋(对称配筋)",
+            "单侧竖向钢筋(对称配筋)",
+            "拉筋",
+        ]
+    )
+    wall.append(["N5007 墙", "1D40间距200", "1D36间距200", "1C14间距400*400"])
+    slab = workbook.create_sheet("楼板配筋")
+    slab.append(
+        [
+            "标高",
+            "顶层水平",
+            "顶层竖向",
+            "中层水平",
+            "中层竖向",
+            "底层水平",
+            "底层竖向",
+            "纵向拉筋",
+        ]
+    )
+    slab.append(
+        [
+            11.45,
+            "1D36间距200",
+            "1D40间距200",
+            None,
+            None,
+            "1D30间距200",
+            "1D28间距200",
+            "1D16间距200",
+        ]
+    )
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
 def _normalizer(
     tmp_path: Path,
     client: FakeClient,
@@ -209,6 +265,7 @@ def test_normalizes_plain_or_fenced_json_once_with_complete_skill_and_snapshot(
     assert "完整 Skill 规则" in prompt
     assert "完整规范规则" in prompt
     assert "不得返回/计算实际配筋面积" in prompt
+    assert "无缩进、无换行的紧凑 JSON" in prompt
     assert '"sheet":"墙体配筋"' in prompt
     assert '"address":"B2"' in prompt
     assert "同时识别 wall 与 slab" in prompt
@@ -221,7 +278,17 @@ def test_normalizes_plain_or_fenced_json_once_with_complete_skill_and_snapshot(
 
 
 def test_include_slab_false_requests_and_accepts_wall_only_payload(tmp_path: Path) -> None:
-    client = FakeClient(json.dumps(_payload(include_slab=False), ensure_ascii=False))
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 1,
+                "patch_rows": [_wall_row()],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
     normalizer = _normalizer(tmp_path, client)
 
     result = normalizer.normalize(
@@ -235,9 +302,11 @@ def test_include_slab_false_requests_and_accepts_wall_only_payload(tmp_path: Pat
         str(message["content"]) for message in client.calls[0]["messages"]
     )
     assert "include_slab=false" in prompt
-    assert "仅识别 wall，忽略 slab" in prompt
-    assert "不得杜撰 slab" in prompt
-    assert "同时识别 wall 与 slab" not in prompt
+    assert "deterministic-audit" in prompt
+    assert "禁止回显其他已确定行" in prompt
+    assert "不得回显已确定行的配筋字段" in prompt
+    assert "patch_rows 仅可返回 issue 行的规范字段" in prompt
+    assert "仍禁止返回 actual_area" in prompt
 
 
 def test_include_slab_false_rejects_model_invented_slab(tmp_path: Path) -> None:
@@ -292,7 +361,17 @@ def test_trusted_count_accepts_exactly_forty_physical_rows(
         tmp_path,
         returned_row_count=returned_row_count,
     )
-    client = FakeClient(json.dumps(payload, ensure_ascii=False))
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": len(payload["rows"]),
+                "patch_rows": payload["rows"],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
     normalizer = _normalizer(
         tmp_path,
         client,
@@ -316,6 +395,87 @@ def test_trusted_count_accepts_exactly_forty_physical_rows(
     )
     assert result.source_row_count == 40
     assert len(result.wall_schedule.rows) == 40
+
+
+def test_hybrid_audit_only_patches_issue_rows_and_keeps_normalized_baseline(
+    tmp_path: Path,
+) -> None:
+    patch = {
+        "kind": "wall",
+        "status": "needs_review",
+        "wall_id": "N5008",
+        "X": None,
+        "Y": "1D28间距200",
+        "Z": "1C12间距400*400",
+        "reason": "水平筋无法唯一确定",
+        "blank_fields": ["X"],
+        "source_sheet": "墙体配筋",
+        "source_row": 3,
+        "source_cells": {"wall": "A3", "X": "B3", "Y": "C3", "Z": "D3"},
+    }
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [patch],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _mixed_issue_workbook(tmp_path),
+        include_slab=False,
+        expected_source_row_count=2,
+    )
+
+    assert result.source_row_count == 2
+    assert [row.wall_id for row in result.wall_schedule.rows] == ["N5007"]
+    assert [issue.wall_id for issue in result.wall_schedule.issues] == ["N5008"]
+    assert result.warnings[0].blank_fields == ("X",)
+    prompt = "\n".join(
+        str(message["content"]) for message in client.calls[0]["messages"]
+    )
+    assert '"issue_row_count":1' in prompt
+    assert '"source_row":3' in prompt
+    assert "N5007" not in prompt
+
+
+def test_hybrid_audit_preserves_wall_and_slab_counts_without_replaying_rows(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _standard_wall_and_slab_workbook(tmp_path),
+        include_slab=True,
+        expected_source_row_count=2,
+    )
+
+    assert result.source_row_count == 2
+    assert result.wall_schedule.source_row_count == 1
+    assert result.slab_schedule is not None
+    assert len(result.slab_schedule.rows) == 1
+    prompt = "\n".join(
+        str(message["content"]) for message in client.calls[0]["messages"]
+    )
+    assert '"wall_source_row_count":1' in prompt
+    assert '"issue_row_count":0' in prompt
+    assert '"duplicate_rows":[]' in prompt
 
 
 def test_prompt_without_expected_source_count_forbids_inventing_fixed_count(
