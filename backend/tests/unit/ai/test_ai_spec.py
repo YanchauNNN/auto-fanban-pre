@@ -59,7 +59,7 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
         (
             "reinforcement_table_normalizer",
             "reinforcement_table_normalizer",
-            True,
+            False,
         ),
     ]
     assert chat.skills[0].root == "storage/ai/skills/ansys-mapdl-18-2"

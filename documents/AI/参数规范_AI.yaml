@@ -449,7 +449,7 @@ ai_layer:
         read_only: true
         handler: "reinforcement_table_normalizer"
         root: "tools/ai/reinforcement-table-normalizer"
-        auto_trigger: true
+        auto_trigger: false
         trigger_terms:
           - "配筋表"
           - "墙体配筋"

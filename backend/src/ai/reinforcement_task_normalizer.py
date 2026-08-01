@@ -81,6 +81,7 @@ class ReinforcementTaskNormalizer:
             skill_text=skill_text,
             snapshot_json=snapshot_json,
             include_slab=include_slab,
+            expected_source_row_count=expected_source_row_count,
         )
         completion = self._client.complete(messages)
         raw_payload = self._decode_model_output(completion.content)
@@ -178,6 +179,7 @@ class ReinforcementTaskNormalizer:
         skill_text: str,
         snapshot_json: str,
         include_slab: bool,
+        expected_source_row_count: int | None,
     ) -> list[dict[str, str]]:
         system = (
             f"执行 skill_id={_SKILL_ID}。只返回 schema v1 的单个 JSON 对象；"
@@ -188,9 +190,19 @@ class ReinforcementTaskNormalizer:
             f"{skill_text}"
         )
         include_slab_text = "true" if include_slab else "false"
+        row_count_constraint = (
+            "expected_source_row_count 未提供；请按 snapshot 识别物理来源行，"
+            "不得杜撰固定源行数。"
+            if expected_source_row_count is None
+            else (
+                "schema 的 source_row_count 与 rows 数量都必须等于 "
+                f"{expected_source_row_count}。"
+            )
+        )
         user = (
             f"include_slab={include_slab_text}。同时识别 wall 与 slab；"
             "include_slab=false 时不得杜撰 slab。"
+            f"{row_count_constraint}"
             "只依据以下安全 workbook snapshot 返回 JSON，不解释、不加额外代码块：\n"
             f"{snapshot_json}"
         )

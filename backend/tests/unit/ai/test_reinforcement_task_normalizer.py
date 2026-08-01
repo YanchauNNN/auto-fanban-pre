@@ -230,6 +230,26 @@ def test_expected_source_row_count_is_enforced_by_deterministic_validator(
 
     assert exc_info.value.code == "model_schema_invalid"
     assert "40" not in str(exc_info.value)
+    prompt = "\n".join(
+        str(message["content"]) for message in client.calls[0]["messages"]
+    )
+    assert "source_row_count 与 rows 数量都必须等于 40" in prompt
+
+
+def test_prompt_without_expected_source_count_forbids_inventing_fixed_count(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client)
+
+    normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    prompt = "\n".join(
+        str(message["content"]) for message in client.calls[0]["messages"]
+    )
+    assert "expected_source_row_count 未提供" in prompt
+    assert "不得杜撰固定源行数" in prompt
+    assert "必须等于 40" not in prompt
 
 
 @pytest.mark.parametrize(
