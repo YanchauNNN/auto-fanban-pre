@@ -29,7 +29,10 @@ from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.cad.slot_pool import CADSlotPool
 from src.calculation_book.archive import ArchiveLimits
-from src.calculation_book.executor import CalculationBookJobExecutor
+from src.calculation_book.executor import (
+    CalculationBookJobExecutor,
+    build_calculation_book_warning_reason,
+)
 from src.calculation_book.models import CalculationBookParams
 from src.calculation_book.ocr import recognize_stress_legend
 from src.calculation_book.preflight import run_calculation_book_preflight
@@ -161,6 +164,137 @@ def _strict_positive_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
     return value
+
+
+def _safe_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _serialize_calculation_book_warnings(details: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_warnings = details.get("calculation_book_warnings")
+    if not isinstance(raw_warnings, list):
+        return []
+    warnings: list[dict[str, Any]] = []
+    for raw in raw_warnings:
+        if not isinstance(raw, dict):
+            continue
+        code = str(raw.get("code") or "needs_review")
+        if code not in {
+            "needs_review",
+            "duplicate_reinforcement_rows",
+            "split_image_group",
+            "image_only_wall",
+            "workbook_only_wall",
+            "image_only_slab",
+            "workbook_only_slab",
+        }:
+            code = "needs_review"
+        scope = str(raw.get("scope") or "reinforcement")
+        if scope not in {"wall", "slab"}:
+            scope = "reinforcement"
+        allowed_fields = (
+            {"wall_id", "wall", "X", "Y", "Z"}
+            if scope == "wall"
+            else {
+                "elevation",
+                "top_x",
+                "top_y",
+                "middle_x",
+                "middle_y",
+                "bottom_x",
+                "bottom_y",
+                "z",
+            }
+        )
+        raw_identity = raw.get("identity")
+        identity = (
+            str(raw_identity).strip()[:100]
+            if raw_identity is not None and str(raw_identity).strip()
+            else None
+        )
+        raw_direction = raw.get("direction")
+        direction = (
+            str(raw_direction)
+            if raw_direction is not None
+            and str(raw_direction) in allowed_fields
+            else None
+        )
+        source_row = _strict_positive_int(raw.get("source_row"))
+        source_sheet = str(raw.get("source_sheet") or "").strip()
+        if source_row is None or not source_sheet:
+            source_row = None
+            source_sheet_value: str | None = None
+            source_cells: dict[str, str] = {}
+        else:
+            source_sheet_value = source_sheet[:100]
+            raw_cells = raw.get("source_cells")
+            source_cells = {
+                str(field): str(address).upper()
+                for field, address in (
+                    raw_cells.items() if isinstance(raw_cells, dict) else ()
+                )
+                if str(field) in allowed_fields
+                and re.fullmatch(r"[A-Za-z]+[1-9]\d*", str(address)) is not None
+            }
+        raw_blank_fields = raw.get("blank_fields")
+        blank_fields = (
+            [
+                str(field)
+                for field in raw_blank_fields
+                if str(field) in allowed_fields
+            ]
+            if isinstance(raw_blank_fields, list)
+            else []
+        )
+        warnings.append(
+            {
+                "code": code,
+                "scope": scope,
+                "identity": identity,
+                "direction": direction,
+                "source_sheet": source_sheet_value,
+                "source_row": source_row,
+                "source_cells": source_cells,
+                "reason": build_calculation_book_warning_reason(
+                    code=code,
+                    scope=scope,
+                    identity=identity,
+                    direction=direction,
+                ),
+                "blank_fields": blank_fields,
+            }
+        )
+    return warnings
+
+
+def _serialize_calculation_ai_normalization(
+    job: Job,
+) -> tuple[bool, dict[str, Any] | None]:
+    if job.options.get("ai_reinforcement_normalization") is not True:
+        return False, None
+    raw = job.progress.details.get("ai_reinforcement_normalization")
+    if not isinstance(raw, dict) or raw.get("validation") != "passed":
+        return False, None
+    string_fields = ("skill_id", "model", "profile")
+    integer_fields = (
+        "call_count",
+        "source_row_count",
+        "normalized_wall_count",
+        "normalized_slab_count",
+        "review_warning_count",
+        "duration_ms",
+    )
+    summary: dict[str, Any] = {
+        field: str(raw.get(field) or "")[:160]
+        for field in string_fields
+    }
+    for field in integer_fields:
+        value = _safe_non_negative_int(raw.get(field))
+        summary[field] = value if value is not None else 0
+    summary["validation"] = "passed"
+    return True, summary
 
 
 class PipelineJobProcessor:
@@ -2282,10 +2416,18 @@ class DeliverableApiRuntime:
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
         elif job.job_type == JobType.CALCULATION_BOOK:
+            warnings = _serialize_calculation_book_warnings(job.progress.details)
+            ai_normalized, ai_normalization = (
+                _serialize_calculation_ai_normalization(job)
+            )
             payload['calculation_book_output'] = {
                 'figure_count': int(job.progress.details.get('figure_count', 0) or 0),
                 'template_type': str(job.progress.details.get('template_type') or ''),
                 'output_filename': str(job.progress.details.get('output_filename') or ''),
+                'ai_normalized': ai_normalized,
+                'warning_count': len(warnings),
+                'warnings': warnings,
+                'ai_normalization': ai_normalization,
             }
         elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()

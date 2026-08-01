@@ -30,6 +30,55 @@ from .processor import (
 _SKILL_ID = "reinforcement_table_normalizer"
 _AI_DETAIL_KEY = "ai_reinforcement_normalization"
 _CELL_ADDRESS_PATTERN = re.compile(r"^[A-Za-z]+[1-9]\d*$")
+_WARNING_CODE_ALIASES = {
+    "duplicate_wall_id": "duplicate_reinforcement_rows",
+}
+_WARNING_CODES = {
+    "needs_review",
+    "duplicate_reinforcement_rows",
+    "split_image_group",
+    "image_only_wall",
+    "workbook_only_wall",
+    "image_only_slab",
+    "workbook_only_slab",
+}
+_WALL_FIELDS = ("wall_id", "wall", "X", "Y", "Z")
+_SLAB_FIELDS = (
+    "elevation",
+    "top_x",
+    "top_y",
+    "middle_x",
+    "middle_y",
+    "bottom_x",
+    "bottom_y",
+    "z",
+)
+
+
+def build_calculation_book_warning_reason(
+    *,
+    code: str,
+    scope: str,
+    identity: str | None,
+    direction: str | None,
+) -> str:
+    """Build UI-safe copy without using model- or workbook-provided prose."""
+    if code == "duplicate_reinforcement_rows":
+        return "同一墙体存在重复配筋行，相关配筋字段已留空"
+    if code == "split_image_group":
+        return "墙体存在 -1/-2 应力图组，配筋对应关系需人工补充，相关配筋字段已留空"
+    if code == "image_only_wall":
+        return "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空"
+    if code == "workbook_only_wall":
+        return "配筋表中存在该墙体，但应力图中没有对应图组，未生成对应图片段落"
+    if code == "image_only_slab":
+        return "应力图中存在该楼板标高，但配筋表没有对应数据，相关配筋字段已留空"
+    if code == "workbook_only_slab":
+        return "配筋表中存在该楼板标高，但应力图中没有对应图组，未生成对应图片段落"
+    subject = "墙体" if scope == "wall" else "楼板" if scope == "slab" else "配筋"
+    identity_text = f" {identity}" if identity else ""
+    direction_text = f"的 {direction} 向" if direction else "的部分"
+    return f"{subject}{identity_text} {direction_text}配筋信息无法确定，相关字段已留空"
 
 
 class ReinforcementNormalizerProtocol(Protocol):
@@ -198,10 +247,9 @@ class CalculationBookJobExecutor:
                 }
             )
             warnings = getattr(result, "normalization_warnings", ())
-            if warnings:
-                job.progress.details["reinforcement_normalization_warnings"] = [
-                    self._safe_warning(warning) for warning in warnings
-                ]
+            job.progress.details["calculation_book_warnings"] = (
+                self._safe_warnings(warnings)
+            )
             job.mark_succeeded()
             self._persist(job)
         except Exception as exc:
@@ -329,26 +377,101 @@ class CalculationBookJobExecutor:
             return None
         return value
 
+    @classmethod
+    def _safe_warnings(cls, warnings: Any) -> list[dict[str, object]]:
+        canonical: dict[tuple[object, ...], tuple[int, dict[str, object]]] = {}
+        for warning in warnings:
+            raw_code = str(getattr(warning, "code", "needs_review"))
+            safe_warning = cls._safe_warning(warning)
+            code = str(safe_warning["code"])
+            if code == "duplicate_reinforcement_rows":
+                key: tuple[object, ...] = (
+                    code,
+                    safe_warning["scope"],
+                    safe_warning["identity"],
+                    tuple(safe_warning["blank_fields"]),
+                )
+                priority = 1 if raw_code == "duplicate_reinforcement_rows" else 0
+            else:
+                key = (
+                    code,
+                    safe_warning["scope"],
+                    safe_warning["identity"],
+                    safe_warning["direction"],
+                    safe_warning["source_sheet"],
+                    safe_warning["source_row"],
+                    tuple(safe_warning["blank_fields"]),
+                )
+                priority = 0
+            previous = canonical.get(key)
+            if previous is None or priority > previous[0]:
+                canonical[key] = (priority, safe_warning)
+        return [warning for _, warning in canonical.values()]
+
     @staticmethod
     def _safe_warning(warning: Any) -> dict[str, object]:
-        blank_fields = [str(field) for field in warning.blank_fields]
-        scope = warning.scope if warning.scope in {"wall", "slab"} else "reinforcement"
+        raw_scope = str(getattr(warning, "scope", ""))
+        scope = raw_scope if raw_scope in {"wall", "slab"} else "reinforcement"
+        allowed_fields = _WALL_FIELDS if scope == "wall" else _SLAB_FIELDS
+        raw_blank_fields = getattr(warning, "blank_fields", ())
+        blank_fields = [
+            str(field)
+            for field in raw_blank_fields
+            if str(field) in allowed_fields
+        ]
+        raw_code = str(getattr(warning, "code", "needs_review"))
+        code = _WARNING_CODE_ALIASES.get(raw_code, raw_code)
+        if code not in _WARNING_CODES:
+            code = "needs_review"
+        if code == "duplicate_reinforcement_rows" and scope == "wall":
+            blank_fields = ["X", "Y", "Z"]
+
+        raw_identity = getattr(warning, "identity", None)
+        identity = (
+            str(raw_identity).strip()[:100]
+            if raw_identity is not None and str(raw_identity).strip()
+            else None
+        )
+        raw_direction = getattr(warning, "direction", None)
+        direction = (
+            str(raw_direction)
+            if raw_direction is not None
+            and str(raw_direction) in allowed_fields
+            else None
+        )
+        raw_sheet = str(getattr(warning, "source_sheet", "") or "").strip()
+        raw_row = getattr(warning, "source_row", None)
+        has_excel_evidence = (
+            bool(raw_sheet)
+            and isinstance(raw_row, int)
+            and not isinstance(raw_row, bool)
+            and raw_row > 0
+        )
+        raw_source_cells = getattr(warning, "source_cells", {})
         source_cells = {
             str(field): str(address).upper()
-            for field, address in warning.source_cells.items()
-            if _CELL_ADDRESS_PATTERN.fullmatch(str(address)) is not None
+            for field, address in (
+                raw_source_cells.items()
+                if isinstance(raw_source_cells, dict)
+                else ()
+            )
+            if has_excel_evidence
+            and str(field) in allowed_fields
+            and _CELL_ADDRESS_PATTERN.fullmatch(str(address)) is not None
         }
         return {
-            "code": warning.code,
+            "code": code,
             "scope": scope,
-            "identity": warning.identity,
-            "direction": warning.direction,
-            "source_sheet": warning.source_sheet,
-            "source_row": warning.source_row,
+            "identity": identity,
+            "direction": direction,
+            "source_sheet": raw_sheet if has_excel_evidence else None,
+            "source_row": raw_row if has_excel_evidence else None,
             "source_cells": source_cells,
-            "reason": (
-                f"{scope} row needs review for fields: "
-                + ", ".join(blank_fields)
+            "reason": build_calculation_book_warning_reason(
+                code=code,
+                scope=scope,
+                identity=identity,
+                direction=direction,
             ),
             "blank_fields": blank_fields,
         }

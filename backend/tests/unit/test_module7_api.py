@@ -2159,6 +2159,54 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                     "output_filename": "JQ计算书.docx",
                 }
             )
+            if job.options.get("ai_reinforcement_normalization") is True:
+                job.progress.details.update(
+                    {
+                        "ai_reinforcement_normalization": {
+                            "skill_id": "reinforcement_table_normalizer",
+                            "model": "structured-test",
+                            "profile": "intranet-test",
+                            "call_count": 1,
+                            "source_row_count": 40,
+                            "normalized_wall_count": 38,
+                            "normalized_slab_count": 2,
+                            "review_warning_count": 2,
+                            "duration_ms": 125,
+                            "validation": "passed",
+                            "prompt": "must-not-leak",
+                        },
+                        "calculation_book_warnings": [
+                            {
+                                "code": "duplicate_reinforcement_rows",
+                                "scope": "wall",
+                                "identity": "S7157",
+                                "direction": None,
+                                "source_sheet": "Sheet1",
+                                "source_row": 28,
+                                "source_cells": {
+                                    "wall": "A28",
+                                    "X": "B28",
+                                    "Y": "C28",
+                                    "Z": "D28",
+                                },
+                                "reason": "model supplied secret reason must-not-leak",
+                                "blank_fields": ["X", "Y", "Z"],
+                                "original_values": {"X": "must-not-leak"},
+                            },
+                            {
+                                "code": "image_only_wall",
+                                "scope": "wall",
+                                "identity": "N5012",
+                                "direction": None,
+                                "source_sheet": None,
+                                "source_row": None,
+                                "source_cells": {},
+                                "reason": "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+                                "blank_fields": ["X", "Y", "Z"],
+                            },
+                        ],
+                    }
+                )
             output_path = cast(Path, job.work_dir) / "JQ计算书.docx"
             output_path.write_bytes(b"docx")
             job.artifacts.calculation_docx = output_path
@@ -2413,6 +2461,54 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             confirmed_ai_response.json()["jobs"][0]["job_id"],
         )
         assert confirmed_ai_detail["status"] == "succeeded"
+        assert confirmed_ai_detail["calculation_book_output"] == {
+            "figure_count": 3,
+            "template_type": "internal_structure",
+            "output_filename": "JQ计算书.docx",
+            "ai_normalized": True,
+            "warning_count": 2,
+            "warnings": [
+                {
+                    "code": "duplicate_reinforcement_rows",
+                    "scope": "wall",
+                    "identity": "S7157",
+                    "direction": None,
+                    "source_sheet": "Sheet1",
+                    "source_row": 28,
+                    "source_cells": {
+                        "wall": "A28",
+                        "X": "B28",
+                        "Y": "C28",
+                        "Z": "D28",
+                    },
+                    "reason": "同一墙体存在重复配筋行，相关配筋字段已留空",
+                    "blank_fields": ["X", "Y", "Z"],
+                },
+                {
+                    "code": "image_only_wall",
+                    "scope": "wall",
+                    "identity": "N5012",
+                    "direction": None,
+                    "source_sheet": None,
+                    "source_row": None,
+                    "source_cells": {},
+                    "reason": "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+                    "blank_fields": ["X", "Y", "Z"],
+                },
+            ],
+            "ai_normalization": {
+                "skill_id": "reinforcement_table_normalizer",
+                "model": "structured-test",
+                "profile": "intranet-test",
+                "call_count": 1,
+                "source_row_count": 40,
+                "normalized_wall_count": 38,
+                "normalized_slab_count": 2,
+                "review_warning_count": 2,
+                "duration_ms": 125,
+                "validation": "passed",
+            },
+        }
         assert observed_ai_options == [(True, 40)]
         assert nonstandard_token not in runtime._calculation_preflight_tokens
         assert not nonstandard_archive.exists()
@@ -2534,6 +2630,10 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert detail["task_kind"] == "calculation_book"
         assert detail["slot_id"] is None
         assert detail["calculation_book_output"]["figure_count"] == 3
+        assert detail["calculation_book_output"]["ai_normalized"] is False
+        assert detail["calculation_book_output"]["warning_count"] == 0
+        assert detail["calculation_book_output"]["warnings"] == []
+        assert detail["calculation_book_output"]["ai_normalization"] is None
         assert detail["artifacts"]["calculation_docx_available"] is True
         assert detail["artifacts"]["calculation_docx_download_url"] == (
             f"/api/jobs/{job_id}/download/calculation-book"

@@ -57,9 +57,15 @@ def _job(tmp_path: Path, *, options: dict[str, object]) -> Job:
 
 
 class FakeNormalizer:
-    def __init__(self, *, failure: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failure: Exception | None = None,
+        warnings: tuple[object, ...] | None = None,
+    ) -> None:
         self.calls: list[tuple[Path, bool, int | None]] = []
         self.failure = failure
+        self.warnings = warnings
 
     def normalize(
         self,
@@ -73,24 +79,25 @@ class FakeNormalizer:
         )
         if self.failure is not None:
             raise self.failure
+        default_warnings = (
+            SimpleNamespace(
+                code="needs_review",
+                scope="wall",
+                identity="N5001",
+                direction="X",
+                source_sheet="Sheet1",
+                source_row=7,
+                source_cells={"X": "B7"},
+                original_values={"X": "secret cell value"},
+                resolved_values={},
+                reason="ambiguous secret rationale",
+                blank_fields=("X",),
+            ),
+        )
         return SimpleNamespace(
             wall_schedule=SimpleNamespace(rows=(object(), object())),
             slab_schedule=SimpleNamespace(rows=(object(),)),
-            warnings=(
-                SimpleNamespace(
-                    code="needs_review",
-                    scope="wall",
-                    identity="N5001",
-                    direction="X",
-                    source_sheet="Sheet1",
-                    source_row=7,
-                    source_cells={"X": "B7"},
-                    original_values={"X": "secret cell value"},
-                    resolved_values={},
-                    reason="ambiguous secret rationale",
-                    blank_fields=("X",),
-                ),
-            ),
+            warnings=(self.warnings if self.warnings is not None else default_warnings),
             source_row_count=3,
         )
 
@@ -189,7 +196,7 @@ def test_ai_job_normalizes_once_before_ocr_and_persists_only_safe_audit(
     assert "secret cell value" not in persisted
     assert "prompt" not in persisted
     assert "api_key" not in persisted
-    assert job.progress.details["reinforcement_normalization_warnings"] == [
+    assert job.progress.details["calculation_book_warnings"] == [
         {
             "code": "needs_review",
             "scope": "wall",
@@ -198,13 +205,100 @@ def test_ai_job_normalizes_once_before_ocr_and_persists_only_safe_audit(
             "source_sheet": "Sheet1",
             "source_row": 7,
             "source_cells": {"X": "B7"},
-            "reason": "wall row needs review for fields: X",
+            "reason": "墙体 N5001 的 X 向配筋信息无法确定，相关字段已留空",
             "blank_fields": ["X"],
         }
     ]
     assert persisted_stages.index("AI_REINFORCEMENT_NORMALIZATION") < (
         persisted_stages.index("OCR_REINFORCEMENT")
     )
+
+
+def test_executor_canonicalizes_duplicate_warnings_and_hides_missing_excel_evidence(
+    tmp_path: Path,
+) -> None:
+    duplicate_alias = SimpleNamespace(
+        code="duplicate_wall_id",
+        scope="wall",
+        identity="S7157",
+        direction=None,
+        source_sheet="Sheet1",
+        source_row=28,
+        source_cells={"wall": "A28", "X": "B28"},
+        original_values={"X": "must-not-persist"},
+        resolved_values={},
+        reason="model-supplied secret reason",
+        blank_fields=("X", "Y", "Z"),
+    )
+    preferred_duplicate = SimpleNamespace(
+        code="duplicate_reinforcement_rows",
+        scope="wall",
+        identity="S7157",
+        direction=None,
+        source_sheet="Sheet1",
+        source_row=28,
+        source_cells={"wall": "A28", "X": "B28", "bad": "not-an-address"},
+        original_values={"X": "another-secret"},
+        resolved_values={},
+        reason="another untrusted reason",
+        blank_fields=("X", "Y", "Z"),
+    )
+    image_only = SimpleNamespace(
+        code="image_only_wall",
+        scope="wall",
+        identity="N5012",
+        direction=None,
+        source_sheet="",
+        source_row=0,
+        source_cells={},
+        original_values={},
+        resolved_values={},
+        reason="raw image-only reason",
+        blank_fields=("X", "Y", "Z"),
+    )
+    job = _job(
+        tmp_path,
+        options={
+            "ai_reinforcement_normalization": True,
+            "ai_reinforcement_expected_source_row_count": 3,
+        },
+    )
+
+    _executor(
+        FakeProcessor(),
+        FakeNormalizer(
+            warnings=(duplicate_alias, preferred_duplicate, image_only)
+        ),
+    ).execute(job)
+
+    assert job.progress.details["calculation_book_warnings"] == [
+        {
+            "code": "duplicate_reinforcement_rows",
+            "scope": "wall",
+            "identity": "S7157",
+            "direction": None,
+            "source_sheet": "Sheet1",
+            "source_row": 28,
+            "source_cells": {"wall": "A28", "X": "B28"},
+            "reason": "同一墙体存在重复配筋行，相关配筋字段已留空",
+            "blank_fields": ["X", "Y", "Z"],
+        },
+        {
+            "code": "image_only_wall",
+            "scope": "wall",
+            "identity": "N5012",
+            "direction": None,
+            "source_sheet": None,
+            "source_row": None,
+            "source_cells": {},
+            "reason": "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+            "blank_fields": ["X", "Y", "Z"],
+        },
+    ]
+    persisted = (job.work_dir / "job.json").read_text(encoding="utf-8")
+    assert "model-supplied secret reason" not in persisted
+    assert "must-not-persist" not in persisted
+    assert "another-secret" not in persisted
 
 
 def test_standard_job_never_constructs_or_calls_normalizer(tmp_path: Path) -> None:
