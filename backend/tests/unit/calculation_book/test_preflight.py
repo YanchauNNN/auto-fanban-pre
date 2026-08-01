@@ -3,11 +3,13 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 from PIL import Image
 
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.preflight import run_calculation_book_preflight
+from src.calculation_book.reinforcement_input import InvalidReinforcementWorkbook
 
 
 def _build_duplicate_archive(
@@ -240,6 +242,7 @@ def test_nonstandard_preflight_returns_ai_confirmation_without_ocr(
 
     assert ocr_calls == []
     assert result["requires_ai_normalization"] is True
+    assert result["ai_reinforcement_expected_source_row_count"] == 2
     assert result["ai_confirmation_message"] == (
         "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
     )
@@ -368,18 +371,17 @@ def test_preflight_requires_slab_sheet_only_when_option_is_enabled(
 ) -> None:
     archive_path = _build_slab_archive(tmp_path, include_slab_sheet=False)
 
-    result = run_calculation_book_preflight(
-        archive_path=archive_path,
-        extraction_root=tmp_path / "extracted",
-        include_slab_stress=True,
-        ocr_recognizer=lambda _path, _direction: StressLegendReading(
-            smn=0,
-            smx=1000,
-            legend_values=tuple(1000 * index / 9 for index in range(10)),
-        ),
-    )
-
-    assert result["requires_ai_normalization"] is True
-    assert result["format_inspection"]["reasons"][0]["code"] == (
-        "slab_sheet_missing"
-    )
+    with pytest.raises(
+        InvalidReinforcementWorkbook,
+        match="无法可靠统计非标准配筋表数据行",
+    ):
+        run_calculation_book_preflight(
+            archive_path=archive_path,
+            extraction_root=tmp_path / "extracted",
+            include_slab_stress=True,
+            ocr_recognizer=lambda _path, _direction: StressLegendReading(
+                smn=0,
+                smx=1000,
+                legend_values=tuple(1000 * index / 9 for index in range(10)),
+            ),
+        )

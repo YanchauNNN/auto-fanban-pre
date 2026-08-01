@@ -44,6 +44,7 @@ class WorkbookFormatInspection:
     reasons: tuple[FormatReason, ...]
     wall_sheet: str | None
     slab_sheet: str | None
+    ai_reinforcement_expected_source_row_count: int | None
 
 
 class _CellLike(Protocol):
@@ -149,6 +150,40 @@ def _wall_candidates(workbook: _WorkbookLike) -> list[_WallCandidate]:
     return candidates
 
 
+def _has_value(value: object) -> bool:
+    return value is not None and bool(str(value).strip())
+
+
+def _candidate_row_count(
+    sheet: _WorksheetLike,
+    *,
+    header_row: int,
+    columns: Sequence[int],
+) -> int:
+    unique_columns = tuple(dict.fromkeys(columns))
+    return sum(
+        any(
+            _has_value(sheet.cell(row=row, column=column).value)
+            for column in unique_columns
+        )
+        for row in range(header_row + 1, sheet.max_row + 1)
+    )
+
+
+def _wall_candidate_row_count(candidates: Sequence[_WallCandidate]) -> int | None:
+    if not candidates:
+        return None
+    total = 0
+    for sheet, columns in candidates:
+        header_row, wall_column, x_column, y_column, z_column = columns
+        total += _candidate_row_count(
+            sheet,
+            header_row=header_row,
+            columns=(wall_column, x_column, y_column, z_column),
+        )
+    return total if total > 0 else None
+
+
 def _wall_value_reason(
     sheet: _WorksheetLike,
     columns: _WallColumns,
@@ -228,6 +263,55 @@ def _slab_candidates(workbook: _WorkbookLike) -> list[_SlabCandidate]:
         if columns is not None or like_header_row is not None:
             candidates.append((sheet, columns, like_header_row))
     return candidates
+
+
+def _slab_like_data_columns(
+    sheet: _WorksheetLike,
+    header_row: int,
+) -> tuple[int, ...] | None:
+    columns: list[int] = []
+    for column in range(1, sheet.max_column + 1):
+        header = _header_text(sheet.cell(row=header_row, column=column).value)
+        normalized = header.upper()
+        is_elevation = "标高" in header or "楼层" in header
+        is_tie = "拉筋" in header
+        is_layer_rebar = (
+            any(
+                token in header
+                for token in ("顶层", "上部", "中层", "底层", "下部")
+            )
+            and any(
+                token in normalized
+                for token in ("水平", "竖向", "X", "Y")
+            )
+        )
+        if is_elevation or is_tie or is_layer_rebar:
+            columns.append(column)
+    return tuple(columns) if len(columns) >= 6 else None
+
+
+def _slab_candidate_row_count(candidates: Sequence[_SlabCandidate]) -> int | None:
+    if not candidates:
+        return None
+    total = 0
+    for sheet, found, like_header_row in candidates:
+        if found is not None:
+            header_row, mapping = found
+            columns = tuple(mapping.values())
+        elif like_header_row is not None:
+            header_row = like_header_row
+            extracted = _slab_like_data_columns(sheet, header_row)
+            if extracted is None:
+                return None
+            columns = extracted
+        else:
+            return None
+        total += _candidate_row_count(
+            sheet,
+            header_row=header_row,
+            columns=columns,
+        )
+    return total if total > 0 else None
 
 
 def _uses_standard_slab_layout(
@@ -310,6 +394,7 @@ def inspect_reinforcement_workbook(
     slab_sheet_name: str | None = None
     try:
         wall_candidates = _wall_candidates(workbook)
+        wall_source_row_count = _wall_candidate_row_count(wall_candidates)
         selected_wall = wall_candidates[0] if wall_candidates else None
         if selected_wall is None:
             reasons.append(
@@ -354,6 +439,7 @@ def inspect_reinforcement_workbook(
 
         if include_slab:
             slab_candidates = _slab_candidates(workbook)
+            slab_source_row_count = _slab_candidate_row_count(slab_candidates)
             selected_slab = slab_candidates[0] if slab_candidates else None
             if selected_slab is None:
                 reasons.append(
@@ -411,11 +497,19 @@ def inspect_reinforcement_workbook(
     finally:
         workbook.close()
 
+    expected_source_row_count = (
+        None
+        if wall_source_row_count is None
+        or (include_slab and slab_source_row_count is None)
+        else wall_source_row_count
+        + (slab_source_row_count if include_slab else 0)
+    )
     return WorkbookFormatInspection(
         requires_ai_normalization=bool(reasons),
         reasons=tuple(reasons),
         wall_sheet=wall_sheet_name,
         slab_sheet=slab_sheet_name,
+        ai_reinforcement_expected_source_row_count=expected_source_row_count,
     )
 
 

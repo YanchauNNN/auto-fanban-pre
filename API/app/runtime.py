@@ -157,6 +157,12 @@ def _summary_int(summary: dict[str, object], key: str) -> int:
     return 0
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 class PipelineJobProcessor:
     def __init__(
         self,
@@ -817,6 +823,23 @@ class DeliverableApiRuntime:
             requires_ai_normalization = bool(
                 preflight.get("requires_ai_normalization", False)
             )
+            expected_source_row_count = _strict_positive_int(
+                preflight.get(
+                    "ai_reinforcement_expected_source_row_count"
+                )
+            )
+            if requires_ai_normalization and expected_source_row_count is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "preflight_token": [
+                                "非标准配筋表行数证据无效，请重新预检"
+                            ]
+                        },
+                    },
+                )
             confirmation_errors: list[str] = []
             for wall_id, candidate_rows in preflight[
                 "confirmation_candidates"
@@ -848,15 +871,21 @@ class DeliverableApiRuntime:
             source_filename = (
                 Path(cached_archive.filename).name or "calculation-images.zip"
             )
+            job_options: dict[str, object] = {
+                "mode": "calculation_book",
+                "ai_reinforcement_normalization": (
+                    requires_ai_normalization
+                ),
+            }
+            if requires_ai_normalization:
+                assert expected_source_row_count is not None
+                job_options[
+                    "ai_reinforcement_expected_source_row_count"
+                ] = expected_source_row_count
             job = self.job_manager.create_job(
                 job_type=JobType.CALCULATION_BOOK.value,
                 project_no=params.project_no,
-                options={
-                    "mode": "calculation_book",
-                    "ai_reinforcement_normalization": (
-                        requires_ai_normalization
-                    ),
-                },
+                options=job_options,
                 params=params.model_dump(
                     mode="json",
                     exclude_computed_fields=True,
@@ -945,6 +974,29 @@ class DeliverableApiRuntime:
                         legend_scale=mechanism.ocr_legend_scale,
                     ),
                 )
+                requires_ai_normalization = bool(
+                    payload.get("requires_ai_normalization", False)
+                )
+                expected_source_row_count = _strict_positive_int(
+                    payload.get(
+                        "ai_reinforcement_expected_source_row_count"
+                    )
+                )
+                if (
+                    requires_ai_normalization
+                    and expected_source_row_count is None
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "upload_errors": {
+                                "archive": [
+                                    "无法可靠统计非标准配筋表数据行"
+                                ]
+                            },
+                            "param_errors": {},
+                        },
+                    )
                 token = f"calculation-preflight-{uuid.uuid4().hex}"
                 confirmation_candidates = {
                     str(item["wall_id"]): {
@@ -996,6 +1048,15 @@ class DeliverableApiRuntime:
                         ),
                         "requires_ai_normalization": bool(
                             payload.get("requires_ai_normalization", False)
+                        ),
+                        **(
+                            {
+                                "ai_reinforcement_expected_source_row_count": (
+                                    expected_source_row_count
+                                )
+                            }
+                            if requires_ai_normalization
+                            else {}
                         ),
                         "format_inspection": payload.get(
                             "format_inspection",

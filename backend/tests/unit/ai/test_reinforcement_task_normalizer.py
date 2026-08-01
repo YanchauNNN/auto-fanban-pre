@@ -125,6 +125,42 @@ def _payload(*, include_slab: bool = True, source_x: str = "B2") -> dict[str, An
     return {"schema_version": "1", "source_row_count": len(rows), "rows": rows}
 
 
+def _forty_row_workbook_and_payload(
+    tmp_path: Path,
+    *,
+    returned_row_count: int,
+) -> tuple[Path, dict[str, Any]]:
+    path = tmp_path / "forty-wall-rows.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    rows: list[dict[str, Any]] = []
+    for index in range(40):
+        source_row = index + 2
+        wall_id = f"S{7000 + index}"
+        wall.append([wall_id, "原表水平筋", "原表竖向筋", "原表拉筋"])
+        if index >= returned_row_count:
+            continue
+        row = _wall_row(source_x=f"B{source_row}")
+        row["wall_id"] = wall_id
+        row["source_row"] = source_row
+        row["source_cells"] = {
+            "wall": f"A{source_row}",
+            "X": f"B{source_row}",
+            "Y": f"C{source_row}",
+            "Z": f"D{source_row}",
+        }
+        rows.append(row)
+    workbook.save(path)
+    workbook.close()
+    return path, {
+        "schema_version": "1",
+        "source_row_count": len(rows),
+        "rows": rows,
+    }
+
+
 def _normalizer(
     tmp_path: Path,
     client: FakeClient,
@@ -237,6 +273,49 @@ def test_expected_source_row_count_is_enforced_by_deterministic_validator(
         str(message["content"]) for message in client.calls[0]["messages"]
     )
     assert "source_row_count 与 rows 数量都必须等于 40" in prompt
+
+
+@pytest.mark.parametrize(
+    ("returned_row_count", "is_valid"),
+    [(39, False), (40, True)],
+)
+def test_trusted_count_accepts_exactly_forty_physical_rows(
+    tmp_path: Path,
+    returned_row_count: int,
+    is_valid: bool,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import (
+        ReinforcementTaskNormalizationError,
+    )
+
+    workbook_path, payload = _forty_row_workbook_and_payload(
+        tmp_path,
+        returned_row_count=returned_row_count,
+    )
+    client = FakeClient(json.dumps(payload, ensure_ascii=False))
+    normalizer = _normalizer(
+        tmp_path,
+        client,
+        max_non_empty_cells=200,
+    )
+
+    if not is_valid:
+        with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+            normalizer.normalize(
+                workbook_path,
+                include_slab=False,
+                expected_source_row_count=40,
+            )
+        assert exc_info.value.code == "model_schema_invalid"
+        return
+
+    result = normalizer.normalize(
+        workbook_path,
+        include_slab=False,
+        expected_source_row_count=40,
+    )
+    assert result.source_row_count == 40
+    assert len(result.wall_schedule.rows) == 40
 
 
 def test_prompt_without_expected_source_count_forbids_inventing_fixed_count(

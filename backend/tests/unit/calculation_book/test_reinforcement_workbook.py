@@ -128,6 +128,7 @@ def test_standard_template_format_does_not_require_ai(tmp_path: Path) -> None:
         reasons=(),
         wall_sheet="Sheet1",
         slab_sheet="楼板配筋",
+        ai_reinforcement_expected_source_row_count=3,
     )
     with pytest.raises(FrozenInstanceError):
         inspection.wall_sheet = "changed"
@@ -282,6 +283,96 @@ def test_multiple_wall_candidates_are_ambiguous(tmp_path: Path) -> None:
     assert inspection.requires_ai_normalization is True
     assert inspection.wall_sheet == "墙表一"
     assert "wall_sheet_ambiguous" in {reason.code for reason in inspection.reasons}
+    assert inspection.ai_reinforcement_expected_source_row_count == 4
+
+
+def test_physical_row_count_sums_all_wall_candidates_and_ignores_empty_rows(
+    tmp_path: Path,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    first = _add_standard_wall_sheet(workbook, title="墙表一")
+    first.append([None, None, None, None])
+    first.append(["S7161", None, None, None])
+    second = _add_standard_wall_sheet(workbook, title="墙表二")
+    second.append([None, "D20@200", None, None])
+    path = tmp_path / "multiple-wall-count.xlsx"
+    workbook.save(path)
+
+    inspection = subject.inspect_reinforcement_workbook(
+        path,
+        include_slab=False,
+    )
+
+    assert inspection.requires_ai_normalization is True
+    assert inspection.ai_reinforcement_expected_source_row_count == 6
+
+
+def test_physical_row_count_includes_all_selected_slab_candidates(
+    tmp_path: Path,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_standard_wall_sheet(workbook)
+    _add_standard_slab_sheet(workbook)
+    custom = workbook.create_sheet("楼板自定义表")
+    custom.append(["楼层", "上部X", "上部Y", "下部X", "下部Y", "拉筋"])
+    custom.append([15.95, None, None, None, None, None])
+    custom.append([None, None, None, None, None, None])
+    custom.append([None, "D20@200", None, None, None, None])
+    path = tmp_path / "multiple-slab-count.xlsx"
+    workbook.save(path)
+
+    inspection = subject.inspect_reinforcement_workbook(path, include_slab=True)
+
+    assert inspection.requires_ai_normalization is True
+    assert inspection.ai_reinforcement_expected_source_row_count == 5
+
+
+def test_physical_row_count_is_none_when_required_headers_are_unreliable(
+    tmp_path: Path,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["unknown", "columns"])
+    sheet.append(["S7159", "D20@200"])
+    path = tmp_path / "unreliable-count.xlsx"
+    workbook.save(path)
+
+    inspection = subject.inspect_reinforcement_workbook(
+        path,
+        include_slab=False,
+    )
+
+    assert inspection.requires_ai_normalization is True
+    assert inspection.ai_reinforcement_expected_source_row_count is None
+
+
+def test_slab_count_is_required_only_when_slab_option_is_enabled(
+    tmp_path: Path,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_standard_wall_sheet(workbook)
+    path = tmp_path / "wall-only-count.xlsx"
+    workbook.save(path)
+
+    without_slab = subject.inspect_reinforcement_workbook(
+        path,
+        include_slab=False,
+    )
+    with_slab = subject.inspect_reinforcement_workbook(
+        path,
+        include_slab=True,
+    )
+
+    assert without_slab.ai_reinforcement_expected_source_row_count == 2
+    assert with_slab.requires_ai_normalization is True
+    assert with_slab.ai_reinforcement_expected_source_row_count is None
 
 
 def test_empty_standard_slab_sheet_requires_ai(tmp_path: Path) -> None:

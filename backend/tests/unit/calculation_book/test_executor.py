@@ -219,6 +219,22 @@ def test_standard_job_never_constructs_or_calls_normalizer(tmp_path: Path) -> No
     assert "ai_reinforcement_normalization" not in job.progress.details
 
 
+def test_server_expected_count_is_forwarded_to_normalizer(tmp_path: Path) -> None:
+    processor = FakeProcessor()
+    normalizer = FakeNormalizer()
+    job = _job(
+        tmp_path,
+        options={
+            "ai_reinforcement_normalization": True,
+            "ai_reinforcement_expected_source_row_count": 40,
+        },
+    )
+
+    _executor(processor, normalizer).execute(job)
+
+    assert normalizer.calls[0][1:] == (True, 40)
+
+
 def test_client_params_cannot_enable_ai_normalization(tmp_path: Path) -> None:
     processor = FakeProcessor()
     normalizer = FakeNormalizer()

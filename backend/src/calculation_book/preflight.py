@@ -12,6 +12,7 @@ from .archive import (
 from .matching import RecognizedFigure, match_reinforcement
 from .ocr import StressLegendReading, recognize_stress_legend
 from .reinforcement_input import (
+    InvalidReinforcementWorkbook,
     NormalizedReinforcementRow,
     ParsedRebarCell,
     load_reinforcement_schedule,
@@ -79,6 +80,9 @@ def _nonstandard_preflight_payload(
         )
     return {
         "requires_ai_normalization": True,
+        "ai_reinforcement_expected_source_row_count": (
+            inspection.ai_reinforcement_expected_source_row_count
+        ),
         "ai_confirmation_message": AI_CONFIRMATION_MESSAGE,
         "format_inspection": _format_inspection_payload(inspection),
         "figure_count": len(contents.reinforcement_figures),
@@ -167,6 +171,17 @@ def run_calculation_book_preflight(
         include_slab=include_slab_stress,
     )
     if inspection.requires_ai_normalization:
+        expected_source_row_count = (
+            inspection.ai_reinforcement_expected_source_row_count
+        )
+        if (
+            isinstance(expected_source_row_count, bool)
+            or not isinstance(expected_source_row_count, int)
+            or expected_source_row_count <= 0
+        ):
+            raise InvalidReinforcementWorkbook(
+                "无法可靠统计非标准配筋表数据行"
+            )
         return _nonstandard_preflight_payload(
             contents=contents,
             inspection=inspection,

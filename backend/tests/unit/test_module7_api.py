@@ -2127,7 +2127,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    observed_ai_options: list[bool] = []
+    observed_ai_options: list[tuple[bool, int | None]] = []
 
     class CalculationProcessor:
         def __call__(self, job: Job) -> None:
@@ -2137,8 +2137,18 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             validated = CalculationBookParams.model_validate(job.params)
             assert validated.project_no == "JQ"
             assert validated.include_slab_stress is True
+            raw_expected_count = job.options.get(
+                "ai_reinforcement_expected_source_row_count"
+            )
             observed_ai_options.append(
-                bool(job.options.get("ai_reinforcement_normalization"))
+                (
+                    bool(job.options.get("ai_reinforcement_normalization")),
+                    (
+                        raw_expected_count
+                        if isinstance(raw_expected_count, int)
+                        else None
+                    ),
+                )
             )
             job.mark_running(stage="VALIDATE_ARCHIVE")
             job.progress.percent = 80
@@ -2163,7 +2173,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
     def fake_calculation_book_preflight(**kwargs):
         assert kwargs["include_slab_stress"] is True
         assert kwargs["archive_path"].suffix == ".rar"
-        requires_ai = kwargs["archive_path"].name.startswith("nonstandard-")
+        archive_name = kwargs["archive_path"].name
+        uncountable = archive_name.startswith("uncountable-")
+        requires_ai = archive_name.startswith("nonstandard-") or uncountable
         return {
             "figure_count": 3,
             "zero_figure_count": 1,
@@ -2171,6 +2183,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             "reinforcement_workbook": "计算书模板文件.xlsx",
             "reinforcement_issue_row_count": 1 if requires_ai else 0,
             "requires_ai_normalization": requires_ai,
+            "ai_reinforcement_expected_source_row_count": (
+                40 if requires_ai and not uncountable else None
+            ),
             "ai_confirmation_message": (
                 "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
                 if requires_ai
@@ -2278,6 +2293,23 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         ] == ["请先完成计算书文件预检"]
         assert not expired_archive.exists()
 
+        uncountable_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "uncountable-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert uncountable_preflight.status_code == 422
+        assert uncountable_preflight.json()["detail"]["upload_errors"] == {
+            "archive": ["无法可靠统计非标准配筋表数据行"]
+        }
+        assert runtime._calculation_preflight_tokens == {}
+
         nonstandard_preflight = client.post(
             "/api/jobs/calculation-books/preflight",
             data={"include_slab_stress": "true"},
@@ -2291,6 +2323,12 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         )
         assert nonstandard_preflight.status_code == 200, nonstandard_preflight.text
         assert nonstandard_preflight.json()["requires_ai_normalization"] is True
+        assert (
+            nonstandard_preflight.json()[
+                "ai_reinforcement_expected_source_row_count"
+            ]
+            == 40
+        )
         assert nonstandard_preflight.json()["ai_confirmation_message"] == (
             "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
         )
@@ -2304,6 +2342,23 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                 "archive_path"
             ]
         )
+        forged_count_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **nonstandard_params,
+                        "ai_reinforcement_expected_source_row_count": 999,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert forged_count_response.status_code == 422
+        assert "ai_reinforcement_expected_source_row_count" in (
+            forged_count_response.json()["detail"]["param_errors"]
+        )
+        assert nonstandard_token in runtime._calculation_preflight_tokens
         unconfirmed_ai_response = client.post(
             "/api/jobs/calculation-books",
             data={
@@ -2339,7 +2394,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             confirmed_ai_response.json()["jobs"][0]["job_id"],
         )
         assert confirmed_ai_detail["status"] == "succeeded"
-        assert observed_ai_options == [True]
+        assert observed_ai_options == [(True, 40)]
         assert nonstandard_token not in runtime._calculation_preflight_tokens
         assert not nonstandard_archive.exists()
 
@@ -2426,7 +2481,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert not cached_archive.exists()
         job_id = response.json()["jobs"][0]["job_id"]
         detail = _poll_job(client, job_id)
-        assert observed_ai_options[-1] is False
+        assert observed_ai_options[-1] == (False, None)
         assert detail["status"] == "succeeded"
         assert detail["task_kind"] == "calculation_book"
         assert detail["slot_id"] is None
