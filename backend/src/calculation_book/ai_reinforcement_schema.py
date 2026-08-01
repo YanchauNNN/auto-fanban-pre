@@ -325,7 +325,7 @@ def validate_ai_reinforcement_payload(
         raise InvalidAiReinforcementPayload("AI 配筋结果必须至少包含一条 wall 行")
 
     snapshot_index = _build_snapshot_index(snapshot)
-    seen_source_rows: set[tuple[str, str, int]] = set()
+    seen_source_rows: dict[tuple[str, int], str] = {}
     wall_rows: list[NormalizedReinforcementRow] = []
     wall_issues: list[ReinforcementRowIssue] = []
     slab_rows: list[NormalizedSlabReinforcementRow] = []
@@ -333,12 +333,14 @@ def validate_ai_reinforcement_payload(
     wall_contexts: dict[tuple[str, int], _SourceEvidence] = {}
 
     for row in payload.rows:
-        source_identity = (row.kind, row.source_sheet, row.source_row)
-        if source_identity in seen_source_rows:
+        source_identity = (row.source_sheet, row.source_row)
+        existing_kind = seen_source_rows.get(source_identity)
+        if existing_kind is not None:
             raise InvalidAiReinforcementPayload(
-                f"{row.source_sheet} 第 {row.source_row} 行存在重复 {row.kind} 来源行"
+                f"{row.source_sheet} 第 {row.source_row} 行存在重复物理来源行："
+                f"已有 kind={existing_kind}，当前 kind={row.kind}"
             )
-        seen_source_rows.add(source_identity)
+        seen_source_rows[source_identity] = row.kind
         evidence = _resolve_evidence(row, snapshot_index)
 
         if isinstance(row, AiWallReinforcementRow):
@@ -685,10 +687,12 @@ def _readable_value(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
-    if isinstance(value, (float, Decimal)):
-        if isinstance(value, float) and not math.isfinite(value):
+    if isinstance(value, float):
+        if not math.isfinite(value):
             return str(value).lower()
-        return format(value, "g")
+        return repr(value)
+    if isinstance(value, Decimal):
+        return format(value, "f")
     if isinstance(value, Mapping):
         stable_mapping = {
             str(key): _stable_json_value(item)

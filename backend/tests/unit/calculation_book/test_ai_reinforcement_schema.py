@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import FrozenInstanceError
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -217,6 +218,45 @@ def test_rejects_duplicate_source_row_even_when_addresses_differ() -> None:
         validate_ai_reinforcement_payload(payload, snapshot=snapshot)
 
 
+def test_rejects_wall_and_slab_claiming_the_same_physical_source_row() -> None:
+    slab = _slab_row()
+    slab.update(
+        {
+            "source_sheet": "墙体配筋",
+            "source_cells": {
+                "elevation": "E2",
+                "top_x": "F2",
+                "top_y": "G2",
+                "middle_x": None,
+                "middle_y": None,
+                "bottom_x": "H2",
+                "bottom_y": "I2",
+                "z": "J2",
+            },
+        }
+    )
+    payload = _payload(_wall_row(), slab, source_row_count=2)
+    snapshot = _snapshot(
+        *_wall_cells(),
+        _cell("墙体配筋", 2, 5, "E2", "11.20m"),
+        _cell("墙体配筋", 2, 6, "F2", "顶层水平原文"),
+        _cell("墙体配筋", 2, 7, "G2", "顶层竖向原文"),
+        _cell("墙体配筋", 2, 8, "H2", "底层水平原文"),
+        _cell("墙体配筋", 2, 9, "I2", "底层竖向原文"),
+        _cell("墙体配筋", 2, 10, "J2", "纵向拉筋原文"),
+    )
+
+    with pytest.raises(
+        InvalidAiReinforcementPayload,
+        match="墙体配筋.*第 2 行.*已有.*wall.*当前.*slab",
+    ):
+        validate_ai_reinforcement_payload(
+            payload,
+            snapshot=snapshot,
+            expected_source_row_count=2,
+        )
+
+
 def test_rejects_missing_and_cross_row_source_addresses() -> None:
     missing = _payload(_wall_row(source_cells={"wall": "A2", "X": "Z2", "Y": "C2", "Z": "D2"}))
     with pytest.raises(InvalidAiReinforcementPayload, match="墙体配筋.*Z2.*不存在"):
@@ -299,6 +339,42 @@ def test_needs_review_returns_warning_and_snapshot_originals_without_raising() -
         "Z": '{"ref":"D2:D3","text":"=SUM(A1:A2)","type":"array"}',
     }
     assert warning.blank_fields == ("wall_id", "X")
+
+
+def test_warning_original_values_preserve_float_and_decimal_precision() -> None:
+    precise_float = 1234567.89
+    precise_decimal = Decimal("1234567.890123456789")
+    row = {
+        "kind": "wall",
+        "status": "needs_review",
+        "wall_id": "S7157",
+        "X": None,
+        "Y": None,
+        "Z": None,
+        "reason": "数值单元格不是可直接采用的配筋规格",
+        "blank_fields": ["X", "Y", "Z"],
+        "source_sheet": "墙体配筋",
+        "source_row": 2,
+        "source_cells": {"wall": "A2", "X": "B2", "Y": "C2", "Z": "D2"},
+    }
+    payload = _payload(row)
+    snapshot = _snapshot(
+        *_wall_cells(
+            wall=precise_float,
+            x=float("nan"),
+            y=float("inf"),
+            z=precise_decimal,
+        )
+    )
+
+    validated = validate_ai_reinforcement_payload(payload, snapshot=snapshot)
+
+    originals = validated.warnings[0].original_values
+    assert originals["wall"] == repr(precise_float)
+    assert float(originals["wall"]) == precise_float
+    assert originals["X"] == "nan"
+    assert originals["Y"] == "inf"
+    assert originals["Z"] == "1234567.890123456789"
 
 
 def test_wall_review_warning_preserves_only_deterministically_resolved_values() -> None:
