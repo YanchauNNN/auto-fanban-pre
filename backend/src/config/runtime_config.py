@@ -357,13 +357,13 @@ class CalculationBookAiNormalizationRuntimeConfig(BaseModel):
 
     enabled: bool = True
     skill_root: Path = Path("tools/ai/reinforcement-table-normalizer")
-    max_non_empty_cells: int = 10_000
-    max_snapshot_chars: int = 500_000
-    max_skill_chars: int = 100_000
-    request_timeout_seconds: int = 120
-    max_output_tokens: int = 32_768
-    temperature: float = 0.0
-    max_retries: int = 0
+    max_non_empty_cells: int = Field(default=10_000, gt=0)
+    max_snapshot_chars: int = Field(default=500_000, gt=0)
+    max_skill_chars: int = Field(default=100_000, gt=0)
+    request_timeout_seconds: int = Field(default=120, gt=0)
+    max_output_tokens: int = Field(default=32_768, gt=0)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_retries: int = Field(default=0, ge=0)
 
 
 class CalculationBookRuntimeConfig(BaseModel):

@@ -16,7 +16,7 @@ from ..calculation_book.ai_reinforcement_schema import (
     validate_ai_reinforcement_payload,
 )
 from ..calculation_book.reinforcement_workbook import build_workbook_snapshot
-from .chat_client import ChatClientProtocol
+from .chat_client import ChatClientError, ChatClientProtocol, ChatCompletionResult
 
 _SKILL_ID = "reinforcement_table_normalizer"
 _FENCED_JSON = re.compile(r"\A```json[ \t]*\r?\n(?P<body>.*)\r?\n```[ \t]*\Z", re.DOTALL)
@@ -25,6 +25,7 @@ NormalizationErrorCode = Literal[
     "snapshot_too_large",
     "model_output_invalid",
     "model_schema_invalid",
+    "model_gateway_failed",
 ]
 
 
@@ -83,7 +84,7 @@ class ReinforcementTaskNormalizer:
             include_slab=include_slab,
             expected_source_row_count=expected_source_row_count,
         )
-        completion = self._client.complete(messages)
+        completion = self._complete(messages)
         raw_payload = self._decode_model_output(completion.content)
         try:
             payload = AiReinforcementPayload.model_validate(raw_payload)
@@ -111,6 +112,16 @@ class ReinforcementTaskNormalizer:
                 "model_schema_invalid",
                 "model output failed reinforcement evidence or row-conservation validation",
             ) from exc
+
+    def _complete(self, messages: list[dict[str, str]]) -> ChatCompletionResult:
+        try:
+            return self._client.complete(messages)
+        except ChatClientError:
+            pass
+        raise ReinforcementTaskNormalizationError(
+            "model_gateway_failed",
+            "reinforcement model gateway request failed",
+        )
 
     def _load_skill_bundle(self) -> str:
         root = self.skill_root.resolve()
@@ -199,9 +210,13 @@ class ReinforcementTaskNormalizer:
                 f"{expected_source_row_count}。"
             )
         )
+        scope_instruction = (
+            "同时识别 wall 与 slab。"
+            if include_slab
+            else "仅识别 wall，忽略 slab；不得杜撰 slab。"
+        )
         user = (
-            f"include_slab={include_slab_text}。同时识别 wall 与 slab；"
-            "include_slab=false 时不得杜撰 slab。"
+            f"include_slab={include_slab_text}。{scope_instruction}"
             f"{row_count_constraint}"
             "只依据以下安全 workbook snapshot 返回 JSON，不解释、不加额外代码块：\n"
             f"{snapshot_json}"

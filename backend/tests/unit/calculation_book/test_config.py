@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from src.config.mechanism_spec import MechanismSpecLoader
-from src.config.runtime_config import RuntimeConfig
+from src.config.runtime_config import (
+    CalculationBookAiNormalizationRuntimeConfig,
+    RuntimeConfig,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -29,6 +35,29 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert config.calculation_book.ai_normalization.max_output_tokens == 32_768
     assert config.calculation_book.ai_normalization.temperature == 0
     assert config.calculation_book.ai_normalization.max_retries == 0
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("max_non_empty_cells", 0),
+        ("max_snapshot_chars", 0),
+        ("max_skill_chars", 0),
+        ("request_timeout_seconds", 0),
+        ("max_output_tokens", 0),
+        ("max_retries", -1),
+        ("temperature", -0.01),
+        ("temperature", 2.01),
+    ],
+)
+def test_calculation_book_ai_normalization_rejects_unsafe_limits(
+    field_name: str,
+    invalid_value: int | float,
+) -> None:
+    with pytest.raises(ValidationError):
+        CalculationBookAiNormalizationRuntimeConfig(
+            **{field_name: invalid_value}
+        )
 
 
 def test_calculation_book_ocr_settings_come_from_mechanism_yaml() -> None:

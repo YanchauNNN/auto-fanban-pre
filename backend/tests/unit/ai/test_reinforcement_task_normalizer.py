@@ -175,6 +175,7 @@ def test_normalizes_plain_or_fenced_json_once_with_complete_skill_and_snapshot(
     assert "不得返回/计算实际配筋面积" in prompt
     assert '"sheet":"墙体配筋"' in prompt
     assert '"address":"B2"' in prompt
+    assert "同时识别 wall 与 slab" in prompt
     assert result.wall_schedule.rows[0].wall_id == "S7157"
     assert result.wall_schedule.rows[0].x.selected.actual_area == pytest.approx(
         math.pi * 18**2 * 5
@@ -198,7 +199,9 @@ def test_include_slab_false_requests_and_accepts_wall_only_payload(tmp_path: Pat
         str(message["content"]) for message in client.calls[0]["messages"]
     )
     assert "include_slab=false" in prompt
+    assert "仅识别 wall，忽略 slab" in prompt
     assert "不得杜撰 slab" in prompt
+    assert "同时识别 wall 与 slab" not in prompt
 
 
 def test_include_slab_false_rejects_model_invented_slab(tmp_path: Path) -> None:
@@ -293,21 +296,34 @@ def test_rejects_invalid_source_evidence_as_model_schema_error(tmp_path: Path) -
     assert "Z99" not in str(exc_info.value)
 
 
-@pytest.mark.parametrize("error_type", ["timeout", "gateway"])
-def test_preserves_diagnostic_gateway_errors(tmp_path: Path, error_type: str) -> None:
-    from src.ai.chat_client import ChatClientTimeout, ChatGatewayError
+@pytest.mark.parametrize("error_type", ["client", "timeout", "gateway"])
+def test_wraps_gateway_errors_without_leaking_sensitive_context(
+    tmp_path: Path,
+    error_type: str,
+) -> None:
+    from src.ai.chat_client import ChatClientError, ChatClientTimeout, ChatGatewayError
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
 
-    error = (
-        ChatClientTimeout("model gateway timed out")
-        if error_type == "timeout"
-        else ChatGatewayError("model gateway request failed")
-    )
+    sensitive = "gateway body: unit-test-secret-api-key / 单元格原文S7157 / snapshot"
+    if error_type == "timeout":
+        error = ChatClientTimeout(sensitive)
+    elif error_type == "gateway":
+        error = ChatGatewayError(sensitive, status_code=503)
+    else:
+        error = ChatClientError(sensitive)
     client = FakeClient("", error=error)
     normalizer = _normalizer(tmp_path, client)
 
-    with pytest.raises(type(error), match="model gateway"):
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
         normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
 
+    assert exc_info.value.code == "model_gateway_failed"
+    assert str(exc_info.value) == "reinforcement model gateway request failed"
+    assert "unit-test-secret-api-key" not in repr(exc_info.value)
+    assert "单元格原文S7157" not in repr(exc_info.value)
+    assert "snapshot" not in repr(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
     assert len(client.calls) == 1
 
 
