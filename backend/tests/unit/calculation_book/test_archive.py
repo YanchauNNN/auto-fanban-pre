@@ -46,6 +46,21 @@ def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> Non
     assert all(path.is_relative_to(contents.root) for path in contents.extracted_files)
 
 
+def test_accepts_one_shared_wrapper_directory(tmp_path: Path) -> None:
+    entries = {
+        f"6层11.45~15.95m 结果云图/{name}": content
+        for name, content in _valid_entries().items()
+    }
+    archive = _write_archive(tmp_path / "wrapped.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    assert contents.root.name == "6层11.45~15.95m 结果云图"
+    assert contents.reinforcement_workbook.parent == contents.root
+    assert contents.layout_image.parent.name == "01"
+    assert contents.model_image.parent.name == "02"
+
+
 def test_extracts_five_slab_figures_without_treating_them_as_ignored(
     tmp_path: Path,
 ) -> None:
@@ -188,7 +203,28 @@ def test_alpha_suffix_wall_is_independent_and_normalized_to_uppercase(
     assert all(figure.group_index is None for figure in alpha_figures)
 
 
-def test_minus_one_and_minus_two_are_separate_groups_requiring_confirmation(
+def test_uses_parenthetical_wall_id_in_prefixed_figure_names(
+    tmp_path: Path,
+) -> None:
+    entries = _valid_entries()
+    for direction in ("X", "Y", "Z"):
+        entries[f"Ndtj2(N5056C)-{direction}.JPEG"] = direction.encode()
+    archive = _write_archive(tmp_path / "parenthetical-wall.zip", entries)
+
+    contents = validate_and_extract_archive(archive, tmp_path / "extracted")
+
+    figures = [
+        figure
+        for figure in contents.reinforcement_figures
+        if figure.wall_id == "N5056C"
+    ]
+    assert [figure.direction for figure in figures] == ["X", "Y", "Z"]
+    assert not {
+        figure.path.name for figure in figures
+    }.intersection(path.name for path in contents.ignored_root_images)
+
+
+def test_minus_one_and_minus_two_are_separate_groups_for_completion_review(
     tmp_path: Path,
 ) -> None:
     entries = _valid_entries()

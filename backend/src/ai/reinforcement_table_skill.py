@@ -111,7 +111,7 @@ class ReinforcementTableSkill:
                 "available": True,
                 "error": "xlsx_attachment_required",
                 "evidence_count": 0,
-                "requires_manual_confirmation": False,
+                "requires_completion_review": False,
             },
         )
 
@@ -167,10 +167,14 @@ class ReinforcementTableSkill:
                     continue
                 workbooks.append(_schedule_payload(source_name, schedule))
 
-        requires_manual = any(
-            workbook["requires_manual_confirmation"] for workbook in workbooks
+        requires_completion_review = any(
+            workbook["requires_completion_review"] for workbook in workbooks
         )
         evidence_count = sum(len(workbook["rows"]) for workbook in workbooks)
+        source_row_count = sum(
+            int(workbook["source_row_count"])
+            for workbook in workbooks
+        )
         payload = {
             "skill": "墙体配筋表规范化",
             "policy": {
@@ -182,7 +186,8 @@ class ReinforcementTableSkill:
                 ),
                 "rounding_only_for_presentation": True,
                 "parenthetical_value_is_actual": True,
-                "duplicate_rows_require_manual_confirmation": True,
+                "local_ambiguities_leave_fields_blank": True,
+                "local_ambiguities_do_not_block_task": True,
             },
             "workbooks": workbooks,
             "errors": errors,
@@ -197,8 +202,9 @@ class ReinforcementTableSkill:
             metadata={
                 "available": True,
                 "evidence_count": evidence_count,
+                "source_row_count": source_row_count,
                 "workbook_count": len(workbooks),
-                "requires_manual_confirmation": requires_manual,
+                "requires_completion_review": requires_completion_review,
                 "errors": errors,
                 "context_format": context_format,
                 "context_error": context_error,
@@ -223,7 +229,7 @@ class ReinforcementTableSkill:
                 "available": False,
                 "error": "skill_payload_incomplete",
                 "evidence_count": 0,
-                "requires_manual_confirmation": False,
+                "requires_completion_review": False,
             },
         )
 
@@ -232,24 +238,59 @@ def _schedule_payload(
     source_name: str,
     schedule: ReinforcementSchedule,
 ) -> dict[str, Any]:
+    normalized_rows = [
+        {
+            "status": "normalized",
+            "wall_id": row.wall_id,
+            "source_sheet": row.source_sheet,
+            "source_row": row.source_row,
+            "source_cells": row.source_cells,
+            "directions": {
+                "X": _cell_payload(row.x),
+                "Y": _cell_payload(row.y),
+                "Z": _cell_payload(row.z),
+            },
+        }
+        for row in schedule.rows
+    ]
+    issue_rows = [
+        {
+            "status": "needs_review",
+            "source_sheet": issue.source_sheet,
+            "source_row": issue.source_row,
+            "source_cells": issue.source_cells,
+            "original_values": issue.original_values,
+            "original_wall_text": issue.original_wall_text,
+            "wall_id": issue.wall_id,
+            "error": issue.error,
+        }
+        for issue in schedule.issues
+    ]
+    output_rows = sorted(
+        [*normalized_rows, *issue_rows],
+        key=lambda row: (
+            str(row["source_sheet"]).casefold(),
+            int(row["source_row"]),
+        ),
+    )
     return {
         "source_name": source_name,
+        "source_row_count": schedule.source_row_count,
+        "normalized_row_count": schedule.normalized_row_count,
+        "issue_row_count": schedule.issue_row_count,
+        "unique_wall_count": schedule.unique_wall_count,
+        "normalization_triggered": schedule.normalization_triggered,
         "duplicate_wall_ids": list(schedule.duplicate_wall_ids),
-        "requires_manual_confirmation": schedule.requires_manual_confirmation,
-        "rows": [
-            {
-                "wall_id": row.wall_id,
-                "source_sheet": row.source_sheet,
-                "source_row": row.source_row,
-                "source_cells": row.source_cells,
-                "directions": {
-                    "X": _cell_payload(row.x),
-                    "Y": _cell_payload(row.y),
-                    "Z": _cell_payload(row.z),
-                },
-            }
-            for row in schedule.rows
+        "requires_completion_review": schedule.requires_manual_confirmation,
+        "issues": [
+            {key: value for key, value in row.items() if key != "status"}
+            for row in issue_rows
         ],
+        "rows": [
+            {key: value for key, value in row.items() if key != "status"}
+            for row in normalized_rows
+        ],
+        "output_rows": output_rows,
     }
 
 
@@ -325,6 +366,25 @@ def _render_payload(
             "actual_area_exact",
             "is_parenthetical",
         ],
+        "issue_schema": [
+            "source_sheet",
+            "source_row",
+            "wall_cell",
+            "x_cell",
+            "y_cell",
+            "z_cell",
+            "original_values",
+            "original_wall_text",
+            "wall_id",
+            "error",
+        ],
+        "output_row_schema": [
+            "status",
+            "source_sheet",
+            "source_row",
+            "wall_id",
+            "error",
+        ],
         "workbooks": [
             _compact_workbook_payload(workbook)
             for workbook in payload["workbooks"]
@@ -345,10 +405,16 @@ def _render_payload(
         "workbooks": [
             {
                 "source_name": workbook["source_name"],
-                "row_count": len(workbook["rows"]),
+                "source_row_count": workbook["source_row_count"],
+                "normalized_row_count": workbook["normalized_row_count"],
+                "issue_row_count": workbook["issue_row_count"],
+                "unique_wall_count": workbook["unique_wall_count"],
+                "normalization_triggered": workbook[
+                    "normalization_triggered"
+                ],
                 "duplicate_wall_ids": workbook["duplicate_wall_ids"],
-                "requires_manual_confirmation": workbook[
-                    "requires_manual_confirmation"
+                "requires_completion_review": workbook[
+                    "requires_completion_review"
                 ],
             }
             for workbook in payload["workbooks"]
@@ -388,11 +454,41 @@ def _compact_workbook_payload(workbook: dict[str, Any]) -> dict[str, Any]:
         )
     return {
         "source_name": workbook["source_name"],
+        "source_row_count": workbook["source_row_count"],
+        "normalized_row_count": workbook["normalized_row_count"],
+        "issue_row_count": workbook["issue_row_count"],
+        "unique_wall_count": workbook["unique_wall_count"],
+        "normalization_triggered": workbook["normalization_triggered"],
         "duplicate_wall_ids": workbook["duplicate_wall_ids"],
-        "requires_manual_confirmation": workbook[
-            "requires_manual_confirmation"
+        "requires_completion_review": workbook[
+            "requires_completion_review"
         ],
         "row_records": records,
+        "issue_records": [
+            [
+                issue["source_sheet"],
+                issue["source_row"],
+                issue["source_cells"]["wall"],
+                issue["source_cells"]["X"],
+                issue["source_cells"]["Y"],
+                issue["source_cells"]["Z"],
+                issue["original_values"],
+                issue["original_wall_text"],
+                issue["wall_id"],
+                issue["error"],
+            ]
+            for issue in workbook["issues"]
+        ],
+        "output_row_records": [
+            [
+                row["status"],
+                row["source_sheet"],
+                row["source_row"],
+                row.get("wall_id"),
+                row.get("error"),
+            ]
+            for row in workbook["output_rows"]
+        ],
     }
 
 

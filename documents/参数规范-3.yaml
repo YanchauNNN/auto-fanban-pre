@@ -136,7 +136,7 @@ backend_mechanism:
       AUDIT_CHECK: "执行纠错识别"
       AUDIT_REPLACE: "执行翻版替换"
       EXPORT_REPORT: "导出纠错报告"
-      VALIDATE_ARCHIVE: "校验计算图片 ZIP"
+      VALIDATE_ARCHIVE: "校验计算图片 ZIP/RAR"
       OCR_REINFORCEMENT: "识别底部应力图例"
       SELECT_REBAR: "匹配并核验实配钢筋"
       RENDER_CALCULATION_BOOK: "渲染 Word 计算书"

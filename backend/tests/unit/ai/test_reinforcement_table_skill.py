@@ -46,7 +46,21 @@ def _workbook_bytes(*, duplicate: bool = True) -> bytes:
     return output.getvalue()
 
 
-def test_skill_normalizes_attached_workbook_with_exact_formula_and_manual_flags(
+def _workbook_with_issue_bytes() -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "墙体单侧实配钢筋"
+    sheet.append(["墙号", "水平筋(X)", "竖向筋(Y)", "拉筋(Z)"])
+    sheet.append(["N5007", "1D40间距200", "1D36间距200", "1C14间距400*400"])
+    sheet.append(["待确认墙", "1D32间距200", "1D32间距200", "1C14间距400*400"])
+    sheet.append(["N5008", "未知写法", "1D28间距200", "1C12间距400*400"])
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
+
+
+def test_skill_normalizes_attached_workbook_with_exact_formula_and_review_flags(
     tmp_path: Path,
 ) -> None:
     from src.ai.reinforcement_table_skill import (
@@ -77,7 +91,7 @@ def test_skill_normalizes_attached_workbook_with_exact_formula_and_manual_flags(
     result = json.loads(context.content)
     workbook_result = result["workbooks"][0]
     assert workbook_result["source_name"] == "墙体配筋结果.xlsx"
-    assert workbook_result["requires_manual_confirmation"] is True
+    assert workbook_result["requires_completion_review"] is True
     assert workbook_result["duplicate_wall_ids"] == ["N5007"]
     assert len(workbook_result["rows"]) == 2
 
@@ -95,7 +109,56 @@ def test_skill_normalizes_attached_workbook_with_exact_formula_and_manual_flags(
         == math.pi * 7**2 * 2.5 * 2.5
     )
     assert context.metadata["evidence_count"] == 2
-    assert context.metadata["requires_manual_confirmation"] is True
+    assert context.metadata["requires_completion_review"] is True
+
+
+def test_skill_reconciles_source_rows_without_dropping_normalization_issues(
+    tmp_path: Path,
+) -> None:
+    from src.ai.reinforcement_table_skill import (
+        ReinforcementTableSkill,
+        ReinforcementTableSkillConfig,
+    )
+
+    attachment = SimpleNamespace(
+        attachment_id="attachment-issues",
+        original_name="非标准墙体配筋结果.xlsx",
+        kind="document",
+        status="ready",
+    )
+    skill = ReinforcementTableSkill(
+        root=_skill_root(tmp_path),
+        config=ReinforcementTableSkillConfig(max_results=100),
+    )
+
+    context = skill.retrieve_from_attachments(
+        "创建计算书并规范化附件配筋表",
+        [],
+        [attachment],
+        lambda _item: _workbook_with_issue_bytes(),
+    )
+
+    assert context is not None
+    result = json.loads(context.content)
+    workbook_result = result["workbooks"][0]
+    assert workbook_result["source_row_count"] == 3
+    assert workbook_result["normalized_row_count"] == 1
+    assert workbook_result["issue_row_count"] == 2
+    assert workbook_result["source_row_count"] == (
+        workbook_result["normalized_row_count"]
+        + workbook_result["issue_row_count"]
+    )
+    assert len(workbook_result["output_rows"]) == 3
+    assert [row["status"] for row in workbook_result["output_rows"]] == [
+        "normalized",
+        "needs_review",
+        "needs_review",
+    ]
+    assert [issue["source_row"] for issue in workbook_result["issues"]] == [3, 4]
+    assert workbook_result["normalization_triggered"] is True
+    assert workbook_result["requires_completion_review"] is True
+    assert context.metadata["source_row_count"] == 3
+    assert context.metadata["requires_completion_review"] is True
 
 
 def test_skill_refuses_to_guess_invalid_or_missing_workbook(tmp_path: Path) -> None:

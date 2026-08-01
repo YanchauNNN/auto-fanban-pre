@@ -855,12 +855,12 @@ calculation_book:
     - { key: "site_soil_temperature", label: "场地土温", type: "number", required: true, unit: "℃" }
     - { key: "include_slab_stress", label: "包含楼板应力", type: "checkbox", required: false, default: false }
   archive:
-    accept: [".zip"]
+    accept: [".zip", ".rar"]
     root_figure_pattern: "<墙号><可选字母后缀><可选-1或-2>-X|Y|Z.(png|jpg|jpeg|bmp)"
     required_root_directions: ["X", "Y", "Z"]
     required_root_workbook: "根目录必须且只能包含 1 个 .xlsx 墙体配筋表"
     required_folders: ["01", "02"]
-    description: "ZIP 根目录保留 X/Y/Z 应力图和 1 个墙体配筋表，并保留含首图的 01、02 子目录；字母后缀墙号独立处理，重复配筋行或 -1/-2 图片组必须人工确认"
+    description: "ZIP 或 RAR 内保留 X/Y/Z 应力图、1 个墙体配筋表以及含首图的 01、02 子目录；允许全部内容位于单层总目录中；字母后缀墙号独立处理，重复配筋行、-1/-2 图片组或表图墙号差异转为完成详情提醒，局部存疑字段留空但不阻断任务"
   reinforcement_normalization:
     wall_id: "统一转大写；S7157A 与 S7157 为不同墙体"
     horizontal_vertical: "统一为 <层数>D<直径>间距<间距>，例如 1D25间距200"
@@ -871,7 +871,7 @@ calculation_book:
       precision: "内部使用 math.pi 未舍入值计算；页面和计算书显示到 1 位小数"
     parenthetical_value: "存在括号内配置时以括号内配置为实配；多个括号内配置取实际配筋面积最大值"
     forbidden_output_marker: "#"
-    manual_confirmation: "出现重复配筋行或 -1/-2 图片组时，一律要求用户逐墙人工确认"
+    unresolved_fields: "重复配筋行、-1/-2 图片组、表图差异或 AI 局部存疑时，仅将受影响字段留空，任务继续并在完成详情提醒用户补充"
 
 # ============================================================================
 # 三、图签提取模块 (titleblock_extract)
@@ -1528,17 +1528,17 @@ submission_contracts:
     endpoint: "POST /api/jobs/calculation-books"
     desc: "创建计算书异步任务；不占用 CAD 槽，成功后产出一个 DOCX"
     preflight_endpoint: "POST /api/jobs/calculation-books/preflight"
-    preflight_desc: "上传并暂存 ZIP，识别底部应力图例、规范化配筋表并返回逐墙证据；创建任务必须携带对应的一次性预检令牌"
+    preflight_desc: "上传并暂存 ZIP 或 RAR，先执行确定性格式检查；标准配筋表无需 AI，非标准配筋表返回 AI 启动确认提示，创建任务必须携带对应的一次性预检令牌"
     transport:
       content_type: "multipart/form-data"
       preflight_archive_field: "archive"
-      create_archive_field: "可选兼容字段；正常流程不重复上传，由预检令牌读取服务端暂存 ZIP"
+      create_archive_field: "可选兼容字段；正常流程不重复上传，由预检令牌读取服务端暂存压缩包"
       params_field: "params_json"
     params_json:
       extends: "calculation_book.fields"
       extra:
         preflight_token: "预检接口返回的一次性令牌"
-        manual_confirmations: "重复配筋行或 -1/-2 图片组对应的墙号到 Excel 源行号映射"
+        confirm_ai_normalization: "仅当预检判定为非标准配筋表时由用户确认；确认后由排队 Worker 启动 AI Skill 并返回结构化字段"
     response:
       batch_id: "批次号"
       jobs: "单个 calculation_book JobSummary"
