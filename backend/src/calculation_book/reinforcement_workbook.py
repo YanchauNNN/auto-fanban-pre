@@ -19,7 +19,6 @@ from .reinforcement_input import (
     _uses_standard_layout,
     normalize_slab_elevation,
     normalize_wall_id,
-    parse_rebar_cell,
 )
 
 
@@ -40,13 +39,22 @@ class WorkbookFormatInspection:
 
 
 _STANDARD_LINEAR_SPEC = re.compile(
-    r"(?:\d+\s+\d+|\d+\s*D\s*\d+|D\s*\d+|\d+)"
-    r"\s*(?:@|间距)\s*\d+",
+    r"(?:"
+    r"(?P<layers_space>\d+)\s+(?P<diameter_space>\d+)"
+    r"|(?P<layers_marked>\d+)\s*D\s*(?P<diameter_marked>\d+)"
+    r"|D\s*(?P<diameter_only_marked>\d+)"
+    r"|(?P<diameter_only>\d+)"
+    r")\s*(?:@|间距)\s*(?P<spacing_primary>\d+)",
     re.IGNORECASE,
 )
 _STANDARD_GRID_SPEC = re.compile(
-    r"(?:\d+\s+\d+|\d+\s*C\s*\d+|C\s*\d+|\d+)"
-    r"\s*(?:@|间距)\s*\d+\s*[*xX]\s*\d+",
+    r"(?:"
+    r"(?P<layers_space>\d+)\s+(?P<diameter_space>\d+)"
+    r"|(?P<layers_marked>\d+)\s*C\s*(?P<diameter_marked>\d+)"
+    r"|C\s*(?P<diameter_only_marked>\d+)"
+    r"|(?P<diameter_only>\d+)"
+    r")\s*(?:@|间距)\s*(?P<spacing_primary>\d+)"
+    r"\s*[*xX]\s*(?P<spacing_secondary>\d+)",
     re.IGNORECASE,
 )
 _STANDARD_WALL_TEXT = re.compile(
@@ -56,13 +64,16 @@ _STANDARD_WALL_TEXT = re.compile(
 
 
 def _is_standard_rebar(value: object, *, direction: str) -> bool:
-    try:
-        parse_rebar_cell(value, direction=direction)
-    except InvalidReinforcementWorkbook:
-        return False
     normalized = _normalized_cell_text(value)
     pattern = _STANDARD_GRID_SPEC if direction == "Z" else _STANDARD_LINEAR_SPEC
-    return pattern.fullmatch(normalized) is not None
+    match = pattern.fullmatch(normalized)
+    if match is None:
+        return False
+    return all(
+        int(component) > 0
+        for component in match.groupdict().values()
+        if component is not None
+    )
 
 
 def _is_standard_wall_text(value: object) -> bool:

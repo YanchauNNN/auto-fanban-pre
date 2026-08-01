@@ -69,6 +69,62 @@ def test_standard_template_format_does_not_require_ai(tmp_path: Path) -> None:
         inspection.wall_sheet = "changed"
 
 
+def test_format_inspection_does_not_invoke_area_calculation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = _subject()
+    from src.calculation_book import reinforcement_input
+
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    _add_standard_wall_sheet(workbook)
+    _add_standard_slab_sheet(workbook)
+    path = tmp_path / "syntax-only.xlsx"
+    workbook.save(path)
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("format inspection must not calculate reinforcement area")
+
+    monkeypatch.setattr(reinforcement_input, "_configuration", fail_if_called)
+
+    inspection = subject.inspect_reinforcement_workbook(path, include_slab=True)
+
+    assert inspection.requires_ai_normalization is False
+
+
+@pytest.mark.parametrize(
+    ("address", "value"),
+    [
+        ("B2", "0D28@200"),
+        ("B2", "1D0@200"),
+        ("B2", "1D28@0"),
+        ("B2", "1D28@-200"),
+        ("B2", "1D28@200*400"),
+        ("D2", "1C12@200"),
+        ("D2", "1C12@200*0"),
+        ("D2", "1A8间距400*400"),
+    ],
+)
+def test_nonpositive_or_directionally_invalid_specs_require_ai(
+    tmp_path: Path,
+    address: str,
+    value: str,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    sheet = _add_standard_wall_sheet(workbook)
+    sheet[address] = value
+    path = tmp_path / "invalid-standard-cell.xlsx"
+    workbook.save(path)
+
+    inspection = subject.inspect_reinforcement_workbook(path, include_slab=False)
+
+    assert inspection.requires_ai_normalization is True
+    assert inspection.reasons[0].code == "wall_value_nonstandard"
+
+
 def test_nonstandard_wall_and_selected_slab_require_ai(tmp_path: Path) -> None:
     subject = _subject()
     workbook = Workbook()
