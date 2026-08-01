@@ -246,25 +246,46 @@ def run_calculation_book_preflight(
         directions: dict[str, Any] = {}
         for direction in ("X", "Y", "Z"):
             figure = assignment.figure_for(direction)
-            cell = _cell_for_direction(assignment.rebar_row, direction)
+            cell = assignment.cell_for(direction)
+            source_cell = (
+                assignment.rebar_row.source_cells.get(direction, "")
+                if assignment.rebar_row is not None
+                else ""
+            )
             directions[direction] = {
                 "image_filename": figure.source.path.name,
                 "smn": figure.reading.smn,
                 "smx": figure.reading.smx,
                 "legend_values": list(figure.reading.legend_values),
                 "is_zero_result": figure.reading.is_zero_result,
-                "source_cell": assignment.rebar_row.source_cells[direction],
-                "original_text": cell.original_text,
-                "canonical_specification": cell.selected.canonical_specification,
-                "narrative_specification": cell.selected.narrative_specification,
-                "actual_area": round(cell.selected.actual_area, 1),
+                "source_cell": source_cell,
+                "original_text": cell.original_text if cell is not None else "",
+                "canonical_specification": (
+                    cell.selected.canonical_specification
+                    if cell is not None
+                    else ""
+                ),
+                "narrative_specification": (
+                    cell.selected.narrative_specification
+                    if cell is not None
+                    else ""
+                ),
+                "actual_area": (
+                    round(cell.selected.actual_area, 1)
+                    if cell is not None
+                    else ""
+                ),
             }
         walls.append(
             {
                 "wall_id": assignment.output_wall_id,
                 "base_wall_id": assignment.base_wall_id,
                 "group_index": assignment.group_index,
-                "suggested_source_row": assignment.rebar_row.source_row,
+                "suggested_source_row": (
+                    assignment.rebar_row.source_row
+                    if assignment.rebar_row is not None
+                    else None
+                ),
                 "directions": directions,
             }
         )
@@ -284,6 +305,20 @@ def run_calculation_book_preflight(
                 ],
             }
         )
+    warnings.extend(
+        {
+            "code": warning.code,
+            "scope": warning.scope,
+            "identity": warning.identity,
+            "direction": warning.direction,
+            "source_sheet": warning.source_sheet,
+            "source_row": warning.source_row,
+            "source_cells": warning.source_cells,
+            "reason": warning.reason,
+            "blank_fields": list(warning.blank_fields),
+        }
+        for warning in plan.warnings
+    )
 
     slabs = []
     if slab_plan is not None:
@@ -303,14 +338,22 @@ def run_calculation_book_preflight(
                     "is_zero_result": reading.is_zero_result,
                     "source_row": slab_assignment.source_row,
                     "source_cell": slab_assignment.source_cell,
-                    "original_text": cell.original_text,
+                    "original_text": cell.original_text if cell is not None else "",
                     "canonical_specification": (
                         cell.selected.canonical_specification
+                        if cell is not None
+                        else ""
                     ),
                     "narrative_specification": (
                         cell.selected.narrative_specification
+                        if cell is not None
+                        else ""
                     ),
-                    "actual_area": round(cell.selected.actual_area, 1),
+                    "actual_area": (
+                        round(cell.selected.actual_area, 1)
+                        if cell is not None
+                        else ""
+                    ),
                 }
             )
     return {
@@ -353,10 +396,7 @@ def run_calculation_book_preflight(
         "requires_wall_count_confirmation": (
             plan.requires_wall_count_confirmation
         ),
-        "requires_manual_confirmation": (
-            plan.requires_manual_confirmation
-            or schedule.requires_manual_confirmation
-        ),
+        "requires_manual_confirmation": False,
         "confirmations": confirmations,
         "walls": walls,
         "slab_figure_count": len(recognized_slabs),

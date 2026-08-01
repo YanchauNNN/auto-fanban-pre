@@ -840,28 +840,6 @@ class DeliverableApiRuntime:
                         },
                     },
                 )
-            confirmation_errors: list[str] = []
-            for wall_id, candidate_rows in preflight[
-                "confirmation_candidates"
-            ].items():
-                selected_row = params.manual_confirmations.get(wall_id)
-                if selected_row is None:
-                    confirmation_errors.append(f"{wall_id} 尚未人工确认")
-                elif selected_row not in candidate_rows:
-                    confirmation_errors.append(
-                        f"{wall_id} 的确认行 {selected_row} 不在候选范围内"
-                    )
-            if confirmation_errors:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail={
-                        "upload_errors": {},
-                        "param_errors": {
-                            "manual_confirmations": confirmation_errors
-                        },
-                    },
-                )
-
             cached_archive = UploadedFilePayload(
                 filename=str(preflight["archive_filename"]),
                 content=cached_content,

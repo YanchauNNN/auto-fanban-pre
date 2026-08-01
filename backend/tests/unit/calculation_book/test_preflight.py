@@ -166,7 +166,7 @@ def _build_mismatch_archive(tmp_path: Path) -> Path:
     return archive_path
 
 
-def test_preflight_returns_structured_evidence_and_manual_confirmation_candidates(
+def test_preflight_returns_blank_duplicate_and_split_groups_without_confirmation(
     tmp_path: Path,
 ) -> None:
     archive_path = _build_duplicate_archive(tmp_path)
@@ -187,19 +187,21 @@ def test_preflight_returns_structured_evidence_and_manual_confirmation_candidate
 
     assert result["figure_count"] == 6
     assert result["wall_count"] == 2
-    assert result["requires_manual_confirmation"] is True
-    assert [item["wall_id"] for item in result["confirmations"]] == [
-        "S7157-1",
-        "S7157-2",
-    ]
-    assert result["confirmations"][0]["suggested_source_row"] == 3
-    assert result["confirmations"][1]["suggested_source_row"] == 2
-    assert {
-        candidate["directions"]["Y"]["narrative_specification"]
-        for candidate in result["confirmations"][0]["candidates"]
-    } == {"1排32@200", "1排36@200"}
+    assert result["requires_manual_confirmation"] is False
+    assert result["confirmations"] == []
+    assert all(item["suggested_source_row"] is None for item in result["walls"])
+    assert all(
+        direction["canonical_specification"] == ""
+        and direction["actual_area"] == ""
+        for wall in result["walls"]
+        for direction in wall["directions"].values()
+    )
+    assert {warning["code"] for warning in result["warnings"]} == {
+        "duplicate_reinforcement_rows",
+        "split_image_group",
+    }
     assert result["walls"][0]["directions"]["X"]["legend_values"][0] == 0
-    assert result["walls"][0]["directions"]["X"]["source_cell"] == "B3"
+    assert result["walls"][0]["directions"]["X"]["source_cell"] == ""
     assert result["normalization_triggered"] is True
     assert (
         result["normalization_skill_id"]
@@ -286,11 +288,22 @@ def test_preflight_reports_normalization_and_wall_count_audit_without_blocking(
     assert result["image_unique_wall_count"] == 2
     assert result["image_wall_group_count"] == 2
     assert result["matched_unique_wall_count"] == 1
-    assert result["wall_count"] == 1
+    assert result["wall_count"] == 2
     assert result["image_only_wall_ids"] == ["NDTJ1"]
     assert result["workbook_only_wall_ids"] == ["S7160"]
     assert result["requires_wall_count_confirmation"] is True
     assert result["requires_manual_confirmation"] is False
+    image_only = next(
+        wall for wall in result["walls"] if wall["wall_id"] == "NDTJ1"
+    )
+    assert all(
+        direction["canonical_specification"] == ""
+        for direction in image_only["directions"].values()
+    )
+    assert {warning["code"] for warning in result["warnings"]} == {
+        "image_only_wall",
+        "workbook_only_wall",
+    }
 
 
 def test_preflight_ignores_slab_ocr_when_option_is_disabled(

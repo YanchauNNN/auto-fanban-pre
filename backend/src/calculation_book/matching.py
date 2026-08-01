@@ -3,11 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .ai_reinforcement_schema import ReinforcementNormalizationWarning
 from .archive import ReinforcementFigure
 from .ocr import StressLegendReading
 from .reinforcement_input import (
     NormalizedReinforcementRow,
+    ParsedRebarCell,
     ReinforcementSchedule,
+    parse_rebar_cell,
 )
 
 
@@ -27,7 +30,9 @@ class ReinforcementAssignment:
     base_wall_id: str
     group_index: int | None
     figures: tuple[RecognizedFigure, ...]
-    rebar_row: NormalizedReinforcementRow
+    rebar_row: NormalizedReinforcementRow | None
+    resolved_cells: tuple[tuple[str, ParsedRebarCell], ...] = ()
+    blank_fields: tuple[str, ...] = ()
 
     @property
     def demand_score(self) -> float:
@@ -39,6 +44,23 @@ class ReinforcementAssignment:
             if figure.source.direction == normalized:
                 return figure
         raise KeyError(f"{self.output_wall_id} 缺少 {normalized} 向图")
+
+    def cell_for(self, direction: str) -> ParsedRebarCell | None:
+        normalized = direction.strip().upper()
+        if normalized not in {"X", "Y", "Z"}:
+            raise KeyError(f"不支持的配筋方向：{direction}")
+        if normalized in self.blank_fields:
+            return None
+        resolved = dict(self.resolved_cells).get(normalized)
+        if resolved is not None:
+            return resolved
+        if self.rebar_row is None:
+            return None
+        return {
+            "X": self.rebar_row.x,
+            "Y": self.rebar_row.y,
+            "Z": self.rebar_row.z,
+        }[normalized]
 
 
 @dataclass(frozen=True)
@@ -54,6 +76,7 @@ class ManualConfirmation:
 class ReinforcementMatchingPlan:
     assignments: tuple[ReinforcementAssignment, ...]
     confirmations: tuple[ManualConfirmation, ...]
+    warnings: tuple[ReinforcementNormalizationWarning, ...] = ()
     image_only_wall_ids: tuple[str, ...] = ()
     workbook_only_wall_ids: tuple[str, ...] = ()
     image_wall_group_count: int = 0
@@ -66,7 +89,7 @@ class ReinforcementMatchingPlan:
 
     @property
     def requires_manual_confirmation(self) -> bool:
-        return bool(self.confirmations)
+        return False
 
 
 @dataclass(frozen=True)
@@ -151,6 +174,8 @@ def _pair_groups_and_rows(
 def match_reinforcement(
     recognized: list[RecognizedFigure],
     schedule: ReinforcementSchedule,
+    *,
+    normalization_warnings: tuple[ReinforcementNormalizationWarning, ...] = (),
 ) -> ReinforcementMatchingPlan:
     image_groups = _group_figures(recognized)
     schedule_by_wall: dict[str, list[NormalizedReinforcementRow]] = {}
@@ -161,62 +186,205 @@ def match_reinforcement(
     for group in image_groups:
         image_groups_by_base.setdefault(group.base_wall_id, []).append(group)
 
+    review_by_wall: dict[str, list[ReinforcementNormalizationWarning]] = {}
+    for warning in normalization_warnings:
+        if warning.scope == "wall" and warning.identity is not None:
+            review_by_wall.setdefault(warning.identity.upper(), []).append(warning)
+
     assignments: list[ReinforcementAssignment] = []
-    confirmations: list[ManualConfirmation] = []
+    matching_warnings: list[ReinforcementNormalizationWarning] = [
+        warning for warning in normalization_warnings if warning.scope == "wall"
+    ]
     image_only_wall_ids: list[str] = []
     for base_wall_id, groups in image_groups_by_base.items():
         rows = schedule_by_wall.get(base_wall_id, [])
-        if not rows:
+        reviews = review_by_wall.get(base_wall_id, [])
+        duplicate_rows = (
+            base_wall_id in schedule.duplicate_wall_ids
+            or len(rows) + len(reviews) > 1
+        )
+        if duplicate_rows:
+            source_sheet, source_row, source_cells = _wall_source(rows, reviews)
+            matching_warnings.append(
+                _warning(
+                    code="duplicate_reinforcement_rows",
+                    scope="wall",
+                    identity=base_wall_id,
+                    source_sheet=source_sheet,
+                    source_row=source_row,
+                    source_cells=source_cells,
+                    reason="同一墙体存在重复配筋行",
+                    blank_fields=("X", "Y", "Z"),
+                )
+            )
+
+        if rows:
+            pairs: list[tuple[_ImageGroup, NormalizedReinforcementRow | None]] = [
+                (group, row) for group, row in _pair_groups_and_rows(groups, rows)
+            ]
+        else:
+            pairs = [(group, None) for group in groups]
+
+        if not rows and not reviews:
             image_only_wall_ids.append(base_wall_id)
-            continue
-        duplicate_rows = len(rows) > 1
-        for group, row in _pair_groups_and_rows(groups, rows):
+            matching_warnings.append(
+                _warning(
+                    code="image_only_wall",
+                    scope="wall",
+                    identity=base_wall_id,
+                    reason="应力图中存在墙体，但配筋表没有对应数据",
+                    blank_fields=("X", "Y", "Z"),
+                )
+            )
+
+        for group, row in pairs:
+            split_group = group.group_index is not None
+            partial_cells = _review_cells(reviews[0]) if len(reviews) == 1 else ()
+            blank_fields = (
+                ("X", "Y", "Z")
+                if duplicate_rows or split_group or (row is None and not reviews)
+                else tuple(
+                    field
+                    for field in (reviews[0].blank_fields if reviews else ())
+                    if field in {"X", "Y", "Z"}
+                )
+            )
             assignment = ReinforcementAssignment(
                 output_wall_id=group.output_wall_id,
                 base_wall_id=base_wall_id,
                 group_index=group.group_index,
                 figures=group.figures,
-                rebar_row=row,
+                rebar_row=(None if duplicate_rows or split_group else row),
+                resolved_cells=(
+                    () if duplicate_rows or split_group else partial_cells
+                ),
+                blank_fields=blank_fields,
             )
             assignments.append(assignment)
-            reasons: list[str] = []
-            if duplicate_rows:
-                reasons.append("duplicate_reinforcement_rows")
-            if group.group_index is not None:
-                reasons.append("split_image_group")
-            if reasons:
-                confirmations.append(
-                    ManualConfirmation(
-                        output_wall_id=group.output_wall_id,
-                        base_wall_id=base_wall_id,
-                        selected_source_row=row.source_row,
-                        candidate_source_rows=tuple(
-                            candidate.source_row for candidate in rows
-                        ),
-                        reasons=tuple(reasons),
+            if split_group:
+                source_sheet, source_row, source_cells = _wall_source(rows, reviews)
+                matching_warnings.append(
+                    _warning(
+                        code="split_image_group",
+                        scope="wall",
+                        identity=group.output_wall_id,
+                        source_sheet=source_sheet,
+                        source_row=source_row,
+                        source_cells=source_cells,
+                        reason="-1/-2 应力图组需在任务完成后确认配筋",
+                        blank_fields=("X", "Y", "Z"),
                     )
                 )
 
     assignments.sort(key=lambda assignment: _wall_sort_key(assignment.output_wall_id))
-    confirmations.sort(
-        key=lambda confirmation: _wall_sort_key(confirmation.output_wall_id)
-    )
     image_base_wall_ids = set(image_groups_by_base)
     workbook_wall_ids = set(schedule_by_wall)
     matched_unique_wall_ids = {
         assignment.base_wall_id
         for assignment in assignments
+        if any(assignment.cell_for(direction) is not None for direction in ("X", "Y", "Z"))
     }
+    workbook_only_wall_ids = sorted(
+        workbook_wall_ids - image_base_wall_ids,
+        key=_wall_sort_key,
+    )
+    for wall_id in workbook_only_wall_ids:
+        row = schedule_by_wall[wall_id][0]
+        matching_warnings.append(
+            _warning(
+                code="workbook_only_wall",
+                scope="wall",
+                identity=wall_id,
+                source_sheet=row.source_sheet,
+                source_row=row.source_row,
+                source_cells=row.source_cells,
+                reason="配筋表中存在墙体，但应力图中没有对应图组",
+                blank_fields=("X", "Y", "Z"),
+            )
+        )
     return ReinforcementMatchingPlan(
         assignments=tuple(assignments),
-        confirmations=tuple(confirmations),
+        confirmations=(),
+        warnings=tuple(_deduplicate_warnings(matching_warnings)),
         image_only_wall_ids=tuple(
             sorted(set(image_only_wall_ids), key=_wall_sort_key)
         ),
-        workbook_only_wall_ids=tuple(
-            sorted(workbook_wall_ids - image_base_wall_ids, key=_wall_sort_key)
-        ),
+        workbook_only_wall_ids=tuple(workbook_only_wall_ids),
         image_wall_group_count=len(image_groups),
         image_unique_wall_count=len(image_base_wall_ids),
         matched_unique_wall_count=len(matched_unique_wall_ids),
     )
+
+
+def _review_cells(
+    warning: ReinforcementNormalizationWarning,
+) -> tuple[tuple[str, ParsedRebarCell], ...]:
+    cells: list[tuple[str, ParsedRebarCell]] = []
+    for direction in ("X", "Y", "Z"):
+        specification = warning.resolved_values.get(direction)
+        if specification is None:
+            continue
+        cells.append(
+            (direction, parse_rebar_cell(specification, direction=direction))
+        )
+    return tuple(cells)
+
+
+def _wall_source(
+    rows: list[NormalizedReinforcementRow],
+    reviews: list[ReinforcementNormalizationWarning],
+) -> tuple[str, int, dict[str, str]]:
+    if rows:
+        row = rows[0]
+        return row.source_sheet, row.source_row, row.source_cells
+    if reviews:
+        warning = reviews[0]
+        return warning.source_sheet, warning.source_row, warning.source_cells
+    return "", 0, {}
+
+
+def _warning(
+    *,
+    code: str,
+    scope: str,
+    identity: str | None,
+    reason: str,
+    blank_fields: tuple[str, ...],
+    source_sheet: str = "",
+    source_row: int = 0,
+    source_cells: dict[str, str] | None = None,
+) -> ReinforcementNormalizationWarning:
+    return ReinforcementNormalizationWarning(
+        code=code,
+        scope=scope,
+        identity=identity,
+        direction=None,
+        source_sheet=source_sheet,
+        source_row=source_row,
+        source_cells=source_cells or {},
+        original_values={},
+        resolved_values={},
+        reason=reason,
+        blank_fields=blank_fields,
+    )
+
+
+def _deduplicate_warnings(
+    warnings: list[ReinforcementNormalizationWarning],
+) -> list[ReinforcementNormalizationWarning]:
+    seen: set[tuple[object, ...]] = set()
+    result: list[ReinforcementNormalizationWarning] = []
+    for warning in warnings:
+        key = (
+            warning.code,
+            warning.scope,
+            warning.identity,
+            warning.direction,
+            warning.source_sheet,
+            warning.source_row,
+            warning.blank_fields,
+        )
+        if key not in seen:
+            seen.add(key)
+            result.append(warning)
+    return result

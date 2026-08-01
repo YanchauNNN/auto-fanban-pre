@@ -20,6 +20,7 @@ from src.calculation_book.processor import (
 from src.calculation_book.reinforcement_input import (
     NormalizedReinforcementRow,
     NormalizedSlabReinforcementRow,
+    ReinforcementRowIssue,
     SlabReinforcementSchedule,
     build_reinforcement_schedule,
     parse_linear_rebar_cell,
@@ -251,7 +252,7 @@ def test_processor_inserts_five_slab_groups_before_wall_results(
 
     assert result.figure_count == 8
     document = Document(result.output_path)
-    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
     transition = (
         "墙体的配筋计算结果如下。"
         "配筋结果为单侧配筋量、其单位为mm2/m。"
@@ -321,7 +322,13 @@ def _slab_review_warning(*, elevation: str):
         source_row=3,
         source_cells={"elevation": "A3", "top_x": "B3"},
         original_values={"elevation": elevation, "top_x": "ambiguous"},
-        resolved_values={"elevation": elevation},
+        resolved_values={
+            "elevation": elevation,
+            "top_y": "1D40间距200",
+            "bottom_x": "1D30间距200",
+            "bottom_y": "1D28间距200",
+            "z": "1D16间距200",
+        },
         reason="slab reinforcement needs review",
         blank_fields=("top_x",),
     )
@@ -473,6 +480,11 @@ def test_ai_review_only_slab_rows_do_not_fail_calculation_generation(
     assert result.output_path.is_file()
     assert result.figure_count == 8
     assert result.normalization_warnings == (warning,)
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
+    assert "11.45m 楼板顶层水平配筋云图" in text
+    assert "11.45m楼板顶层水平钢筋" not in text
+    assert "11.45m楼板底层水平钢筋" in text
 
 
 def test_ai_partial_slab_schedule_matches_only_resolved_elevations(
@@ -518,3 +530,78 @@ def test_ai_partial_slab_schedule_matches_only_resolved_elevations(
     document = Document(result.output_path)
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "11.45m楼板顶层水平钢筋" in text
+
+
+def test_ai_partial_wall_keeps_heading_and_image_but_blanks_only_x_values(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    monkeypatch.setattr(
+        processor_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: pytest.fail("AI override must be used"),
+    )
+    issue = ReinforcementRowIssue(
+        source_sheet="AI",
+        source_row=7,
+        source_cells={"wall": "A7", "X": "B7", "Y": "C7", "Z": "D7"},
+        original_values={"wall": "N5012", "X": "?"},
+        original_wall_text="N5012",
+        wall_id="N5012",
+        error="X 向待确认",
+    )
+    warning = SimpleNamespace(
+        code="needs_review",
+        scope="wall",
+        identity="N5012",
+        direction="X",
+        source_sheet="AI",
+        source_row=7,
+        source_cells=issue.source_cells,
+        original_values=issue.original_values,
+        resolved_values={
+            "wall_id": "N5012",
+            "Y": "1D28间距200",
+            "Z": "1C14间距400*400",
+        },
+        reason="X 向待确认",
+        blank_fields=("X",),
+    )
+    validated = SimpleNamespace(
+        wall_schedule=build_reinforcement_schedule(
+            rows=(),
+            issues=(issue,),
+            source_row_count=1,
+            normalization_triggered=True,
+        ),
+        slab_schedule=None,
+        warnings=(warning,),
+        source_row_count=1,
+    )
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=lambda _path, direction: StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 800,
+            legend_values=() if direction == "Z" else tuple(range(10)),
+            is_zero_result=direction == "Z",
+        ),
+    )
+
+    result = processor.process(
+        archive_path=_build_zip(tmp_path),
+        output_dir=tmp_path / "partial-wall-output",
+        params=_params(),
+        reinforcement_normalizer=lambda _path, _include_slab: validated,
+    )
+
+    assert [item.direction for item in result.selections] == ["Y", "Z"]
+    assert result.warnings == (warning,)
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert "N5012-水平向" in text
+    assert "墙N5012-水平向钢筋计算配筋面积" not in text
+    assert "墙N5012-竖向钢筋计算配筋面积" in text
+    assert len(document.inline_shapes) >= 3

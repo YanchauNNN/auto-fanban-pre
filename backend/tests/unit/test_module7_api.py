@@ -2175,6 +2175,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert kwargs["archive_path"].suffix == ".rar"
         archive_name = kwargs["archive_path"].name
         uncountable = archive_name.startswith("uncountable-")
+        manual_review = archive_name.startswith("manual-")
         requires_ai = archive_name.startswith("nonstandard-") or uncountable
         return {
             "figure_count": 3,
@@ -2207,9 +2208,27 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                     else []
                 ),
             },
-            "requires_manual_confirmation": False,
+            "requires_manual_confirmation": manual_review,
             "requires_wall_count_confirmation": not requires_ai,
-            "confirmations": [],
+            "confirmation_candidates": (
+                {"N5012": [2, 3]} if manual_review else {}
+            ),
+            "confirmations": (
+                [
+                    {
+                        "wall_id": "N5012",
+                        "base_wall_id": "N5012",
+                        "reasons": ["duplicate_reinforcement_rows"],
+                        "suggested_source_row": 2,
+                        "candidates": [
+                            {"source_row": 2},
+                            {"source_row": 3},
+                        ],
+                    }
+                ]
+                if manual_review
+                else []
+            ),
             "walls": [],
             "warnings": [],
         }
@@ -2411,6 +2430,35 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert replay_ai_response.json()["detail"]["param_errors"][
             "preflight_token"
         ] == ["请先完成计算书文件预检"]
+
+        manual_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "manual-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert manual_preflight.status_code == 200, manual_preflight.text
+        assert manual_preflight.json()["requires_manual_confirmation"] is True
+        no_row_confirmation = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": manual_preflight.json()[
+                            "preflight_token"
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert no_row_confirmation.status_code == 201, no_row_confirmation.text
 
         preflight_response = client.post(
             "/api/jobs/calculation-books/preflight",

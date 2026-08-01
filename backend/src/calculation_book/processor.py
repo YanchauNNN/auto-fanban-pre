@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
@@ -34,7 +34,7 @@ from .narrative import (
 from .ocr import StressLegendReading, recognize_stress_legend
 from .reinforcement_input import (
     NormalizedReinforcementRow,
-    ParsedRebarCell,
+    SlabReinforcementSchedule,
     load_reinforcement_schedule,
     load_slab_reinforcement_schedule,
 )
@@ -97,6 +97,10 @@ class CalculationBookResult:
     selections: tuple[AppliedReinforcement, ...]
     normalization_warnings: tuple[ReinforcementNormalizationWarning, ...] = ()
 
+    @property
+    def warnings(self) -> tuple[ReinforcementNormalizationWarning, ...]:
+        return self.normalization_warnings
+
 
 def _format_number(value: float | int) -> str:
     return f"{float(value):g}"
@@ -106,65 +110,28 @@ def _format_actual_area(value: float | int) -> str:
     return f"{round(float(value), 1):g}"
 
 
-def _cell_for_direction(
-    row: NormalizedReinforcementRow,
-    direction: str,
-) -> ParsedRebarCell:
-    return {
-        "X": row.x,
-        "Y": row.y,
-        "Z": row.z,
-    }[direction]
-
-
 def _apply_manual_confirmations(
     plan: ReinforcementMatchingPlan,
     *,
     confirmations: dict[str, int],
     schedule_rows: tuple[NormalizedReinforcementRow, ...],
 ) -> tuple[ReinforcementAssignment, ...]:
-    if not plan.requires_manual_confirmation:
-        return plan.assignments
-
-    rows_by_wall: dict[str, list[NormalizedReinforcementRow]] = {}
-    for row in schedule_rows:
-        rows_by_wall.setdefault(row.wall_id, []).append(row)
-    confirmation_by_output = {
-        confirmation.output_wall_id: confirmation
-        for confirmation in plan.confirmations
-    }
-    applied: list[ReinforcementAssignment] = []
-    for assignment in plan.assignments:
-        requirement = confirmation_by_output.get(assignment.output_wall_id)
-        if requirement is None:
-            applied.append(assignment)
-            continue
-        selected_row = confirmations.get(assignment.output_wall_id)
-        if selected_row is None:
-            raise ManualConfirmationRequired(
-                f"{assignment.output_wall_id} 存在重复配筋行或 -1/-2 图片组，"
-                "必须人工确认后才能创建任务"
-            )
-        candidates = rows_by_wall[assignment.base_wall_id]
-        selected = next(
-            (row for row in candidates if row.source_row == selected_row),
-            None,
-        )
-        if selected is None:
-            raise ManualConfirmationRequired(
-                f"{assignment.output_wall_id} 的人工确认行 {selected_row} "
-                f"不在候选行 {requirement.candidate_source_rows} 中"
-            )
-        applied.append(replace(assignment, rebar_row=selected))
-    return tuple(applied)
+    # Kept as a compatibility seam for persisted legacy request payloads.
+    # Ambiguous rows are represented as blank assignments by matching itself;
+    # user-provided row numbers must not make generation block or guess values.
+    del confirmations, schedule_rows
+    return plan.assignments
 
 
 def _selection(
     assignment: ReinforcementAssignment,
     direction: str,
-) -> AppliedReinforcement:
+) -> AppliedReinforcement | None:
     figure = assignment.figure_for(direction)
-    config = _cell_for_direction(assignment.rebar_row, direction).selected
+    cell = assignment.cell_for(direction)
+    if cell is None:
+        return None
+    config = cell.selected
     calculation_area = select_calculation_reference(
         figure.reading,
         actual_area=config.actual_area,
@@ -193,6 +160,11 @@ def _wall_rows(
         for direction in ("X", "Y", "Z"):
             selection = _selection(assignment, direction)
             prefix = direction.lower()
+            if selection is None:
+                row[f"{prefix}_calc"] = ""
+                row[f"{prefix}_actual"] = ""
+                row[f"{prefix}_margin"] = ""
+                continue
             row[f"{prefix}_calc"] = _format_number(selection.calculation_area)
             row[f"{prefix}_actual"] = _format_actual_area(selection.actual_area)
             row[f"{prefix}_margin"] = (
@@ -207,15 +179,16 @@ def _wall_rows(
 def _actual_rebar_rows(
     assignments: tuple[ReinforcementAssignment, ...],
 ) -> list[dict[str, str]]:
-    return [
-        {
-            "id": assignment.output_wall_id,
-            "x_spec": assignment.rebar_row.x.selected.canonical_specification,
-            "y_spec": assignment.rebar_row.y.selected.canonical_specification,
-            "z_spec": assignment.rebar_row.z.selected.canonical_specification,
-        }
-        for assignment in assignments
-    ]
+    rows: list[dict[str, str]] = []
+    for assignment in assignments:
+        row = {"id": assignment.output_wall_id}
+        for direction in ("X", "Y", "Z"):
+            cell = assignment.cell_for(direction)
+            row[f"{direction.lower()}_spec"] = (
+                cell.selected.canonical_specification if cell is not None else ""
+            )
+        rows.append(row)
+    return rows
 
 
 def _reinforcement_figure_rows(
@@ -229,10 +202,27 @@ def _reinforcement_figure_rows(
     direction_labels = {"X": "水平向", "Y": "竖向", "Z": "拉筋"}
     for assignment in assignments:
         for figure in assignment.figures:
-            cell = _cell_for_direction(
-                assignment.rebar_row,
-                figure.source.direction,
-            )
+            cell = assignment.cell_for(figure.source.direction)
+            narrative = ""
+            sm_value = ""
+            rebar_spec = ""
+            rebar_area = ""
+            if cell is not None:
+                narrative = build_reinforcement_narrative(
+                    wall_id=assignment.output_wall_id,
+                    direction=figure.source.direction,
+                    reading=figure.reading,
+                    rebar_specification=cell.selected.narrative_specification,
+                    actual_area=cell.selected.actual_area,
+                )
+                sm_value = _format_number(
+                    select_calculation_reference(
+                        figure.reading,
+                        actual_area=cell.selected.actual_area,
+                    )
+                )
+                rebar_spec = cell.selected.narrative_specification
+                rebar_area = _format_actual_area(cell.selected.actual_area)
             rows.append(
                 {
                     "figure_number": f"{chapter}-{start_index + len(rows)}",
@@ -245,21 +235,10 @@ def _reinforcement_figure_rows(
                         f"{assignment.output_wall_id}-"
                         f"{direction_labels[figure.source.direction]}"
                     ),
-                    "narrative": build_reinforcement_narrative(
-                        wall_id=assignment.output_wall_id,
-                        direction=figure.source.direction,
-                        reading=figure.reading,
-                        rebar_specification=cell.selected.narrative_specification,
-                        actual_area=cell.selected.actual_area,
-                    ),
-                    "sm_value": _format_number(
-                        select_calculation_reference(
-                            figure.reading,
-                            actual_area=cell.selected.actual_area,
-                        )
-                    ),
-                    "rebar_spec": cell.selected.narrative_specification,
-                    "rebar_area": _format_actual_area(cell.selected.actual_area),
+                    "narrative": narrative,
+                    "sm_value": sm_value,
+                    "rebar_spec": rebar_spec,
+                    "rebar_area": rebar_area,
                 }
             )
     return rows
@@ -286,6 +265,16 @@ def _slab_figure_rows(
     for assignment in plan.assignments:
         label = _SLAB_LAYER_LABELS[assignment.key]
         cell = assignment.rebar_cell
+        narrative = ""
+        if cell is not None:
+            narrative = build_slab_reinforcement_narrative(
+                elevation=assignment.elevation,
+                layer_label=label,
+                reading=assignment.figure.reading,
+                rebar_specification=(cell.selected.narrative_specification),
+                actual_area=cell.selected.actual_area,
+                is_z=assignment.direction == "Z",
+            )
         rows.append(
             {
                 "figure_number": f"{chapter}-{len(rows) + 1}",
@@ -295,16 +284,7 @@ def _slab_figure_rows(
                     width=Mm(140),
                 ),
                 "caption": f"{assignment.elevation}m 楼板{label}",
-                "narrative": build_slab_reinforcement_narrative(
-                    elevation=assignment.elevation,
-                    layer_label=label,
-                    reading=assignment.figure.reading,
-                    rebar_specification=(
-                        cell.selected.narrative_specification
-                    ),
-                    actual_area=cell.selected.actual_area,
-                    is_z=assignment.direction == "Z",
-                ),
+                "narrative": narrative,
             }
         )
     return rows
@@ -426,16 +406,24 @@ class CalculationBookProcessor:
         ]
 
         report(CalculationBookStage.SELECT_REBAR, 55, "正在匹配并核验实配钢筋", {})
-        plan = match_reinforcement(recognized, schedule)
+        normalization_warnings = (
+            normalized.warnings if normalized is not None else ()
+        )
+        plan = match_reinforcement(
+            recognized,
+            schedule,
+            normalization_warnings=normalization_warnings,
+        )
         assignments = _apply_manual_confirmations(
             plan,
             confirmations=params.manual_confirmations,
             schedule_rows=schedule.rows,
         )
         selections = tuple(
-            _selection(assignment, direction)
+            selection
             for assignment in assignments
             for direction in ("X", "Y", "Z")
+            if (selection := _selection(assignment, direction)) is not None
         )
 
         slab_plan = SlabMatchingPlan(assignments=())
@@ -465,20 +453,13 @@ class CalculationBookProcessor:
                     recognized_slabs,
                     slab_schedule,
                 )
-            elif slab_schedule is not None and slab_schedule.rows:
-                resolved_elevations = {
-                    row.elevation for row in slab_schedule.rows
-                }
-                resolved_slabs = [
-                    figure
-                    for figure in recognized_slabs
-                    if figure.source.elevation in resolved_elevations
-                ]
-                if resolved_slabs:
-                    slab_plan = match_slab_reinforcement(
-                        resolved_slabs,
-                        slab_schedule,
-                    )
+            else:
+                slab_plan = match_slab_reinforcement(
+                    recognized_slabs,
+                    slab_schedule or SlabReinforcementSchedule(rows=()),
+                    normalization_warnings=normalization_warnings,
+                    allow_partial=True,
+                )
 
         report(CalculationBookStage.RENDER_CALCULATION_BOOK, 75, "正在渲染 Word 计算书", {})
         template_path = resolve_template_path(self.assets.template_root, params.template_type)
@@ -535,7 +516,28 @@ class CalculationBookProcessor:
             figure_count=len(recognized) + len(recognized_slabs),
             template_type=params.template_type.value,
             selections=selections,
-            normalization_warnings=(
-                normalized.warnings if normalized is not None else ()
+            normalization_warnings=_deduplicate_warnings(
+                (*plan.warnings, *slab_plan.warnings)
             ),
         )
+
+
+def _deduplicate_warnings(
+    warnings: tuple[ReinforcementNormalizationWarning, ...],
+) -> tuple[ReinforcementNormalizationWarning, ...]:
+    seen: set[tuple[object, ...]] = set()
+    result: list[ReinforcementNormalizationWarning] = []
+    for warning in warnings:
+        key = (
+            warning.code,
+            warning.scope,
+            warning.identity,
+            warning.direction,
+            warning.source_sheet,
+            warning.source_row,
+            warning.blank_fields,
+        )
+        if key not in seen:
+            seen.add(key)
+            result.append(warning)
+    return tuple(result)

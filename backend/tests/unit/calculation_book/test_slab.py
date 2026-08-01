@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -199,3 +200,63 @@ def test_rejects_empty_slab_figure_set() -> None:
             [],
             SlabReinforcementSchedule(rows=(_row(),)),
         )
+
+
+def test_ai_partial_slab_preserves_all_figures_and_only_blanks_review_field() -> None:
+    warning = SimpleNamespace(
+        code="needs_review",
+        scope="slab",
+        identity="11.45",
+        direction="top_x",
+        source_sheet="AI-slab",
+        source_row=7,
+        source_cells={
+            "elevation": "A7",
+            "top_x": "B7",
+            "top_y": "C7",
+            "bottom_x": "F7",
+            "bottom_y": "G7",
+            "z": "H7",
+        },
+        original_values={},
+        resolved_values={
+            "elevation": "11.45",
+            "top_y": "1D40间距200",
+            "bottom_x": "1D30间距200",
+            "bottom_y": "1D28间距200",
+            "z": "1D16间距200",
+        },
+        reason="top_x 待确认",
+        blank_fields=("top_x",),
+    )
+
+    plan = match_slab_reinforcement(
+        _five_figures(),
+        SlabReinforcementSchedule(rows=(_row(),)),
+        normalization_warnings=(warning,),
+        allow_partial=True,
+    )
+
+    assert [item.key for item in plan.assignments] == [
+        "top_x",
+        "bottom_x",
+        "top_y",
+        "bottom_y",
+        "z",
+    ]
+    by_key = {item.key: item for item in plan.assignments}
+    assert by_key["top_x"].rebar_cell is None
+    assert by_key["top_y"].rebar_cell.selected.canonical_specification == "1D40间距200"
+    assert {warning.code for warning in plan.warnings} == {"needs_review"}
+
+
+def test_ai_image_only_slab_keeps_five_blank_assignments() -> None:
+    plan = match_slab_reinforcement(
+        _five_figures(),
+        SlabReinforcementSchedule(rows=()),
+        allow_partial=True,
+    )
+
+    assert len(plan.assignments) == 5
+    assert all(item.rebar_cell is None for item in plan.assignments)
+    assert [warning.code for warning in plan.warnings] == ["image_only_slab"]

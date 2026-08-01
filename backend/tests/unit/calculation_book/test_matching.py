@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from src.calculation_book.ai_reinforcement_schema import (
+    ReinforcementNormalizationWarning,
+)
 from src.calculation_book.archive import ReinforcementFigure
-from src.calculation_book.matching import RecognizedFigure, match_reinforcement
+from src.calculation_book.matching import (
+    CalculationMatchingError,
+    RecognizedFigure,
+    match_reinforcement,
+)
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.reinforcement_input import (
     NormalizedReinforcementRow,
@@ -103,9 +112,12 @@ def test_single_image_group_uses_largest_duplicate_configuration_as_envelope() -
 
     plan = match_reinforcement(_group("S7157", 4000), schedule)
 
-    assert plan.assignments[0].rebar_row.source_row == 28
-    assert plan.requires_manual_confirmation
-    assert plan.confirmations[0].reasons == ("duplicate_reinforcement_rows",)
+    assert plan.assignments[0].rebar_row is None
+    assert plan.assignments[0].cell_for("X") is None
+    assert not plan.requires_manual_confirmation
+    assert {warning.code for warning in plan.warnings} == {
+        "duplicate_reinforcement_rows"
+    }
 
 
 def test_two_image_groups_pair_larger_demand_with_larger_configuration() -> None:
@@ -127,14 +139,16 @@ def test_two_image_groups_pair_larger_demand_with_larger_configuration() -> None
         for assignment in plan.assignments
     }
 
-    assert by_output["S7157-1"].rebar_row.source_row == 29
-    assert by_output["S7157-2"].rebar_row.source_row == 28
-    assert plan.requires_manual_confirmation
+    assert by_output["S7157-1"].rebar_row is None
+    assert by_output["S7157-2"].rebar_row is None
     assert all(
-        confirmation.reasons
-        == ("duplicate_reinforcement_rows", "split_image_group")
-        for confirmation in plan.confirmations
+        assignment.blank_fields == ("X", "Y", "Z")
+        for assignment in by_output.values()
     )
+    assert {warning.code for warning in plan.warnings} == {
+        "duplicate_reinforcement_rows",
+        "split_image_group",
+    }
 
 
 def test_alpha_suffix_wall_does_not_merge_with_base_wall() -> None:
@@ -171,10 +185,84 @@ def test_records_image_and_workbook_only_walls_and_keeps_matched_subset() -> Non
         schedule,
     )
 
-    assert [item.output_wall_id for item in plan.assignments] == ["S7159"]
+    assert [item.output_wall_id for item in plan.assignments] == ["NDTJ1", "S7159"]
+    assert plan.assignments[0].rebar_row is None
     assert plan.image_only_wall_ids == ("NDTJ1",)
     assert plan.workbook_only_wall_ids == ("S7160",)
     assert plan.image_unique_wall_count == 2
     assert plan.matched_unique_wall_count == 1
     assert plan.requires_wall_count_confirmation is True
     assert plan.requires_manual_confirmation is False
+    assert {warning.code for warning in plan.warnings} == {
+        "image_only_wall",
+        "workbook_only_wall",
+    }
+
+
+def test_ai_review_row_keeps_resolved_directions_and_blanks_only_requested_field() -> None:
+    warning = ReinforcementNormalizationWarning(
+        code="needs_review",
+        scope="wall",
+        identity="N5012",
+        direction="X",
+        source_sheet="AI",
+        source_row=7,
+        source_cells={"wall": "A7", "X": "B7", "Y": "C7", "Z": "D7"},
+        original_values={"wall": "N5012", "X": "?", "Y": "1D28@200", "Z": "1C14@400*400"},
+        resolved_values={
+            "wall_id": "N5012",
+            "Y": "1D28间距200",
+            "Z": "1C14间距400*400",
+        },
+        reason="X 向写法无法唯一确定",
+        blank_fields=("X",),
+    )
+
+    plan = match_reinforcement(
+        _group("N5012", 2000),
+        ReinforcementSchedule(rows=(), duplicate_wall_ids=()),
+        normalization_warnings=(warning,),
+    )
+
+    assignment = plan.assignments[0]
+    assert assignment.cell_for("X") is None
+    assert assignment.cell_for("Y").selected.canonical_specification == "1D28间距200"
+    assert assignment.cell_for("Z").selected.canonical_specification == "1C14间距400*400"
+    assert assignment.blank_fields == ("X",)
+
+
+def test_unknown_review_identity_keeps_image_group_fully_blank() -> None:
+    warning = ReinforcementNormalizationWarning(
+        code="needs_review",
+        scope="wall",
+        identity=None,
+        direction=None,
+        source_sheet="AI",
+        source_row=8,
+        source_cells={"wall": "A8"},
+        original_values={"wall": "?"},
+        resolved_values={},
+        reason="墙号无法识别",
+        blank_fields=("wall_id", "X", "Y", "Z"),
+    )
+
+    plan = match_reinforcement(
+        _group("IMG9001", 2000),
+        ReinforcementSchedule(rows=(), duplicate_wall_ids=()),
+        normalization_warnings=(warning,),
+    )
+
+    assert plan.assignments[0].output_wall_id == "IMG9001"
+    assert plan.assignments[0].blank_fields == ("X", "Y", "Z")
+    assert all(plan.assignments[0].cell_for(item) is None for item in "XYZ")
+
+
+def test_missing_wall_direction_remains_a_hard_archive_structure_failure() -> None:
+    with pytest.raises(CalculationMatchingError, match="缺少 Z"):
+        match_reinforcement(
+            _group("S7159", 2000)[:2],
+            ReinforcementSchedule(
+                rows=(_row("S7159", diameter=28, source_row=2),),
+                duplicate_wall_ids=(),
+            ),
+        )
