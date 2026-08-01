@@ -38,6 +38,8 @@ class CalculationBookParams(BaseModel):
     factory_extreme_max_temperature: float = Field(ge=-100, le=100)
     site_soil_temperature: float = Field(ge=-100, le=100)
     include_slab_stress: bool = False
+    confirm_ai_normalization: bool = False
+    confirm_wall_count_mismatch: bool = False
     manual_confirmations: dict[str, int] = Field(default_factory=dict)
     preflight_token: str = Field(default="", max_length=100)
 

@@ -2123,6 +2123,8 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
+    observed_ai_options: list[bool] = []
+
     class CalculationProcessor:
         def __call__(self, job: Job) -> None:
             assert job.job_type == JobType.CALCULATION_BOOK
@@ -2131,6 +2133,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             validated = CalculationBookParams.model_validate(job.params)
             assert validated.project_no == "JQ"
             assert validated.include_slab_stress is True
+            observed_ai_options.append(
+                bool(job.options.get("ai_reinforcement_normalization"))
+            )
             job.mark_running(stage="VALIDATE_ARCHIVE")
             job.progress.percent = 80
             job.progress.details.update(
@@ -2153,12 +2158,38 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
 
     def fake_calculation_book_preflight(**kwargs):
         assert kwargs["include_slab_stress"] is True
+        assert kwargs["archive_path"].suffix == ".rar"
+        requires_ai = kwargs["archive_path"].name.startswith("nonstandard-")
         return {
             "figure_count": 3,
             "zero_figure_count": 1,
             "wall_count": 1,
             "reinforcement_workbook": "计算书模板文件.xlsx",
+            "reinforcement_issue_row_count": 1 if requires_ai else 0,
+            "requires_ai_normalization": requires_ai,
+            "ai_confirmation_message": (
+                "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
+                if requires_ai
+                else None
+            ),
+            "format_inspection": {
+                "wall_sheet": "非标准墙表" if requires_ai else "Sheet1",
+                "slab_sheet": "楼板配筋",
+                "reasons": (
+                    [
+                        {
+                            "scope": "wall",
+                            "code": "wall_layout_nonstandard",
+                            "sheet": "非标准墙表",
+                            "message": "非标准墙表不是标准四列墙体配筋模板",
+                        }
+                    ]
+                    if requires_ai
+                    else []
+                ),
+            },
             "requires_manual_confirmation": False,
+            "requires_wall_count_confirmation": not requires_ai,
             "confirmations": [],
             "walls": [],
             "warnings": [],
@@ -2194,21 +2225,136 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             font_preflight_service=FakeFontPreflightService(),
         )
     ) as client:
-        archive_bytes = b"PK\x03\x04test"
+        archive_bytes = b"Rar!\x1a\x07\x01\x00test"
+        wrong_token_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {**params, "preflight_token": "forged-token"},
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert wrong_token_response.status_code == 422
+        assert wrong_token_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
+
+        expired_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        expired_token = expired_preflight.json()["preflight_token"]
+        runtime = client.app.state.runtime
+        expired_entry = runtime._calculation_preflight_tokens[expired_token]
+        expired_archive = Path(expired_entry["archive_path"])
+        expired_entry["created_at"] -= 1801
+        expired_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": expired_token,
+                        "confirm_wall_count_mismatch": True,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert expired_response.status_code == 422
+        assert expired_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
+        assert not expired_archive.exists()
+
+        nonstandard_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "nonstandard-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert nonstandard_preflight.status_code == 200, nonstandard_preflight.text
+        assert nonstandard_preflight.json()["requires_ai_normalization"] is True
+        assert nonstandard_preflight.json()["ai_confirmation_message"] == (
+            "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
+        )
+        nonstandard_params = {
+            **params,
+            "preflight_token": nonstandard_preflight.json()["preflight_token"],
+        }
+        unconfirmed_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    nonstandard_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert unconfirmed_ai_response.status_code == 422
+        assert unconfirmed_ai_response.json()["detail"]["param_errors"][
+            "confirm_ai_normalization"
+        ] == ["请确认启动人工智能规范化非标准配筋表"]
+
+        nonstandard_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "nonstandard-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        confirmed_ai_params = {
+            **nonstandard_params,
+            "preflight_token": nonstandard_preflight.json()["preflight_token"],
+            "confirm_ai_normalization": True,
+        }
+        confirmed_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    confirmed_ai_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert confirmed_ai_response.status_code == 201, confirmed_ai_response.text
+        confirmed_ai_detail = _poll_job(
+            client,
+            confirmed_ai_response.json()["jobs"][0]["job_id"],
+        )
+        assert confirmed_ai_detail["status"] == "succeeded"
+        assert observed_ai_options == [True]
+
         preflight_response = client.post(
             "/api/jobs/calculation-books/preflight",
             data={"include_slab_stress": "true"},
             files={
                 "archive": (
-                    "calculation-images.zip",
+                    "calculation-images.rar",
                     archive_bytes,
-                    "application/zip",
+                    "application/vnd.rar",
                 )
             },
         )
         assert preflight_response.status_code == 200, preflight_response.text
         params["preflight_token"] = preflight_response.json()["preflight_token"]
-        runtime = client.app.state.runtime
         assert runtime._calculation_preflight_tokens[params["preflight_token"]][
             "include_slab_stress"
         ] is True
@@ -2218,6 +2364,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             ]
         )
         assert cached_archive.is_file()
+        assert cached_archive.suffix == ".rar"
 
         mismatch_params = {
             **params,
@@ -2238,14 +2385,46 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             data={"include_slab_stress": "true"},
             files={
                 "archive": (
-                    "calculation-images.zip",
+                    "calculation-images.rar",
                     archive_bytes,
-                    "application/zip",
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        assert preflight_response.json()["requires_ai_normalization"] is False
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+
+        unconfirmed_response = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+        assert unconfirmed_response.status_code == 422
+        assert unconfirmed_response.json()["detail"]["param_errors"][
+            "confirm_wall_count_mismatch"
+        ] == ["请确认仅按已匹配墙体生成计算书"]
+        assert not cached_archive.exists()
+
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
                 )
             },
         )
         assert preflight_response.status_code == 200, preflight_response.text
         params["preflight_token"] = preflight_response.json()["preflight_token"]
+        params["confirm_wall_count_mismatch"] = True
+        params["confirm_ai_normalization"] = True
         cached_archive = Path(
             runtime._calculation_preflight_tokens[params["preflight_token"]][
                 "archive_path"
@@ -2261,6 +2440,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert not cached_archive.exists()
         job_id = response.json()["jobs"][0]["job_id"]
         detail = _poll_job(client, job_id)
+        assert observed_ai_options[-1] is False
         assert detail["status"] == "succeeded"
         assert detail["task_kind"] == "calculation_book"
         assert detail["slot_id"] is None

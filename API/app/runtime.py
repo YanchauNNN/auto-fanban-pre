@@ -669,7 +669,7 @@ class DeliverableApiRuntime:
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail={
                         "upload_errors": {
-                            "archive": ["预检文件已失效，请重新选择 ZIP 并预检"]
+                            "archive": ["预检文件已失效，请重新选择 ZIP 或 RAR 并预检"]
                         },
                         "param_errors": {},
                     },
@@ -693,14 +693,48 @@ class DeliverableApiRuntime:
                         detail={
                             "upload_errors": {
                                 "archive": [
-                                    "当前 ZIP 与预检时的文件不一致，请重新预检"
+                                    "当前压缩包与预检时的文件不一致，请重新预检"
                                 ]
                             },
                             "param_errors": {},
                         },
                     )
 
+            requires_ai_normalization = bool(
+                preflight.get("requires_ai_normalization", False)
+            )
+            if (
+                requires_ai_normalization
+                and not params.confirm_ai_normalization
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "confirm_ai_normalization": [
+                                "请确认启动人工智能规范化非标准配筋表"
+                            ]
+                        },
+                    },
+                )
+
             confirmation_errors: list[str] = []
+            if (
+                bool(preflight.get("requires_wall_count_confirmation", False))
+                and not params.confirm_wall_count_mismatch
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "confirm_wall_count_mismatch": [
+                                "请确认仅按已匹配墙体生成计算书"
+                            ]
+                        },
+                    },
+                )
             for wall_id, candidate_rows in preflight[
                 "confirmation_candidates"
             ].items():
@@ -734,7 +768,12 @@ class DeliverableApiRuntime:
             job = self.job_manager.create_job(
                 job_type=JobType.CALCULATION_BOOK.value,
                 project_no=params.project_no,
-                options={"mode": "calculation_book"},
+                options={
+                    "mode": "calculation_book",
+                    "ai_reinforcement_normalization": (
+                        requires_ai_normalization
+                    ),
+                },
                 params=params.model_dump(
                     mode="json",
                     exclude_computed_fields=True,
@@ -759,8 +798,11 @@ class DeliverableApiRuntime:
         include_slab_stress: bool = False,
     ) -> dict[str, Any]:
         upload_errors: dict[str, list[str]] = {}
-        if Path(archive.filename).suffix.lower() != ".zip":
-            upload_errors.setdefault("archive", []).append("only .zip files are allowed")
+        archive_suffix = Path(archive.filename).suffix.lower()
+        if archive_suffix not in {".zip", ".rar"}:
+            upload_errors.setdefault("archive", []).append(
+                "only .zip or .rar files are allowed"
+            )
         if not archive.content:
             upload_errors.setdefault("archive", []).append("archive is empty")
         runtime = self.config.calculation_book
@@ -827,7 +869,7 @@ class DeliverableApiRuntime:
                     / "calculation-preflight"
                 )
                 cache_root.mkdir(parents=True, exist_ok=True)
-                cached_archive_path = cache_root / f"{token}.zip"
+                cached_archive_path = cache_root / f"{token}{archive_suffix}"
                 cached_archive_path.write_bytes(archive.content)
                 expired_archive_paths: list[Path] = []
                 with self._calculation_preflight_lock:
@@ -850,10 +892,28 @@ class DeliverableApiRuntime:
                             or "calculation-images.zip"
                         ),
                         "content_type": (
-                            archive.content_type or "application/zip"
+                            archive.content_type
+                            or (
+                                "application/vnd.rar"
+                                if archive_suffix == ".rar"
+                                else "application/zip"
+                            )
                         ),
                         "include_slab_stress": include_slab_stress,
                         "confirmation_candidates": confirmation_candidates,
+                        "requires_wall_count_confirmation": bool(
+                            payload.get(
+                                "requires_wall_count_confirmation",
+                                False,
+                            )
+                        ),
+                        "requires_ai_normalization": bool(
+                            payload.get("requires_ai_normalization", False)
+                        ),
+                        "format_inspection": payload.get(
+                            "format_inspection",
+                            {},
+                        ),
                     }
                 for path in expired_archive_paths:
                     path.unlink(missing_ok=True)
