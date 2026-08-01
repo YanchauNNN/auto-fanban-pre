@@ -65,6 +65,32 @@ from .metadata import FormMetadataService
 
 logger = logging.getLogger(__name__)
 _CALCULATION_PREFLIGHT_TTL_SECONDS = 1800
+_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT = (
+    "unsafe calculation preflight cache root"
+)
+
+
+def _validate_calculation_preflight_cache_root(cache_root: Path) -> None:
+    root_stat = cache_root.lstat()
+    is_junction = getattr(cache_root, "is_junction", lambda: False)
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or cache_root.is_symlink()
+        or is_junction()
+    ):
+        raise RuntimeError(_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT)
+
+
+def _ensure_calculation_preflight_cache_root(cache_root: Path) -> None:
+    try:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        _validate_calculation_preflight_cache_root(cache_root)
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError(
+            _UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT
+        ) from exc
 
 
 def _cleanup_calculation_preflight_cache(
@@ -75,17 +101,10 @@ def _cleanup_calculation_preflight_cache(
     """Delete only stale, regular preflight archives from the flat cache."""
     reference_time = time.time() if now is None else now
     try:
-        root_stat = cache_root.lstat()
-        if (
-            not stat.S_ISDIR(root_stat.st_mode)
-            or cache_root.is_symlink()
-            or (
-                hasattr(cache_root, "is_junction")
-                and cache_root.is_junction()
-            )
-        ):
-            return
+        _validate_calculation_preflight_cache_root(cache_root)
         candidates = tuple(cache_root.iterdir())
+    except FileNotFoundError:
+        return
     except OSError:
         return
     for candidate in candidates:
@@ -178,9 +197,14 @@ class DeliverableApiRuntime:
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
-        _cleanup_calculation_preflight_cache(
-            self.config.storage_dir / "runtime" / "calculation-preflight"
-        )
+        try:
+            _cleanup_calculation_preflight_cache(
+                self.config.storage_dir
+                / "runtime"
+                / "calculation-preflight"
+            )
+        except RuntimeError:
+            logger.error(_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT)
         self.process_jobs_in_api = process_jobs_in_api
         self.worker_process_mode = worker_process_mode
         self.queue_store = SQLiteQueueStore(
@@ -872,7 +896,7 @@ class DeliverableApiRuntime:
                 / "runtime"
                 / "calculation-preflight"
             )
-            cache_root.mkdir(parents=True, exist_ok=True)
+            _ensure_calculation_preflight_cache_root(cache_root)
             _cleanup_calculation_preflight_cache(cache_root)
             with TemporaryDirectory(prefix="fanban-calculation-preflight-") as temp_dir:
                 work_dir = Path(temp_dir)

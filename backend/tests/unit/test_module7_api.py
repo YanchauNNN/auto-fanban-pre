@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 from PIL import Image
@@ -2451,6 +2452,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
 
 def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     from API.app.runtime import _cleanup_calculation_preflight_cache
 
@@ -2502,13 +2504,30 @@ def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
     try:
         linked_root.symlink_to(outside_root, target_is_directory=True)
     except OSError:
-        pass
-    else:
+        linked_root.mkdir()
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda self: (
+                True
+                if self == linked_root
+                else original_is_symlink(self)
+            ),
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe calculation preflight cache root",
+    ):
         _cleanup_calculation_preflight_cache(linked_root, now=now)
-        assert outside_old.is_file()
+    assert outside_old.is_file()
 
 
-def _malicious_calculation_archive_bytes(tmp_path: Path) -> bytes:
+def _calculation_archive_bytes(
+    tmp_path: Path,
+    *,
+    malicious_workbook: bool,
+) -> bytes:
     source = tmp_path / "malicious-calculation-source"
     source.mkdir()
     for direction in ("X", "Y", "Z"):
@@ -2533,21 +2552,26 @@ def _malicious_calculation_archive_bytes(tmp_path: Path) -> bytes:
     sheet.append(
         ["S7159墙", "1D28间距200", "1D28间距200", "1C12间距200*400"]
     )
-    safe_workbook = source / "safe.xlsx"
-    workbook.save(safe_workbook)
-    malicious_workbook = source / "计算书模板文件.xlsx"
-    with zipfile.ZipFile(safe_workbook) as source_archive, zipfile.ZipFile(
-        malicious_workbook,
-        "w",
-        zipfile.ZIP_DEFLATED,
-    ) as target_archive:
-        for info in source_archive.infolist():
-            target_archive.writestr(info, source_archive.read(info.filename))
-        target_archive.writestr(
-            "xl/sharedStrings.xml",
-            b"<sst><si><t>" + (b"A" * (8 * 1024 * 1024)) + b"</t></si></sst>",
-        )
-    safe_workbook.unlink()
+    workbook_path = source / "计算书模板文件.xlsx"
+    if malicious_workbook:
+        safe_workbook = source / "safe.xlsx"
+        workbook.save(safe_workbook)
+        with zipfile.ZipFile(safe_workbook) as source_archive, zipfile.ZipFile(
+            workbook_path,
+            "w",
+            zipfile.ZIP_DEFLATED,
+        ) as target_archive:
+            for info in source_archive.infolist():
+                target_archive.writestr(info, source_archive.read(info.filename))
+            target_archive.writestr(
+                "xl/sharedStrings.xml",
+                b"<sst><si><t>"
+                + (b"A" * (8 * 1024 * 1024))
+                + b"</t></si></sst>",
+            )
+        safe_workbook.unlink()
+    else:
+        workbook.save(workbook_path)
 
     archive_buffer = BytesIO()
     with zipfile.ZipFile(
@@ -2596,7 +2620,10 @@ def test_calculation_preflight_rejects_embedded_xlsx_bomb_before_ocr_ai_and_cach
             files={
                 "archive": (
                     "malicious.zip",
-                    _malicious_calculation_archive_bytes(tmp_path),
+                    _calculation_archive_bytes(
+                        tmp_path,
+                        malicious_workbook=True,
+                    ),
                     "application/zip",
                 )
             },
@@ -2604,6 +2631,69 @@ def test_calculation_preflight_rejects_embedded_xlsx_bomb_before_ocr_ai_and_cach
 
         assert response.status_code == 422
         assert "XLSX internal resource limit" in response.text
+        assert client.app.state.runtime._calculation_preflight_tokens == {}
+
+
+def test_calculation_preflight_rejects_linked_cache_root_before_ocr_or_write(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    cache_parent = tmp_path / "storage" / "runtime"
+    cache_parent.mkdir(parents=True)
+    outside_root = tmp_path / "outside-preflight-cache"
+    outside_root.mkdir()
+    cache_root = cache_parent / "calculation-preflight"
+    try:
+        cache_root.symlink_to(outside_root, target_is_directory=True)
+    except OSError:
+        cache_root.mkdir()
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda self: (
+                True
+                if self == cache_root
+                else original_is_symlink(self)
+            ),
+        )
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe cache root must fail before OCR")
+
+    monkeypatch.setattr(
+        "API.app.runtime.recognize_stress_legend",
+        fail_if_called,
+    )
+    with TestClient(
+        create_app(
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "safe.zip",
+                    _calculation_archive_bytes(
+                        tmp_path,
+                        malicious_workbook=False,
+                    ),
+                    "application/zip",
+                )
+            },
+        )
+
+        assert response.status_code == 422
+        assert "unsafe calculation preflight cache root" in response.text
+        assert list(outside_root.iterdir()) == []
         assert client.app.state.runtime._calculation_preflight_tokens == {}
 
 
