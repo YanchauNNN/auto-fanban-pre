@@ -381,7 +381,7 @@ describe("CalculationBookWorkspace", () => {
     await waitFor(() => expect(screen.getByLabelText("共 1 面墙")).toBeInTheDocument());
   });
 
-  it("keeps the required ZIP tree visible and restores focus after Escape", async () => {
+  it("orders the compact task rail and keeps archive guidance collapsed until requested", async () => {
     const user = userEvent.setup();
     const adapter = {
       preflightCalculationBook: vi.fn(),
@@ -390,21 +390,39 @@ describe("CalculationBookWorkspace", () => {
     render(<Harness adapter={adapter} />);
     const trigger = screen.getByRole("button", { name: "计算书" });
     await user.click(trigger);
+    await waitFor(() =>
+      expect(screen.getByLabelText("计算书模板")).toHaveFocus(),
+    );
 
+    const uploadInput = screen.getByLabelText("选择计算图片压缩包");
+    const uploadBox = uploadInput.closest("label");
+    expect(uploadBox).not.toBeNull();
+    expect(within(uploadBox as HTMLElement).getByText("上传压缩包")).toBeInTheDocument();
+    const slabToggle = screen.getByRole("checkbox", { name: "包含楼板应力" });
+    const slabBox = slabToggle.closest("label");
+    const presetPanel = screen.getByRole("heading", { name: "参数预设" }).closest("section");
+    const archiveHelp = screen.getByText("压缩包结构要求").closest("details");
+    expect(slabBox).not.toBeNull();
+    expect(presetPanel).not.toBeNull();
+    expect(archiveHelp).not.toBeNull();
+    expect((uploadBox as Node).compareDocumentPosition(slabBox as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((slabBox as Node).compareDocumentPosition(presetPanel as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect((presetPanel as Node).compareDocumentPosition(archiveHelp as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(archiveHelp).not.toHaveAttribute("open");
+    expect(slabToggle).not.toBeChecked();
+    expect(slabToggle).toHaveAccessibleDescription(
+      /共 5 组.*楼板配筋.*页面不提供手工输入/,
+    );
+    await user.click(screen.getByText("压缩包结构要求"));
+    expect(archiveHelp).toHaveAttribute("open");
     expect(screen.getByText("墙体01-X.png")).toBeInTheDocument();
     expect(screen.getByText("墙体01-Y.png")).toBeInTheDocument();
     expect(screen.getByText("墙体01-Z.png")).toBeInTheDocument();
     expect(screen.getByText("01 / 厂房标高布置图")).toBeInTheDocument();
     expect(screen.getByText("02 / 墙体有限元模型图")).toBeInTheDocument();
-    const slabToggle = screen.getByRole("checkbox", { name: "包含楼板应力" });
-    expect(slabToggle).not.toBeChecked();
-    expect(slabToggle).toHaveAccessibleDescription(
-      /共 5 组.*楼板配筋.*页面不提供手工输入/,
-    );
+    await user.upload(uploadInput, new File(["zip"], "business-package.zip", { type: "application/zip" }));
+    expect(within(uploadBox as HTMLElement).getByText("business-package.zip")).toBeInTheDocument();
     expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByLabelText("计算书模板")).toHaveFocus(),
-    );
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "创建计算书" })).not.toBeInTheDocument();

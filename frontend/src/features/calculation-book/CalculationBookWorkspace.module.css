@@ -1,5 +1,5 @@
 .dialog {
-  width: min(1160px, calc(100vw - 24px));
+  width: min(1360px, calc(100vw - 16px));
 }
 
 .surface {
@@ -14,7 +14,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.35rem 1.5rem 1.05rem;
+  padding: 0.72rem 1rem 0.62rem;
   border-bottom: 1px solid rgba(20, 70, 128, 0.1);
   background: rgba(245, 249, 255, 0.96);
   backdrop-filter: blur(12px);
@@ -26,17 +26,18 @@
 }
 
 .header h2 {
-  font-size: clamp(1.45rem, 2.4vw, 2rem);
+  font-size: clamp(1.35rem, 2vw, 1.7rem);
   color: #133f70;
 }
 
 .header > div > p:last-child {
-  margin-top: 0.35rem;
+  margin-top: 0.18rem;
+  font-size: 0.84rem;
   color: #5d7895;
 }
 
 .kicker {
-  margin-bottom: 0.2rem !important;
+  margin-bottom: 0.08rem !important;
   color: #3473b4;
   font-family: "Rajdhani", sans-serif;
   font-weight: 700;
@@ -59,8 +60,8 @@
 .steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.55rem;
-  padding: 0.85rem 1.5rem 0;
+  gap: 0.42rem;
+  padding: 0.5rem 1rem 0;
 }
 
 .steps span {
@@ -70,7 +71,7 @@
   border-radius: 12px;
   background: rgba(236, 243, 251, 0.72);
   color: #728aa2;
-  padding: 0.58rem 0.75rem;
+  padding: 0.4rem 0.6rem;
   font-size: 0.82rem;
   font-weight: 750;
   text-align: center;
@@ -135,21 +136,21 @@
 
 .content {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 1rem;
-  padding: 1rem 1.5rem 1.2rem;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.7rem;
+  padding: 0.65rem 1rem 0.75rem;
 }
 
 .archivePanel,
 .formPanel {
   border: 1px solid rgba(26, 79, 137, 0.1);
-  border-radius: 22px;
+  border-radius: 16px;
   background: rgba(248, 251, 255, 0.86);
 }
 
 .archivePanel {
   align-self: start;
-  padding: 1rem;
+  padding: 0.65rem;
 }
 
 .archivePanel h3 {
@@ -204,12 +205,12 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
-  gap: 0.7rem;
-  margin-top: 0.85rem;
+  gap: 0.55rem;
+  margin-top: 0.55rem;
   border: 1px solid rgba(37, 112, 190, 0.16);
   border-radius: 16px;
   background: rgba(235, 244, 253, 0.76);
-  padding: 0.8rem;
+  padding: 0.58rem;
   cursor: pointer;
 }
 
@@ -242,8 +243,8 @@
 
 .slabToggle small {
   color: #627f9d;
-  font-size: 0.77rem;
-  line-height: 1.5;
+  font-size: 0.7rem;
+  line-height: 1.38;
 }
 
 .slabToggle:focus-within {
@@ -255,11 +256,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  margin-top: 0.85rem;
-  padding: 1rem;
+  margin-top: 0;
+  padding: 0.72rem;
   border: 1px dashed rgba(25, 86, 151, 0.36);
   border-radius: 16px;
-  background: linear-gradient(145deg, rgba(229, 240, 252, 0.8), rgba(255, 255, 255, 0.92));
+  background: #fff;
   cursor: pointer;
 }
 
@@ -310,11 +311,47 @@
   color: #18835d;
 }
 
+.archiveHelp {
+  margin-top: 0.58rem;
+  border-top: 1px solid rgba(20, 70, 128, 0.1);
+  padding-top: 0.5rem;
+}
+
+.archiveHelp summary {
+  color: #285a89;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.archiveHelp summary:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid rgba(37, 112, 190, 0.2);
+  outline-offset: 3px;
+}
+
+.archiveHelpBody {
+  display: grid;
+  gap: 0.48rem;
+  padding-top: 0.48rem;
+}
+
+.archiveHelpBody .helper,
+.archiveHelpBody .validationList {
+  margin: 0;
+}
+
+.archiveHelpBody .tree {
+  gap: 0.34rem;
+  padding: 0.58rem;
+  font-size: 0.72rem;
+}
+
 .presetPanel {
   display: grid;
-  gap: 0.65rem;
-  margin-top: 0.9rem;
-  padding-top: 0.85rem;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+  padding-top: 0.55rem;
   border-top: 1px solid rgba(20, 70, 128, 0.1);
 }
 
@@ -338,7 +375,7 @@
 
 .presetStack {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.38rem;
 }
 
 .presetInput,
@@ -363,12 +400,13 @@
 .presetActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem;
+  gap: 0.32rem;
 }
 
 .presetActions button {
   min-width: 0;
-  padding: 0.48rem 0.55rem;
+  min-height: 36px;
+  padding: 0.4rem 0.48rem;
   font-size: 0.78rem;
 }
 
@@ -388,7 +426,7 @@
 }
 
 .formPanel {
-  padding: 1rem;
+  padding: 0.7rem;
 }
 
 .errorPanel {
@@ -410,8 +448,8 @@
 }
 
 .fieldset {
-  margin: 0.8rem 0 0;
-  padding: 0.85rem 0 0;
+  margin: 0.55rem 0 0;
+  padding: 0.52rem 0 0;
   border: 0;
   border-top: 1px solid rgba(20, 70, 128, 0.09);
 }
@@ -419,20 +457,20 @@
 .fieldset legend {
   padding: 0 0.6rem 0 0;
   color: #174777;
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 800;
 }
 
 .fieldGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.48rem 0.58rem;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.38rem;
+  gap: 0.22rem;
   min-width: 0;
 }
 
@@ -465,13 +503,13 @@
 .field input,
 .field select {
   width: 100%;
-  min-height: 42px;
+  min-height: 38px;
   box-sizing: border-box;
   border: 1px solid rgba(20, 70, 128, 0.16);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
   color: #173e67;
-  padding: 0.68rem 0.75rem;
+  padding: 0.45rem 0.62rem;
   font: inherit;
 }
 
@@ -871,8 +909,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem 1.5rem 1.25rem;
+  gap: 0.7rem;
+  padding: 0.62rem 1rem 0.72rem;
   border-top: 1px solid rgba(20, 70, 128, 0.1);
   background: rgba(239, 246, 253, 0.96);
   backdrop-filter: blur(12px);
@@ -899,7 +937,7 @@
 .primaryButton {
   border: 0;
   border-radius: 999px;
-  padding: 0.72rem 1.15rem;
+  padding: 0.58rem 1rem;
   background: linear-gradient(135deg, #174c86, #2878c4);
   box-shadow: 0 8px 20px rgba(23, 76, 134, 0.2);
   color: #fff;
@@ -921,7 +959,7 @@
   opacity: 0.56;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .dialog {
     width: calc(100vw - 1rem);
     max-height: calc(100vh - 1rem);

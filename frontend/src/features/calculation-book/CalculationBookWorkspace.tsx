@@ -708,18 +708,16 @@ export function CalculationBookWorkspace({
           {phase === "input" ? (
             <div className={styles.content}>
               <aside className={styles.archivePanel}>
-                <div className={styles.stepBadge}>01 · 任务文件</div>
-                <h3>ZIP / RAR 结构检查</h3>
-                <p className={styles.helper}>{calculationSchema.archive.description}</p>
-                <div className={styles.tree} aria-label="压缩包必需结构">
-                  <div className={styles.treeRoot}>计算图片.zip（或 .rar）</div>
-                  <div><span>├─</span> 墙体01-X.png</div>
-                  <div><span>├─</span> 墙体01-Y.png</div>
-                  <div><span>├─</span> 墙体01-Z.png</div>
-                  <div><span>├─</span> 计算书模板文件.xlsx</div>
-                  <div><span>├─</span> 01 / 厂房标高布置图</div>
-                  <div><span>└─</span> 02 / 墙体有限元模型图</div>
-                </div>
+                <label className={styles.uploadBox}>
+                  <span>{archive ? archive.name : "上传压缩包"}</span>
+                  <small>{archive ? formatFileSize(archive.size) : "单个 .zip 或 .rar 文件"}</small>
+                  <input
+                    accept={calculationSchema.archive.accept.join(",")}
+                    aria-label="选择计算图片压缩包"
+                    type="file"
+                    onChange={(event) => handleArchive(event.currentTarget.files?.[0] ?? null)}
+                  />
+                </label>
                 {slabField ? (
                   <label className={styles.slabToggle}>
                     <input
@@ -743,22 +741,6 @@ export function CalculationBookWorkspace({
                     </span>
                   </label>
                 ) : null}
-                <label className={styles.uploadBox}>
-                  <span>{archive ? archive.name : "选择 ZIP 或 RAR 文件"}</span>
-                  <small>{archive ? formatFileSize(archive.size) : "仅支持单个 .zip 或 .rar 文件"}</small>
-                  <input
-                    accept={calculationSchema.archive.accept.join(",")}
-                    aria-label="选择计算图片压缩包"
-                    type="file"
-                    onChange={(event) => handleArchive(event.currentTarget.files?.[0] ?? null)}
-                  />
-                </label>
-                <div className={styles.validationList} aria-live="polite">
-                  <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR</span>
-                  <span>根目录 X / Y / Z 图片</span>
-                  <span>根目录墙体配筋表</span>
-                  <span>01 与 02 子目录</span>
-                </div>
                 <section className={styles.presetPanel} aria-labelledby="calculation-book-presets-title">
                   <div className={styles.presetHeader}>
                     <h4 id="calculation-book-presets-title">参数预设</h4>
@@ -819,6 +801,27 @@ export function CalculationBookWorkspace({
                     ) : null}
                   </div>
                 </section>
+                <details className={styles.archiveHelp}>
+                  <summary>压缩包结构要求</summary>
+                  <div className={styles.archiveHelpBody}>
+                    <p className={styles.helper}>{calculationSchema.archive.description}</p>
+                    <div className={styles.tree} aria-label="压缩包必需结构">
+                      <div className={styles.treeRoot}>计算图片.zip（或 .rar）</div>
+                      <div><span>├─</span> 墙体01-X.png</div>
+                      <div><span>├─</span> 墙体01-Y.png</div>
+                      <div><span>├─</span> 墙体01-Z.png</div>
+                      <div><span>├─</span> 计算书模板文件.xlsx</div>
+                      <div><span>├─</span> 01 / 厂房标高布置图</div>
+                      <div><span>└─</span> 02 / 墙体有限元模型图</div>
+                    </div>
+                    <div className={styles.validationList} aria-live="polite">
+                      <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR</span>
+                      <span>根目录 X / Y / Z 图片</span>
+                      <span>根目录墙体配筋表</span>
+                      <span>01 与 02 子目录</span>
+                    </div>
+                  </div>
+                </details>
               </aside>
 
               <section className={styles.formPanel}>
