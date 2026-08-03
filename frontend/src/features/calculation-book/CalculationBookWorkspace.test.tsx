@@ -411,7 +411,7 @@ describe("CalculationBookWorkspace", () => {
     expect(archiveHelp).not.toHaveAttribute("open");
     expect(slabToggle).not.toBeChecked();
     expect(slabToggle).toHaveAccessibleDescription(
-      /共 5 组.*楼板配筋.*页面不提供手工输入/,
+      /自动识别 5 组.*MIDDLE-X.*自动识别 7 组.*楼板配筋仅从 Excel 读取.*页面不手工输入/,
     );
     await user.click(screen.getByText("压缩包结构要求"));
     expect(archiveHelp).toHaveAttribute("open");

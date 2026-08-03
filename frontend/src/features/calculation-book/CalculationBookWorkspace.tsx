@@ -734,9 +734,8 @@ export function CalculationBookWorkspace({
                     <span>
                       <strong id="calculation-book-slab-toggle-label">{slabField.label}</strong>
                       <small id="calculation-book-slab-toggle-help">
-                        勾选后，每个标高识别 TOP-X、TOP-Y、BOTTOM-X、BOTTOM-Y、Z，共 5 组；
-                        同时包含 MIDDLE-X 和 MIDDLE-Y 时为 7 组。楼板实配钢筋仅从 Excel
-                        的“楼板配筋”工作表读取，页面不提供手工输入。
+                        按文件名自动识别 5 组；含 MIDDLE-X / MIDDLE-Y 时自动识别 7 组。
+                        楼板配筋仅从 Excel 读取，页面不手工输入。
                       </small>
                     </span>
                   </label>
