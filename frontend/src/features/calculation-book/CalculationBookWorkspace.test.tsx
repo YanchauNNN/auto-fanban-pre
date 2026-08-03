@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   ApiAdapter,
@@ -60,6 +60,24 @@ const minimalSlabSchema: FormSchema = {
     ...schema.calculationBook,
     fields: [
       calculationFields[0],
+      calculationFields[calculationFields.length - 1],
+    ],
+  },
+};
+
+const presetSchema: FormSchema = {
+  ...schema,
+  calculationBook: {
+    ...schema.calculationBook,
+    projectOptions: [
+      ...schema.calculationBook.projectOptions,
+      { value: "2026", label: "金七门核电厂扩建工程" },
+    ],
+    fields: [
+      calculationFields[0],
+      calculationFields[1],
+      calculationFields[2],
+      calculationFields[3],
       calculationFields[calculationFields.length - 1],
     ],
   },
@@ -197,6 +215,172 @@ function Harness({ adapter }: { adapter: ApiAdapter }) {
 }
 
 describe("CalculationBookWorkspace", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates, updates, renames, and deletes a calculation book preset with live feedback", async () => {
+    const user = userEvent.setup();
+    render(
+      <CalculationBookWorkspace
+        adapter={{} as ApiAdapter}
+        isOpen
+        schema={presetSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(screen.getByLabelText("计算书方案名称")).toBeInTheDocument();
+    expect(screen.getByLabelText("已保存计算书方案")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("请先填写计算书方案名称");
+    await user.click(screen.getByRole("button", { name: "应用方案" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("请先选择一个已保存计算书方案");
+
+    await user.type(screen.getByLabelText("内部编号"), "preset-v1");
+    await user.type(screen.getByLabelText("计算书方案名称"), "常用参数");
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已保存计算书方案");
+    expect(screen.getByRole("option", { name: "常用参数" })).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("内部编号"));
+    await user.type(screen.getByLabelText("内部编号"), "preset-v2");
+    await user.click(screen.getByRole("button", { name: "更新当前方案" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已更新计算书方案");
+
+    await user.clear(screen.getByLabelText("计算书方案名称"));
+    await user.type(screen.getByLabelText("计算书方案名称"), "结构专业常用参数");
+    await user.click(screen.getByRole("button", { name: "重命名" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已重命名计算书方案");
+    expect(screen.getByRole("option", { name: "结构专业常用参数" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "删除" }));
+    expect(screen.getByRole("status")).toHaveTextContent("已删除计算书方案");
+    expect(screen.queryByRole("option", { name: "结构专业常用参数" })).not.toBeInTheDocument();
+  });
+
+  it("applies parameters without replacing the archive and invalidates prior preflight state", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(preflightResult);
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={presetSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.selectOptions(screen.getByLabelText("项目代号"), "2016");
+    await user.type(screen.getByLabelText("内部编号"), "saved-code");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.type(screen.getByLabelText("计算书方案名称"), "含楼板方案");
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+
+    await user.selectOptions(screen.getByLabelText("项目代号"), "2026");
+    await user.clear(screen.getByLabelText("内部编号"));
+    await user.type(screen.getByLabelText("内部编号"), "current-code");
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    const archive = new File(["zip"], "business-package.zip", { type: "application/zip" });
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+    expect(await screen.findByLabelText("共 1 面墙")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回修改" }));
+
+    await user.clear(screen.getByLabelText("内部编号"));
+    await user.click(screen.getByRole("button", { name: "继续核对" }));
+    expect(screen.getByText("请填写内部编号")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "应用方案" }));
+
+    expect(screen.getByRole("status")).toHaveTextContent("已应用计算书方案");
+    expect(screen.getByText("business-package.zip")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "包含楼板应力" })).toBeChecked();
+    expect(screen.getByLabelText("项目代号")).toHaveValue("2016");
+    expect(screen.getByLabelText("项目名称")).toHaveValue("浙江金七门核电厂1、2号机组");
+    expect(screen.getByLabelText("内部编号")).toHaveValue("saved-code");
+    expect(screen.queryByText("请填写内部编号")).not.toBeInTheDocument();
+    expect(screen.getByText("先预检，再创建任务")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+    await waitFor(() => expect(preflightCalculationBook).toHaveBeenCalledTimes(2));
+    expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
+      includeSlabStress: true,
+    });
+  });
+
+  it("announces browser storage failures instead of losing preset actions silently", async () => {
+    const user = userEvent.setup();
+    render(
+      <CalculationBookWorkspace
+        adapter={{} as ApiAdapter}
+        isOpen
+        schema={presetSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.type(screen.getByLabelText("计算书方案名称"), "无法保存的方案");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "保存计算书预设失败，请检查浏览器本地存储后重试",
+    );
+  });
+
+  it("locks every preset control while preflight is pending", async () => {
+    const user = userEvent.setup();
+    let resolvePreflight: ((result: typeof preflightResult) => void) | undefined;
+    const preflightCalculationBook = vi.fn(
+      () => new Promise<typeof preflightResult>((resolve) => {
+        resolvePreflight = resolve;
+      }),
+    );
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={presetSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.selectOptions(screen.getByLabelText("项目代号"), "2016");
+    await user.type(screen.getByLabelText("内部编号"), "saved-code");
+    await user.type(screen.getByLabelText("计算书方案名称"), "预检锁定方案");
+    await user.click(screen.getByRole("button", { name: "保存为新方案" }));
+    await user.clear(screen.getByLabelText("内部编号"));
+    await user.type(screen.getByLabelText("内部编号"), "current-code");
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["zip"], "pending.zip", { type: "application/zip" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(screen.getByLabelText("计算书方案名称")).toBeDisabled();
+    expect(screen.getByLabelText("已保存计算书方案")).toBeDisabled();
+    for (const name of ["保存为新方案", "应用方案", "更新当前方案", "重命名", "删除"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    await user.click(screen.getByRole("button", { name: "应用方案" }));
+    expect(screen.getByLabelText("内部编号")).toHaveValue("current-code");
+
+    resolvePreflight?.(preflightResult);
+    await waitFor(() => expect(screen.getByLabelText("共 1 面墙")).toBeInTheDocument());
+  });
+
   it("keeps the required ZIP tree visible and restores focus after Escape", async () => {
     const user = userEvent.setup();
     const adapter = {

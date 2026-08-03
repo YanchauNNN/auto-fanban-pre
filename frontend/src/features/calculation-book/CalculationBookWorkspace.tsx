@@ -19,6 +19,16 @@ import type {
   SubmissionParams,
 } from "../../platform/api/types";
 import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
+import {
+  applyCalculationBookPreset,
+  createCalculationBookPreset,
+  deleteCalculationBookPreset,
+  loadCalculationBookPresets,
+  renameCalculationBookPreset,
+  saveCalculationBookPreset,
+  updateCalculationBookPreset,
+  type CalculationBookPreset,
+} from "./calculationBookPresets";
 import styles from "./CalculationBookWorkspace.module.css";
 
 type Props = {
@@ -192,6 +202,13 @@ export function CalculationBookWorkspace({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [busyAction, setBusyAction] = useState<"preflight" | "submit" | null>(null);
+  const [savedPresets, setSavedPresets] = useState<CalculationBookPreset[]>(
+    () => loadCalculationBookPresets(),
+  );
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const initialFocusRef = useRef<HTMLSelectElement>(null);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
@@ -207,6 +224,11 @@ export function CalculationBookWorkspace({
       setFieldErrors({});
       setFormErrors([]);
       setBusyAction(null);
+      setSavedPresets(loadCalculationBookPresets());
+      setSelectedPresetId("");
+      setPresetName("");
+      setPresetError(null);
+      setPresetNotice(null);
     }
     wasOpenRef.current = isOpen;
   }, [initialValues, isOpen]);
@@ -236,6 +258,8 @@ export function CalculationBookWorkspace({
     (field) => !NUMERIC_FIELDS.has(field.key) && field.key !== "include_slab_stress",
   );
   const workshopFields = calculationSchema.fields.filter((field) => NUMERIC_FIELDS.has(field.key));
+  const selectedPreset =
+    savedPresets.find((preset) => preset.id === selectedPresetId) ?? null;
   const fieldErrorCount = Object.values(fieldErrors).filter((messages) => messages.length > 0).length;
   const hasValidationErrors = fieldErrorCount > 0 || formErrors.length > 0;
   const slabEvidenceGroups = buildSlabEvidenceGroups(preflight?.slabs ?? []);
@@ -263,6 +287,7 @@ export function CalculationBookWorkspace({
   const busy = busyAction !== null;
 
   function updateValue(field: CalculationBookField, nextValue: string) {
+    setPresetNotice(null);
     setValues((current) => {
       const next = { ...current, [field.key]: nextValue };
       if (field.key === "project_no") {
@@ -286,6 +311,140 @@ export function CalculationBookWorkspace({
     setArchive(file);
     setFormErrors([]);
     resetPreflight();
+  }
+
+  function handlePresetSelectionChange(nextId: string) {
+    if (busy) {
+      return;
+    }
+    setSelectedPresetId(nextId);
+    setPresetName(savedPresets.find((preset) => preset.id === nextId)?.name ?? "");
+    setPresetError(null);
+    setPresetNotice(null);
+  }
+
+  function reportPresetFailure(error: unknown) {
+    setPresetNotice(null);
+    setPresetError(
+      error instanceof Error
+        ? error.message
+        : "计算书预设操作失败，请稍后重试。",
+    );
+  }
+
+  function handleSavePreset() {
+    if (busy) {
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      const preset = createCalculationBookPreset(trimmedName, activeSchema, values);
+      setSavedPresets(saveCalculationBookPreset(preset));
+      setSelectedPresetId(preset.id);
+      setPresetName(preset.name);
+      setPresetError(null);
+      setPresetNotice("已保存计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleApplyPreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPreset) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    setValues(applyCalculationBookPreset(activeSchema, values, selectedPreset));
+    setFieldErrors({});
+    setFormErrors([]);
+    resetPreflight();
+    setPresetError(null);
+    setPresetNotice("已应用计算书方案。");
+  }
+
+  function handleUpdatePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      const preset = updateCalculationBookPreset(
+        selectedPresetId,
+        trimmedName,
+        activeSchema,
+        values,
+      );
+      setSavedPresets(saveCalculationBookPreset(preset));
+      setPresetName(preset.name);
+      setPresetError(null);
+      setPresetNotice("已更新计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleRenamePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      setSavedPresets(renameCalculationBookPreset(selectedPresetId, trimmedName));
+      setPresetName(trimmedName);
+      setPresetError(null);
+      setPresetNotice("已重命名计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleDeletePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    try {
+      setSavedPresets(deleteCalculationBookPreset(selectedPresetId));
+      setSelectedPresetId("");
+      setPresetName("");
+      setPresetError(null);
+      setPresetNotice("已删除计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
   }
 
   function requestClose() {
@@ -600,6 +759,66 @@ export function CalculationBookWorkspace({
                   <span>根目录墙体配筋表</span>
                   <span>01 与 02 子目录</span>
                 </div>
+                <section className={styles.presetPanel} aria-labelledby="calculation-book-presets-title">
+                  <div className={styles.presetHeader}>
+                    <h4 id="calculation-book-presets-title">参数预设</h4>
+                    <span>{savedPresets.length} 个</span>
+                  </div>
+                  <div className={styles.presetStack}>
+                    <input
+                      aria-label="计算书方案名称"
+                      className={styles.presetInput}
+                      disabled={busy}
+                      placeholder="输入方案名称"
+                      type="text"
+                      value={presetName}
+                      onChange={(event) => {
+                        setPresetName(event.currentTarget.value);
+                        setPresetError(null);
+                        setPresetNotice(null);
+                      }}
+                    />
+                    <select
+                      aria-label="已保存计算书方案"
+                      className={styles.presetSelect}
+                      disabled={busy}
+                      value={selectedPresetId}
+                      onChange={(event) => handlePresetSelectionChange(event.currentTarget.value)}
+                    >
+                      <option value="">选择已保存方案</option>
+                      {savedPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                    <div className={styles.presetActions}>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleSavePreset}>
+                        保存为新方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleApplyPreset}>
+                        应用方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleUpdatePreset}>
+                        更新当前方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleRenamePreset}>
+                        重命名
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleDeletePreset}>
+                        删除
+                      </button>
+                    </div>
+                    {presetError ? (
+                      <p aria-live="assertive" className={styles.presetError} role="alert">
+                        {presetError}
+                      </p>
+                    ) : null}
+                    {presetNotice ? (
+                      <p aria-live="polite" className={styles.presetNotice} role="status">
+                        {presetNotice}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
               </aside>
 
               <section className={styles.formPanel}>

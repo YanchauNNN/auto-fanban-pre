@@ -310,6 +310,83 @@
   color: #18835d;
 }
 
+.presetPanel {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(20, 70, 128, 0.1);
+}
+
+.presetHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.presetHeader h4 {
+  margin: 0;
+  color: #174777;
+  font-size: 0.92rem;
+}
+
+.presetHeader span {
+  color: #6b86a1;
+  font-size: 0.76rem;
+}
+
+.presetStack {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.presetInput,
+.presetSelect {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid rgba(20, 70, 128, 0.16);
+  border-radius: 10px;
+  background: #fff;
+  color: #173e67;
+  padding: 0.52rem 0.65rem;
+  font: inherit;
+}
+
+.presetInput:focus,
+.presetSelect:focus {
+  outline: 3px solid rgba(37, 112, 190, 0.2);
+  border-color: #397bbb;
+}
+
+.presetActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.presetActions button {
+  min-width: 0;
+  padding: 0.48rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.presetError,
+.presetNotice {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.presetError {
+  color: #a83c3c;
+}
+
+.presetNotice {
+  color: #247457;
+}
+
 .formPanel {
   padding: 1rem;
 }
