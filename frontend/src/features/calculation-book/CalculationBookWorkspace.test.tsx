@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -239,7 +239,9 @@ describe("CalculationBookWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "下载标准配筋模板" }));
+    const downloadButton = screen.getByRole("button", { name: "下载标准配筋模板" });
+    expect(downloadButton).not.toHaveAttribute("aria-describedby");
+    await user.click(downloadButton);
 
     await waitFor(() => {
       expect(downloadArtifact).toHaveBeenCalledWith(
@@ -283,7 +285,13 @@ describe("CalculationBookWorkspace", () => {
 
     await waitFor(() => expect(downloadButton).toBeDisabled());
     expect(downloadButton).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("status")).toHaveTextContent("正在下载…");
+    const loadingStatus = screen.getByRole("status");
+    expect(loadingStatus).toHaveTextContent("正在下载…");
+    expect(loadingStatus).toHaveAttribute(
+      "id",
+      "calculation-book-template-download-feedback",
+    );
+    expect(downloadButton).toHaveAttribute("aria-describedby", loadingStatus.id);
     expect(screen.getByRole("button", { name: "关闭创建计算书" })).toBeEnabled();
     expect(screen.getByLabelText("计算书模板")).toBeEnabled();
     expect(screen.getByText("01 文件与参数")).toHaveAttribute("aria-current", "step");
@@ -294,7 +302,9 @@ describe("CalculationBookWorkspace", () => {
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
 
     resolveDownload();
-    expect(await screen.findByRole("status")).toHaveTextContent("已开始下载");
+    const successStatus = await screen.findByRole("status");
+    expect(successStatus).toHaveTextContent("已开始下载");
+    expect(downloadButton).toHaveAttribute("aria-describedby", successStatus.id);
     expect(downloadButton).toBeEnabled();
   });
 
@@ -315,7 +325,13 @@ describe("CalculationBookWorkspace", () => {
 
     const downloadButton = screen.getByRole("button", { name: "下载标准配筋模板" });
     await user.click(downloadButton);
-    expect(await screen.findByRole("alert")).toHaveTextContent("下载失败，请重试");
+    const failureAlert = await screen.findByRole("alert");
+    expect(failureAlert).toHaveTextContent("下载失败，请重试");
+    expect(failureAlert).toHaveAttribute(
+      "id",
+      "calculation-book-template-download-feedback",
+    );
+    expect(downloadButton).toHaveAttribute("aria-describedby", failureAlert.id);
     expect(downloadButton).toBeEnabled();
 
     await user.click(downloadButton);
@@ -358,6 +374,60 @@ describe("CalculationBookWorkspace", () => {
 
     expect(screen.queryByText("已开始下载")).not.toBeInTheDocument();
   });
+
+  it.each(["resolve", "reject"] as const)(
+    "ignores a pending template download %s after the workspace closes",
+    async (outcome) => {
+      const user = userEvent.setup();
+      let settleDownload!: () => void;
+      const downloadPromise = new Promise<void>((resolve, reject) => {
+        settleDownload = () => {
+          if (outcome === "resolve") {
+            resolve();
+          } else {
+            reject(new Error("offline"));
+          }
+        };
+      });
+      const downloadArtifact = vi.fn(() => downloadPromise);
+      const calculationBookGetter = vi.fn(() => schema.calculationBook);
+      const trackedSchema = {
+        ...schema,
+        get calculationBook() {
+          return calculationBookGetter();
+        },
+      } as FormSchema;
+      const adapter = { downloadArtifact } as unknown as ApiAdapter;
+      const workspace = (open: boolean) => (
+        <CalculationBookWorkspace
+          adapter={adapter}
+          isOpen={open}
+          schema={trackedSchema}
+          onBatchCreated={() => undefined}
+          onClose={() => undefined}
+        />
+      );
+      const { rerender } = render(workspace(true));
+
+      await user.click(screen.getByRole("button", { name: "下载标准配筋模板" }));
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "下载标准配筋模板" })).toBeDisabled();
+      });
+      rerender(workspace(false));
+      calculationBookGetter.mockClear();
+
+      await act(async () => {
+        settleDownload();
+        await downloadPromise.catch(() => undefined);
+        await Promise.resolve();
+      });
+
+      expect(calculationBookGetter).not.toHaveBeenCalled();
+      rerender(workspace(true));
+      expect(screen.queryByText("已开始下载")).not.toBeInTheDocument();
+      expect(screen.queryByText("下载失败，请重试")).not.toBeInTheDocument();
+    },
+  );
 
   it("creates, updates, renames, and deletes a calculation book preset with live feedback", async () => {
     const user = userEvent.setup();

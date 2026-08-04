@@ -45,6 +45,8 @@ type TemplateDownloadState = "idle" | "loading" | "success" | "error";
 const REINFORCEMENT_TEMPLATE_URL =
   "/api/jobs/calculation-books/reinforcement-template";
 const REINFORCEMENT_TEMPLATE_FILENAME = "标准配筋模板.xlsx";
+const REINFORCEMENT_TEMPLATE_FEEDBACK_ID =
+  "calculation-book-template-download-feedback";
 
 const NUMERIC_FIELDS = new Set([
   "workshop_length",
@@ -239,9 +241,18 @@ export function CalculationBookWorkspace({
       setPresetNotice(null);
       setTemplateDownloadState("idle");
       templateDownloadRequestRef.current += 1;
+    } else if (!isOpen && wasOpenRef.current) {
+      templateDownloadRequestRef.current += 1;
     }
     wasOpenRef.current = isOpen;
   }, [initialValues, isOpen]);
+
+  useEffect(
+    () => () => {
+      templateDownloadRequestRef.current += 1;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     if (!isOpen) {
@@ -700,6 +711,11 @@ export function CalculationBookWorkspace({
             <div className={styles.templateDownloadControl}>
               <button
                 aria-busy={templateDownloadState === "loading"}
+                aria-describedby={
+                  templateDownloadState === "idle"
+                    ? undefined
+                    : REINFORCEMENT_TEMPLATE_FEEDBACK_ID
+                }
                 className={styles.templateDownloadButton}
                 disabled={templateDownloadState === "loading"}
                 type="button"
@@ -719,6 +735,7 @@ export function CalculationBookWorkspace({
                   aria-atomic="true"
                   aria-live={templateDownloadState === "error" ? "assertive" : "polite"}
                   className={styles.templateDownloadFeedback}
+                  id={REINFORCEMENT_TEMPLATE_FEEDBACK_ID}
                   role={templateDownloadState === "error" ? "alert" : "status"}
                 >
                   {templateDownloadState === "loading"
