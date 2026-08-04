@@ -49,6 +49,9 @@ class ODAConfig(BaseModel):
 
     exe_path: str = ""
     work_dir: str | None = None
+    native_dxf_fallback_enabled: bool = True
+    native_dxf_fallback_version: str = "AC1032"
+    native_dxf_fallback_precision: int = 16
 
 
 class Module5CadRunnerConfig(BaseModel):

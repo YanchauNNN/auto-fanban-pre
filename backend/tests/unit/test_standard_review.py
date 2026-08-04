@@ -282,6 +282,54 @@ def test_standard_review_accepts_standard_code_format_variants() -> None:
     assert findings == []
 
 
+def test_standard_review_accepts_name_after_ascii_or_fullwidth_closing_parenthesis() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50205-2020",
+            code_without_year="GB 50205",
+            expected_year="2020",
+            expected_name="钢结构工程施工质量验收标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    for closing_parenthesis in (")", "）"):
+        findings = engine.evaluate(
+            [
+                _item(
+                    f"GB50205-2020{closing_parenthesis}钢结构工程施工质量验收标准",
+                    x=10.0,
+                    y=100.0,
+                )
+            ]
+        )
+        assert findings == []
+
+
+def test_standard_review_excludes_trailing_parenthesis_from_wrong_year_finding() -> None:
+    entries = [
+        StandardEntry(
+            canonical_code="GB 50205-2020",
+            code_without_year="GB 50205",
+            expected_year="2020",
+            expected_name="钢结构工程施工质量验收标准",
+            source_sheet="DatStdItem",
+            source_row=1,
+        )
+    ]
+    engine = StandardReviewEngine(entries, same_line_y_tolerance=5.0)
+
+    findings = engine.evaluate(
+        [_item("GB50205-2019)钢结构工程施工质量验收标准", x=10.0, y=100.0)]
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("GB50205-2019", "standard_review_year"),
+    ]
+
+
 def test_standard_review_accepts_bracketed_name_before_code_in_same_entity() -> None:
     entries = [
         StandardEntry(
