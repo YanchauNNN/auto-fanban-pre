@@ -1185,6 +1185,10 @@
     min-height: 44px;
   }
 
+  .presetActions button {
+    min-height: 44px;
+  }
+
   .header,
   .footer {
     padding-inline: 0.9rem;
