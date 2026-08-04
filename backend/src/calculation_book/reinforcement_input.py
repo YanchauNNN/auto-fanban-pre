@@ -187,6 +187,8 @@ def _configuration(
     direction: str,
     is_parenthetical: bool,
 ) -> RebarConfiguration:
+    if layers not in {1, 2}:
+        raise InvalidReinforcementWorkbook("钢筋层数只允许 1 或 2")
     if layers <= 0 or diameter <= 0 or spacing_primary <= 0:
         raise InvalidReinforcementWorkbook("钢筋层数、直径和间距必须大于 0")
 

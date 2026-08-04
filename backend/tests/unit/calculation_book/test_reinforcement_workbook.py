@@ -158,6 +158,51 @@ def test_format_inspection_does_not_invoke_area_calculation(
     assert inspection.requires_ai_normalization is False
 
 
+@pytest.mark.parametrize(
+    ("value", "direction"),
+    [
+        ("1D28@200", "X"),
+        ("2D28间距200", "Y"),
+        ("1C12@200*400", "Z"),
+        ("2C12间距200*400", "Z"),
+        ("D28@200", "X"),
+        ("12@200*400", "Z"),
+    ],
+)
+def test_standard_rebar_accepts_implicit_or_explicit_one_and_two_layers(
+    value: str,
+    direction: str,
+) -> None:
+    assert _subject()._is_standard_rebar(value, direction=direction) is True
+
+
+@pytest.mark.parametrize(
+    ("address", "value"),
+    [
+        ("B2", "3D28@200"),
+        ("B2", "40591D40间距200"),
+        ("D2", "3C12@200*400"),
+    ],
+)
+def test_explicit_layer_count_above_two_requires_ai_normalization(
+    tmp_path: Path,
+    address: str,
+    value: str,
+) -> None:
+    subject = _subject()
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    sheet = _add_standard_wall_sheet(workbook)
+    sheet[address] = value
+    path = tmp_path / "unsupported-layer-count.xlsx"
+    workbook.save(path)
+
+    inspection = subject.inspect_reinforcement_workbook(path, include_slab=False)
+
+    assert inspection.requires_ai_normalization is True
+    assert inspection.reasons[0].code == "wall_value_nonstandard"
+
+
 def test_format_inspection_rejects_compressed_shared_strings_before_openpyxl(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

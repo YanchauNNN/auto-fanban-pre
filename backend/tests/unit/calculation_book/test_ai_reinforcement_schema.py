@@ -300,6 +300,18 @@ def test_rejects_malformed_normalized_spec_with_source_location() -> None:
         validate_ai_reinforcement_payload(payload, snapshot=_snapshot(*_wall_cells()))
 
 
+def test_rejects_ai_patch_with_impossible_reinforcement_layer_count() -> None:
+    row = _wall_row()
+    row["Y"] = "1D28间距200(N4057-N40591D40间距200#):"
+    payload = _payload(row)
+
+    with pytest.raises(
+        InvalidAiReinforcementPayload,
+        match="墙体配筋.*第 2 行.*C2.*钢筋层数只允许 1 或 2",
+    ):
+        validate_ai_reinforcement_payload(payload, snapshot=_snapshot(*_wall_cells()))
+
+
 def test_needs_review_returns_warning_and_snapshot_originals_without_raising() -> None:
     row = {
         "kind": "wall",

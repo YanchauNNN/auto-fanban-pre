@@ -128,6 +128,9 @@ def _is_standard_rebar(value: object, *, direction: str) -> bool:
     match = pattern.fullmatch(normalized)
     if match is None:
         return False
+    explicit_layers = match.group("layers_space") or match.group("layers_marked")
+    if explicit_layers is not None and int(explicit_layers) not in {1, 2}:
+        return False
     return all(
         int(component) > 0
         for component in match.groupdict().values()

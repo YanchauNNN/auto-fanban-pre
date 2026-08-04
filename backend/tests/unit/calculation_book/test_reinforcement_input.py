@@ -71,6 +71,37 @@ def test_largest_parenthetical_configuration_is_selected() -> None:
     assert len(parsed.candidates) == 3
 
 
+def test_rejects_impossible_layer_count_before_area_calculation() -> None:
+    with pytest.raises(
+        InvalidReinforcementWorkbook,
+        match="钢筋层数只允许 1 或 2",
+    ):
+        parse_rebar_cell(
+            "1D28间距200(N4057-N40591D40间距200#):",
+            direction="Y",
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "direction", "expected"),
+    [
+        ("1D28间距200", "X", "1D28间距200"),
+        ("2D28间距200", "Y", "2D28间距200"),
+        ("1C12间距200*400", "Z", "1C12间距200*400"),
+        ("2C12间距200*400", "Z", "2C12间距200*400"),
+    ],
+)
+def test_accepts_supported_single_and_double_layer_specs(
+    value: str,
+    direction: str,
+    expected: str,
+) -> None:
+    assert (
+        parse_rebar_cell(value, direction=direction).selected.canonical_specification
+        == expected
+    )
+
+
 def test_rejects_tie_without_two_direction_spacings() -> None:
     with pytest.raises(InvalidReinforcementWorkbook, match="两个方向"):
         parse_rebar_cell("1C14间距400", direction="Z")
@@ -240,6 +271,31 @@ def test_preserves_every_nonempty_source_row_in_normalization_audit(
     assert schedule.issues[1].wall_id == "S7158"
     assert schedule.issues[1].original_values["X"] == "无法识别"
     assert schedule.requires_manual_confirmation is True
+
+
+def test_invalid_layer_count_is_conserved_as_workbook_issue(tmp_path: Path) -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["构件编号及位置", "水平筋", "竖向筋", "拉筋"])
+    sheet.append(
+        [
+            "N4007",
+            "1D28间距200",
+            "1D28间距200(N4057-N40591D40间距200#):",
+            "1C14间距400*400",
+        ]
+    )
+    path = tmp_path / "invalid-layers.xlsx"
+    workbook.save(path)
+
+    schedule = load_reinforcement_schedule(path)
+
+    assert schedule.source_row_count == 1
+    assert schedule.rows == ()
+    assert schedule.issue_row_count == 1
+    assert schedule.issues[0].wall_id == "N4007"
+    assert schedule.issues[0].error == "钢筋层数只允许 1 或 2"
+    assert not hasattr(schedule.issues[0], "actual_area")
 
 
 def test_canonical_standard_template_does_not_trigger_normalization(
