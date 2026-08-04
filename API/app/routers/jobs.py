@@ -6,14 +6,26 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from src.config import load_mechanism_spec
 
 from ..auth_helpers import require_current_account
-from ..runtime import UploadedFilePayload
+from ..runtime import (
+    STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE,
+    UploadedFilePayload,
+)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -171,6 +183,31 @@ async def preflight_calculation_book(
         include_slab_stress=include_slab_stress,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
+
+
+@router.get("/calculation-books/reinforcement-template")
+def download_standard_reinforcement_template(
+    request: Request,
+    _=Depends(require_current_account),
+) -> FileResponse:
+    try:
+        path = request.app.state.runtime.get_standard_reinforcement_template_path()
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE,
+        ) from None
+    return FileResponse(
+        path=path,
+        filename="标准配筋模板.xlsx",
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("")

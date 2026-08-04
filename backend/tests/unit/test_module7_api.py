@@ -10,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient as FastApiTestClient
@@ -2651,6 +2652,78 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
             "请先完成计算书文件预检"
         ]
+
+
+def test_download_standard_reinforcement_template_is_authenticated_and_fixed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    template_dir = tmp_path / "calculation-book-templates"
+    template_dir.mkdir()
+    template = template_dir / "计算书模板文件.xlsx"
+    expected = b"PK\x03\x04standard-reinforcement-template"
+    template.write_bytes(expected)
+    (template_dir / "other.xlsx").write_bytes(b"must-not-be-downloaded")
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        runtime.config.calculation_book.template_dir = template_dir
+        runtime.config.calculation_book.standard_reinforcement_template = template
+
+        response = client.get(
+            "/api/jobs/calculation-books/reinforcement-template",
+            params={"filename": "other.xlsx"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == expected
+        assert response.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "标准配筋模板.xlsx" in unquote(
+            response.headers["content-disposition"]
+        )
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+        client.headers.pop("Authorization")
+        unauthenticated = client.get(
+            "/api/jobs/calculation-books/reinforcement-template"
+        )
+
+    assert unauthenticated.status_code == 401
+
+
+@pytest.mark.parametrize("invalid_kind", ["missing", "directory", "escape"])
+def test_download_standard_reinforcement_template_hides_invalid_paths(
+    monkeypatch,
+    tmp_path: Path,
+    invalid_kind: str,
+) -> None:
+    template_dir = tmp_path / "calculation-book-templates"
+    template_dir.mkdir()
+    outside = tmp_path / "outside.xlsx"
+    outside.write_bytes(b"outside")
+    if invalid_kind == "missing":
+        configured = template_dir / "missing.xlsx"
+    elif invalid_kind == "directory":
+        configured = template_dir / "nested"
+        configured.mkdir()
+    else:
+        configured = outside
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        runtime.config.calculation_book.template_dir = template_dir
+        runtime.config.calculation_book.standard_reinforcement_template = configured
+
+        response = client.get(
+            "/api/jobs/calculation-books/reinforcement-template"
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "标准配筋模板不可用"}
+    assert str(configured) not in response.text
 
 
 def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(

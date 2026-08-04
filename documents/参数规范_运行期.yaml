@@ -78,6 +78,7 @@ runtime_options:
 
   calculation_book:
     template_dir: { type: str, default: "documents_bin/calculation_book", desc: "计算书 Word 模板目录" }
+    standard_reinforcement_template: { type: str, default: "documents_bin/calculation_book/计算书模板文件.xlsx", desc: "计算书标准配筋模板" }
     rebar_table: { type: str, default: "documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx", desc: "钢筋公称面积表" }
     tesseract_exe: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe", desc: "计算书 OCR 使用的 Tesseract 可执行文件" }
     tessdata_dir: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tessdata", desc: "Tesseract 语言数据目录" }

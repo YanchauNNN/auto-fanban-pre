@@ -71,6 +71,7 @@ _CALCULATION_PREFLIGHT_TTL_SECONDS = 1800
 _UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT = (
     "unsafe calculation preflight cache root"
 )
+STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE = "标准配筋模板不可用"
 
 
 def _validate_calculation_preflight_cache_root(cache_root: Path) -> None:
@@ -414,6 +415,26 @@ class DeliverableApiRuntime:
         self._job_completion_lock = threading.Lock()
         self._calculation_preflight_tokens: dict[str, dict[str, Any]] = {}
         self._calculation_preflight_lock = threading.Lock()
+
+    def get_standard_reinforcement_template_path(self) -> Path:
+        """Resolve the single configured reinforcement template without path escape."""
+        try:
+            template_dir = self.config.calculation_book.template_dir.resolve(
+                strict=True
+            )
+            candidate = (
+                self.config.calculation_book.standard_reinforcement_template.resolve(
+                    strict=True
+                )
+            )
+            if not template_dir.is_dir() or not candidate.is_file():
+                raise FileNotFoundError
+            candidate.relative_to(template_dir)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+            raise FileNotFoundError(
+                STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE
+            ) from exc
+        return candidate
 
     def start(self) -> None:
         self.queue_store.initialize()

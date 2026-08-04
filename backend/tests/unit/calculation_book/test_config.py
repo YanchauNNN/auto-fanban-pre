@@ -20,6 +20,12 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert config.calculation_book.template_dir == (
         REPO_ROOT / "documents_bin" / "calculation_book"
     ).resolve()
+    assert config.calculation_book.standard_reinforcement_template == (
+        REPO_ROOT
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    ).resolve()
     assert config.calculation_book.rebar_table.name == "钢筋的公称直径、公称面积表.xlsx"
     assert config.calculation_book.max_archive_mb == 1024
     assert config.calculation_book.max_archive_files == 500
@@ -111,6 +117,7 @@ def test_calculation_book_runtime_paths_resolve_in_terminal_package_layout(
 runtime_options:
   calculation_book:
     template_dir: { type: str, default: "documents_bin/calculation_book" }
+    standard_reinforcement_template: { type: str, default: "documents_bin/calculation_book/计算书模板文件.xlsx" }
     rebar_table: { type: str, default: "documents_bin/calculation_book/rebar.xlsx" }
     tesseract_exe: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe" }
     tessdata_dir: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tessdata" }
@@ -122,6 +129,12 @@ runtime_options:
 
     assert config.calculation_book.template_dir == (
         deploy_root / "documents_bin" / "calculation_book"
+    ).resolve()
+    assert config.calculation_book.standard_reinforcement_template == (
+        deploy_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
     ).resolve()
     assert config.calculation_book.tesseract_exe == (
         deploy_root

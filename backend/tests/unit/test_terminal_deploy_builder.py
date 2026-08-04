@@ -278,6 +278,32 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     ).exists()
 
 
+def test_build_terminal_deploy_package_copies_standard_reinforcement_template(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    template = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    expected = b"PK\x03\x04standard-reinforcement-template"
+    template.write_bytes(expected)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    packaged = (
+        output_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    assert packaged.read_bytes() == expected
+
+
 def test_terminal_package_materializes_ansys_skill_without_copying_private_archive(
     tmp_path: Path,
 ) -> None:
