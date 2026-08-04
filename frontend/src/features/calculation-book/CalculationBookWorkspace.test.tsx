@@ -223,6 +223,129 @@ describe("CalculationBookWorkspace", () => {
     vi.restoreAllMocks();
   });
 
+  it("downloads the standard reinforcement template without submitting or advancing the task", async () => {
+    const user = userEvent.setup();
+    const downloadArtifact = vi.fn().mockResolvedValue(undefined);
+    const preflightCalculationBook = vi.fn();
+    const onBatchCreated = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <CalculationBookWorkspace
+        adapter={{ downloadArtifact, preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={schema}
+        onBatchCreated={onBatchCreated}
+        onClose={onClose}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "下载标准配筋模板" }));
+
+    await waitFor(() => {
+      expect(downloadArtifact).toHaveBeenCalledWith(
+        "/api/jobs/calculation-books/reinforcement-template",
+        "标准配筋模板.xlsx",
+      );
+    });
+    expect(preflightCalculationBook).not.toHaveBeenCalled();
+    expect(onBatchCreated).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("01 文件与参数")).toHaveAttribute("aria-current", "step");
+  });
+
+  it("prevents duplicate template downloads while pending and announces success", async () => {
+    const user = userEvent.setup();
+    let resolveDownload!: () => void;
+    const downloadArtifact = vi.fn(
+      () => new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      }),
+    );
+    render(
+      <CalculationBookWorkspace
+        adapter={{ downloadArtifact } as unknown as ApiAdapter}
+        isOpen
+        schema={schema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const downloadButton = screen.getByRole("button", { name: "下载标准配筋模板" });
+    await user.click(downloadButton);
+
+    await waitFor(() => expect(downloadButton).toBeDisabled());
+    expect(downloadButton).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("正在下载…");
+    await user.click(downloadButton);
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+
+    resolveDownload();
+    expect(await screen.findByRole("status")).toHaveTextContent("已开始下载");
+    expect(downloadButton).toBeEnabled();
+  });
+
+  it("announces template download failures and allows retrying", async () => {
+    const user = userEvent.setup();
+    const downloadArtifact = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(undefined);
+    render(
+      <CalculationBookWorkspace
+        adapter={{ downloadArtifact } as unknown as ApiAdapter}
+        isOpen
+        schema={schema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const downloadButton = screen.getByRole("button", { name: "下载标准配筋模板" });
+    await user.click(downloadButton);
+    expect(await screen.findByRole("alert")).toHaveTextContent("下载失败，请重试");
+    expect(downloadButton).toBeEnabled();
+
+    await user.click(downloadButton);
+    expect(await screen.findByRole("status")).toHaveTextContent("已开始下载");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(downloadArtifact).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts the template download from the keyboard", async () => {
+    const user = userEvent.setup();
+    const downloadArtifact = vi.fn().mockResolvedValue(undefined);
+    render(
+      <CalculationBookWorkspace
+        adapter={{ downloadArtifact } as unknown as ApiAdapter}
+        isOpen
+        schema={schema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const downloadButton = screen.getByRole("button", { name: "下载标准配筋模板" });
+    downloadButton.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(downloadArtifact).toHaveBeenCalledTimes(1));
+  });
+
+  it("clears template download feedback when the workspace is reopened", async () => {
+    const user = userEvent.setup();
+    const downloadArtifact = vi.fn().mockResolvedValue(undefined);
+    render(<Harness adapter={{ downloadArtifact } as unknown as ApiAdapter} />);
+
+    await user.click(screen.getByRole("button", { name: "计算书" }));
+    await user.click(screen.getByRole("button", { name: "下载标准配筋模板" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("已开始下载");
+
+    await user.click(screen.getByRole("button", { name: "关闭创建计算书" }));
+    await user.click(screen.getByRole("button", { name: "计算书" }));
+
+    expect(screen.queryByText("已开始下载")).not.toBeInTheDocument();
+  });
+
   it("creates, updates, renames, and deletes a calculation book preset with live feedback", async () => {
     const user = userEvent.setup();
     render(

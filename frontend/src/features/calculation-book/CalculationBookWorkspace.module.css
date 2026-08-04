@@ -30,7 +30,20 @@
   color: #133f70;
 }
 
-.header > div > p:last-child {
+.headerMain {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.headerCopy {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.headerCopy > p:last-child {
   margin-top: 0.18rem;
   font-size: 0.84rem;
   color: #5d7895;
@@ -43,6 +56,73 @@
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
+}
+
+.templateDownloadControl {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.templateDownloadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.48rem;
+  min-height: 40px;
+  border: 1px solid rgba(42, 91, 139, 0.28);
+  border-radius: 999px;
+  background: #fff;
+  color: #24557f;
+  padding: 0.48rem 0.92rem;
+  box-shadow: 0 4px 12px rgba(27, 74, 122, 0.08);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  white-space: nowrap;
+  transition: border-color 150ms ease, box-shadow 150ms ease, color 150ms ease;
+}
+
+.templateDownloadButton svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.templateDownloadButton:hover:not(:disabled) {
+  border-color: rgba(30, 100, 169, 0.56);
+  box-shadow: 0 6px 16px rgba(27, 74, 122, 0.13);
+  color: #174c86;
+}
+
+.templateDownloadButton:focus-visible {
+  outline: 3px solid rgba(44, 126, 205, 0.24);
+  outline-offset: 2px;
+}
+
+.templateDownloadButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.templateDownloadFeedback {
+  min-height: 1em;
+  padding-inline: 0.18rem;
+  color: #4e718f;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.templateDownloadFeedback[role="alert"] {
+  color: #b43838;
 }
 
 .closeButton,
@@ -966,7 +1046,7 @@
   }
 
   .kicker,
-  .header > div > p:last-child {
+  .headerCopy > p:last-child {
     display: none;
   }
 
@@ -1091,8 +1171,18 @@
     padding-block: 0.9rem 0.75rem;
   }
 
-  .header > div > p:last-child {
+  .headerMain {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .headerCopy > p:last-child {
     display: none;
+  }
+
+  .templateDownloadButton {
+    min-height: 44px;
   }
 
   .header,

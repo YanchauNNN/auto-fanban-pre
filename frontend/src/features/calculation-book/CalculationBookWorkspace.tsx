@@ -40,6 +40,11 @@ type Props = {
 };
 
 type Phase = "input" | "review" | "confirm";
+type TemplateDownloadState = "idle" | "loading" | "success" | "error";
+
+const REINFORCEMENT_TEMPLATE_URL =
+  "/api/jobs/calculation-books/reinforcement-template";
+const REINFORCEMENT_TEMPLATE_FILENAME = "标准配筋模板.xlsx";
 
 const NUMERIC_FIELDS = new Set([
   "workshop_length",
@@ -209,11 +214,14 @@ export function CalculationBookWorkspace({
   const [presetName, setPresetName] = useState("");
   const [presetError, setPresetError] = useState<string | null>(null);
   const [presetNotice, setPresetNotice] = useState<string | null>(null);
+  const [templateDownloadState, setTemplateDownloadState] =
+    useState<TemplateDownloadState>("idle");
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const initialFocusRef = useRef<HTMLSelectElement>(null);
   const errorSummaryRef = useRef<HTMLDivElement>(null);
   const reviewHeadingRef = useRef<HTMLHeadingElement>(null);
   const wasOpenRef = useRef(false);
+  const templateDownloadRequestRef = useRef(0);
 
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
@@ -229,6 +237,8 @@ export function CalculationBookWorkspace({
       setPresetName("");
       setPresetError(null);
       setPresetNotice(null);
+      setTemplateDownloadState("idle");
+      templateDownloadRequestRef.current += 1;
     }
     wasOpenRef.current = isOpen;
   }, [initialValues, isOpen]);
@@ -453,6 +463,31 @@ export function CalculationBookWorkspace({
     }
   }
 
+  async function handleTemplateDownload() {
+    if (templateDownloadState === "loading") {
+      return;
+    }
+    const requestId = templateDownloadRequestRef.current + 1;
+    templateDownloadRequestRef.current = requestId;
+    setTemplateDownloadState("loading");
+    try {
+      if (!adapter.downloadArtifact) {
+        throw new Error("当前后台不支持文件下载。");
+      }
+      await adapter.downloadArtifact(
+        REINFORCEMENT_TEMPLATE_URL,
+        REINFORCEMENT_TEMPLATE_FILENAME,
+      );
+      if (templateDownloadRequestRef.current === requestId) {
+        setTemplateDownloadState("success");
+      }
+    } catch {
+      if (templateDownloadRequestRef.current === requestId) {
+        setTemplateDownloadState("error");
+      }
+    }
+  }
+
   function focusFirstValidationError(
     nextFieldErrors: Record<string, string[]>,
     nextFormErrors: string[],
@@ -656,10 +691,44 @@ export function CalculationBookWorkspace({
     >
       <div ref={surfaceRef} className={styles.surface} onKeyDown={trapFocus}>
         <header className={styles.header}>
-          <div>
-            <p className={styles.kicker}>Calculation Book</p>
-            <h2>创建计算书</h2>
-            <p>上传文件并完成核验后，再进入后台任务队列。</p>
+          <div className={styles.headerMain}>
+            <div className={styles.headerCopy}>
+              <p className={styles.kicker}>Calculation Book</p>
+              <h2>创建计算书</h2>
+              <p>上传文件并完成核验后，再进入后台任务队列。</p>
+            </div>
+            <div className={styles.templateDownloadControl}>
+              <button
+                aria-busy={templateDownloadState === "loading"}
+                className={styles.templateDownloadButton}
+                disabled={templateDownloadState === "loading"}
+                type="button"
+                onClick={() => void handleTemplateDownload()}
+              >
+                <svg
+                  aria-hidden="true"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2h14v-2" />
+                </svg>
+                <span>下载标准配筋模板</span>
+              </button>
+              {templateDownloadState !== "idle" ? (
+                <span
+                  aria-atomic="true"
+                  aria-live={templateDownloadState === "error" ? "assertive" : "polite"}
+                  className={styles.templateDownloadFeedback}
+                  role={templateDownloadState === "error" ? "alert" : "status"}
+                >
+                  {templateDownloadState === "loading"
+                    ? "正在下载…"
+                    : templateDownloadState === "success"
+                      ? "已开始下载"
+                      : "下载失败，请重试"}
+                </span>
+              ) : null}
+            </div>
           </div>
           <button
             aria-label="关闭创建计算书"
