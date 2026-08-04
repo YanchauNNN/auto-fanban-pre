@@ -261,12 +261,19 @@ describe("CalculationBookWorkspace", () => {
         resolveDownload = resolve;
       }),
     );
+    const preflightCalculationBook = vi.fn();
+    const createCalculationBook = vi.fn();
+    const onBatchCreated = vi.fn();
     render(
       <CalculationBookWorkspace
-        adapter={{ downloadArtifact } as unknown as ApiAdapter}
+        adapter={{
+          createCalculationBook,
+          downloadArtifact,
+          preflightCalculationBook,
+        } as unknown as ApiAdapter}
         isOpen
         schema={schema}
-        onBatchCreated={() => undefined}
+        onBatchCreated={onBatchCreated}
         onClose={() => undefined}
       />,
     );
@@ -277,6 +284,12 @@ describe("CalculationBookWorkspace", () => {
     await waitFor(() => expect(downloadButton).toBeDisabled());
     expect(downloadButton).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("status")).toHaveTextContent("正在下载…");
+    expect(screen.getByRole("button", { name: "关闭创建计算书" })).toBeEnabled();
+    expect(screen.getByLabelText("计算书模板")).toBeEnabled();
+    expect(screen.getByText("01 文件与参数")).toHaveAttribute("aria-current", "step");
+    expect(preflightCalculationBook).not.toHaveBeenCalled();
+    expect(createCalculationBook).not.toHaveBeenCalled();
+    expect(onBatchCreated).not.toHaveBeenCalled();
     await user.click(downloadButton);
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
 
