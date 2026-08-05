@@ -80,12 +80,31 @@ function warningMessage(warning: CalculationBookWarning): string {
   }
 
   const direction = warning.direction
+    ? fieldLabel(warning.direction)
+    : "相关方向";
+  if (warning.code === "OCR_RECOGNITION_FAILED") {
+    return `SMX 识别失败，${direction}建议已留空，请核对对应云图`;
+  }
+  if (warning.code === "NO_ELIGIBLE_CANDIDATE") {
+    return `没有满足至少 10% 裕度的候选，${direction}建议已留空`;
+  }
+  if (warning.code === "AI_NEEDS_REVIEW") {
+    return `AI 未能形成确定建议，${direction}已留空，请人工复核`;
+  }
+  if (warning.code === "AI_BASE_FAILURE_LIMIT") {
+    return `AI 连续三次调用或协议校验失败，${direction}建议已留空`;
+  }
+  if (warning.code === "UNKNOWN_IMAGE_NAME") {
+    return "云图文件名无法匹配墙体或楼板，未生成该图片的配筋建议";
+  }
+
+  const reinforcementDirection = warning.direction
     ? `${fieldLabel(warning.direction)}配筋`
     : "部分配筋";
   const blankResult = warning.blankFields.length > 0
     ? `${warning.blankFields.map(fieldLabel).join("、")}已留空`
     : "相关字段已留空";
-  return `${groupLabel(warning)} 的${direction}信息无法确定，${blankResult}`;
+  return `${groupLabel(warning)} 的${reinforcementDirection}信息无法确定，${blankResult}`;
 }
 
 function WarningEvidence({ warning }: { warning: CalculationBookWarning }) {
@@ -106,39 +125,80 @@ export function CalculationBookTaskWarnings({
 }: {
   output: CalculationBookOutput | undefined;
 }) {
-  if (!output || (!output.aiNormalized && output.warningCount === 0)) {
+  if (
+    !output
+    || (!output.aiNormalized && !output.aiRebarSuggestion && output.warningCount === 0)
+  ) {
     return null;
   }
 
   const groups = groupWarnings(output.warnings);
   const normalized = output.aiNormalization;
+  const suggested = output.aiRebarSuggestion;
+  const isSuggested = output.reinforcementSource === "ai_suggested" || Boolean(suggested);
+  const validationLabel = suggested?.validation === "passed"
+    ? "通过"
+    : suggested?.validation || "未记录";
 
   return (
     <section
-      aria-label="配筋表人工补充提醒"
+      aria-label={isSuggested ? "AI 配筋建议结果" : "配筋表人工补充提醒"}
       className={styles.panel}
       role="region"
     >
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>配筋表处理结果</p>
+          <p className={styles.eyebrow}>
+            {isSuggested ? "云图配筋建议结果" : "配筋表处理结果"}
+          </p>
           <h3 id="calculation-book-reinforcement-warning-title">
-            {output.aiNormalized
+            {isSuggested
+              ? "AI 配筋建议已生成"
+              : output.aiNormalized
               ? "AI 已规范化非标准配筋表"
               : "配筋结果包含待补充字段"}
           </h3>
-          {normalized ? (
+          {suggested ? (
+            <p>
+              已生成 {suggested.suggestedDirectionCount} 个方向，
+              {suggested.blankDirectionCount} 个方向留空待复核。
+            </p>
+          ) : normalized ? (
             <p>
               已处理 {normalized.sourceRowCount} 行源数据，确定内容已继续生成计算书。
             </p>
           ) : null}
         </div>
         {output.warningCount > 0 ? (
-          <strong className={styles.warningCount}>需人工补充 {output.warningCount} 项</strong>
+          <strong className={styles.warningCount}>
+            {isSuggested ? "需人工复核" : "需人工补充"} {output.warningCount} 项
+          </strong>
         ) : (
           <span className={styles.completeState}>无需补充</span>
         )}
       </header>
+
+      {suggested ? (
+        <div aria-label="AI 配筋建议摘要" className={styles.suggestionSummary}>
+          <div className={styles.suggestionMetrics}>
+            <span><small>建议方向</small><strong>{suggested.suggestedDirectionCount}</strong></span>
+            <span><small>留空方向</small><strong>{suggested.blankDirectionCount}</strong></span>
+            <span><small>模型调用</small><strong>{suggested.callCount}</strong></span>
+            <span><small>修复轮次</small><strong>{suggested.repairRoundCount}</strong></span>
+          </div>
+          <div className={styles.suggestionMeta}>
+            <span><small>内部模型</small><strong>{suggested.model || "未记录"}</strong></span>
+            <span title={suggested.skillSha256 || undefined}>
+              <small>Skill</small>
+              <strong>
+                {suggested.skillId || "未记录"}
+                {suggested.skillVersion ? ` · v${suggested.skillVersion}` : ""}
+              </strong>
+            </span>
+            <span><small>后端校验</small><strong>{validationLabel}</strong></span>
+          </div>
+        </div>
+      ) : null}
 
       {groups.length > 0 ? (
         <div className={styles.groups}>

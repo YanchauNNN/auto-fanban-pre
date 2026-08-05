@@ -2473,6 +2473,10 @@ function CalculationBookResultCard({
     <div className={styles.resultStack}>
       <div className={styles.resultSummaryGrid}>
         <InfoBlock label="计算书模板" value={templateLabel} />
+        <InfoBlock
+          label="配筋来源"
+          value={output.reinforcementSource === "ai_suggested" ? "AI 云图建议" : "用户配筋表"}
+        />
         <InfoBlock label="配筋图数量" value={`${output.figureCount} 张`} />
         <InfoBlock label="生成文件" value={output.outputFilename} />
       </div>
@@ -2971,6 +2975,7 @@ function renderArtifactButtons(
     report: "下载 report.xlsx",
     replacedDwg: "下载替换后 DWG",
     calculationDocx: "下载计算书 DOCX",
+    calculationLog: "下载诊断日志 JSONL",
   };
 
   const previewButton =
@@ -3077,17 +3082,30 @@ function renderArtifactButtons(
   }
 
   if (job.taskKind === "calculation_book") {
-    return job.artifacts.calculationDocxAvailable &&
+    return [
+      ...(job.artifacts.calculationDocxAvailable &&
       job.artifacts.calculationDocxDownloadUrl
-      ? [
-      <ArtifactButton
-        href={job.artifacts.calculationDocxDownloadUrl}
-        key="calculation-docx"
-        label={labels.calculationDocx}
-        onDownload={onDownload}
-      />,
-        ]
-      : [];
+        ? [
+            <ArtifactButton
+              href={job.artifacts.calculationDocxDownloadUrl}
+              key="calculation-docx"
+              label={labels.calculationDocx}
+              onDownload={onDownload}
+            />,
+          ]
+        : []),
+      ...(job.artifacts.calculationLogAvailable &&
+      job.artifacts.calculationLogDownloadUrl
+        ? [
+            <ArtifactButton
+              href={job.artifacts.calculationLogDownloadUrl}
+              key="calculation-log"
+              label={labels.calculationLog}
+              onDownload={onDownload}
+            />,
+          ]
+        : []),
+    ];
   }
 
   if (job.taskKind !== "audit_replace") {

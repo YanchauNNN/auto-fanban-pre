@@ -62,6 +62,62 @@ const aiOutput: CalculationBookOutput = {
   aiRebarSuggestion: null,
 };
 
+const aiSuggestedOutput: CalculationBookOutput = {
+  reinforcementSource: "ai_suggested",
+  figureCount: 177,
+  templateType: "internal_structure",
+  outputFilename: "AI配筋建议计算书.docx",
+  aiNormalized: false,
+  warningCount: 3,
+  warnings: [
+    {
+      code: "OCR_RECOGNITION_FAILED",
+      scope: "wall",
+      identity: "N5012",
+      direction: "X",
+      sourceSheet: null,
+      sourceRow: null,
+      sourceCells: {},
+      reason: "应力云图 SMX 识别失败，当前方向配筋建议已留空，请人工复核",
+      blankFields: ["X"],
+    },
+    {
+      code: "NO_ELIGIBLE_CANDIDATE",
+      scope: "wall",
+      identity: "N5013",
+      direction: "Y",
+      sourceSheet: null,
+      sourceRow: null,
+      sourceCells: {},
+      reason: "后端未生成满足配筋规则的候选，当前方向已留空，请人工复核",
+      blankFields: ["Y"],
+    },
+    {
+      code: "AI_BASE_FAILURE_LIMIT",
+      scope: "slab",
+      identity: "11.45",
+      direction: "top_x",
+      sourceSheet: null,
+      sourceRow: null,
+      sourceCells: {},
+      reason: "人工智能连续三次调用或协议失败，当前方向已留空，请人工复核",
+      blankFields: ["top_x"],
+    },
+  ],
+  aiNormalization: null,
+  aiRebarSuggestion: {
+    skillId: "calculation_book_rebar_adviser",
+    skillVersion: "1.0.0",
+    skillSha256: "abc123",
+    model: "intranet-structured-model",
+    callCount: 4,
+    suggestedDirectionCount: 174,
+    blankDirectionCount: 3,
+    repairRoundCount: 2,
+    validation: "passed",
+  },
+};
+
 describe("CalculationBookTaskWarnings", () => {
   it("groups completed AI warnings with natural direction and evidence labels", async () => {
     const user = userEvent.setup();
@@ -108,5 +164,29 @@ describe("CalculationBookTaskWarnings", () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("summarizes image-only AI recommendations and explains every blank direction", async () => {
+    const user = userEvent.setup();
+    render(<CalculationBookTaskWarnings output={aiSuggestedOutput} />);
+
+    const region = screen.getByRole("region", { name: "AI 配筋建议结果" });
+    expect(region).toHaveTextContent("AI 配筋建议已生成");
+    expect(region).toHaveTextContent("已生成 174 个方向");
+    expect(region).toHaveTextContent("3 个方向留空待复核");
+    expect(screen.getByLabelText("AI 配筋建议摘要")).toHaveTextContent("修复轮次2");
+    expect(region).toHaveTextContent("intranet-structured-model");
+    expect(region).toHaveTextContent("calculation_book_rebar_adviser · v1.0.0");
+    expect(region).toHaveTextContent("后端校验通过");
+
+    await user.click(screen.getByText("墙体 N5012").closest("summary") as HTMLElement);
+    expect(region).toHaveTextContent("SMX 识别失败，水平筋建议已留空，请核对对应云图");
+    expect(region).toHaveTextContent("仅图片证据");
+
+    await user.click(screen.getByText("墙体 N5013").closest("summary") as HTMLElement);
+    expect(region).toHaveTextContent("没有满足至少 10% 裕度的候选，竖向筋建议已留空");
+
+    await user.click(screen.getByText("楼板 11.45m").closest("summary") as HTMLElement);
+    expect(region).toHaveTextContent("AI 连续三次调用或协议校验失败，顶层水平向建议已留空");
   });
 });

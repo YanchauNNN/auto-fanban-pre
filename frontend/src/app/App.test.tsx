@@ -1915,6 +1915,98 @@ describe("job detail pages", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows image-only AI recommendation metrics and its downloadable JSONL log", async () => {
+    window.history.pushState({}, "", "/jobs/calculation-book-ai-suggested-1");
+    mockGetJobDetail.mockResolvedValue({
+      jobId: "calculation-book-ai-suggested-1",
+      batchId: "batch-calculation-book-ai-suggested-1",
+      groupId: null,
+      isGroup: false,
+      sourceFilename: "6层11.45~15.95m 结果云图 - 副本.rar",
+      sourceFilenames: ["6层11.45~15.95m 结果云图 - 副本.rar"],
+      taskKind: "calculation_book",
+      taskRole: null,
+      jobMode: "calculation_book",
+      projectNo: "2016",
+      status: "succeeded",
+      stage: "CALCULATION_BOOK_COMPLETE",
+      percent: 100,
+      message: "",
+      createdAt: "2026-08-05T10:00:00+08:00",
+      finishedAt: "2026-08-05T10:05:00+08:00",
+      startedAt: "2026-08-05T10:00:10+08:00",
+      currentFile: null,
+      runAuditCheck: false,
+      childJobIds: [],
+      findingsCount: 0,
+      affectedDrawingsCount: 0,
+      artifacts: {
+        packageAvailable: false,
+        iedAvailable: false,
+        reportAvailable: false,
+        replacedDwgAvailable: false,
+        calculationDocxAvailable: true,
+        calculationLogAvailable: true,
+        calculationDocxDownloadUrl:
+          "/api/jobs/calculation-book-ai-suggested-1/download/calculation-book",
+        calculationLogDownloadUrl:
+          "/api/jobs/calculation-book-ai-suggested-1/download/calculation-book-log",
+      },
+      retryAvailable: false,
+      sharedRunId: null,
+      flags: [],
+      errors: [],
+      topWrongTexts: [],
+      topInternalCodes: [],
+      calculationBookOutput: {
+        reinforcementSource: "ai_suggested",
+        figureCount: 177,
+        templateType: "internal_structure",
+        outputFilename: "AI配筋建议计算书.docx",
+        aiNormalized: false,
+        warningCount: 1,
+        warnings: [
+          {
+            code: "OCR_RECOGNITION_FAILED",
+            scope: "wall",
+            identity: "N5012",
+            direction: "X",
+            sourceSheet: null,
+            sourceRow: null,
+            sourceCells: {},
+            reason: "应力云图 SMX 识别失败，当前方向配筋建议已留空，请人工复核",
+            blankFields: ["X"],
+          },
+        ],
+        aiNormalization: null,
+        aiRebarSuggestion: {
+          skillId: "calculation_book_rebar_adviser",
+          skillVersion: "1.0.0",
+          skillSha256: "abc123",
+          model: "intranet-structured-model",
+          callCount: 3,
+          suggestedDirectionCount: 176,
+          blankDirectionCount: 1,
+          repairRoundCount: 1,
+          validation: "passed",
+        },
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("AI 配筋建议已生成")).toBeInTheDocument();
+    expect(screen.getByText("AI 云图建议")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载计算书 DOCX" })).toHaveAttribute(
+      "href",
+      "/api/jobs/calculation-book-ai-suggested-1/download/calculation-book",
+    );
+    expect(screen.getByRole("link", { name: "下载诊断日志 JSONL" })).toHaveAttribute(
+      "href",
+      "/api/jobs/calculation-book-ai-suggested-1/download/calculation-book-log",
+    );
+  });
+
   it.each(["running", "failed"] as const)(
     "hides AI completion and supplement reminders while a calculation task is %s",
     async (status) => {
