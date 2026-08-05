@@ -3,9 +3,12 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook
 from PIL import Image
 
+from src.calculation_book.archive import InvalidCalculationArchive
+from src.calculation_book.models import ReinforcementSource
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.preflight import run_calculation_book_preflight
 
@@ -14,6 +17,7 @@ def _build_duplicate_archive(
     tmp_path: Path,
     *,
     standard_layout: bool = True,
+    include_workbook: bool = True,
 ) -> Path:
     source = tmp_path / "source"
     source.mkdir()
@@ -39,7 +43,8 @@ def _build_duplicate_archive(
     )
     sheet.append(["S7157墙", "1D36间距200", "1D36间距200", "1C14间距400*400"])
     sheet.append(["S7157墙", "1D32间距200", "1D32间距200", "1C14间距400*400"])
-    workbook.save(source / "计算书模板文件.xlsx")
+    if include_workbook:
+        workbook.save(source / "计算书模板文件.xlsx")
 
     archive_path = tmp_path / "input.zip"
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -164,6 +169,43 @@ def _build_mismatch_archive(tmp_path: Path) -> Path:
     return archive_path
 
 
+def _build_ai_suggested_archive(
+    tmp_path: Path,
+    *,
+    include_slab_figures: bool = True,
+) -> Path:
+    source = tmp_path / "source"
+    source.mkdir()
+    for wall_id in ("S7157", "S7158"):
+        for direction in ("X", "Y", "Z"):
+            Image.new("RGB", (1200, 800), "white").save(
+                source / f"{wall_id}-{direction}.png"
+            )
+    if include_slab_figures:
+        for stem in (
+            "11.45-TOP-X",
+            "11.45-TOP-Y",
+            "11.45-BOTTOM-X",
+            "11.45-BOTTOM-Y",
+            "11.45-Z",
+        ):
+            Image.new("RGB", (1200, 800), "white").save(
+                source / f"{stem}.png"
+            )
+    Image.new("RGB", (1200, 800), "white").save(source / "说明图.png")
+    (source / "01").mkdir()
+    (source / "02").mkdir()
+    Image.new("RGB", (1200, 800), "white").save(source / "01" / "layout.png")
+    Image.new("RGB", (1200, 800), "white").save(source / "02" / "model.png")
+
+    archive_path = tmp_path / "ai-suggested.zip"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for path in source.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(source).as_posix())
+    return archive_path
+
+
 def test_preflight_returns_blank_duplicate_and_split_groups_without_confirmation(
     tmp_path: Path,
 ) -> None:
@@ -206,6 +248,8 @@ def test_preflight_returns_blank_duplicate_and_split_groups_without_confirmation
         == "reinforcement_table_normalizer"
     )
     assert result["requires_ai_normalization"] is False
+    assert result["requires_ai_recommendation"] is False
+    assert result["reinforcement_source"] == "provided"
     assert result["ai_confirmation_message"] is None
 
 
@@ -242,6 +286,8 @@ def test_nonstandard_preflight_returns_ai_confirmation_without_ocr(
 
     assert ocr_calls == []
     assert result["requires_ai_normalization"] is True
+    assert result["requires_ai_recommendation"] is False
+    assert result["reinforcement_source"] == "provided"
     assert result["ai_reinforcement_expected_source_row_count"] == 2
     assert result["ai_confirmation_message"] == (
         "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
@@ -260,6 +306,226 @@ def test_nonstandard_preflight_returns_ai_confirmation_without_ocr(
     }
     assert result["confirmations"] == []
     assert result["walls"] == []
+
+
+@pytest.mark.parametrize(
+    "reinforcement_source",
+    [ReinforcementSource.PROVIDED, ReinforcementSource.AI_SUGGESTED],
+)
+def test_preflight_rejects_enabled_slab_stress_without_slab_figures_before_ocr(
+    tmp_path: Path,
+    reinforcement_source: ReinforcementSource,
+) -> None:
+    archive_path = (
+        _build_duplicate_archive(tmp_path)
+        if reinforcement_source is ReinforcementSource.PROVIDED
+        else _build_ai_suggested_archive(
+            tmp_path,
+            include_slab_figures=False,
+        )
+    )
+    ocr_calls: list[str] = []
+
+    def recognize(path: Path, _direction: str) -> StressLegendReading:
+        ocr_calls.append(path.name)
+        return StressLegendReading(smn=0, smx=1000, legend_values=())
+
+    with pytest.raises(
+        InvalidCalculationArchive,
+        match="启用楼板应力.*没有.*楼板",
+    ):
+        run_calculation_book_preflight(
+            archive_path=archive_path,
+            extraction_root=tmp_path / "extracted",
+            reinforcement_source=reinforcement_source,
+            include_slab_stress=True,
+            ocr_recognizer=recognize,
+        )
+
+    assert ocr_calls == []
+
+
+def test_ai_suggested_preflight_needs_no_workbook_and_keeps_ocr_review_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import src.calculation_book.preflight as preflight_module
+
+    archive_path = _build_ai_suggested_archive(tmp_path)
+    recognized_names: list[str] = []
+
+    monkeypatch.setattr(
+        preflight_module,
+        "inspect_reinforcement_workbook",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("AI suggested preflight must not inspect a workbook")
+        ),
+    )
+    monkeypatch.setattr(
+        preflight_module,
+        "load_reinforcement_schedule",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("AI suggested preflight must not load a wall schedule")
+        ),
+    )
+    monkeypatch.setattr(
+        preflight_module,
+        "load_slab_reinforcement_schedule",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("AI suggested preflight must not load a slab schedule")
+        ),
+    )
+
+    def recognize(path: Path, direction: str) -> StressLegendReading:
+        recognized_names.append(path.name)
+        if path.name == "S7158-Z.png":
+            raise RuntimeError("SMX missing")
+        return StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 1000,
+            legend_values=(
+                () if direction == "Z" else tuple(1000 * index / 9 for index in range(10))
+            ),
+            is_zero_result=direction == "Z",
+        )
+
+    result = run_calculation_book_preflight(
+        archive_path=archive_path,
+        extraction_root=tmp_path / "extracted",
+        reinforcement_source="ai_suggested",
+        include_slab_stress=False,
+        ocr_recognizer=recognize,
+    )
+
+    assert recognized_names == [
+        "S7157-X.png",
+        "S7157-Y.png",
+        "S7157-Z.png",
+        "S7158-X.png",
+        "S7158-Y.png",
+        "S7158-Z.png",
+    ]
+    assert result["reinforcement_source"] == "ai_suggested"
+    assert result["reinforcement_workbook"] is None
+    assert result["requires_ai_normalization"] is False
+    assert result["requires_ai_recommendation"] is True
+    assert result["image_wall_group_count"] == 2
+    assert result["figure_count"] == 6
+    assert result["slab_figure_count"] == 0
+    assert result["slab_zero_figure_count"] == 0
+    assert result["slab_elevation_count"] == 0
+    assert result["z_zero_or_missing_smx_count"] == 2
+    assert result["ignored_root_images"] == ["说明图.png"]
+    assert result["review_items"] == [
+        {
+            "scope": "wall",
+            "identity": "S7158",
+            "direction": "Z",
+            "image_filename": "S7158-Z.png",
+            "reason": "OCR 识别失败：SMX missing",
+        }
+    ]
+    assert len(result["walls"]) == 2
+
+
+def test_ai_suggested_preflight_ocrs_slab_figures_only_when_enabled(
+    tmp_path: Path,
+) -> None:
+    archive_path = _build_ai_suggested_archive(tmp_path)
+    recognized_names: list[str] = []
+
+    def recognize(path: Path, direction: str) -> StressLegendReading:
+        recognized_names.append(path.name)
+        return StressLegendReading(
+            smn=0,
+            smx=0 if direction == "Z" else 1000,
+            legend_values=(),
+            is_zero_result=direction == "Z",
+        )
+
+    result = run_calculation_book_preflight(
+        archive_path=archive_path,
+        extraction_root=tmp_path / "extracted",
+        reinforcement_source=ReinforcementSource.AI_SUGGESTED,
+        include_slab_stress=True,
+        ocr_recognizer=recognize,
+    )
+
+    assert recognized_names[-5:] == [
+        "11.45-TOP-X.png",
+        "11.45-TOP-Y.png",
+        "11.45-BOTTOM-X.png",
+        "11.45-BOTTOM-Y.png",
+        "11.45-Z.png",
+    ]
+    assert result["slab_figure_count"] == 5
+    assert result["slab_elevation_count"] == 1
+    assert result["zero_figure_count"] == 2
+    assert result["slab_zero_figure_count"] == 1
+    assert len(result["slabs"]) == 5
+
+
+def test_ai_suggested_split_groups_emit_stable_review_evidence_without_blocking(
+    tmp_path: Path,
+) -> None:
+    archive_path = _build_duplicate_archive(
+        tmp_path,
+        include_workbook=False,
+    )
+
+    result = run_calculation_book_preflight(
+        archive_path=archive_path,
+        extraction_root=tmp_path / "extracted",
+        reinforcement_source=ReinforcementSource.AI_SUGGESTED,
+        ocr_recognizer=lambda _path, _direction: StressLegendReading(
+            smn=0,
+            smx=1000,
+            legend_values=(),
+        ),
+    )
+
+    expected_reviews = [
+        {
+            "code": "split_image_group",
+            "scope": "wall",
+            "identity": f"S7157-{group_index}",
+            "direction": direction,
+            "image_filename": f"S7157-{group_index}-{direction}.png",
+            "reason": "-1/-2 应力图组需在任务完成后确认配筋",
+        }
+        for group_index in (1, 2)
+        for direction in ("X", "Y", "Z")
+    ]
+    assert result["review_items"] == expected_reviews
+    assert result["warnings"] == expected_reviews
+    assert result["requires_ocr_review"] is False
+    assert result["requires_manual_confirmation"] is False
+    assert result["confirmations"] == []
+    assert [wall["wall_id"] for wall in result["walls"]] == [
+        "S7157-1",
+        "S7157-2",
+    ]
+    assert all(
+        evidence["image_filename"]
+        for wall in result["walls"]
+        for evidence in wall["directions"].values()
+    )
+
+
+def test_preflight_rejects_unknown_reinforcement_source(tmp_path: Path) -> None:
+    archive_path = _build_duplicate_archive(tmp_path)
+
+    with pytest.raises(ValueError, match="unsupported.*ReinforcementSource"):
+        run_calculation_book_preflight(
+            archive_path=archive_path,
+            extraction_root=tmp_path / "extracted",
+            reinforcement_source="unsupported",
+            ocr_recognizer=lambda _path, _direction: StressLegendReading(
+                smn=0,
+                smx=1000,
+                legend_values=(),
+            ),
+        )
 
 
 def test_preflight_reports_normalization_and_wall_count_audit_without_blocking(
@@ -363,6 +629,7 @@ def test_preflight_returns_seven_ordered_slab_evidence_items(
 
     assert result["slab_figure_count"] == 7
     assert result["slab_elevation_count"] == 1
+    assert result["slab_zero_figure_count"] == 1
     assert [item["key"] for item in result["slabs"]] == [
         "top_x",
         "middle_x",

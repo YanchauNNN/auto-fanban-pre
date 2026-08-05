@@ -19,6 +19,7 @@ from fastapi import (
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from src.calculation_book.models import ReinforcementSource
 from src.config import load_mechanism_spec
 
 from ..auth_helpers import require_current_account
@@ -170,6 +171,9 @@ async def preflight_calculation_book(
     request: Request,
     archive: UploadFile = File(...),
     include_slab_stress: bool = Form(False),
+    reinforcement_source: ReinforcementSource = Form(
+        ReinforcementSource.PROVIDED
+    ),
     _=Depends(require_current_account),
 ) -> JSONResponse:
     upload = UploadedFilePayload(
@@ -181,6 +185,7 @@ async def preflight_calculation_book(
         request.app.state.runtime.preflight_calculation_book,
         archive=upload,
         include_slab_stress=include_slab_stress,
+        reinforcement_source=reinforcement_source,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 

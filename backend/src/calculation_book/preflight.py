@@ -7,9 +7,11 @@ from typing import Any
 from .archive import (
     ArchiveLimits,
     CalculationArchiveContents,
+    InvalidCalculationArchive,
     validate_and_extract_archive,
 )
 from .matching import RecognizedFigure, match_reinforcement
+from .models import ReinforcementSource
 from .ocr import StressLegendReading, recognize_stress_legend
 from .reinforcement_input import (
     InvalidReinforcementWorkbook,
@@ -79,7 +81,9 @@ def _nonstandard_preflight_payload(
             }
         )
     return {
+        "reinforcement_source": ReinforcementSource.PROVIDED.value,
         "requires_ai_normalization": True,
+        "requires_ai_recommendation": False,
         "ai_reinforcement_expected_source_row_count": (
             inspection.ai_reinforcement_expected_source_row_count
         ),
@@ -106,6 +110,7 @@ def _nonstandard_preflight_payload(
         "confirmations": [],
         "walls": [],
         "slab_figure_count": len(selected_slab_figures),
+        "slab_zero_figure_count": 0,
         "slab_elevation_count": len(
             {figure.elevation for figure in selected_slab_figures}
         ),
@@ -153,19 +158,251 @@ def _candidate_payload(row: NormalizedReinforcementRow) -> dict[str, Any]:
     }
 
 
+def _ai_reading_payload(
+    *,
+    path: Path,
+    direction: str,
+    recognize: OcrRecognizer,
+    scope: str,
+    identity: str,
+    review_items: list[dict[str, Any]],
+) -> tuple[dict[str, Any], bool, bool]:
+    try:
+        reading = recognize(path, direction)
+    except Exception as exc:
+        reason = f"OCR 识别失败：{exc}"
+        review_items.append(
+            {
+                "scope": scope,
+                "identity": identity,
+                "direction": direction,
+                "image_filename": path.name,
+                "reason": reason,
+            }
+        )
+        return (
+            {
+                "image_filename": path.name,
+                "smn": None,
+                "smx": None,
+                "legend_values": [],
+                "is_zero_result": False,
+                "ocr_status": "review_required",
+                "ocr_error": reason,
+            },
+            False,
+            direction == "Z",
+        )
+    return (
+        {
+            "image_filename": path.name,
+            "smn": reading.smn,
+            "smx": reading.smx,
+            "legend_values": list(reading.legend_values),
+            "is_zero_result": reading.is_zero_result,
+            "ocr_status": "recognized",
+            "ocr_error": None,
+        },
+        reading.is_zero_result,
+        direction == "Z" and reading.smx == 0,
+    )
+
+
+def _ai_suggested_preflight_payload(
+    *,
+    contents: CalculationArchiveContents,
+    include_slab_stress: bool,
+    recognize: OcrRecognizer,
+) -> dict[str, Any]:
+    review_items: list[dict[str, Any]] = []
+    zero_figure_count = 0
+    slab_zero_figure_count = 0
+    z_zero_or_missing_smx_count = 0
+    grouped_figures: dict[str, list[Any]] = {}
+    for figure in contents.reinforcement_figures:
+        grouped_figures.setdefault(figure.wall_id, []).append(figure)
+
+    walls: list[dict[str, Any]] = []
+    for wall_id, figures in grouped_figures.items():
+        directions: dict[str, Any] = {}
+        for figure in figures:
+            if figure.group_index is not None:
+                review_items.append(
+                    {
+                        "code": "split_image_group",
+                        "scope": "wall",
+                        "identity": wall_id,
+                        "direction": figure.direction,
+                        "image_filename": figure.path.name,
+                        "reason": "-1/-2 应力图组需在任务完成后确认配筋",
+                    }
+                )
+            reading_payload, is_zero, z_zero_or_missing = _ai_reading_payload(
+                path=figure.path,
+                direction=figure.direction,
+                recognize=recognize,
+                scope="wall",
+                identity=wall_id,
+                review_items=review_items,
+            )
+            zero_figure_count += int(is_zero)
+            z_zero_or_missing_smx_count += int(z_zero_or_missing)
+            directions[figure.direction] = {
+                **reading_payload,
+                "source_cell": "",
+                "original_text": "",
+                "canonical_specification": "",
+                "narrative_specification": "",
+                "actual_area": "",
+            }
+        first_figure = figures[0]
+        walls.append(
+            {
+                "wall_id": wall_id,
+                "base_wall_id": first_figure.base_wall_id,
+                "group_index": first_figure.group_index,
+                "suggested_source_row": None,
+                "directions": directions,
+            }
+        )
+
+    selected_slab_figures = (
+        contents.slab_figures if include_slab_stress else ()
+    )
+    slabs: list[dict[str, Any]] = []
+    for figure in selected_slab_figures:
+        key = (
+            "z"
+            if figure.position is None
+            else f"{figure.position.lower()}_{figure.direction.lower()}"
+        )
+        reading_payload, is_zero, z_zero_or_missing = _ai_reading_payload(
+            path=figure.path,
+            direction=figure.direction,
+            recognize=recognize,
+            scope="slab",
+            identity=f"{figure.elevation}:{key}",
+            review_items=review_items,
+        )
+        slab_zero_figure_count += int(is_zero)
+        z_zero_or_missing_smx_count += int(z_zero_or_missing)
+        slabs.append(
+            {
+                "elevation": figure.elevation,
+                "key": key,
+                "position": figure.position,
+                "direction": figure.direction,
+                **reading_payload,
+                "source_row": None,
+                "source_cell": "",
+                "original_text": "",
+                "canonical_specification": "",
+                "narrative_specification": "",
+                "actual_area": "",
+            }
+        )
+
+    ignored = [path.name for path in contents.ignored_root_images]
+    warnings: list[dict[str, Any]] = []
+    if ignored:
+        warnings.append(
+            {"code": "ignored_root_images", "filenames": ignored}
+        )
+    if contents.slab_figures and not include_slab_stress:
+        warnings.append(
+            {
+                "code": "slab_ignored_by_choice",
+                "filenames": [
+                    figure.path.name for figure in contents.slab_figures
+                ],
+            }
+        )
+    warnings.extend(
+        {"code": "ocr_review_required", **item}
+        for item in review_items
+    )
+    slab_group_count = len(
+        {figure.elevation for figure in selected_slab_figures}
+    )
+    return {
+        "reinforcement_source": ReinforcementSource.AI_SUGGESTED.value,
+        "requires_ai_normalization": False,
+        "requires_ai_recommendation": True,
+        "ai_confirmation_message": None,
+        "format_inspection": None,
+        "figure_count": len(contents.reinforcement_figures),
+        "wall_direction_figure_count": len(contents.reinforcement_figures),
+        "zero_figure_count": zero_figure_count,
+        "z_zero_or_missing_smx_count": z_zero_or_missing_smx_count,
+        "wall_count": len(walls),
+        "reinforcement_workbook": None,
+        "reinforcement_source_row_count": 0,
+        "reinforcement_normalized_row_count": 0,
+        "reinforcement_issue_row_count": 0,
+        "reinforcement_unique_wall_count": 0,
+        "normalization_triggered": False,
+        "normalization_skill_id": None,
+        "normalization_issues": [],
+        "image_wall_group_count": len(walls),
+        "image_unique_wall_count": len(
+            {figure.base_wall_id for figure in contents.reinforcement_figures}
+        ),
+        "matched_unique_wall_count": 0,
+        "image_only_wall_ids": [],
+        "workbook_only_wall_ids": [],
+        "requires_wall_count_confirmation": False,
+        "requires_manual_confirmation": False,
+        "requires_ocr_review": any(
+            item.get("code", "ocr_review_required")
+            == "ocr_review_required"
+            for item in review_items
+        ),
+        "confirmations": [],
+        "walls": walls,
+        "slab_figure_count": len(selected_slab_figures),
+        "slab_zero_figure_count": slab_zero_figure_count,
+        "slab_elevation_count": slab_group_count,
+        "slab_actual_group_count": slab_group_count,
+        "slabs": slabs,
+        "ignored_root_images": ignored,
+        "review_items": review_items,
+        "warnings": warnings,
+    }
+
+
 def run_calculation_book_preflight(
     *,
     archive_path: Path,
     extraction_root: Path,
+    reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
     include_slab_stress: bool = False,
     ocr_recognizer: OcrRecognizer | None = None,
     archive_limits: ArchiveLimits | None = None,
 ) -> dict[str, Any]:
+    active_reinforcement_source = ReinforcementSource(reinforcement_source)
     contents = validate_and_extract_archive(
         archive_path,
         extraction_root,
+        reinforcement_source=active_reinforcement_source,
         limits=archive_limits,
     )
+    if include_slab_stress and not contents.slab_figures:
+        raise InvalidCalculationArchive(
+            "已启用楼板应力，但压缩包根目录没有可识别的楼板应力图片"
+        )
+    recognize = ocr_recognizer or (
+        lambda path, direction: recognize_stress_legend(
+            path,
+            direction=direction,
+        )
+    )
+    if active_reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+        return _ai_suggested_preflight_payload(
+            contents=contents,
+            include_slab_stress=include_slab_stress,
+            recognize=recognize,
+        )
+    assert contents.reinforcement_workbook is not None
     inspection = inspect_reinforcement_workbook(
         contents.reinforcement_workbook,
         include_slab=include_slab_stress,
@@ -188,12 +425,6 @@ def run_calculation_book_preflight(
             include_slab_stress=include_slab_stress,
         )
     schedule = load_reinforcement_schedule(contents.reinforcement_workbook)
-    recognize = ocr_recognizer or (
-        lambda path, direction: recognize_stress_legend(
-            path,
-            direction=direction,
-        )
-    )
     recognized = [
         RecognizedFigure(
             source=figure,
@@ -357,7 +588,9 @@ def run_calculation_book_preflight(
                 }
             )
     return {
+        "reinforcement_source": ReinforcementSource.PROVIDED.value,
         "requires_ai_normalization": False,
+        "requires_ai_recommendation": False,
         "ai_confirmation_message": None,
         "format_inspection": _format_inspection_payload(inspection),
         "figure_count": len(recognized),
@@ -400,6 +633,9 @@ def run_calculation_book_preflight(
         "confirmations": confirmations,
         "walls": walls,
         "slab_figure_count": len(recognized_slabs),
+        "slab_zero_figure_count": sum(
+            figure.reading.is_zero_result for figure in recognized_slabs
+        ),
         "slab_elevation_count": (
             slab_plan.elevation_count if slab_plan is not None else 0
         ),

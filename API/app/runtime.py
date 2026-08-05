@@ -33,7 +33,7 @@ from src.calculation_book.executor import (
     CalculationBookJobExecutor,
     build_calculation_book_warning_reason,
 )
-from src.calculation_book.models import CalculationBookParams
+from src.calculation_book.models import CalculationBookParams, ReinforcementSource
 from src.calculation_book.ocr import recognize_stress_legend
 from src.calculation_book.preflight import run_calculation_book_preflight
 from src.config import get_config, load_mechanism_spec
@@ -874,6 +874,8 @@ class DeliverableApiRuntime:
         preflight_token = params.preflight_token.strip()
         expired_archive_paths: list[Path] = []
         requires_ai_confirmation = False
+        reinforcement_source_matches = False
+        include_slab_stress_matches = False
         with self._calculation_preflight_lock:
             now = time.monotonic()
             for token, entry in list(self._calculation_preflight_tokens.items()):
@@ -887,8 +889,26 @@ class DeliverableApiRuntime:
             preflight = self._calculation_preflight_tokens.get(
                 preflight_token,
             )
+            reinforcement_source_matches = bool(
+                preflight is not None
+                and str(
+                    preflight.get(
+                        "reinforcement_source",
+                        ReinforcementSource.PROVIDED.value,
+                    )
+                )
+                == params.reinforcement_source.value
+            )
+            include_slab_stress_matches = bool(
+                preflight is not None
+                and bool(preflight.get("include_slab_stress", False))
+                == params.include_slab_stress
+            )
             requires_ai_confirmation = bool(
                 preflight is not None
+                and reinforcement_source_matches
+                and include_slab_stress_matches
+                and params.reinforcement_source is ReinforcementSource.PROVIDED
                 and preflight.get("requires_ai_normalization", False)
                 and not params.confirm_ai_normalization
             )
@@ -899,6 +919,43 @@ class DeliverableApiRuntime:
                 )
         for path in expired_archive_paths:
             path.unlink(missing_ok=True)
+        if preflight is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "preflight_token": ["请先完成计算书文件预检"]
+                    },
+                },
+            )
+        cached_archive_path = Path(str(preflight["archive_path"]))
+        if not reinforcement_source_matches:
+            cached_archive_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "reinforcement_source": [
+                            "配筋来源已变化，请重新预检"
+                        ]
+                    },
+                },
+            )
+        if not include_slab_stress_matches:
+            cached_archive_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "include_slab_stress": [
+                            "楼板应力选项已变化，请重新预检"
+                        ]
+                    },
+                },
+            )
         if requires_ai_confirmation:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -911,32 +968,7 @@ class DeliverableApiRuntime:
                     },
                 },
             )
-        if preflight is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "upload_errors": {},
-                    "param_errors": {
-                        "preflight_token": ["请先完成计算书文件预检"]
-                    },
-                },
-            )
-        cached_archive_path = Path(str(preflight["archive_path"]))
         try:
-            if bool(preflight.get("include_slab_stress", False)) != (
-                params.include_slab_stress
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail={
-                        "upload_errors": {},
-                        "param_errors": {
-                            "include_slab_stress": [
-                                "楼板应力选项已变化，请重新预检"
-                            ]
-                        },
-                    },
-                )
             try:
                 cached_content = cached_archive_path.read_bytes()
             except OSError as exc:
@@ -976,7 +1008,8 @@ class DeliverableApiRuntime:
                     )
 
             requires_ai_normalization = bool(
-                preflight.get("requires_ai_normalization", False)
+                params.reinforcement_source is ReinforcementSource.PROVIDED
+                and preflight.get("requires_ai_normalization", False)
             )
             expected_source_row_count = _strict_positive_int(
                 preflight.get(
@@ -1006,11 +1039,12 @@ class DeliverableApiRuntime:
             )
             job_options: dict[str, object] = {
                 "mode": "calculation_book",
-                "ai_reinforcement_normalization": (
-                    requires_ai_normalization
-                ),
+                "reinforcement_source": params.reinforcement_source.value,
+                "ai_reinforcement_normalization": requires_ai_normalization,
             }
-            if requires_ai_normalization:
+            if params.reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+                job_options["ai_rebar_suggestion"] = True
+            elif requires_ai_normalization:
                 assert expected_source_row_count is not None
                 job_options[
                     "ai_reinforcement_expected_source_row_count"
@@ -1041,7 +1075,9 @@ class DeliverableApiRuntime:
         *,
         archive: UploadedFilePayload,
         include_slab_stress: bool = False,
+        reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
     ) -> dict[str, Any]:
+        active_reinforcement_source = ReinforcementSource(reinforcement_source)
         upload_errors: dict[str, list[str]] = {}
         archive_suffix = Path(archive.filename).suffix.lower()
         if archive_suffix not in {".zip", ".rar"}:
@@ -1080,6 +1116,7 @@ class DeliverableApiRuntime:
                     archive_path=archive_path,
                     extraction_root=work_dir / "extracted",
                     include_slab_stress=include_slab_stress,
+                    reinforcement_source=active_reinforcement_source,
                     archive_limits=ArchiveLimits(
                         max_files=runtime.max_archive_files,
                         max_total_bytes=runtime.max_archive_mb * 1024 * 1024,
@@ -1108,7 +1145,8 @@ class DeliverableApiRuntime:
                     ),
                 )
                 requires_ai_normalization = bool(
-                    payload.get("requires_ai_normalization", False)
+                    active_reinforcement_source is ReinforcementSource.PROVIDED
+                    and payload.get("requires_ai_normalization", False)
                 )
                 expected_source_row_count = _strict_positive_int(
                     payload.get(
@@ -1172,6 +1210,7 @@ class DeliverableApiRuntime:
                             )
                         ),
                         "include_slab_stress": include_slab_stress,
+                        "reinforcement_source": active_reinforcement_source.value,
                         "confirmation_candidates": confirmation_candidates,
                         "requires_wall_count_confirmation": bool(
                             payload.get(
@@ -1180,7 +1219,7 @@ class DeliverableApiRuntime:
                             )
                         ),
                         "requires_ai_normalization": bool(
-                            payload.get("requires_ai_normalization", False)
+                            requires_ai_normalization
                         ),
                         **(
                             {

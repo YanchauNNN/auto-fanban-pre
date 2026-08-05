@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 from PIL import Image
 
-from src.calculation_book.models import CalculationBookParams
+from src.calculation_book.models import CalculationBookParams, ReinforcementSource
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
@@ -2129,6 +2129,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
     tmp_path: Path,
 ) -> None:
     observed_ai_options: list[tuple[bool, int | None]] = []
+    observed_job_options: list[dict[str, object]] = []
 
     class CalculationProcessor:
         def __call__(self, job: Job) -> None:
@@ -2151,6 +2152,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                     ),
                 )
             )
+            observed_job_options.append(dict(job.options))
             job.mark_running(stage="VALIDATE_ARCHIVE")
             job.progress.percent = 80
             job.progress.details.update(
@@ -2221,18 +2223,32 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
 
     def fake_calculation_book_preflight(**kwargs):
         assert kwargs["include_slab_stress"] is True
+        reinforcement_source = kwargs["reinforcement_source"]
+        assert isinstance(reinforcement_source, ReinforcementSource)
         assert kwargs["archive_path"].suffix == ".rar"
         archive_name = kwargs["archive_path"].name
         uncountable = archive_name.startswith("uncountable-")
         manual_review = archive_name.startswith("manual-")
-        requires_ai = archive_name.startswith("nonstandard-") or uncountable
+        requires_ai = (
+            reinforcement_source is ReinforcementSource.PROVIDED
+            and (archive_name.startswith("nonstandard-") or uncountable)
+        )
+        requires_ai_recommendation = (
+            reinforcement_source is ReinforcementSource.AI_SUGGESTED
+        )
         return {
+            "reinforcement_source": reinforcement_source.value,
             "figure_count": 3,
             "zero_figure_count": 1,
             "wall_count": 1,
-            "reinforcement_workbook": "计算书模板文件.xlsx",
+            "reinforcement_workbook": (
+                None
+                if requires_ai_recommendation
+                else "计算书模板文件.xlsx"
+            ),
             "reinforcement_issue_row_count": 1 if requires_ai else 0,
             "requires_ai_normalization": requires_ai,
+            "requires_ai_recommendation": requires_ai_recommendation,
             "ai_reinforcement_expected_source_row_count": (
                 40 if requires_ai and not uncountable else None
             ),
@@ -2377,6 +2393,43 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             "archive": ["无法可靠统计非标准配筋表数据行"]
         }
         assert runtime._calculation_preflight_tokens == {}
+
+        slab_mismatch_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "nonstandard-slab-mismatch.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        slab_mismatch_token = slab_mismatch_preflight.json()["preflight_token"]
+        slab_mismatch_archive = Path(
+            runtime._calculation_preflight_tokens[slab_mismatch_token][
+                "archive_path"
+            ]
+        )
+        slab_mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "include_slab_stress": False,
+                        "preflight_token": slab_mismatch_token,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert slab_mismatch_response.status_code == 422
+        assert slab_mismatch_response.json()["detail"]["param_errors"][
+            "include_slab_stress"
+        ] == ["楼板应力选项已变化，请重新预检"]
+        assert slab_mismatch_token not in runtime._calculation_preflight_tokens
+        assert not slab_mismatch_archive.exists()
 
         nonstandard_preflight = client.post(
             "/api/jobs/calculation-books/preflight",
@@ -2652,6 +2705,134 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
         assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
             "请先完成计算书文件预检"
         ]
+
+        ai_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+            },
+            files={
+                "archive": (
+                    "ai-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert ai_preflight.status_code == 200, ai_preflight.text
+        assert ai_preflight.json()["requires_ai_recommendation"] is True
+        ai_token = ai_preflight.json()["preflight_token"]
+        assert runtime._calculation_preflight_tokens[ai_token][
+            "reinforcement_source"
+        ] == "ai_suggested"
+
+        source_mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "provided",
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert source_mismatch_response.status_code == 422
+        assert source_mismatch_response.json()["detail"]["param_errors"][
+            "reinforcement_source"
+        ] == ["配筋来源已变化，请重新预检"]
+
+        ai_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+            },
+            files={
+                "archive": (
+                    "ai-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        ai_token = ai_preflight.json()["preflight_token"]
+        forged_options_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "ai_suggested",
+                        "options": {
+                            "candidates": ["client-forged"],
+                            "skill_id": "client-forged",
+                            "failure_count": 999,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert forged_options_response.status_code == 422
+        assert "options" in forged_options_response.json()["detail"][
+            "param_errors"
+        ]
+        assert ai_token in runtime._calculation_preflight_tokens
+
+        ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "ai_suggested",
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert ai_response.status_code == 201, ai_response.text
+        ai_detail = _poll_job(
+            client,
+            ai_response.json()["jobs"][0]["job_id"],
+        )
+        assert ai_detail["status"] == "succeeded"
+
+        ai_options = next(
+            item
+            for item in observed_job_options
+            if item.get("reinforcement_source") == "ai_suggested"
+        )
+        assert ai_options == {
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+            "ai_reinforcement_normalization": False,
+            "ai_rebar_suggestion": True,
+        }
+        provided_options = [
+            item
+            for item in observed_job_options
+            if item.get("reinforcement_source") == "provided"
+        ]
+        assert any(
+            item.get("ai_reinforcement_normalization") is True
+            and "ai_rebar_suggestion" not in item
+            for item in provided_options
+        )
+        assert any(
+            item["ai_reinforcement_normalization"] is False
+            and "ai_rebar_suggestion" not in item
+            for item in provided_options
+        )
 
 
 def test_download_standard_reinforcement_template_is_authenticated_and_fixed(

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
 
+from .models import ReinforcementSource
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 _FIGURE_NAME = re.compile(
     r"^(?P<prefix>[A-Za-z]+)(?P<number>\d+)(?P<suffix>[A-Za-z]?)"
@@ -70,7 +72,7 @@ class CalculationArchiveContents:
     reinforcement_figures: tuple[ReinforcementFigure, ...]
     slab_figures: tuple[SlabReinforcementFigure, ...]
     ignored_root_images: tuple[Path, ...]
-    reinforcement_workbook: Path
+    reinforcement_workbook: Path | None
     layout_image: Path
     model_image: Path
     extracted_files: tuple[Path, ...]
@@ -321,6 +323,38 @@ def _normalize_elevation(value: str) -> tuple[str, Decimal]:
     return normalized, decimal_value
 
 
+def _validate_slab_figure_groups(
+    slab_figures: list[SlabReinforcementFigure],
+) -> None:
+    required_keys = ("TOP-X", "TOP-Y", "BOTTOM-X", "BOTTOM-Y", "Z")
+    groups: dict[str, set[str]] = {}
+    for figure in slab_figures:
+        key = (
+            "Z"
+            if figure.position is None
+            else f"{figure.position}-{figure.direction}"
+        )
+        keys = groups.setdefault(figure.elevation, set())
+        if key in keys:
+            raise InvalidCalculationArchive(
+                f"楼板标高 {figure.elevation} 存在重复图片：{key}"
+            )
+        keys.add(key)
+
+    for elevation, keys in groups.items():
+        missing = [key for key in required_keys if key not in keys]
+        if missing:
+            raise InvalidCalculationArchive(
+                f"楼板标高 {elevation} 缺少 {'/'.join(missing)} 应力图片"
+            )
+        has_middle_x = "MIDDLE-X" in keys
+        has_middle_y = "MIDDLE-Y" in keys
+        if has_middle_x != has_middle_y:
+            raise InvalidCalculationArchive(
+                f"楼板标高 {elevation} 的 MIDDLE-X/Y 图片必须成对出现"
+            )
+
+
 def _content_root(
     extraction_root: Path,
     extracted: list[Path],
@@ -349,8 +383,10 @@ def validate_and_extract_archive(
     archive_path: Path,
     destination: Path,
     *,
+    reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
     limits: ArchiveLimits | None = None,
 ) -> CalculationArchiveContents:
+    active_reinforcement_source = ReinforcementSource(reinforcement_source)
     active_limits = limits or ArchiveLimits()
     if zipfile.is_zipfile(archive_path):
         resolved_root, extracted = _extract_zip(
@@ -446,9 +482,15 @@ def validate_and_extract_archive(
         )
     figures.sort(key=lambda item: item.sort_key)
     slab_figures.sort(key=lambda item: item.sort_key)
+    _validate_slab_figure_groups(slab_figures)
     figure_groups: dict[str, set[str]] = {}
     for figure in figures:
-        figure_groups.setdefault(figure.wall_id, set()).add(figure.direction)
+        directions = figure_groups.setdefault(figure.wall_id, set())
+        if figure.direction in directions:
+            raise InvalidCalculationArchive(
+                f"ZIP 根目录的 {figure.wall_id} 存在重复 {figure.direction} 方向配筋图片"
+            )
+        directions.add(figure.direction)
     if not figure_groups:
         raise InvalidCalculationArchive("ZIP 根目录没有可识别的墙体 X/Y/Z 配筋图片")
     for wall_id, directions in figure_groups.items():
@@ -461,19 +503,32 @@ def validate_and_extract_archive(
                 f"{'/'.join(missing_directions)} 方向配筋图片"
             )
 
-    reinforcement_workbooks = sorted(
+    root_xlsx_files = sorted(
         path
         for path in extracted
         if (
             path.parent == content_root
             and path.suffix.lower() == ".xlsx"
-            and not path.name.startswith("~$")
         )
     )
-    if not reinforcement_workbooks:
-        raise InvalidCalculationArchive("ZIP 根目录缺少墙体配筋表")
-    if len(reinforcement_workbooks) > 1:
-        raise InvalidCalculationArchive("ZIP 根目录只能包含一个墙体配筋表")
+    if active_reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+        archive_xlsx_files = [
+            path for path in extracted if path.suffix.lower() == ".xlsx"
+        ]
+        if archive_xlsx_files:
+            raise InvalidCalculationArchive(
+                "无实配钢筋模式不得包含 Excel 配筋表"
+            )
+        reinforcement_workbook = None
+    else:
+        reinforcement_workbooks = [
+            path for path in root_xlsx_files if not path.name.startswith("~$")
+        ]
+        if not reinforcement_workbooks:
+            raise InvalidCalculationArchive("ZIP 根目录缺少墙体配筋表")
+        if len(reinforcement_workbooks) > 1:
+            raise InvalidCalculationArchive("ZIP 根目录只能包含一个墙体配筋表")
+        reinforcement_workbook = reinforcement_workbooks[0]
 
     folder_01 = content_root / "01"
     folder_02 = content_root / "02"
@@ -487,7 +542,7 @@ def validate_and_extract_archive(
         reinforcement_figures=tuple(figures),
         slab_figures=tuple(slab_figures),
         ignored_root_images=tuple(sorted(ignored_root_images)),
-        reinforcement_workbook=reinforcement_workbooks[0],
+        reinforcement_workbook=reinforcement_workbook,
         layout_image=_single_image(folder_01, "01"),
         model_image=_single_image(folder_02, "02"),
         extracted_files=tuple(extracted),

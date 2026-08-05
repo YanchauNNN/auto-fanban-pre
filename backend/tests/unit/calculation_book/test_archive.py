@@ -10,6 +10,7 @@ from src.calculation_book.archive import (
     InvalidCalculationArchive,
     validate_and_extract_archive,
 )
+from src.calculation_book.models import ReinforcementSource
 
 
 def _write_archive(path: Path, entries: dict[str, bytes]) -> Path:
@@ -124,6 +125,51 @@ def test_extracts_mixed_case_middle_as_seven_slab_figures(
         ("BOTTOM", "Y"),
         (None, "Z"),
     }
+
+
+@pytest.mark.parametrize(
+    "reinforcement_source",
+    [ReinforcementSource.PROVIDED, ReinforcementSource.AI_SUGGESTED],
+)
+def test_rejects_incomplete_five_figure_slab_group_for_each_source(
+    tmp_path: Path,
+    reinforcement_source: ReinforcementSource,
+) -> None:
+    entries = _valid_entries()
+    if reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+        entries.pop("计算书模板文件.xlsx")
+    for name in (
+        "11.2-TOP-X.png",
+        "11.2-TOP-Y.png",
+        "11.2-BOTTOM-X.png",
+        "11.2-BOTTOM-Y.png",
+    ):
+        entries[name] = name.encode()
+    archive = _write_archive(tmp_path / "incomplete-slab.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="11.2.*Z"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            reinforcement_source=reinforcement_source,
+        )
+
+
+def test_rejects_unpaired_middle_slab_figure(tmp_path: Path) -> None:
+    entries = _valid_entries()
+    for name in (
+        "11.2-TOP-X.png",
+        "11.2-TOP-Y.png",
+        "11.2-MIDDLE-X.png",
+        "11.2-BOTTOM-X.png",
+        "11.2-BOTTOM-Y.png",
+        "11.2-Z.png",
+    ):
+        entries[name] = name.encode()
+    archive = _write_archive(tmp_path / "unpaired-middle-slab.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="MIDDLE-X/Y.*成对"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
 
 
 @pytest.mark.parametrize(
@@ -262,6 +308,76 @@ def test_rejects_multiple_root_reinforcement_workbooks(tmp_path: Path) -> None:
 
     with pytest.raises(InvalidCalculationArchive, match="只能包含一个"):
         validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+@pytest.mark.parametrize(
+    "reinforcement_source",
+    [ReinforcementSource.PROVIDED, ReinforcementSource.AI_SUGGESTED],
+)
+def test_rejects_duplicate_wall_direction_across_image_extensions(
+    tmp_path: Path,
+    reinforcement_source: ReinforcementSource,
+) -> None:
+    entries = _valid_entries()
+    if reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+        entries.pop("计算书模板文件.xlsx")
+    entries["RX1-X.jpg"] = b"duplicate-x"
+    archive = _write_archive(tmp_path / "duplicate-direction.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="RX1.*重复.*X"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            reinforcement_source=reinforcement_source,
+        )
+
+
+@pytest.mark.parametrize(
+    "reinforcement_source",
+    [ReinforcementSource.AI_SUGGESTED, "ai_suggested"],
+)
+def test_ai_suggested_accepts_archive_without_reinforcement_workbook(
+    tmp_path: Path,
+    reinforcement_source: ReinforcementSource | str,
+) -> None:
+    entries = _valid_entries()
+    entries.pop("计算书模板文件.xlsx")
+    archive = _write_archive(tmp_path / "ai-suggested.zip", entries)
+
+    contents = validate_and_extract_archive(
+        archive,
+        tmp_path / "extracted",
+        reinforcement_source=reinforcement_source,
+    )
+
+    assert contents.reinforcement_workbook is None
+
+
+def test_rejects_unknown_reinforcement_source(tmp_path: Path) -> None:
+    archive = _write_archive(tmp_path / "unknown-source.zip", _valid_entries())
+
+    with pytest.raises(ValueError, match="unsupported.*ReinforcementSource"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            reinforcement_source="unsupported",
+        )
+
+
+def test_ai_suggested_rejects_any_root_reinforcement_workbook(
+    tmp_path: Path,
+) -> None:
+    archive = _write_archive(tmp_path / "ai-with-workbook.zip", _valid_entries())
+
+    with pytest.raises(
+        InvalidCalculationArchive,
+        match="无实配钢筋模式不得包含.*(?:Excel|配筋表)",
+    ):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            reinforcement_source=ReinforcementSource.AI_SUGGESTED,
+        )
 
 
 @pytest.mark.parametrize("folder", ["01", "02"])
