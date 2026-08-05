@@ -63,9 +63,13 @@ def _request_item(
     candidates: tuple[RebarCandidate, ...] | None = None,
     repair_context: AiRebarRepairContext | None = None,
 ) -> AiRebarSuggestionRequestItem:
-    source_candidates = candidates or (
-        _candidate("linear-l1-d18-s200", diameter=18),
-        _candidate("linear-l1-d20-s200", diameter=20),
+    source_candidates = (
+        candidates
+        if candidates is not None
+        else (
+            _candidate("linear-l1-d18-s200", diameter=18),
+            _candidate("linear-l1-d20-s200", diameter=20),
+        )
     )
     return AiRebarSuggestionRequestItem(
         item_id=item_id,
@@ -496,7 +500,35 @@ def test_validation_accepts_a_response_already_parsed_by_the_model_client() -> N
     assert result.selected[0].candidate is candidate
 
 
-def test_validation_preserves_needs_review_as_a_non_error_outcome() -> None:
+def test_request_accepts_an_empty_candidate_set_for_deterministic_review() -> None:
+    item = _request_item(candidates=())
+
+    assert item.candidates == ()
+
+
+def test_request_rejects_a_missing_candidates_field() -> None:
+    payload = _request_item(candidates=()).model_dump(mode="json")
+    del payload["candidates"]
+
+    with pytest.raises(ValidationError):
+        AiRebarSuggestionRequestItem.model_validate(payload)
+
+
+def test_validation_preserves_needs_review_when_no_candidate_exists() -> None:
+    request = _request(items=(_request_item(candidates=()),))
+
+    result = validate_ai_rebar_suggestion_response(
+        _response_text(_review()),
+        request=request,
+        server_candidates={"N5001:Y": ()},
+    )
+
+    assert result.selected == ()
+    assert result.errors == ()
+    assert result.needs_review[0].review_reasons == ("无法确定候选",)
+
+
+def test_validation_rejects_needs_review_when_an_eligible_candidate_exists() -> None:
     candidate = _candidate("linear-l1-d18-s200", diameter=18)
 
     result = validate_ai_rebar_suggestion_response(
@@ -506,8 +538,10 @@ def test_validation_preserves_needs_review_as_a_non_error_outcome() -> None:
     )
 
     assert result.selected == ()
-    assert result.errors == ()
-    assert result.needs_review[0].review_reasons == ("无法确定候选",)
+    assert result.needs_review == ()
+    assert [error.code for error in result.errors] == [
+        RebarSuggestionErrorCode.SCHEMA_INVALID
+    ]
 
 
 @pytest.mark.parametrize(

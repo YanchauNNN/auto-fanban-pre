@@ -149,7 +149,7 @@ class AiRebarSuggestionRequestItem(_StrictModel):
     direction: Literal["X", "Y", "Z"]
     smx: JsonNumber = Field(ge=0)
     target_area: JsonNumber = Field(ge=0)
-    candidates: tuple[AiRebarSuggestionCandidate, ...] = Field(min_length=1)
+    candidates: tuple[AiRebarSuggestionCandidate, ...]
     repair_context: AiRebarRepairContext | None
 
     @model_validator(mode="after")
@@ -351,6 +351,24 @@ def validate_ai_rebar_suggestion_response(
     for response_item in response.items:
         request_item = request_by_id[response_item.item_id]
         if response_item.status == "needs_review":
+            eligible_candidate_ids = tuple(
+                candidate.candidate_id
+                for candidate in request_item.candidates
+                if candidate.actual_area >= request_item.target_area
+            )
+            if eligible_candidate_ids:
+                errors.append(
+                    RebarSuggestionValidationError(
+                        code=RebarSuggestionErrorCode.SCHEMA_INVALID,
+                        message=(
+                            f"{response_item.item_id} 仍有合格候选，"
+                            "不得返回 needs_review"
+                        ),
+                        item_id=response_item.item_id,
+                        better_candidate_ids=eligible_candidate_ids,
+                    )
+                )
+                continue
             needs_review.append(
                 RebarSuggestionNeedsReview(
                     item_id=response_item.item_id,

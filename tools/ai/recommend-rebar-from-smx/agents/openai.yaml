@@ -1,0 +1,4 @@
+interface:
+  display_name: "SMX 配筋建议"
+  short_description: "从精确候选中选择满足SMX裕度与优先级规则的可验算配筋建议"
+  default_prompt: "Use $recommend-rebar-from-smx to select candidate IDs from structured SMX inputs and return strict JSON."
