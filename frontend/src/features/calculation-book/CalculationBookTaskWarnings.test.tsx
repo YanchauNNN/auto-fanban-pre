@@ -189,4 +189,61 @@ describe("CalculationBookTaskWarnings", () => {
     await user.click(screen.getByText("楼板 11.45m").closest("summary") as HTMLElement);
     expect(region).toHaveTextContent("AI 连续三次调用或协议校验失败，顶层水平向建议已留空");
   });
+
+  it("shows twelve high-priority groups first and progressively reveals the rest", async () => {
+    const user = userEvent.setup();
+    const highPriorityWarnings = Array.from({ length: 13 }, (_, index) => ({
+      code: index === 0 ? "OCR_RECOGNITION_FAILED" : "needs_review",
+      scope: "wall" as const,
+      identity: `高优先级-${index + 1}`,
+      direction: "X",
+      sourceSheet: null,
+      sourceRow: null,
+      sourceCells: {},
+      reason: "当前方向配筋建议已留空，请人工复核",
+      blankFields: ["X"],
+    }));
+    const ordinaryWarnings = Array.from({ length: 2 }, (_, index) => ({
+      code: "workbook_only_wall",
+      scope: "wall" as const,
+      identity: `普通提醒-${index + 1}`,
+      direction: null,
+      sourceSheet: "Sheet1",
+      sourceRow: index + 2,
+      sourceCells: { wall: `A${index + 2}` },
+      reason: "配筋表有记录，但应力图没有对应图组",
+      blankFields: [],
+    }));
+
+    render(
+      <CalculationBookTaskWarnings
+        output={{
+          ...aiSuggestedOutput,
+          warningCount: 15,
+          warnings: [ordinaryWarnings[0], ...highPriorityWarnings, ordinaryWarnings[1]],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("墙体 高优先级-12")).toBeInTheDocument();
+    expect(screen.queryByText("墙体 高优先级-13")).not.toBeInTheDocument();
+    expect(screen.queryByText("墙体 普通提醒-1")).not.toBeInTheDocument();
+
+    const revealButton = screen.getByRole("button", { name: "显示其余 3 组" });
+    expect(revealButton).toHaveAttribute("aria-expanded", "false");
+    revealButton.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText("墙体 高优先级-13")).toBeInTheDocument();
+    expect(screen.getByText("墙体 普通提醒-1")).toBeInTheDocument();
+    expect(screen.getByText("墙体 普通提醒-2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起提醒分组" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "收起提醒分组" }));
+    expect(screen.queryByText("墙体 高优先级-13")).not.toBeInTheDocument();
+    expect(screen.queryByText("墙体 普通提醒-1")).not.toBeInTheDocument();
+  });
 });

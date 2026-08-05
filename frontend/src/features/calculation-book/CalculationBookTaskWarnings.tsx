@@ -1,8 +1,25 @@
+import { useState } from "react";
+
 import type {
   CalculationBookOutput,
   CalculationBookWarning,
 } from "../../platform/api/types";
 import styles from "./CalculationBookTaskWarnings.module.css";
+
+const DEFAULT_VISIBLE_GROUP_COUNT = 12;
+const WARNING_GROUPS_ID = "calculation-book-warning-groups";
+const HIGH_PRIORITY_WARNING_CODES = new Set([
+  "OCR_RECOGNITION_FAILED",
+  "NO_ELIGIBLE_CANDIDATE",
+  "AI_NEEDS_REVIEW",
+  "AI_BASE_FAILURE_LIMIT",
+  "UNKNOWN_IMAGE_NAME",
+  "duplicate_reinforcement_rows",
+  "split_image_group",
+  "image_only_wall",
+  "image_only_slab",
+  "needs_review",
+]);
 
 const DIRECTION_LABELS: Readonly<Record<string, string>> = {
   X: "水平筋",
@@ -56,7 +73,19 @@ function groupWarnings(warnings: readonly CalculationBookWarning[]): WarningGrou
       });
     }
   }
-  return Array.from(groups.values());
+  return Array.from(groups.values()).sort(
+    (left, right) => warningGroupPriority(left) - warningGroupPriority(right),
+  );
+}
+
+function warningGroupPriority(group: WarningGroup): number {
+  return group.warnings.some(
+    (warning) =>
+      warning.blankFields.length > 0
+      || HIGH_PRIORITY_WARNING_CODES.has(warning.code),
+  )
+    ? 0
+    : 1;
 }
 
 function warningMessage(warning: CalculationBookWarning): string {
@@ -125,6 +154,8 @@ export function CalculationBookTaskWarnings({
 }: {
   output: CalculationBookOutput | undefined;
 }) {
+  const [showAllGroups, setShowAllGroups] = useState(false);
+
   if (
     !output
     || (!output.aiNormalized && !output.aiRebarSuggestion && output.warningCount === 0)
@@ -133,6 +164,10 @@ export function CalculationBookTaskWarnings({
   }
 
   const groups = groupWarnings(output.warnings);
+  const hiddenGroupCount = Math.max(0, groups.length - DEFAULT_VISIBLE_GROUP_COUNT);
+  const visibleGroups = showAllGroups
+    ? groups
+    : groups.slice(0, DEFAULT_VISIBLE_GROUP_COUNT);
   const normalized = output.aiNormalization;
   const suggested = output.aiRebarSuggestion;
   const isSuggested = output.reinforcementSource === "ai_suggested" || Boolean(suggested);
@@ -201,8 +236,8 @@ export function CalculationBookTaskWarnings({
       ) : null}
 
       {groups.length > 0 ? (
-        <div className={styles.groups}>
-          {groups.map((group) => (
+        <div className={styles.groups} id={WARNING_GROUPS_ID}>
+          {visibleGroups.map((group) => (
             <details className={styles.group} key={group.key}>
               <summary>
                 <span>{group.label}</span>
@@ -232,6 +267,18 @@ export function CalculationBookTaskWarnings({
             </details>
           ))}
         </div>
+      ) : null}
+
+      {hiddenGroupCount > 0 ? (
+        <button
+          aria-controls={WARNING_GROUPS_ID}
+          aria-expanded={showAllGroups}
+          className={styles.groupToggle}
+          type="button"
+          onClick={() => setShowAllGroups((current) => !current)}
+        >
+          {showAllGroups ? "收起提醒分组" : `显示其余 ${hiddenGroupCount} 组`}
+        </button>
       ) : null}
     </section>
   );

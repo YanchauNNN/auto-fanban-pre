@@ -112,6 +112,30 @@
   gap: 10px;
 }
 
+.groupToggle {
+  justify-self: center;
+  min-height: 44px;
+  border: 1px solid rgba(53, 104, 154, 0.24);
+  border-radius: 999px;
+  background: #fff;
+  color: #24577f;
+  padding: 9px 18px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.groupToggle:hover {
+  border-color: rgba(36, 116, 180, 0.48);
+  background: #f1f7fc;
+}
+
+.groupToggle:focus-visible {
+  outline: 3px solid rgba(36, 116, 180, 0.36);
+  outline-offset: 3px;
+}
+
 .group {
   border-top: 1px solid rgba(53, 104, 154, 0.16);
 }
