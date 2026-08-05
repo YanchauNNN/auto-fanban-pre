@@ -8,16 +8,94 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 from openpyxl import Workbook
 
+from src.calculation_book import reinforcement_input
 from src.calculation_book.reinforcement_input import (
     InvalidReinforcementWorkbook,
     NormalizedReinforcementRow,
     ReinforcementRowIssue,
+    build_rebar_configuration,
     build_reinforcement_schedule,
     load_reinforcement_schedule,
     load_slab_reinforcement_schedule,
     parse_linear_rebar_cell,
     parse_rebar_cell,
 )
+
+
+def test_public_configuration_builder_keeps_exact_formula_and_notation() -> None:
+    configuration = build_rebar_configuration(
+        layers=1,
+        diameter=16,
+        spacing_primary=200,
+        spacing_secondary=None,
+        direction="X",
+        is_parenthetical=False,
+    )
+
+    assert configuration.actual_area == pytest.approx(math.pi * 8**2 * 5)
+    assert configuration.canonical_specification == "1D16间距200"
+    assert configuration.narrative_specification == "1排16@200"
+
+    grid = build_rebar_configuration(
+        layers=2,
+        diameter=14,
+        spacing_primary=200,
+        spacing_secondary=400,
+        direction="Z",
+        is_parenthetical=False,
+    )
+    assert grid.actual_area == pytest.approx(2 * math.pi * 7**2 * 5 * 2.5)
+    assert grid.canonical_specification == "2C14间距200*400"
+    assert grid.narrative_specification == "2排14@200x400"
+
+
+def test_public_builder_canonicalizes_reversed_grid_spacing() -> None:
+    configuration = build_rebar_configuration(
+        layers=1,
+        diameter=14,
+        spacing_primary=400,
+        spacing_secondary=200,
+        direction="Z",
+    )
+
+    assert (configuration.spacing_primary, configuration.spacing_secondary) == (
+        200,
+        400,
+    )
+    assert configuration.actual_area == pytest.approx(math.pi * 7**2 * 5 * 2.5)
+    assert configuration.canonical_specification == "1C14间距200*400"
+    assert configuration.narrative_specification == "1排14@200x400"
+
+
+def test_parse_canonicalizes_reversed_grid_spacing() -> None:
+    parsed = parse_rebar_cell("1C14@400x200", direction="Z")
+
+    assert (parsed.selected.spacing_primary, parsed.selected.spacing_secondary) == (
+        200,
+        400,
+    )
+    assert parsed.selected.canonical_specification == "1C14间距200*400"
+    assert parsed.selected.narrative_specification == "1排14@200x400"
+
+
+def test_parse_calls_backward_compatible_configuration_alias(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    def recording_configuration(**kwargs):
+        calls.append(kwargs)
+        return build_rebar_configuration(**kwargs)
+
+    monkeypatch.setattr(
+        reinforcement_input,
+        "_configuration",
+        recording_configuration,
+    )
+
+    parsed = parse_rebar_cell("1D16@200", direction="X")
+
+    assert parsed.selected.canonical_specification == "1D16间距200"
+    assert len(calls) == 1
+    assert calls[0]["diameter"] == 16
 
 
 def test_normalizes_standard_horizontal_and_tie_notation() -> None:

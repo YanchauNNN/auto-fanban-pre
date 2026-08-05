@@ -178,33 +178,39 @@ def _format_direction(direction: str) -> str:
     return normalized
 
 
-def _configuration(
+def build_rebar_configuration(
     *,
     layers: int,
     diameter: int,
     spacing_primary: int,
     spacing_secondary: int | None,
     direction: str,
-    is_parenthetical: bool,
+    is_parenthetical: bool = False,
 ) -> RebarConfiguration:
+    normalized_direction = _format_direction(direction)
     if layers not in {1, 2}:
         raise InvalidReinforcementWorkbook("钢筋层数只允许 1 或 2")
     if layers <= 0 or diameter <= 0 or spacing_primary <= 0:
         raise InvalidReinforcementWorkbook("钢筋层数、直径和间距必须大于 0")
+    if normalized_direction == "Z":
+        if spacing_secondary is None or spacing_secondary <= 0:
+            raise InvalidReinforcementWorkbook("拉筋必须填写两个方向的网格间距")
+        spacing_primary, spacing_secondary = sorted(
+            (spacing_primary, spacing_secondary)
+        )
+    elif spacing_secondary is not None:
+        raise InvalidReinforcementWorkbook("水平筋或竖向筋只能填写一个方向的间距")
 
     bar_area = math.pi * (diameter / 2) ** 2
     actual_area = layers * bar_area * (1000 / spacing_primary)
-    if direction == "Z":
-        if spacing_secondary is None or spacing_secondary <= 0:
-            raise InvalidReinforcementWorkbook("拉筋必须填写两个方向的网格间距")
+    if normalized_direction == "Z":
+        assert spacing_secondary is not None
         actual_area *= 1000 / spacing_secondary
         canonical = (
             f"{layers}C{diameter}间距{spacing_primary}*{spacing_secondary}"
         )
         narrative = f"{layers}排{diameter}@{spacing_primary}x{spacing_secondary}"
     else:
-        if spacing_secondary is not None:
-            raise InvalidReinforcementWorkbook("水平筋或竖向筋只能填写一个方向的间距")
         canonical = f"{layers}D{diameter}间距{spacing_primary}"
         narrative = f"{layers}排{diameter}@{spacing_primary}"
 
@@ -218,6 +224,10 @@ def _configuration(
         actual_area=actual_area,
         is_parenthetical=is_parenthetical,
     )
+
+
+# Backward-compatible alias for callers/tests that still patch the former helper.
+_configuration = build_rebar_configuration
 
 
 def parse_rebar_cell(value: object, *, direction: str) -> ParsedRebarCell:
