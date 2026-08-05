@@ -30,8 +30,8 @@ def test_chat_client_posts_openai_compatible_payload_without_leaking_key(
         def __exit__(self, *args: object) -> None:
             return None
 
-        def read(self) -> bytes:
-            return json.dumps(
+        def read(self, amount: int | None = None) -> bytes:
+            payload = json.dumps(
                 {
                     "choices": [
                         {
@@ -44,6 +44,7 @@ def test_chat_client_posts_openai_compatible_payload_without_leaking_key(
                     "usage": {"prompt_tokens": 11, "completion_tokens": 3},
                 }
             ).encode("utf-8")
+            return payload if amount is None else payload[:amount]
 
     def fake_urlopen(request: Any, timeout: float) -> FakeResponse:
         captured["url"] = request.full_url
@@ -106,8 +107,8 @@ def test_chat_client_sends_tools_and_parses_tool_calls(
         def __exit__(self, *args: object) -> None:
             return None
 
-        def read(self) -> bytes:
-            return json.dumps(
+        def read(self, amount: int | None = None) -> bytes:
+            payload = json.dumps(
                 {
                     "choices": [
                         {
@@ -131,6 +132,7 @@ def test_chat_client_sends_tools_and_parses_tool_calls(
                     ],
                 },
             ).encode("utf-8")
+            return payload if amount is None else payload[:amount]
 
     def fake_urlopen(request: Any, timeout: float) -> FakeResponse:
         captured["body"] = json.loads(request.data.decode("utf-8"))

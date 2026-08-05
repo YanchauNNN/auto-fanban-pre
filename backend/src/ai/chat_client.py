@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from dataclasses import dataclass, field
+from http.client import HTTPException
 from typing import Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -24,12 +26,21 @@ class ChatGatewayError(ChatClientError):
         self.status_code = status_code
 
 
+class ChatGatewayResponseError(ChatGatewayError):
+    """Raised when a gateway response is unsafe or malformed."""
+
+
+class ChatGatewayResponseTooLarge(ChatGatewayResponseError):
+    """Raised before parsing when a gateway response exceeds its byte limit."""
+
+
 class _RejectRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
         return None
 
 
 _NO_REDIRECT_OPENER = build_opener(_RejectRedirectHandler())
+_DEFAULT_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
 def urlopen(request: Request, *, timeout: float) -> Any:
@@ -47,6 +58,7 @@ class ChatClientConfig:
     max_output_tokens: int
     max_retries: int = 1
     retry_backoff_ms: int = 800
+    max_response_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES
 
     def __repr__(self) -> str:
         return (
@@ -57,7 +69,8 @@ class ChatClientConfig:
             f"timeout_seconds={self.timeout_seconds!r}, "
             f"temperature={self.temperature!r}, "
             f"max_output_tokens={self.max_output_tokens!r}, "
-            f"max_retries={self.max_retries!r})"
+            f"max_retries={self.max_retries!r}, "
+            f"max_response_bytes={self.max_response_bytes!r})"
         )
 
 
@@ -109,39 +122,81 @@ class OpenAICompatibleChatClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
-        request = Request(
-            self._chat_completions_url(),
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers=self._headers(),
-            method="POST",
-        )
+        payload_serialization_failed = False
+        try:
+            encoded_payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            payload_serialization_failed = True
+            encoded_payload = b""
+        if payload_serialization_failed:
+            raise ChatGatewayError("model gateway request payload is invalid")
+        request_build_failed = False
+        try:
+            request = Request(
+                self._chat_completions_url(),
+                data=encoded_payload,
+                headers=self._headers(),
+                method="POST",
+            )
+        except ChatGatewayError:
+            raise
+        except ValueError:
+            request_build_failed = True
+            request = None
+        if request_build_failed:
+            raise ChatGatewayError("model gateway request configuration is invalid")
+        assert request is not None
 
         attempts = max(int(self.config.max_retries), 0) + 1
         last_error: ChatClientError | None = None
         for attempt in range(attempts):
+            should_raise = False
             try:
                 with urlopen(request, timeout=float(self.config.timeout_seconds)) as response:
-                    response_payload = json.loads(response.read().decode("utf-8"))
+                    response_body = _read_bounded_response(
+                        response,
+                        max_bytes=self.config.max_response_bytes,
+                    )
+                    response_parse_failed = False
+                    try:
+                        response_payload = json.loads(response_body.decode("utf-8"))
+                    except (UnicodeError, ValueError, RecursionError):
+                        response_parse_failed = True
+                    if response_parse_failed:
+                        response_body = b""
+                        raise ChatGatewayResponseError(
+                            "model gateway returned invalid JSON"
+                        )
                 return _parse_completion_response(response_payload)
-            except TimeoutError as exc:
+            except TimeoutError:
                 last_error = ChatClientTimeout("model gateway timed out")
-                if attempt >= attempts - 1:
-                    raise last_error from exc
+                should_raise = attempt >= attempts - 1
             except HTTPError as exc:
-                body = _redact_secret(_read_error_body(exc), self.config.api_key)
+                with suppress(Exception):
+                    exc.close()
                 last_error = ChatGatewayError(
-                    f"model gateway returned HTTP {exc.code}: {body}",
+                    f"model gateway returned HTTP {exc.code}",
                     status_code=exc.code,
                 )
-                if not _is_retryable_status(exc.code) or attempt >= attempts - 1:
-                    raise last_error from exc
-            except URLError as exc:
-                reason = _redact_secret(str(exc.reason), self.config.api_key)
-                last_error = ChatGatewayError(f"model gateway request failed: {reason}")
-                if attempt >= attempts - 1:
-                    raise last_error from exc
-            except json.JSONDecodeError as exc:
-                raise ChatGatewayError("model gateway returned invalid JSON") from exc
+                should_raise = (
+                    not _is_retryable_status(exc.code) or attempt >= attempts - 1
+                )
+            except HTTPException:
+                last_error = ChatGatewayError(
+                    "model gateway returned an invalid HTTP response"
+                )
+                should_raise = attempt >= attempts - 1
+            except ValueError:
+                last_error = ChatGatewayError(
+                    "model gateway request configuration is invalid"
+                )
+                should_raise = True
+            except URLError:
+                last_error = ChatGatewayError("model gateway request failed")
+                should_raise = attempt >= attempts - 1
+            if should_raise:
+                assert last_error is not None
+                raise last_error
 
         if last_error is not None:
             raise last_error
@@ -155,11 +210,18 @@ class OpenAICompatibleChatClient:
         if self.config.api_key:
             scheme = self.config.authorization_scheme.strip().lower()
             if scheme == "bearer":
-                headers["Authorization"] = f"Bearer {self.config.api_key}"
+                authorization = f"Bearer {self.config.api_key}"
             elif scheme and scheme != "none":
-                headers["Authorization"] = f"{self.config.authorization_scheme} {self.config.api_key}"
+                authorization = (
+                    f"{self.config.authorization_scheme} {self.config.api_key}"
+                )
             else:
-                headers["Authorization"] = self.config.api_key
+                authorization = self.config.api_key
+            if not _is_safe_authorization_header(authorization):
+                raise ChatGatewayError(
+                    "model gateway authorization configuration is invalid"
+                )
+            headers["Authorization"] = authorization
         return headers
 
 
@@ -171,6 +233,7 @@ def build_chat_client(
     temperature: float | None = None,
     max_output_tokens: int | None = None,
     max_retries: int | None = None,
+    max_response_bytes: int | None = None,
 ) -> OpenAICompatibleChatClient:
     """Build a gateway client without exposing gateway credentials."""
 
@@ -180,6 +243,18 @@ def build_chat_client(
     models = spec.resolve_models()
     chat = spec.ai_layer.chat
     model = models.chat.model if model_kind == "chat" else models.structured.model
+    resolved_max_output_tokens = (
+        models.chat.max_output_tokens if max_output_tokens is None else max_output_tokens
+    )
+    if max_response_bytes is not None:
+        resolved_max_response_bytes = max_response_bytes
+    elif max_output_tokens is not None or model_kind == "chat":
+        resolved_max_response_bytes = max(
+            64 * 1024,
+            resolved_max_output_tokens * 16,
+        )
+    else:
+        resolved_max_response_bytes = _DEFAULT_MAX_RESPONSE_BYTES
     return OpenAICompatibleChatClient(
         ChatClientConfig(
             base_url=gateway.base_url,
@@ -187,31 +262,26 @@ def build_chat_client(
             authorization_scheme=gateway.authorization_scheme,
             model=model,
             timeout_seconds=(
-                chat.request_timeout_seconds
-                if timeout_seconds is None
-                else timeout_seconds
+                chat.request_timeout_seconds if timeout_seconds is None else timeout_seconds
             ),
-            temperature=(
-                models.chat.temperature if temperature is None else temperature
-            ),
-            max_output_tokens=(
-                models.chat.max_output_tokens
-                if max_output_tokens is None
-                else max_output_tokens
-            ),
+            temperature=(models.chat.temperature if temperature is None else temperature),
+            max_output_tokens=resolved_max_output_tokens,
             max_retries=0 if max_retries is None else max_retries,
             retry_backoff_ms=gateway.retry_backoff_ms,
+            max_response_bytes=resolved_max_response_bytes,
         )
     )
 
 
-def _parse_completion_response(payload: dict[str, Any]) -> ChatCompletionResult:
+def _parse_completion_response(payload: Any) -> ChatCompletionResult:
+    if not isinstance(payload, dict):
+        raise ChatGatewayResponseError("model gateway response must be an object")
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise ChatGatewayError("model gateway response did not include choices")
+        raise ChatGatewayResponseError("model gateway response did not include choices")
     first = choices[0]
     if not isinstance(first, dict):
-        raise ChatGatewayError("model gateway response choice is invalid")
+        raise ChatGatewayResponseError("model gateway response choice is invalid")
     message = first.get("message")
     content: Any = None
     tool_calls: list[ChatToolCall] = []
@@ -224,7 +294,7 @@ def _parse_completion_response(payload: dict[str, Any]) -> ChatCompletionResult:
     if content is None and tool_calls:
         content = ""
     if not isinstance(content, str):
-        raise ChatGatewayError("model gateway response did not include assistant content")
+        raise ChatGatewayResponseError("model gateway response did not include assistant content")
     usage = payload.get("usage")
     return ChatCompletionResult(
         content=_strip_think_blocks(content),
@@ -238,22 +308,32 @@ def _parse_tool_calls(value: Any) -> list[ChatToolCall]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise ChatGatewayError("model gateway returned invalid tool calls")
+        raise ChatGatewayResponseError("model gateway returned invalid tool calls")
     parsed: list[ChatToolCall] = []
     for index, item in enumerate(value):
         if not isinstance(item, dict) or not isinstance(item.get("function"), dict):
-            raise ChatGatewayError("model gateway returned an invalid tool call")
+            raise ChatGatewayResponseError("model gateway returned an invalid tool call")
         function = item["function"]
         name = function.get("name")
         arguments_raw = function.get("arguments", "{}")
         if not isinstance(name, str) or not name.strip() or not isinstance(arguments_raw, str):
-            raise ChatGatewayError("model gateway returned an invalid tool function")
+            raise ChatGatewayResponseError("model gateway returned an invalid tool function")
+        arguments_parse_failed = False
         try:
             arguments = json.loads(arguments_raw or "{}")
-        except json.JSONDecodeError as exc:
-            raise ChatGatewayError("model gateway returned invalid tool arguments") from exc
+        except (ValueError, RecursionError):
+            arguments_parse_failed = True
+            arguments = None
+        if arguments_parse_failed:
+            arguments_raw = ""
+            function = {}
+            item = {}
+            value = None
+            raise ChatGatewayResponseError(
+                "model gateway returned invalid tool arguments"
+            )
         if not isinstance(arguments, dict):
-            raise ChatGatewayError("model gateway tool arguments must be an object")
+            raise ChatGatewayResponseError("model gateway tool arguments must be an object")
         call_id = item.get("id")
         parsed.append(
             ChatToolCall(
@@ -266,22 +346,36 @@ def _parse_tool_calls(value: Any) -> list[ChatToolCall]:
     return parsed
 
 
-def _read_error_body(exc: HTTPError) -> str:
+def _read_bounded_response(response: Any, *, max_bytes: int) -> bytes:
+    if max_bytes <= 0:
+        raise ChatGatewayResponseError("model gateway response size limit is invalid")
     try:
-        body = exc.read().decode("utf-8", errors="replace").strip()
-    except Exception:
-        body = ""
-    return body[:500]
-
-
-def _redact_secret(value: str, secret: str | None) -> str:
-    if not secret:
-        return value
-    return value.replace(secret, "[REDACTED]")
+        body = response.read(max_bytes + 1)
+    except TypeError:
+        raise ChatGatewayResponseError(
+            "model gateway response does not support bounded reads"
+        ) from None
+    if not isinstance(body, (bytes, bytearray)):
+        body = b""
+        raise ChatGatewayResponseError("model gateway response body is invalid")
+    if len(body) > max_bytes:
+        body = b""
+        raise ChatGatewayResponseTooLarge(
+            "model gateway response exceeded size limit"
+        )
+    return bytes(body)
 
 
 def _is_retryable_status(status_code: int) -> bool:
     return status_code in {408, 429, 500, 502, 503, 504}
+
+
+def _is_safe_authorization_header(value: str) -> bool:
+    try:
+        encoded = value.encode("latin-1")
+    except UnicodeError:
+        return False
+    return len(encoded) <= 8_192 and all(32 <= byte <= 126 for byte in encoded)
 
 
 def _strip_think_blocks(content: str) -> str:

@@ -53,6 +53,11 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert suggestion.request_timeout_seconds == 600
     assert suggestion.max_output_tokens == 65_536
     assert suggestion.temperature == 0
+    assert suggestion.max_skill_bytes == 131_072
+    assert suggestion.max_reference_files == 8
+    assert suggestion.max_request_bytes == 1_048_576
+    assert suggestion.max_response_bytes == 1_048_576
+    assert suggestion.max_identifier_chars == 200
     assert suggestion.max_consecutive_base_failures == 3
     assert suggestion.log_dir == (
         REPO_ROOT / "storage" / "logs" / "calculation-book-ai-suggestion"
@@ -120,6 +125,11 @@ def test_calculation_book_ai_normalization_accepts_valid_env_override(
         ("batch_size", 0),
         ("request_timeout_seconds", 0),
         ("max_output_tokens", 0),
+        ("max_skill_bytes", 0),
+        ("max_reference_files", 0),
+        ("max_request_bytes", 0),
+        ("max_response_bytes", 0),
+        ("max_identifier_chars", 0),
         ("max_consecutive_base_failures", 0),
         ("log_max_bytes", 0),
         ("log_retention_days", 0),
