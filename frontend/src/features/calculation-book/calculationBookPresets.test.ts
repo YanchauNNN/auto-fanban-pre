@@ -87,6 +87,14 @@ const schema = {
       required: false,
       defaultValue: "false",
     },
+    {
+      key: "reinforcement_source",
+      label: "Reinforcement source",
+      type: "select",
+      required: false,
+      defaultValue: "provided",
+      options: ["provided", "ai_suggested"],
+    },
   ],
   archive: {
     accept: [".zip", ".rar"],
@@ -129,6 +137,7 @@ describe("calculationBookPresets", () => {
       design_phase: "construction",
       derived_title: "Stale derived title",
       include_slab_stress: "true",
+      reinforcement_source: "ai_suggested",
       removed_legacy_field: "legacy",
     });
 
@@ -141,6 +150,7 @@ describe("calculationBookPresets", () => {
       section_type: "slab",
       design_phase: "construction",
       include_slab_stress: "true",
+      reinforcement_source: "ai_suggested",
     });
 
     saveCalculationBookPreset(created);
@@ -169,6 +179,7 @@ describe("calculationBookPresets", () => {
       values: {
         project_no: "2026",
         include_slab_stress: "true",
+        reinforcement_source: "provided",
       },
     });
   });
@@ -237,6 +248,7 @@ describe("calculationBookPresets", () => {
         design_phase: "construction",
         derived_title: "Current derived title",
         include_slab_stress: "false",
+        reinforcement_source: "ai_suggested",
         removed_current_field: "remove me",
       },
       preset({
@@ -260,7 +272,20 @@ describe("calculationBookPresets", () => {
       design_phase: "construction",
       derived_title: "Current derived title",
       include_slab_stress: "true",
+      reinforcement_source: "provided",
     });
+  });
+
+  it("uses the safe provided default when an old preset lacks reinforcement source", () => {
+    const applied = applyCalculationBookPreset(
+      schema,
+      {
+        reinforcement_source: "ai_suggested",
+      },
+      preset({ values: { include_slab_stress: "true" } }),
+    );
+
+    expect(applied.reinforcement_source).toBe("provided");
   });
 
   it("falls invalid select values back to each field default or an empty string", () => {

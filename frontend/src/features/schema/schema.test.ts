@@ -479,6 +479,39 @@ describe("normalizeFormSchema", () => {
       }),
     ]);
   });
+
+  it("preserves the calculation-book reinforcement source enum and safe default", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "reinforcement_source",
+            label: "配筋来源",
+            type: "select",
+            required: false,
+            default: "provided",
+            options: ["provided", "ai_suggested"],
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields).toEqual([
+      expect.objectContaining({
+        key: "reinforcement_source",
+        type: "select",
+        defaultValue: "provided",
+        options: ["provided", "ai_suggested"],
+      }),
+    ]);
+  });
 });
 
 describe("evaluateRequiredWhen", () => {

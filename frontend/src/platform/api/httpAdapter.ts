@@ -50,6 +50,7 @@ import type {
   PersonnelSnapshot,
   PingStatus,
   ReplacementState,
+  ReinforcementSource,
   SubmissionParams,
   TaskGroupDetail,
   TaskGroupList,
@@ -85,12 +86,14 @@ type RawArtifacts = {
   report_available: boolean;
   replaced_dwg_available: boolean;
   calculation_docx_available?: boolean | null;
+  calculation_log_available?: boolean | null;
   package_download_url?: string | null;
   ied_download_url?: string | null;
   preview_download_url?: string | null;
   report_download_url?: string | null;
   replaced_dwg_download_url?: string | null;
   calculation_docx_download_url?: string | null;
+  calculation_log_download_url?: string | null;
 };
 
 type RawJobSummary = {
@@ -213,6 +216,7 @@ type RawJobDetail = RawJobSummary & {
     message?: string | null;
   } | null;
   calculation_book_output?: {
+    reinforcement_source?: ReinforcementSource | null;
     figure_count?: number | null;
     template_type?: string | null;
     output_filename?: string | null;
@@ -239,6 +243,17 @@ type RawJobDetail = RawJobSummary & {
       normalized_slab_count?: number | null;
       review_warning_count?: number | null;
       duration_ms?: number | null;
+      validation?: string | null;
+    } | null;
+    ai_rebar_suggestion?: {
+      skill_id?: string | null;
+      skill_version?: string | null;
+      skill_sha256?: string | null;
+      model?: string | null;
+      call_count?: number | null;
+      suggested_direction_count?: number | null;
+      blank_direction_count?: number | null;
+      repair_round_count?: number | null;
       validation?: string | null;
     } | null;
   } | null;
@@ -1079,7 +1094,10 @@ export class HttpAdapter implements ApiAdapter {
 
   async preflightCalculationBook(
     archive: File,
-    options: { includeSlabStress: boolean },
+    options: {
+      includeSlabStress: boolean;
+      reinforcementSource: ReinforcementSource;
+    },
   ): Promise<CalculationBookPreflightResult> {
     const formData = new FormData();
     formData.append("archive", archive);
@@ -1087,10 +1105,15 @@ export class HttpAdapter implements ApiAdapter {
       "include_slab_stress",
       String(options.includeSlabStress),
     );
+    formData.append("reinforcement_source", options.reinforcementSource);
     const payload = await this.fetchJson<{
       preflight_token: string;
+      reinforcement_source?: ReinforcementSource | null;
+      requires_ai_recommendation?: boolean | null;
       figure_count: number;
+      wall_direction_figure_count?: number | null;
       zero_figure_count: number;
+      z_zero_or_missing_smx_count?: number | null;
       wall_count: number;
       reinforcement_source_row_count?: number;
       reinforcement_normalized_row_count?: number;
@@ -1127,8 +1150,20 @@ export class HttpAdapter implements ApiAdapter {
       workbook_only_wall_ids?: string[];
       requires_wall_count_confirmation?: boolean;
       slab_figure_count: number;
+      slab_zero_figure_count?: number | null;
       slab_elevation_count: number;
-      reinforcement_workbook: string;
+      slab_actual_group_count?: number | null;
+      reinforcement_workbook: string | null;
+      requires_ocr_review?: boolean | null;
+      ignored_root_images?: string[] | null;
+      review_items?: Array<{
+        code?: string | null;
+        scope?: string | null;
+        identity?: string | null;
+        direction?: string | null;
+        image_filename?: string | null;
+        reason?: string | null;
+      }> | null;
       requires_manual_confirmation: boolean;
       confirmations: Array<{
         wall_id: string;
@@ -1154,8 +1189,8 @@ export class HttpAdapter implements ApiAdapter {
         suggested_source_row: number | null;
         directions: Record<string, {
           image_filename: string;
-          smn: number;
-          smx: number;
+          smn: number | null;
+          smx: number | null;
           legend_values: number[];
           is_zero_result: boolean;
           source_cell?: string | null;
@@ -1171,8 +1206,8 @@ export class HttpAdapter implements ApiAdapter {
         position: "TOP" | "MIDDLE" | "BOTTOM" | null;
         direction: "X" | "Y" | "Z";
         image_filename: string;
-        smn: number;
-        smx: number;
+        smn: number | null;
+        smx: number | null;
         legend_values: number[];
         is_zero_result: boolean;
         source_row: number | null;
@@ -1192,8 +1227,8 @@ export class HttpAdapter implements ApiAdapter {
     const mapDirections = (
       directions: Record<string, {
         image_filename?: string;
-        smn?: number;
-        smx?: number;
+        smn?: number | null;
+        smx?: number | null;
         legend_values?: number[];
         is_zero_result?: boolean;
         source_cell?: string | null;
@@ -1211,8 +1246,8 @@ export class HttpAdapter implements ApiAdapter {
         const item = directions[direction];
         return {
           imageFilename: item?.image_filename ?? "",
-          smn: item?.smn ?? 0,
-          smx: item?.smx ?? 0,
+          smn: finiteNumberOrNull(item?.smn),
+          smx: finiteNumberOrNull(item?.smx),
           legendValues: item?.legend_values ?? [],
           isZeroResult: item?.is_zero_result ?? false,
           sourceCell: item?.source_cell ?? "",
@@ -1230,8 +1265,16 @@ export class HttpAdapter implements ApiAdapter {
     };
     return {
       preflightToken: payload.preflight_token,
+      reinforcementSource:
+        payload.reinforcement_source ?? options.reinforcementSource,
+      requiresAiRecommendation:
+        payload.requires_ai_recommendation ?? false,
       figureCount: payload.figure_count,
+      wallDirectionFigureCount:
+        payload.wall_direction_figure_count ?? payload.figure_count,
       zeroFigureCount: payload.zero_figure_count,
+      zZeroOrMissingSmxCount:
+        payload.z_zero_or_missing_smx_count ?? 0,
       wallCount: payload.wall_count,
       reinforcementSourceRowCount:
         payload.reinforcement_source_row_count ?? payload.wall_count,
@@ -1282,8 +1325,21 @@ export class HttpAdapter implements ApiAdapter {
       requiresWallCountConfirmation:
         payload.requires_wall_count_confirmation ?? false,
       slabFigureCount: payload.slab_figure_count ?? 0,
+      slabZeroFigureCount: payload.slab_zero_figure_count ?? 0,
       slabElevationCount: payload.slab_elevation_count ?? 0,
+      slabActualGroupCount:
+        payload.slab_actual_group_count ?? payload.slab_elevation_count ?? 0,
       reinforcementWorkbook: payload.reinforcement_workbook,
+      requiresOcrReview: payload.requires_ocr_review ?? false,
+      ignoredRootImages: payload.ignored_root_images ?? [],
+      reviewItems: (payload.review_items ?? []).map((item) => ({
+        code: item.code ?? "ocr_review_required",
+        scope: item.scope ?? "wall",
+        identity: item.identity ?? "",
+        direction: item.direction ?? null,
+        imageFilename: item.image_filename ?? "",
+        reason: item.reason ?? "需要人工复核",
+      })),
       requiresManualConfirmation: payload.requires_manual_confirmation,
       confirmations: payload.confirmations.map((confirmation) => ({
         wallId: confirmation.wall_id,
@@ -1313,8 +1369,14 @@ export class HttpAdapter implements ApiAdapter {
         position: item.position,
         direction: item.direction,
         imageFilename: item.image_filename,
-        smn: item.smn,
-        smx: item.smx,
+        smn:
+          typeof item.smn === "number" && Number.isFinite(item.smn)
+            ? item.smn
+            : null,
+        smx:
+          typeof item.smx === "number" && Number.isFinite(item.smx)
+            ? item.smx
+            : null,
         legendValues: item.legend_values,
         isZeroResult: item.is_zero_result,
         sourceRow:
@@ -1482,6 +1544,8 @@ export class HttpAdapter implements ApiAdapter {
       factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
       calculationBookOutput: payload.calculation_book_output
         ? {
+            reinforcementSource:
+              payload.calculation_book_output.reinforcement_source ?? "provided",
             figureCount: Number(payload.calculation_book_output.figure_count ?? 0),
             templateType: payload.calculation_book_output.template_type ?? "",
             outputFilename: payload.calculation_book_output.output_filename ?? "",
@@ -1527,6 +1591,35 @@ export class HttpAdapter implements ApiAdapter {
                   ),
                   validation:
                     payload.calculation_book_output.ai_normalization.validation ?? "",
+                }
+              : null,
+            aiRebarSuggestion: payload.calculation_book_output.ai_rebar_suggestion
+              ? {
+                  skillId:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_id ?? "",
+                  skillVersion:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_version ?? "",
+                  skillSha256:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_sha256 ?? "",
+                  model:
+                    payload.calculation_book_output.ai_rebar_suggestion.model ?? "",
+                  callCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion.call_count ?? 0,
+                  ),
+                  suggestedDirectionCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .suggested_direction_count ?? 0,
+                  ),
+                  blankDirectionCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .blank_direction_count ?? 0,
+                  ),
+                  repairRoundCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .repair_round_count ?? 0,
+                  ),
+                  validation:
+                    payload.calculation_book_output.ai_rebar_suggestion.validation ?? "",
                 }
               : null,
           }
@@ -1738,6 +1831,7 @@ export class HttpAdapter implements ApiAdapter {
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
         calculationDocxAvailable: payload.artifacts.calculation_docx_available ?? false,
+        calculationLogAvailable: payload.artifacts.calculation_log_available ?? false,
         packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
         iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
         previewDownloadUrl: this.resolveUrl(payload.artifacts.preview_download_url),
@@ -1745,6 +1839,9 @@ export class HttpAdapter implements ApiAdapter {
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
         calculationDocxDownloadUrl: this.resolveUrl(
           payload.artifacts.calculation_docx_download_url,
+        ),
+        calculationLogDownloadUrl: this.resolveUrl(
+          payload.artifacts.calculation_log_download_url,
         ),
       },
       retryAvailable: payload.retry_available,

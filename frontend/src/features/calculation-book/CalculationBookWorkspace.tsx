@@ -625,6 +625,10 @@ export function CalculationBookWorkspace({
         {
           includeSlabStress:
             String(values.include_slab_stress ?? "false") === "true",
+          reinforcementSource:
+            values.reinforcement_source === "ai_suggested"
+              ? "ai_suggested"
+              : "provided",
         },
       );
       setPreflight(result);

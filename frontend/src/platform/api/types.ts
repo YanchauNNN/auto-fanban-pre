@@ -1,6 +1,7 @@
 export type TaskKind = "deliverable" | "audit_check" | "audit_replace" | "calculation_book";
 export type TaskIntent = TaskKind;
 export type PreviewMode = "plain" | "annotated";
+export type ReinforcementSource = "provided" | "ai_suggested";
 
 export type FormFieldType =
   | "text"
@@ -39,8 +40,8 @@ export type CalculationBookSchema = {
 
 export type CalculationBookDirectionEvidence = {
   imageFilename: string;
-  smn: number;
-  smx: number;
+  smn: number | null;
+  smx: number | null;
   legendValues: readonly number[];
   isZeroResult: boolean;
   sourceCell: string;
@@ -86,8 +87,12 @@ export type CalculationBookNormalizationIssue = {
 
 export type CalculationBookPreflightResult = {
   preflightToken: string;
+  reinforcementSource: ReinforcementSource;
+  requiresAiRecommendation: boolean;
   figureCount: number;
+  wallDirectionFigureCount: number;
   zeroFigureCount: number;
+  zZeroOrMissingSmxCount: number;
   wallCount: number;
   reinforcementSourceRowCount: number;
   reinforcementNormalizedRowCount: number;
@@ -107,8 +112,13 @@ export type CalculationBookPreflightResult = {
   workbookOnlyWallIds: readonly string[];
   requiresWallCountConfirmation: boolean;
   slabFigureCount: number;
+  slabZeroFigureCount: number;
   slabElevationCount: number;
-  reinforcementWorkbook: string;
+  slabActualGroupCount: number;
+  reinforcementWorkbook: string | null;
+  requiresOcrReview: boolean;
+  ignoredRootImages: readonly string[];
+  reviewItems: readonly CalculationBookReviewItem[];
   requiresManualConfirmation: boolean;
   confirmations: readonly {
     wallId: string;
@@ -129,6 +139,15 @@ export type CalculationBookPreflightResult = {
     code: string;
     filenames: readonly string[];
   }[];
+};
+
+export type CalculationBookReviewItem = {
+  code: string;
+  scope: "wall" | "slab" | string;
+  identity: string;
+  direction: string | null;
+  imageFilename: string;
+  reason: string;
 };
 
 export type CalculationBookFormatInspection = {
@@ -528,15 +547,18 @@ export type JobArtifacts = {
   reportAvailable: boolean;
   replacedDwgAvailable: boolean;
   calculationDocxAvailable?: boolean;
+  calculationLogAvailable?: boolean;
   packageDownloadUrl?: string | null;
   iedDownloadUrl?: string | null;
   previewDownloadUrl?: string | null;
   reportDownloadUrl?: string | null;
   replacedDwgDownloadUrl?: string | null;
   calculationDocxDownloadUrl?: string | null;
+  calculationLogDownloadUrl?: string | null;
 };
 
 export type CalculationBookOutput = {
+  reinforcementSource: ReinforcementSource;
   figureCount: number;
   templateType: string;
   outputFilename: string;
@@ -544,6 +566,19 @@ export type CalculationBookOutput = {
   warningCount: number;
   warnings: readonly CalculationBookWarning[];
   aiNormalization: CalculationBookAiNormalization | null;
+  aiRebarSuggestion: CalculationBookAiRebarSuggestion | null;
+};
+
+export type CalculationBookAiRebarSuggestion = {
+  skillId: string;
+  skillVersion: string;
+  skillSha256: string;
+  model: string;
+  callCount: number;
+  suggestedDirectionCount: number;
+  blankDirectionCount: number;
+  repairRoundCount: number;
+  validation: string;
 };
 
 export type CalculationBookWarning = {
@@ -1006,7 +1041,10 @@ export type ApiAdapter = {
   ) => Promise<CreateBatchPayload>;
   preflightCalculationBook?: (
     archive: File,
-    options: { includeSlabStress: boolean },
+    options: {
+      includeSlabStress: boolean;
+      reinforcementSource: ReinforcementSource;
+    },
   ) => Promise<CalculationBookPreflightResult>;
   listTaskGroups?: () => Promise<TaskGroupList>;
   getTaskGroupDetail?: (groupId: string) => Promise<TaskGroupDetail>;

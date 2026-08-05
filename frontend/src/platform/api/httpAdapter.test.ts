@@ -279,8 +279,12 @@ describe("HttpAdapter", () => {
       text: async () =>
         JSON.stringify({
           preflight_token: "preflight-1",
+          reinforcement_source: "provided",
+          requires_ai_recommendation: false,
           figure_count: 3,
+          wall_direction_figure_count: 3,
           zero_figure_count: 1,
+          z_zero_or_missing_smx_count: 1,
           wall_count: 1,
           reinforcement_source_row_count: 315,
           reinforcement_normalized_row_count: 314,
@@ -326,7 +330,9 @@ describe("HttpAdapter", () => {
           workbook_only_wall_ids: ["N0001"],
           requires_wall_count_confirmation: true,
           slab_figure_count: 1,
+          slab_zero_figure_count: 0,
           slab_elevation_count: 1,
+          slab_actual_group_count: 1,
           reinforcement_workbook: "计算书模板文件.xlsx",
           requires_manual_confirmation: false,
           confirmations: [],
@@ -379,11 +385,18 @@ describe("HttpAdapter", () => {
 
     const result = await adapter.preflightCalculationBook(archive, {
       includeSlabStress: true,
+      reinforcementSource: "provided",
     });
 
     expect(result.preflightToken).toBe("preflight-1");
     expect(result).toEqual(
       expect.objectContaining({
+        reinforcementSource: "provided",
+        requiresAiRecommendation: false,
+        wallDirectionFigureCount: 3,
+        zZeroOrMissingSmxCount: 1,
+        slabZeroFigureCount: 0,
+        slabActualGroupCount: 1,
         reinforcementSourceRowCount: 315,
         reinforcementNormalizedRowCount: 314,
         reinforcementUniqueWallCount: 314,
@@ -452,6 +465,85 @@ describe("HttpAdapter", () => {
     expect(url).toBe("http://127.0.0.1:8000/api/jobs/calculation-books/preflight");
     expect((init.body as FormData).get("archive")).toBe(archive);
     expect((init.body as FormData).get("include_slab_stress")).toBe("true");
+    expect((init.body as FormData).get("reinforcement_source")).toBe("provided");
+  });
+
+  it("maps an image-only AI preflight without inventing an Excel workbook", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        preflight_token: "preflight-ai-1",
+        reinforcement_source: "ai_suggested",
+        requires_ai_recommendation: true,
+        requires_ai_normalization: false,
+        figure_count: 177,
+        wall_direction_figure_count: 177,
+        zero_figure_count: 2,
+        z_zero_or_missing_smx_count: 3,
+        wall_count: 59,
+        reinforcement_workbook: null,
+        reinforcement_source_row_count: 0,
+        reinforcement_normalized_row_count: 0,
+        reinforcement_issue_row_count: 0,
+        reinforcement_unique_wall_count: 0,
+        normalization_triggered: false,
+        normalization_skill_id: null,
+        normalization_issues: [],
+        image_wall_group_count: 59,
+        image_unique_wall_count: 59,
+        matched_unique_wall_count: 0,
+        image_only_wall_ids: [],
+        workbook_only_wall_ids: [],
+        requires_wall_count_confirmation: false,
+        requires_manual_confirmation: false,
+        requires_ocr_review: true,
+        confirmations: [],
+        walls: [],
+        slab_figure_count: 5,
+        slab_zero_figure_count: 1,
+        slab_elevation_count: 1,
+        slab_actual_group_count: 1,
+        slabs: [],
+        ignored_root_images: ["preview.png"],
+        review_items: [{
+          code: "split_image_group",
+          scope: "wall",
+          identity: "N5012-1",
+          direction: "X",
+          image_filename: "N5012-1-X.png",
+          reason: "-1/-2 图片组需要人工确认",
+        }],
+        warnings: [{ code: "ocr_review_required", filenames: ["N5012-1-X.png"] }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000");
+    const archive = new File(["rar"], "calculation.rar");
+
+    const result = await adapter.preflightCalculationBook(archive, {
+      includeSlabStress: true,
+      reinforcementSource: "ai_suggested",
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      reinforcementSource: "ai_suggested",
+      requiresAiRecommendation: true,
+      requiresAiNormalization: false,
+      reinforcementWorkbook: null,
+      wallDirectionFigureCount: 177,
+      zZeroOrMissingSmxCount: 3,
+      slabFigureCount: 5,
+      slabZeroFigureCount: 1,
+      slabActualGroupCount: 1,
+      requiresOcrReview: true,
+      ignoredRootImages: ["preview.png"],
+      reviewItems: [expect.objectContaining({
+        code: "split_image_group",
+        identity: "N5012-1",
+      })],
+    }));
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.body as FormData).get("reinforcement_source")).toBe("ai_suggested");
   });
 
   it("maps calculation-book AI normalization warnings from completed task details", async () => {
@@ -476,9 +568,13 @@ describe("HttpAdapter", () => {
           report_available: false,
           replaced_dwg_available: false,
           calculation_docx_available: true,
+          calculation_log_available: true,
+          calculation_log_download_url:
+            "/api/jobs/calculation-ai-1/download/calculation-book-log",
         },
         retry_available: false,
         calculation_book_output: {
+          reinforcement_source: "ai_suggested",
           figure_count: 174,
           template_type: "internal_structure",
           output_filename: "计算书.docx",
@@ -509,6 +605,17 @@ describe("HttpAdapter", () => {
             duration_ms: 125,
             validation: "passed",
           },
+          ai_rebar_suggestion: {
+            skill_id: "recommend-rebar-from-smx",
+            skill_version: "1.0.0",
+            skill_sha256: "abc123",
+            model: "structured-test",
+            call_count: 6,
+            suggested_direction_count: 181,
+            blank_direction_count: 1,
+            repair_round_count: 2,
+            validation: "passed_with_warnings",
+          },
         },
       }),
     });
@@ -520,6 +627,7 @@ describe("HttpAdapter", () => {
 
     expect(detail.calculationBookOutput).toEqual(
       expect.objectContaining({
+        reinforcementSource: "ai_suggested",
         aiNormalized: true,
         warningCount: 1,
         warnings: [
@@ -535,8 +643,23 @@ describe("HttpAdapter", () => {
           sourceRowCount: 315,
           normalizedWallCount: 314,
         }),
+        aiRebarSuggestion: expect.objectContaining({
+          skillId: "recommend-rebar-from-smx",
+          skillVersion: "1.0.0",
+          skillSha256: "abc123",
+          callCount: 6,
+          suggestedDirectionCount: 181,
+          blankDirectionCount: 1,
+          repairRoundCount: 2,
+          validation: "passed_with_warnings",
+        }),
       }),
     );
+    expect(detail.artifacts).toEqual(expect.objectContaining({
+      calculationLogAvailable: true,
+      calculationLogDownloadUrl:
+        "http://127.0.0.1:8000/api/jobs/calculation-ai-1/download/calculation-book-log",
+    }));
   });
 
   it("uses a normalized API base URL and resolves relative artifact links", async () => {

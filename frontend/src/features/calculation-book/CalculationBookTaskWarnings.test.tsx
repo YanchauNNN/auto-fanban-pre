@@ -6,6 +6,7 @@ import type { CalculationBookOutput } from "../../platform/api/types";
 import { CalculationBookTaskWarnings } from "./CalculationBookTaskWarnings";
 
 const aiOutput: CalculationBookOutput = {
+  reinforcementSource: "provided",
   figureCount: 12,
   templateType: "internal_structure",
   outputFilename: "计算书.docx",
@@ -58,6 +59,7 @@ const aiOutput: CalculationBookOutput = {
     durationMs: 125,
     validation: "passed",
   },
+  aiRebarSuggestion: null,
 };
 
 describe("CalculationBookTaskWarnings", () => {

@@ -103,10 +103,14 @@ export function applyCalculationBookPreset(
   const nextValues = Object.fromEntries(
     schema.fields.map((field) => {
       const fallback = currentValues[field.key] ?? field.defaultValue ?? "";
+      const missingPresetFallback =
+        field.key === "reinforcement_source"
+          ? field.defaultValue ?? "provided"
+          : fallback;
       const candidate =
         isPresetManagedField(field) && hasOwn(preset.values, field.key)
           ? preset.values[field.key]
-          : fallback;
+          : missingPresetFallback;
       return [field.key, normalizeSelectValue(schema, field, candidate)];
     }),
   );
