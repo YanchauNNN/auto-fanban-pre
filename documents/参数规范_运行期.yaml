@@ -111,7 +111,7 @@ runtime_options:
       max_identifier_chars: { type: int, default: 200, desc: "任务与关联标识最大字符数" }
       max_consecutive_base_failures: { type: int, default: 3, desc: "单个配筋条目连续基础调用失败后留空并提示复核的阈值" }
       log_dir: { type: str, default: "storage/logs/calculation-book-ai-suggestion", desc: "每任务独立 AI 配筋建议审计日志目录，随运行部署根解析" }
-      log_max_bytes: { type: int, default: 10485760, desc: "单个任务 AI 配筋建议审计日志最大字节数" }
+      log_max_bytes: { type: int, default: 10485760, desc: "单个任务 AI 配筋建议审计日志最大字节数；不得低于8192字节，内部固定预留终态记录空间" }
       log_retention_days: { type: int, default: 30, desc: "AI 配筋建议审计日志保留天数" }
 
   plot_assets:

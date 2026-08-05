@@ -45,6 +45,7 @@ class JobArtifacts(BaseModel):
     report_json: Path | None = None
     replaced_dwg: Path | None = None
     calculation_docx: Path | None = None
+    calculation_log: Path | None = None
 
 
 class JobProgress(BaseModel):

@@ -4,6 +4,8 @@
 每个模块完成后必须运行：pytest tests/unit/test_models.py -v
 """
 
+from pathlib import Path
+
 import pytest
 
 from src.models import (
@@ -94,6 +96,21 @@ class TestJob:
 
         assert job.job_type.value == "calculation_book"
         assert job.artifacts.calculation_docx is None
+
+    def test_calculation_book_supports_a_diagnostic_log_artifact(self):
+        job = Job(
+            job_id="calculation-book-log-1",
+            job_type=JobType.CALCULATION_BOOK,
+            project_no="2026",
+        )
+
+        assert job.artifacts.calculation_log is None
+        job.artifacts.calculation_log = Path("output/calculation-book-job.log")
+        payload = job.model_dump(mode="json")
+
+        assert payload["artifacts"]["calculation_log"].endswith(
+            "calculation-book-job.log"
+        )
 
 
 class TestSheetSet:

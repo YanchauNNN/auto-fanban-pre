@@ -390,7 +390,7 @@ class CalculationBookAiSuggestionRuntimeConfig(BaseModel):
     max_identifier_chars: int = Field(default=200, gt=0)
     max_consecutive_base_failures: int = Field(default=3, gt=0)
     log_dir: Path = Path("storage/logs/calculation-book-ai-suggestion")
-    log_max_bytes: int = Field(default=10_485_760, gt=0)
+    log_max_bytes: int = Field(default=10_485_760, ge=8_192)
     log_retention_days: int = Field(default=30, gt=0)
 
 

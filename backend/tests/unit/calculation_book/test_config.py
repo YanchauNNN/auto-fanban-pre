@@ -131,7 +131,7 @@ def test_calculation_book_ai_normalization_accepts_valid_env_override(
         ("max_response_bytes", 0),
         ("max_identifier_chars", 0),
         ("max_consecutive_base_failures", 0),
-        ("log_max_bytes", 0),
+        ("log_max_bytes", 8_191),
         ("log_retention_days", 0),
         ("temperature", -0.01),
         ("temperature", 2.01),
