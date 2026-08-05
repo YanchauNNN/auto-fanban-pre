@@ -28,6 +28,14 @@ const calculationFields = [
   { key: "factory_extreme_max_temperature", label: "历史最高温度", type: "number", required: true, unit: "℃" },
   { key: "site_soil_temperature", label: "场地土温", type: "number", required: true, unit: "℃" },
   {
+    key: "reinforcement_source",
+    label: "配筋来源",
+    type: "select",
+    required: false,
+    defaultValue: "provided",
+    options: ["provided", "ai_suggested"],
+  },
+  {
     key: "include_slab_stress",
     label: "包含楼板应力",
     type: "checkbox",
@@ -60,6 +68,7 @@ const minimalSlabSchema: FormSchema = {
     ...schema.calculationBook,
     fields: [
       calculationFields[0],
+      calculationFields[calculationFields.length - 2],
       calculationFields[calculationFields.length - 1],
     ],
   },
@@ -78,6 +87,7 @@ const presetSchema: FormSchema = {
       calculationFields[1],
       calculationFields[2],
       calculationFields[3],
+      calculationFields[calculationFields.length - 2],
       calculationFields[calculationFields.length - 1],
     ],
   },
@@ -85,8 +95,12 @@ const presetSchema: FormSchema = {
 
 const preflightResult = {
   preflightToken: "calculation-preflight-1",
+  reinforcementSource: "provided" as const,
+  requiresAiRecommendation: false,
   figureCount: 3,
+  wallDirectionFigureCount: 3,
   zeroFigureCount: 1,
+  zZeroOrMissingSmxCount: 1,
   wallCount: 1,
   reinforcementSourceRowCount: 1,
   reinforcementNormalizedRowCount: 1,
@@ -112,7 +126,12 @@ const preflightResult = {
   reinforcementWorkbook: "计算书模板文件.xlsx",
   requiresManualConfirmation: false,
   slabFigureCount: 0,
+  slabZeroFigureCount: 0,
   slabElevationCount: 0,
+  slabActualGroupCount: 0,
+  requiresOcrReview: false,
+  ignoredRootImages: [],
+  reviewItems: [],
   slabs: [],
   confirmations: [],
   warnings: [],
@@ -158,6 +177,72 @@ const preflightResult = {
           canonicalSpecification: "1C14间距400*400",
           narrativeSpecification: "1排14@400x400",
           actualArea: 962.1,
+        },
+      },
+    },
+  ],
+} as const;
+
+const aiPreflightResult = {
+  ...preflightResult,
+  preflightToken: "calculation-ai-preflight-1",
+  reinforcementSource: "ai_suggested" as const,
+  requiresAiRecommendation: true,
+  figureCount: 177,
+  wallDirectionFigureCount: 177,
+  zeroFigureCount: 2,
+  zZeroOrMissingSmxCount: 3,
+  wallCount: 59,
+  reinforcementSourceRowCount: 0,
+  reinforcementNormalizedRowCount: 0,
+  reinforcementIssueRowCount: 0,
+  reinforcementUniqueWallCount: 0,
+  normalizationTriggered: false,
+  normalizationSkillId: null,
+  formatInspection: { wallSheet: null, slabSheet: null, reasons: [] },
+  imageWallGroupCount: 59,
+  imageUniqueWallCount: 59,
+  matchedUniqueWallCount: 0,
+  reinforcementWorkbook: null,
+  requiresOcrReview: true,
+  reviewItems: [
+    {
+      code: "split_image_group",
+      scope: "wall",
+      identity: "N5012-1",
+      direction: "X",
+      imageFilename: "N5012-1-X.png",
+      reason: "-1/-2 图片组需要人工确认",
+    },
+  ],
+  walls: [
+    {
+      ...preflightResult.walls[0],
+      suggestedSourceRow: null,
+      directions: {
+        X: {
+          ...preflightResult.walls[0].directions.X,
+          sourceCell: "",
+          originalText: "",
+          canonicalSpecification: "",
+          narrativeSpecification: "",
+          actualArea: null,
+        },
+        Y: {
+          ...preflightResult.walls[0].directions.Y,
+          sourceCell: "",
+          originalText: "",
+          canonicalSpecification: "",
+          narrativeSpecification: "",
+          actualArea: null,
+        },
+        Z: {
+          ...preflightResult.walls[0].directions.Z,
+          sourceCell: "",
+          originalText: "",
+          canonicalSpecification: "",
+          narrativeSpecification: "",
+          actualArea: null,
         },
       },
     },
@@ -487,6 +572,7 @@ describe("CalculationBookWorkspace", () => {
     await user.selectOptions(screen.getByLabelText("项目代号"), "2016");
     await user.type(screen.getByLabelText("内部编号"), "saved-code");
     await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.click(screen.getByRole("checkbox", { name: "无实配钢筋" }));
     await user.type(screen.getByLabelText("计算书方案名称"), "含楼板方案");
     await user.click(screen.getByRole("button", { name: "保存为新方案" }));
 
@@ -494,6 +580,7 @@ describe("CalculationBookWorkspace", () => {
     await user.clear(screen.getByLabelText("内部编号"));
     await user.type(screen.getByLabelText("内部编号"), "current-code");
     await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.click(screen.getByRole("checkbox", { name: "无实配钢筋" }));
     const archive = new File(["zip"], "business-package.zip", { type: "application/zip" });
     await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
@@ -508,6 +595,7 @@ describe("CalculationBookWorkspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("已应用计算书方案");
     expect(screen.getByText("business-package.zip")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "包含楼板应力" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "无实配钢筋" })).toBeChecked();
     expect(screen.getByLabelText("项目代号")).toHaveValue("2016");
     expect(screen.getByLabelText("项目名称")).toHaveValue("浙江金七门核电厂1、2号机组");
     expect(screen.getByLabelText("内部编号")).toHaveValue("saved-code");
@@ -518,6 +606,7 @@ describe("CalculationBookWorkspace", () => {
     await waitFor(() => expect(preflightCalculationBook).toHaveBeenCalledTimes(2));
     expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
       includeSlabStress: true,
+      reinforcementSource: "ai_suggested",
     });
   });
 
@@ -635,6 +724,102 @@ describe("CalculationBookWorkspace", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("runs the image-only AI flow from one explicit compact mode switch", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(aiPreflightResult);
+    const createCalculationBook = vi.fn().mockResolvedValue({
+      batchId: "batch-ai-rebar",
+      jobs: [],
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{
+          preflightCalculationBook,
+          createCalculationBook,
+        } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const aiMode = screen.getByRole("checkbox", { name: "无实配钢筋" });
+    const slabMode = screen.getByRole("checkbox", { name: "包含楼板应力" });
+    expect(aiMode).not.toBeChecked();
+    expect(screen.queryByRole("combobox", { name: "配筋来源" })).not.toBeInTheDocument();
+    expect(aiMode).toHaveAccessibleDescription(/压缩包需包含唯一的 Excel 配筋表/);
+    expect((aiMode.closest("label") as Node).compareDocumentPosition(
+      slabMode.closest("label") as Node,
+    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    await user.click(aiMode);
+    expect(aiMode).toBeChecked();
+    expect(aiMode).toHaveAccessibleDescription(/压缩包不得包含 Excel/);
+    expect(slabMode).toHaveAccessibleDescription(/楼板配筋建议同样由云图 SMX 生成/);
+
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    const archive = new File(["rar"], "images-only.rar", {
+      type: "application/vnd.rar",
+    });
+    await user.upload(screen.getByLabelText("选择计算图片压缩包"), archive);
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
+      includeSlabStress: false,
+      reinforcementSource: "ai_suggested",
+    });
+    expect(await screen.findByText("云图核验结果")).toBeInTheDocument();
+    expect(screen.getByText("02 云图核验")).toHaveAttribute("aria-current", "step");
+    expect(screen.getByLabelText("共 59 个墙体图组")).toBeInTheDocument();
+    expect(screen.getByLabelText("共 177 张墙体方向图")).toBeInTheDocument();
+    expect(screen.getByLabelText("共 3 张 Z 向零值或无 SMX 图")).toBeInTheDocument();
+    expect(screen.getByText("N5012-1 · X")).toBeInTheDocument();
+    expect(screen.getByText("-1/-2 图片组需要人工确认")).toBeInTheDocument();
+    expect(screen.queryByText("配筋表与图片匹配")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Excel 单元格证据/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/程序将启动人工智能/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+    await user.click(screen.getByRole("button", { name: "创建计算书任务" }));
+    await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
+    expect(createCalculationBook).toHaveBeenCalledWith(expect.objectContaining({
+      reinforcement_source: "ai_suggested",
+      include_slab_stress: false,
+      preflight_token: "calculation-ai-preflight-1",
+    }));
+    expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
+      "confirm_ai_normalization",
+    );
+  });
+
+  it("invalidates an existing preflight whenever either mode switch changes", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(aiPreflightResult);
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "无实配钢筋" }));
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["rar"], "images-only.rar"),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+    expect(await screen.findByText("云图核验结果")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "返回修改" }));
+    expect(screen.getByRole("button", { name: "继续核对" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    expect(screen.getByRole("button", { name: "预检并核对" })).toBeInTheDocument();
+  });
+
   it("submits normalized parameters and one ZIP without duplicate submission", async () => {
     const user = userEvent.setup();
     const preflightCalculationBook = vi.fn().mockResolvedValue(preflightResult);
@@ -699,6 +884,7 @@ describe("CalculationBookWorkspace", () => {
 
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: false,
+      reinforcementSource: "provided",
     });
     await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
     expect(createCalculationBook).toHaveBeenCalledWith(
@@ -1169,6 +1355,7 @@ describe("CalculationBookWorkspace", () => {
     expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: true,
+      reinforcementSource: "provided",
     });
 
     await user.click(screen.getByRole("button", { name: "进入确认提交" }));
@@ -1375,6 +1562,7 @@ describe("CalculationBookWorkspace", () => {
     await waitFor(() => expect(preflightCalculationBook).toHaveBeenCalledTimes(2));
     expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
       includeSlabStress: true,
+      reinforcementSource: "provided",
     });
   });
 });

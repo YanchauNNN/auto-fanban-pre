@@ -281,12 +281,18 @@
   font-weight: 700;
 }
 
+.modeOptions {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
 .slabToggle {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
   gap: 0.55rem;
-  margin-top: 0.55rem;
+  margin-top: 0;
   border: 1px solid rgba(37, 112, 190, 0.16);
   border-radius: 16px;
   background: rgba(235, 244, 253, 0.76);
@@ -808,6 +814,74 @@
   font-size: 0.82rem;
 }
 
+.ocrReviewPanel {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.8fr);
+  gap: 0.85rem;
+  border: 1px solid rgba(188, 113, 17, 0.24);
+  border-radius: 15px;
+  background: linear-gradient(135deg, rgba(255, 249, 232, 0.96), rgba(255, 253, 247, 0.96));
+  padding: 0.8rem 0.9rem;
+}
+
+.ocrReviewPanel h3,
+.ocrReviewPanel p,
+.ocrReviewPanel ul {
+  margin: 0;
+}
+
+.ocrReviewPanel > div {
+  display: grid;
+  align-content: start;
+  gap: 0.28rem;
+}
+
+.ocrReviewPanel h3 {
+  color: #87510d;
+  font-size: 1rem;
+}
+
+.ocrReviewPanel p {
+  color: #8f6a38;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.ocrReviewPanel ul {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0;
+  list-style: none;
+}
+
+.ocrReviewPanel li {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) minmax(120px, auto);
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid rgba(188, 113, 17, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.74);
+  padding: 0.48rem 0.6rem;
+}
+
+.ocrReviewPanel li strong {
+  color: #78460a;
+  font-size: 0.8rem;
+}
+
+.ocrReviewPanel li span {
+  color: #725631;
+  font-size: 0.78rem;
+}
+
+.ocrReviewPanel li small {
+  overflow-wrap: anywhere;
+  color: #997a52;
+  font-size: 0.68rem;
+  text-align: right;
+}
+
 .warningPanel {
   border-radius: 14px;
   padding: 0.75rem 0.9rem;
@@ -1072,7 +1146,6 @@
   }
 
   .slabToggle {
-    margin-top: 0.42rem;
     padding: 0.48rem;
   }
 
@@ -1157,6 +1230,10 @@
     display: none;
   }
 
+  .ocrReviewPanel {
+    grid-template-columns: 1fr;
+  }
+
   .directionGrid {
     grid-template-columns: 1fr;
   }
@@ -1214,6 +1291,15 @@
   .matchingFlow span {
     grid-template-columns: 3.5rem minmax(0, 1fr);
     align-items: baseline;
+    text-align: left;
+  }
+
+  .ocrReviewPanel li {
+    grid-template-columns: 1fr;
+    gap: 0.18rem;
+  }
+
+  .ocrReviewPanel li small {
     text-align: left;
   }
 

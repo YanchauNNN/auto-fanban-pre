@@ -275,8 +275,15 @@ export function CalculationBookWorkspace({
   const slabField = calculationSchema.fields.find(
     (field) => field.key === "include_slab_stress",
   );
+  const reinforcementSourceField = calculationSchema.fields.find(
+    (field) => field.key === "reinforcement_source",
+  );
+  const aiSuggested = values.reinforcement_source === "ai_suggested";
   const projectFields = calculationSchema.fields.filter(
-    (field) => !NUMERIC_FIELDS.has(field.key) && field.key !== "include_slab_stress",
+    (field) =>
+      !NUMERIC_FIELDS.has(field.key)
+      && field.key !== "include_slab_stress"
+      && field.key !== "reinforcement_source",
   );
   const workshopFields = calculationSchema.fields.filter((field) => NUMERIC_FIELDS.has(field.key));
   const selectedPreset =
@@ -318,7 +325,10 @@ export function CalculationBookWorkspace({
       return next;
     });
     setFieldErrors((current) => ({ ...current, [field.key]: [] }));
-    if (field.key === "include_slab_stress" && preflight) {
+    if (
+      (field.key === "include_slab_stress" || field.key === "reinforcement_source")
+      && preflight
+    ) {
       resetPreflight();
     }
   }
@@ -774,7 +784,7 @@ export function CalculationBookWorkspace({
               aria-current={phase === "review" ? "step" : undefined}
               data-state={phase === "input" ? "pending" : phase === "review" ? "current" : "completed"}
             >
-              02 规范化核验
+              {aiSuggested ? "02 云图核验" : "02 规范化核验"}
             </span>
             <span
               aria-current={phase === "confirm" ? "step" : undefined}
@@ -791,7 +801,11 @@ export function CalculationBookWorkspace({
               aria-valuetext={busyAction === "preflight" ? "正在预检计算书文件" : "正在创建计算书任务"}
             >
               <span />
-              {busyAction === "preflight" ? "正在读取图例与配筋表…" : "正在提交任务…"}
+              {busyAction === "preflight"
+                ? aiSuggested
+                  ? "正在读取云图 SMX…"
+                  : "正在读取图例与配筋表…"
+                : "正在提交任务…"}
             </div>
           ) : null}
 
@@ -808,28 +822,55 @@ export function CalculationBookWorkspace({
                     onChange={(event) => handleArchive(event.currentTarget.files?.[0] ?? null)}
                   />
                 </label>
-                {slabField ? (
-                  <label className={styles.slabToggle}>
-                    <input
-                      aria-describedby="calculation-book-slab-toggle-help"
-                      aria-labelledby="calculation-book-slab-toggle-label"
-                      checked={values[slabField.key] === "true"}
-                      type="checkbox"
-                      onChange={(event) =>
-                        updateValue(
-                          slabField,
-                          String(event.currentTarget.checked),
-                        )}
-                    />
-                    <span>
-                      <strong id="calculation-book-slab-toggle-label">{slabField.label}</strong>
-                      <small id="calculation-book-slab-toggle-help">
-                        按文件名自动识别 5 组；含 MIDDLE-X / MIDDLE-Y 时自动识别 7 组。
-                        楼板配筋仅从 Excel 读取，页面不手工输入。
-                      </small>
-                    </span>
-                  </label>
-                ) : null}
+                <div className={styles.modeOptions}>
+                  {reinforcementSourceField ? (
+                    <label className={styles.slabToggle}>
+                      <input
+                        aria-describedby="calculation-book-rebar-source-help"
+                        aria-labelledby="calculation-book-rebar-source-label"
+                        checked={aiSuggested}
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateValue(
+                            reinforcementSourceField,
+                            event.currentTarget.checked ? "ai_suggested" : "provided",
+                          )}
+                      />
+                      <span>
+                        <strong id="calculation-book-rebar-source-label">无实配钢筋</strong>
+                        <small id="calculation-book-rebar-source-help">
+                          {aiSuggested
+                            ? "压缩包不得包含 Excel；人工智能将按云图 SMX 给出配筋建议，并由后端逐项校验。"
+                            : "默认使用实配钢筋；压缩包需包含唯一的 Excel 配筋表。"}
+                        </small>
+                      </span>
+                    </label>
+                  ) : null}
+                  {slabField ? (
+                    <label className={styles.slabToggle}>
+                      <input
+                        aria-describedby="calculation-book-slab-toggle-help"
+                        aria-labelledby="calculation-book-slab-toggle-label"
+                        checked={values[slabField.key] === "true"}
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateValue(
+                            slabField,
+                            String(event.currentTarget.checked),
+                          )}
+                      />
+                      <span>
+                        <strong id="calculation-book-slab-toggle-label">{slabField.label}</strong>
+                        <small id="calculation-book-slab-toggle-help">
+                          按文件名自动识别 5 组；含 MIDDLE-X / MIDDLE-Y 时自动识别 7 组。
+                          {aiSuggested
+                            ? "楼板配筋建议同样由云图 SMX 生成，页面不手工输入。"
+                            : "楼板配筋仅从 Excel 读取，页面不手工输入。"}
+                        </small>
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
                 <section className={styles.presetPanel} aria-labelledby="calculation-book-presets-title">
                   <div className={styles.presetHeader}>
                     <h4 id="calculation-book-presets-title">参数预设</h4>
@@ -893,20 +934,24 @@ export function CalculationBookWorkspace({
                 <details className={styles.archiveHelp}>
                   <summary>压缩包结构要求</summary>
                   <div className={styles.archiveHelpBody}>
-                    <p className={styles.helper}>{calculationSchema.archive.description}</p>
+                    <p className={styles.helper}>
+                      {aiSuggested
+                        ? "仅上传结果云图和 01、02 子目录，不包含 Excel 配筋表。"
+                        : calculationSchema.archive.description}
+                    </p>
                     <div className={styles.tree} aria-label="压缩包必需结构">
                       <div className={styles.treeRoot}>计算图片.zip（或 .rar）</div>
                       <div><span>├─</span> 墙体01-X.png</div>
                       <div><span>├─</span> 墙体01-Y.png</div>
                       <div><span>├─</span> 墙体01-Z.png</div>
-                      <div><span>├─</span> 计算书模板文件.xlsx</div>
+                      {!aiSuggested ? <div><span>├─</span> 计算书模板文件.xlsx</div> : null}
                       <div><span>├─</span> 01 / 厂房标高布置图</div>
                       <div><span>└─</span> 02 / 墙体有限元模型图</div>
                     </div>
                     <div className={styles.validationList} aria-live="polite">
                       <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR</span>
                       <span>根目录 X / Y / Z 图片</span>
-                      <span>根目录墙体配筋表</span>
+                      <span>{aiSuggested ? "不包含 Excel 配筋表" : "根目录墙体配筋表"}</span>
                       <span>01 与 02 子目录</span>
                     </div>
                   </div>
@@ -978,22 +1023,32 @@ export function CalculationBookWorkspace({
                         ? !normalizationComplete
                           ? "预检数据校验失败，不能提交"
                           : slabEvidenceComplete
-                          ? "核验完成，进入确认提交"
+                          ? aiSuggested
+                            ? "云图核验完成，进入确认提交"
+                            : "核验完成，进入确认提交"
                           : "楼板证据不完整，不能提交"
                         : preflight?.requiresAiNormalization
                           ? "确认后，人工智能将在任务中规范化配筋表"
-                          : "核验完成，可以创建任务"}
+                          : aiSuggested
+                            ? "确认后，人工智能将在任务中生成配筋建议"
+                            : "核验完成，可以创建任务"}
               </strong>
               <span>
                 {phase === "input"
                   ? preflight?.requiresAiNormalization
                     ? "返回确认后才能启动任务。"
-                    : "预检会读取图例、规范化配筋并检查图片对应关系。"
+                    : aiSuggested
+                      ? "预检会读取云图 SMX、检查墙体与方向分组，不读取配筋表。"
+                      : "预检会读取图例、规范化配筋并检查图片对应关系。"
                   : phase === "review"
-                    ? "确认识别证据无误后，再检查最终提交摘要。"
+                    ? aiSuggested
+                      ? "需人工复核的方向会明确列出；建议配筋在任务生成过程中完成。"
+                      : "确认识别证据无误后，再检查最终提交摘要。"
                     : preflight?.requiresAiNormalization
                       ? "无法确定的字段会留空，任务仍会完成，并在任务详情中提醒补充。"
-                      : "压缩包已由预检暂存，创建时不会重复上传；完成后可下载 DOCX。"}
+                      : aiSuggested
+                        ? "后端会验证每项 AI 选择；无法收敛的字段留空并在任务详情中提醒。"
+                        : "压缩包已由预检暂存，创建时不会重复上传；完成后可下载 DOCX。"}
               </span>
             </div>
             <div className={styles.footerActions}>
@@ -1112,47 +1167,78 @@ function ReviewPanel({
         + preflight.reinforcementIssueRowCount
     && preflight.normalizationIssues.length
       === preflight.reinforcementIssueRowCount;
+  const aiSuggested = preflight.reinforcementSource === "ai_suggested";
   return (
     <section className={styles.reviewPanel}>
       <div className={styles.reviewHeader}>
         <div>
-          <p className={styles.stepBadge}>02 · 规范化核验</p>
+          <p className={styles.stepBadge}>
+            {aiSuggested ? "02 · 云图核验" : "02 · 规范化核验"}
+          </p>
           <h3
             ref={headingRef}
             tabIndex={-1}
           >
-            {phase === "review" ? "文件与配筋对应结果" : "最终确认与提交"}
+            {phase === "review"
+              ? aiSuggested ? "云图核验结果" : "文件与配筋对应结果"
+              : "最终确认与提交"}
           </h3>
           <p>
-            {phase === "review"
-              ? "所有数值均保留图片和 Excel 单元格证据，请先核对识别结果。"
-              : `本次采用配筋表：${preflight.reinforcementWorkbook}。确认后即可创建任务。`}
+            {aiSuggested
+              ? phase === "review"
+                ? "这里只核对云图分组与 SMX 识别结果；配筋建议将在任务中由人工智能生成并由后端校验。"
+                : "本次不读取实配钢筋表。确认后将按云图 SMX 生成配筋建议。"
+              : phase === "review"
+                ? "所有数值均保留图片和 Excel 单元格证据，请先核对识别结果。"
+                : `本次采用配筋表：${preflight.reinforcementWorkbook}。确认后即可创建任务。`}
           </p>
         </div>
         <div className={styles.summaryCards}>
-          <span aria-label={`共 ${preflight.wallCount} 面墙`}>
-            <strong>{preflight.wallCount}</strong><small>面墙</small>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.wallCount} 个墙体图组`
+            : `共 ${preflight.wallCount} 面墙`}
+          >
+            <strong>{preflight.wallCount}</strong>
+            <small>{aiSuggested ? "墙体图组" : "面墙"}</small>
           </span>
-          <span aria-label={`共 ${preflight.figureCount} 张云图`}>
-            <strong>{preflight.figureCount}</strong><small>云图</small>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.wallDirectionFigureCount} 张墙体方向图`
+            : `共 ${preflight.figureCount} 张云图`}
+          >
+            <strong>{aiSuggested
+              ? preflight.wallDirectionFigureCount
+              : preflight.figureCount}</strong>
+            <small>{aiSuggested ? "墙体方向图" : "云图"}</small>
           </span>
-          <span aria-label={`共 ${preflight.zeroFigureCount} 张 Z 向零值图`}>
-            <strong>{preflight.zeroFigureCount}</strong><small>Z 向零值</small>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.zZeroOrMissingSmxCount} 张 Z 向零值或无 SMX 图`
+            : `共 ${preflight.zeroFigureCount} 张 Z 向零值图`}
+          >
+            <strong>{aiSuggested
+              ? preflight.zZeroOrMissingSmxCount
+              : preflight.zeroFigureCount}</strong>
+            <small>{aiSuggested ? "Z 向零值/无 SMX" : "Z 向零值"}</small>
           </span>
           {preflight.slabFigureCount > 0 ? (
             <>
               <span aria-label={`共 ${preflight.slabElevationCount} 个楼板标高`}>
                 <strong>{preflight.slabElevationCount}</strong><small>楼板标高</small>
               </span>
-              <span aria-label={`共 ${preflight.slabFigureCount} 张楼板云图`}>
-                <strong>{preflight.slabFigureCount}</strong><small>楼板云图</small>
+              <span aria-label={aiSuggested
+                ? `共 ${preflight.slabActualGroupCount} 组楼板方向图`
+                : `共 ${preflight.slabFigureCount} 张楼板云图`}
+              >
+                <strong>{aiSuggested
+                  ? preflight.slabActualGroupCount
+                  : preflight.slabFigureCount}</strong>
+                <small>{aiSuggested ? "楼板方向组" : "楼板云图"}</small>
               </span>
             </>
           ) : null}
         </div>
       </div>
 
-      <section
+      {!aiSuggested ? <section
         aria-labelledby="calculation-book-matching-audit"
         className={styles.matchingAudit}
       >
@@ -1195,7 +1281,30 @@ function ReviewPanel({
             规范化审计数据不守恒：源行数必须等于规范化行数与问题行数之和，且问题明细数量必须一致。已阻止提交，请重新预检。
           </p>
         ) : null}
-      </section>
+      </section> : null}
+
+      {aiSuggested && preflight.reviewItems.length > 0 ? (
+        <section
+          aria-labelledby="calculation-book-ocr-review-title"
+          className={styles.ocrReviewPanel}
+        >
+          <div>
+            <h3 id="calculation-book-ocr-review-title">需人工复核</h3>
+            <p>以下图片不阻断任务；对应建议可能留空，并会在任务完成后的详情中继续提醒。</p>
+          </div>
+          <ul>
+            {preflight.reviewItems.map((item, index) => (
+              <li key={`${item.code}-${item.identity}-${item.direction ?? "all"}-${index}`}>
+                <strong>
+                  {item.identity}{item.direction ? ` · ${item.direction}` : ""}
+                </strong>
+                <span>{item.reason}</span>
+                <small>{item.imageFilename}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {preflight.warnings.filter((warning) => warning.filenames.length > 0).map((warning) => (
         <div className={styles.warningPanel} key={warning.code} role="status">
@@ -1220,7 +1329,9 @@ function ReviewPanel({
           <div>
             <h3>逐标高楼板识别证据</h3>
             <p>
-              这里只核对图片、Excel 单元格和精确公式结果；实配钢筋不在页面重复录入。
+              {aiSuggested
+                ? "这里只核对图片分组和 SMX；配筋建议会在任务生成过程中写入计算书。"
+                : "这里只核对图片、Excel 单元格和精确公式结果；实配钢筋不在页面重复录入。"}
             </p>
           </div>
           {slabEvidenceGroups.map((group, groupIndex) => (
@@ -1240,13 +1351,14 @@ function ReviewPanel({
                   {" · "}
                   {group.sourceRows.length > 0
                     ? `配筋表第 ${group.sourceRows.join("、")} 行`
-                    : "无对应配筋行"}
+                    : aiSuggested ? "等待任务生成 AI 建议" : "无对应配筋行"}
                 </span>
               </summary>
               <div className={styles.slabDirectionGrid}>
                 {group.items.map((item) => (
                   <SlabEvidenceCard
                     evidence={item}
+                    imageOnly={aiSuggested}
                     key={`${item.elevation}-${item.key}`}
                   />
                 ))}
@@ -1259,7 +1371,11 @@ function ReviewPanel({
       <div className={styles.evidenceSection}>
         <div>
           <h3>逐墙识别证据</h3>
-          <p>展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。</p>
+          <p>
+            {aiSuggested
+              ? "展开墙号可核对各方向图片与 SMX 识别值；存在疑点的方向会保留为待复核。"
+              : "展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。"}
+          </p>
         </div>
         {preflight.walls.map((wall) => (
             <details
@@ -1270,7 +1386,7 @@ function ReviewPanel({
                 <strong>{wall.wallId}</strong>
                 <span>
                   {wall.suggestedSourceRow === null
-                    ? "无对应配筋行"
+                    ? aiSuggested ? "等待任务生成 AI 建议" : "无对应配筋行"
                     : `配筋表第 ${wall.suggestedSourceRow} 行`}
                 </span>
               </summary>
@@ -1279,6 +1395,7 @@ function ReviewPanel({
                   <DirectionEvidence
                     direction={direction}
                     evidence={wall.directions[direction]}
+                    imageOnly={aiSuggested}
                     key={direction}
                   />
                 ))}
@@ -1292,45 +1409,51 @@ function ReviewPanel({
 
 function SlabEvidenceCard({
   evidence,
+  imageOnly = false,
 }: {
   evidence: CalculationBookSlabEvidence;
+  imageOnly?: boolean;
 }) {
   return (
     <article className={styles.directionCard}>
       <header>
         <h4>{SLAB_GROUP_LABELS[evidence.key] ?? evidence.key}</h4>
-        {evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
+        {!imageOnly && evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
       </header>
       <p>{evidence.imageFilename}</p>
       <dl>
         <div>
           <dt>计算范围</dt>
           <dd>
-            {evidence.isZeroResult
-              ? "无 SMX，计算值按 0 处理"
-              : `${evidence.smn} → ${evidence.smx} mm²/m`}
+            {evidence.smx === null
+              ? "OCR 需复核"
+              : evidence.isZeroResult
+                ? "无 SMX，计算值按 0 处理"
+                : imageOnly
+                  ? `SMX ${evidence.smx} mm²/m`
+                  : `${evidence.smn ?? "OCR 需复核"} → ${evidence.smx} mm²/m`}
           </dd>
         </div>
-        <div>
+        {!imageOnly ? <div>
           <dt>Excel 写法</dt>
           <dd>{evidence.originalText}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>规范写法</dt>
           <dd>{evidence.canonicalSpecification}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>计算书用语</dt>
           <dd>{evidence.narrativeSpecification}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>实配面积</dt>
           <dd>
             {evidence.actualArea === null
               ? "待补充"
               : `${evidence.actualArea} mm²/m`}
           </dd>
-        </div>
+        </div> : null}
       </dl>
     </article>
   );
@@ -1339,46 +1462,52 @@ function SlabEvidenceCard({
 function DirectionEvidence({
   direction,
   evidence,
+  imageOnly = false,
 }: {
   direction: "X" | "Y" | "Z";
   evidence: CalculationBookDirectionEvidence;
+  imageOnly?: boolean;
 }) {
   return (
     <article className={styles.directionCard}>
       <header>
         <strong>{direction} · {DIRECTION_LABELS[direction]}</strong>
-        {evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
+        {!imageOnly && evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
       </header>
       <p>{evidence.imageFilename}</p>
       <dl>
         <div>
           <dt>计算范围</dt>
           <dd>
-            {evidence.isZeroResult
-              ? "Z 向无 SMX，计算值按 0 处理"
-              : `${evidence.smn} → ${evidence.smx} mm²/m`}
+            {evidence.smx === null
+              ? "OCR 需复核"
+              : evidence.isZeroResult
+                ? "Z 向无 SMX，计算值按 0 处理"
+                : imageOnly
+                  ? `SMX ${evidence.smx} ${direction === "Z" ? "mm²/m²" : "mm²/m"}`
+                  : `${evidence.smn ?? "OCR 需复核"} → ${evidence.smx} mm²/m`}
           </dd>
         </div>
-        <div>
+        {!imageOnly ? <div>
           <dt>原始写法</dt>
           <dd>{evidence.originalText}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>成品表写法</dt>
           <dd>{evidence.canonicalSpecification}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>计算书用语</dt>
           <dd>{evidence.narrativeSpecification}</dd>
-        </div>
-        <div>
+        </div> : null}
+        {!imageOnly ? <div>
           <dt>实配面积</dt>
           <dd>
             {evidence.actualArea === null
               ? "待补充"
               : `${evidence.actualArea} ${direction === "Z" ? "mm²/m²" : "mm²/m"}`}
           </dd>
-        </div>
+        </div> : null}
       </dl>
     </article>
   );
