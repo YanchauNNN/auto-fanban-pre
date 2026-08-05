@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PositiveInt
 
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
@@ -107,6 +107,56 @@ class AuditReplaceMechanismConfig(BaseModel):
     )
 
 
+class CalculationBookAiSuggestionDirectionConfig(BaseModel):
+    diameters: list[PositiveInt] = Field(min_length=1)
+    hard_priority: list[str] = Field(min_length=1)
+
+
+class CalculationBookZeroOrMissingSmxConfig(BaseModel):
+    fixed_spec: str = Field(default="1C14@400x400", min_length=1)
+
+
+class CalculationBookAiSuggestionMechanismConfig(BaseModel):
+    margin_ratio: float = Field(default=0.10, ge=0, le=1)
+    xy: CalculationBookAiSuggestionDirectionConfig = Field(
+        default_factory=lambda: CalculationBookAiSuggestionDirectionConfig(
+            diameters=[16, 18, 20, 25, 28, 32, 36, 40],
+            hard_priority=["1@200", "1@150", "2@200", "2@150"],
+        )
+    )
+    z: CalculationBookAiSuggestionDirectionConfig = Field(
+        default_factory=lambda: CalculationBookAiSuggestionDirectionConfig(
+            diameters=[6, 8, 10, 12, 14, 16],
+            hard_priority=[
+                "1@400x400",
+                "1@200x400",
+                "1@200x200",
+                "2@400x400",
+                "2@200x400",
+                "2@200x200",
+            ],
+        )
+    )
+    zero_or_missing_smx: CalculationBookZeroOrMissingSmxConfig = Field(
+        default_factory=CalculationBookZeroOrMissingSmxConfig
+    )
+    slab_direction_mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "top_x": "X",
+            "middle_x": "X",
+            "bottom_x": "X",
+            "top_y": "Y",
+            "middle_y": "Y",
+            "bottom_y": "Y",
+            "z": "Z",
+        }
+    )
+    word_declaration: str = (
+        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，"
+        "供设计人员复核。"
+    )
+
+
 class CalculationBookMechanismConfig(BaseModel):
     ocr_threshold: int = Field(default=160, ge=0, le=255)
     ocr_legend_value_count: int = Field(default=10, ge=2)
@@ -127,6 +177,9 @@ class CalculationBookMechanismConfig(BaseModel):
     ocr_header_scale: int = Field(default=4, ge=1)
     ocr_legend_scale: int = Field(default=3, ge=1)
     chapter: str = "7.1"
+    ai_suggestion: CalculationBookAiSuggestionMechanismConfig = Field(
+        default_factory=CalculationBookAiSuggestionMechanismConfig
+    )
 
 
 class ApiRuntimeMechanismConfig(BaseModel):

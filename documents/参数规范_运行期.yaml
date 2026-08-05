@@ -96,6 +96,18 @@ runtime_options:
       max_output_tokens: { type: int, default: 65536, desc: "结构化模型紧凑 JSON 最大输出 token；确定性审计只返回 patch，完整表回退仍覆盖大批量源行" }
       temperature: { type: float, default: 0.0, desc: "计算书结构化规范化模型温度" }
       max_retries: { type: int, default: 0, desc: "计算书结构化规范化请求由共享客户端执行的重试次数；0 表示只调用一次" }
+    ai_suggestion:
+      enabled: { type: bool, default: true, desc: "未提供实配钢筋时，是否允许计算书 Worker 调用 AI Skill 根据 SMX 生成配筋建议" }
+      skill_root: { type: str, default: "tools/ai/recommend-rebar-from-smx", desc: "AI 配筋建议 Skill 根目录，随源码仓库或部署资源根解析" }
+      skill_version: { type: str, default: "1.0.0", desc: "写入审计日志的 AI 配筋建议 Skill 契约版本" }
+      batch_size: { type: int, default: 20, desc: "单次模型请求处理的墙体或楼板方向记录上限" }
+      request_timeout_seconds: { type: int, default: 600, desc: "AI 配筋建议单次模型请求超时秒数" }
+      max_output_tokens: { type: int, default: 65536, desc: "AI 配筋建议结构化 JSON 最大输出 token" }
+      temperature: { type: float, default: 0.0, desc: "AI 配筋建议模型温度，保持确定性输出" }
+      max_consecutive_base_failures: { type: int, default: 3, desc: "连续基础请求失败后终止本任务的阈值" }
+      log_dir: { type: str, default: "storage/logs/calculation-book-ai-suggestion", desc: "每任务独立 AI 配筋建议审计日志目录，随运行部署根解析" }
+      log_max_bytes: { type: int, default: 10485760, desc: "单个任务 AI 配筋建议审计日志最大字节数" }
+      log_retention_days: { type: int, default: 30, desc: "AI 配筋建议审计日志保留天数" }
 
   plot_assets:
     asset_roots:

@@ -371,6 +371,24 @@ class CalculationBookAiNormalizationRuntimeConfig(BaseModel):
     max_retries: int = Field(default=0, ge=0)
 
 
+class CalculationBookAiSuggestionRuntimeConfig(BaseModel):
+    """计算书 AI 配筋建议 Skill、批处理和审计日志限制。"""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    skill_root: Path = Path("tools/ai/recommend-rebar-from-smx")
+    skill_version: str = Field(default="1.0.0", min_length=1)
+    batch_size: int = Field(default=20, gt=0)
+    request_timeout_seconds: int = Field(default=600, gt=0)
+    max_output_tokens: int = Field(default=65_536, gt=0)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_consecutive_base_failures: int = Field(default=3, gt=0)
+    log_dir: Path = Path("storage/logs/calculation-book-ai-suggestion")
+    log_max_bytes: int = Field(default=10_485_760, gt=0)
+    log_retention_days: int = Field(default=30, gt=0)
+
+
 class CalculationBookRuntimeConfig(BaseModel):
     """计算书业务资产、OCR 运行时和 ZIP/RAR 安全限制。"""
 
@@ -391,6 +409,9 @@ class CalculationBookRuntimeConfig(BaseModel):
     max_compression_ratio: float = 250.0
     ai_normalization: CalculationBookAiNormalizationRuntimeConfig = Field(
         default_factory=CalculationBookAiNormalizationRuntimeConfig
+    )
+    ai_suggestion: CalculationBookAiSuggestionRuntimeConfig = Field(
+        default_factory=CalculationBookAiSuggestionRuntimeConfig
     )
 
 
@@ -787,6 +808,14 @@ class RuntimeConfig(BaseSettings):
         self.calculation_book.ai_normalization.skill_root = self._resolve_root_path(
             self.calculation_book.ai_normalization.skill_root,
             self.base_dir,
+        )
+        self.calculation_book.ai_suggestion.skill_root = self._resolve_root_path(
+            self.calculation_book.ai_suggestion.skill_root,
+            self.base_dir,
+        )
+        self.calculation_book.ai_suggestion.log_dir = self._resolve_root_path(
+            self.calculation_book.ai_suggestion.log_dir,
+            self._resolve_runtime_root(base_dir),
         )
 
     def _normalize_root_paths(self, base_dir: Path) -> None:

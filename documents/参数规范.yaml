@@ -854,6 +854,7 @@ calculation_book:
     - { key: "factory_extreme_max_temperature", label: "历史最高温度", type: "number", required: true, unit: "℃" }
     - { key: "site_soil_temperature", label: "场地土温", type: "number", required: true, unit: "℃" }
     - { key: "include_slab_stress", label: "包含楼板应力", type: "checkbox", required: false, default: false }
+    - { key: "reinforcement_source", label: "配筋来源", type: "select", required: false, default: "provided", options: ["provided", "ai_suggested"] }
   archive:
     accept: [".zip", ".rar"]
     root_figure_pattern: "<墙号><可选字母后缀><可选-1或-2>-X|Y|Z.(png|jpg|jpeg|bmp)"

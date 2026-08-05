@@ -11,6 +11,11 @@ class CalculationBookTemplate(StrEnum):
     NUCLEAR_ISLAND_PLANT = "nuclear_island_plant"
 
 
+class ReinforcementSource(StrEnum):
+    PROVIDED = "provided"
+    AI_SUGGESTED = "ai_suggested"
+
+
 ALL_PLANTS = ("RX", "NH", "SD", "SU", "KA")
 _ELEVATION_RANGE = re.compile(
     r"(?P<start>[+-]?\d+(?:\.\d+)?)\s*m\s*[~～—-]\s*(?P<end>[+-]?\d+(?:\.\d+)?)\s*m",
@@ -38,6 +43,7 @@ class CalculationBookParams(BaseModel):
     factory_extreme_max_temperature: float = Field(ge=-100, le=100)
     site_soil_temperature: float = Field(ge=-100, le=100)
     include_slab_stress: bool = False
+    reinforcement_source: ReinforcementSource = ReinforcementSource.PROVIDED
     confirm_ai_normalization: bool = False
     manual_confirmations: dict[str, int] = Field(default_factory=dict)
     preflight_token: str = Field(default="", max_length=100)
@@ -71,6 +77,11 @@ class CalculationBookParams(BaseModel):
             raise ValueError("历史最低温度必须小于历史最高温度")
         if self.raft_slab_top_elevation >= self.roof_top_elevation:
             raise ValueError("筏板顶标高必须小于屋面顶标高")
+        if (
+            self.reinforcement_source is ReinforcementSource.AI_SUGGESTED
+            and self.confirm_ai_normalization
+        ):
+            raise ValueError("AI 推荐配筋不能同时确认配筋表 AI 规范化")
         if _ELEVATION_RANGE.search(self.document_name) is None:
             raise ValueError("文件名称必须包含形如 0.000m~15.000m 的厂房标高范围")
         return self

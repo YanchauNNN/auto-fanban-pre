@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from src.calculation_book import models as calculation_models
 from src.calculation_book.models import CalculationBookParams, CalculationBookTemplate
 
 
@@ -31,6 +32,7 @@ def test_calculation_params_are_strict_and_derive_template_values() -> None:
     params = CalculationBookParams.model_validate(_valid_payload())
 
     assert params.template_type is CalculationBookTemplate.INTERNAL_STRUCTURE
+    assert params.reinforcement_source is calculation_models.ReinforcementSource.PROVIDED
     assert params.include_slab_stress is False
     assert params.project_number == "JQ"
     assert params.document_serial_number == "01"
@@ -45,6 +47,57 @@ def test_calculation_params_accept_optional_slab_stress() -> None:
     params = CalculationBookParams.model_validate(payload)
 
     assert params.include_slab_stress is True
+
+
+def test_calculation_params_accept_ai_suggested_reinforcement() -> None:
+    payload = _valid_payload()
+    payload["reinforcement_source"] = "ai_suggested"
+
+    params = CalculationBookParams.model_validate(payload)
+
+    assert (
+        params.reinforcement_source
+        is calculation_models.ReinforcementSource.AI_SUGGESTED
+    )
+
+
+def test_ai_suggested_reinforcement_rejects_ai_normalization_confirmation() -> None:
+    payload = _valid_payload()
+    payload.update(
+        reinforcement_source="ai_suggested",
+        confirm_ai_normalization=True,
+    )
+
+    with pytest.raises(ValidationError, match="AI 推荐配筋.*AI 规范化"):
+        CalculationBookParams.model_validate(payload)
+
+
+def test_provided_reinforcement_keeps_nonstandard_normalization_confirmation() -> None:
+    payload = _valid_payload()
+    payload["confirm_ai_normalization"] = True
+
+    params = CalculationBookParams.model_validate(payload)
+
+    assert params.reinforcement_source is calculation_models.ReinforcementSource.PROVIDED
+    assert params.confirm_ai_normalization is True
+
+
+@pytest.mark.parametrize(
+    "request_only_override",
+    [
+        {"skill_root": "client/controlled"},
+        {"xy_diameters": [99]},
+        {"max_consecutive_base_failures": 99},
+    ],
+)
+def test_calculation_params_reject_server_owned_ai_overrides(
+    request_only_override: dict[str, object],
+) -> None:
+    payload = _valid_payload()
+    payload.update(request_only_override)
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        CalculationBookParams.model_validate(payload)
 
 
 def test_persisted_params_exclude_computed_template_values_and_can_be_revalidated() -> None:
