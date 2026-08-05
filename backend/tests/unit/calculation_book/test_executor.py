@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.ai.rebar_suggestion_task import (
+    RebarSuggestionSkillMetadata,
     RebarSuggestionTaskError,
     RebarSuggestionTaskResult,
 )
@@ -19,7 +20,10 @@ from src.calculation_book.ai_rebar_suggestion_schema import (
     PROTOCOL_VERSION,
     AiRebarSuggestionResponse,
 )
-from src.calculation_book.diagnostic_log import DiagnosticLogError
+from src.calculation_book.diagnostic_log import (
+    CalculationBookDiagnosticLog,
+    DiagnosticLogError,
+)
 from src.calculation_book.executor import (
     CalculationBookJobExecutor,
     RebarSuggestionUnavailable,
@@ -31,7 +35,18 @@ from src.calculation_book.executor import (
 from src.calculation_book.processor import CalculationBookStage
 from src.calculation_book.rebar_candidates import generate_rebar_candidates
 from src.calculation_book.rebar_recommender import RebarSuggestionInput
+from src.config import get_config
 from src.models import Job, JobStatus, JobType
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ai_diagnostic_log_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = get_config().model_copy(deep=True)
+    config.calculation_book.ai_suggestion.log_dir = tmp_path / "central-ai-audit"
+    monkeypatch.setattr("src.calculation_book.executor.get_config", lambda: config)
 
 
 def _params() -> dict[str, object]:
@@ -264,6 +279,14 @@ class AlwaysFailRebarInvoker:
             "infrastructure",
             "model_timeout",
             "sanitized timeout",
+        )
+
+    def skill_metadata(self) -> RebarSuggestionSkillMetadata:
+        return RebarSuggestionSkillMetadata(
+            skill_id="recommend-rebar-from-smx",
+            skill_version="1.0.0",
+            skill_sha256="b" * 64,
+            model=self.model,
         )
 
 
@@ -681,6 +704,7 @@ def test_real_normalizer_builder_fails_closed_when_disabled(tmp_path: Path) -> N
 
 
 def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     processor = FakeProcessor()
@@ -695,6 +719,22 @@ def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
         },
     )
     job.params["reinforcement_source"] = "ai_suggested"
+    central_log_dir = tmp_path / "central-ai-audit"
+    config = get_config().model_copy(deep=True)
+    config.calculation_book.ai_suggestion.log_dir = central_log_dir
+    config.calculation_book.ai_suggestion.log_retention_days = 17
+    monkeypatch.setattr("src.calculation_book.executor.get_config", lambda: config)
+    create_kwargs: dict[str, object] = {}
+    original_create = CalculationBookDiagnosticLog.create_for_job
+
+    def capture_create_kwargs(**kwargs):
+        create_kwargs.update(kwargs)
+        return original_create(**kwargs)
+
+    monkeypatch.setattr(
+        "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
+        capture_create_kwargs,
+    )
 
     executor = CalculationBookJobExecutor(
         processor=processor,
@@ -709,6 +749,12 @@ def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
     assert job.status == JobStatus.SUCCEEDED
     assert job.artifacts.calculation_log is not None
     assert job.artifacts.calculation_log.is_file()
+    assert job.artifacts.calculation_log == (
+        central_log_dir / f"calculation-book-{job.job_id}.log"
+    )
+    assert create_kwargs["log_dir"] == central_log_dir
+    assert create_kwargs["retention_days"] == 17
+    assert "work_dir" not in create_kwargs
     assert job.progress.details["ai_rebar_suggestion"] == {
         "skill_id": "recommend-rebar-from-smx",
         "skill_version": "1.0.0",
@@ -790,7 +836,7 @@ def test_ai_base_failure_limit_succeeds_with_blank_result_and_safe_metadata(
     assert job.progress.details["ai_rebar_suggestion"] == {
         "skill_id": "recommend-rebar-from-smx",
         "skill_version": "1.0.0",
-        "skill_sha256": "",
+        "skill_sha256": "b" * 64,
         "model": "failed-model",
         "call_count": 3,
         "suggested_direction_count": 0,
@@ -1013,6 +1059,100 @@ def test_ai_job_fails_and_hides_log_when_success_close_is_not_durable(
     assert fake_log.closed is True
     assert job.status == JobStatus.FAILED
     assert job.artifacts.calculation_log is None
+    assert job.artifacts.calculation_docx is None
+
+
+def test_ai_job_hides_word_but_keeps_failed_log_when_completion_record_fails(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class CompletionWriteFailingLog:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(b"")
+            self.closed = False
+            self.events: list[str] = []
+
+        def write(self, event: str, **_details) -> None:
+            if event == "task_completed":
+                raise DiagnosticLogError("log_write_failed", "safe failure")
+            self.events.append(event)
+
+        def close(self) -> None:
+            self.closed = True
+
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+    fake_log = CompletionWriteFailingLog(
+        tmp_path
+        / "job"
+        / "calculation-book"
+        / "logs"
+        / "calculation-book-calc-job.log"
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
+        lambda **_kwargs: fake_log,
+    )
+
+    with pytest.raises(DiagnosticLogError):
+        CalculationBookJobExecutor(
+            processor=FakeProcessor(),
+            rebar_suggestion_invoker=FakeRebarInvoker(),
+        ).execute(job)
+
+    assert fake_log.closed is True
+    assert fake_log.events[-1] == "task_failed"
+    assert job.status == JobStatus.FAILED
+    assert job.artifacts.calculation_log == fake_log.path
+    assert job.artifacts.calculation_docx is None
+
+
+def test_ai_job_hides_completed_log_when_success_state_persistence_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+    original_persist = CalculationBookJobExecutor._persist
+
+    def fail_only_success_state(candidate: Job) -> None:
+        if candidate.status == JobStatus.SUCCEEDED:
+            raise OSError("simulated successful-state persistence failure")
+        original_persist(candidate)
+
+    monkeypatch.setattr(
+        CalculationBookJobExecutor,
+        "_persist",
+        staticmethod(fail_only_success_state),
+    )
+
+    with pytest.raises(OSError):
+        CalculationBookJobExecutor(
+            processor=FakeProcessor(),
+            rebar_suggestion_invoker=FakeRebarInvoker(),
+        ).execute(job)
+
+    assert job.status == JobStatus.FAILED
+    assert job.artifacts.calculation_docx is None
+    assert job.artifacts.calculation_log is None
+    persisted = json.loads((job.work_dir / "job.json").read_text(encoding="utf-8"))
+    assert persisted["status"] == "failed"
+    assert persisted["artifacts"]["calculation_docx"] is None
+    assert persisted["artifacts"]["calculation_log"] is None
 
 
 def test_real_rebar_suggestion_builder_uses_one_structured_skill_capability(

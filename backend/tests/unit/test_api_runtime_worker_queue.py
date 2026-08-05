@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient as FastApiTestClient
 
+from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
 from src.pipeline.sqlite_queue import SQLiteQueueStore
@@ -514,7 +515,19 @@ def test_api_mode_reload_restores_ai_calculation_source_summary_and_log(
         / f"calculation-book-{job.job_id}.log"
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_bytes(b'{"event":"task_completed"}\n')
+    with CalculationBookDiagnosticLog.create(
+        log_path,
+        job_id=job.job_id,
+        correlation_id=job.job_id,
+        max_bytes=8_192,
+    ) as diagnostic_log:
+        diagnostic_log.write(
+            "task_completed",
+            duration_ms=1,
+            figure_count=1,
+            warning_count=0,
+            output_filename="result.docx",
+        )
     job.artifacts.calculation_log = log_path
     job.progress.details["ai_rebar_suggestion"] = {
         "skill_id": "recommend-rebar-from-smx",
@@ -555,4 +568,6 @@ def test_api_mode_reload_restores_ai_calculation_source_summary_and_log(
     }
     assert detail["artifacts"]["calculation_log_available"] is True
     assert log_response.status_code == 200
-    assert log_response.content == b'{"event":"task_completed"}\n'
+    assert json.loads(log_response.content.splitlines()[-1])["event"] == (
+        "task_completed"
+    )

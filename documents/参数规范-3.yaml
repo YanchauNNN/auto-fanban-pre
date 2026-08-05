@@ -134,6 +134,8 @@ backend_mechanism:
   api_runtime:
     job_completion_wait_timeout_sec: 3600
     job_summary_sync_interval_sec: 3
+    worker_heartbeat_interval_sec: 10
+    worker_claim_timeout_sec: 90
     jobs_activity_stream_poll_interval_sec: 2
     jobs_activity_stream_keepalive_sec: 15
     jobs_activity_stream_max_duration_sec: 60

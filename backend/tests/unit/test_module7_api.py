@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
 from PIL import Image
 
+from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 from src.calculation_book.models import CalculationBookParams, ReinforcementSource
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
@@ -2218,7 +2219,19 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                     / f"calculation-book-{job.job_id}.log"
                 )
                 calculation_log.parent.mkdir(parents=True, exist_ok=True)
-                calculation_log.write_bytes(b'{"event":"task_completed"}\n')
+                with CalculationBookDiagnosticLog.create(
+                    calculation_log,
+                    job_id=job.job_id,
+                    correlation_id=job.job_id,
+                    max_bytes=8_192,
+                ) as diagnostic_log:
+                    diagnostic_log.write(
+                        "task_completed",
+                        duration_ms=1,
+                        figure_count=3,
+                        warning_count=1,
+                        output_filename="result.docx",
+                    )
                 job.artifacts.calculation_log = calculation_log
                 job.progress.details.update(
                     {
@@ -2890,7 +2903,9 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             f"/api/jobs/{ai_job_id}/download/calculation-book-log"
         )
         assert log_download.status_code == 200
-        assert log_download.content == b'{"event":"task_completed"}\n'
+        assert json.loads(log_download.content.splitlines()[-1])["event"] == (
+            "task_completed"
+        )
         assert log_download.headers["content-type"] == (
             "text/plain; charset=utf-8"
         )
@@ -2969,6 +2984,73 @@ def test_download_standard_reinforcement_template_is_authenticated_and_fixed(
         )
 
     assert unauthenticated.status_code == 401
+
+
+def test_failed_ai_calculation_hides_word_but_keeps_terminal_log_download(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        job = runtime.job_manager.create_job(
+            job_type=JobType.CALCULATION_BOOK.value,
+            project_no="JQ",
+            options={
+                "reinforcement_source": "ai_suggested",
+                "ai_rebar_suggestion": True,
+            },
+        )
+        work_dir = tmp_path / "failed-ai-calculation"
+        runtime.config.calculation_book.ai_suggestion.log_dir = (
+            tmp_path / "central-ai-audit"
+        )
+        log_path = (
+            runtime.config.calculation_book.ai_suggestion.log_dir
+            / f"calculation-book-{job.job_id}.log"
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with CalculationBookDiagnosticLog.create(
+            log_path,
+            job_id=job.job_id,
+            correlation_id=job.job_id,
+            max_bytes=8_192,
+        ) as diagnostic_log:
+            diagnostic_log.write(
+                "task_failed",
+                stage="render_document",
+                duration_ms=1,
+                error_code="RuntimeError",
+            )
+        docx_path = work_dir / "calculation-book" / "failed.docx"
+        docx_path.parent.mkdir(parents=True, exist_ok=True)
+        docx_path.write_bytes(b"PK\x03\x04failed-word")
+        job.work_dir = work_dir
+        job.artifacts.calculation_log = log_path
+        job.artifacts.calculation_docx = docx_path
+        job.status = JobStatus.FAILED
+        runtime.job_manager.update_job(job)
+
+        detail = client.get(f"/api/jobs/{job.job_id}")
+        assert detail.status_code == 200
+        artifacts = detail.json()["artifacts"]
+        assert artifacts["calculation_docx_available"] is False
+        assert artifacts["calculation_docx_download_url"] is None
+        assert artifacts["calculation_log_available"] is True
+        assert artifacts["calculation_log_download_url"] == (
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+
+        word = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book"
+        )
+        assert word.status_code == 404
+        log = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+        assert log.status_code == 200
+        assert json.loads(log.content.splitlines()[-1])["event"] == (
+            "task_failed"
+        )
 
 
 @pytest.mark.parametrize("invalid_kind", ["missing", "directory", "escape"])

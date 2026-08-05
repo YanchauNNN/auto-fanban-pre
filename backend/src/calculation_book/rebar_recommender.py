@@ -30,7 +30,7 @@ from .reinforcement_input import RebarConfiguration
 
 MemberKind = Literal["wall", "slab"]
 Direction = Literal["X", "Y", "Z"]
-SelectionSource = Literal["ai", "fixed_rule"]
+SelectionSource = Literal["ai"]
 RebarSuggestionAudit = Callable[[str, dict[str, object]], None]
 WarningCode = Literal[
     "NO_ELIGIBLE_CANDIDATE",
@@ -185,9 +185,6 @@ def recommend_rebar_suggestions(
                 code="NO_ELIGIBLE_CANDIDATE",
                 message="后端未生成满足配筋规则的候选，当前方向已留空",
             )
-            continue
-        if _is_fixed_zero_z(state.source):
-            state.selected = _select_fixed_candidate(state, task_id=task_id)
             continue
         pending.append(state.source.item_id)
 
@@ -532,52 +529,6 @@ def _validate_input_contract(item: RebarSuggestionInput, *, task_id: str) -> Non
         raise RebarRecommendationContractError(
             f"invalid backend recommendation input for {item.item_id}"
         ) from exc
-
-
-def _is_fixed_zero_z(item: RebarSuggestionInput) -> bool:
-    return item.direction == "Z" and item.smx == 0
-
-
-def _select_fixed_candidate(
-    state: _ItemState,
-    *,
-    task_id: str,
-) -> SelectedRebarSuggestion:
-    if len(state.source.candidates) != 1:
-        raise RebarRecommendationContractError(
-            f"zero-SMX Z item {state.source.item_id} must have exactly one fixed candidate"
-        )
-    request = AiRebarSuggestionRequest(
-        schema_version=PROTOCOL_VERSION,
-        task_id=task_id,
-        items=(_request_item(state),),
-    )
-    candidate = state.source.candidates[0]
-    response = AiRebarSuggestionResponse.model_validate(
-        {
-            "schema_version": PROTOCOL_VERSION,
-            "items": [
-                {
-                    "item_id": state.source.item_id,
-                    "status": "selected",
-                    "selected_candidate_id": candidate.candidate_id,
-                    "reason": "Z 向 SMX 为 0，采用后端固定构造钢筋候选",
-                    "review_reasons": [],
-                }
-            ],
-        }
-    )
-    validation = validate_ai_rebar_suggestion_response(
-        response,
-        request=request,
-        server_candidates={state.source.item_id: state.source.candidates},
-    )
-    if validation.errors or len(validation.selected) != 1:
-        code = validation.errors[0].code if validation.errors else "UNKNOWN"
-        raise RebarRecommendationContractError(
-            f"fixed zero-SMX Z candidate failed backend validation: {code}"
-        )
-    return _selected_output(state, validation.selected[0], source="fixed_rule")
 
 
 def _take_active_batch(

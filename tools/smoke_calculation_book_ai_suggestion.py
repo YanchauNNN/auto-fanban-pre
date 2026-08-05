@@ -19,6 +19,12 @@ EXPECTED_WALL_DIRECTION_IMAGES = 177
 EXPECTED_SLAB_IMAGES = 5
 EXPECTED_RECOMMENDATION_DIRECTIONS = 182
 EXPECTED_ARCHIVE_IMAGES = 184
+FATAL_AI_WARNING_REASONS = {
+    "AI_BASE_FAILURE_LIMIT": (
+        "the internal model or response protocol remained unavailable after retries"
+    ),
+    "OCR_RECOGNITION_FAILED": "an SMX value could not be recognized",
+}
 
 
 class SmokeFailure(RuntimeError):
@@ -343,6 +349,20 @@ def _validate_result(
     warnings = output.get("warnings")
     if not isinstance(warnings, list):
         raise SmokeFailure("job detail warnings are invalid")
+    fatal_warnings = sorted(
+        {
+            str(warning.get("code"))
+            for warning in warnings
+            if isinstance(warning, dict)
+            and warning.get("code") in FATAL_AI_WARNING_REASONS
+        }
+    )
+    if fatal_warnings:
+        diagnostics = "; ".join(
+            f"{code}: {FATAL_AI_WARNING_REASONS[code]}"
+            for code in fatal_warnings
+        )
+        raise SmokeFailure(f"real AI smoke has fatal warning(s): {diagnostics}")
     blank_with_reason = sum(
         len(warning.get("blank_fields", []))
         for warning in warnings

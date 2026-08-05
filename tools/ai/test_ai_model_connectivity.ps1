@@ -2807,7 +2807,7 @@ $applicationApiResult = Invoke-ApplicationApiProxyProbe `
     -ExpectedProfile $selectedProfile -TimeoutSec $timeoutSec
 Set-AnsysMapdlApplicationRegistration -SkillProbe $ansysMapdlSkillResult -ApplicationApiProbe $applicationApiResult
 if ($applicationApiResult.configured -and $applicationApiResult.status -eq "failed") {
-    [void]$errors.Add("Application AI API probe failed: $($applicationApiResult.error)")
+    Add-DiagnosticError $errors "application_api" "Application AI API probe failed."
 }
 
 $finishedAt = Get-UtcIsoTimestamp
@@ -2972,7 +2972,19 @@ Write-Host ("OutputJson: {0}" -f $OutputPath)
 
 if (-not $summaryOk) {
     foreach ($errorItem in $errors) {
-        Write-Host ("ERROR[{0}]: {1}" -f $errorItem.stage, $errorItem.message)
+        if ($errorItem -is [string]) {
+            Write-Host "ERROR[diagnostic]: A diagnostic check failed; inspect the JSON report."
+            continue
+        }
+        $errorStage = [string](Get-JsonPropertyValue $errorItem "stage")
+        $errorMessage = [string](Get-JsonPropertyValue $errorItem "message")
+        if ([string]::IsNullOrWhiteSpace($errorStage)) {
+            $errorStage = "diagnostic"
+        }
+        if ([string]::IsNullOrWhiteSpace($errorMessage)) {
+            $errorMessage = "A diagnostic check failed; inspect the JSON report."
+        }
+        Write-Host ("ERROR[{0}]: {1}" -f $errorStage, $errorMessage)
     }
     exit 1
 }

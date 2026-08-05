@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, PositiveInt
+from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
@@ -211,10 +211,21 @@ class ApiRuntimeMechanismConfig(BaseModel):
     )
     job_completion_wait_timeout_sec: float = 3600.0
     job_summary_sync_interval_sec: float = 3.0
+    worker_heartbeat_interval_sec: float = Field(default=10.0, gt=0)
+    worker_claim_timeout_sec: float = Field(default=90.0, gt=0)
     jobs_activity_stream_poll_interval_sec: float = 2.0
     jobs_activity_stream_keepalive_sec: float = 15.0
     jobs_activity_stream_max_duration_sec: float = 60.0
     jobs_activity_stream_retry_ms: int = 5000
+
+    @model_validator(mode="after")
+    def validate_worker_claim_timing(self) -> ApiRuntimeMechanismConfig:
+        if self.worker_claim_timeout_sec < 3 * self.worker_heartbeat_interval_sec:
+            raise ValueError(
+                "worker_claim_timeout_sec must be at least three times "
+                "worker_heartbeat_interval_sec"
+            )
+        return self
 
 
 class CadRuntimeMechanismConfig(BaseModel):

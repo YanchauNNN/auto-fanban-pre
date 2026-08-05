@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 UNFINISHED_QUEUE_STATUSES = ("queued", "claimed")
 ACTIVE_SUMMARY_STATUSES = {"queued", "running", "claimed", "processing", "pending"}
 DEFAULT_SQLITE_TIMEOUT_SECONDS = 30.0
 DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 30000
+WORKER_INTERRUPTED_ERROR = "worker_interrupted_before_completion"
 
 
 class SQLiteQueueStore:
@@ -234,6 +235,179 @@ class SQLiteQueueStore:
                 (cutoff,),
             ).fetchall()
         return [_queue_row_to_dict(row) for row in rows]
+
+    def recover_stale_claims(
+        self,
+        *,
+        timeout_seconds: float,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Atomically fail expired claims without replaying non-idempotent work."""
+        timestamp = _format_timestamp(_coerce_now(now))
+        cutoff = _format_timestamp(
+            _coerce_now(now) - timedelta(seconds=max(0.0, float(timeout_seconds)))
+        )
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM queue_items
+                    WHERE status = 'claimed'
+                      AND COALESCE(heartbeat_at, claimed_at, updated_at) <= ?
+                    ORDER BY COALESCE(heartbeat_at, claimed_at, updated_at) ASC, id ASC
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                row_ids = [int(row["id"]) for row in rows]
+                for row_id in row_ids:
+                    conn.execute(
+                        """
+                        UPDATE queue_items
+                        SET status = 'failed',
+                            last_error = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                          AND status = 'claimed'
+                          AND COALESCE(heartbeat_at, claimed_at, updated_at) <= ?
+                        """,
+                        (WORKER_INTERRUPTED_ERROR, timestamp, row_id, cutoff),
+                    )
+                recovered_rows = [
+                    row
+                    for row_id in row_ids
+                    if (row := conn.execute(
+                        "SELECT * FROM queue_items WHERE id = ? AND status = 'failed' "
+                        "AND last_error = ?",
+                        (row_id, WORKER_INTERRUPTED_ERROR),
+                    ).fetchone())
+                    is not None
+                ]
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return [_queue_row_to_dict(row) for row in recovered_rows]
+
+    def list_interrupted_claims(self) -> list[dict[str, Any]]:
+        """Return interrupted claims that may still need JSON state reconciliation."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM queue_items
+                WHERE status = 'failed'
+                  AND last_error = ?
+                  AND claimed_by IS NOT NULL
+                ORDER BY id ASC
+                """,
+                (WORKER_INTERRUPTED_ERROR,),
+            ).fetchall()
+        return [_queue_row_to_dict(row) for row in rows]
+
+    def acknowledge_interrupted_claim(
+        self,
+        *,
+        queue_item_id: int,
+        claimed_by: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Persistently acknowledge that interrupted JSON state was reconciled."""
+        timestamp = _format_timestamp(_coerce_now(now))
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    UPDATE queue_items
+                    SET claimed_by = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND status = 'failed'
+                      AND last_error = ?
+                      AND claimed_by = ?
+                    """,
+                    (
+                        timestamp,
+                        int(queue_item_id),
+                        WORKER_INTERRUPTED_ERROR,
+                        claimed_by,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    conn.commit()
+                    return None
+                acknowledged = self._get_queue_item(conn, int(queue_item_id))
+                conn.commit()
+                return acknowledged
+            except Exception:
+                conn.rollback()
+                raise
+
+    def has_newer_queue_item(
+        self,
+        *,
+        item_type: str,
+        item_id: str,
+        after_queue_item_id: int,
+    ) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM queue_items
+                WHERE item_type = ?
+                  AND item_id = ?
+                  AND id > ?
+                LIMIT 1
+                """,
+                (item_type, item_id, int(after_queue_item_id)),
+            ).fetchone()
+        return row is not None
+
+    def get_queue_item(self, queue_item_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return self._get_queue_item(conn, int(queue_item_id))
+
+    def complete_claim(
+        self,
+        *,
+        queue_item_id: int,
+        worker_id: str,
+        status: str,
+        last_error: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Complete only the exact claim owned by ``worker_id``.
+
+        Returning ``None`` fences a late worker whose claim was already recovered.
+        """
+        timestamp = _format_timestamp(_coerce_now(now))
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    UPDATE queue_items
+                    SET status = ?,
+                        last_error = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND status = 'claimed'
+                      AND claimed_by = ?
+                    """,
+                    (status, last_error, timestamp, int(queue_item_id), worker_id),
+                )
+                if cursor.rowcount != 1:
+                    conn.commit()
+                    return None
+                completed = self._get_queue_item(conn, int(queue_item_id))
+                conn.commit()
+                return completed
+            except Exception:
+                conn.rollback()
+                raise
 
     def complete(
         self,

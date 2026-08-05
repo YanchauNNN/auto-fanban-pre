@@ -6,6 +6,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import pytest
+from tools.smoke_calculation_book_ai_suggestion import (
+    SmokeFailure,
+    _validate_result,
+)
+from tools.smoke_calculation_book_ai_suggestion import (
+    main as smoke_main,
+)
+
 from src.ai.chat_client import (
     ChatClientTimeout,
     ChatCompletionResult,
@@ -183,6 +192,93 @@ def _create_and_wait(
     detail = _poll_job(client, job_id)
     assert detail["status"] == "succeeded", detail
     return job_id, detail
+
+
+def _smoke_detail_with_blank_warning(code: str) -> dict[str, object]:
+    return {
+        "calculation_book_output": {
+            "warning_count": 1,
+            "warnings": [
+                {
+                    "code": code,
+                    "reason": "safe review reason",
+                    "blank_fields": ["X"],
+                }
+            ],
+            "ai_rebar_suggestion": {
+                "model": "structured-model",
+                "skill_version": "1.0.0",
+                "skill_sha256": "a" * 64,
+                "suggested_direction_count": 1,
+                "blank_direction_count": 1,
+            },
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "warning_code",
+    ["AI_BASE_FAILURE_LIMIT", "OCR_RECOGNITION_FAILED"],
+)
+def test_real_smoke_rejects_infrastructure_or_ocr_blank_directions(
+    warning_code: str,
+) -> None:
+    with pytest.raises(SmokeFailure, match=warning_code):
+        _validate_result(
+            _smoke_detail_with_blank_warning(warning_code),
+            expected_direction_count=2,
+        )
+
+
+@pytest.mark.parametrize(
+    "warning_code",
+    ["AI_BASE_FAILURE_LIMIT", "OCR_RECOGNITION_FAILED"],
+)
+def test_real_smoke_cli_returns_nonzero_for_fatal_blank_directions(
+    monkeypatch,
+    capsys,
+    warning_code: str,
+) -> None:
+    def fail_during_result_validation(_args) -> None:
+        _validate_result(
+            _smoke_detail_with_blank_warning(warning_code),
+            expected_direction_count=2,
+        )
+
+    monkeypatch.setattr(
+        "tools.smoke_calculation_book_ai_suggestion.run",
+        fail_during_result_validation,
+    )
+
+    exit_code = smoke_main(
+        [
+            "--api-base-url",
+            "http://127.0.0.1:1",
+            "--archive",
+            "unused.rar",
+            "--output-dir",
+            "unused-output",
+        ]
+    )
+
+    assert exit_code == 1
+    assert warning_code in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "warning_code",
+    ["NO_ELIGIBLE_CANDIDATE", "AI_NEEDS_REVIEW"],
+)
+def test_real_smoke_allows_business_review_blank_directions(
+    warning_code: str,
+) -> None:
+    output, summary = _validate_result(
+        _smoke_detail_with_blank_warning(warning_code),
+        expected_direction_count=2,
+    )
+
+    assert output["warnings"][0]["code"] == warning_code
+    assert summary["blank_direction_count"] == 1
 
 
 def test_formal_modes_ai_targeted_repair_and_local_failure(

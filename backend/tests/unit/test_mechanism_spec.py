@@ -114,10 +114,77 @@ def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> 
     spec = MechanismSpecLoader.load(spec_path)
 
     assert spec.api_runtime.job_summary_sync_interval_sec == 3.0
+    assert spec.api_runtime.worker_heartbeat_interval_sec == 10.0
+    assert spec.api_runtime.worker_claim_timeout_sec == 90.0
     assert spec.api_runtime.jobs_activity_stream_poll_interval_sec == 2.0
     assert spec.api_runtime.jobs_activity_stream_keepalive_sec == 15.0
     assert spec.api_runtime.jobs_activity_stream_max_duration_sec == 60.0
     assert spec.api_runtime.jobs_activity_stream_retry_ms == 5000
+
+
+@pytest.mark.parametrize("invalid_timeout", [0, -1])
+def test_mechanism_spec_rejects_nonpositive_worker_claim_timeout(
+    tmp_path: Path,
+    invalid_timeout: int,
+) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "api_runtime": {
+                    "worker_claim_timeout_sec": invalid_timeout,
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    with pytest.raises(ValueError, match="worker_claim_timeout_sec"):
+        MechanismSpecLoader.load(spec_path)
+
+
+def test_mechanism_spec_rejects_claim_timeout_shorter_than_three_heartbeats(
+    tmp_path: Path,
+) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "api_runtime": {
+                    "worker_heartbeat_interval_sec": 10,
+                    "worker_claim_timeout_sec": 1,
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    with pytest.raises(ValueError, match="three times worker_heartbeat_interval_sec"):
+        MechanismSpecLoader.load(spec_path)
+
+
+def test_mechanism_spec_accepts_claim_timeout_at_three_heartbeat_boundary(
+    tmp_path: Path,
+) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "api_runtime": {
+                    "worker_heartbeat_interval_sec": 10,
+                    "worker_claim_timeout_sec": 30,
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(spec_path)
+
+    assert spec.api_runtime.worker_claim_timeout_sec == 30.0
 
 
 def test_append_audit_replace_factory_codes_updates_yaml_and_cache(tmp_path: Path) -> None:

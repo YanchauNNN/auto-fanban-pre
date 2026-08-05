@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import stat
 import unicodedata
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
@@ -16,6 +17,20 @@ from typing import Any, BinaryIO, Literal, Self
 
 LOG_SCHEMA_VERSION = "calculation-book-log-1"
 _SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$")
+_LOG_FILENAME = re.compile(
+    r"^calculation-book-[A-Za-z0-9][A-Za-z0-9_-]{0,199}\.log$"
+)
+_LOG_RECORD_KEYS = frozenset(
+    {
+        "schema_version",
+        "timestamp_utc",
+        "sequence",
+        "event",
+        "job_id",
+        "correlation_id",
+        "details",
+    }
+)
 _AUTHORIZATION_VALUE = re.compile(
     r"(?i)authorization\s*[:=]\s*[^\r\n,;]+"
 )
@@ -263,28 +278,26 @@ class CalculationBookDiagnosticLog:
     def create_for_job(
         cls,
         *,
-        work_dir: Path,
+        log_dir: Path,
         job_id: str,
         correlation_id: str,
         max_bytes: int,
+        retention_days: int,
     ) -> Self:
         safe_job_id = _validated_identifier(job_id, label="job_id")
-        work_root = Path(work_dir).resolve()
-        logs_dir = work_root / "calculation-book" / "logs"
-        try:
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            resolved_logs_dir = logs_dir.resolve(strict=True)
-        except OSError:
-            raise DiagnosticLogError(
-                "log_create_failed",
-                "diagnostic log directory could not be created",
-            ) from None
-        if not resolved_logs_dir.is_relative_to(work_root):
-            raise DiagnosticLogError(
-                "log_create_failed",
-                "diagnostic log directory is outside the task workspace",
-            )
-        filename = f"calculation-book-{safe_job_id}.log"
+        if (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or retention_days <= 0
+        ):
+            raise ValueError("retention_days must be a positive integer")
+        resolved_logs_dir = _prepare_log_directory(log_dir)
+        filename = calculation_book_log_filename(safe_job_id)
+        _cleanup_expired_logs(
+            resolved_logs_dir,
+            current_filename=filename,
+            retention_days=retention_days,
+        )
         target = resolved_logs_dir / filename
         log = cls.create(
             target,
@@ -303,7 +316,6 @@ class CalculationBookDiagnosticLog:
             or final_path is None
             or final_path.parent != resolved_logs_dir
             or final_path.name != filename
-            or not final_path.is_relative_to(work_root)
         ):
             try:
                 _delete_open_file(log._stream, final_path or target)
@@ -510,6 +522,208 @@ def _open_exclusive_stream(target: Path) -> BinaryIO:
     except Exception:
         os.close(descriptor)
         raise
+
+
+def calculation_book_log_filename(job_id: str) -> str:
+    """Return the only permitted audit-log filename for a task."""
+
+    safe_job_id = _validated_identifier(job_id, label="job_id")
+    return f"calculation-book-{safe_job_id}.log"
+
+
+def calculation_book_log_matches_terminal_state(
+    path: Path,
+    *,
+    job_id: str,
+    expected_event: Literal["task_completed", "task_failed"],
+    max_bytes: int,
+) -> bool:
+    """Validate a bounded JSONL log and its terminal event for API exposure."""
+
+    try:
+        safe_job_id = _validated_identifier(job_id, label="job_id")
+    except ValueError:
+        return False
+    if (
+        expected_event not in _TERMINAL_EVENTS
+        or isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or max_bytes <= 0
+    ):
+        return False
+    payload = _read_bounded_regular_file(Path(path), max_bytes=max_bytes)
+    if payload is None or not payload.endswith(b"\n"):
+        return False
+    lines = payload.splitlines()
+    if not lines:
+        return False
+    events: list[str] = []
+    for sequence, line in enumerate(lines, start=1):
+        event = _validated_persisted_record(
+            line,
+            job_id=safe_job_id,
+            sequence=sequence,
+        )
+        if event is None:
+            return False
+        events.append(event)
+    if any(event in _TERMINAL_EVENTS for event in events[:-1]):
+        return False
+    return events[-1] == expected_event
+
+
+def _read_bounded_regular_file(path: Path, *, max_bytes: int) -> bytes | None:
+    try:
+        initial_stat = path.lstat()
+        is_junction = getattr(path, "is_junction", lambda: False)
+        if (
+            not stat.S_ISREG(initial_stat.st_mode)
+            or path.is_symlink()
+            or is_junction()
+            or initial_stat.st_size <= 0
+            or initial_stat.st_size > max_bytes
+        ):
+            return None
+        with path.open("rb") as stream:
+            opened_stat = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or _file_identity(opened_stat) != _file_identity(initial_stat)
+            ):
+                return None
+            payload = stream.read(max_bytes + 1)
+            final_open_stat = os.fstat(stream.fileno())
+        final_path_stat = path.lstat()
+    except (OSError, RuntimeError):
+        return None
+    if (
+        len(payload) > max_bytes
+        or len(payload) != initial_stat.st_size
+        or _file_identity(final_open_stat) != _file_identity(initial_stat)
+        or _file_identity(final_path_stat) != _file_identity(initial_stat)
+        or final_open_stat.st_size != initial_stat.st_size
+        or final_path_stat.st_size != initial_stat.st_size
+    ):
+        return None
+    return payload
+
+
+def _file_identity(file_stat: os.stat_result) -> tuple[int, int]:
+    return file_stat.st_dev, file_stat.st_ino
+
+
+def _validated_persisted_record(
+    payload: bytes,
+    *,
+    job_id: str,
+    sequence: int,
+) -> str | None:
+    try:
+        record = json.loads(payload.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(record, dict) or set(record) != _LOG_RECORD_KEYS:
+        return None
+    if record.get("schema_version") != LOG_SCHEMA_VERSION:
+        return None
+    persisted_sequence = record.get("sequence")
+    if (
+        isinstance(persisted_sequence, bool)
+        or persisted_sequence != sequence
+    ):
+        return None
+    if record.get("job_id") != job_id:
+        return None
+    try:
+        _validated_identifier(
+            record.get("correlation_id"),
+            label="correlation_id",
+        )
+        event = _validated_event(record.get("event"))
+    except (TypeError, ValueError):
+        return None
+    details = record.get("details")
+    if not isinstance(details, dict):
+        return None
+    try:
+        _validate_event_details(event, details)
+    except (DiagnosticLogError, TypeError, ValueError):
+        return None
+    timestamp = record.get("timestamp_utc")
+    if not isinstance(timestamp, str):
+        return None
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+    if (
+        parsed_timestamp.tzinfo is None
+        or parsed_timestamp.utcoffset() != UTC.utcoffset(parsed_timestamp)
+    ):
+        return None
+    return event
+
+
+def _prepare_log_directory(log_dir: Path) -> Path:
+    candidate = Path(log_dir)
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        candidate_stat = candidate.lstat()
+        is_junction = getattr(candidate, "is_junction", lambda: False)
+        if (
+            not stat.S_ISDIR(candidate_stat.st_mode)
+            or candidate.is_symlink()
+            or is_junction()
+        ):
+            raise OSError("unsafe diagnostic log root")
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise DiagnosticLogError(
+            "log_create_failed",
+            "diagnostic log directory could not be created",
+        ) from None
+    return resolved
+
+
+def _cleanup_expired_logs(
+    log_dir: Path,
+    *,
+    current_filename: str,
+    retention_days: int,
+) -> None:
+    cutoff = datetime.now(UTC).timestamp() - retention_days * 86_400
+    try:
+        candidates = tuple(log_dir.iterdir())
+    except (OSError, RuntimeError):
+        return
+    for candidate in candidates:
+        if (
+            candidate.name == current_filename
+            or _LOG_FILENAME.fullmatch(candidate.name) is None
+        ):
+            continue
+        try:
+            if candidate.is_symlink():
+                continue
+            first_stat = candidate.lstat()
+            if not stat.S_ISREG(first_stat.st_mode) or first_stat.st_mtime >= cutoff:
+                continue
+            resolved = candidate.resolve(strict=True)
+            if resolved.parent != log_dir or resolved.name != candidate.name:
+                continue
+            second_stat = candidate.lstat()
+            if (
+                candidate.is_symlink()
+                or not stat.S_ISREG(second_stat.st_mode)
+                or (first_stat.st_dev, first_stat.st_ino)
+                != (second_stat.st_dev, second_stat.st_ino)
+            ):
+                continue
+            candidate.unlink()
+        except (OSError, RuntimeError):
+            # Retention is best-effort. Failure to remove one historical log
+            # must not prevent the current task from creating its audit trail.
+            continue
 
 
 def _delete_open_file(stream: BinaryIO, final_path: Path) -> bool:

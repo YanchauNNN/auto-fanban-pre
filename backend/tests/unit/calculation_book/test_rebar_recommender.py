@@ -441,13 +441,28 @@ def test_business_valid_response_resets_consecutive_base_failure_counter() -> No
     assert result.call_count == 6
 
 
-def test_empty_candidates_and_zero_z_fixed_candidate_do_not_call_ai() -> None:
-    fixed = _candidate(14, direction="Z", target_area=0.0)
+def test_empty_candidates_do_not_call_ai() -> None:
     invoker = _ScriptedInvoker([])
+
+    result = _run((_input("N5001:Y", candidates=()),), invoker)
+
+    assert invoker.requests == []
+    assert result.call_count == 0
+    assert result.repair_round_count == 0
+    assert result.selected == ()
+    assert result.warnings[0].code == "NO_ELIGIBLE_CANDIDATE"
+    assert result.skill_id is None
+    assert result.skill_version is None
+    assert result.skill_sha256 is None
+    assert result.model is None
+
+
+def test_zero_z_fixed_candidate_is_selected_by_skill_and_backend_validated() -> None:
+    fixed = _candidate(14, direction="Z", target_area=0.0)
+    invoker = _ScriptedInvoker([{"N5002:Z": fixed.candidate_id}])
 
     result = _run(
         (
-            _input("N5001:Y", candidates=()),
             _input(
                 "N5002:Z",
                 candidates=(fixed,),
@@ -459,16 +474,56 @@ def test_empty_candidates_and_zero_z_fixed_candidate_do_not_call_ai() -> None:
         invoker,
     )
 
-    assert invoker.requests == []
-    assert result.call_count == 0
+    assert len(invoker.requests) == 1
+    request_item = invoker.requests[0].items[0]
+    assert request_item.item_id == "N5002:Z"
+    assert request_item.smx == 0.0
+    assert request_item.target_area == 0.0
+    assert [candidate.candidate_id for candidate in request_item.candidates] == [
+        fixed.candidate_id
+    ]
+    assert [candidate.spec for candidate in request_item.candidates] == [
+        "1C14间距400*400"
+    ]
+    assert result.call_count == 1
     assert result.repair_round_count == 0
     assert result.selected[0].candidate is fixed
-    assert result.selected[0].source == "fixed_rule"
-    assert result.warnings[0].code == "NO_ELIGIBLE_CANDIDATE"
-    assert result.skill_id is None
-    assert result.skill_version is None
-    assert result.skill_sha256 is None
-    assert result.model is None
+    assert result.selected[0].source == "ai"
+    assert result.warnings == ()
+    assert result.skill_id == "recommend-rebar-from-smx"
+    assert result.skill_version == "1.0.0"
+    assert result.skill_sha256 == "sha-1"
+    assert result.model == "local-model"
+
+
+def test_zero_z_model_failure_retries_three_times_then_blanks_with_warning() -> None:
+    fixed = _candidate(14, direction="Z", target_area=0.0)
+    invoker = _ScriptedInvoker(
+        [
+            _task_error("infrastructure", "model_gateway_failed"),
+            _task_error("infrastructure", "model_gateway_failed"),
+            _task_error("infrastructure", "model_gateway_failed"),
+        ]
+    )
+
+    result = _run(
+        (
+            _input(
+                "N5002:Z",
+                candidates=(fixed,),
+                direction="Z",
+                smx=0.0,
+                target_area=0.0,
+            ),
+        ),
+        invoker,
+    )
+
+    assert len(invoker.requests) == 3
+    assert result.call_count == 3
+    assert result.selected == ()
+    assert result.warnings[0].code == "AI_BASE_FAILURE_LIMIT"
+    assert result.warnings[0].detail_codes == ("model_gateway_failed",)
 
 
 def test_formula_mismatch_fails_fast_as_backend_contract_error() -> None:

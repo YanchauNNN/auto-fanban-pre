@@ -12,6 +12,8 @@ from typing import Any, Protocol
 
 from src.ai.chat_client import build_chat_client
 from src.ai.rebar_suggestion_task import (
+    RebarSuggestionMetadataProvider,
+    RebarSuggestionSkillMetadata,
     RebarSuggestionTaskLimits,
     build_rebar_suggestion_task,
 )
@@ -280,8 +282,9 @@ class CalculationBookJobExecutor:
         if ai_suggestion_mode:
             diagnostic_log = self._create_diagnostic_log(
                 job=job,
-                work_dir=work_dir,
+                log_dir=runtime.ai_suggestion.log_dir,
                 max_bytes=runtime.ai_suggestion.log_max_bytes,
+                retention_days=runtime.ai_suggestion.log_retention_days,
             )
             try:
                 diagnostic_log.write(
@@ -427,6 +430,9 @@ class CalculationBookJobExecutor:
             self._persist(job)
         except Exception as exc:
             failure: Exception = exc
+            # A Word file is not a downloadable result until the task and its
+            # terminal diagnostic record have both completed durably.
+            job.artifacts.calculation_docx = None
             if diagnostic_log is not None and not diagnostic_log.closed:
                 terminal_log_failed = False
                 try:
@@ -448,15 +454,18 @@ class CalculationBookJobExecutor:
                         "AI rebar suggestion diagnostic log is unavailable",
                     )
                     job.artifacts.calculation_log = None
-            elif (
-                diagnostic_log is not None
-                and isinstance(exc, DiagnosticLogError)
-            ):
-                failure = RebarSuggestionUnavailable(
-                    "diagnostic_log_unavailable",
-                    "AI rebar suggestion diagnostic log is unavailable",
-                )
+            elif diagnostic_log is not None:
+                # The closed log already ends in task_completed, but a later
+                # failure (for example persisting the succeeded job state)
+                # means that terminal record is no longer truthful. Keep the
+                # file for retention cleanup, but never expose it as an
+                # artifact of the failed task.
                 job.artifacts.calculation_log = None
+                if isinstance(exc, DiagnosticLogError):
+                    failure = RebarSuggestionUnavailable(
+                        "diagnostic_log_unavailable",
+                        "AI rebar suggestion diagnostic log is unavailable",
+                    )
             job.mark_failed(str(failure))
             self._persist(job)
             if failure is exc:
@@ -483,15 +492,17 @@ class CalculationBookJobExecutor:
     def _create_diagnostic_log(
         *,
         job: Job,
-        work_dir: Path,
+        log_dir: Path,
         max_bytes: int,
+        retention_days: int,
     ) -> CalculationBookDiagnosticLog:
         try:
             diagnostic_log = CalculationBookDiagnosticLog.create_for_job(
-                work_dir=work_dir,
+                log_dir=log_dir,
                 job_id=job.job_id,
                 correlation_id=job.job_id,
                 max_bytes=max_bytes,
+                retention_days=retention_days,
             )
         except Exception:
             failure = RebarSuggestionUnavailable(
@@ -524,11 +535,43 @@ class CalculationBookJobExecutor:
                 "AI rebar suggestion capability could not be initialized",
             ) from None
         settings = config.calculation_book.ai_suggestion
+        skill_metadata: RebarSuggestionSkillMetadata | None = None
+        if isinstance(invoker, RebarSuggestionMetadataProvider):
+            try:
+                candidate_metadata = invoker.skill_metadata()
+            except Exception:
+                raise RebarSuggestionUnavailable(
+                    "ai_suggestion_initialization_failed",
+                    "AI rebar suggestion capability could not be initialized",
+                ) from None
+            if not isinstance(candidate_metadata, RebarSuggestionSkillMetadata):
+                raise RebarSuggestionUnavailable(
+                    "ai_suggestion_initialization_failed",
+                    "AI rebar suggestion capability could not be initialized",
+                )
+            skill_metadata = candidate_metadata
         metadata.update(
             {
-                "skill_id": _REBAR_SUGGESTION_SKILL_ID,
-                "skill_version": str(settings.skill_version)[:160],
-                "model": str(getattr(invoker, "model", "") or "")[:160],
+                "skill_id": str(
+                    skill_metadata.skill_id
+                    if skill_metadata is not None
+                    else _REBAR_SUGGESTION_SKILL_ID
+                )[:160],
+                "skill_version": str(
+                    skill_metadata.skill_version
+                    if skill_metadata is not None
+                    else settings.skill_version
+                )[:160],
+                "skill_sha256": str(
+                    skill_metadata.skill_sha256
+                    if skill_metadata is not None
+                    else ""
+                )[:160],
+                "model": str(
+                    skill_metadata.model
+                    if skill_metadata is not None
+                    else getattr(invoker, "model", "") or ""
+                )[:160],
             }
         )
 
@@ -606,6 +649,15 @@ class CalculationBookJobExecutor:
                 "ai_suggestion_count_invalid",
                 "AI rebar suggestion direction counts are invalid",
             )
+        skill_sha256 = str(
+            result.skill_sha256
+            or fallback_metadata.get("skill_sha256", "")
+        ).strip()
+        if re.fullmatch(r"[0-9A-Fa-f]{64}", skill_sha256) is None:
+            raise RebarSuggestionUnavailable(
+                "ai_suggestion_skill_metadata_invalid",
+                "AI rebar suggestion Skill metadata is invalid",
+            )
         return {
             "skill_id": str(
                 result.skill_id or fallback_metadata.get("skill_id", "")
@@ -614,7 +666,7 @@ class CalculationBookJobExecutor:
                 result.skill_version
                 or fallback_metadata.get("skill_version", "")
             )[:160],
-            "skill_sha256": str(result.skill_sha256 or "")[:160],
+            "skill_sha256": skill_sha256,
             "model": str(
                 result.model or fallback_metadata.get("model", "")
             )[:160],

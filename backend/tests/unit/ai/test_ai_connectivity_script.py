@@ -591,6 +591,91 @@ profiles:
     assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"] == "198.18.0.73:49100"
 
 
+def test_ai_connectivity_script_reports_application_api_failure_without_strict_mode_crash(
+    tmp_path: Path,
+    openai_compatible_server: str,
+) -> None:
+    if shutil.which("powershell") is None:
+        pytest.skip("PowerShell is required for the connectivity script")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script_path = repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1"
+    config_path = tmp_path / "ai_model_gateway.yaml"
+    output_path = tmp_path / "connectivity.json"
+    application_base_url = openai_compatible_server.removesuffix("/v1")
+    config_path.write_text(
+        f"""
+schema_version: "0.1"
+active_profile: "application_failure_test"
+profiles:
+  application_failure_test:
+    provider: "local-test"
+    protocol: "openai_compatible"
+    network_mode: "test"
+    architecture: "local_test_gateway"
+    base_url: "{openai_compatible_server}"
+    models_path: "/models"
+    chat_completions_path: "/chat/completions"
+    api_key_env_var: ""
+    api_key_required: false
+    authorization_scheme: "none"
+    chat_model: "Qwen3.6-35A3"
+    structured_model: "Qwen3.6-35A3"
+    stream_enabled: false
+    timeout_sec: 15
+    connect_timeout_sec: 5
+    model_list_required: true
+    ssl_no_revoke: false
+    test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
+    expected_response_contains: "AI_CONNECTIVITY_OK"
+    agent_probe_enabled: false
+    multimodal_probe_enabled: false
+    concurrency_probe_count: 0
+    application_api_base_url: "{application_base_url}"
+    application_api_state_path: "/api/ai/missing-state"
+    application_api_forwarded_for_probe: "198.18.0.73"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ConfigPath",
+            str(config_path),
+            "-OutputPath",
+            str(output_path),
+            "-SkipStream",
+            "-SkipAdvanced",
+            "-SkipMultimodal",
+            "-Concurrency",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+    )
+
+    assert completed.returncode == 1
+    combined_output = completed.stdout + completed.stderr
+    assert "PropertyNotFoundStrict" not in combined_output
+    assert "property 'stage' cannot be found" not in combined_output.lower()
+    result = json.loads(output_path.read_text(encoding="utf-8-sig"))
+    assert result["errors"] == [
+        {
+            "stage": "application_api",
+            "message": "Application AI API probe failed.",
+        }
+    ]
+    assert result["checks"]["application_api"]["status"] == "failed"
+
+
 def test_ai_connectivity_script_accepts_split_stream_content(
     tmp_path: Path,
     openai_compatible_server: str,

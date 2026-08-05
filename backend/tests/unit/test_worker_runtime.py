@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
+from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
 from src.pipeline.group_manager import GroupManager
@@ -65,6 +70,15 @@ class SlotBoundProcessor:
         return None
 
 
+class NeverCalledProcessor:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, job: Job) -> None:
+        self.calls += 1
+        raise AssertionError(f"recovered job must not be executed again: {job.job_id}")
+
+
 class BlockingSlotBoundProcessor:
     def __init__(self) -> None:
         self.started = threading.Event()
@@ -109,7 +123,19 @@ class CalculationArtifactProcessor:
             / f"calculation-book-{job.job_id}.log"
         )
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_path.write_bytes(b'{"event":"task_completed"}\n')
+        with CalculationBookDiagnosticLog.create(
+            log_path,
+            job_id=job.job_id,
+            correlation_id=job.job_id,
+            max_bytes=8_192,
+        ) as diagnostic_log:
+            diagnostic_log.write(
+                "task_completed",
+                duration_ms=1,
+                figure_count=1,
+                warning_count=0,
+                output_filename="result.docx",
+            )
         job.artifacts.calculation_log = log_path
         job.progress.details["ai_rebar_suggestion"] = {
             "skill_id": "recommend-rebar-from-smx",
@@ -267,6 +293,335 @@ def test_worker_run_once_claims_and_executes_queued_job(monkeypatch, tmp_path: P
     assert queue_store.list_queue_items()[0]["status"] == "done"
 
 
+def test_worker_constructor_rejects_timeout_shorter_than_three_heartbeats(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+    from API.app.worker import DeliverableWorkerRuntime
+
+    created_worker = None
+    try:
+        with pytest.raises(ValueError, match="three times heartbeat_interval_seconds"):
+            created_worker = DeliverableWorkerRuntime(
+                worker_id="worker-invalid-timing",
+                heartbeat_interval_seconds=10,
+                stale_claim_timeout_seconds=29,
+            )
+    finally:
+        if created_worker is not None:
+            created_worker.stop()
+
+
+def test_worker_recovers_stale_calculation_claim_without_reopening_exclusive_log(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+        options={
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+        },
+        params={"reinforcement_source": "ai_suggested"},
+    )
+    job.mark_running(stage="AI_REBAR_SUGGESTION")
+    log_path = (
+        tmp_path
+        / "storage"
+        / "jobs"
+        / job.job_id
+        / "calculation-book"
+        / "logs"
+        / f"calculation-book-{job.job_id}.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    original_log = b'{"event":"task_started"}\n'
+    log_path.write_bytes(original_log)
+    job.artifacts.calculation_log = log_path
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    stale_at = datetime.now(UTC) - timedelta(minutes=5)
+    queue_store.enqueue("job", job.job_id, now=stale_at)
+    queue_store.claim_next(worker_id="worker-dead", now=stale_at)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    processor = NeverCalledProcessor()
+    worker = DeliverableWorkerRuntime(
+        worker_id="worker-recovery",
+        job_processor=processor,
+        stale_claim_timeout_seconds=90,
+    )
+    try:
+        assert worker.run_once() is False
+    finally:
+        worker.stop()
+
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.FAILED
+    assert persisted.errors.count("worker_interrupted_before_completion") == 1
+    assert persisted.artifacts.calculation_log == log_path
+    assert log_path.read_bytes() == original_log
+    assert processor.calls == 0
+    queue_item = queue_store.list_queue_items()[0]
+    assert queue_item["status"] == "failed"
+    assert queue_item["last_error"] == "worker_interrupted_before_completion"
+    assert queue_item["attempt_count"] == 1
+    assert queue_item["claimed_by"] is None
+
+    first_finished_at = persisted.finished_at
+    time.sleep(0.02)
+    restarted_worker = DeliverableWorkerRuntime(
+        worker_id="worker-restarted",
+        job_processor=processor,
+        stale_claim_timeout_seconds=90,
+    )
+    try:
+        assert restarted_worker.run_once() is False
+    finally:
+        restarted_worker.stop()
+    after_restart = manager.reload_job(job.job_id)
+    assert after_restart is not None
+    assert after_restart.finished_at == first_finished_at
+
+
+def test_worker_recovers_stale_group_and_nonterminal_children(monkeypatch, tmp_path: Path) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+
+    group_manager = GroupManager()
+    job_manager = JobManager()
+    group = group_manager.create_group(
+        batch_id="batch-stale",
+        source_filenames=["stale.dwg"],
+        project_no="2016",
+        run_audit_check=False,
+    )
+    child = job_manager.create_job(
+        job_type=JobType.DELIVERABLE.value,
+        project_no="2016",
+        group_id=group.group_id,
+    )
+    child.mark_running(stage="GENERATE_DOCS")
+    job_manager.update_job(child)
+    group.child_job_ids = [child.job_id]
+    group.mark_running("DOCS_AND_PACKAGE")
+    group_manager.update_group(group)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    stale_at = datetime.now(UTC) - timedelta(minutes=5)
+    queue_store.enqueue("group", group.group_id, now=stale_at)
+    queue_store.claim_next(worker_id="worker-dead", now=stale_at)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    processor = NeverCalledProcessor()
+    worker = DeliverableWorkerRuntime(
+        worker_id="worker-recovery",
+        job_processor=processor,
+        stale_claim_timeout_seconds=90,
+    )
+    try:
+        assert worker.run_once() is False
+    finally:
+        worker.stop()
+
+    recovered_group = group_manager.reload_group(group.group_id)
+    recovered_child = job_manager.reload_job(child.job_id)
+    assert recovered_group is not None
+    assert recovered_group.status == JobStatus.FAILED
+    assert recovered_group.errors.count("worker_interrupted_before_completion") == 1
+    assert recovered_child is not None
+    assert recovered_child.status == JobStatus.FAILED
+    assert recovered_child.errors.count("worker_interrupted_before_completion") == 1
+    assert processor.calls == 0
+
+
+def test_interrupted_reconciliation_is_idempotent_when_worker_crashes_before_ack(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+    )
+    job.mark_running(stage="RENDER_CALCULATION_BOOK")
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    stale_at = datetime.now(UTC) - timedelta(minutes=5)
+    queue_store.enqueue("job", job.job_id, now=stale_at)
+    queue_store.claim_next(worker_id="worker-dead", now=stale_at)
+    interrupted = queue_store.recover_stale_claims(
+        timeout_seconds=90,
+        now=datetime.now(UTC),
+    )[0]
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    crashed_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    crashed_worker.runtime = SimpleNamespace(
+        job_manager=manager,
+        group_manager=GroupManager(),
+        refresh_summary_index=lambda *_args: None,
+    )
+    assert crashed_worker._finalize_interrupted_item(interrupted) is True
+    first_finished_at = manager.reload_job(job.job_id).finished_at
+    assert queue_store.list_interrupted_claims()
+
+    restarted_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    restarted_worker.worker_id = "worker-restarted"
+    restarted_worker.queue_store = queue_store
+    restarted_worker.stale_claim_timeout_seconds = 90
+    restarted_worker.runtime = crashed_worker.runtime
+    time.sleep(0.02)
+    restarted_worker._recover_stale_claims(now=datetime.now(UTC))
+
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.finished_at == first_finished_at
+    assert queue_store.list_interrupted_claims() == []
+
+
+def test_late_worker_after_ack_without_retry_reasserts_interrupted_job_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+    )
+    job.mark_running(stage="RENDER_CALCULATION_BOOK")
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    stale_at = datetime.now(UTC) - timedelta(minutes=5)
+    queue_store.enqueue("job", job.job_id, now=stale_at)
+    stale_claim = queue_store.claim_next(worker_id="worker-old", now=stale_at)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    recovery_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    recovery_worker.worker_id = "worker-recovery"
+    recovery_worker.queue_store = queue_store
+    recovery_worker.stale_claim_timeout_seconds = 90
+    recovery_worker.runtime = SimpleNamespace(
+        job_manager=manager,
+        group_manager=GroupManager(),
+        refresh_summary_index=lambda *_args: None,
+    )
+    recovery_worker._recover_stale_claims(now=datetime.now(UTC))
+    assert queue_store.get_queue_item(stale_claim["id"])["claimed_by"] is None
+
+    late_job = manager.reload_job(job.job_id)
+    assert late_job is not None
+    late_job.mark_succeeded()
+    manager.update_job(late_job)
+
+    worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    worker.worker_id = "worker-old"
+    worker.queue_store = queue_store
+    worker.runtime = SimpleNamespace(
+        job_manager=manager,
+        group_manager=GroupManager(),
+        refresh_summary_index=lambda *_args: None,
+    )
+
+    assert worker._finish_owned_claim(stale_claim, status="done") is False
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.FAILED
+    assert persisted.errors.count("worker_interrupted_before_completion") == 1
+
+
+def test_newer_retry_fences_acknowledged_interruption_and_late_old_worker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+    )
+    job.mark_running(stage="RENDER_CALCULATION_BOOK")
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    stale_at = datetime.now(UTC) - timedelta(minutes=5)
+    queue_store.enqueue("job", job.job_id, now=stale_at)
+    stale_claim = queue_store.claim_next(worker_id="worker-old", now=stale_at)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    recovery_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    recovery_worker.worker_id = "worker-recovery"
+    recovery_worker.queue_store = queue_store
+    recovery_worker.stale_claim_timeout_seconds = 90
+    recovery_worker.runtime = SimpleNamespace(
+        job_manager=manager,
+        group_manager=GroupManager(),
+        refresh_summary_index=lambda *_args: None,
+    )
+    recovery_worker._recover_stale_claims(now=datetime.now(UTC))
+
+    queue_store.enqueue("job", job.job_id, now=datetime.now(UTC))
+    retry_claim = queue_store.claim_next(worker_id="worker-new", now=datetime.now(UTC))
+    retried_job = manager.reload_job(job.job_id)
+    assert retried_job is not None
+    retried_job.mark_succeeded()
+    manager.update_job(retried_job)
+
+    old_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    old_worker.worker_id = "worker-old"
+    old_worker.queue_store = queue_store
+    old_worker.runtime = SimpleNamespace(
+        job_manager=manager,
+        group_manager=GroupManager(),
+        refresh_summary_index=lambda *_args: None,
+    )
+
+    assert old_worker._finish_owned_claim(stale_claim, status="done") is False
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.SUCCEEDED
+    assert queue_store.get_queue_item(retry_claim["id"])["status"] == "claimed"
+
+
 def test_worker_heartbeat_retries_transient_sqlite_lock() -> None:
     queue_store = FlakyHeartbeatQueue(fail_count=1)
     worker = _bare_worker_with_queue(queue_store)
@@ -346,6 +701,10 @@ def test_worker_refreshes_heartbeats_while_processing_long_item(monkeypatch, tmp
 
     refreshed_worker_seen = queue_store.worker_status(max_age_seconds=3600)["last_seen_at"]
     refreshed_queue_heartbeat = queue_store.list_queue_items(status="claimed")[0]["heartbeat_at"]
+    assert queue_store.recover_stale_claims(
+        timeout_seconds=1,
+        now=datetime.now(UTC),
+    ) == []
     processor.release.set()
     worker_thread.join(timeout=2)
     worker.stop()
@@ -653,8 +1012,9 @@ def test_worker_persists_ai_calculation_source_summary_and_log_artifact(
     assert persisted.status == JobStatus.SUCCEEDED
     assert persisted.options["reinforcement_source"] == "ai_suggested"
     assert persisted.artifacts.calculation_log is not None
-    assert persisted.artifacts.calculation_log.read_bytes() == (
-        b'{"event":"task_completed"}\n'
+    persisted_log = persisted.artifacts.calculation_log.read_bytes()
+    assert json.loads(persisted_log.splitlines()[-1])["event"] == (
+        "task_completed"
     )
     assert persisted.progress.details["ai_rebar_suggestion"][
         "suggested_direction_count"

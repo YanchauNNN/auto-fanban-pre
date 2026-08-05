@@ -8,7 +8,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from threading import Lock
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, Protocol, runtime_checkable
 
 import yaml
 
@@ -107,6 +107,19 @@ class RebarSuggestionTaskResult:
     usage: dict[str, int] = field(default_factory=dict, repr=False)
 
 
+@dataclass(frozen=True)
+class RebarSuggestionSkillMetadata:
+    skill_id: str
+    skill_version: str
+    skill_sha256: str
+    model: str
+
+
+@runtime_checkable
+class RebarSuggestionMetadataProvider(Protocol):
+    def skill_metadata(self) -> RebarSuggestionSkillMetadata: ...
+
+
 class RebarSuggestionTask:
     def __init__(
         self,
@@ -130,6 +143,17 @@ class RebarSuggestionTask:
             "RebarSuggestionTask("
             f"model={self.model!r}, skill_root={self.skill_root!r}, "
             f"skill_version={self.skill_version!r}, limits={self.limits!r})"
+        )
+
+    def skill_metadata(self) -> RebarSuggestionSkillMetadata:
+        """Load and freeze the local Skill identity without calling a model."""
+
+        bundle = self._load_skill_bundle()
+        return RebarSuggestionSkillMetadata(
+            skill_id=bundle.skill_id,
+            skill_version=bundle.skill_version,
+            skill_sha256=bundle.content_sha256,
+            model=self.model,
         )
 
     def suggest(

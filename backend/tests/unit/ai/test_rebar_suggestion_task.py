@@ -186,6 +186,26 @@ def test_calls_structured_model_once_with_only_bounded_skill_request_and_ids(
     assert result.usage == {"completion_tokens": 41}
 
 
+def test_prefetches_read_only_skill_metadata_without_calling_model(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(_response())
+    task = _task(tmp_path, client)
+
+    metadata = task.skill_metadata()
+
+    assert client.calls == []
+    assert metadata.skill_id == "recommend-rebar-from-smx"
+    assert metadata.skill_version == "1.2.3"
+    assert metadata.model == "structured-model"
+    assert len(metadata.skill_sha256) == 64
+    result = task.suggest(_request(), correlation_id="corr-after-prefetch")
+    assert result.skill_id == metadata.skill_id
+    assert result.skill_version == metadata.skill_version
+    assert result.skill_sha256 == metadata.skill_sha256
+    assert result.model == metadata.model
+
+
 def test_freezes_first_successfully_loaded_skill_bundle_for_repair_rounds(
     tmp_path: Path,
 ) -> None:

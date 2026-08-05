@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -181,28 +183,27 @@ def test_diagnostic_log_rejects_unsafe_job_identifiers(
 
     with pytest.raises(ValueError):
         CalculationBookDiagnosticLog.create_for_job(
-            work_dir=tmp_path,
+            log_dir=tmp_path,
             job_id=job_id,
             correlation_id="corr-safe",
             max_bytes=10_000,
+            retention_days=30,
         )
 
 
-def test_create_for_job_uses_the_fixed_task_log_location(tmp_path: Path) -> None:
+def test_create_for_job_uses_the_configured_central_log_location(
+    tmp_path: Path,
+) -> None:
     from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 
     with CalculationBookDiagnosticLog.create_for_job(
-        work_dir=tmp_path,
+        log_dir=tmp_path,
         job_id="job-safe_42",
         correlation_id="corr-safe",
         max_bytes=10_000,
+        retention_days=30,
     ) as log:
-        assert log.path == (
-            tmp_path
-            / "calculation-book"
-            / "logs"
-            / "calculation-book-job-safe_42.log"
-        )
+        assert log.path == tmp_path / "calculation-book-job-safe_42.log"
         log.write("task_started")
 
     assert log.path.is_file()
@@ -436,18 +437,16 @@ def test_create_for_job_rejects_an_open_handle_outside_the_checked_parent(
 
     with pytest.raises(diagnostic_log.DiagnosticLogError) as raised:
         diagnostic_log.CalculationBookDiagnosticLog.create_for_job(
-            work_dir=tmp_path,
+            log_dir=tmp_path,
             job_id="job-race",
             correlation_id="corr-race",
             max_bytes=10_000,
+            retention_days=30,
         )
 
     assert raised.value.code == "log_create_failed"
     created = (
-        tmp_path
-        / "calculation-book"
-        / "logs"
-        / "calculation-book-job-race.log"
+        tmp_path / "calculation-book-job-race.log"
     )
     assert created.exists() is False
 
@@ -473,10 +472,11 @@ def test_create_for_job_closes_handle_and_redacts_delete_failure(
 
     with pytest.raises(diagnostic_log.DiagnosticLogError) as raised:
         diagnostic_log.CalculationBookDiagnosticLog.create_for_job(
-            work_dir=tmp_path,
+            log_dir=tmp_path,
             job_id="job-delete",
             correlation_id="corr-delete",
             max_bytes=10_000,
+            retention_days=30,
         )
 
     assert raised.value.code == "log_create_failed"
@@ -484,10 +484,119 @@ def test_create_for_job_closes_handle_and_redacts_delete_failure(
     assert raised.value.__context__ is None
     assert sensitive not in repr(raised.value)
     created = (
-        tmp_path
-        / "calculation-book"
-        / "logs"
-        / "calculation-book-job-delete.log"
+        tmp_path / "calculation-book-job-delete.log"
     )
     created.write_text("handle-closed", encoding="utf-8")
     assert created.read_text(encoding="utf-8") == "handle-closed"
+
+
+def test_central_log_retention_removes_only_expired_matching_regular_files(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
+
+    log_dir = tmp_path / "central-audit"
+    log_dir.mkdir()
+    now = time.time()
+    expired = log_dir / "calculation-book-job-expired.log"
+    fresh = log_dir / "calculation-book-job-fresh.log"
+    unrelated = log_dir / "unrelated.log"
+    matching_directory = log_dir / "calculation-book-job-directory.log"
+    outside = tmp_path / "outside-target.log"
+    linked = log_dir / "calculation-book-job-linked.log"
+    escaped = log_dir / "calculation-book-job-escaped.log"
+    expired.write_text("expired", encoding="utf-8")
+    fresh.write_text("fresh", encoding="utf-8")
+    unrelated.write_text("unrelated", encoding="utf-8")
+    matching_directory.mkdir()
+    outside.write_text("outside", encoding="utf-8")
+    linked.write_text("simulated symlink", encoding="utf-8")
+    escaped.write_text("simulated escape", encoding="utf-8")
+    os.utime(expired, (now - 3 * 86_400, now - 3 * 86_400))
+    os.utime(fresh, (now - 23 * 3_600, now - 23 * 3_600))
+    os.utime(linked, (now - 3 * 86_400, now - 3 * 86_400))
+    os.utime(escaped, (now - 3 * 86_400, now - 3 * 86_400))
+    original_is_symlink = Path.is_symlink
+    original_resolve = Path.resolve
+
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda path: path == linked or original_is_symlink(path),
+    )
+
+    def resolve_with_escape(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == escaped:
+            return outside
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_with_escape)
+
+    with CalculationBookDiagnosticLog.create_for_job(
+        log_dir=log_dir,
+        job_id="job-current",
+        correlation_id="corr-current",
+        max_bytes=10_000,
+        retention_days=2,
+    ) as log:
+        assert log.path == log_dir / "calculation-book-job-current.log"
+
+    assert expired.exists() is False
+    assert fresh.read_text(encoding="utf-8") == "fresh"
+    assert unrelated.read_text(encoding="utf-8") == "unrelated"
+    assert matching_directory.is_dir()
+    assert linked.read_text(encoding="utf-8") == "simulated symlink"
+    assert escaped.read_text(encoding="utf-8") == "simulated escape"
+    assert outside.read_text(encoding="utf-8") == "outside"
+
+
+def test_retention_never_deletes_the_current_target(tmp_path: Path) -> None:
+    from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
+
+    current = tmp_path / "calculation-book-job-current.log"
+    current.write_text("existing-current", encoding="utf-8")
+    old = time.time() - 90 * 86_400
+    os.utime(current, (old, old))
+
+    with pytest.raises(FileExistsError):
+        CalculationBookDiagnosticLog.create_for_job(
+            log_dir=tmp_path,
+            job_id="job-current",
+            correlation_id="corr-current",
+            max_bytes=10_000,
+            retention_days=1,
+        )
+
+    assert current.read_text(encoding="utf-8") == "existing-current"
+
+
+def test_single_expired_log_delete_failure_does_not_block_current_log(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
+
+    expired = tmp_path / "calculation-book-job-expired.log"
+    expired.write_text("expired", encoding="utf-8")
+    old = time.time() - 90 * 86_400
+    os.utime(expired, (old, old))
+    original_unlink = Path.unlink
+
+    def fail_only_expired(path: Path, *args: object, **kwargs: object) -> None:
+        if path == expired:
+            raise PermissionError("sensitive deletion failure")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_only_expired)
+
+    with CalculationBookDiagnosticLog.create_for_job(
+        log_dir=tmp_path,
+        job_id="job-current",
+        correlation_id="corr-current",
+        max_bytes=10_000,
+        retention_days=1,
+    ) as log:
+        assert log.path.is_file()
+
+    assert expired.read_text(encoding="utf-8") == "expired"

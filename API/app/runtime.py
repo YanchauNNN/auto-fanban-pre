@@ -29,6 +29,10 @@ from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.cad.slot_pool import CADSlotPool
 from src.calculation_book.archive import ArchiveLimits
+from src.calculation_book.diagnostic_log import (
+    calculation_book_log_filename,
+    calculation_book_log_matches_terminal_state,
+)
 from src.calculation_book.executor import (
     CalculationBookJobExecutor,
     build_calculation_book_warning_reason,
@@ -345,29 +349,111 @@ def _calculation_reinforcement_source(job: Job) -> str:
         return ReinforcementSource.PROVIDED.value
 
 
-def _calculation_log_artifact_path(job: Job) -> Path | None:
+def _calculation_log_artifact_path(
+    job: Job,
+    *,
+    configured_log_dir: Path,
+    configured_log_max_bytes: int,
+) -> Path | None:
     if (
         job.status not in {JobStatus.SUCCEEDED, JobStatus.FAILED}
-        or job.work_dir is None
         or job.artifacts.calculation_log is None
     ):
         return None
     try:
-        work_root = Path(job.work_dir).resolve(strict=True)
-        candidate = Path(job.artifacts.calculation_log).resolve(strict=True)
-        expected = (
-            work_root
-            / "calculation-book"
-            / "logs"
-            / f"calculation-book-{job.job_id}.log"
-        ).resolve(strict=True)
+        filename = calculation_book_log_filename(job.job_id)
+    except ValueError:
+        return None
+    candidate = Path(job.artifacts.calculation_log)
+    central = _exact_calculation_log_path(
+        candidate,
+        root=Path(configured_log_dir),
+        filename=filename,
+    )
+    resolved = central
+    if resolved is None and job.work_dir is not None:
+        try:
+            work_root = Path(job.work_dir).resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        resolved = _exact_calculation_log_path(
+            candidate,
+            root=work_root / "calculation-book" / "logs",
+            filename=filename,
+            containment_root=work_root,
+        )
+    if resolved is None:
+        return None
+    expected_event = (
+        "task_completed"
+        if job.status == JobStatus.SUCCEEDED
+        else "task_failed"
+    )
+    if not calculation_book_log_matches_terminal_state(
+        resolved,
+        job_id=job.job_id,
+        expected_event=expected_event,
+        max_bytes=configured_log_max_bytes,
+    ):
+        return None
+    return resolved
+
+
+def _exact_calculation_log_path(
+    candidate: Path,
+    *,
+    root: Path,
+    filename: str,
+    containment_root: Path | None = None,
+) -> Path | None:
+    try:
+        root_stat = root.lstat()
+        root_is_junction = getattr(root, "is_junction", lambda: False)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root.is_symlink()
+            or root_is_junction()
+        ):
+            return None
+        resolved_root = root.resolve(strict=True)
+        if containment_root is not None:
+            resolved_containment = containment_root.resolve(strict=True)
+            if not resolved_root.is_relative_to(resolved_containment):
+                return None
+        expected = resolved_root / filename
+        expected_is_junction = getattr(expected, "is_junction", lambda: False)
+        if expected.is_symlink() or expected_is_junction():
+            return None
+        resolved_expected = expected.resolve(strict=True)
+        if candidate.is_symlink():
+            return None
+        resolved_candidate = candidate.resolve(strict=True)
+        candidate_stat = resolved_candidate.lstat()
     except (OSError, RuntimeError):
         return None
-    if expected != candidate or not candidate.is_relative_to(work_root):
+    if (
+        resolved_candidate != resolved_expected
+        or resolved_candidate.parent != resolved_root
+        or resolved_candidate.name != filename
+        or not stat.S_ISREG(candidate_stat.st_mode)
+    ):
         return None
-    if not candidate.is_file():
+    return resolved_candidate
+
+
+def _calculation_docx_artifact_path(job: Job) -> Path | None:
+    """Expose a generated Word file only after the job has succeeded."""
+
+    if (
+        job.status != JobStatus.SUCCEEDED
+        or job.artifacts.calculation_docx is None
+    ):
         return None
-    return candidate
+    try:
+        candidate = Path(job.artifacts.calculation_docx).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return candidate if candidate.is_file() else None
 
 
 class PipelineJobProcessor:
@@ -1711,8 +1797,16 @@ class DeliverableApiRuntime:
             'preview': job.artifacts.preview_pdf,
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
-            'calculation_book': job.artifacts.calculation_docx,
-            'calculation_book_log': _calculation_log_artifact_path(job),
+            'calculation_book': _calculation_docx_artifact_path(job),
+            'calculation_book_log': _calculation_log_artifact_path(
+                job,
+                configured_log_dir=(
+                    self.config.calculation_book.ai_suggestion.log_dir
+                ),
+                configured_log_max_bytes=(
+                    self.config.calculation_book.ai_suggestion.log_max_bytes
+                ),
+            ),
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
@@ -2598,11 +2692,20 @@ class DeliverableApiRuntime:
         report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
         preview_available = bool(job.artifacts.preview_pdf and Path(job.artifacts.preview_pdf).exists())
-        calculation_docx_available = bool(
-            job.artifacts.calculation_docx and Path(job.artifacts.calculation_docx).exists()
+        calculation_docx_available = (
+            _calculation_docx_artifact_path(job) is not None
         )
         calculation_log_available = (
-            _calculation_log_artifact_path(job) is not None
+            _calculation_log_artifact_path(
+                job,
+                configured_log_dir=(
+                    self.config.calculation_book.ai_suggestion.log_dir
+                ),
+                configured_log_max_bytes=(
+                    self.config.calculation_book.ai_suggestion.log_max_bytes
+                ),
+            )
+            is not None
         )
         payload: dict[str, Any] = {
             'package_available': package_available,
