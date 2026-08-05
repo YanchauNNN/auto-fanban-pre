@@ -15,7 +15,9 @@ from src.calculation_book.reinforcement_input import (
 from src.calculation_book.slab import (
     RecognizedSlabFigure,
     SlabMatchingError,
+    build_ai_slab_plan,
     match_slab_reinforcement,
+    slab_rebar_item_id,
 )
 
 
@@ -260,3 +262,45 @@ def test_ai_image_only_slab_keeps_five_blank_assignments() -> None:
     assert len(plan.assignments) == 5
     assert all(item.rebar_cell is None for item in plan.assignments)
     assert [warning.code for warning in plan.warnings] == ["image_only_slab"]
+
+
+def test_ai_slab_plan_routes_middle_layers_without_direction_collisions() -> None:
+    figures = [
+        *_five_figures(),
+        _figure("11.45", "MIDDLE", "X"),
+        _figure("11.45", "MIDDLE", "Y"),
+    ]
+    selected = {
+        slab_rebar_item_id(figure.source): parse_linear_rebar_cell(
+            "1D25@200"
+        )
+        for figure in figures
+        if figure.source.direction != "Z"
+    }
+    z_figure = next(figure for figure in figures if figure.source.direction == "Z")
+    missing_id = slab_rebar_item_id(z_figure.source)
+
+    plan = build_ai_slab_plan(
+        figures,
+        selected_cells=selected,
+        missing_reasons={missing_id: ("AI_NEEDS_REVIEW", "模型未确定")},
+    )
+
+    assert [assignment.key for assignment in plan.assignments] == [
+        "top_x",
+        "middle_x",
+        "bottom_x",
+        "top_y",
+        "middle_y",
+        "bottom_y",
+        "z",
+    ]
+    assert len({slab_rebar_item_id(item.figure.source) for item in plan.assignments}) == 7
+    assert all(
+        item.rebar_cell is not None
+        for item in plan.assignments
+        if item.key != "z"
+    )
+    assert plan.assignments[-1].rebar_cell is None
+    assert plan.warnings[0].direction == "Z"
+    assert plan.warnings[0].blank_fields == ("z",)

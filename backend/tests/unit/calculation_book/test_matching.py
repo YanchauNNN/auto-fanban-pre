@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,9 @@ from src.calculation_book.archive import ReinforcementFigure
 from src.calculation_book.matching import (
     CalculationMatchingError,
     RecognizedFigure,
+    build_ai_reinforcement_plan,
     match_reinforcement,
+    wall_rebar_item_id,
 )
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.reinforcement_input import (
@@ -294,3 +297,57 @@ def test_missing_wall_direction_remains_a_hard_archive_structure_failure() -> No
                 duplicate_wall_ids=(),
             ),
         )
+
+
+def test_ai_plan_routes_alpha_suffix_and_preserves_one_ocr_blank_direction() -> None:
+    figures = [*_group("S7157", 2000), *_group("S7157A", 3000)]
+    failed = figures.index(next(item for item in figures if item.source.wall_id == "S7157A" and item.source.direction == "Y"))
+    figures[failed] = replace(figures[failed], reading=None)
+    selected = {
+        wall_rebar_item_id(figure.source): parse_rebar_cell(
+            "1C14@400x400" if figure.source.direction == "Z" else "1D25@200",
+            direction=figure.source.direction,
+        )
+        for figure in figures
+        if figure.reading is not None
+    }
+    failed_id = wall_rebar_item_id(figures[failed].source)
+
+    plan = build_ai_reinforcement_plan(
+        figures,
+        selected_cells=selected,
+        missing_reasons={failed_id: ("OCR_RECOGNITION_FAILED", "SMX 未识别")},
+    )
+
+    by_wall = {item.output_wall_id: item for item in plan.assignments}
+    assert set(by_wall) == {"S7157", "S7157A"}
+    assert by_wall["S7157A"].cell_for("X") is not None
+    assert by_wall["S7157A"].cell_for("Y") is None
+    assert by_wall["S7157A"].cell_for("Z") is not None
+    assert [warning.code for warning in plan.warnings] == [
+        "OCR_RECOGNITION_FAILED"
+    ]
+    assert plan.warnings[0].direction == "Y"
+
+
+def test_ai_plan_never_applies_selected_cells_to_split_image_groups() -> None:
+    figures = [
+        *_group("S7157-1", 2000, base_wall_id="S7157", group_index=1),
+        *_group("S7157-2", 3000, base_wall_id="S7157", group_index=2),
+    ]
+    selected = {
+        wall_rebar_item_id(figure.source): parse_rebar_cell(
+            "1C14@400x400" if figure.source.direction == "Z" else "1D25@200",
+            direction=figure.source.direction,
+        )
+        for figure in figures
+    }
+
+    plan = build_ai_reinforcement_plan(figures, selected_cells=selected)
+
+    assert all(
+        assignment.cell_for(direction) is None
+        for assignment in plan.assignments
+        for direction in "XYZ"
+    )
+    assert {warning.code for warning in plan.warnings} == {"split_image_group"}

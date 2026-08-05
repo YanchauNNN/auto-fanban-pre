@@ -128,3 +128,44 @@ def test_builds_zero_slab_z_narrative_as_constructor_reinforcement() -> None:
         "选用钢筋1排16@200（配筋面积为1005.3 mm²/m）作为构造钢筋。 "
         "配筋结果包络计算结果。"
     )
+
+
+def test_ai_wall_narrative_marks_selection_as_a_suggestion() -> None:
+    reading = StressLegendReading(
+        smn=0,
+        smx=1000,
+        legend_values=tuple(1000 * index / 9 for index in range(10)),
+    )
+
+    narrative = build_reinforcement_narrative(
+        wall_id="S7157A",
+        direction="X",
+        reading=reading,
+        rebar_specification="1排18@200",
+        actual_area=1272.345,
+        is_ai_suggested=True,
+    )
+
+    assert "建议选用钢筋1排18@200" in narrative
+    assert "。选用钢筋" not in narrative
+
+
+def test_ai_slab_narrative_marks_selection_as_a_suggestion() -> None:
+    reading = StressLegendReading(
+        smn=0,
+        smx=1000,
+        legend_values=tuple(1000 * index / 9 for index in range(10)),
+    )
+
+    narrative = build_slab_reinforcement_narrative(
+        elevation="11.45",
+        layer_label="中层竖向",
+        reading=reading,
+        rebar_specification="1排18@200",
+        actual_area=1272.345,
+        is_z=False,
+        is_ai_suggested=True,
+    )
+
+    assert "建议选用钢筋1排18@200" in narrative
+    assert "。选用钢筋" not in narrative

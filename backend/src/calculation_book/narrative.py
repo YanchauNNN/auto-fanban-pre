@@ -51,6 +51,7 @@ def build_reinforcement_narrative(
     reading: StressLegendReading,
     rebar_specification: str,
     actual_area: float | int,
+    is_ai_suggested: bool = False,
 ) -> str:
     normalized_direction = direction.strip().upper()
     try:
@@ -61,8 +62,9 @@ def build_reinforcement_narrative(
     actual = float(actual_area)
     actual_text = _format_actual_area(actual)
     prefix = f"墙{wall_id}-{direction_label}钢筋"
+    selection_verb = "建议选用钢筋" if is_ai_suggested else "选用钢筋"
     selection = (
-        f"选用钢筋{rebar_specification}"
+        f"{selection_verb}{rebar_specification}"
         f"（配筋面积为{actual_text} mm²/m）"
     )
     conclusion = " 配筋结果包络计算结果。"
@@ -99,6 +101,7 @@ def build_slab_reinforcement_narrative(
     rebar_specification: str,
     actual_area: float | int,
     is_z: bool,
+    is_ai_suggested: bool = False,
 ) -> str:
     actual = float(actual_area)
     actual_text = _format_actual_area(actual)
@@ -106,8 +109,9 @@ def build_slab_reinforcement_narrative(
         f"{elevation}m楼板{layer_label}"
         f"{'' if is_z else '钢筋'}"
     )
+    selection_verb = "建议选用钢筋" if is_ai_suggested else "选用钢筋"
     selection = (
-        f"选用钢筋{rebar_specification}"
+        f"{selection_verb}{rebar_specification}"
         f"（配筋面积为{actual_text} mm²/m）"
     )
     conclusion = " 配筋结果包络计算结果。"

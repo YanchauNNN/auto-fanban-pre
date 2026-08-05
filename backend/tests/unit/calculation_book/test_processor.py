@@ -11,11 +11,16 @@ from openpyxl import Workbook
 from PIL import Image
 
 from src.calculation_book.models import CalculationBookParams
-from src.calculation_book.ocr import StressLegendReading
+from src.calculation_book.ocr import OcrRecognitionError, StressLegendReading
 from src.calculation_book.processor import (
     CalculationBookAssets,
     CalculationBookProcessor,
     CalculationBookStage,
+)
+from src.calculation_book.rebar_recommender import (
+    RebarSuggestionInput,
+    RebarSuggestionResult,
+    SelectedRebarSuggestion,
 )
 from src.calculation_book.reinforcement_input import (
     NormalizedReinforcementRow,
@@ -41,12 +46,14 @@ def _build_zip(
     include_slab: bool = False,
     include_middle: bool = False,
     slab_elevations: tuple[str, ...] = ("11.45",),
+    include_workbook: bool = True,
+    wall_ids: tuple[str, ...] = ("N5012",),
+    ignored_root_images: tuple[str, ...] = (),
 ) -> Path:
     source = tmp_path / "source"
     names = [
-        "N5012-X.png",
-        "N5012-Y.png",
-        "N5012-Z.png",
+        *(f"{wall_id}-{direction}.png" for wall_id in wall_ids for direction in "XYZ"),
+        *ignored_root_images,
         "01/layout.png",
         "02/model.png",
     ]
@@ -69,46 +76,47 @@ def _build_zip(
         )
     for name in names:
         _write_png(source / name)
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(
-        [
-            "构件编号及位置",
-            "单侧水平钢筋(对称配筋)",
-            "单侧竖向钢筋(对称配筋)",
-            "拉筋",
-        ]
-    )
-    sheet.append(
-        ["N5012 墙", "1D32间距200", "1D28间距200", "1C14间距400*400"]
-    )
-    if include_slab:
-        slab_sheet = workbook.create_sheet("楼板配筋")
-        slab_sheet.append(
+    if include_workbook:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(
             [
-                "标高",
-                "顶层水平",
-                "顶层竖向",
-                "中层水平",
-                "中层竖向",
-                "底层水平",
-                "底层竖向",
-                "纵向拉筋",
+                "构件编号及位置",
+                "单侧水平钢筋(对称配筋)",
+                "单侧竖向钢筋(对称配筋)",
+                "拉筋",
             ]
         )
-        slab_sheet.append(
-            [
-                11.45,
-                "1D36@200",
-                "1D40@200",
-                "1D32@200" if include_middle else None,
-                "1D34@200" if include_middle else None,
-                "1D30@200",
-                "1D28@200",
-                "1D16@200",
-            ]
+        sheet.append(
+            ["N5012 墙", "1D32间距200", "1D28间距200", "1C14间距400*400"]
         )
-    workbook.save(source / "计算书模板文件.xlsx")
+        if include_slab:
+            slab_sheet = workbook.create_sheet("楼板配筋")
+            slab_sheet.append(
+                [
+                    "标高",
+                    "顶层水平",
+                    "顶层竖向",
+                    "中层水平",
+                    "中层竖向",
+                    "底层水平",
+                    "底层竖向",
+                    "纵向拉筋",
+                ]
+            )
+            slab_sheet.append(
+                [
+                    11.45,
+                    "1D36@200",
+                    "1D40@200",
+                    "1D32@200" if include_middle else None,
+                    "1D34@200" if include_middle else None,
+                    "1D30@200",
+                    "1D28@200",
+                    "1D16@200",
+                ]
+            )
+        workbook.save(source / "计算书模板文件.xlsx")
     archive_path = tmp_path / "input.zip"
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in source.rglob("*"):
@@ -118,10 +126,15 @@ def _build_zip(
     return archive_path
 
 
-def _params(*, include_slab_stress: bool = False) -> CalculationBookParams:
+def _params(
+    *,
+    include_slab_stress: bool = False,
+    reinforcement_source: str = "provided",
+    template_type: str = "internal_structure",
+) -> CalculationBookParams:
     return CalculationBookParams.model_validate(
         {
-            "template_type": "internal_structure",
+            "template_type": template_type,
             "project_no": "JQ",
             "project_name": "浙江金七门核电厂1、2号机组",
             "internal_code": "JQ00-NN-001",
@@ -138,6 +151,7 @@ def _params(*, include_slab_stress: bool = False) -> CalculationBookParams:
             "factory_extreme_max_temperature": 39.0,
             "site_soil_temperature": 15.0,
             "include_slab_stress": include_slab_stress,
+            "reinforcement_source": reinforcement_source,
         }
     )
 
@@ -676,3 +690,201 @@ def test_ai_partial_wall_keeps_heading_and_image_but_blanks_only_x_values(
     assert "墙N5012-水平向钢筋计算配筋面积" not in text
     assert "墙N5012-竖向钢筋计算配筋面积" in text
     assert len(document.inline_shapes) >= 3
+
+
+def _select_first_suggestions(
+    items: tuple[RebarSuggestionInput, ...],
+) -> RebarSuggestionResult:
+    selected: list[SelectedRebarSuggestion] = []
+    for item in items:
+        assert item.candidates, item.item_id
+        candidate = item.candidates[0]
+        selected.append(
+            SelectedRebarSuggestion(
+                item_id=item.item_id,
+                member_kind=item.member_kind,
+                member_id=item.member_id,
+                direction=item.direction,
+                smx=item.smx,
+                target_area=item.target_area,
+                candidate=candidate,
+                configuration=parse_rebar_cell(
+                    candidate.canonical_specification,
+                    direction=item.direction,
+                ).selected,
+                reason="测试选择精确候选",
+                source=(
+                    "fixed_rule"
+                    if item.direction == "Z" and item.smx == 0
+                    else "ai"
+                ),
+            )
+        )
+    return RebarSuggestionResult(
+        selected=tuple(selected),
+        warnings=(),
+        call_count=1,
+        repair_round_count=0,
+        skill_id="recommend-rebar-from-smx",
+        skill_version="1.0.0",
+        skill_sha256="sha-test",
+        model="test-model",
+    )
+
+
+@pytest.mark.parametrize(
+    "template_type",
+    ["internal_structure", "nuclear_island_plant"],
+)
+def test_ai_suggested_processor_skips_excel_and_renders_five_or_seven_slab_items(
+    tmp_path: Path,
+    template_type: str,
+) -> None:
+    stages: list[CalculationBookStage] = []
+    captured_items: list[RebarSuggestionInput] = []
+    audit_events: list[tuple[str, dict[str, object]]] = []
+
+    def recognize(_path: Path, direction: str) -> StressLegendReading:
+        if direction == "Z":
+            return StressLegendReading(0, 0, (), is_zero_result=True)
+        return StressLegendReading(
+            smn=0,
+            smx=800,
+            legend_values=tuple(800 * index / 9 for index in range(10)),
+        )
+
+    def suggest(items: tuple[RebarSuggestionInput, ...]) -> RebarSuggestionResult:
+        captured_items.extend(items)
+        return _select_first_suggestions(items)
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=recognize,
+    )
+    result = processor.process(
+        archive_path=_build_zip(
+            tmp_path,
+            include_slab=True,
+            include_middle=True,
+            include_workbook=False,
+        ),
+        output_dir=tmp_path / "ai-output",
+        params=_params(
+            include_slab_stress=True,
+            reinforcement_source="ai_suggested",
+            template_type=template_type,
+        ),
+        reinforcement_normalizer=lambda *_args: pytest.fail(
+            "无实配钢筋模式不得启动 Excel 规范化"
+        ),
+        rebar_suggester=suggest,
+        progress=lambda stage, _percent, _message, _details: stages.append(stage),
+        audit=lambda event, payload: audit_events.append((event, payload)),
+    )
+
+    assert stages == [
+        CalculationBookStage.VALIDATE_ARCHIVE,
+        CalculationBookStage.OCR_REINFORCEMENT,
+        CalculationBookStage.AI_REBAR_SUGGESTION,
+        CalculationBookStage.SELECT_REBAR,
+        CalculationBookStage.RENDER_CALCULATION_BOOK,
+        CalculationBookStage.FINALIZE_ARTIFACT,
+    ]
+    assert len(captured_items) == 10
+    assert {item.item_id for item in captured_items if item.member_kind == "slab"} == {
+        "slab:11.45:top_x",
+        "slab:11.45:middle_x",
+        "slab:11.45:bottom_x",
+        "slab:11.45:top_y",
+        "slab:11.45:middle_y",
+        "slab:11.45:bottom_y",
+        "slab:11.45:z",
+    }
+    assert result.ai_rebar_suggestion is not None
+    assert result.ai_suggested_direction_count == 10
+    assert result.ai_blank_direction_count == 0
+    assert result.figure_count == 10
+    assert [event for event, _payload in audit_events].count("archive_validated") == 1
+    assert [event for event, _payload in audit_events].count("image_grouped") == 10
+    assert [event for event, _payload in audit_events].count("ocr_completed") == 10
+    assert [event for event, _payload in audit_events].count("word_entry_written") == 10
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
+    disclosure = (
+        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，"
+        "供设计人员复核。"
+    )
+    transition = (
+        "墙体的配筋计算结果如下。"
+        "配筋结果为单侧配筋量、其单位为mm2/m。"
+    )
+    assert disclosure in text
+    assert "建议选用钢筋" in text
+    assert text.index("11.45m楼板中层竖向钢筋") < text.index(transition)
+    assert text.index(transition) < text.index("墙N5012-水平向钢筋")
+    _assert_mm2_uses_true_superscript(document)
+
+
+def test_ai_processor_isolates_ocr_failure_split_groups_and_unknown_images(
+    tmp_path: Path,
+) -> None:
+    recognized_names: list[str] = []
+    captured_ids: list[str] = []
+
+    def recognize(path: Path, direction: str) -> StressLegendReading:
+        recognized_names.append(path.name)
+        if path.name == "S7157A-X.png":
+            raise OcrRecognitionError("SMX 未识别")
+        if direction == "Z":
+            return StressLegendReading(0, 0, (), is_zero_result=True)
+        return StressLegendReading(
+            smn=0,
+            smx=800,
+            legend_values=tuple(800 * index / 9 for index in range(10)),
+        )
+
+    def suggest(items: tuple[RebarSuggestionInput, ...]) -> RebarSuggestionResult:
+        captured_ids.extend(item.item_id for item in items)
+        return _select_first_suggestions(items)
+
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        ocr_recognizer=recognize,
+    )
+    result = processor.process(
+        archive_path=_build_zip(
+            tmp_path,
+            include_workbook=False,
+            wall_ids=("S7157", "S7157A", "S7157-1", "S7157-2"),
+            ignored_root_images=("无法识别名称.png",),
+        ),
+        output_dir=tmp_path / "ai-partial-output",
+        params=_params(reinforcement_source="ai_suggested"),
+        rebar_suggester=suggest,
+    )
+
+    assert all("S7157-1" not in item_id and "S7157-2" not in item_id for item_id in captured_ids)
+    assert not any("S7157-1" in name or "S7157-2" in name for name in recognized_names)
+    assert set(captured_ids) == {
+        "wall:S7157:X",
+        "wall:S7157:Y",
+        "wall:S7157:Z",
+        "wall:S7157A:Y",
+        "wall:S7157A:Z",
+    }
+    assert result.figure_count == 13
+    assert result.ai_suggested_direction_count == 5
+    assert result.ai_blank_direction_count == 7
+    warning_codes = {warning.code for warning in result.warnings}
+    assert {
+        "OCR_RECOGNITION_FAILED",
+        "split_image_group",
+        "UNKNOWN_IMAGE_NAME",
+    } <= warning_codes
+    document = Document(result.output_path)
+    text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
+    assert "S7157A-水平向" in text
+    assert "墙S7157A-水平向钢筋计算配筋面积" not in text
+    assert "S7157-1-水平向" in text
+    assert "S7157-2-拉筋" in text
+    assert "无法识别的应力图：无法识别名称" in text

@@ -20,6 +20,7 @@ def test_both_external_templates_are_present_and_have_known_variables() -> None:
         assert "project_number" in variables
         assert "reinforcement_figures" in variables
         assert "wall_table_rows" in variables
+        assert "ai_rebar_disclosure" in variables
 
 
 def test_internal_template_accepts_a_complete_context() -> None:

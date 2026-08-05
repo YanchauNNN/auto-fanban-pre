@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Literal, Protocol
 
 from ..ai.rebar_suggestion_task import (
@@ -27,6 +31,7 @@ from .reinforcement_input import RebarConfiguration
 MemberKind = Literal["wall", "slab"]
 Direction = Literal["X", "Y", "Z"]
 SelectionSource = Literal["ai", "fixed_rule"]
+RebarSuggestionAudit = Callable[[str, dict[str, object]], None]
 WarningCode = Literal[
     "NO_ELIGIBLE_CANDIDATE",
     "AI_NEEDS_REVIEW",
@@ -141,6 +146,7 @@ def recommend_rebar_suggestions(
     invoker: RebarSuggestionInvoker,
     batch_size: int,
     max_consecutive_base_failures: int,
+    audit: RebarSuggestionAudit | None = None,
 ) -> RebarSuggestionResult:
     """Select exact candidates with per-item monotonic repair and bounded failures."""
 
@@ -156,6 +162,23 @@ def recommend_rebar_suggestions(
 
     for state in states.values():
         _validate_input_contract(state.source, task_id=task_id)
+        _emit(
+            audit,
+            "candidate_generated",
+            item_id=state.source.item_id,
+            smx=state.source.smx,
+            target_area=state.source.target_area,
+            candidates=[
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "priority_rank": candidate.priority_rank,
+                    "actual_area": candidate.actual_area,
+                    "excess_area": candidate.excess_area,
+                }
+                for candidate in state.source.candidates
+            ],
+            elimination_codes=[],
+        )
         if not state.source.candidates:
             state.warning = _warning(
                 state,
@@ -179,10 +202,44 @@ def recommend_rebar_suggestions(
             items=tuple(_request_item(state) for state in batch_states),
         )
         call_count += 1
+        _emit(
+            audit,
+            "ai_call_started",
+            call_index=call_count,
+            batch_index=call_count,
+            item_ids=list(batch_ids),
+            repair_rounds={
+                state.source.item_id: state.feedback_round
+                for state in batch_states
+            },
+            candidate_counts={
+                state.source.item_id: len(state.remaining_candidates)
+                for state in batch_states
+            },
+            excluded_candidate_ids={
+                state.source.item_id: sorted(state.excluded_candidate_ids)
+                for state in batch_states
+            },
+            input_summary_sha256=_request_summary_sha256(request),
+        )
+        started = perf_counter()
 
         try:
             invocation = invoker.suggest(request, correlation_id=correlation_id)
         except RebarSuggestionTaskError as exc:
+            _emit(
+                audit,
+                "ai_call_failed",
+                call_index=call_count,
+                duration_ms=_duration_ms(started),
+                error_kind=exc.kind,
+                error_code=exc.code,
+                item_ids=list(batch_ids),
+                consecutive_base_failures={
+                    state.source.item_id: state.consecutive_base_failures + 1
+                    for state in batch_states
+                },
+            )
             for state in batch_states:
                 _record_base_failure(
                     state,
@@ -190,6 +247,7 @@ def recommend_rebar_suggestions(
                     max_failures=max_consecutive_base_failures,
                 )
                 if state.active:
+                    _emit_repair_scheduled(audit, state)
                     pending.append(state.source.item_id)
             continue
 
@@ -210,6 +268,25 @@ def recommend_rebar_suggestions(
             raise RebarRecommendationContractError(
                 "AI recommendation metadata changed between model calls"
             )
+        _emit(
+            audit,
+            "ai_call_completed",
+            call_index=call_count,
+            duration_ms=_duration_ms(started),
+            model=invocation.model,
+            skill_id=invocation.skill_id,
+            skill_version=invocation.skill_version,
+            skill_sha256=invocation.skill_sha256,
+            usage=invocation.usage,
+            items=[
+                {
+                    "item_id": item.item_id,
+                    "status": item.status,
+                    "candidate_id": getattr(item, "selected_candidate_id", None),
+                }
+                for item in invocation.response.items
+            ],
+        )
 
         validation = validate_ai_rebar_suggestion_response(
             invocation.response,
@@ -249,13 +326,34 @@ def recommend_rebar_suggestions(
                     f"validator returned {outcomes} outcomes for {item_id}"
                 )
             if item_id in selected_by_id:
+                selection = selected_by_id[item_id]
+                _emit(
+                    audit,
+                    "validation_completed",
+                    item_id=item_id,
+                    call_index=call_count,
+                    status="selected",
+                    error_codes=[],
+                    candidate_id=selection.candidate.candidate_id,
+                    better_candidate_ids=[],
+                )
                 state.consecutive_base_failures = 0
                 state.selected = _selected_output(
                     state,
-                    selected_by_id[item_id],
+                    selection,
                     source="ai",
                 )
             elif item_id in review_by_id:
+                _emit(
+                    audit,
+                    "validation_completed",
+                    item_id=item_id,
+                    call_index=call_count,
+                    status="needs_review",
+                    error_codes=[],
+                    candidate_id=None,
+                    better_candidate_ids=[],
+                )
                 state.consecutive_base_failures = 0
                 review = review_by_id[item_id]
                 state.warning = _warning(
@@ -266,12 +364,23 @@ def recommend_rebar_suggestions(
                 )
             else:
                 error = errors_by_id[item_id]
+                _emit(
+                    audit,
+                    "validation_completed",
+                    item_id=item_id,
+                    call_index=call_count,
+                    status="invalid",
+                    error_codes=[error.code.value],
+                    candidate_id=error.candidate_id,
+                    better_candidate_ids=list(error.better_candidate_ids),
+                )
                 _apply_validation_error(
                     state,
                     error=error,
                     max_failures=max_consecutive_base_failures,
                 )
                 if state.active:
+                    _emit_repair_scheduled(audit, state)
                     pending.append(item_id)
 
     selected = tuple(
@@ -280,6 +389,8 @@ def recommend_rebar_suggestions(
     warnings = tuple(
         state.warning for state in states.values() if state.warning is not None
     )
+    for state in states.values():
+        _emit_item_finalized(audit, state)
     repair_round_count = max(
         (len(state.excluded_candidate_ids) for state in states.values()),
         default=0,
@@ -293,6 +404,88 @@ def recommend_rebar_suggestions(
         skill_version=metadata[1] if metadata is not None else None,
         skill_sha256=metadata[2] if metadata is not None else None,
         model=metadata[3] if metadata is not None else None,
+    )
+
+
+def _emit(
+    audit: RebarSuggestionAudit | None,
+    event: str,
+    **payload: object,
+) -> None:
+    if audit is not None:
+        audit(event, payload)
+
+
+def _duration_ms(started: float) -> int:
+    return max(0, round((perf_counter() - started) * 1000))
+
+
+def _request_summary_sha256(request: AiRebarSuggestionRequest) -> str:
+    payload = json.dumps(
+        request.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _emit_repair_scheduled(
+    audit: RebarSuggestionAudit | None,
+    state: _ItemState,
+) -> None:
+    _emit(
+        audit,
+        "repair_scheduled",
+        item_id=state.source.item_id,
+        next_round=state.feedback_round + 1,
+        new_excluded_candidate_ids=(
+            [state.repair_context.errors[0].candidate_id]
+            if state.repair_context is not None
+            and state.repair_context.errors[0].candidate_id is not None
+            else []
+        ),
+        excluded_candidate_ids=sorted(state.excluded_candidate_ids),
+        remaining_count=len(state.remaining_candidates),
+    )
+
+
+def _emit_item_finalized(
+    audit: RebarSuggestionAudit | None,
+    state: _ItemState,
+) -> None:
+    selected = state.selected
+    warning = state.warning
+    _emit(
+        audit,
+        "item_finalized",
+        item_id=state.source.item_id,
+        member_kind=state.source.member_kind,
+        member_id=state.source.member_id,
+        direction=state.source.direction,
+        status="selected" if selected is not None else "blank",
+        source=selected.source if selected is not None else None,
+        candidate_id=(
+            selected.candidate.candidate_id if selected is not None else None
+        ),
+        spec=(
+            selected.configuration.canonical_specification
+            if selected is not None
+            else None
+        ),
+        actual_area=(
+            selected.configuration.actual_area if selected is not None else None
+        ),
+        smx=state.source.smx,
+        target_area=state.source.target_area,
+        margin_ratio=(
+            0.0
+            if state.source.smx == 0
+            else (state.source.target_area / state.source.smx) - 1
+        ),
+        blank_reason_code=warning.code if warning is not None else None,
+        image_name=None,
+        error_code=(warning.detail_codes[0] if warning and warning.detail_codes else None),
     )
 
 

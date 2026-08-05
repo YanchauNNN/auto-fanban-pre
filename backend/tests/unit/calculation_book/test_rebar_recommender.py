@@ -167,6 +167,7 @@ def _run(
     *,
     batch_size: int = 20,
     max_failures: int = 3,
+    audit=None,
 ):
     return recommend_rebar_suggestions(
         task_id="job-123",
@@ -175,6 +176,7 @@ def _run(
         invoker=invoker,
         batch_size=batch_size,
         max_consecutive_base_failures=max_failures,
+        audit=audit,
     )
 
 
@@ -519,3 +521,43 @@ def test_batch_size_bounds_every_model_call() -> None:
 
     assert len(result.selected) == 5
     assert [len(request.items) for request in invoker.requests] == [2, 2, 1]
+
+
+def test_audit_reports_candidates_calls_validation_repair_and_final_state() -> None:
+    best, wrong = _candidate(18), _candidate(20)
+    invoker = _ScriptedInvoker(
+        [
+            {"N5001:Y": wrong.candidate_id},
+            {"N5001:Y": best.candidate_id},
+        ]
+    )
+    events: list[tuple[str, dict[str, object]]] = []
+
+    result = _run(
+        (_input(candidates=(best, wrong)),),
+        invoker,
+        audit=lambda event, payload: events.append((event, payload)),
+    )
+
+    assert result.selected[0].candidate is best
+    event_names = [event for event, _payload in events]
+    assert event_names == [
+        "candidate_generated",
+        "ai_call_started",
+        "ai_call_completed",
+        "validation_completed",
+        "repair_scheduled",
+        "ai_call_started",
+        "ai_call_completed",
+        "validation_completed",
+        "item_finalized",
+    ]
+    first_call = events[1][1]
+    assert first_call["item_ids"] == ["N5001:Y"]
+    assert first_call["candidate_counts"] == {"N5001:Y": 2}
+    repair = events[4][1]
+    assert repair["new_excluded_candidate_ids"] == [wrong.candidate_id]
+    final = events[-1][1]
+    assert final["status"] == "selected"
+    assert final["candidate_id"] == best.candidate_id
+    assert "按优先级和最小超额选择" not in repr(events)

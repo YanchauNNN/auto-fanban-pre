@@ -152,6 +152,27 @@ def test_z_figure_without_smx_is_an_explicit_zero_result(tmp_path: Path) -> None
     )
 
 
+def test_z_figure_without_smx_ignores_any_accidentally_read_legend_values(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "N5012-Z.png"
+    Image.new("RGB", (1200, 800), "white").save(image_path)
+
+    result = recognize_stress_legend(
+        image_path,
+        direction="Z",
+        text_runner=lambda _image, _config: "EPJZ ABS (NOAVG)\nDMX=0",
+        data_runner=lambda _image, _config: _legend_data(tuple(range(10))),
+    )
+
+    assert result == StressLegendReading(
+        smn=0.0,
+        smx=0.0,
+        legend_values=(),
+        is_zero_result=True,
+    )
+
+
 def test_x_or_y_figure_without_smx_remains_an_ocr_error(tmp_path: Path) -> None:
     image_path = tmp_path / "N5012-Y.png"
     Image.new("RGB", (1200, 800), "white").save(image_path)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .ai_reinforcement_schema import ReinforcementNormalizationWarning
@@ -21,7 +22,7 @@ class CalculationMatchingError(ValueError):
 @dataclass(frozen=True)
 class RecognizedFigure:
     source: ReinforcementFigure
-    reading: StressLegendReading
+    reading: StressLegendReading | None
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,14 @@ class ReinforcementAssignment:
 
     @property
     def demand_score(self) -> float:
-        return max(figure.reading.smx for figure in self.figures)
+        return max(
+            (
+                figure.reading.smx
+                for figure in self.figures
+                if figure.reading is not None
+            ),
+            default=0.0,
+        )
 
     def figure_for(self, direction: str) -> RecognizedFigure:
         normalized = direction.strip().upper()
@@ -101,12 +109,126 @@ class _ImageGroup:
 
     @property
     def demand_score(self) -> float:
-        return max(figure.reading.smx for figure in self.figures)
+        return max(
+            (
+                figure.reading.smx
+                for figure in self.figures
+                if figure.reading is not None
+            ),
+            default=0.0,
+        )
 
 
 def _wall_sort_key(wall_id: str) -> tuple[int, str]:
     match = re.search(r"\d+", wall_id)
     return (int(match.group()) if match is not None else 0, wall_id)
+
+
+def wall_rebar_item_id(figure: ReinforcementFigure) -> str:
+    """Return the stable backend-owned route for one wall direction image."""
+
+    return f"wall:{figure.wall_id}:{figure.direction}"
+
+
+def build_ai_reinforcement_plan(
+    recognized: list[RecognizedFigure],
+    *,
+    selected_cells: Mapping[str, ParsedRebarCell],
+    missing_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> ReinforcementMatchingPlan:
+    """Build a partial wall plan without inventing values for unresolved images."""
+
+    groups = _group_figures(recognized)
+    known_item_ids = {
+        wall_rebar_item_id(figure.source)
+        for group in groups
+        for figure in group.figures
+    }
+    unknown_item_ids = set(selected_cells) - known_item_ids
+    if unknown_item_ids:
+        raise CalculationMatchingError(
+            "AI 配筋结果包含未知墙体方向：" + ", ".join(sorted(unknown_item_ids))
+        )
+
+    reasons = missing_reasons or {}
+    assignments: list[ReinforcementAssignment] = []
+    warnings: list[ReinforcementNormalizationWarning] = []
+    for group in groups:
+        if group.group_index is not None:
+            assignments.append(
+                ReinforcementAssignment(
+                    output_wall_id=group.output_wall_id,
+                    base_wall_id=group.base_wall_id,
+                    group_index=group.group_index,
+                    figures=group.figures,
+                    rebar_row=None,
+                    blank_fields=("X", "Y", "Z"),
+                )
+            )
+            warnings.append(
+                _warning(
+                    code="split_image_group",
+                    scope="wall",
+                    identity=group.output_wall_id,
+                    reason="-1/-2 应力图组需在任务完成后人工确认配筋",
+                    blank_fields=("X", "Y", "Z"),
+                )
+            )
+            continue
+
+        resolved: list[tuple[str, ParsedRebarCell]] = []
+        blank_fields: list[str] = []
+        for figure in group.figures:
+            direction = figure.source.direction
+            item_id = wall_rebar_item_id(figure.source)
+            cell = selected_cells.get(item_id)
+            if cell is not None:
+                if figure.reading is None:
+                    raise CalculationMatchingError(
+                        f"{item_id} 没有有效 OCR 结果却存在 AI 配筋建议"
+                    )
+                resolved.append((direction, cell))
+                continue
+            blank_fields.append(direction)
+            code, reason = reasons.get(
+                item_id,
+                ("AI_NEEDS_REVIEW", "当前方向没有通过后端验算的 AI 配筋建议"),
+            )
+            warnings.append(
+                _warning(
+                    code=code,
+                    scope="wall",
+                    identity=group.output_wall_id,
+                    direction=direction,
+                    reason=reason,
+                    blank_fields=(direction,),
+                )
+            )
+        assignments.append(
+            ReinforcementAssignment(
+                output_wall_id=group.output_wall_id,
+                base_wall_id=group.base_wall_id,
+                group_index=None,
+                figures=group.figures,
+                rebar_row=None,
+                resolved_cells=tuple(resolved),
+                blank_fields=tuple(blank_fields),
+            )
+        )
+
+    matched_wall_ids = {
+        assignment.base_wall_id
+        for assignment in assignments
+        if any(assignment.cell_for(direction) is not None for direction in "XYZ")
+    }
+    return ReinforcementMatchingPlan(
+        assignments=tuple(assignments),
+        confirmations=(),
+        warnings=tuple(warnings),
+        image_wall_group_count=len(groups),
+        image_unique_wall_count=len({group.base_wall_id for group in groups}),
+        matched_unique_wall_count=len(matched_wall_ids),
+    )
 
 
 def _supply_score(row: NormalizedReinforcementRow) -> float:
@@ -370,6 +492,7 @@ def _warning(
     identity: str | None,
     reason: str,
     blank_fields: tuple[str, ...],
+    direction: str | None = None,
     source_sheet: str = "",
     source_row: int = 0,
     source_cells: dict[str, str] | None = None,
@@ -378,7 +501,7 @@ def _warning(
         code=code,
         scope=scope,
         identity=identity,
-        direction=None,
+        direction=direction,
         source_sheet=source_sheet,
         source_row=source_row,
         source_cells=source_cells or {},

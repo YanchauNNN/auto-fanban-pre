@@ -333,7 +333,7 @@ def recognize_stress_legend(
 
         smx = header.get("SMX")
         if smx is None:
-            if normalized_direction == "Z" and not legend_values:
+            if normalized_direction == "Z":
                 return StressLegendReading(
                     smn=0.0,
                     smx=0.0,

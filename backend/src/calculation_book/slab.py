@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 
 from .ai_reinforcement_schema import ReinforcementNormalizationWarning
 from .archive import SlabReinforcementFigure
@@ -20,7 +21,7 @@ class SlabMatchingError(ValueError):
 @dataclass(frozen=True)
 class RecognizedSlabFigure:
     source: SlabReinforcementFigure
-    reading: StressLegendReading
+    reading: StressLegendReading | None
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,74 @@ def _figure_key(figure: SlabReinforcementFigure) -> str:
             f"楼板图 {figure.path.name} 的 X/Y 方向缺少 TOP/MIDDLE/BOTTOM"
         )
     return f"{figure.position.lower()}_{figure.direction.lower()}"
+
+
+def slab_rebar_item_id(figure: SlabReinforcementFigure) -> str:
+    """Return the stable backend-owned route for one slab layer image."""
+
+    return f"slab:{figure.elevation}:{_figure_key(figure)}"
+
+
+def build_ai_slab_plan(
+    figures: list[RecognizedSlabFigure] | tuple[RecognizedSlabFigure, ...],
+    *,
+    selected_cells: Mapping[str, ParsedRebarCell],
+    missing_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> SlabMatchingPlan:
+    """Build a partial five/seven-layer slab plan keyed by elevation and layer."""
+
+    base = match_slab_reinforcement(
+        figures,
+        SlabReinforcementSchedule(rows=()),
+        allow_partial=True,
+    )
+    known_item_ids = {
+        slab_rebar_item_id(assignment.figure.source)
+        for assignment in base.assignments
+    }
+    unknown_item_ids = set(selected_cells) - known_item_ids
+    if unknown_item_ids:
+        raise SlabMatchingError(
+            "AI 配筋结果包含未知楼板方向：" + ", ".join(sorted(unknown_item_ids))
+        )
+
+    reasons = missing_reasons or {}
+    assignments: list[SlabAssignment] = []
+    warnings: list[ReinforcementNormalizationWarning] = []
+    for assignment in base.assignments:
+        item_id = slab_rebar_item_id(assignment.figure.source)
+        cell = selected_cells.get(item_id)
+        if cell is not None and assignment.figure.reading is None:
+            raise SlabMatchingError(
+                f"{item_id} 没有有效 OCR 结果却存在 AI 配筋建议"
+            )
+        assignments.append(
+            replace(
+                assignment,
+                rebar_cell=cell,
+                source_cell=None,
+                source_row=None,
+            )
+        )
+        if cell is not None:
+            continue
+        code, reason = reasons.get(
+            item_id,
+            ("AI_NEEDS_REVIEW", "当前方向没有通过后端验算的 AI 配筋建议"),
+        )
+        warnings.append(
+            _warning(
+                code=code,
+                identity=assignment.elevation,
+                direction=assignment.direction,
+                reason=reason,
+                blank_fields=(assignment.key,),
+            )
+        )
+    return SlabMatchingPlan(
+        assignments=tuple(assignments),
+        warnings=tuple(warnings),
+    )
 
 
 def _row_cell(
@@ -223,6 +292,7 @@ def _warning(
     identity: str,
     reason: str,
     blank_fields: tuple[str, ...],
+    direction: str | None = None,
     source_sheet: str = "",
     source_row: int = 0,
     source_cells: dict[str, str] | None = None,
@@ -231,7 +301,7 @@ def _warning(
         code=code,
         scope="slab",
         identity=identity,
-        direction=None,
+        direction=direction,
         source_sheet=source_sheet,
         source_row=source_row,
         source_cells=source_cells or {},
