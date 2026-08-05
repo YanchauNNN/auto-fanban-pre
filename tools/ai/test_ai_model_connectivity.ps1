@@ -1638,6 +1638,7 @@ $modelsPath = [string]$profileConfig["models_path"]
 $chatPath = [string]$profileConfig["chat_completions_path"]
 $responsesPath = [string]$profileConfig["responses_path"]
 $chatModel = [string]$profileConfig["chat_model"]
+$structuredModel = [string]$profileConfig["structured_model"]
 $apiKeyEnvVar = [string]$profileConfig["api_key_env_var"]
 $apiKeyRequired = [bool]$profileConfig["api_key_required"]
 $streamEnabled = [bool]$profileConfig["stream_enabled"]
@@ -2274,7 +2275,8 @@ function Invoke-LocalJsonProcess {
     param(
         [string]$FileName,
         [string[]]$Arguments,
-        [int]$TimeoutSec = 180
+        [int]$TimeoutSec = 180,
+        [switch]$AllowText
     )
 
     $result = [PSCustomObject]@{
@@ -2297,7 +2299,9 @@ function Invoke-LocalJsonProcess {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    $startInfo.EnvironmentVariables["PYTHONUTF8"] = "1"
+    if ($null -ne $startInfo.EnvironmentVariables) {
+        $startInfo.EnvironmentVariables["PYTHONUTF8"] = "1"
+    }
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -2324,7 +2328,7 @@ function Invoke-LocalJsonProcess {
             } else {
                 $stderrText.Trim()
             }
-        } elseif ($null -eq $result.json) {
+        } elseif ($null -eq $result.json -and -not $AllowText) {
             $result.error = "Local diagnostic process did not return valid JSON."
         }
     } catch {
@@ -2333,6 +2337,284 @@ function Invoke-LocalJsonProcess {
         $stopwatch.Stop()
         $result.elapsed_ms = [long]$stopwatch.ElapsedMilliseconds
         $process.Dispose()
+    }
+    return $result
+}
+
+function Get-NormalizedUtf8Text {
+    param([string]$Path)
+
+    $text = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
+    return $text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
+function Get-RebarSuggestionSkillBundleText {
+    param([string]$SkillRoot)
+
+    $parts = @(
+        "## SKILL.md`n$(Get-NormalizedUtf8Text (Join-Path $SkillRoot 'SKILL.md'))",
+        "## references/io-schema.md`n$(Get-NormalizedUtf8Text (Join-Path $SkillRoot 'references\io-schema.md'))",
+        "## references/ranking-rules.md`n$(Get-NormalizedUtf8Text (Join-Path $SkillRoot 'references\ranking-rules.md'))"
+    )
+    return [string]::Join("`n`n", [string[]]$parts)
+}
+
+function Get-LowerTextSha256 {
+    param([string]$Text)
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
+        return -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") })
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-CalculationBookRebarSkillProbe {
+    param(
+        [string]$Root,
+        [string]$PythonPath,
+        [string]$SelectedProfile,
+        [string]$StructuredModel,
+        [string]$ChatUrl,
+        [hashtable]$Headers,
+        [int]$TimeoutSec,
+        [bool]$NetworkPolicyBlocked,
+        [switch]$SkipModelProbe,
+        [switch]$UseSslNoRevoke
+    )
+
+    $targetProfile = "terminal_cnpe_intranet_qwen_fast"
+    $configuredRoot = [Environment]::GetEnvironmentVariable("FANBAN_REBAR_SUGGESTION_SKILL_ROOT")
+    $rootSource = "package_default"
+    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
+        $configuredRoot = Join-Path $Root "tools\ai\recommend-rebar-from-smx"
+    } else {
+        $rootSource = "environment"
+    }
+    $skillRoot = Resolve-FullPathOrRaw $configuredRoot
+    $requiredRelativePaths = @(
+        "SKILL.md",
+        "agents\openai.yaml",
+        "references\io-schema.md",
+        "references\ranking-rules.md",
+        "scripts\validate_fixtures.py"
+    )
+    $files = @(
+        foreach ($relativePath in $requiredRelativePaths) {
+            $path = Join-Path $skillRoot $relativePath
+            $exists = Test-Path -LiteralPath $path -PathType Leaf
+            [PSCustomObject]@{
+                relative_path = $relativePath.Replace("\", "/")
+                exists = $exists
+                bytes = if ($exists) { (Get-Item -LiteralPath $path).Length } else { $null }
+                sha256 = if ($exists) { Get-FileSha256 $path } else { $null }
+            }
+        }
+    )
+    $missingFiles = @($files | Where-Object { -not $_.exists } | ForEach-Object { $_.relative_path })
+    $result = [PSCustomObject]@{
+        skill_id = "recommend-rebar-from-smx"
+        status = "not_installed"
+        local_status = "not_installed"
+        root = $skillRoot
+        root_source = $rootSource
+        environment_override_configured = $rootSource -eq "environment"
+        python = $PythonPath
+        required_files = $files
+        missing_files = $missingFiles
+        content_sha256 = $null
+        validation = [PSCustomObject]@{
+            attempted = $false
+            status = "not_attempted"
+            exit_code = $null
+            elapsed_ms = $null
+            error = $null
+        }
+        structured_selection = [PSCustomObject]@{
+            attempted = $false
+            status = "skipped"
+            model = $StructuredModel
+            status_code = $null
+            selected_candidate_id = $null
+            validator_status = "not_attempted"
+            elapsed_ms = $null
+            error = $null
+        }
+        error = $null
+    }
+
+    if ($SelectedProfile -ne $targetProfile) {
+        $result.status = "skipped"
+        $result.local_status = "skipped"
+        $result.structured_selection.error = "Structured selection is only required for $targetProfile."
+        return $result
+    }
+    if ($missingFiles.Count -gt 0) {
+        $result.error = "Calculation-book rebar suggestion Skill payload is incomplete."
+        return $result
+    }
+    if ([string]::IsNullOrWhiteSpace($PythonPath)) {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "No Python runtime was available for the rebar suggestion Skill probe."
+        return $result
+    }
+
+    $bundleText = Get-RebarSuggestionSkillBundleText -SkillRoot $skillRoot
+    $result.content_sha256 = Get-LowerTextSha256 -Text $bundleText
+    $validationProcess = Invoke-LocalJsonProcess -FileName $PythonPath `
+        -Arguments @((Join-Path $skillRoot "scripts\validate_fixtures.py")) `
+        -TimeoutSec 60 -AllowText
+    $result.validation.attempted = $validationProcess.attempted
+    $result.validation.exit_code = $validationProcess.exit_code
+    $result.validation.elapsed_ms = $validationProcess.elapsed_ms
+    $result.validation.error = $validationProcess.error
+    $result.validation.status = if (
+        $validationProcess.exit_code -eq 0 -and
+        ([string]$validationProcess.output).Contains("fixtures: ok")
+    ) { "passed" } else { "failed" }
+    if ($result.validation.status -ne "passed") {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "Rebar suggestion Skill fixture validation failed."
+        return $result
+    }
+    $result.local_status = "passed"
+
+    if ($SkipModelProbe) {
+        $result.status = "passed"
+        $result.structured_selection.error = "Structured selection was explicitly skipped with -SkipChat."
+        return $result
+    }
+    if ($NetworkPolicyBlocked) {
+        $result.status = "failed"
+        $result.structured_selection.status = "failed"
+        $result.structured_selection.error = "Network policy blocked the structured model probe."
+        $result.error = $result.structured_selection.error
+        return $result
+    }
+    if ([string]::IsNullOrWhiteSpace($StructuredModel)) {
+        $result.status = "failed"
+        $result.structured_selection.status = "failed"
+        $result.structured_selection.error = "The terminal profile does not define structured_model."
+        $result.error = $result.structured_selection.error
+        return $result
+    }
+
+    $requestObject = [ordered]@{
+        schema_version = "smx-rebar-1"
+        task_id = "SMX_REBAR_SELECTION_PROBE_7319"
+        items = @(
+            [ordered]@{
+                item_id = "PROBE:X"
+                member_kind = "wall"
+                member_id = "PROBE"
+                direction = "X"
+                smx = 1000
+                target_area = 1100
+                candidates = @(
+                    [ordered]@{
+                        candidate_id = "linear-l1-d16-s200"
+                        spec = "1D16@200"
+                        actual_area = 1200
+                        priority_rank = 1
+                        excess_area = 100
+                    }
+                )
+                repair_context = $null
+            }
+        )
+    }
+    $requestJson = $requestObject | ConvertTo-Json -Depth 12 -Compress
+    $probeHeaders = $Headers.Clone()
+    $probeHeaders["Content-Type"] = "application/json"
+    $payload = [ordered]@{
+        model = $StructuredModel
+        stream = $false
+        messages = @(
+            [ordered]@{
+                role = "system"
+                content = "Follow this packaged Skill exactly and return only its strict JSON response.`n`n$bundleText"
+            },
+            [ordered]@{
+                role = "user"
+                content = "SMX_REBAR_SELECTION_PROBE_7319`n$requestJson"
+            }
+        )
+        temperature = 0
+        max_tokens = 1024
+        response_format = @{ type = "json_object" }
+    } | ConvertTo-Json -Depth 14 -Compress
+
+    $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban-rebar-probe-" + [Guid]::NewGuid().ToString("N"))
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $result.structured_selection.attempted = $true
+        $response = Invoke-CurlJson -Url $ChatUrl -Method "POST" -Headers $probeHeaders `
+            -Body $payload -TimeoutSec $TimeoutSec -UseSslNoRevoke:$UseSslNoRevoke
+        $result.structured_selection.status_code = $response.status_code
+        if ($response.status_code -ne 200) {
+            throw "Structured model request returned HTTP $($response.status_code)."
+        }
+        $responseEnvelope = ConvertTo-JsonObjectOrNull $response.body
+        [object[]]$choices = @()
+        if ($null -ne $responseEnvelope) {
+            $choices = @(Get-JsonPropertyValue $responseEnvelope "choices")
+        }
+        if ($choices.Count -eq 0) {
+            throw "Structured model response did not contain choices."
+        }
+        $message = Get-JsonPropertyValue $choices[0] "message"
+        $content = [string](Get-JsonPropertyValue $message "content")
+        $responseObject = ConvertTo-JsonObjectOrNull $content
+        if ($null -eq $responseObject) {
+            throw "Structured model response content was not strict JSON."
+        }
+
+        [System.IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        $requestPath = Join-Path $temporaryRoot "request.json"
+        $responsePath = Join-Path $temporaryRoot "response.json"
+        [System.IO.File]::WriteAllText($requestPath, $requestJson, $utf8NoBom)
+        [System.IO.File]::WriteAllText($responsePath, $content, $utf8NoBom)
+        $responseValidation = Invoke-LocalJsonProcess -FileName $PythonPath `
+            -Arguments @(
+                (Join-Path $skillRoot "scripts\validate_fixtures.py"),
+                "--request", $requestPath,
+                "--response", $responsePath
+            ) -TimeoutSec 60 -AllowText
+        $result.structured_selection.validator_status = if (
+            $responseValidation.exit_code -eq 0 -and
+            ([string]$responseValidation.output).Contains("response: valid")
+        ) { "passed" } else { "failed" }
+        if ($result.structured_selection.validator_status -ne "passed") {
+            throw "Packaged validator rejected the structured model response: $($responseValidation.error)"
+        }
+
+        [object[]]$responseItems = @(Get-JsonPropertyValue $responseObject "items")
+        $selectedItem = @($responseItems | Where-Object {
+            [string](Get-JsonPropertyValue $_ "item_id") -eq "PROBE:X"
+        }) | Select-Object -First 1
+        $selectedCandidateId = [string](Get-JsonPropertyValue $selectedItem "selected_candidate_id")
+        if ($selectedCandidateId -ne "linear-l1-d16-s200") {
+            throw "Structured model did not select the deterministic minimum candidate."
+        }
+        $result.structured_selection.selected_candidate_id = $selectedCandidateId
+        $result.structured_selection.status = "passed"
+        $result.status = "passed"
+    } catch {
+        $result.structured_selection.status = "failed"
+        $result.structured_selection.error = $_.Exception.Message
+        $result.status = "failed"
+        $result.error = "Structured rebar selection probe failed."
+    } finally {
+        $stopwatch.Stop()
+        $result.structured_selection.elapsed_ms = [long]$stopwatch.ElapsedMilliseconds
+        if (Test-Path -LiteralPath $temporaryRoot -PathType Container) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+        }
     }
     return $result
 }
@@ -2507,6 +2789,18 @@ function Set-AnsysMapdlApplicationRegistration {
 }
 
 $ansysMapdlSkillResult = Get-AnsysMapdlSkillProbe -Root $root -PythonPath $runtimeResult.selected_python
+$rebarSuggestionSkillResult = Get-CalculationBookRebarSkillProbe `
+    -Root $root -PythonPath $runtimeResult.selected_python `
+    -SelectedProfile $selectedProfile -StructuredModel $structuredModel `
+    -ChatUrl (Join-EndpointUrl $baseUrl $chatPath) -Headers $headers `
+    -TimeoutSec $timeoutSec -NetworkPolicyBlocked $networkPolicyBlocked `
+    -SkipModelProbe:$SkipChat -UseSslNoRevoke:$sslNoRevokeConfig
+if (
+    $selectedProfile -eq "terminal_cnpe_intranet_qwen_fast" -and
+    $rebarSuggestionSkillResult.status -ne "passed"
+) {
+    Add-DiagnosticError $errors "calculation_book_rebar_skill" $rebarSuggestionSkillResult.error
+}
 $applicationApiResult = Invoke-ApplicationApiProxyProbe `
     -BaseUrl $applicationApiBaseUrl -StatePath $applicationApiStatePath `
     -HostHeader $applicationApiHostHeader -ForwardedFor $applicationApiForwardedFor `
@@ -2569,7 +2863,7 @@ $result = [PSCustomObject]@{
         chat_completions_url = $chatResult.url
         responses_url = if ([string]::IsNullOrWhiteSpace($responsesPath)) { $null } else { Join-EndpointUrl $baseUrl $responsesPath }
         chat_model = $chatModel
-        structured_model = [string]$profileConfig["structured_model"]
+        structured_model = $structuredModel
         stream_enabled = $streamEnabled
         model_list_required = $modelListRequired
         application_api_base_url = Get-SanitizedUrl $applicationApiBaseUrl
@@ -2606,6 +2900,7 @@ $result = [PSCustomObject]@{
         concurrency = $concurrencyResult
         runtime = $runtimeResult
         ansys_mapdl_skill = $ansysMapdlSkillResult
+        calculation_book_rebar_skill = $rebarSuggestionSkillResult
         application_api = $applicationApiResult
         mcp = [PSCustomObject]@{
             streamable_http = $mcpStreamableResult
@@ -2634,6 +2929,14 @@ $result = [PSCustomObject]@{
             -Status $ansysMapdlSkillResult.status `
             -Summary "ANSYS MAPDL Skill readiness covers packaged files, full corpus validation, an ANTYPE retrieval query, and application auto-trigger registration when the application API is configured." `
             -Checks @("required_files", "integrity", "regression", "query", "application_registration")
+        structured_model = New-ReadinessResult `
+            -Status $rebarSuggestionSkillResult.structured_selection.status `
+            -Summary "The terminal structured model must return one strict rebar candidate selection that passes the packaged Skill validator." `
+            -Checks @("profile", "model", "json_object", "packaged_validator", "deterministic_candidate")
+        calculation_book_rebar_skill = New-ReadinessResult `
+            -Status $rebarSuggestionSkillResult.status `
+            -Summary "Calculation-book rebar readiness covers the packaged five-file Skill, deterministic content hash, local fixtures, and terminal-profile structured selection." `
+            -Checks @("required_files", "content_sha256", "fixtures", "structured_selection")
         mcp = New-ReadinessResult `
             -Status $(
                 if ($mcpStreamableResult.status -eq "passed") { "passed" }

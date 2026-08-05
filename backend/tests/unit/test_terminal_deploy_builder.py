@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import subprocess
+import sys
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -29,6 +31,15 @@ TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.m
 AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
+REBAR_SUGGESTION_SKILL_ID = "recommend-rebar-from-smx"
+REBAR_SUGGESTION_SKILL_ROOT = Path("tools/ai/recommend-rebar-from-smx")
+REBAR_SUGGESTION_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("agents/openai.yaml"),
+    Path("references/io-schema.md"),
+    Path("references/ranking-rules.md"),
+    Path("scripts/validate_fixtures.py"),
+)
 ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
 BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
@@ -187,7 +198,18 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome.ctb")
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome-huidu.ctb")
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
-    _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
+    _write_file(
+        repo_root / "documents" / RUNTIME_SPEC_NAME,
+        """
+runtime_options:
+  calculation_book:
+    ai_suggestion:
+      skill_root:
+        type: str
+        default: "tools/ai/recommend-rebar-from-smx"
+        desc: "test Skill root"
+""".strip(),
+    )
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
     _write_file(repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME, "terminal install plan")
     _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
@@ -206,6 +228,26 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(
         repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         "Write-Host install-building-standards",
+    )
+    rebar_skill = repo_root / REBAR_SUGGESTION_SKILL_ROOT
+    _write_file(
+        rebar_skill / "SKILL.md",
+        """
+---
+name: recommend-rebar-from-smx
+description: test fixture
+---
+
+Read [references/io-schema.md](references/io-schema.md) and
+[references/ranking-rules.md](references/ranking-rules.md).
+""".strip(),
+    )
+    _write_file(rebar_skill / "agents" / "openai.yaml", "interface: {}")
+    _write_file(rebar_skill / "references" / "io-schema.md", "schema")
+    _write_file(rebar_skill / "references" / "ranking-rules.md", "ranking")
+    _write_file(
+        rebar_skill / "scripts" / "validate_fixtures.py",
+        "print('fixtures: ok')\n",
     )
 
 
@@ -576,6 +618,74 @@ ai_layer:
     )
     assert (installed / "SKILL.md").is_file()
     assert (installed / "references" / "normalization-rules.md").is_file()
+
+
+def test_terminal_package_materializes_rebar_suggestion_skill_from_runtime_root(
+    tmp_path: Path,
+) -> None:
+    from src.config.runtime_config import RuntimeConfig
+
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    source = repo_root / REBAR_SUGGESTION_SKILL_ROOT
+    installed = output_root / REBAR_SUGGESTION_SKILL_ROOT
+    assert _relative_files(installed) == {
+        path.as_posix() for path in REBAR_SUGGESTION_REQUIRED_FILES
+    }
+    manifest = json.loads(
+        (output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8")
+    )
+    manifest_files = {item["path"]: item for item in manifest["files"]}
+    for relative in REBAR_SUGGESTION_REQUIRED_FILES:
+        source_file = source / relative
+        installed_file = installed / relative
+        expected_sha256 = hashlib.sha256(source_file.read_bytes()).hexdigest()
+        assert installed_file.read_bytes() == source_file.read_bytes()
+        assert manifest_files[
+            (REBAR_SUGGESTION_SKILL_ROOT / relative).as_posix()
+        ]["sha256"] == expected_sha256
+
+    runtime = RuntimeConfig.from_yaml(
+        output_root / "documents" / RUNTIME_SPEC_NAME
+    )
+    assert runtime.calculation_book.ai_suggestion.skill_root == installed.resolve()
+    assert f"name: {REBAR_SUGGESTION_SKILL_ID}" in (
+        installed / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / "validate_fixtures.py"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout.strip() == "fixtures: ok"
+
+
+@pytest.mark.parametrize("missing", REBAR_SUGGESTION_REQUIRED_FILES)
+def test_terminal_package_rejects_incomplete_rebar_suggestion_skill(
+    tmp_path: Path,
+    missing: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+    (repo_root / REBAR_SUGGESTION_SKILL_ROOT / missing).unlink()
+
+    with pytest.raises(
+        FileNotFoundError,
+        match=rf"{REBAR_SUGGESTION_SKILL_ID}.*{missing.name}",
+    ):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
 
 def test_build_terminal_deploy_package_requires_pdf_preview_worker_asset(tmp_path: Path) -> None:

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
+
 from ..ai.ansys_mapdl_skill import (
     ANSYS_MAPDL_SKILL_ID,
 )
@@ -74,6 +76,15 @@ DELTA_USAGE = "使用说明.txt"
 MANAGED_PDF2_PC3_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_pdf2_pc3_name
 MANAGED_MONOCHROME_CTB_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_monochrome_ctb_name
 DEFAULT_FRONTEND_API_PORT = _DEFAULT_DEPLOYMENT_MECHANISM.default_frontend_api_port
+REBAR_SUGGESTION_SKILL_ID = "recommend-rebar-from-smx"
+REBAR_SUGGESTION_SKILL_ROOT = Path("tools/ai/recommend-rebar-from-smx")
+REBAR_SUGGESTION_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("agents/openai.yaml"),
+    Path("references/io-schema.md"),
+    Path("references/ranking-rules.md"),
+    Path("scripts/validate_fixtures.py"),
+)
 
 
 @dataclass(frozen=True)
@@ -394,6 +405,70 @@ def _materialize_reinforcement_table_skill(
             "墙体配筋表规范化 Skill 已启用，但本地规则包不完整。"
             "请检查 tools/ai/reinforcement-table-normalizer。"
         )
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+    )
+
+
+def _configured_rebar_suggestion_skill_root(repo_root: Path) -> Path:
+    runtime_path = repo_root / "documents" / RUNTIME_SPEC_NAME
+    payload = yaml.safe_load(runtime_path.read_text(encoding="utf-8")) or {}
+    try:
+        configured = payload["runtime_options"]["calculation_book"][
+            "ai_suggestion"
+        ]["skill_root"]["default"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} skill_root is missing from "
+            f"{runtime_path.name}"
+        ) from exc
+
+    configured_text = str(configured).strip()
+    relative_root = Path(configured_text)
+    if (
+        not configured_text
+        or relative_root.is_absolute()
+        or ".." in relative_root.parts
+    ):
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} skill_root must be a package-relative path"
+        )
+    if relative_root.as_posix() != REBAR_SUGGESTION_SKILL_ROOT.as_posix():
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} has one supported source root: "
+            f"{REBAR_SUGGESTION_SKILL_ROOT.as_posix()}"
+        )
+    return relative_root
+
+
+def _materialize_rebar_suggestion_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    relative_root = _configured_rebar_suggestion_skill_root(repo_root)
+    source = repo_root / relative_root
+    missing = [
+        relative.as_posix()
+        for relative in REBAR_SUGGESTION_REQUIRED_FILES
+        if not (source / relative).is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"{REBAR_SUGGESTION_SKILL_ID} payload is incomplete; missing: "
+            + ", ".join(missing)
+        )
+
+    skill_text = (source / "SKILL.md").read_text(encoding="utf-8")
+    if f"name: {REBAR_SUGGESTION_SKILL_ID}" not in skill_text:
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} SKILL.md frontmatter name is invalid"
+        )
+
+    target = output_root / relative_root
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(
@@ -3499,6 +3574,7 @@ def build_terminal_deploy_package(
     _materialize_ansys_mapdl_skill(repo_root, output_root)
     _materialize_building_standards_skill(repo_root, output_root)
     _materialize_reinforcement_table_skill(repo_root, output_root)
+    _materialize_rebar_suggestion_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)

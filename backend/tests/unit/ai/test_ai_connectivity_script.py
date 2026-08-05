@@ -13,6 +13,34 @@ from urllib.parse import urlsplit
 
 import pytest
 
+REBAR_SUGGESTION_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("agents/openai.yaml"),
+    Path("references/io-schema.md"),
+    Path("references/ranking-rules.md"),
+    Path("scripts/validate_fixtures.py"),
+)
+
+
+def _rebar_skill_bundle_sha256(skill_root: Path) -> str:
+    parts = [
+        ("SKILL.md", (skill_root / "SKILL.md").read_text(encoding="utf-8")),
+        (
+            "references/io-schema.md",
+            (skill_root / "references" / "io-schema.md").read_text(
+                encoding="utf-8"
+            ),
+        ),
+        (
+            "references/ranking-rules.md",
+            (skill_root / "references" / "ranking-rules.md").read_text(
+                encoding="utf-8"
+            ),
+        ),
+    ]
+    content = "\n\n".join(f"## {name}\n{text}" for name, text in parts)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
 
 class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -235,6 +263,25 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
 
         if last_role == "tool":
             self._send_completion("TOOL_ROUNDTRIP_OK")
+            return
+        if "SMX_REBAR_SELECTION_PROBE_7319" in prompt:
+            self._send_completion(
+                json.dumps(
+                    {
+                        "schema_version": "smx-rebar-1",
+                        "items": [
+                            {
+                                "item_id": "PROBE:X",
+                                "status": "selected",
+                                "selected_candidate_id": "linear-l1-d16-s200",
+                                "reason": "minimum eligible candidate",
+                                "review_reasons": [],
+                            }
+                        ],
+                    },
+                    separators=(",", ":"),
+                )
+            )
             return
         if isinstance(response_format, dict) and response_format.get("type") == "json_schema":
             self._send_completion('{"marker":"JSON_SCHEMA_OK","value":7319}')
@@ -1103,6 +1150,125 @@ def test_ai_connectivity_script_reports_ansys_mapdl_skill_readiness() -> None:
     )
     for marker in required_probe_markers:
         assert marker in script_text
+
+
+def test_terminal_profile_probes_packaged_rebar_skill_with_structured_model(
+    tmp_path: Path,
+    openai_compatible_server: str,
+) -> None:
+    if shutil.which("powershell") is None:
+        pytest.skip("PowerShell is required for the connectivity script")
+
+    repo_root = Path(__file__).resolve().parents[4]
+    script_path = repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1"
+    config_path = tmp_path / "ai_model_gateway.yaml"
+    output_path = tmp_path / "connectivity.json"
+    skill_root = tmp_path / "package" / "tools" / "ai" / "recommend-rebar-from-smx"
+    shutil.copytree(
+        repo_root / "tools" / "ai" / "recommend-rebar-from-smx",
+        skill_root,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+    assert {
+        path.relative_to(skill_root) for path in skill_root.rglob("*") if path.is_file()
+    } == set(REBAR_SUGGESTION_REQUIRED_FILES)
+    config_path.write_text(
+        f"""
+schema_version: "0.1"
+active_profile: "terminal_cnpe_intranet_qwen_fast"
+profiles:
+  terminal_cnpe_intranet_qwen_fast:
+    provider: "cnpe-qwen-fast"
+    protocol: "openai_compatible"
+    network_mode: "intranet_only"
+    architecture: "intranet_openai_compatible_gateway"
+    base_url: "{openai_compatible_server}"
+    allowed_hosts: ["127.0.0.1"]
+    mcp_allowed_hosts: ["127.0.0.1"]
+    models_path: "/models"
+    chat_completions_path: "/chat/completions"
+    responses_path: "/responses"
+    api_key_env_var: ""
+    api_key_required: false
+    authorization_scheme: "none"
+    chat_model: "Qwen3.6-35A3"
+    structured_model: "Qwen3.6-35A3-structured"
+    stream_enabled: false
+    timeout_sec: 15
+    connect_timeout_sec: 5
+    model_list_required: false
+    ssl_no_revoke: false
+    test_prompt: "Please reply exactly: AI_CONNECTIVITY_OK"
+    expected_response_contains: "AI_CONNECTIVITY_OK"
+    agent_probe_enabled: false
+    multimodal_probe_enabled: false
+    concurrency_probe_count: 0
+    mcp_streamable_http_url: ""
+    mcp_sse_url: ""
+    mcp_stdio_command: ""
+    mcp_api_key_env_var: ""
+    application_api_base_url: ""
+""".strip(),
+        encoding="utf-8",
+    )
+
+    environment = os.environ.copy()
+    environment["FANBAN_REBAR_SUGGESTION_SKILL_ROOT"] = str(skill_root)
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ConfigPath",
+            str(config_path),
+            "-OutputPath",
+            str(output_path),
+            "-SkipStream",
+            "-SkipAdvanced",
+            "-SkipMultimodal",
+            "-Concurrency",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        timeout=90,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    result = json.loads(output_path.read_text(encoding="utf-8-sig"))
+    assert result["environment"]["profile"] == "terminal_cnpe_intranet_qwen_fast"
+    assert result["profile"]["structured_model"] == "Qwen3.6-35A3-structured"
+    skill = result["checks"]["calculation_book_rebar_skill"]
+    assert skill["skill_id"] == "recommend-rebar-from-smx"
+    assert skill["root_source"] == "environment"
+    assert skill["missing_files"] == []
+    assert skill["content_sha256"] == _rebar_skill_bundle_sha256(skill_root)
+    assert skill["validation"]["status"] == "passed"
+    assert skill["structured_selection"]["status"] == "passed"
+    assert skill["structured_selection"]["model"] == "Qwen3.6-35A3-structured"
+    assert skill["structured_selection"]["selected_candidate_id"] == (
+        "linear-l1-d16-s200"
+    )
+    assert result["readiness"]["structured_model"]["status"] == "passed"
+    assert result["readiness"]["calculation_book_rebar_skill"]["status"] == (
+        "passed"
+    )
+    structured_payloads = [
+        payload
+        for payload in _OpenAiCompatibleHandler.received_payloads
+        if payload.get("model") == "Qwen3.6-35A3-structured"
+    ]
+    assert len(structured_payloads) == 1
+    assert structured_payloads[0]["temperature"] == 0
+    assert structured_payloads[0]["response_format"] == {"type": "json_object"}
+    assert "SMX_REBAR_SELECTION_PROBE_7319" in json.dumps(
+        structured_payloads[0], ensure_ascii=False
+    )
 
 
 def test_ai_connectivity_script_records_empty_ansys_query_without_crashing(
