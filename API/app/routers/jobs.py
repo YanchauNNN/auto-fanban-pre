@@ -370,3 +370,25 @@ def download_calculation_book(
         filename=path.name,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+@router.get("/{job_id}/download/calculation-book-log")
+def download_calculation_book_log(
+    request: Request,
+    job_id: str,
+    account=Depends(require_current_account),
+) -> FileResponse:
+    path = request.app.state.runtime.get_artifact_path(
+        job_id,
+        "calculation_book_log",
+        account=account,
+    )
+    return FileResponse(
+        path=path,
+        filename=path.name,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

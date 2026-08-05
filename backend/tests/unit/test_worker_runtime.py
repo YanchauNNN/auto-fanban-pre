@@ -96,6 +96,35 @@ class BlockingCalculationProcessor:
         job.mark_succeeded()
 
 
+class CalculationArtifactProcessor:
+    def __call__(self, job: Job) -> None:
+        assert job.options["reinforcement_source"] == "ai_suggested"
+        job.mark_running(stage="AI_REBAR_SUGGESTION")
+        work_dir = job.work_dir
+        assert work_dir is not None
+        log_path = (
+            work_dir
+            / "calculation-book"
+            / "logs"
+            / f"calculation-book-{job.job_id}.log"
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_bytes(b'{"event":"task_completed"}\n')
+        job.artifacts.calculation_log = log_path
+        job.progress.details["ai_rebar_suggestion"] = {
+            "skill_id": "recommend-rebar-from-smx",
+            "skill_version": "1.0.0",
+            "skill_sha256": "c" * 64,
+            "model": "structured-test",
+            "call_count": 1,
+            "suggested_direction_count": 3,
+            "blank_direction_count": 0,
+            "repair_round_count": 0,
+            "validation": "passed",
+        }
+        job.mark_succeeded()
+
+
 class DeferredDocProcessor:
     def __init__(self, package_path: Path) -> None:
         self.package_path = package_path
@@ -577,3 +606,59 @@ def test_worker_waits_when_calculation_doc_thread_has_not_persisted_running_stat
     summary = queue_store.list_summaries()["items"][0]
     assert summary["status"] == "succeeded"
     assert summary["stage"] == "RENDER_CALCULATION_BOOK"
+
+
+def test_worker_persists_ai_calculation_source_summary_and_log_artifact(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    import API.app.runtime as runtime_mod
+
+    monkeypatch.setattr(runtime_mod, "CADSlotPool", FakeCADSlotPool)
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+        options={
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+        params={"reinforcement_source": "ai_suggested"},
+    )
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(
+        tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3"
+    )
+    queue_store.initialize()
+    queue_store.enqueue("job", job.job_id)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    worker = DeliverableWorkerRuntime(
+        worker_id="worker-test",
+        job_processor=CalculationArtifactProcessor(),
+        heartbeat_interval_seconds=0.05,
+    )
+    try:
+        assert worker.run_once() is True
+    finally:
+        worker.stop()
+
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.SUCCEEDED
+    assert persisted.options["reinforcement_source"] == "ai_suggested"
+    assert persisted.artifacts.calculation_log is not None
+    assert persisted.artifacts.calculation_log.read_bytes() == (
+        b'{"event":"task_completed"}\n'
+    )
+    assert persisted.progress.details["ai_rebar_suggestion"][
+        "suggested_direction_count"
+    ] == 3
+    summary = queue_store.list_summaries()["items"][0]
+    assert summary["status"] == "succeeded"
+    assert summary["artifacts"]["calculation_log_available"] is True

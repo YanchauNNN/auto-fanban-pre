@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import traceback
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,16 +8,29 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from src.ai.rebar_suggestion_task import (
+    RebarSuggestionTaskError,
+    RebarSuggestionTaskResult,
+)
 from src.ai.reinforcement_task_normalizer import (
     ReinforcementTaskNormalizationError,
 )
+from src.calculation_book.ai_rebar_suggestion_schema import (
+    PROTOCOL_VERSION,
+    AiRebarSuggestionResponse,
+)
+from src.calculation_book.diagnostic_log import DiagnosticLogError
 from src.calculation_book.executor import (
     CalculationBookJobExecutor,
+    RebarSuggestionUnavailable,
     ReinforcementNormalizationUnavailable,
     ReinforcementNormalizerMetadata,
+    build_rebar_suggestion_invoker,
     build_reinforcement_task_normalizer,
 )
 from src.calculation_book.processor import CalculationBookStage
+from src.calculation_book.rebar_candidates import generate_rebar_candidates
+from src.calculation_book.rebar_recommender import RebarSuggestionInput
 from src.models import Job, JobStatus, JobType
 
 
@@ -107,7 +121,17 @@ class FakeProcessor:
         self.callbacks: list[object] = []
         self.stages: list[CalculationBookStage] = []
 
-    def process(self, *, output_dir: Path, params, progress, reinforcement_normalizer, **_kwargs):
+    def process(
+        self,
+        *,
+        output_dir: Path,
+        params,
+        progress,
+        reinforcement_normalizer,
+        rebar_suggester=None,
+        audit=None,
+        **_kwargs,
+    ):
         self.callbacks.append(reinforcement_normalizer)
         progress(CalculationBookStage.VALIDATE_ARCHIVE, 10, "validated", {})
         validated = None
@@ -123,6 +147,51 @@ class FakeProcessor:
                 CalculationBookStage.OCR_REINFORCEMENT,
             )
         )
+        suggestion = None
+        suggestion_warnings: tuple[object, ...] = ()
+        if rebar_suggester is not None:
+            candidates = generate_rebar_candidates(smx=1000, direction="X")
+            suggestion = rebar_suggester(
+                (
+                    RebarSuggestionInput(
+                        item_id="wall:N5001:X",
+                        member_kind="wall",
+                        member_id="N5001",
+                        direction="X",
+                        smx=1000,
+                        target_area=1100,
+                        candidates=candidates,
+                    ),
+                )
+            )
+            suggestion_warnings = tuple(
+                SimpleNamespace(
+                    code=warning.code,
+                    scope=warning.member_kind,
+                    identity=warning.member_id,
+                    direction=warning.direction,
+                    source_sheet=None,
+                    source_row=None,
+                    source_cells={},
+                    reason=warning.message,
+                    blank_fields=(warning.direction,),
+                )
+                for warning in suggestion.warnings
+            )
+            if audit is not None and suggestion.selected:
+                selected = suggestion.selected[0]
+                audit(
+                    "word_entry_written",
+                    {
+                        "member_kind": "wall",
+                        "member_id": "N5001",
+                        "direction": "X",
+                        "spec": selected.candidate.canonical_specification,
+                        "actual_area": selected.candidate.actual_area,
+                        "smx": 1000,
+                        "image_name": "N5001-X.png",
+                    },
+                )
         output = output_dir / "result.docx"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"docx")
@@ -132,8 +201,69 @@ class FakeProcessor:
             template_type="internal_structure",
             selections=(),
             normalization_warnings=(
-                validated.warnings if validated is not None else ()
+                validated.warnings if validated is not None else suggestion_warnings
             ),
+            ai_rebar_suggestion=suggestion,
+            ai_suggested_direction_count=(
+                len(suggestion.selected) if suggestion is not None else 0
+            ),
+            ai_blank_direction_count=(
+                len(suggestion.warnings) if suggestion is not None else 0
+            ),
+        )
+
+
+class FakeRebarInvoker:
+    def __init__(self, *, invalid_first: bool = False) -> None:
+        self.calls = 0
+        self.invalid_first = invalid_first
+
+    def suggest(self, request, *, correlation_id: str) -> RebarSuggestionTaskResult:
+        self.calls += 1
+        item = request.items[0]
+        candidate = (
+            item.candidates[-1]
+            if self.invalid_first and self.calls == 1
+            else item.candidates[0]
+        )
+        response = AiRebarSuggestionResponse.model_validate(
+            {
+                "schema_version": PROTOCOL_VERSION,
+                "items": [
+                    {
+                        "item_id": item.item_id,
+                        "status": "selected",
+                        "selected_candidate_id": candidate.candidate_id,
+                        "reason": "minimum excess in the first eligible priority",
+                        "review_reasons": [],
+                    }
+                ],
+            }
+        )
+        return RebarSuggestionTaskResult(
+            response=response,
+            correlation_id=correlation_id,
+            task_id=request.task_id,
+            skill_id="recommend-rebar-from-smx",
+            skill_version="1.0.0",
+            skill_sha256="a" * 64,
+            model="structured-test",
+        )
+
+
+class AlwaysFailRebarInvoker:
+    model = "failed-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def suggest(self, request, *, correlation_id: str) -> RebarSuggestionTaskResult:
+        del request, correlation_id
+        self.calls += 1
+        raise RebarSuggestionTaskError(
+            "infrastructure",
+            "model_timeout",
+            "sanitized timeout",
         )
 
 
@@ -301,6 +431,34 @@ def test_executor_canonicalizes_duplicate_warnings_and_hides_missing_excel_evide
     assert "another-secret" not in persisted
 
 
+def test_executor_serializes_ai_blank_warning_with_backend_owned_reason() -> None:
+    warning = SimpleNamespace(
+        code="OCR_RECOGNITION_FAILED",
+        scope="slab",
+        identity="11.45m",
+        direction="X",
+        source_sheet=None,
+        source_row=None,
+        source_cells={},
+        reason="raw OCR exception with secret-token",
+        blank_fields=("top_x",),
+    )
+
+    assert CalculationBookJobExecutor._safe_warnings((warning,)) == [
+        {
+            "code": "OCR_RECOGNITION_FAILED",
+            "scope": "slab",
+            "identity": "11.45m",
+            "direction": "X",
+            "source_sheet": None,
+            "source_row": None,
+            "source_cells": {},
+            "reason": "应力云图 SMX 识别失败，当前方向配筋建议已留空，请人工复核",
+            "blank_fields": ["top_x"],
+        }
+    ]
+
+
 def test_standard_job_never_constructs_or_calls_normalizer(tmp_path: Path) -> None:
     processor = FakeProcessor()
     normalizer = FakeNormalizer()
@@ -327,6 +485,36 @@ def test_server_expected_count_is_forwarded_to_normalizer(tmp_path: Path) -> Non
     _executor(processor, normalizer).execute(job)
 
     assert normalizer.calls[0][1:] == (True, 40)
+
+
+def test_normalization_callback_initialization_failure_is_persisted_as_failed(
+    tmp_path: Path,
+) -> None:
+    class CallbackFailingExecutor(CalculationBookJobExecutor):
+        def _normalization_callback(self, **_kwargs):
+            raise ReinforcementNormalizationUnavailable(
+                "normalizer_initialization_failed",
+                "AI reinforcement normalizer initialization failed",
+            )
+
+    processor = FakeProcessor()
+    job = _job(
+        tmp_path,
+        options={"ai_reinforcement_normalization": True},
+    )
+
+    with pytest.raises(ReinforcementNormalizationUnavailable):
+        CallbackFailingExecutor(processor=processor).execute(job)
+
+    assert job.status == JobStatus.FAILED
+    assert processor.callbacks == []
+    persisted = json.loads(
+        (job.work_dir / "job.json").read_text(encoding="utf-8")
+    )
+    assert persisted["status"] == "failed"
+    assert persisted["errors"] == [
+        "AI reinforcement normalizer initialization failed"
+    ]
 
 
 def test_client_params_cannot_enable_ai_normalization(tmp_path: Path) -> None:
@@ -490,3 +678,404 @@ def test_real_normalizer_builder_fails_closed_when_disabled(tmp_path: Path) -> N
 
     with pytest.raises(RuntimeError, match="disabled"):
         build_reinforcement_task_normalizer(config)
+
+
+def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
+    tmp_path: Path,
+) -> None:
+    processor = FakeProcessor()
+    invoker = FakeRebarInvoker()
+    factory_calls: list[object] = []
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+            "ai_reinforcement_normalization": False,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+
+    executor = CalculationBookJobExecutor(
+        processor=processor,
+        rebar_suggestion_factory=(
+            lambda config: factory_calls.append(config) or invoker
+        ),
+    )
+    executor.execute(job)
+
+    assert len(factory_calls) == 1
+    assert invoker.calls == 1
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.artifacts.calculation_log is not None
+    assert job.artifacts.calculation_log.is_file()
+    assert job.progress.details["ai_rebar_suggestion"] == {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "a" * 64,
+        "model": "structured-test",
+        "call_count": 1,
+        "suggested_direction_count": 1,
+        "blank_direction_count": 0,
+        "repair_round_count": 0,
+        "validation": "passed",
+    }
+    persisted = (job.work_dir / "job.json").read_text(encoding="utf-8")
+    assert "candidate_counts" not in persisted
+    assert "candidates" not in persisted
+    assert "selected_candidate_id" not in persisted
+
+    records = [
+        json.loads(line)
+        for line in job.artifacts.calculation_log.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert records[0]["event"] == "task_started"
+    assert records[-1]["event"] == "task_completed"
+    assert any(record["event"] == "ai_call_started" for record in records)
+    assert any(record["event"] == "item_finalized" for record in records)
+    assert any(record["event"] == "word_entry_written" for record in records)
+    assert records[-1]["details"]["figure_count"] == 3
+
+
+def test_ai_repair_progress_persists_only_safe_round_information(
+    tmp_path: Path,
+) -> None:
+    invoker = FakeRebarInvoker(invalid_first=True)
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+
+    CalculationBookJobExecutor(
+        processor=FakeProcessor(),
+        rebar_suggestion_invoker=invoker,
+    ).execute(job)
+
+    assert invoker.calls == 2
+    assert job.progress.details["ai_rebar_suggestion_round"] == 2
+    assert job.progress.message == "AI 配筋建议第 2 轮修正"
+    persisted = (job.work_dir / "job.json").read_text(encoding="utf-8")
+    assert "candidate_counts" not in persisted
+    assert "excluded_candidate_ids" not in persisted
+    assert "better_candidate_ids" not in persisted
+    assert "input_summary_sha256" not in persisted
+
+
+def test_ai_base_failure_limit_succeeds_with_blank_result_and_safe_metadata(
+    tmp_path: Path,
+) -> None:
+    invoker = AlwaysFailRebarInvoker()
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+
+    CalculationBookJobExecutor(
+        processor=FakeProcessor(),
+        rebar_suggestion_invoker=invoker,
+    ).execute(job)
+
+    assert invoker.calls == 3
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.progress.details["ai_rebar_suggestion"] == {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "",
+        "model": "failed-model",
+        "call_count": 3,
+        "suggested_direction_count": 0,
+        "blank_direction_count": 1,
+        "repair_round_count": 0,
+        "validation": "passed_with_warnings",
+    }
+    assert job.progress.details["calculation_book_warnings"] == [
+        {
+            "code": "AI_BASE_FAILURE_LIMIT",
+            "scope": "wall",
+            "identity": "N5001",
+            "direction": "X",
+            "source_sheet": None,
+            "source_row": None,
+            "source_cells": {},
+            "reason": "人工智能连续三次调用或协议失败，当前方向已留空，请人工复核",
+            "blank_fields": ["X"],
+        }
+    ]
+    assert job.artifacts.calculation_log is not None
+    records = [
+        json.loads(line)
+        for line in job.artifacts.calculation_log.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert records[-1]["event"] == "task_completed"
+    assert sum(record["event"] == "ai_call_failed" for record in records) == 3
+
+
+def test_provided_job_never_builds_ai_invoker_or_requires_diagnostic_log(
+    tmp_path: Path,
+) -> None:
+    processor = FakeProcessor()
+    factory_calls: list[object] = []
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "provided",
+            "ai_rebar_suggestion": False,
+            "ai_reinforcement_normalization": False,
+        },
+    )
+
+    CalculationBookJobExecutor(
+        processor=processor,
+        rebar_suggestion_factory=(
+            lambda config: factory_calls.append(config) or FakeRebarInvoker()
+        ),
+    ).execute(job)
+
+    assert factory_calls == []
+    assert job.status == JobStatus.SUCCEEDED
+    assert job.artifacts.calculation_log is None
+    assert "ai_rebar_suggestion" not in job.progress.details
+
+
+def test_ai_suggestion_job_fails_closed_when_log_creation_is_unavailable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    processor = FakeProcessor()
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+
+    def fail_create(**_kwargs):
+        raise OSError("sensitive filesystem detail")
+
+    monkeypatch.setattr(
+        "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
+        fail_create,
+    )
+
+    with pytest.raises(RebarSuggestionUnavailable) as exc_info:
+        CalculationBookJobExecutor(
+            processor=processor,
+            rebar_suggestion_factory=lambda _config: FakeRebarInvoker(),
+        ).execute(job)
+
+    assert exc_info.value.code == "diagnostic_log_unavailable"
+    assert job.status == JobStatus.FAILED
+    assert processor.callbacks == []
+    assert job.artifacts.calculation_log is None
+    persisted = (job.work_dir / "job.json").read_text(encoding="utf-8")
+    assert "sensitive filesystem detail" not in persisted
+
+
+def test_ai_suggestion_job_writes_failed_terminal_record_and_closes_log(
+    tmp_path: Path,
+) -> None:
+    class FailingProcessor(FakeProcessor):
+        def process(self, **_kwargs):
+            raise RuntimeError("render failed")
+
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+
+    with pytest.raises(RuntimeError, match="render failed"):
+        CalculationBookJobExecutor(
+            processor=FailingProcessor(),
+            rebar_suggestion_factory=lambda _config: FakeRebarInvoker(),
+        ).execute(job)
+
+    assert job.status == JobStatus.FAILED
+    assert job.artifacts.calculation_log is not None
+    records = [
+        json.loads(line)
+        for line in job.artifacts.calculation_log.read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert records[-1]["event"] == "task_failed"
+    assert records[-1]["details"]["error_code"] == "RuntimeError"
+
+
+def test_ai_job_closes_and_hides_log_when_failed_terminal_cannot_be_written(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class FailingProcessor(FakeProcessor):
+        def process(self, **_kwargs):
+            raise RuntimeError("render failed")
+
+    class FailingTerminalLog:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(b"")
+            self.closed = False
+
+        def write(self, event: str, **_details) -> None:
+            if event == "task_failed":
+                raise DiagnosticLogError("log_write_failed", "safe failure")
+
+        def close(self) -> None:
+            self.closed = True
+
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+    fake_log = FailingTerminalLog(
+        tmp_path / "job" / "calculation-book" / "logs" / "failed.log"
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
+        lambda **_kwargs: fake_log,
+    )
+
+    with pytest.raises(RebarSuggestionUnavailable) as exc_info:
+        CalculationBookJobExecutor(
+            processor=FailingProcessor(),
+            rebar_suggestion_factory=lambda _config: FakeRebarInvoker(),
+        ).execute(job)
+
+    assert exc_info.value.code == "diagnostic_log_unavailable"
+    assert fake_log.closed is True
+    assert job.status == JobStatus.FAILED
+    assert job.artifacts.calculation_log is None
+
+
+def test_ai_job_fails_and_hides_log_when_success_close_is_not_durable(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    class CloseFailingLog:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(b"")
+            self.closed = False
+
+        def write(self, _event: str, **_details) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+            raise DiagnosticLogError("log_flush_failed", "safe failure")
+
+    job = _job(
+        tmp_path,
+        options={
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+        },
+    )
+    job.params["reinforcement_source"] = "ai_suggested"
+    fake_log = CloseFailingLog(
+        tmp_path / "job" / "calculation-book" / "logs" / "failed.log"
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
+        lambda **_kwargs: fake_log,
+    )
+
+    with pytest.raises(RebarSuggestionUnavailable) as exc_info:
+        CalculationBookJobExecutor(
+            processor=FakeProcessor(),
+            rebar_suggestion_factory=lambda _config: FakeRebarInvoker(),
+        ).execute(job)
+
+    assert exc_info.value.code == "diagnostic_log_unavailable"
+    assert fake_log.closed is True
+    assert job.status == JobStatus.FAILED
+    assert job.artifacts.calculation_log is None
+
+
+def test_real_rebar_suggestion_builder_uses_one_structured_skill_capability(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, object]] = []
+    fake_spec = object()
+    fake_invoker = object()
+    monkeypatch.setattr(
+        "src.calculation_book.executor.load_ai_spec",
+        lambda path: calls.append({"ai_spec_path": path}) or fake_spec,
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.executor.build_rebar_suggestion_task",
+        lambda spec, **kwargs: calls.append({"spec": spec, **kwargs})
+        or fake_invoker,
+    )
+    settings = SimpleNamespace(
+        enabled=True,
+        skill_root=tmp_path / "skill",
+        skill_version="2.0.0",
+        request_timeout_seconds=321,
+        max_output_tokens=12_345,
+        max_skill_bytes=111,
+        max_reference_files=3,
+        max_request_bytes=222,
+        max_response_bytes=333,
+        max_identifier_chars=44,
+    )
+    config = SimpleNamespace(
+        ai_spec_path=tmp_path / "ai.yaml",
+        calculation_book=SimpleNamespace(ai_suggestion=settings),
+    )
+
+    built = build_rebar_suggestion_invoker(config)
+
+    assert built is fake_invoker
+    assert calls[0] == {"ai_spec_path": config.ai_spec_path}
+    assert calls[1]["spec"] is fake_spec
+    assert calls[1]["skill_root"] == settings.skill_root
+    assert calls[1]["skill_version"] == "2.0.0"
+    assert calls[1]["request_timeout_seconds"] == 321
+    assert calls[1]["max_output_tokens"] == 12_345
+    limits = calls[1]["limits"]
+    assert limits.max_skill_bytes == 111
+    assert limits.max_reference_files == 3
+    assert limits.max_request_bytes == 222
+    assert limits.max_response_bytes == 333
+    assert limits.max_response_tokens == 12_345
+    assert limits.max_identifier_chars == 44
+
+
+def test_real_rebar_suggestion_builder_fails_closed_when_disabled(
+    tmp_path: Path,
+) -> None:
+    config = SimpleNamespace(
+        calculation_book=SimpleNamespace(
+            ai_suggestion=SimpleNamespace(enabled=False)
+        )
+    )
+
+    with pytest.raises(RebarSuggestionUnavailable) as exc_info:
+        build_rebar_suggestion_invoker(config)
+
+    assert exc_info.value.code == "ai_suggestion_disabled"

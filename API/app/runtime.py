@@ -190,6 +190,11 @@ def _serialize_calculation_book_warnings(details: dict[str, Any]) -> list[dict[s
             "workbook_only_wall",
             "image_only_slab",
             "workbook_only_slab",
+            "NO_ELIGIBLE_CANDIDATE",
+            "AI_NEEDS_REVIEW",
+            "AI_BASE_FAILURE_LIMIT",
+            "OCR_RECOGNITION_FAILED",
+            "UNKNOWN_IMAGE_NAME",
         }:
             code = "needs_review"
         scope = str(raw.get("scope") or "reinforcement")
@@ -216,10 +221,11 @@ def _serialize_calculation_book_warnings(details: dict[str, Any]) -> list[dict[s
             else None
         )
         raw_direction = raw.get("direction")
+        allowed_directions = allowed_fields | {"X", "Y", "Z"}
         direction = (
             str(raw_direction)
             if raw_direction is not None
-            and str(raw_direction) in allowed_fields
+            and str(raw_direction) in allowed_directions
             else None
         )
         source_row = _strict_positive_int(raw.get("source_row"))
@@ -296,6 +302,72 @@ def _serialize_calculation_ai_normalization(
         summary[field] = value if value is not None else 0
     summary["validation"] = "passed"
     return True, summary
+
+
+def _serialize_calculation_ai_rebar_suggestion(
+    job: Job,
+) -> dict[str, Any] | None:
+    if job.options.get("ai_rebar_suggestion") is not True:
+        return None
+    raw = job.progress.details.get("ai_rebar_suggestion")
+    if not isinstance(raw, dict):
+        return None
+    validation = str(raw.get("validation") or "")
+    if validation not in {"passed", "passed_with_warnings"}:
+        return None
+    summary: dict[str, Any] = {}
+    for field in ("skill_id", "skill_version", "model"):
+        summary[field] = str(raw.get(field) or "")[:160]
+    raw_sha256 = str(raw.get("skill_sha256") or "")
+    summary["skill_sha256"] = (
+        raw_sha256.lower()
+        if re.fullmatch(r"[A-Fa-f0-9]{64}", raw_sha256) is not None
+        else ""
+    )
+    for field in (
+        "call_count",
+        "suggested_direction_count",
+        "blank_direction_count",
+        "repair_round_count",
+    ):
+        value = _safe_non_negative_int(raw.get(field))
+        summary[field] = value if value is not None else 0
+    summary["validation"] = validation
+    return summary
+
+
+def _calculation_reinforcement_source(job: Job) -> str:
+    try:
+        return ReinforcementSource(
+            str(job.options.get("reinforcement_source") or "provided")
+        ).value
+    except ValueError:
+        return ReinforcementSource.PROVIDED.value
+
+
+def _calculation_log_artifact_path(job: Job) -> Path | None:
+    if (
+        job.status not in {JobStatus.SUCCEEDED, JobStatus.FAILED}
+        or job.work_dir is None
+        or job.artifacts.calculation_log is None
+    ):
+        return None
+    try:
+        work_root = Path(job.work_dir).resolve(strict=True)
+        candidate = Path(job.artifacts.calculation_log).resolve(strict=True)
+        expected = (
+            work_root
+            / "calculation-book"
+            / "logs"
+            / f"calculation-book-{job.job_id}.log"
+        ).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if expected != candidate or not candidate.is_relative_to(work_root):
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
 
 
 class PipelineJobProcessor:
@@ -1640,6 +1712,7 @@ class DeliverableApiRuntime:
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
             'calculation_book': job.artifacts.calculation_docx,
+            'calculation_book_log': _calculation_log_artifact_path(job),
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
@@ -2484,10 +2557,14 @@ class DeliverableApiRuntime:
                 'figure_count': int(job.progress.details.get('figure_count', 0) or 0),
                 'template_type': str(job.progress.details.get('template_type') or ''),
                 'output_filename': str(job.progress.details.get('output_filename') or ''),
+                'reinforcement_source': _calculation_reinforcement_source(job),
                 'ai_normalized': ai_normalized,
                 'warning_count': len(warnings),
                 'warnings': warnings,
                 'ai_normalization': ai_normalization,
+                'ai_rebar_suggestion': (
+                    _serialize_calculation_ai_rebar_suggestion(job)
+                ),
             }
         elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
@@ -2524,6 +2601,9 @@ class DeliverableApiRuntime:
         calculation_docx_available = bool(
             job.artifacts.calculation_docx and Path(job.artifacts.calculation_docx).exists()
         )
+        calculation_log_available = (
+            _calculation_log_artifact_path(job) is not None
+        )
         payload: dict[str, Any] = {
             'package_available': package_available,
             'ied_available': ied_available,
@@ -2532,6 +2612,7 @@ class DeliverableApiRuntime:
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
             'calculation_docx_available': calculation_docx_available,
+            'calculation_log_available': calculation_log_available,
         }
         if include_urls and job_id is not None:
             payload.update({
@@ -2543,6 +2624,11 @@ class DeliverableApiRuntime:
                 'calculation_docx_download_url': (
                     f'/api/jobs/{job_id}/download/calculation-book'
                     if calculation_docx_available
+                    else None
+                ),
+                'calculation_log_download_url': (
+                    f'/api/jobs/{job_id}/download/calculation-book-log'
+                    if calculation_log_available
                     else None
                 ),
             })

@@ -2210,6 +2210,46 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                         ],
                     }
                 )
+            if job.options.get("ai_rebar_suggestion") is True:
+                calculation_log = (
+                    cast(Path, job.work_dir)
+                    / "calculation-book"
+                    / "logs"
+                    / f"calculation-book-{job.job_id}.log"
+                )
+                calculation_log.parent.mkdir(parents=True, exist_ok=True)
+                calculation_log.write_bytes(b'{"event":"task_completed"}\n')
+                job.artifacts.calculation_log = calculation_log
+                job.progress.details.update(
+                    {
+                        "ai_rebar_suggestion": {
+                            "skill_id": "recommend-rebar-from-smx",
+                            "skill_version": "1.0.0",
+                            "skill_sha256": "a" * 64,
+                            "model": "structured-test",
+                            "call_count": 6,
+                            "suggested_direction_count": 181,
+                            "blank_direction_count": 1,
+                            "repair_round_count": 2,
+                            "validation": "passed_with_warnings",
+                            "prompt": "must-not-leak",
+                            "candidates": ["must-not-leak"],
+                        },
+                        "calculation_book_warnings": [
+                            {
+                                "code": "AI_BASE_FAILURE_LIMIT",
+                                "scope": "wall",
+                                "identity": "N5012",
+                                "direction": "Z",
+                                "source_sheet": None,
+                                "source_row": None,
+                                "source_cells": {},
+                                "reason": "raw model failure must-not-leak",
+                                "blank_fields": ["Z"],
+                            }
+                        ],
+                    }
+                )
             output_path = cast(Path, job.work_dir) / "JQ计算书.docx"
             output_path.write_bytes(b"docx")
             job.artifacts.calculation_docx = output_path
@@ -2519,6 +2559,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             "figure_count": 3,
             "template_type": "internal_structure",
             "output_filename": "JQ计算书.docx",
+            "reinforcement_source": "provided",
             "ai_normalized": True,
             "warning_count": 2,
             "warnings": [
@@ -2562,6 +2603,7 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
                 "duration_ms": 125,
                 "validation": "passed",
             },
+            "ai_rebar_suggestion": None,
         }
         assert observed_ai_options == [(True, 40)]
         assert nonstandard_token not in runtime._calculation_preflight_tokens
@@ -2806,6 +2848,60 @@ def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
             ai_response.json()["jobs"][0]["job_id"],
         )
         assert ai_detail["status"] == "succeeded"
+        ai_job_id = ai_response.json()["jobs"][0]["job_id"]
+        assert ai_detail["calculation_book_output"] == {
+            "figure_count": 3,
+            "template_type": "internal_structure",
+            "output_filename": "JQ计算书.docx",
+            "reinforcement_source": "ai_suggested",
+            "ai_normalized": False,
+            "warning_count": 1,
+            "warnings": [
+                {
+                    "code": "AI_BASE_FAILURE_LIMIT",
+                    "scope": "wall",
+                    "identity": "N5012",
+                    "direction": "Z",
+                    "source_sheet": None,
+                    "source_row": None,
+                    "source_cells": {},
+                    "reason": "人工智能连续三次调用或协议失败，当前方向已留空，请人工复核",
+                    "blank_fields": ["Z"],
+                }
+            ],
+            "ai_normalization": None,
+            "ai_rebar_suggestion": {
+                "skill_id": "recommend-rebar-from-smx",
+                "skill_version": "1.0.0",
+                "skill_sha256": "a" * 64,
+                "model": "structured-test",
+                "call_count": 6,
+                "suggested_direction_count": 181,
+                "blank_direction_count": 1,
+                "repair_round_count": 2,
+                "validation": "passed_with_warnings",
+            },
+        }
+        assert ai_detail["artifacts"]["calculation_log_available"] is True
+        assert ai_detail["artifacts"]["calculation_log_download_url"] == (
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        log_download = client.get(
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        assert log_download.status_code == 200
+        assert log_download.content == b'{"event":"task_completed"}\n'
+        assert log_download.headers["content-type"] == (
+            "text/plain; charset=utf-8"
+        )
+        assert log_download.headers["cache-control"] == "no-store"
+        assert log_download.headers["x-content-type-options"] == "nosniff"
+        authorization = client.headers.pop("Authorization")
+        unauthenticated_log = client.get(
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        assert unauthenticated_log.status_code == 401
+        client.headers["Authorization"] = authorization
 
         ai_options = next(
             item

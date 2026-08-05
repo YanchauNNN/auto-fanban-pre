@@ -481,3 +481,78 @@ def test_api_mode_detail_and_download_reload_worker_written_job_json(
     assert detail["artifacts"]["package_download_url"] == f"/api/jobs/{job_id}/download/package"
     assert download_response.status_code == 200
     assert download_response.content == b"zip-result"
+
+
+def test_api_mode_reload_restores_ai_calculation_source_summary_and_log(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    from API.app.main import create_app
+
+    from src.config import get_config
+    from src.pipeline.job_manager import JobManager
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+        options={
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+            "ai_reinforcement_normalization": False,
+        },
+        params={"reinforcement_source": "ai_suggested"},
+        source_filename="cloud-images.rar",
+    )
+    job.work_dir = get_config().get_job_dir(job.job_id)
+    log_path = (
+        job.work_dir
+        / "calculation-book"
+        / "logs"
+        / f"calculation-book-{job.job_id}.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_bytes(b'{"event":"task_completed"}\n')
+    job.artifacts.calculation_log = log_path
+    job.progress.details["ai_rebar_suggestion"] = {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "b" * 64,
+        "model": "structured-test",
+        "call_count": 4,
+        "suggested_direction_count": 12,
+        "blank_direction_count": 1,
+        "repair_round_count": 1,
+        "validation": "passed_with_warnings",
+    }
+    job.mark_succeeded()
+    manager.update_job(job)
+
+    app = create_app(job_processor=RecordingProcessor(), process_jobs_in_api=False)
+    with TestClient(app) as client:
+        detail_response = client.get(f"/api/jobs/{job.job_id}")
+        log_response = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["calculation_book_output"]["reinforcement_source"] == (
+        "ai_suggested"
+    )
+    assert detail["calculation_book_output"]["ai_rebar_suggestion"] == {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "b" * 64,
+        "model": "structured-test",
+        "call_count": 4,
+        "suggested_direction_count": 12,
+        "blank_direction_count": 1,
+        "repair_round_count": 1,
+        "validation": "passed_with_warnings",
+    }
+    assert detail["artifacts"]["calculation_log_available"] is True
+    assert log_response.status_code == 200
+    assert log_response.content == b'{"event":"task_completed"}\n'
