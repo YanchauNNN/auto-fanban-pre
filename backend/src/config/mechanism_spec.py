@@ -75,19 +75,22 @@ class TaskGroupSubmissionArtifactRequirementConfig(BaseModel):
 class TaskGroupSubmissionTaskRoleConfig(BaseModel):
     task_role: str = Field(min_length=1)
     missing_role_error: str = Field(min_length=1)
+    duplicate_role_error: str = Field(min_length=1)
     artifacts: list[TaskGroupSubmissionArtifactRequirementConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_artifact_fields(self) -> TaskGroupSubmissionTaskRoleConfig:
+        fields = [artifact.field for artifact in self.artifacts]
+        duplicates = sorted({field for field in fields if fields.count(field) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate artifact field: {', '.join(duplicates)}")
+        return self
 
 
 class TaskGroupSubmissionSharedPrepConfig(BaseModel):
-    required_json_files: list[str] = Field(
-        default_factory=lambda: ["frames.json", "sheet_sets.json"],
-        min_length=1,
-    )
-    summary_file: str = Field(default="prep_summary.json", min_length=1)
-    source_summary_field: str = Field(default="source_input_dwg", min_length=1)
-    source_glob: str = Field(default="source_input.*", min_length=1)
     invalid_error: str = Field(default="shared_prep_invalid", min_length=1)
     source_missing_error: str = Field(default="shared_prep_source_missing", min_length=1)
+    source_outside_error: str = Field(default="shared_prep_source_outside", min_length=1)
 
 
 class TaskGroupSubmissionConfig(BaseModel):
@@ -99,6 +102,7 @@ class TaskGroupSubmissionConfig(BaseModel):
             TaskGroupSubmissionTaskRoleConfig(
                 task_role="deliverable_main",
                 missing_role_error="deliverable_main_missing",
+                duplicate_role_error="deliverable_main_duplicate",
                 artifacts=[
                     TaskGroupSubmissionArtifactRequirementConfig(
                         field="package_zip",
@@ -121,6 +125,14 @@ class TaskGroupSubmissionConfig(BaseModel):
         ],
         min_length=1,
     )
+
+    @model_validator(mode="after")
+    def validate_unique_task_roles(self) -> TaskGroupSubmissionConfig:
+        roles = [requirement.task_role for requirement in self.required_task_roles]
+        duplicates = sorted({role for role in roles if roles.count(role) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate task_role: {', '.join(duplicates)}")
+        return self
 
 
 class WorkloadStatusOptionConfig(BaseModel):

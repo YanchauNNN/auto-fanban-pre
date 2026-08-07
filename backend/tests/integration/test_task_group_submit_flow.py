@@ -281,6 +281,71 @@ def test_detail_and_submit_reload_worker_persisted_group_and_child_state(
 
 
 @pytest.mark.parametrize(
+    ("group_status", "workflow_status", "expected_error"),
+    [
+        (JobStatus.QUEUED, WorkflowStatus.DRAFT, "task_group_not_succeeded"),
+        (JobStatus.SUCCEEDED, WorkflowStatus.IN_REVIEW, "workflow_not_draft"),
+    ],
+)
+def test_rejected_status_short_circuits_child_and_shared_prep_io(
+    monkeypatch,
+    tmp_path,
+    group_status: JobStatus,
+    workflow_status: WorkflowStatus,
+    expected_error: str,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        group.status = group_status
+        group.workflow.status = workflow_status
+        policy = cast(Any, client.app).state.management.task_group_service.submission_readiness
+        monkeypatch.setattr(
+            policy.job_manager,
+            "reload_job",
+            lambda _job_id: pytest.fail("rejected status must not reload child jobs"),
+        )
+        monkeypatch.setattr(
+            policy,
+            "_inspect_shared_prep",
+            lambda _group: pytest.fail("rejected status must not read shared prep"),
+        )
+
+        result = policy.inspect(group)
+
+        assert result.is_ready is False
+        assert result.primary_error == expected_error
+
+
+def test_ready_policy_reads_each_shared_prep_json_once(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        _, group, _ = _runtime_group_and_child(client, group_id)
+        shared_dir = group.shared_dir.resolve()
+        counts: dict[str, int] = {}
+        original_read_text = Path.read_text
+
+        def counting_read_text(path: Path, *args, **kwargs):
+            if path.parent.resolve() == shared_dir:
+                counts[path.name] = counts.get(path.name, 0) + 1
+            return original_read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+        policy = cast(Any, client.app).state.management.task_group_service.submission_readiness
+
+        result = policy.inspect(group)
+
+        assert result.is_ready is True
+        assert counts["frames.json"] == 1
+        assert counts["sheet_sets.json"] == 1
+        assert counts["prep_summary.json"] == 1
+
+
+@pytest.mark.parametrize(
     ("filename", "invalid_contents"),
     [
         ("frames.json", "{"),
@@ -316,6 +381,37 @@ def test_submit_rejects_missing_shared_prep_source_input(monkeypatch, tmp_path) 
         (group.shared_dir / "source_input.dwg").unlink()
 
         _assert_submit_blocked(client, group_id, "shared_prep_source_missing")
+
+
+@pytest.mark.parametrize("source_kind", ["relative_parent", "absolute_external"])
+def test_submit_rejects_shared_prep_source_outside_shared_directory(
+    monkeypatch,
+    tmp_path,
+    source_kind: str,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        _, group, _ = _runtime_group_and_child(client, group_id)
+        if source_kind == "relative_parent":
+            outside = group.shared_dir.parent / "outside-relative.dwg"
+            summary_value = "../outside-relative.dwg"
+        else:
+            outside = tmp_path / "outside-absolute.dwg"
+            summary_value = str(outside.resolve())
+        outside.write_text("outside", encoding="utf-8")
+        (group.shared_dir / "prep_summary.json").write_text(
+            json.dumps(
+                {
+                    "source_input_dwg": summary_value,
+                    "source_converted_dxf": str(group.shared_dir / "source_converted.dxf"),
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        _assert_submit_blocked(client, group_id, "shared_prep_source_outside")
 
 
 def test_shared_prep_validation_precedes_duplicate_cancellation_side_effect(
@@ -418,6 +514,7 @@ def test_submission_role_and_error_code_are_loaded_from_mechanism_yaml(
                 {
                     "task_role": "configured_deliverable",
                     "missing_role_error": "configured_deliverable_missing",
+                    "duplicate_role_error": "configured_deliverable_duplicate",
                     "artifacts": [
                         {
                             "field": "package_zip",
@@ -434,6 +531,28 @@ def test_submission_role_and_error_code_are_loaded_from_mechanism_yaml(
         group_id = _seed_group(client, tmp_path)
 
         _assert_submit_blocked(client, group_id, "configured_deliverable_missing")
+
+
+def test_submit_rejects_duplicate_required_task_role(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, child = _runtime_group_and_child(client, group_id)
+        duplicate = runtime.job_manager.create_job(
+            job_type="deliverable",
+            project_no=child.project_no,
+            group_id=group.group_id,
+            task_role="deliverable_main",
+            params=dict(child.params),
+        )
+        duplicate.artifacts = child.artifacts.model_copy(deep=True)
+        duplicate.mark_succeeded()
+        runtime.job_manager.update_job(duplicate)
+        group.child_job_ids.append(duplicate.job_id)
+        runtime.group_manager.update_group(group)
+
+        _assert_submit_blocked(client, group_id, "deliverable_main_duplicate")
 
 
 @pytest.mark.parametrize(

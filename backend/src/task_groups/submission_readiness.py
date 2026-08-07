@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +48,8 @@ class TaskGroupSubmissionReadinessPolicy:
             errors.append("workflow_not_draft")
         if group.status is not JobStatus.SUCCEEDED:
             errors.append("task_group_not_succeeded")
+        if errors:
+            return TaskGroupSubmissionReadiness(tuple(errors))
 
         if not group.child_job_ids:
             errors.append("task_group_children_missing")
@@ -67,13 +68,16 @@ class TaskGroupSubmissionReadinessPolicy:
         errors.extend(self._inspect_shared_prep(group))
 
         for role_requirement in self.config.required_task_roles:
-            child = next(
-                (item for item in children if item.task_role == role_requirement.task_role),
-                None,
-            )
-            if child is None:
+            matching_children = [
+                item for item in children if item.task_role == role_requirement.task_role
+            ]
+            if not matching_children:
                 errors.append(role_requirement.missing_role_error)
                 continue
+            if len(matching_children) > 1:
+                errors.append(role_requirement.duplicate_role_error)
+                continue
+            child = matching_children[0]
             for artifact_requirement in role_requirement.artifacts:
                 if not _artifact_is_required(child, artifact_requirement.required_when):
                     continue
@@ -97,32 +101,23 @@ class TaskGroupSubmissionReadinessPolicy:
             group.shared_dir
             or self.group_manager.config.get_group_dir(group.group_id) / "shared"
         ).resolve()
-        summary: dict[str, object] = {}
         try:
-            for filename in config.required_json_files:
-                json.loads((shared_dir / filename).read_text(encoding="utf-8"))
-            summary_path = shared_dir / config.summary_file
-            if summary_path.exists():
-                raw_summary = json.loads(summary_path.read_text(encoding="utf-8"))
-                if not isinstance(raw_summary, dict):
-                    raise ValueError("shared prep summary must be an object")
-                summary = raw_summary
-            self.shared_prep_service.load(shared_dir)
+            prep = self.shared_prep_service.load(shared_dir)
         except (OSError, TypeError, ValueError):
             return [config.invalid_error]
 
-        source_candidates = [
-            path
-            for path in shared_dir.glob(config.source_glob)
-            if path.is_file()
-        ]
-        summary_source = str(summary.get(config.source_summary_field) or "").strip()
-        if summary_source:
-            summary_source_path = Path(summary_source)
-            if not summary_source_path.is_absolute():
-                summary_source_path = shared_dir / summary_source_path
-            source_candidates.append(summary_source_path)
-        if not any(_is_file(path) for path in source_candidates):
+        source_path = prep.source_input_dwg
+        if not source_path.is_absolute():
+            source_path = shared_dir / source_path
+        try:
+            source_path = source_path.resolve()
+        except OSError:
+            return [config.source_missing_error]
+        try:
+            source_path.relative_to(shared_dir)
+        except ValueError:
+            return [config.source_outside_error]
+        if not _is_file(source_path):
             return [config.source_missing_error]
         return []
 

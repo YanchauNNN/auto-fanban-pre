@@ -81,14 +81,74 @@ def test_repo_mechanism_spec_exposes_typed_task_group_submission_rules() -> None
     spec = MechanismSpecLoader.load(repo_root / "documents" / "参数规范-3.yaml")
     submission = spec.task_group_submission
 
-    assert submission.shared_prep.required_json_files == ["frames.json", "sheet_sets.json"]
     assert submission.shared_prep.invalid_error == "shared_prep_invalid"
     assert submission.shared_prep.source_missing_error == "shared_prep_source_missing"
+    assert submission.shared_prep.source_outside_error == "shared_prep_source_outside"
+    assert not hasattr(submission.shared_prep, "required_json_files")
     deliverable = submission.required_task_roles[0]
     assert deliverable.task_role == "deliverable_main"
+    assert deliverable.duplicate_role_error == "deliverable_main_duplicate"
     assert [artifact.field for artifact in deliverable.artifacts] == ["package_zip", "ied_xlsx"]
     assert deliverable.artifacts[1].required_when is not None
     assert deliverable.artifacts[1].required_when.field == "include_ied_plan"
+
+
+def test_mechanism_spec_rejects_duplicate_submission_task_roles(tmp_path: Path) -> None:
+    role = {
+        "task_role": "deliverable_main",
+        "missing_role_error": "deliverable_main_missing",
+        "duplicate_role_error": "deliverable_main_duplicate",
+        "artifacts": [
+            {
+                "field": "package_zip",
+                "not_declared_error": "package_not_declared",
+                "not_found_error": "package_not_found",
+            }
+        ],
+    }
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "参数规范-3.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "task_group_submission": {"required_task_roles": [role, role]},
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    with pytest.raises(ValueError, match="duplicate task_role"):
+        MechanismSpecLoader.load(spec_path)
+
+
+def test_mechanism_spec_rejects_duplicate_submission_artifact_fields(tmp_path: Path) -> None:
+    artifact = {
+        "field": "package_zip",
+        "not_declared_error": "package_not_declared",
+        "not_found_error": "package_not_found",
+    }
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "参数规范-3.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "task_group_submission": {
+                    "required_task_roles": [
+                        {
+                            "task_role": "deliverable_main",
+                            "missing_role_error": "deliverable_main_missing",
+                            "duplicate_role_error": "deliverable_main_duplicate",
+                            "artifacts": [artifact, artifact],
+                        }
+                    ],
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    with pytest.raises(ValueError, match="duplicate artifact field"):
+        MechanismSpecLoader.load(spec_path)
 
 
 def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> None:
