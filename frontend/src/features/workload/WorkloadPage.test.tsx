@@ -287,6 +287,37 @@ describe("WorkloadPage", () => {
     expect(within(overview).queryByText("历史记录")).not.toBeInTheDocument();
   });
 
+  it("counts only submitted, reviewing, approved, and archiving workflows as in progress", async () => {
+    const statuses = [
+      "draft",
+      "submitted",
+      "in_review",
+      "three_review_approved",
+      "archiving",
+      "archived",
+      "cancelled",
+    ];
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: statuses.length,
+      items: statuses.map((workflowStatus, index) =>
+        makeMonitorItem({
+          canApprove: false,
+          currentNodeKey: null,
+          displayName: `流程 ${index + 1}`,
+          groupId: `group-${index + 1}`,
+          workflowStatus,
+        }),
+      ),
+    });
+
+    renderWorkloadPage();
+
+    const overview = await screen.findByRole("region", { name: "工作量概览" });
+    const activeMetric = within(overview).getByText("流程中").closest("article");
+    expect(activeMetric).not.toBeNull();
+    expect(within(activeMetric as HTMLElement).getByText("4")).toBeInTheDocument();
+  });
+
   it("orders approvable, failed, related, and ordinary workflows for action", async () => {
     mockGetWorkflowMonitor.mockResolvedValue({
       total: 4,
@@ -357,27 +388,94 @@ describe("WorkloadPage", () => {
     renderWorkloadPage();
 
     const rail = await screen.findByRole("list", { name: "任务流程" });
-    expect(within(rail).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+    const stages = within(rail).getAllByRole("listitem");
+    expect(stages.map((item) => item.textContent)).toEqual([
       expect.stringContaining("质量复核"),
       expect.stringContaining("总师审定"),
       expect.stringContaining("归档"),
     ]);
-    expect(within(rail).getAllByRole("listitem")[1]).toHaveAttribute("aria-current", "step");
+    expect(stages[0]).toHaveTextContent("已完成");
+    expect(stages[1]).toHaveTextContent("当前");
+    expect(stages[1]).toHaveAttribute("aria-current", "step");
+    expect(stages[2]).toHaveTextContent("待处理");
   });
 
-  it("previews final A1 live and keeps the custom node key on approval", async () => {
+  it("keeps approved nodes complete while archive remains pending after terminal approval", async () => {
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 1,
+      items: [
+        makeMonitorItem({
+          archiveStatus: "pending",
+          canApprove: false,
+          currentNodeKey: null,
+          workflowStatus: "three_review_approved",
+        }),
+      ],
+    });
+
+    renderWorkloadPage();
+
+    const rail = await screen.findByRole("list", { name: "任务流程" });
+    const stages = within(rail).getAllByRole("listitem");
+    stages.slice(0, -1).forEach((stage) => expect(stage).toHaveTextContent("已完成"));
+    expect(stages[stages.length - 1]).toHaveTextContent("归档待处理");
+  });
+
+  it("keeps approved nodes complete and marks only archive as failed", async () => {
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 1,
+      items: [
+        makeMonitorItem({
+          archiveStatus: "failed",
+          canApprove: false,
+          currentNodeKey: null,
+          workflowStatus: "archive_failed",
+        }),
+      ],
+    });
+
+    renderWorkloadPage();
+
+    const rail = await screen.findByRole("list", { name: "任务流程" });
+    const stages = within(rail).getAllByRole("listitem");
+    stages.slice(0, -1).forEach((stage) => expect(stage).toHaveTextContent("已完成"));
+    expect(stages[stages.length - 1]).toHaveTextContent("归档异常");
+  });
+
+  it("marks review and archive stages complete only after archive succeeds", async () => {
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 1,
+      items: [
+        makeMonitorItem({
+          archiveStatus: "succeeded",
+          canApprove: false,
+          currentNodeKey: null,
+          workflowStatus: "archived",
+        }),
+      ],
+    });
+
+    renderWorkloadPage();
+
+    const rail = await screen.findByRole("list", { name: "任务流程" });
+    within(rail)
+      .getAllByRole("listitem")
+      .forEach((stage) => expect(stage).toHaveTextContent("已完成"));
+  });
+
+  it("replaces the existing second-review factor in the live A1 preview", async () => {
     const user = userEvent.setup();
     mockGetWorkflowMonitor.mockResolvedValue({
       total: 1,
       items: [
         makeMonitorItem({
-          currentNodeKey: "quality_gate",
-          effectiveWorkload: 1.65,
+          currentNodeKey: "two_review",
+          effectiveWorkload: 99,
           workload: {
             ...makeMonitorItem().workload,
-            initialWorkloadA1: 1.5,
-            finalWorkloadA1: 1.65,
-            nodeFactors: { precheck: 1.1 },
+            initialWorkloadA1: 2,
+            finalWorkloadA1: 2.31,
+            nodeFactors: { one_review: 1.05, two_review: 1.08, three_review: 1.02 },
           },
         }),
       ],
@@ -387,21 +485,51 @@ describe("WorkloadPage", () => {
     const trigger = await screen.findByRole("button", { name: "审批" });
     await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "审批当前节点" });
-    expect(within(dialog).getByText("1.50 A1")).toBeInTheDocument();
-    expect(within(dialog).getByText("1.10")).toBeInTheDocument();
+    expect(within(dialog).getByText("2.00 A1")).toBeInTheDocument();
+    expect(within(dialog).getByText("1.071")).toBeInTheDocument();
+    expect(within(dialog).getByText("2.46 A1")).toBeInTheDocument();
     const factorInput = within(dialog).getByLabelText("当前输入系数");
     expect(factorInput).toHaveFocus();
     await user.clear(factorInput);
-    await user.type(factorInput, "1.20");
-    expect(within(dialog).getByText("1.98 A1")).toBeInTheDocument();
+    await user.type(factorInput, "1.10");
+    expect(within(dialog).getByText("2.36 A1")).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "确认审批" }));
 
     await waitFor(() => {
       expect(mockApproveWorkflow).toHaveBeenCalledWith("group-1", {
-        factor: 1.2,
-        nodeKey: "quality_gate",
+        factor: 1.1,
+        nodeKey: "two_review",
       });
     });
+  });
+
+  it("replaces the existing third-review factor instead of multiplying it twice", async () => {
+    const user = userEvent.setup();
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 1,
+      items: [
+        makeMonitorItem({
+          currentNodeKey: "three_review",
+          effectiveWorkload: 3.44,
+          workload: {
+            ...makeMonitorItem().workload,
+            initialWorkloadA1: 3,
+            finalWorkloadA1: 3.44,
+            nodeFactors: { one_review: 1.04, two_review: 1.03, three_review: 1.07 },
+          },
+        }),
+      ],
+    });
+    renderWorkloadPage();
+
+    await user.click(await screen.findByRole("button", { name: "审批" }));
+    const dialog = screen.getByRole("dialog", { name: "审批当前节点" });
+    expect(within(dialog).getByText("1.0712")).toBeInTheDocument();
+    expect(within(dialog).getByText("3.70 A1")).toBeInTheDocument();
+    const factorInput = within(dialog).getByLabelText("当前输入系数");
+    await user.clear(factorInput);
+    await user.type(factorInput, "1.10");
+    expect(within(dialog).getByText("3.53 A1")).toBeInTheDocument();
   });
 
   it("shows natural language roles and settlement states in the ledger", async () => {
@@ -430,20 +558,60 @@ describe("WorkloadPage", () => {
     expect(await screen.findByRole("alert", { name: "流程监控加载失败" })).toBeInTheDocument();
   });
 
-  it("closes approval and repair dialogs with Escape and restores trigger focus", async () => {
+  it("maps stable approval errors to natural Chinese without exposing the backend code", async () => {
+    const user = userEvent.setup();
+    mockApproveWorkflow.mockRejectedValue({ detail: "node_key_mismatch" });
+    renderWorkloadPage();
+
+    await user.click(await screen.findByRole("button", { name: "审批" }));
+    await user.click(screen.getByRole("button", { name: "确认审批" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("当前审批节点已变化，请刷新后重试。");
+    expect(alert).not.toHaveTextContent("node_key_mismatch");
+  });
+
+  it.each([
+    { error: { detail: "database_internal_secret" }, source: "detail" },
+    { error: new Error("database_internal_secret"), source: "message" },
+  ])("uses a safe fallback for an unknown backend $source", async ({ error }) => {
+    const user = userEvent.setup();
+    mockApproveWorkflow.mockRejectedValue(error);
+    renderWorkloadPage();
+
+    await user.click(await screen.findByRole("button", { name: "审批" }));
+    await user.click(screen.getByRole("button", { name: "确认审批" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("审批提交失败，请稍后重试。");
+    expect(alert).not.toHaveTextContent("database_internal_secret");
+  });
+
+  it("traps focus, exposes modal descriptions, closes with Escape, and restores trigger focus", async () => {
     const user = userEvent.setup();
     renderWorkloadPage();
 
     const approvalTrigger = await screen.findByRole("button", { name: "审批" });
     await user.click(approvalTrigger);
-    expect(screen.getByRole("dialog", { name: "审批当前节点" })).toBeInTheDocument();
+    const approvalDialog = screen.getByRole("dialog", { name: "审批当前节点" });
+    expect(approvalDialog).toHaveAttribute("aria-describedby", "workflow-approval-description");
+    expect(document.getElementById("workflow-approval-description")).toBeInTheDocument();
+    const approvalCloseButton = within(approvalDialog).getByRole("button", { name: "关闭" });
+    const approvalSubmitButton = within(approvalDialog).getByRole("button", { name: "确认审批" });
+    approvalSubmitButton.focus();
+    await user.tab();
+    expect(approvalCloseButton).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(approvalSubmitButton).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "审批当前节点" })).not.toBeInTheDocument();
     expect(approvalTrigger).toHaveFocus();
 
     const repairTrigger = screen.getByRole("button", { name: "修复当前节点" });
     await user.click(repairTrigger);
-    expect(screen.getByRole("dialog", { name: "修复当前节点" })).toBeInTheDocument();
+    const repairDialog = screen.getByRole("dialog", { name: "修复当前节点" });
+    expect(repairDialog).toHaveAttribute("aria-describedby", "workflow-repair-description");
+    expect(document.getElementById("workflow-repair-description")).toBeInTheDocument();
     expect(screen.getByLabelText("替换账号")).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "修复当前节点" })).not.toBeInTheDocument();

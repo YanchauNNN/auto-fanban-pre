@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getArchiveStatusLabel,
+  getCurrentNodeLabel,
   getSettlementStatusLabel,
   getWorkflowStatusLabel,
   getWorkloadRoleLabel,
@@ -21,5 +22,14 @@ describe("task group presentation", () => {
         nodeLabels: { quality_gate: "质量复核" },
       }),
     ).toBe("质量复核");
+  });
+
+  it("does not expose unknown workflow node codes", () => {
+    expect(
+      getCurrentNodeLabel("quality_gate", {
+        nodeLabels: { quality_gate: "质量复核" },
+      }),
+    ).toBe("质量复核");
+    expect(getCurrentNodeLabel("internal_unknown_node")).toBe("未知节点");
   });
 });

@@ -40,6 +40,20 @@ type FeedbackState = {
 } | null;
 
 const WORKLOAD_SCOPE_ORDER: readonly WorkloadScopeKey[] = ["me", "office", "institute", "admin"];
+const ACTIVE_WORKFLOW_STATUSES = new Set([
+  "submitted",
+  "in_review",
+  "three_review_approved",
+  "archiving",
+]);
+const WORKFLOW_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  "account not found": "未找到指定账号，请刷新后重新选择。",
+  "factor out of range": "审批系数超出允许范围，请检查后重试。",
+  "no current workflow node": "当前任务没有可处理的审批节点，请刷新后确认。",
+  "only current assignee can approve": "当前账号不是该节点审批人，无法提交审批。",
+  node_key_mismatch: "当前审批节点已变化，请刷新后重试。",
+  repair_target_required: "请选择有效的节点修复账号。",
+};
 
 function buildEmptyRepairForm(role: string) {
   return {
@@ -279,9 +293,7 @@ export function WorkloadPage() {
     const items = monitorQuery.data?.items ?? [];
     return {
       approvable: items.filter((item) => item.canApprove).length,
-      active: items.filter(
-        (item) => !["archived", "cancelled"].includes(item.workflowStatus),
-      ).length,
+      active: items.filter((item) => ACTIVE_WORKFLOW_STATUSES.has(item.workflowStatus)).length,
       failed: items.filter(
         (item) => item.archiveStatus === "failed" || item.workflowStatus === "archive_failed",
       ).length,
@@ -696,6 +708,7 @@ export function WorkloadPage() {
       {approvalTarget ? (
         <AccessibleModal
           ariaLabel="审批当前节点"
+          descriptionId="workflow-approval-description"
           initialFocusRef={approvalFactorInputRef}
           onClose={() => setApprovalTarget(null)}
         >
@@ -709,7 +722,7 @@ export function WorkloadPage() {
             </button>
           </div>
 
-          <p className={styles.modalDescription}>
+          <p className={styles.modalDescription} id="workflow-approval-description">
             {`${getTaskGroupDisplayTitle(approvalTarget)} 当前处于 ${getCurrentNodeLabel(
               approvalTarget.currentNodeKey,
               taskGroupPresentationLabels,
@@ -724,7 +737,7 @@ export function WorkloadPage() {
               </div>
               <div>
                 <dt>已应用系数</dt>
-                <dd>{approvalPreview.appliedFactor.toFixed(2)}</dd>
+                <dd>{formatFactorProduct(approvalPreview.appliedFactor)}</dd>
               </div>
               <div>
                 <dt>当前输入系数</dt>
@@ -778,6 +791,7 @@ export function WorkloadPage() {
       {repairTarget ? (
         <AccessibleModal
           ariaLabel="修复当前节点"
+          descriptionId="workflow-repair-description"
           initialFocusRef={repairAccountSelectRef}
           onClose={closeRepairDialog}
         >
@@ -791,7 +805,7 @@ export function WorkloadPage() {
               </button>
             </div>
 
-            <p className={styles.modalDescription}>
+            <p className={styles.modalDescription} id="workflow-repair-description">
               {`${getTaskGroupDisplayTitle(repairTarget)} 当前卡在 ${getCurrentNodeLabel(
                 repairTarget.currentNodeKey,
                 taskGroupPresentationLabels,
@@ -1045,18 +1059,37 @@ function WorkflowRail({
   terminalStatus: string;
   workflowStatus: string;
 }) {
-  const stages = [
-    ...nodes.map((node) => ({ key: node.nodeKey, label: node.nodeLabel })),
-    { key: "archive", label: "归档" },
-  ];
   const currentIndex = currentNodeKey
-    ? stages.findIndex((stage) => stage.key === currentNodeKey)
+    ? nodes.findIndex((node) => node.nodeKey === currentNodeKey)
     : -1;
-  const isTerminal =
+  const approvalIsComplete =
     workflowStatus === terminalStatus ||
+    workflowStatus === "archiving" ||
+    workflowStatus === "archive_failed" ||
     workflowStatus === "archived" ||
-    archiveStatus === "succeeded";
-  const hasFailed = archiveStatus === "failed" || workflowStatus === "archive_failed";
+    ["running", "failed", "succeeded"].includes(archiveStatus);
+  const archiveState =
+    archiveStatus === "failed" || workflowStatus === "archive_failed"
+      ? "failed"
+      : archiveStatus === "succeeded" || workflowStatus === "archived"
+        ? "done"
+        : archiveStatus === "running" || workflowStatus === "archiving"
+          ? "current"
+          : "pending";
+  const stages = [
+    ...nodes.map((node, index) => ({
+      key: node.nodeKey,
+      label: node.nodeLabel,
+      state: approvalIsComplete
+        ? "done"
+        : index < currentIndex
+          ? "done"
+          : index === currentIndex
+            ? "current"
+            : "pending",
+    })),
+    { key: "archive", label: "归档", state: archiveState },
+  ];
 
   return (
     <ol
@@ -1064,17 +1097,8 @@ function WorkflowRail({
       className={styles.flowRail}
       style={{ gridTemplateColumns: `repeat(${Math.max(stages.length, 1)}, minmax(0, 1fr))` }}
     >
-      {stages.map((stage, index) => {
-        let state = "pending";
-        if (hasFailed && stage.key === "archive") {
-          state = "failed";
-        } else if (isTerminal) {
-          state = "done";
-        } else if (index < currentIndex) {
-          state = "done";
-        } else if (index === currentIndex) {
-          state = "current";
-        }
+      {stages.map((stage) => {
+        const state = stage.state;
         const stateLabel = {
           current: "当前",
           done: "已完成",
@@ -1100,14 +1124,17 @@ function WorkflowRail({
 function AccessibleModal({
   ariaLabel,
   children,
+  descriptionId,
   initialFocusRef,
   onClose,
 }: {
   ariaLabel: string;
   children: ReactNode;
+  descriptionId: string;
   initialFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
+  const modalCardRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
 
@@ -1125,6 +1152,38 @@ function AccessibleModal({
       if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const modalCard = modalCardRef.current;
+      if (!modalCard) {
+        return;
+      }
+      const focusableElements = Array.from(
+        modalCard.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+      if (!firstFocusable || !lastFocusable) {
+        event.preventDefault();
+        modalCard.focus();
+        return;
+      }
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === firstFocusable || !modalCard.contains(activeElement))) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (
+        !event.shiftKey &&
+        (activeElement === lastFocusable || !modalCard.contains(activeElement))
+      ) {
+        event.preventDefault();
+        firstFocusable.focus();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -1135,18 +1194,32 @@ function AccessibleModal({
   }, [initialFocusRef]);
 
   return (
-    <div aria-label={ariaLabel} aria-modal="true" className={styles.modalBackdrop} role="dialog">
-      <div className={styles.modalCard}>{children}</div>
+    <div
+      aria-describedby={descriptionId}
+      aria-label={ariaLabel}
+      aria-modal="true"
+      className={styles.modalBackdrop}
+      role="dialog"
+    >
+      <div className={styles.modalCard} ref={modalCardRef} tabIndex={-1}>
+        {children}
+      </div>
     </div>
   );
 }
 
 function buildApprovalPreview(item: TaskGroupSummary, inputValue: string) {
   const initialWorkload = item.workload.initialWorkloadA1;
-  const appliedFactor =
-    initialWorkload > 0 && Number.isFinite(item.effectiveWorkload)
-      ? item.effectiveWorkload / initialWorkload
-      : 1;
+  const appliedFactor = Object.entries(item.workload.nodeFactors).reduce(
+    (product, [nodeKey, factor]) => {
+      if (nodeKey === item.currentNodeKey) {
+        return product;
+      }
+      const numericFactor = Number(factor);
+      return Number.isFinite(numericFactor) ? product * numericFactor : product;
+    },
+    1,
+  );
   const inputFactor = Number.parseFloat(inputValue);
   const hasValidInput = Number.isFinite(inputFactor);
   return {
@@ -1154,24 +1227,20 @@ function buildApprovalPreview(item: TaskGroupSummary, inputValue: string) {
     appliedFactor,
     inputFactorLabel: hasValidInput ? inputFactor.toFixed(2) : "待输入",
     projectedWorkloadLabel: hasValidInput
-      ? `${formatWorkload(item.effectiveWorkload * inputFactor)} A1`
+      ? `${formatWorkload(initialWorkload * appliedFactor * inputFactor)} A1`
       : "待输入",
   };
 }
 
 function resolveErrorMessage(error: unknown, fallback: string) {
-  if (
+  const errorCode =
     typeof error === "object" &&
     error &&
     "detail" in error &&
     typeof (error as { detail?: unknown }).detail === "string"
-  ) {
-    return (error as { detail: string }).detail;
-  }
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return fallback;
+      ? (error as { detail: string }).detail
+      : null;
+  return (errorCode && WORKFLOW_ERROR_MESSAGES[errorCode]) || fallback;
 }
 
 function capitalize(value: string) {
@@ -1181,4 +1250,12 @@ function capitalize(value: string) {
 function formatApprovalFactor(value: number, precision: number) {
   const safePrecision = Math.max(0, Math.trunc(precision));
   return value.toFixed(safePrecision);
+}
+
+function formatFactorProduct(value: number) {
+  return value.toLocaleString("zh-CN", {
+    maximumFractionDigits: 4,
+    minimumFractionDigits: 2,
+    useGrouping: false,
+  });
 }

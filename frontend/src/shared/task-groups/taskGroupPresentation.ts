@@ -131,7 +131,7 @@ export function getCurrentNodeLabel(nodeKey: string | null, labels: TaskGroupPre
   if (!nodeKey) {
     return labels.emptyCurrentNodeLabel ?? "";
   }
-  return labels.nodeLabels?.[nodeKey] ?? nodeKey;
+  return labels.nodeLabels?.[nodeKey] ?? "未知节点";
 }
 
 function formatEffectiveWorkload(value: number) {
