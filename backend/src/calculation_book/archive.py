@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import locale
+import os
 import re
 import shutil
 import stat
 import subprocess
+import unicodedata
 import zipfile
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 
 from .models import ReinforcementSource
 
@@ -95,6 +97,19 @@ class ArchiveLimits:
     max_compression_ratio: float = 250.0
 
 
+class ArchiveExtractorSettings(Protocol):
+    executable: Path
+    list_timeout_seconds: int
+    extract_timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class _ArchiveMember:
+    path: PurePosixPath
+    size: int
+    is_directory: bool
+
+
 @dataclass(frozen=True)
 class ReinforcementFigure:
     wall_id: str
@@ -133,47 +148,135 @@ class CalculationArchiveContents:
         )
 
 
-def _safe_member_path(info: zipfile.ZipInfo) -> PurePosixPath:
-    raw_name = info.filename.replace("\\", "/")
-    member = PurePosixPath(raw_name)
-    if (
-        not raw_name
-        or raw_name.startswith("/")
-        or re.match(r"^[A-Za-z]:/", raw_name)
-        or ".." in member.parts
-    ):
-        raise InvalidCalculationArchive(f"ZIP 包含不安全路径：{info.filename}")
-    unix_mode = info.external_attr >> 16
-    if unix_mode and (stat.S_ISLNK(unix_mode) or stat.S_ISCHR(unix_mode) or stat.S_ISBLK(unix_mode)):
-        raise InvalidCalculationArchive(f"ZIP 包含不安全文件类型：{info.filename}")
-    return member
+_WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+_SEVEN_Z_SAFE_FALSE_VALUES = {"", "-", "0", "false", "no"}
 
 
-def _decode_tar_output(payload: bytes) -> str:
-    encodings = (
-        locale.getpreferredencoding(False),
-        "gbk",
-        "utf-8",
-    )
-    for encoding in dict.fromkeys(encodings):
-        try:
-            return payload.decode(encoding)
-        except (LookupError, UnicodeDecodeError):
-            continue
-    raise InvalidCalculationArchive("RAR 文件名编码无法识别")
-
-
-def _safe_rar_member_path(raw_name: str) -> PurePosixPath:
+def _normalized_member_path(raw_name: str, *, is_directory: bool) -> PurePosixPath:
     normalized = raw_name.replace("\\", "/")
-    member = PurePosixPath(normalized)
+    if is_directory:
+        normalized = normalized.rstrip("/")
     if (
         not normalized
         or normalized.startswith("/")
-        or re.match(r"^[A-Za-z]:/", normalized)
-        or ".." in member.parts
+        or re.match(r"^[A-Za-z]:", normalized)
     ):
-        raise InvalidCalculationArchive(f"RAR 包含不安全路径：{raw_name}")
-    return member
+        raise InvalidCalculationArchive("压缩包包含不安全路径")
+
+    raw_parts = normalized.split("/")
+    if any(not part or part in {".", ".."} for part in raw_parts):
+        raise InvalidCalculationArchive("压缩包包含不安全路径")
+    for part in raw_parts:
+        if any(ord(character) < 32 or ord(character) == 127 for character in part):
+            raise InvalidCalculationArchive("压缩包包含不安全路径")
+        if ":" in part or part.endswith((".", " ")):
+            raise InvalidCalculationArchive("压缩包包含不安全路径")
+        normalized_part = unicodedata.normalize("NFC", part)
+        stem = normalized_part.split(".", 1)[0].upper()
+        if stem in _WINDOWS_RESERVED_NAMES:
+            raise InvalidCalculationArchive("压缩包包含不安全路径")
+    return PurePosixPath(*raw_parts)
+
+
+def _member_key(member: PurePosixPath) -> str:
+    return "/".join(
+        unicodedata.normalize("NFC", part).casefold()
+        for part in member.parts
+    )
+
+
+def _is_reparse_point(file_stat: os.stat_result) -> bool:
+    reparse_flag = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    attributes = int(getattr(file_stat, "st_file_attributes", 0))
+    return bool(attributes & reparse_flag)
+
+
+def _is_unsafe_file_stat(file_stat: os.stat_result) -> bool:
+    return stat.S_ISLNK(file_stat.st_mode) or _is_reparse_point(file_stat)
+
+
+def _prepare_destination(destination: Path) -> Path:
+    if destination.exists() or destination.is_symlink():
+        destination_stat = destination.lstat()
+        if (
+            _is_unsafe_file_stat(destination_stat)
+            or not stat.S_ISDIR(destination_stat.st_mode)
+        ):
+            raise InvalidCalculationArchive("压缩包解压目标目录不安全")
+        if any(destination.iterdir()):
+            raise InvalidCalculationArchive("压缩包解压目标目录必须为空")
+    return destination.resolve()
+
+
+def _verify_extracted_files(
+    extraction_root: Path,
+    expected_members: list[_ArchiveMember],
+) -> list[Path]:
+    resolved_root = extraction_root.resolve()
+    root_stat = resolved_root.lstat()
+    if _is_unsafe_file_stat(root_stat) or not stat.S_ISDIR(root_stat.st_mode):
+        raise InvalidCalculationArchive("压缩包解压后校验失败")
+
+    actual_by_key: dict[str, tuple[Path, int]] = {}
+    pending_directories = [resolved_root]
+    while pending_directories:
+        current = pending_directories.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError as exc:
+            raise InvalidCalculationArchive("压缩包解压后校验失败") from exc
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise InvalidCalculationArchive("压缩包解压后校验失败") from exc
+            if _is_unsafe_file_stat(entry_stat):
+                raise InvalidCalculationArchive("压缩包解压后校验失败")
+            if stat.S_ISDIR(entry_stat.st_mode):
+                pending_directories.append(path)
+                continue
+            if not stat.S_ISREG(entry_stat.st_mode):
+                raise InvalidCalculationArchive("压缩包解压后校验失败")
+            relative = path.relative_to(resolved_root)
+            member = _normalized_member_path(relative.as_posix(), is_directory=False)
+            key = _member_key(member)
+            if key in actual_by_key:
+                raise InvalidCalculationArchive("压缩包解压后校验失败")
+            actual_by_key[key] = (path.resolve(), entry_stat.st_size)
+
+    expected_files = [member for member in expected_members if not member.is_directory]
+    expected_by_key = {_member_key(member.path): member for member in expected_files}
+    if set(actual_by_key) != set(expected_by_key):
+        raise InvalidCalculationArchive("压缩包解压后校验失败")
+    for key, expected in expected_by_key.items():
+        if actual_by_key[key][1] != expected.size:
+            raise InvalidCalculationArchive("压缩包解压后校验失败")
+    return [actual_by_key[_member_key(member.path)][0] for member in expected_files]
+
+
+def _safe_zip_member(info: zipfile.ZipInfo) -> _ArchiveMember:
+    member = _normalized_member_path(info.filename, is_directory=info.is_dir())
+    unix_mode = info.external_attr >> 16
+    unix_type = stat.S_IFMT(unix_mode)
+    unsafe_unix_type = unix_type not in {0, stat.S_IFREG, stat.S_IFDIR}
+    has_reparse_attribute = bool(info.external_attr & 0x400)
+    if unsafe_unix_type or has_reparse_attribute:
+        raise InvalidCalculationArchive("压缩包包含不安全文件类型")
+    if info.flag_bits & 0x1:
+        raise InvalidCalculationArchive("暂不支持加密压缩包")
+    return _ArchiveMember(
+        path=member,
+        size=info.file_size,
+        is_directory=info.is_dir(),
+    )
 
 
 def _extract_zip(
@@ -184,169 +287,294 @@ def _extract_zip(
     try:
         archive = zipfile.ZipFile(archive_path)
     except (OSError, zipfile.BadZipFile) as exc:
-        raise InvalidCalculationArchive("上传文件不是有效的 ZIP") from exc
+        raise InvalidCalculationArchive("上传文件不是有效的压缩包") from exc
 
     with archive:
-        infos = [info for info in archive.infolist() if not info.is_dir()]
+        infos = archive.infolist()
         if not infos:
-            raise InvalidCalculationArchive("ZIP 中没有文件")
+            raise InvalidCalculationArchive("压缩包中没有文件")
         if len(infos) > limits.max_files:
             raise InvalidCalculationArchive(
-                f"ZIP 文件数量超过限制 {limits.max_files}"
+                f"压缩包条目数量超过限制 {limits.max_files}"
             )
 
         total_bytes = 0
-        safe_members: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
+        seen: set[str] = set()
+        safe_members: list[tuple[zipfile.ZipInfo, _ArchiveMember]] = []
         for info in infos:
-            member = _safe_member_path(info)
-            if info.file_size > limits.max_single_file_bytes:
-                raise InvalidCalculationArchive(
-                    f"ZIP 中单个文件超过限制：{info.filename}"
-                )
-            total_bytes += info.file_size
-            if total_bytes > limits.max_total_bytes:
-                raise InvalidCalculationArchive("ZIP 解压后总大小超过限制")
-            if info.file_size > 0:
-                compressed = max(info.compress_size, 1)
-                if info.file_size / compressed > limits.max_compression_ratio:
-                    raise InvalidCalculationArchive(
-                        f"ZIP 压缩比异常：{info.filename}"
-                    )
+            member = _safe_zip_member(info)
+            key = _member_key(member.path)
+            if key in seen:
+                raise InvalidCalculationArchive("压缩包包含重复路径")
+            seen.add(key)
+            if not member.is_directory:
+                if member.size > limits.max_single_file_bytes:
+                    raise InvalidCalculationArchive("压缩包中单个文件超过限制")
+                total_bytes += member.size
+                if total_bytes > limits.max_total_bytes:
+                    raise InvalidCalculationArchive("压缩包解压后总大小超过限制")
+                if member.size > 0:
+                    compressed = max(info.compress_size, 1)
+                    if member.size / compressed > limits.max_compression_ratio:
+                        raise InvalidCalculationArchive("压缩包压缩比异常")
             safe_members.append((info, member))
 
-        destination.mkdir(parents=True, exist_ok=True)
-        resolved_root = destination.resolve()
-        extracted: list[Path] = []
+        if not any(not member.is_directory for _, member in safe_members):
+            raise InvalidCalculationArchive("压缩包中没有文件")
+        resolved_root = _prepare_destination(destination)
+        resolved_root.mkdir(parents=True, exist_ok=True)
         for info, member in safe_members:
-            target = destination.joinpath(*member.parts)
-            resolved_target = target.resolve()
-            if not resolved_target.is_relative_to(resolved_root):
-                raise InvalidCalculationArchive(
-                    f"ZIP 包含不安全路径：{info.filename}"
-                )
+            target = resolved_root.joinpath(*member.path.parts)
+            if member.is_directory:
+                target.mkdir(parents=True, exist_ok=True)
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as source, target.open("wb") as output:
                 shutil.copyfileobj(source, output)
-            extracted.append(resolved_target)
+        extracted = _verify_extracted_files(
+            resolved_root,
+            [member for _, member in safe_members],
+        )
     return resolved_root, extracted
 
 
-def _extract_rar(
+def _parse_slt_records(payload: bytes) -> list[dict[str, str]]:
+    try:
+        text = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise InvalidCalculationArchive("压缩包清单无法解析") from exc
+
+    records: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip("\r")
+        if not line.strip() or set(line.strip()) <= {"-"}:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        if " = " not in line:
+            continue
+        key, value = line.split(" = ", 1)
+        key = key.strip()
+        if not key or key in current:
+            raise InvalidCalculationArchive("压缩包清单无法解析")
+        current[key] = value
+    if current:
+        records.append(current)
+    if not records:
+        raise InvalidCalculationArchive("压缩包清单无法解析")
+    return records
+
+
+def _field_is_enabled(value: str | None) -> bool:
+    return value is not None and value.strip().casefold() not in _SEVEN_Z_SAFE_FALSE_VALUES
+
+
+def _parse_nonnegative_size(value: str | None) -> int:
+    try:
+        parsed = int(value or "")
+    except ValueError as exc:
+        raise InvalidCalculationArchive("压缩包清单无法解析") from exc
+    if parsed < 0:
+        raise InvalidCalculationArchive("压缩包清单无法解析")
+    return parsed
+
+
+def _record_is_directory(record: dict[str, str]) -> bool:
+    folder = record.get("Folder")
+    if folder is not None:
+        if folder.strip() == "+":
+            return True
+        if folder.strip() != "-":
+            raise InvalidCalculationArchive("压缩包清单无法解析")
+    attributes = record.get("Attributes", "").strip()
+    return attributes[:1].upper() == "D"
+
+
+def _record_has_unsafe_type(record: dict[str, str]) -> bool:
+    for field in ("Symbolic Link", "Hard Link", "Alternate Stream", "Reparse"):
+        if _field_is_enabled(record.get(field)):
+            return True
+    item_type = record.get("Type", "").strip().casefold()
+    if item_type and item_type not in {"file", "directory"}:
+        return True
+    attributes = record.get("Attributes", "").strip().casefold()
+    return bool(re.search(r"(?:^|[\s_])[lbcps][rwx-]{9}(?:$|\s)", attributes))
+
+
+def _validate_archive_metadata(records: list[dict[str, str]]) -> None:
+    for record in records:
+        if _field_is_enabled(record.get("Encrypted")):
+            raise InvalidCalculationArchive("暂不支持加密压缩包")
+        if _field_is_enabled(record.get("Multivolume")):
+            raise InvalidCalculationArchive("暂不支持分卷压缩包")
+        if "Volume Index" in record:
+            raise InvalidCalculationArchive("暂不支持分卷压缩包")
+        volumes = record.get("Volumes")
+        if volumes is not None and _parse_nonnegative_size(volumes) != 1:
+            raise InvalidCalculationArchive("暂不支持分卷压缩包")
+
+
+def _members_from_slt_listing(
+    payload: bytes,
+    archive_path: Path,
+    limits: ArchiveLimits,
+) -> list[_ArchiveMember]:
+    records = _parse_slt_records(payload)
+    _validate_archive_metadata(records)
+    item_records = [
+        record
+        for record in records
+        if "Path" in record
+        and "Physical Size" not in record
+        and any(field in record for field in ("Size", "Folder", "Attributes"))
+    ]
+    if not item_records:
+        raise InvalidCalculationArchive("压缩包中没有文件")
+    if len(item_records) > limits.max_files:
+        raise InvalidCalculationArchive(
+            f"压缩包条目数量超过限制 {limits.max_files}"
+        )
+
+    total_bytes = 0
+    seen: set[str] = set()
+    members: list[_ArchiveMember] = []
+    for record in item_records:
+        is_directory = _record_is_directory(record)
+        if _record_has_unsafe_type(record):
+            raise InvalidCalculationArchive("压缩包包含不安全文件类型")
+        member = _normalized_member_path(record["Path"], is_directory=is_directory)
+        key = _member_key(member)
+        if key in seen:
+            raise InvalidCalculationArchive("压缩包包含重复路径")
+        seen.add(key)
+        size = _parse_nonnegative_size(record.get("Size"))
+        if "Packed Size" in record:
+            _parse_nonnegative_size(record["Packed Size"])
+        if not is_directory:
+            if size > limits.max_single_file_bytes:
+                raise InvalidCalculationArchive("压缩包中单个文件超过限制")
+            total_bytes += size
+            if total_bytes > limits.max_total_bytes:
+                raise InvalidCalculationArchive("压缩包解压后总大小超过限制")
+        members.append(_ArchiveMember(member, size, is_directory))
+
+    if not any(not member.is_directory for member in members):
+        raise InvalidCalculationArchive("压缩包中没有文件")
+    archive_size = max(archive_path.stat().st_size, 1)
+    if total_bytes / archive_size > limits.max_compression_ratio:
+        raise InvalidCalculationArchive("压缩包总压缩比异常")
+    return members
+
+
+def _private_extractor(
+    settings: ArchiveExtractorSettings | None,
+) -> tuple[Path, int, int]:
+    if settings is None:
+        raise InvalidCalculationArchive("RAR/7z 私有解包器不可用")
+    executable = Path(settings.executable)
+    if not executable.is_absolute():
+        raise InvalidCalculationArchive("RAR/7z 私有解包器必须使用绝对路径")
+    if not executable.exists() or not executable.is_file():
+        raise InvalidCalculationArchive("RAR/7z 私有解包器不存在")
+    executable_stat = executable.lstat()
+    if _is_unsafe_file_stat(executable_stat):
+        raise InvalidCalculationArchive("RAR/7z 私有解包器路径不安全")
+    list_timeout = settings.list_timeout_seconds
+    extract_timeout = settings.extract_timeout_seconds
+    if (
+        not isinstance(list_timeout, int)
+        or isinstance(list_timeout, bool)
+        or list_timeout <= 0
+        or not isinstance(extract_timeout, int)
+        or isinstance(extract_timeout, bool)
+        or extract_timeout <= 0
+    ):
+        raise InvalidCalculationArchive("RAR/7z 私有解包器超时参数无效")
+    return executable.resolve(), list_timeout, extract_timeout
+
+
+def _seven_zip_failure_message(stderr: bytes, *, operation: str) -> str:
+    detail = stderr[:500].decode("utf-8", errors="replace").casefold()
+    if any(
+        marker in detail
+        for marker in ("can not open the file as archive", "unexpected end", "not archive")
+    ):
+        return "压缩包已损坏或格式无效"
+    if "wrong password" in detail or "encrypted" in detail:
+        return "暂不支持加密压缩包"
+    return f"压缩包{operation}失败"
+
+
+def _extract_external_archive(
     archive_path: Path,
     destination: Path,
     limits: ArchiveLimits,
+    *,
+    archive_format: ArchiveFormat,
+    archive_extractor: ArchiveExtractorSettings | None,
 ) -> tuple[Path, list[Path]]:
-    tar_executable = shutil.which("tar.exe") or shutil.which("tar")
-    if tar_executable is None:
-        raise InvalidCalculationArchive(
-            "当前运行环境缺少 RAR 解压支持（未找到 tar.exe）"
-        )
+    if archive_format not in {ArchiveFormat.RAR, ArchiveFormat.SEVEN_Z}:
+        raise InvalidCalculationArchive("压缩包格式不支持外部解压")
+    executable, list_timeout, extract_timeout = _private_extractor(archive_extractor)
+    resolved_root = _prepare_destination(destination)
     creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    common_options = {
+        "check": False,
+        "capture_output": True,
+        "stdin": subprocess.DEVNULL,
+        "creationflags": creationflags,
+        "shell": False,
+    }
     try:
         listing = subprocess.run(
-            [tar_executable, "-tvf", str(archive_path)],
-            check=False,
-            capture_output=True,
-            timeout=120,
-            creationflags=creationflags,
+            [
+                str(executable),
+                "l",
+                "-slt",
+                "-sccUTF-8",
+                "-bd",
+                str(archive_path),
+            ],
+            timeout=list_timeout,
+            **common_options,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise InvalidCalculationArchive("RAR 文件读取失败") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise InvalidCalculationArchive("压缩包清单读取超时") from exc
+    except OSError as exc:
+        raise InvalidCalculationArchive("压缩包清单读取失败") from exc
     if listing.returncode != 0:
-        detail = _decode_tar_output(listing.stderr).strip()
         raise InvalidCalculationArchive(
-            f"上传文件不是有效的 RAR{f'：{detail}' if detail else ''}"
+            _seven_zip_failure_message(listing.stderr, operation="读取")
         )
+    members = _members_from_slt_listing(listing.stdout, archive_path, limits)
 
-    safe_members: list[tuple[PurePosixPath, int]] = []
-    seen: set[PurePosixPath] = set()
-    total_bytes = 0
-    for raw_line in _decode_tar_output(listing.stdout).splitlines():
-        if not raw_line.strip():
-            continue
-        parts = raw_line.split(maxsplit=8)
-        if len(parts) != 9 or len(parts[0]) < 1:
-            raise InvalidCalculationArchive("RAR 文件清单格式无法识别")
-        mode = parts[0]
-        raw_name = parts[8]
-        if mode.startswith("d") or raw_name.endswith(("/", "\\")):
-            continue
-        if not mode.startswith("-"):
-            raise InvalidCalculationArchive(
-                f"RAR 包含不安全文件类型：{raw_name}"
-            )
-        try:
-            file_size = int(parts[4])
-        except ValueError as exc:
-            raise InvalidCalculationArchive(
-                f"RAR 文件大小无法识别：{raw_name}"
-            ) from exc
-        member = _safe_rar_member_path(raw_name)
-        if member in seen:
-            raise InvalidCalculationArchive(f"RAR 包含重复路径：{raw_name}")
-        seen.add(member)
-        if file_size > limits.max_single_file_bytes:
-            raise InvalidCalculationArchive(
-                f"RAR 中单个文件超过限制：{raw_name}"
-            )
-        total_bytes += file_size
-        if total_bytes > limits.max_total_bytes:
-            raise InvalidCalculationArchive("RAR 解压后总大小超过限制")
-        safe_members.append((member, file_size))
-
-    if not safe_members:
-        raise InvalidCalculationArchive("RAR 中没有文件")
-    if len(safe_members) > limits.max_files:
-        raise InvalidCalculationArchive(
-            f"RAR 文件数量超过限制 {limits.max_files}"
-        )
-    archive_size = max(archive_path.stat().st_size, 1)
-    if total_bytes / archive_size > limits.max_compression_ratio:
-        raise InvalidCalculationArchive("RAR 总压缩比异常")
-
-    destination.mkdir(parents=True, exist_ok=True)
-    resolved_root = destination.resolve()
+    resolved_root.mkdir(parents=True, exist_ok=True)
     try:
         extracted_result = subprocess.run(
             [
-                tar_executable,
-                "-xf",
+                str(executable),
+                "x",
+                "-y",
+                "-bd",
+                "-bb0",
+                "-sccUTF-8",
+                f"-o{resolved_root}",
                 str(archive_path),
-                "-C",
-                str(destination),
-                "--no-same-owner",
-                "--no-same-permissions",
             ],
-            check=False,
-            capture_output=True,
-            timeout=300,
-            creationflags=creationflags,
+            timeout=extract_timeout,
+            **common_options,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise InvalidCalculationArchive("RAR 解压失败") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise InvalidCalculationArchive("压缩包解压超时") from exc
+    except OSError as exc:
+        raise InvalidCalculationArchive("压缩包解压失败") from exc
     if extracted_result.returncode != 0:
-        detail = _decode_tar_output(extracted_result.stderr).strip()
         raise InvalidCalculationArchive(
-            f"RAR 解压失败{f'：{detail}' if detail else ''}"
+            _seven_zip_failure_message(extracted_result.stderr, operation="解压")
         )
-
-    extracted: list[Path] = []
-    for member, expected_size in safe_members:
-        target = destination.joinpath(*member.parts)
-        resolved_target = target.resolve()
-        if not resolved_target.is_relative_to(resolved_root):
-            raise InvalidCalculationArchive(
-                f"RAR 包含不安全路径：{member.as_posix()}"
-            )
-        if not target.is_file() or target.is_symlink():
-            raise InvalidCalculationArchive(
-                f"RAR 文件未安全解压：{member.as_posix()}"
-            )
-        if target.stat().st_size != expected_size:
-            raise InvalidCalculationArchive(
-                f"RAR 文件大小校验失败：{member.as_posix()}"
-            )
-        extracted.append(resolved_target)
+    extracted = _verify_extracted_files(resolved_root, members)
     return resolved_root, extracted
 
 
@@ -355,9 +583,9 @@ def _single_image(folder: Path, label: str) -> Path:
         path for path in folder.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     )
     if not images:
-        raise InvalidCalculationArchive(f"ZIP 的 {label} 目录中没有支持的图片")
+        raise InvalidCalculationArchive(f"压缩包的 {label} 目录中没有支持的图片")
     if len(images) > 1:
-        raise InvalidCalculationArchive(f"ZIP 的 {label} 目录只能包含一张支持的图片")
+        raise InvalidCalculationArchive(f"压缩包的 {label} 目录只能包含一张支持的图片")
     return images[0]
 
 
@@ -433,6 +661,7 @@ def validate_and_extract_archive(
     *,
     reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
     limits: ArchiveLimits | None = None,
+    archive_extractor: ArchiveExtractorSettings | None = None,
 ) -> CalculationArchiveContents:
     active_reinforcement_source = ReinforcementSource(reinforcement_source)
     active_limits = limits or ArchiveLimits()
@@ -443,14 +672,14 @@ def validate_and_extract_archive(
             destination,
             active_limits,
         )
-    elif archive_format is ArchiveFormat.RAR:
-        resolved_root, extracted = _extract_rar(
+    else:
+        resolved_root, extracted = _extract_external_archive(
             archive_path,
             destination,
             active_limits,
+            archive_format=archive_format,
+            archive_extractor=archive_extractor,
         )
-    else:
-        raise InvalidCalculationArchive("RAR/7z 私有解包器尚未接入/不可用")
 
     content_root = _content_root(resolved_root, extracted)
     figures: list[ReinforcementFigure] = []
@@ -539,18 +768,18 @@ def validate_and_extract_archive(
         directions = figure_groups.setdefault(figure.wall_id, set())
         if figure.direction in directions:
             raise InvalidCalculationArchive(
-                f"ZIP 根目录的 {figure.wall_id} 存在重复 {figure.direction} 方向配筋图片"
+                f"压缩包根目录的 {figure.wall_id} 存在重复 {figure.direction} 方向配筋图片"
             )
         directions.add(figure.direction)
     if not figure_groups:
-        raise InvalidCalculationArchive("ZIP 根目录没有可识别的墙体 X/Y/Z 配筋图片")
+        raise InvalidCalculationArchive("压缩包根目录没有可识别的墙体 X/Y/Z 配筋图片")
     for wall_id, directions in figure_groups.items():
         missing_directions = [
             direction for direction in ("X", "Y", "Z") if direction not in directions
         ]
         if missing_directions:
             raise InvalidCalculationArchive(
-                f"ZIP 根目录的 {wall_id} 缺少 "
+                f"压缩包根目录的 {wall_id} 缺少 "
                 f"{'/'.join(missing_directions)} 方向配筋图片"
             )
 
@@ -576,17 +805,17 @@ def validate_and_extract_archive(
             path for path in root_xlsx_files if not path.name.startswith("~$")
         ]
         if not reinforcement_workbooks:
-            raise InvalidCalculationArchive("ZIP 根目录缺少墙体配筋表")
+            raise InvalidCalculationArchive("压缩包根目录缺少墙体配筋表")
         if len(reinforcement_workbooks) > 1:
-            raise InvalidCalculationArchive("ZIP 根目录只能包含一个墙体配筋表")
+            raise InvalidCalculationArchive("压缩包根目录只能包含一个墙体配筋表")
         reinforcement_workbook = reinforcement_workbooks[0]
 
     folder_01 = content_root / "01"
     folder_02 = content_root / "02"
     if not folder_01.is_dir():
-        raise InvalidCalculationArchive("ZIP 根目录缺少 01 目录")
+        raise InvalidCalculationArchive("压缩包根目录缺少 01 目录")
     if not folder_02.is_dir():
-        raise InvalidCalculationArchive("ZIP 根目录缺少 02 目录")
+        raise InvalidCalculationArchive("压缩包根目录缺少 02 目录")
 
     return CalculationArchiveContents(
         root=content_root,
