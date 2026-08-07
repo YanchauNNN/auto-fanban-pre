@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { TaskGroupConflictDialog } from "../../app/TaskGroupConflictDialog";
 import type {
@@ -17,6 +17,9 @@ const EMPTY_SUBMIT_FLAGS: TaskGroupSubmitPayload = {
   overwriteArchiveExisting: false,
   cancelExistingInProgress: false,
 };
+
+const UNKNOWN_STATUS_LABEL = "未知状态";
+const UNKNOWN_BLOCKER_LABEL = "存在未识别的提交条件，请联系管理员处理。";
 
 const BLOCKER_LABELS: Record<string, string> = {
   workflow_not_draft: "审批流程已经启动，不能重复提交",
@@ -37,10 +40,13 @@ const BLOCKER_LABELS: Record<string, string> = {
 
 const WORKFLOW_LABELS: Record<string, string> = {
   draft: "待提交",
+  submitted: "已提交",
   in_review: "审批中",
-  three_review_approved: "审批通过",
-  succeeded: "已完成",
-  failed: "审批异常",
+  three_review_approved: "三审通过",
+  archiving: "归档中",
+  archived: "已归档",
+  archive_failed: "归档失败",
+  cancelled: "已取消",
 };
 
 const ARCHIVE_LABELS: Record<string, string> = {
@@ -52,10 +58,9 @@ const ARCHIVE_LABELS: Record<string, string> = {
 
 const NODE_STATUS_LABELS: Record<string, string> = {
   pending: "待处理",
-  active: "当前节点",
+  current: "当前节点",
   approved: "已通过",
-  succeeded: "已通过",
-  failed: "异常",
+  cancelled: "已取消",
 };
 
 export function TaskGroupWorkflowPanel({
@@ -68,11 +73,33 @@ export function TaskGroupWorkflowPanel({
   const queryClient = useQueryClient();
   const { currentAccount, refreshCurrentAccount } = useSession();
   const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const activeGroupIdRef = useRef<string | null>(null);
+  const submissionGenerationRef = useRef(0);
+  const submissionInFlightRef = useRef(false);
   const confirmedFlagsRef = useRef<TaskGroupSubmitPayload>({ ...EMPTY_SUBMIT_FLAGS });
   const [conflict, setConflict] = useState<ConflictKind | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    activeGroupIdRef.current = groupId;
+    submissionGenerationRef.current += 1;
+    submissionInFlightRef.current = false;
+    confirmedFlagsRef.current = { ...EMPTY_SUBMIT_FLAGS };
+    setConflict(null);
+    setIsSubmitting(false);
+    setFeedback(null);
+    setSubmitError(null);
+
+    return () => {
+      if (activeGroupIdRef.current === groupId) {
+        activeGroupIdRef.current = null;
+      }
+      submissionGenerationRef.current += 1;
+      submissionInFlightRef.current = false;
+    };
+  }, [groupId]);
 
   const detailQuery = useQuery({
     queryKey: ["task-group-detail", groupId],
@@ -95,10 +122,10 @@ export function TaskGroupWorkflowPanel({
     restoreSubmitFocus();
   }, [restoreSubmitFocus]);
 
-  async function refreshDependentViews(updated: TaskGroupDetail) {
-    queryClient.setQueryData(["task-group-detail", groupId], updated);
+  async function refreshDependentViews(updated: TaskGroupDetail, requestGroupId: string) {
+    queryClient.setQueryData(["task-group-detail", requestGroupId], updated);
     await Promise.allSettled([
-      queryClient.invalidateQueries({ queryKey: ["job-detail", groupId] }),
+      queryClient.invalidateQueries({ queryKey: ["job-detail", requestGroupId] }),
       queryClient.invalidateQueries({ queryKey: ["jobs"] }),
       queryClient.invalidateQueries({ queryKey: ["jobs-activity"] }),
       queryClient.invalidateQueries({ queryKey: ["task-groups"] }),
@@ -112,6 +139,16 @@ export function TaskGroupWorkflowPanel({
     payload: TaskGroupSubmitPayload,
     useRestart: boolean,
   ) {
+    if (submissionInFlightRef.current) {
+      return;
+    }
+    const requestGroupId = groupId;
+    const requestGeneration = submissionGenerationRef.current;
+    const isCurrentRequest = () =>
+      activeGroupIdRef.current === requestGroupId &&
+      submissionGenerationRef.current === requestGeneration;
+
+    submissionInFlightRef.current = true;
     setIsSubmitting(true);
     setFeedback(null);
     setSubmitError(null);
@@ -121,38 +158,53 @@ export function TaskGroupWorkflowPanel({
         if (!adapter.restartSubmitTaskGroup) {
           throw new Error("restart submission unavailable");
         }
-        updated = await adapter.restartSubmitTaskGroup(groupId, payload);
+        updated = await adapter.restartSubmitTaskGroup(requestGroupId, payload);
       } else {
         if (!adapter.submitTaskGroup) {
           throw new Error("submission unavailable");
         }
-        updated = await adapter.submitTaskGroup(groupId, payload);
+        updated = await adapter.submitTaskGroup(requestGroupId, payload);
+      }
+      if (!isCurrentRequest()) {
+        return;
       }
       setConflict(null);
-      await refreshDependentViews(updated);
+      await refreshDependentViews(updated, requestGroupId);
+      if (!isCurrentRequest()) {
+        return;
+      }
       setFeedback("审批流程已提交。");
     } catch (error) {
+      if (!isCurrentRequest()) {
+        return;
+      }
       const nextConflict = readConflictKind(error);
       if (nextConflict) {
         setConflict(nextConflict);
       } else {
         setConflict(null);
-        setSubmitError(readErrorMessage(error));
+        setSubmitError(readErrorMessage());
         restoreSubmitFocus();
       }
     } finally {
-      setIsSubmitting(false);
+      if (isCurrentRequest()) {
+        submissionInFlightRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   }
 
   function handleInitialSubmit() {
+    if (submissionInFlightRef.current) {
+      return;
+    }
     const flags = { ...EMPTY_SUBMIT_FLAGS };
     confirmedFlagsRef.current = flags;
     void executeSubmission(flags, false);
   }
 
   function handleConflictConfirm() {
-    if (!conflict) {
+    if (!conflict || submissionInFlightRef.current) {
       return;
     }
     const nextFlags = {
@@ -169,14 +221,18 @@ export function TaskGroupWorkflowPanel({
   if (detailQuery.isLoading) {
     return (
       <section aria-label="审批与归档" className={styles.panel}>
-        <p className={styles.loading}>正在读取审批状态…</p>
+        <p className={styles.loading} role="status">正在读取审批状态…</p>
       </section>
     );
   }
 
   if (detailQuery.isError || !detailQuery.data) {
     return (
-      <section aria-label="审批与归档" className={`${styles.panel} ${styles.errorPanel}`}>
+      <section
+        aria-label="审批与归档"
+        className={`${styles.panel} ${styles.errorPanel}`}
+        role="alert"
+      >
         <strong>审批信息暂时无法加载，任务产物仍可正常查看。</strong>
         <span>可稍后刷新页面重试，不影响下方产物下载。</span>
       </section>
@@ -201,15 +257,18 @@ export function TaskGroupWorkflowPanel({
         <div className={styles.statusLine} aria-label="当前管理状态">
           <StatusItem
             label="审批"
-            value={WORKFLOW_LABELS[detail.workflowStatus] ?? detail.workflowStatus}
+            value={WORKFLOW_LABELS[detail.workflowStatus] ?? UNKNOWN_STATUS_LABEL}
           />
           <StatusItem
             label="当前节点"
-            value={currentNode?.nodeLabel ?? detail.currentNodeKey ?? "未进入审批"}
+            value={
+              currentNode?.nodeLabel ??
+              (detail.currentNodeKey ? "未知节点" : "未进入审批")
+            }
           />
           <StatusItem
             label="归档"
-            value={ARCHIVE_LABELS[detail.archiveStatus] ?? detail.archiveStatus}
+            value={ARCHIVE_LABELS[detail.archiveStatus] ?? UNKNOWN_STATUS_LABEL}
           />
         </div>
       </header>
@@ -217,9 +276,13 @@ export function TaskGroupWorkflowPanel({
       {detail.workflow.nodes.length > 0 ? (
         <ol className={styles.nodeList} aria-label="审批节点">
           {detail.workflow.nodes.map((node) => (
-            <li key={node.nodeKey} data-current={node.nodeKey === detail.currentNodeKey}>
+            <li
+              key={node.nodeKey}
+              aria-current={node.nodeKey === detail.currentNodeKey ? "step" : undefined}
+              data-current={node.nodeKey === detail.currentNodeKey}
+            >
               <span>{node.nodeLabel}</span>
-              <strong>{NODE_STATUS_LABELS[node.status] ?? node.status}</strong>
+              <strong>{NODE_STATUS_LABELS[node.status] ?? UNKNOWN_STATUS_LABEL}</strong>
               <small>{node.assigneeName ?? "待分配"}</small>
             </li>
           ))}
@@ -237,7 +300,7 @@ export function TaskGroupWorkflowPanel({
               <strong>提交前仍需处理</strong>
               <ul>
                 {blockers.map((code) => (
-                  <li key={code}>{BLOCKER_LABELS[code] ?? `任务尚未满足提交条件（${code}）`}</li>
+                  <li key={code}>{BLOCKER_LABELS[code] ?? UNKNOWN_BLOCKER_LABEL}</li>
                 ))}
               </ul>
             </div>
@@ -247,7 +310,9 @@ export function TaskGroupWorkflowPanel({
             <p>当前流程状态不允许再次提交。</p>
           )}
           {feedback ? <p className={styles.success}>{feedback}</p> : null}
-          {submitError ? <p className={styles.submitError}>{submitError}</p> : null}
+          {submitError ? (
+            <p className={styles.submitError} role="alert">{submitError}</p>
+          ) : null}
         </div>
 
         {isCreator ? (
@@ -296,11 +361,8 @@ function readConflictKind(error: unknown): ConflictKind | null {
   return null;
 }
 
-function readErrorMessage(error: unknown) {
-  if (isApiError(error) && typeof error.detail === "string" && error.detail.trim()) {
-    return `提交失败：${error.detail}`;
-  }
-  return "提交失败，请稍后重试。";
+function readErrorMessage() {
+  return "提交失败，服务器未能完成审批请求，请稍后重试。";
 }
 
 function isApiError(error: unknown): error is ApiError {

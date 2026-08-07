@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -125,9 +125,34 @@ function makeSubmittedDetail() {
   });
 }
 
+function makeNode(nodeKey: string, nodeLabel: string, status: string) {
+  return {
+    nodeKey,
+    nodeLabel,
+    assigneeAccount: null,
+    assigneeName: null,
+    status,
+    factor: 1,
+    approvedAt: null,
+    actedByAccount: null,
+    actedByName: null,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, reject, resolve };
+}
+
 function renderPanel(
   adapterOverrides: Partial<ApiAdapter> = {},
   detail: TaskGroupDetail = makeDetail(),
+  groupId = detail.groupId,
 ) {
   const adapter = {
     getTaskGroupDetail: vi.fn().mockResolvedValue(detail),
@@ -142,13 +167,23 @@ function renderPanel(
     },
   });
 
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
-      <TaskGroupWorkflowPanel adapter={adapter} groupId="group-1" />
+      <TaskGroupWorkflowPanel adapter={adapter} groupId={groupId} />
     </QueryClientProvider>,
   );
 
-  return { adapter, queryClient };
+  return {
+    adapter,
+    queryClient,
+    rerenderGroup(nextGroupId: string) {
+      view.rerender(
+        <QueryClientProvider client={queryClient}>
+          <TaskGroupWorkflowPanel adapter={adapter} groupId={nextGroupId} />
+        </QueryClientProvider>,
+      );
+    },
+  };
 }
 
 beforeEach(() => {
@@ -158,6 +193,87 @@ beforeEach(() => {
 });
 
 describe("TaskGroupWorkflowPanel", () => {
+  it("announces loading and management failures with semantic live regions", async () => {
+    const pending = createDeferred<TaskGroupDetail>();
+    const { rerenderGroup } = renderPanel(
+      {
+        getTaskGroupDetail: vi.fn((groupId: string) =>
+          groupId === "loading-group"
+            ? pending.promise
+            : Promise.reject(new Error("offline")),
+        ),
+      },
+      makeDetail({ groupId: "loading-group" }),
+      "loading-group",
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("正在读取审批状态");
+
+    rerenderGroup("failed-group");
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "审批信息暂时无法加载，任务产物仍可正常查看。",
+      );
+    });
+  });
+
+  it("renders real workflow, archive, and node states without leaking raw codes", async () => {
+    renderPanel(
+      {},
+      makeDetail({
+        workflowStatus: "archived",
+        archiveStatus: "succeeded",
+        currentNodeKey: "two_review",
+        canSubmit: false,
+        workflow: {
+          ...makeDetail().workflow,
+          status: "archived",
+          currentNodeKey: "two_review",
+          nodes: [
+            makeNode("one_review", "一审", "approved"),
+            makeNode("two_review", "二审", "current"),
+            makeNode("three_review", "三审", "pending"),
+            makeNode("cancelled_review", "已取消节点", "cancelled"),
+          ],
+        },
+      }),
+    );
+
+    const managementStatus = await screen.findByLabelText("当前管理状态");
+    expect(within(managementStatus).getAllByText("已归档")).toHaveLength(2);
+    const nodeList = screen.getByRole("list", { name: "审批节点" });
+    expect(within(nodeList).getByText("当前节点")).toBeInTheDocument();
+    expect(within(nodeList).getByText("已通过")).toBeInTheDocument();
+    expect(within(nodeList).getByText("待处理")).toBeInTheDocument();
+    expect(within(nodeList).getByText("已取消")).toBeInTheDocument();
+    expect(within(nodeList).getByText("二审").closest("li")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(screen.queryByText("current")).not.toBeInTheDocument();
+  });
+
+  it("uses natural Chinese fallbacks for unknown statuses and blockers", async () => {
+    renderPanel(
+      {},
+      makeDetail({
+        workflowStatus: "private_workflow_code",
+        archiveStatus: "private_archive_code",
+        currentNodeKey: "private_node_key",
+        canSubmit: false,
+        submitBlockers: ["private_blocker_code"],
+        workflow: {
+          ...makeDetail().workflow,
+          nodes: [makeNode("private_node_key", "待核对节点", "private_node_status")],
+        },
+      }),
+    );
+
+    expect((await screen.findAllByText("未知状态")).length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("存在未识别的提交条件，请联系管理员处理。")).toBeInTheDocument();
+    expect(screen.queryByText(/private_/)).not.toBeInTheDocument();
+  });
+
   it("submits with no conflict flags and refreshes every dependent view", async () => {
     const user = userEvent.setup();
     const { adapter, queryClient } = renderPanel();
@@ -254,6 +370,94 @@ describe("TaskGroupWorkflowPanel", () => {
     await user.click(await screen.findByRole("button", { name: "取消" }));
 
     await waitFor(() => expect(submitButton).toHaveFocus());
+  });
+
+  it("prevents rapid repeated clicks from starting duplicate submissions", async () => {
+    const pending = createDeferred<TaskGroupDetail>();
+    const submitTaskGroup = vi.fn().mockReturnValue(pending.promise);
+    renderPanel({ submitTaskGroup });
+
+    const submitButton = await screen.findByRole("button", { name: "提交审批" });
+    act(() => {
+      submitButton.click();
+      submitButton.click();
+    });
+
+    expect(submitTaskGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears submission feedback when navigating to another task group", async () => {
+    const getTaskGroupDetail = vi.fn((groupId: string) =>
+      Promise.resolve(makeDetail({ groupId })),
+    );
+    const { rerenderGroup } = renderPanel(
+      { getTaskGroupDetail },
+      makeDetail({ groupId: "group-a" }),
+      "group-a",
+    );
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "提交审批" }));
+    expect(await screen.findByText("审批流程已提交。")).toBeInTheDocument();
+
+    rerenderGroup("group-b");
+    await screen.findByRole("button", { name: "提交审批" });
+    expect(screen.queryByText("审批流程已提交。")).not.toBeInTheDocument();
+  });
+
+  it("ignores stale conflicts after switching groups and restarts flags from false", async () => {
+    const user = userEvent.setup();
+    const oldRestart = createDeferred<TaskGroupDetail>();
+    const submitTaskGroup = vi
+      .fn()
+      .mockRejectedValueOnce({ status: 422, detail: "archive_target_exists" })
+      .mockResolvedValue(makeSubmittedDetail());
+    const restartSubmitTaskGroup = vi.fn().mockReturnValue(oldRestart.promise);
+    const getTaskGroupDetail = vi.fn((groupId: string) =>
+      Promise.resolve(makeDetail({ groupId })),
+    );
+    const { rerenderGroup } = renderPanel(
+      { getTaskGroupDetail, restartSubmitTaskGroup, submitTaskGroup },
+      makeDetail({ groupId: "group-a" }),
+      "group-a",
+    );
+
+    await user.click(await screen.findByRole("button", { name: "提交审批" }));
+    await user.click(await screen.findByRole("button", { name: "继续提交" }));
+    expect(restartSubmitTaskGroup).toHaveBeenCalledWith("group-a", {
+      overwriteArchiveExisting: true,
+      cancelExistingInProgress: false,
+    });
+
+    rerenderGroup("group-b");
+    await screen.findByRole("button", { name: "提交审批" });
+    await act(async () => {
+      oldRestart.reject({ status: 422, detail: "duplicate_in_progress_exists" });
+      await oldRestart.promise.catch(() => undefined);
+    });
+
+    expect(screen.queryByRole("dialog", { name: "重复流程确认" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "提交审批" }));
+    expect(submitTaskGroup).toHaveBeenLastCalledWith("group-b", {
+      overwriteArchiveExisting: false,
+      cancelExistingInProgress: false,
+    });
+  });
+
+  it("announces submission errors without exposing backend detail codes", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      submitTaskGroup: vi
+        .fn()
+        .mockRejectedValue({ status: 500, detail: "private_backend_error_code" }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "提交审批" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "提交失败，服务器未能完成审批请求，请稍后重试。",
+    );
+    expect(screen.queryByText(/private_backend_error_code/)).not.toBeInTheDocument();
   });
 
   it("contains management failures inside the panel", async () => {

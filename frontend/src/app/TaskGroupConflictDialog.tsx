@@ -14,6 +14,7 @@ export function TaskGroupConflictDialog({
   onConfirm,
 }: TaskGroupConflictDialogProps) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
   const title = kind === "archive" ? "归档冲突确认" : "重复流程确认";
   const description =
     kind === "archive"
@@ -25,12 +26,33 @@ export function TaskGroupConflictDialog({
     cancelButtonRef.current?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
         return;
       }
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const cancelButton = cancelButtonRef.current;
+      const confirmButton = confirmButtonRef.current;
+      if (!cancelButton || !confirmButton) {
+        return;
+      }
+
+      const activeElement = document.activeElement;
+      if (event.shiftKey && activeElement === cancelButton) {
+        event.preventDefault();
+        confirmButton.focus();
+      } else if (!event.shiftKey && activeElement === confirmButton) {
+        event.preventDefault();
+        cancelButton.focus();
+      } else if (activeElement !== cancelButton && activeElement !== confirmButton) {
+        event.preventDefault();
+        (event.shiftKey ? confirmButton : cancelButton).focus();
+      }
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -61,7 +83,12 @@ export function TaskGroupConflictDialog({
           >
             取消
           </button>
-          <button className={styles.primaryActionButton} type="button" onClick={onConfirm}>
+          <button
+            ref={confirmButtonRef}
+            className={styles.primaryActionButton}
+            type="button"
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </button>
         </div>
