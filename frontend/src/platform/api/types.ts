@@ -499,6 +499,7 @@ export type TaskGroupSummary = {
   effectiveWorkload: number;
   canViewDetail: boolean;
   canSubmit: boolean;
+  submitBlockers: string[];
   canApprove: boolean;
   isRelatedToCurrentUser: boolean;
 };

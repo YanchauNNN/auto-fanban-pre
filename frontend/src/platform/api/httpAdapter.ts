@@ -579,6 +579,7 @@ type RawTaskGroupSummary = {
   effective_workload?: number | null;
   can_view_detail?: boolean | null;
   can_submit?: boolean | null;
+  submit_blockers?: string[] | null;
   can_approve?: boolean | null;
   is_related_to_current_user?: boolean | null;
 };
@@ -2287,6 +2288,7 @@ export class HttpAdapter implements ApiAdapter {
       effectiveWorkload: payload.effective_workload ?? 0,
       canViewDetail: Boolean(payload.can_view_detail),
       canSubmit: Boolean(payload.can_submit),
+      submitBlockers: payload.submit_blockers ?? [],
       canApprove: Boolean(payload.can_approve),
       isRelatedToCurrentUser: Boolean(payload.is_related_to_current_user),
     };

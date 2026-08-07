@@ -45,6 +45,7 @@ import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
 import { CalculationBookTaskWarnings } from "../features/calculation-book/CalculationBookTaskWarnings";
+import { TaskGroupWorkflowPanel } from "../features/task-groups/TaskGroupWorkflowPanel";
 import type {
   ApiAdapter,
   CalculationBookOutput,
@@ -596,7 +597,7 @@ export function App() {
               path="/jobs/:jobId"
             />
             <Route
-              element={<RequireSession><JobDetailPage /></RequireSession>}
+              element={<RequireSession><JobDetailPage taskGroupMode /></RequireSession>}
               path="/task-groups/:jobId"
             />
           </Routes>
@@ -1935,7 +1936,7 @@ function DeliverableTutorialOverlay({
   );
 }
 
-function JobDetailPage() {
+function JobDetailPage({ taskGroupMode = false }: { taskGroupMode?: boolean }) {
   const adapter = useApiAdapter();
   const navigate = useNavigate();
   const params = useParams();
@@ -1978,6 +1979,10 @@ function JobDetailPage() {
       <button className={styles.backButton} type="button" onClick={() => navigate("/")}>
         返回工作台
       </button>
+
+      {taskGroupMode && params.jobId ? (
+        <TaskGroupWorkflowPanel adapter={adapter} groupId={params.jobId} />
+      ) : null}
 
       {detail ? (
         detail.isGroup ? (

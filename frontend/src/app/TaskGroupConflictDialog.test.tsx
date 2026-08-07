@@ -23,7 +23,7 @@ describe("TaskGroupConflictDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("renders duplicate conflict copy and supports canceling", async () => {
+  it("renders duplicate conflict copy, focuses cancel, and supports canceling", async () => {
     const onClose = vi.fn();
     const onConfirm = vi.fn();
     const user = userEvent.setup();
@@ -33,9 +33,26 @@ describe("TaskGroupConflictDialog", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "重复流程确认" })).toBeInTheDocument();
-    expect(screen.getByText("已有同图册流程在执行中，是否取消旧流程并重新提交？")).toBeInTheDocument();
+    expect(screen.getByText("已有同图册流程正在执行，是否取消旧流程并重新提交？")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    const cancelButton = screen.getByRole("button", { name: "取消" });
+    expect(cancelButton).toHaveFocus();
+    await user.click(cancelButton);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("closes with Escape without confirming", async () => {
+    const onClose = vi.fn();
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <TaskGroupConflictDialog kind="archive" onClose={onClose} onConfirm={onConfirm} />,
+    );
+
+    await user.keyboard("{Escape}");
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();

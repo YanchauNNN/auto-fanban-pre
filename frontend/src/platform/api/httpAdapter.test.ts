@@ -9,6 +9,33 @@ describe("HttpAdapter", () => {
     vi.useRealTimers();
   });
 
+  it("normalizes task-group submission blockers from management detail", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          group_id: "group-1",
+          status: "succeeded",
+          can_submit: false,
+          submit_blockers: ["deliverable_package_not_found", "shared_prep_invalid"],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await new HttpAdapter("http://127.0.0.1:8000/").getTaskGroupDetail(
+      "group-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/task-groups/group-1",
+      undefined,
+    );
+    expect(detail.submitBlockers).toEqual([
+      "deliverable_package_not_found",
+      "shared_prep_invalid",
+    ]);
+  });
+
   it("checks backend process reachability through the lightweight ping endpoint", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

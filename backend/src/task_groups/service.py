@@ -225,13 +225,26 @@ class TaskGroupService:
         return self.serializers.summarize(group, **permissions)
 
     def _serialize_detail(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, object]:
-        permissions = self._permissions(group, account)
-        return self.serializers.detail(group, **permissions)
+        readiness = self.submission_readiness.inspect(group)
+        permissions = self._permissions(group, account, submission_ready=readiness.is_ready)
+        return self.serializers.detail(
+            group,
+            **permissions,
+            submit_blockers=readiness.error_codes,
+        )
 
-    def _permissions(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, bool]:
+    def _permissions(
+        self,
+        group: TaskGroup,
+        account: AccountSnapshot,
+        *,
+        submission_ready: bool | None = None,
+    ) -> dict[str, bool]:
         current_node = self.workflow_service.current_node(group)
         can_view_detail = self.task_group_visibility.can_view(group, account)
-        can_submit = self.submission_readiness.inspect(group).is_ready and (
+        if submission_ready is None:
+            submission_ready = self.submission_readiness.inspect(group).is_ready
+        can_submit = submission_ready and (
             group.owner_snapshot is None or group.owner_snapshot.creator_account == account.account_id
         )
         can_approve = current_node is not None and current_node.assignee_account == account.account_id

@@ -48,6 +48,7 @@ class TaskGroupSerializers:
         can_submit: bool,
         can_approve: bool,
         is_related_to_current_user: bool,
+        submit_blockers: tuple[str, ...] = (),
     ) -> dict[str, object]:
         payload = TaskGroupSerializers.summarize(
             group,
@@ -64,6 +65,7 @@ class TaskGroupSerializers:
                 "archive": group.archive.model_dump(mode="json"),
                 "replacement": group.replacement.model_dump(mode="json"),
                 "legacy_visibility": group.legacy_visibility.model_dump(mode="json"),
+                "submit_blockers": list(submit_blockers),
             }
         )
         return payload

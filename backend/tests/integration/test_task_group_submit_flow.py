@@ -151,6 +151,7 @@ def _assert_submit_blocked(
     )
     assert detail.status_code == 200
     assert detail.json()["can_submit"] is False
+    assert expected_error in detail.json()["submit_blockers"]
 
     submit = client.post(
         f"/api/task-groups/{group_id}/submit",
@@ -799,6 +800,7 @@ def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch
         assert before_submit.status_code == 200
         before_payload = before_submit.json()
         assert before_payload["can_submit"] is True
+        assert before_payload["submit_blockers"] == []
         assert before_payload["can_approve"] is False
         assert before_payload["effective_workload"] == 0.0
 
@@ -814,6 +816,10 @@ def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch
         assert detail.status_code == 200
         payload = detail.json()
         assert payload["can_submit"] is False
+        assert payload["submit_blockers"] == [
+            "workflow_not_draft",
+            "task_group_not_succeeded",
+        ]
         assert payload["can_approve"] is True
         assert payload["is_related_to_current_user"] is True
         assert payload["album_internal_code"] == "2016-JG001"

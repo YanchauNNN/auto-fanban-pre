@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import styles from "./App.module.css";
 
 type TaskGroupConflictDialogProps = {
@@ -11,16 +13,38 @@ export function TaskGroupConflictDialog({
   onClose,
   onConfirm,
 }: TaskGroupConflictDialogProps) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const title = kind === "archive" ? "归档冲突确认" : "重复流程确认";
   const description =
     kind === "archive"
       ? "归档目标已存在，是否覆盖归档后继续提交？"
-      : "已有同图册流程在执行中，是否取消旧流程并重新提交？";
+      : "已有同图册流程正在执行，是否取消旧流程并重新提交？";
   const confirmLabel = kind === "archive" ? "继续提交" : "取消旧流程并重提";
+
+  useEffect(() => {
+    cancelButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   return (
     <div className={styles.jobsModalBackdrop}>
-      <div aria-label={title} aria-modal="true" className={styles.jobsModal} role="dialog">
+      <div
+        aria-label={title}
+        aria-modal="true"
+        className={`${styles.jobsModal} ${styles.conflictDialog}`}
+        role="dialog"
+      >
         <header className={styles.jobsModalHeader}>
           <div>
             <p className={styles.brandTop}>Submit Conflict</p>
@@ -29,7 +53,12 @@ export function TaskGroupConflictDialog({
         </header>
         <p className={styles.jobMessage}>{description}</p>
         <div className={styles.jobsModalActions}>
-          <button className={styles.secondaryActionButton} type="button" onClick={onClose}>
+          <button
+            ref={cancelButtonRef}
+            className={styles.secondaryActionButton}
+            type="button"
+            onClick={onClose}
+          >
             取消
           </button>
           <button className={styles.primaryActionButton} type="button" onClick={onConfirm}>

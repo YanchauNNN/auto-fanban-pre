@@ -21,6 +21,9 @@ const mockListJobs = vi.fn();
 const mockGetJobsActivity = vi.fn();
 const mockSubscribeJobsActivity = vi.fn();
 const mockGetJobDetail = vi.fn();
+const mockGetTaskGroupDetail = vi.fn();
+const mockSubmitTaskGroup = vi.fn();
+const mockRestartSubmitTaskGroup = vi.fn();
 const mockGetMe = vi.fn();
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
@@ -85,6 +88,9 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     getJobsActivity: mockGetJobsActivity,
     subscribeJobsActivity: mockSubscribeJobsActivity,
     getJobDetail: mockGetJobDetail,
+    getTaskGroupDetail: mockGetTaskGroupDetail,
+    submitTaskGroup: mockSubmitTaskGroup,
+    restartSubmitTaskGroup: mockRestartSubmitTaskGroup,
     getAiState: mockGetAiState,
     listAiConversations: mockListAiConversations,
     createAiConversation: mockCreateAiConversation,
@@ -112,6 +118,9 @@ beforeEach(() => {
   mockGetJobsActivity.mockReset();
   mockSubscribeJobsActivity.mockReset();
   mockGetJobDetail.mockReset();
+  mockGetTaskGroupDetail.mockReset();
+  mockSubmitTaskGroup.mockReset();
+  mockRestartSubmitTaskGroup.mockReset();
   mockGetMe.mockReset();
   mockLogin.mockReset();
   mockLogout.mockReset();
@@ -142,6 +151,13 @@ beforeEach(() => {
   mockReadArtifact.mockResolvedValue({
     arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
   });
+  mockGetTaskGroupDetail.mockResolvedValue(makeTaskGroupManagementDetail());
+  mockSubmitTaskGroup.mockResolvedValue(
+    makeTaskGroupManagementDetail({ canSubmit: false, workflowStatus: "in_review" }),
+  );
+  mockRestartSubmitTaskGroup.mockResolvedValue(
+    makeTaskGroupManagementDetail({ canSubmit: false, workflowStatus: "in_review" }),
+  );
   mockGetHealth.mockResolvedValue({
     status: "ok",
     ready: true,
@@ -354,6 +370,98 @@ function makeSingleJob(index: number, sourceFilename: string) {
     },
     retryAvailable: false,
     sharedRunId: null,
+  };
+}
+
+function makeTaskGroupManagementDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    groupId: "group-1",
+    displayName: "2016-JG001",
+    albumInternalCode: "2016-JG001",
+    batchId: "batch-1",
+    projectNo: "2016",
+    status: "succeeded",
+    createdAt: "2026-08-07T10:00:00+08:00",
+    sourceFilenames: ["sample.dwg"],
+    ownerSnapshot: null,
+    creatorName: "测试用户",
+    creatorAccount: "test-user",
+    creatorOffice: "建筑结构所",
+    workflowStatus: "draft",
+    currentNodeKey: null,
+    archiveStatus: "pending",
+    workload: {
+      initialWorkloadA1: 1,
+      finalWorkloadA1: 1,
+      oneReviewFactor: 1,
+      twoReviewFactor: 1,
+      threeReviewFactor: 1,
+      nodeFactors: {},
+      settlementStatus: "pending",
+      settledAt: null,
+      contributorEntries: [],
+    },
+    effectiveWorkload: 1,
+    canViewDetail: true,
+    canSubmit: true,
+    submitBlockers: [],
+    canApprove: false,
+    isRelatedToCurrentUser: true,
+    childJobIds: [],
+    personnelSnapshot: { members: {} },
+    workflow: {
+      status: "draft",
+      initiatedAt: null,
+      initiatedByAccount: null,
+      initiatedByName: null,
+      duplicatePolicy: null,
+      overwriteArchiveTarget: null,
+      currentNodeKey: null,
+      nodes: [],
+      archiveStatus: null,
+      archiveRetryCount: 0,
+      archiveLastError: null,
+      archiveLastAttemptAt: null,
+    },
+    archive: {
+      archiveRootPath: null,
+      targetDir: null,
+      status: "pending",
+      overwriteMode: null,
+      startedAt: null,
+      completedAt: null,
+      lastError: null,
+      retryCount: 0,
+      lastAttemptAt: null,
+      archivedFiles: [],
+    },
+    replacement: {
+      albumInternalCode: null,
+      revision: null,
+      replacedGroupId: null,
+      replacedRecordPendingDelete: false,
+    },
+    legacyVisibility: { scope: "creator", reason: null },
+    ...overrides,
+  };
+}
+
+function makeGroupJobDetail(jobId: string) {
+  return {
+    ...makeSingleJob(90, "sample-group.dwg"),
+    jobId,
+    groupId: jobId,
+    isGroup: true,
+    taskKind: null,
+    taskRole: null,
+    jobMode: null,
+    startedAt: "2026-08-07T10:00:10+08:00",
+    currentFile: null,
+    flags: [],
+    errors: [],
+    topWrongTexts: [],
+    topInternalCodes: [],
+    children: [],
   };
 }
 
@@ -1719,6 +1827,47 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
+  it("loads runtime and management details together on task-group routes", async () => {
+    window.history.pushState({}, "", "/task-groups/group-parallel");
+    mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-parallel"));
+    mockGetTaskGroupDetail.mockResolvedValue(
+      makeTaskGroupManagementDetail({ groupId: "group-parallel" }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "审批与归档" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "任务包概览" })).toBeInTheDocument();
+    expect(mockGetJobDetail).toHaveBeenCalledWith("group-parallel");
+    expect(mockGetTaskGroupDetail).toHaveBeenCalledWith("group-parallel");
+  });
+
+  it("keeps ordinary job routes on the runtime detail API only", async () => {
+    window.history.pushState({}, "", "/jobs/group-runtime-only");
+    mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-runtime-only"));
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "任务包概览" })).toBeInTheDocument();
+    expect(mockGetJobDetail).toHaveBeenCalledWith("group-runtime-only");
+    expect(mockGetTaskGroupDetail).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("审批与归档")).not.toBeInTheDocument();
+  });
+
+  it("keeps task artifacts visible when management detail is unavailable", async () => {
+    window.history.pushState({}, "", "/task-groups/group-management-offline");
+    mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-management-offline"));
+    mockGetTaskGroupDetail.mockRejectedValue(new Error("management offline"));
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("审批信息暂时无法加载，任务产物仍可正常查看。"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "任务包概览" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();
+  });
+
   it("shows failure diagnostics before quick downloads on single-job detail pages", async () => {
     window.history.pushState({}, "", "/jobs/failed-single-job");
     mockGetJobDetail.mockResolvedValue({
