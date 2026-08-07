@@ -517,6 +517,16 @@ def _extract_external_archive(
 ) -> tuple[Path, list[Path]]:
     if archive_format not in {ArchiveFormat.RAR, ArchiveFormat.SEVEN_Z}:
         raise InvalidCalculationArchive("压缩包格式不支持外部解压")
+    try:
+        resolved_archive = archive_path.resolve(strict=True)
+        source_stat = Path(os.path.abspath(archive_path)).lstat()
+        resolved_stat = resolved_archive.lstat()
+    except OSError as exc:
+        raise InvalidCalculationArchive("外部压缩归档文件读取失败") from exc
+    if _is_unsafe_file_stat(source_stat) or _is_unsafe_file_stat(resolved_stat):
+        raise InvalidCalculationArchive("外部压缩归档文件路径不安全")
+    if not stat.S_ISREG(source_stat.st_mode) or not stat.S_ISREG(resolved_stat.st_mode):
+        raise InvalidCalculationArchive("外部压缩归档文件必须是普通文件")
     executable, list_timeout, extract_timeout = _private_extractor(archive_extractor)
     resolved_root = _prepare_destination(destination)
     creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -535,7 +545,7 @@ def _extract_external_archive(
                 "-slt",
                 "-sccUTF-8",
                 "-bd",
-                str(archive_path),
+                str(resolved_archive),
             ],
             timeout=list_timeout,
             **common_options,
@@ -548,7 +558,7 @@ def _extract_external_archive(
         raise InvalidCalculationArchive(
             _seven_zip_failure_message(listing.stderr, operation="读取")
         )
-    members = _members_from_slt_listing(listing.stdout, archive_path, limits)
+    members = _members_from_slt_listing(listing.stdout, resolved_archive, limits)
 
     resolved_root.mkdir(parents=True, exist_ok=True)
     try:
@@ -561,7 +571,7 @@ def _extract_external_archive(
                 "-bb0",
                 "-sccUTF-8",
                 f"-o{resolved_root}",
-                str(archive_path),
+                str(resolved_archive),
             ],
             timeout=extract_timeout,
             **common_options,

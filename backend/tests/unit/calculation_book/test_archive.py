@@ -303,6 +303,105 @@ def test_external_archive_uses_private_7zip_with_utf8_and_yaml_timeouts(
     }
 
 
+@pytest.mark.parametrize("relative_name", ["-input.rar", "@input.7z"])
+def test_external_archive_resolves_switch_like_relative_paths_before_7zip_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_name: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    archive = _write_external_archive(Path(relative_name))
+    resolved_archive = archive.resolve(strict=True)
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    calls = _mock_external_run(monkeypatch, _slt_listing(entries), entries)
+
+    validate_and_extract_archive(
+        archive,
+        tmp_path / "extracted",
+        archive_extractor=settings,
+    )
+
+    assert len(calls) == 2
+    for args, _ in calls:
+        assert args[-1] == str(resolved_archive)
+        assert Path(args[-1]).is_absolute()
+        assert not args[-1].startswith(("-", "@"))
+        assert relative_name not in args
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "reparse"])
+def test_external_archive_rejects_unsafe_archive_file_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_kind: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "unsafe-input.rar")
+    settings = _extractor_settings(tmp_path)
+    archive_size = archive.stat().st_size
+    if unsafe_kind == "symlink":
+        real_lstat = Path.lstat
+        archive_absolute = Path(os.path.abspath(archive))
+
+        def mark_archive_as_symlink(path: Path) -> os.stat_result:
+            file_stat = real_lstat(path)
+            if Path(os.path.abspath(path)) != archive_absolute:
+                return file_stat
+            values = list(file_stat)
+            values[0] = stat.S_IFLNK | 0o777
+            return os.stat_result(values)
+
+        monkeypatch.setattr(Path, "lstat", mark_archive_as_symlink)
+    else:
+        real_is_reparse_point = archive_module._is_reparse_point
+
+        def mark_archive_as_reparse(file_stat: os.stat_result) -> bool:
+            return (
+                stat.S_ISREG(file_stat.st_mode)
+                and file_stat.st_size == archive_size
+            ) or real_is_reparse_point(file_stat)
+
+        monkeypatch.setattr(
+            "src.calculation_book.archive._is_reparse_point",
+            mark_archive_as_reparse,
+        )
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7-Zip must not run for an unsafe archive path")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match="归档文件.*不安全"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+
+def test_external_archive_rejects_directory_archive_path_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_directory = tmp_path / "directory.rar"
+    archive_directory.mkdir()
+    settings = _extractor_settings(tmp_path)
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7-Zip must not run for an archive directory")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match="归档文件.*普通文件"):
+        archive_module._extract_external_archive(
+            archive_directory,
+            tmp_path / "extracted",
+            ArchiveLimits(),
+            archive_format=ArchiveFormat.RAR,
+            archive_extractor=settings,
+        )
+
+
 @pytest.mark.parametrize(
     ("executable", "message"),
     [
