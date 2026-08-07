@@ -27,6 +27,8 @@ const mockRestartSubmitTaskGroup = vi.fn();
 const mockGetMe = vi.fn();
 const mockLogin = vi.fn();
 const mockLogout = vi.fn();
+const mockGetWorkloadMe = vi.fn();
+const mockChangePassword = vi.fn();
 const mockReadArtifact = vi.fn();
 const mockGetAiState = vi.fn();
 const mockListAiConversations = vi.fn();
@@ -75,6 +77,8 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     login: mockLogin,
     logout: mockLogout,
     getMe: mockGetMe,
+    getWorkloadMe: mockGetWorkloadMe,
+    changePassword: mockChangePassword,
     readArtifact: mockReadArtifact,
     ping: mockPing,
     getHealth: mockGetHealth,
@@ -122,6 +126,8 @@ beforeEach(() => {
   mockSubmitTaskGroup.mockReset();
   mockRestartSubmitTaskGroup.mockReset();
   mockGetMe.mockReset();
+  mockGetWorkloadMe.mockReset();
+  mockChangePassword.mockReset();
   mockLogin.mockReset();
   mockLogout.mockReset();
   mockReadArtifact.mockReset();
@@ -150,6 +156,23 @@ beforeEach(() => {
   });
   mockReadArtifact.mockResolvedValue({
     arrayBuffer: () => Promise.resolve(new TextEncoder().encode("pdf-data").buffer),
+  });
+  mockGetWorkloadMe.mockResolvedValue({
+    scope: "me",
+    filters: { startDate: null, endDate: null, status: null, validOnly: false },
+    officeName: null,
+    totalWorkloadA1: 0,
+    totalsByAccount: {},
+    entries: [],
+  });
+  mockChangePassword.mockResolvedValue({
+    accountId: "test-user",
+    displayName: "测试用户",
+    role: "管理员",
+    officeCode: "25C0",
+    officeName: "建筑结构所",
+    valid: true,
+    pendingTodoCount: 0,
   });
   mockGetTaskGroupDetail.mockResolvedValue(makeTaskGroupManagementDetail());
   mockSubmitTaskGroup.mockResolvedValue(
@@ -1152,7 +1175,16 @@ describe("homepage shell", () => {
     await user.click(accountButton);
     expect(screen.getByTestId("module-account-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("module-business-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workspace-page")).toHaveAttribute(
+      "data-layout-mode",
+      "bounded-account",
+    );
 
+    await user.click(await screen.findByRole("button", { name: "查看 0 项待办" }));
+    expect(screen.getByTestId("module-workload-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("module-account-panel")).not.toBeInTheDocument();
+
+    await user.click(accountButton);
     await user.click(workloadButton);
     expect(screen.getByTestId("module-workload-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("module-account-panel")).not.toBeInTheDocument();

@@ -19,10 +19,12 @@ export function AccountModulePanel({
   isAdmin,
   mode,
   onModeChange,
+  onOpenWorkload,
 }: {
   isAdmin: boolean;
   mode: AccountPanelMode;
   onModeChange: (mode: AccountPanelMode) => void;
+  onOpenWorkload: () => void;
 }) {
   return (
     <section className={styles.modulePanel} data-testid="module-account-panel">
@@ -49,7 +51,11 @@ export function AccountModulePanel({
       <Suspense
         fallback={<RoutePlaceholder description="正在加载账号信息..." title="账号模块" />}
       >
-        {mode === "admin" && isAdmin ? <AccountAdminPage /> : <AccountPage />}
+        {mode === "admin" && isAdmin ? (
+          <AccountAdminPage />
+        ) : (
+          <AccountPage onOpenWorkload={onOpenWorkload} />
+        )}
       </Suspense>
     </section>
   );

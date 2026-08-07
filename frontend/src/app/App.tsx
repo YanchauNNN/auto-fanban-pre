@@ -1100,9 +1100,17 @@ function WorkspacePage() {
   return (
     <div
       className={`${styles.workspacePage} ${
-        activeModule === "workload" ? styles.workspacePageWorkload : ""
+        activeModule === "workload" || activeModule === "account"
+          ? styles.workspacePageBounded
+          : ""
       }`}
-      data-layout-mode={activeModule === "workload" ? "bounded-workload" : "document"}
+      data-layout-mode={
+        activeModule === "workload"
+          ? "bounded-workload"
+          : activeModule === "account"
+            ? "bounded-account"
+            : "document"
+      }
       data-testid="workspace-page"
     >
       <header className={styles.titleStrip} data-testid="title-strip">
@@ -1411,6 +1419,7 @@ function WorkspacePage() {
               isAdmin={isAdmin}
               mode={accountPanelMode}
               onModeChange={setAccountPanelMode}
+              onOpenWorkload={() => setActiveModule("workload")}
             />
           ) : (
             <WorkloadModulePanel />

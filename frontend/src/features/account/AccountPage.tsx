@@ -1,8 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
 
-import { getWorkloadEntryDisplayTitle } from "../../shared/task-groups/taskGroupPresentation";
 import { useApiAdapter } from "../../platform/api/useApiAdapter";
+import {
+  getSettlementStatusLabel,
+  getWorkloadEntryDisplayTitle,
+  getWorkloadRoleLabel,
+} from "../../shared/task-groups/taskGroupPresentation";
 import { useSession } from "../../shared/session/SessionContext";
 import styles from "./AccountPage.module.css";
 
@@ -30,10 +34,12 @@ function formatTimestamp(value: string | null) {
   }).format(date);
 }
 
-export function AccountPage() {
+export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) {
   const adapter = useApiAdapter();
   const { currentAccount, refreshCurrentAccount } = useSession();
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{
     tone: "error" | "success";
@@ -52,27 +58,31 @@ export function AccountPage() {
         const rightTime = right.settledAt ? new Date(right.settledAt).getTime() : 0;
         return rightTime - leftTime;
       })
-      .slice(0, 5);
+      .slice(0, 8);
   }, [workloadQuery.data?.entries]);
 
   if (!currentAccount) {
     return null;
   }
 
+  const passwordsMismatch = Boolean(confirmPassword && newPassword !== confirmPassword);
+  const canSubmitPassword = Boolean(
+    newPassword.trim() && confirmPassword.trim() && !passwordsMismatch && !submitting,
+  );
+
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmed = newPassword.trim();
-    if (!trimmed) {
-      setFeedback({ tone: "error", message: "请输入新密码。" });
+    if (!canSubmitPassword) {
       return;
     }
 
     setSubmitting(true);
     setFeedback(null);
     try {
-      await adapter.changePassword(trimmed);
+      await adapter.changePassword(newPassword.trim());
       await refreshCurrentAccount();
       setNewPassword("");
+      setConfirmPassword("");
       setFeedback({ tone: "success", message: "密码已更新，下次登录请使用新密码。" });
     } catch (error) {
       setFeedback({ tone: "error", message: "密码更新失败，请稍后重试。" });
@@ -83,145 +93,170 @@ export function AccountPage() {
 
   return (
     <main className={styles.page}>
-      <div className={styles.surface}>
-        <header className={styles.header}>
-          <div>
-            <p className={styles.eyebrow}>Account Center</p>
-            <h1>账号模块</h1>
-            <p className={styles.description}>
-              当前登录账号、密码入口和个人已结算工作量集中在一个工作台内。
-            </p>
-          </div>
-          <div className={styles.headerMetric}>
-            <span>待办流程</span>
-            <strong>{currentAccount.pendingTodoCount}</strong>
-          </div>
-        </header>
+      <header className={styles.pageHeader}>
+        <div>
+          <p className={styles.eyebrow}>Personal Account</p>
+          <h1>我的账号</h1>
+          <p className={styles.description}>查看身份、安全设置和最近已结算工作量。</p>
+        </div>
+        <button
+          aria-label={`查看 ${currentAccount.pendingTodoCount} 项待办`}
+          className={styles.todoButton}
+          onClick={onOpenWorkload}
+          type="button"
+        >
+          <span>待我处理</span>
+          <strong>{currentAccount.pendingTodoCount}</strong>
+          <small>进入工作量模块</small>
+        </button>
+      </header>
 
-        <section className={styles.accountShell}>
-          <aside className={styles.profilePanel}>
+      <div className={styles.workspace}>
+        <section
+          aria-labelledby="account-identity-heading"
+          className={`${styles.section} ${styles.identitySection}`}
+        >
+          <div className={styles.sectionHeader}>
             <div>
-              <span className={styles.profileLabel}>当前账号</span>
-              <strong className={styles.profileName}>{currentAccount.displayName}</strong>
-              <p className={styles.profileMeta}>{currentAccount.accountId}</p>
+              <span className={styles.sectionIndex}>01</span>
+              <h2 id="account-identity-heading">身份摘要</h2>
             </div>
-            <div className={styles.identityGrid}>
-              <InfoCard label="角色" value={currentAccount.role} />
-              <InfoCard label="责任单位" value={currentAccount.officeName ?? "未配置"} />
-              <InfoCard label="单位编码" value={currentAccount.officeCode ?? "未配置"} />
+            <span className={styles.statusTag}>当前会话</span>
+          </div>
+          <div className={styles.identityPrimary}>
+            <strong>{currentAccount.displayName}</strong>
+            <span>{currentAccount.accountId}</span>
+          </div>
+          <dl className={styles.identityList}>
+            <div>
+              <dt>角色</dt>
+              <dd>{currentAccount.role}</dd>
             </div>
-          </aside>
+            <div>
+              <dt>责任单位</dt>
+              <dd>{currentAccount.officeName ?? "未配置"}</dd>
+            </div>
+            <div>
+              <dt>单位编码</dt>
+              <dd>{currentAccount.officeCode ?? "未配置"}</dd>
+            </div>
+          </dl>
+        </section>
 
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.eyebrow}>Security</p>
-                <h2>修改密码</h2>
-              </div>
-              <span className={styles.panelHint}>只更新当前账号密码</span>
+        <section aria-labelledby="account-security-heading" className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <span className={styles.sectionIndex}>02</span>
+              <h2 id="account-security-heading">安全操作</h2>
             </div>
+            <button
+              aria-label={passwordVisible ? "隐藏密码" : "显示密码"}
+              className={styles.textButton}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              type="button"
+            >
+              {passwordVisible ? "隐藏" : "显示"}
+            </button>
+          </div>
 
-            <form className={styles.form} onSubmit={handlePasswordSubmit}>
-              <label className={styles.label} htmlFor="account-new-password">
-                新密码
-              </label>
+          <form className={styles.passwordForm} onSubmit={handlePasswordSubmit}>
+            <label className={styles.field} htmlFor="account-new-password">
+              <span>新密码</span>
               <input
-                className={styles.input}
+                autoComplete="new-password"
                 id="account-new-password"
                 name="new_password"
-                onChange={(event) => setNewPassword(event.currentTarget.value)}
-                type="password"
+                onChange={(event) => {
+                  setNewPassword(event.currentTarget.value);
+                  setFeedback(null);
+                }}
+                type={passwordVisible ? "text" : "password"}
                 value={newPassword}
               />
-              <p className={styles.helpText}>提交后立即生效，后续登录请使用新密码。</p>
+            </label>
+            <label className={styles.field} htmlFor="account-confirm-password">
+              <span>确认新密码</span>
+              <input
+                autoComplete="new-password"
+                id="account-confirm-password"
+                name="confirm_password"
+                onChange={(event) => {
+                  setConfirmPassword(event.currentTarget.value);
+                  setFeedback(null);
+                }}
+                type={passwordVisible ? "text" : "password"}
+                value={confirmPassword}
+              />
+            </label>
+            <div className={styles.formMessage} aria-live="polite">
+              {passwordsMismatch ? (
+                <p className={styles.validationError}>两次输入的密码不一致。</p>
+              ) : (
+                <p>密码更新后立即生效。</p>
+              )}
               {feedback ? (
                 <p
-                  className={feedback.tone === "success" ? styles.feedbackSuccess : styles.feedbackError}
-                  role="status"
+                  className={feedback.tone === "success" ? styles.feedbackSuccess : styles.validationError}
+                  role={feedback.tone === "error" ? "alert" : "status"}
                 >
                   {feedback.message}
                 </p>
               ) : null}
-              <button className={styles.primaryButton} disabled={submitting} type="submit">
-                {submitting ? "更新中..." : "更新密码"}
-              </button>
-            </form>
-          </section>
-
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.eyebrow}>Personal Workload</p>
-                <h2>个人工作量摘要</h2>
-              </div>
-              <span className={styles.panelHint}>已结算记录</span>
             </div>
+            <button className={styles.primaryButton} disabled={!canSubmitPassword} type="submit">
+              {submitting ? "更新中..." : "更新密码"}
+            </button>
+          </form>
+        </section>
 
-            {workloadQuery.isLoading ? (
-              <p className={styles.muted}>正在加载个人工作量...</p>
-            ) : workloadQuery.isError ? (
-              <p className={styles.feedbackError}>个人工作量暂时加载失败，请稍后刷新重试。</p>
-            ) : (
-              <>
-                <div className={styles.workloadHero}>
-                  <div>
-                    <span className={styles.workloadLabel}>累计工作量 A1</span>
-                    <strong className={styles.workloadValue}>
-                      {formatWorkload(workloadQuery.data?.totalWorkloadA1 ?? 0)}
-                    </strong>
-                  </div>
-                  <div className={styles.workloadMeta}>
-                    <span>{`${workloadQuery.data?.entries.length ?? 0} 条已结算记录`}</span>
-                    <span>
-                      {recentEntries[0]?.settledAt
-                        ? `最近结算：${formatTimestamp(recentEntries[0].settledAt)}`
-                        : "最近结算：暂无"}
-                    </span>
-                  </div>
-                </div>
+        <section
+          aria-labelledby="account-settlement-heading"
+          className={`${styles.section} ${styles.settlementSection}`}
+        >
+          <div className={styles.sectionHeader}>
+            <div>
+              <span className={styles.sectionIndex}>03</span>
+              <h2 id="account-settlement-heading">最近结算</h2>
+            </div>
+            <div className={styles.totalWorkload}>
+              <span>累计 A1</span>
+              <strong>{formatWorkload(workloadQuery.data?.totalWorkloadA1 ?? 0)}</strong>
+            </div>
+          </div>
 
-                {recentEntries.length > 0 ? (
-                  <div className={styles.entryList}>
-                    {recentEntries.map((entry) => (
-                      <article className={styles.entryCard} key={`${entry.groupId}-${entry.roleKey}`}>
-                        <div className={styles.entryHeader}>
-                          <strong>{getWorkloadEntryDisplayTitle(entry)}</strong>
-                          <span>{formatWorkload(entry.workloadA1)}</span>
-                        </div>
-                        <div className={styles.entryMeta}>
-                          <span>{entry.roleKey}</span>
-                          <span>{entry.displayName ?? currentAccount.displayName}</span>
-                          <span>{formatTimestamp(entry.settledAt)}</span>
-                        </div>
-                      </article>
-                    ))}
+          {workloadQuery.isLoading ? (
+            <p aria-label="正在加载最近结算" className={styles.stateMessage} role="status">
+              正在读取最近结算记录...
+            </p>
+          ) : workloadQuery.isError ? (
+            <p aria-label="最近结算加载失败" className={styles.errorState} role="alert">
+              最近结算加载失败，请稍后刷新重试。
+            </p>
+          ) : recentEntries.length > 0 ? (
+            <div aria-label="最近结算记录" className={styles.settlementList} role="list">
+              {recentEntries.map((entry) => (
+                <article
+                  className={styles.settlementRow}
+                  key={`${entry.groupId}-${entry.roleKey}-${entry.settledAt ?? "pending"}`}
+                  role="listitem"
+                >
+                  <div className={styles.settlementMain}>
+                    <strong>{getWorkloadEntryDisplayTitle(entry)}</strong>
+                    <span>{formatTimestamp(entry.settledAt)}</span>
                   </div>
-                ) : (
-                  <p className={styles.muted}>当前还没有已结算的个人工作量记录。</p>
-                )}
-              </>
-            )}
-          </section>
+                  <div className={styles.settlementMeta}>
+                    <span>{getWorkloadRoleLabel(entry.roleKey)}</span>
+                    <span>{getSettlementStatusLabel(entry.settlementStatus)}</span>
+                    <strong>{formatWorkload(entry.workloadA1)} A1</strong>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.stateMessage}>当前还没有已结算记录。</p>
+          )}
         </section>
       </div>
     </main>
-  );
-}
-
-function InfoCard({
-  label,
-  value,
-  supporting,
-}: {
-  label: string;
-  value: string;
-  supporting?: string;
-}) {
-  return (
-    <article className={styles.infoCard}>
-      <span className={styles.cardLabel}>{label}</span>
-      <strong className={styles.cardValue}>{value}</strong>
-      {supporting ? <p className={styles.cardSupporting}>{supporting}</p> : null}
-    </article>
   );
 }
