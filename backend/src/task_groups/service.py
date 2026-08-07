@@ -227,7 +227,7 @@ class TaskGroupService:
         self.workload_calculator.refresh_final(group.workload)
 
     def _require_group(self, group_id: str) -> TaskGroup:
-        group = self.group_manager.get_group(group_id)
+        group = self.group_manager.reload_group(group_id)
         if group is None:
             raise ValueError("group not found")
         return group

@@ -41,6 +41,30 @@ backend_mechanism:
       - "archiving"
       - "archive_failed"
 
+  task_group_submission:
+    shared_prep:
+      required_json_files: ["frames.json", "sheet_sets.json"]
+      summary_file: "prep_summary.json"
+      source_summary_field: "source_input_dwg"
+      source_glob: "source_input.*"
+      invalid_error: "shared_prep_invalid"
+      source_missing_error: "shared_prep_source_missing"
+    required_task_roles:
+      - task_role: "deliverable_main"
+        missing_role_error: "deliverable_main_missing"
+        artifacts:
+          - field: "package_zip"
+            not_declared_error: "deliverable_package_not_declared"
+            not_found_error: "deliverable_package_not_found"
+          - field: "ied_xlsx"
+            not_declared_error: "deliverable_ied_not_declared"
+            not_found_error: "deliverable_ied_not_found"
+            required_when:
+              source: "params"
+              field: "include_ied_plan"
+              equals: true
+              default: true
+
   workload_runtime:
     status_options:
       - { label: "全部状态", value: "" }

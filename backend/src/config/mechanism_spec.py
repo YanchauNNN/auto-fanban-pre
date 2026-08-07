@@ -13,7 +13,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, PositiveInt, model_validator
@@ -56,6 +56,71 @@ class WorkflowRuntimeConfig(BaseModel):
     approval_terminal_status: str = ""
     archive_trigger_status: str = ""
     active_conflict_statuses: list[str] = Field(default_factory=list)
+
+
+class TaskGroupSubmissionConditionConfig(BaseModel):
+    source: Literal["params", "options"] = "params"
+    field: str = Field(min_length=1)
+    equals: bool = True
+    default: bool = True
+
+
+class TaskGroupSubmissionArtifactRequirementConfig(BaseModel):
+    field: Literal["package_zip", "ied_xlsx"]
+    not_declared_error: str = Field(min_length=1)
+    not_found_error: str = Field(min_length=1)
+    required_when: TaskGroupSubmissionConditionConfig | None = None
+
+
+class TaskGroupSubmissionTaskRoleConfig(BaseModel):
+    task_role: str = Field(min_length=1)
+    missing_role_error: str = Field(min_length=1)
+    artifacts: list[TaskGroupSubmissionArtifactRequirementConfig] = Field(min_length=1)
+
+
+class TaskGroupSubmissionSharedPrepConfig(BaseModel):
+    required_json_files: list[str] = Field(
+        default_factory=lambda: ["frames.json", "sheet_sets.json"],
+        min_length=1,
+    )
+    summary_file: str = Field(default="prep_summary.json", min_length=1)
+    source_summary_field: str = Field(default="source_input_dwg", min_length=1)
+    source_glob: str = Field(default="source_input.*", min_length=1)
+    invalid_error: str = Field(default="shared_prep_invalid", min_length=1)
+    source_missing_error: str = Field(default="shared_prep_source_missing", min_length=1)
+
+
+class TaskGroupSubmissionConfig(BaseModel):
+    shared_prep: TaskGroupSubmissionSharedPrepConfig = Field(
+        default_factory=TaskGroupSubmissionSharedPrepConfig
+    )
+    required_task_roles: list[TaskGroupSubmissionTaskRoleConfig] = Field(
+        default_factory=lambda: [
+            TaskGroupSubmissionTaskRoleConfig(
+                task_role="deliverable_main",
+                missing_role_error="deliverable_main_missing",
+                artifacts=[
+                    TaskGroupSubmissionArtifactRequirementConfig(
+                        field="package_zip",
+                        not_declared_error="deliverable_package_not_declared",
+                        not_found_error="deliverable_package_not_found",
+                    ),
+                    TaskGroupSubmissionArtifactRequirementConfig(
+                        field="ied_xlsx",
+                        not_declared_error="deliverable_ied_not_declared",
+                        not_found_error="deliverable_ied_not_found",
+                        required_when=TaskGroupSubmissionConditionConfig(
+                            source="params",
+                            field="include_ied_plan",
+                            equals=True,
+                            default=True,
+                        ),
+                    ),
+                ],
+            )
+        ],
+        min_length=1,
+    )
 
 
 class WorkloadStatusOptionConfig(BaseModel):
@@ -307,6 +372,9 @@ class BackendMechanismConfig(BaseModel):
     archive_defaults: ArchiveDefaultsConfig = Field(default_factory=ArchiveDefaultsConfig)
     workload_settlement: WorkloadSettlementConfig = Field(default_factory=WorkloadSettlementConfig)
     workflow_runtime: WorkflowRuntimeConfig = Field(default_factory=WorkflowRuntimeConfig)
+    task_group_submission: TaskGroupSubmissionConfig = Field(
+        default_factory=TaskGroupSubmissionConfig
+    )
     workload_runtime: WorkloadRuntimeConfig = Field(default_factory=WorkloadRuntimeConfig)
     management_ui: ManagementUiConfig = Field(default_factory=ManagementUiConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
@@ -340,6 +408,10 @@ class MechanismSpec(BaseModel):
     @property
     def workflow_runtime(self) -> WorkflowRuntimeConfig:
         return self.backend_mechanism.workflow_runtime
+
+    @property
+    def task_group_submission(self) -> TaskGroupSubmissionConfig:
+        return self.backend_mechanism.task_group_submission
 
     @property
     def workload_runtime(self) -> WorkloadRuntimeConfig:

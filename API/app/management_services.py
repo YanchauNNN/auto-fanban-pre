@@ -75,7 +75,11 @@ class ManagementServices:
         workload_calculator = WorkloadCalculator()
         workload_settlement_service = WorkloadSettlementService(workload_calculator)
         workload_queries = WorkloadQueries()
-        submission_readiness = TaskGroupSubmissionReadinessPolicy(runtime.job_manager)
+        submission_readiness = TaskGroupSubmissionReadinessPolicy(
+            group_manager=runtime.group_manager,
+            job_manager=runtime.job_manager,
+            shared_prep_service=runtime.shared_prep_service,
+        )
         task_group_service = TaskGroupService(
             group_manager=runtime.group_manager,
             job_manager=runtime.job_manager,

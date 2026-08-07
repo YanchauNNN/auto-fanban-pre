@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..models import JobStatus, TaskGroup
+from ..config import MechanismSpec, load_mechanism_spec
+from ..config.mechanism_spec import TaskGroupSubmissionConditionConfig
+from ..models import Job, JobStatus, TaskGroup
+from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
+from ..pipeline.shared_prep import SharedPrepService
 from ..workflow.models import WorkflowStatus
 
 
@@ -24,8 +29,18 @@ class TaskGroupSubmissionReadiness:
 class TaskGroupSubmissionReadinessPolicy:
     """Read-only readiness checks shared by submission and UI permissions."""
 
-    def __init__(self, job_manager: JobManager) -> None:
+    def __init__(
+        self,
+        *,
+        group_manager: GroupManager,
+        job_manager: JobManager,
+        shared_prep_service: SharedPrepService,
+        mechanism_spec: MechanismSpec | None = None,
+    ) -> None:
+        self.group_manager = group_manager
         self.job_manager = job_manager
+        self.shared_prep_service = shared_prep_service
+        self.config = (mechanism_spec or load_mechanism_spec()).task_group_submission
 
     def inspect(self, group: TaskGroup) -> TaskGroupSubmissionReadiness:
         errors: list[str] = []
@@ -41,7 +56,7 @@ class TaskGroupSubmissionReadinessPolicy:
 
         children = []
         for child_job_id in group.child_job_ids:
-            child = self.job_manager.get_job(child_job_id)
+            child = self.job_manager.reload_job(child_job_id)
             if child is None:
                 errors.append("task_group_child_not_found")
                 continue
@@ -49,13 +64,24 @@ class TaskGroupSubmissionReadinessPolicy:
             if child.status is not JobStatus.SUCCEEDED:
                 errors.append("task_group_child_not_succeeded")
 
-        deliverable = next((child for child in children if child.task_role == "deliverable_main"), None)
-        if deliverable is None:
-            errors.append("deliverable_main_missing")
-        elif deliverable.artifacts.package_zip is None:
-            errors.append("deliverable_package_not_declared")
-        elif not _is_file(deliverable.artifacts.package_zip):
-            errors.append("deliverable_package_not_found")
+        errors.extend(self._inspect_shared_prep(group))
+
+        for role_requirement in self.config.required_task_roles:
+            child = next(
+                (item for item in children if item.task_role == role_requirement.task_role),
+                None,
+            )
+            if child is None:
+                errors.append(role_requirement.missing_role_error)
+                continue
+            for artifact_requirement in role_requirement.artifacts:
+                if not _artifact_is_required(child, artifact_requirement.required_when):
+                    continue
+                artifact = getattr(child.artifacts, artifact_requirement.field)
+                if artifact is None:
+                    errors.append(artifact_requirement.not_declared_error)
+                elif not _is_file(artifact):
+                    errors.append(artifact_requirement.not_found_error)
 
         return TaskGroupSubmissionReadiness(tuple(dict.fromkeys(errors)))
 
@@ -64,6 +90,60 @@ class TaskGroupSubmissionReadinessPolicy:
         if not result.is_ready:
             raise ValueError(result.primary_error)
         return result
+
+    def _inspect_shared_prep(self, group: TaskGroup) -> list[str]:
+        config = self.config.shared_prep
+        shared_dir = (
+            group.shared_dir
+            or self.group_manager.config.get_group_dir(group.group_id) / "shared"
+        ).resolve()
+        summary: dict[str, object] = {}
+        try:
+            for filename in config.required_json_files:
+                json.loads((shared_dir / filename).read_text(encoding="utf-8"))
+            summary_path = shared_dir / config.summary_file
+            if summary_path.exists():
+                raw_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                if not isinstance(raw_summary, dict):
+                    raise ValueError("shared prep summary must be an object")
+                summary = raw_summary
+            self.shared_prep_service.load(shared_dir)
+        except (OSError, TypeError, ValueError):
+            return [config.invalid_error]
+
+        source_candidates = [
+            path
+            for path in shared_dir.glob(config.source_glob)
+            if path.is_file()
+        ]
+        summary_source = str(summary.get(config.source_summary_field) or "").strip()
+        if summary_source:
+            summary_source_path = Path(summary_source)
+            if not summary_source_path.is_absolute():
+                summary_source_path = shared_dir / summary_source_path
+            source_candidates.append(summary_source_path)
+        if not any(_is_file(path) for path in source_candidates):
+            return [config.source_missing_error]
+        return []
+
+
+def _artifact_is_required(
+    child: Job,
+    condition: TaskGroupSubmissionConditionConfig | None,
+) -> bool:
+    if condition is None:
+        return True
+    source = child.params if condition.source == "params" else child.options
+    raw_value = source.get(condition.field, condition.default)
+    return _coerce_bool(raw_value) == condition.equals
+
+
+def _coerce_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _is_file(path: Path) -> bool:

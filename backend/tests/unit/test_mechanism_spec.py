@@ -74,6 +74,23 @@ def test_repo_mechanism_spec_whitelists_connected_han_forbidden_term() -> None:
     assert spec.audit_display.forbidden_term_connected_han_whitelist == ["工种"]
 
 
+def test_repo_mechanism_spec_exposes_typed_task_group_submission_rules() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(repo_root / "documents" / "参数规范-3.yaml")
+    submission = spec.task_group_submission
+
+    assert submission.shared_prep.required_json_files == ["frames.json", "sheet_sets.json"]
+    assert submission.shared_prep.invalid_error == "shared_prep_invalid"
+    assert submission.shared_prep.source_missing_error == "shared_prep_source_missing"
+    deliverable = submission.required_task_roles[0]
+    assert deliverable.task_role == "deliverable_main"
+    assert [artifact.field for artifact in deliverable.artifacts] == ["package_zip", "ied_xlsx"]
+    assert deliverable.artifacts[1].required_when is not None
+    assert deliverable.artifacts[1].required_when.field == "include_ied_plan"
+
+
 def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> None:
     spec_path = _write_mechanism_spec(
         tmp_path / "documents" / "参数规范-3.yaml",

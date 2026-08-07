@@ -6,9 +6,11 @@ from typing import Any, cast
 from zipfile import ZipFile
 
 import pytest
+import yaml
 from API.app.main import create_app
 from fastapi.testclient import TestClient
 
+from src.config import MechanismSpecLoader
 from src.models import JobArtifacts, JobStatus
 from src.workflow.models import WorkflowStatus
 
@@ -21,7 +23,12 @@ def _login(client: TestClient, account_id: str) -> str:
     return response.json()["token"]
 
 
-def _seed_group(client: TestClient, tmp_path: Path) -> str:
+def _seed_group(
+    client: TestClient,
+    tmp_path: Path,
+    *,
+    include_ied_plan: bool = False,
+) -> str:
     runtime = cast(Any, client.app).state.runtime
     creator = cast(Any, client.app).state.management.account_registry.to_snapshot("zhangsan")
     group = runtime.group_manager.create_group(
@@ -41,7 +48,6 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
         group_id=group.group_id,
         source_filename="sample.dwg",
         task_role="deliverable_main",
-        options={"include_ied_plan": False},
         params={
             "project_no": "2016",
             "classification": "非密",
@@ -56,6 +62,7 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
             "ied_discipline_leader": "王五",
             "ied_reviewed_by": "王五",
             "ied_approved_by": "管理员",
+            "include_ied_plan": include_ied_plan,
         },
     )
     job_dir = runtime.config.get_job_dir(job.job_id)
@@ -63,7 +70,11 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
     package_zip = job_dir / "package.zip"
     with ZipFile(package_zip, "w") as archive:
         archive.writestr("manifest.txt", "minimal deliverable package")
-    job.artifacts = JobArtifacts(package_zip=package_zip)
+    ied_xlsx = None
+    if include_ied_plan:
+        ied_xlsx = job_dir / "ied.xlsx"
+        ied_xlsx.write_bytes(b"minimal ied workbook")
+    job.artifacts = JobArtifacts(package_zip=package_zip, ied_xlsx=ied_xlsx)
     job.mark_succeeded()
     runtime.job_manager.update_job(job)
 
@@ -102,6 +113,20 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
     (group.shared_dir / "frames.json").write_text(json.dumps([frame_payload], ensure_ascii=False), encoding="utf-8")
     (group.shared_dir / "sheet_sets.json").write_text("[]", encoding="utf-8")
     return group.group_id
+
+
+def _write_task_group_submission_mechanism(
+    project_root: Path,
+    payload: dict[str, object],
+) -> None:
+    mechanism_path = project_root / "documents" / "参数规范-3.yaml"
+    mechanism_payload = yaml.safe_load(mechanism_path.read_text(encoding="utf-8"))
+    mechanism_payload["backend_mechanism"]["task_group_submission"] = payload
+    mechanism_path.write_text(
+        yaml.safe_dump(mechanism_payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    MechanismSpecLoader.clear_cache()
 
 
 def _runtime_group_and_child(client: TestClient, group_id: str):
@@ -221,6 +246,194 @@ def test_submit_requires_existing_deliverable_package(monkeypatch, tmp_path) -> 
         runtime.job_manager.update_job(child)
 
         _assert_submit_blocked(client, group_id, "deliverable_package_not_found")
+
+
+def test_detail_and_submit_reload_worker_persisted_group_and_child_state(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, cached_group, cached_child = _runtime_group_and_child(client, group_id)
+
+        cached_group.status = JobStatus.QUEUED
+        cached_child.status = JobStatus.QUEUED
+        token = _login(client, "zhangsan")
+
+        detail = client.get(
+            f"/api/task-groups/{group_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.status_code == 200
+        assert detail.json()["status"] == "succeeded"
+        assert detail.json()["can_submit"] is True
+
+        runtime.group_manager.get_group(group_id).status = JobStatus.QUEUED
+        runtime.job_manager.get_job(cached_child.job_id).status = JobStatus.QUEUED
+        submit = client.post(
+            f"/api/task-groups/{group_id}/submit",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert submit.status_code == 200
+        assert submit.json()["workflow"]["status"] == "in_review"
+
+
+@pytest.mark.parametrize(
+    ("filename", "invalid_contents"),
+    [
+        ("frames.json", "{"),
+        ("sheet_sets.json", None),
+    ],
+)
+def test_submit_rejects_missing_or_invalid_shared_prep_json(
+    monkeypatch,
+    tmp_path,
+    filename: str,
+    invalid_contents: str | None,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        target = group.shared_dir / filename
+        if invalid_contents is None:
+            target.unlink()
+        else:
+            target.write_text(invalid_contents, encoding="utf-8")
+
+        _assert_submit_blocked(client, group_id, "shared_prep_invalid")
+
+
+def test_submit_rejects_missing_shared_prep_source_input(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        _, group, _ = _runtime_group_and_child(client, group_id)
+        (group.shared_dir / "source_input.dwg").unlink()
+
+        _assert_submit_blocked(client, group_id, "shared_prep_source_missing")
+
+
+def test_shared_prep_validation_precedes_duplicate_cancellation_side_effect(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    project_root = configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        admin_token = _login(client, "admin")
+        patch = client.patch(
+            "/api/admin/config",
+            json={"archive_root_path": str(project_root / "archive-root")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert patch.status_code == 200
+
+        first_group_id = _seed_group(client, tmp_path)
+        first_submit = client.post(
+            f"/api/task-groups/{first_group_id}/submit",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+        assert first_submit.status_code == 200
+
+        second_group_id = _seed_group(client, tmp_path)
+        runtime, second_group, _ = _runtime_group_and_child(client, second_group_id)
+        (second_group.shared_dir / "frames.json").write_text("{", encoding="utf-8")
+        blocked = client.post(
+            f"/api/task-groups/{second_group_id}/submit",
+            json={"cancel_existing_in_progress": True},
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+
+        assert blocked.status_code == 422
+        assert blocked.json()["detail"] == "shared_prep_invalid"
+        assert runtime.group_manager.reload_group(first_group_id) is not None
+
+
+def test_include_ied_plan_false_does_not_require_ied_artifact(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path, include_ied_plan=False)
+        detail = client.get(
+            f"/api/task-groups/{group_id}",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+
+        assert detail.status_code == 200
+        assert detail.json()["can_submit"] is True
+
+
+def test_include_ied_plan_true_requires_declared_ied_artifact(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path, include_ied_plan=True)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.artifacts.ied_xlsx = None
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "deliverable_ied_not_declared")
+
+
+def test_include_ied_plan_true_requires_existing_ied_artifact(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path, include_ied_plan=True)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.artifacts.ied_xlsx = tmp_path / "missing-ied.xlsx"
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "deliverable_ied_not_found")
+
+
+def test_include_ied_plan_true_accepts_existing_ied_artifact(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path, include_ied_plan=True)
+        detail = client.get(
+            f"/api/task-groups/{group_id}",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+
+        assert detail.status_code == 200
+        assert detail.json()["can_submit"] is True
+
+
+def test_submission_role_and_error_code_are_loaded_from_mechanism_yaml(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    project_root = configure_management_env(monkeypatch, tmp_path)
+    _write_task_group_submission_mechanism(
+        project_root,
+        {
+            "required_task_roles": [
+                {
+                    "task_role": "configured_deliverable",
+                    "missing_role_error": "configured_deliverable_missing",
+                    "artifacts": [
+                        {
+                            "field": "package_zip",
+                            "not_declared_error": "configured_package_not_declared",
+                            "not_found_error": "configured_package_not_found",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+
+        _assert_submit_blocked(client, group_id, "configured_deliverable_missing")
 
 
 @pytest.mark.parametrize(
