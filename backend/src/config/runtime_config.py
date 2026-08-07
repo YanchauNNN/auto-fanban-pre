@@ -402,6 +402,7 @@ class ArchiveExtractorConfig(BaseModel):
     executable: Path = Path("bin/7-Zip/7z.exe")
     list_timeout_seconds: int = Field(default=120, gt=0)
     extract_timeout_seconds: int = Field(default=300, gt=0)
+    max_list_output_bytes: int = Field(default=8_388_608, gt=0)
 
 
 class CalculationBookRuntimeConfig(BaseModel):

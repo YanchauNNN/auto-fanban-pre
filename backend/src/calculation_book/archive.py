@@ -5,8 +5,11 @@ import re
 import shutil
 import stat
 import subprocess
+import tempfile
+import time
 import unicodedata
 import zipfile
+from contextlib import suppress
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
@@ -101,6 +104,7 @@ class ArchiveExtractorSettings(Protocol):
     executable: Path
     list_timeout_seconds: int
     extract_timeout_seconds: int
+    max_list_output_bytes: int
 
 
 @dataclass(frozen=True)
@@ -157,6 +161,8 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 _SEVEN_Z_SAFE_FALSE_VALUES = {"", "-", "0", "false", "no"}
+_WINDOWS_FORBIDDEN_CHARACTERS = frozenset('*?"<>|')
+_WINDOWS_DEVICE_DIGIT_TRANSLATION = str.maketrans({"¹": "1", "²": "2", "³": "3"})
 
 
 def _normalized_member_path(raw_name: str, *, is_directory: bool) -> PurePosixPath:
@@ -176,10 +182,16 @@ def _normalized_member_path(raw_name: str, *, is_directory: bool) -> PurePosixPa
     for part in raw_parts:
         if any(ord(character) < 32 or ord(character) == 127 for character in part):
             raise InvalidCalculationArchive("压缩包包含不安全路径")
-        if ":" in part or part.endswith((".", " ")):
+        if (
+            ":" in part
+            or any(character in _WINDOWS_FORBIDDEN_CHARACTERS for character in part)
+            or part.endswith((".", " "))
+        ):
             raise InvalidCalculationArchive("压缩包包含不安全路径")
         normalized_part = unicodedata.normalize("NFC", part)
-        stem = normalized_part.split(".", 1)[0].upper()
+        stem = normalized_part.split(".", 1)[0].upper().translate(
+            _WINDOWS_DEVICE_DIGIT_TRANSLATION
+        )
         if stem in _WINDOWS_RESERVED_NAMES:
             raise InvalidCalculationArchive("压缩包包含不安全路径")
     return PurePosixPath(*raw_parts)
@@ -190,6 +202,19 @@ def _member_key(member: PurePosixPath) -> str:
         unicodedata.normalize("NFC", part).casefold()
         for part in member.parts
     )
+
+
+def _validate_member_topology(members: list[_ArchiveMember]) -> None:
+    file_keys = {
+        _member_key(member.path)
+        for member in members
+        if not member.is_directory
+    }
+    for member in members:
+        key_parts = _member_key(member.path).split("/")
+        for part_count in range(1, len(key_parts)):
+            if "/".join(key_parts[:part_count]) in file_keys:
+                raise InvalidCalculationArchive("压缩包存在文件与目录路径冲突")
 
 
 def _is_reparse_point(file_stat: os.stat_result) -> bool:
@@ -289,53 +314,86 @@ def _extract_zip(
     except (OSError, zipfile.BadZipFile) as exc:
         raise InvalidCalculationArchive("上传文件不是有效的压缩包") from exc
 
-    with archive:
-        infos = archive.infolist()
-        if not infos:
-            raise InvalidCalculationArchive("压缩包中没有文件")
-        if len(infos) > limits.max_files:
-            raise InvalidCalculationArchive(
-                f"压缩包条目数量超过限制 {limits.max_files}"
+    staging_root: Path | None = None
+    try:
+        with archive:
+            infos = archive.infolist()
+            if not infos:
+                raise InvalidCalculationArchive("压缩包中没有文件")
+            if len(infos) > limits.max_files:
+                raise InvalidCalculationArchive(
+                    f"压缩包条目数量超过限制 {limits.max_files}"
+                )
+
+            total_bytes = 0
+            seen: set[str] = set()
+            safe_members: list[tuple[zipfile.ZipInfo, _ArchiveMember]] = []
+            for info in infos:
+                member = _safe_zip_member(info)
+                key = _member_key(member.path)
+                if key in seen:
+                    raise InvalidCalculationArchive("压缩包包含重复路径")
+                seen.add(key)
+                if not member.is_directory:
+                    if member.size > limits.max_single_file_bytes:
+                        raise InvalidCalculationArchive("压缩包中单个文件超过限制")
+                    total_bytes += member.size
+                    if total_bytes > limits.max_total_bytes:
+                        raise InvalidCalculationArchive("压缩包解压后总大小超过限制")
+                    if member.size > 0:
+                        compressed = max(info.compress_size, 1)
+                        if member.size / compressed > limits.max_compression_ratio:
+                            raise InvalidCalculationArchive("压缩包压缩比异常")
+                safe_members.append((info, member))
+
+            members = [member for _, member in safe_members]
+            if not any(not member.is_directory for member in members):
+                raise InvalidCalculationArchive("压缩包中没有文件")
+            _validate_member_topology(members)
+            resolved_root = _prepare_destination(destination)
+            resolved_root.parent.mkdir(parents=True, exist_ok=True)
+            staging_root = Path(
+                tempfile.mkdtemp(
+                    prefix=".calculation-archive-",
+                    dir=resolved_root.parent,
+                )
             )
-
-        total_bytes = 0
-        seen: set[str] = set()
-        safe_members: list[tuple[zipfile.ZipInfo, _ArchiveMember]] = []
-        for info in infos:
-            member = _safe_zip_member(info)
-            key = _member_key(member.path)
-            if key in seen:
-                raise InvalidCalculationArchive("压缩包包含重复路径")
-            seen.add(key)
-            if not member.is_directory:
-                if member.size > limits.max_single_file_bytes:
-                    raise InvalidCalculationArchive("压缩包中单个文件超过限制")
-                total_bytes += member.size
-                if total_bytes > limits.max_total_bytes:
-                    raise InvalidCalculationArchive("压缩包解压后总大小超过限制")
-                if member.size > 0:
-                    compressed = max(info.compress_size, 1)
-                    if member.size / compressed > limits.max_compression_ratio:
-                        raise InvalidCalculationArchive("压缩包压缩比异常")
-            safe_members.append((info, member))
-
-        if not any(not member.is_directory for _, member in safe_members):
-            raise InvalidCalculationArchive("压缩包中没有文件")
-        resolved_root = _prepare_destination(destination)
-        resolved_root.mkdir(parents=True, exist_ok=True)
-        for info, member in safe_members:
-            target = resolved_root.joinpath(*member.path.parts)
-            if member.is_directory:
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(info) as source, target.open("wb") as output:
-                shutil.copyfileobj(source, output)
-        extracted = _verify_extracted_files(
-            resolved_root,
-            [member for _, member in safe_members],
-        )
-    return resolved_root, extracted
+            for info, member in safe_members:
+                target = staging_root.joinpath(*member.path.parts)
+                if member.is_directory:
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+            staged_extracted = _verify_extracted_files(staging_root, members)
+            relative_extracted = [
+                path.relative_to(staging_root)
+                for path in staged_extracted
+            ]
+            if resolved_root.exists():
+                resolved_root.rmdir()
+            staging_root.replace(resolved_root)
+            staging_root = None
+            extracted = [
+                resolved_root.joinpath(*relative.parts).resolve()
+                for relative in relative_extracted
+            ]
+            return resolved_root, extracted
+    except InvalidCalculationArchive:
+        raise
+    except (
+        EOFError,
+        NotImplementedError,
+        OSError,
+        RuntimeError,
+        zipfile.BadZipFile,
+        zipfile.LargeZipFile,
+    ) as exc:
+        raise InvalidCalculationArchive("ZIP 压缩包解压失败") from exc
+    finally:
+        if staging_root is not None:
+            shutil.rmtree(staging_root, ignore_errors=True)
 
 
 def _parse_slt_records(payload: bytes) -> list[dict[str, str]]:
@@ -462,6 +520,7 @@ def _members_from_slt_listing(
 
     if not any(not member.is_directory for member in members):
         raise InvalidCalculationArchive("压缩包中没有文件")
+    _validate_member_topology(members)
     archive_size = max(archive_path.stat().st_size, 1)
     if total_bytes / archive_size > limits.max_compression_ratio:
         raise InvalidCalculationArchive("压缩包总压缩比异常")
@@ -470,7 +529,7 @@ def _members_from_slt_listing(
 
 def _private_extractor(
     settings: ArchiveExtractorSettings | None,
-) -> tuple[Path, int, int]:
+) -> tuple[Path, int, int, int]:
     if settings is None:
         raise InvalidCalculationArchive("RAR/7z 私有解包器不可用")
     executable = Path(settings.executable)
@@ -483,6 +542,7 @@ def _private_extractor(
         raise InvalidCalculationArchive("RAR/7z 私有解包器路径不安全")
     list_timeout = settings.list_timeout_seconds
     extract_timeout = settings.extract_timeout_seconds
+    max_list_output_bytes = settings.max_list_output_bytes
     if (
         not isinstance(list_timeout, int)
         or isinstance(list_timeout, bool)
@@ -490,9 +550,17 @@ def _private_extractor(
         or not isinstance(extract_timeout, int)
         or isinstance(extract_timeout, bool)
         or extract_timeout <= 0
+        or not isinstance(max_list_output_bytes, int)
+        or isinstance(max_list_output_bytes, bool)
+        or max_list_output_bytes <= 0
     ):
-        raise InvalidCalculationArchive("RAR/7z 私有解包器超时参数无效")
-    return executable.resolve(), list_timeout, extract_timeout
+        raise InvalidCalculationArchive("RAR/7z 私有解包器安全参数无效")
+    return (
+        executable.resolve(),
+        list_timeout,
+        extract_timeout,
+        max_list_output_bytes,
+    )
 
 
 def _seven_zip_failure_message(stderr: bytes, *, operation: str) -> str:
@@ -505,6 +573,74 @@ def _seven_zip_failure_message(stderr: bytes, *, operation: str) -> str:
     if "wrong password" in detail or "encrypted" in detail:
         return "暂不支持加密压缩包"
     return f"压缩包{operation}失败"
+
+
+def _stop_process(process: subprocess.Popen[bytes]) -> None:
+    with suppress(OSError):
+        process.terminate()
+    try:
+        process.wait(timeout=1)
+        return
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    with suppress(OSError):
+        process.kill()
+    with suppress(OSError, subprocess.TimeoutExpired):
+        process.wait(timeout=1)
+
+
+def _run_limited_7zip_listing(
+    command: list[str],
+    *,
+    timeout_seconds: int,
+    max_output_bytes: int,
+    creationflags: int,
+) -> subprocess.CompletedProcess[bytes]:
+    stderr_limit = 16_384
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            creationflags=creationflags,
+            shell=False,
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            stdout_size = os.fstat(stdout_file.fileno()).st_size
+            stderr_size = os.fstat(stderr_file.fileno()).st_size
+            if stdout_size > max_output_bytes:
+                _stop_process(process)
+                raise InvalidCalculationArchive("压缩包清单输出超过限制")
+            if stderr_size > stderr_limit:
+                _stop_process(process)
+                raise InvalidCalculationArchive("压缩包清单错误输出超过安全限制")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _stop_process(process)
+                raise subprocess.TimeoutExpired(command, timeout_seconds)
+            try:
+                returncode = process.wait(timeout=min(0.05, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+
+        stdout_size = os.fstat(stdout_file.fileno()).st_size
+        stderr_size = os.fstat(stderr_file.fileno()).st_size
+        if stdout_size > max_output_bytes:
+            _stop_process(process)
+            raise InvalidCalculationArchive("压缩包清单输出超过限制")
+        if stderr_size > stderr_limit:
+            raise InvalidCalculationArchive("压缩包清单错误输出超过安全限制")
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            stdout_file.read(max_output_bytes + 1),
+            stderr_file.read(501),
+        )
 
 
 def _extract_external_archive(
@@ -527,18 +663,16 @@ def _extract_external_archive(
         raise InvalidCalculationArchive("外部压缩归档文件路径不安全")
     if not stat.S_ISREG(source_stat.st_mode) or not stat.S_ISREG(resolved_stat.st_mode):
         raise InvalidCalculationArchive("外部压缩归档文件必须是普通文件")
-    executable, list_timeout, extract_timeout = _private_extractor(archive_extractor)
+    (
+        executable,
+        list_timeout,
+        extract_timeout,
+        max_list_output_bytes,
+    ) = _private_extractor(archive_extractor)
     resolved_root = _prepare_destination(destination)
     creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    common_options = {
-        "check": False,
-        "capture_output": True,
-        "stdin": subprocess.DEVNULL,
-        "creationflags": creationflags,
-        "shell": False,
-    }
     try:
-        listing = subprocess.run(
+        listing = _run_limited_7zip_listing(
             [
                 str(executable),
                 "l",
@@ -547,8 +681,9 @@ def _extract_external_archive(
                 "-bd",
                 str(resolved_archive),
             ],
-            timeout=list_timeout,
-            **common_options,
+            timeout_seconds=list_timeout,
+            max_output_bytes=max_list_output_bytes,
+            creationflags=creationflags,
         )
     except subprocess.TimeoutExpired as exc:
         raise InvalidCalculationArchive("压缩包清单读取超时") from exc
@@ -574,7 +709,11 @@ def _extract_external_archive(
                 str(resolved_archive),
             ],
             timeout=extract_timeout,
-            **common_options,
+            check=False,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+            shell=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise InvalidCalculationArchive("压缩包解压超时") from exc

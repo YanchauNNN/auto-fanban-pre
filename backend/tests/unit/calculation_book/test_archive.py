@@ -53,6 +53,7 @@ def _extractor_settings(
     executable: Path | None = None,
     list_timeout_seconds: int = 17,
     extract_timeout_seconds: int = 29,
+    max_list_output_bytes: int = 8_388_608,
 ) -> SimpleNamespace:
     active_executable = executable or (tmp_path / "private 7-Zip" / "7z.exe")
     if executable is None:
@@ -62,6 +63,7 @@ def _extractor_settings(
         executable=active_executable,
         list_timeout_seconds=list_timeout_seconds,
         extract_timeout_seconds=extract_timeout_seconds,
+        max_list_output_bytes=max_list_output_bytes,
     )
 
 
@@ -123,10 +125,27 @@ def _mock_external_run(
 ) -> list[tuple[list[str], dict[str, Any]]]:
     calls: list[tuple[list[str], dict[str, Any]]] = []
 
+    class FakeListingProcess:
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            calls.append((args, kwargs))
+            result = list_result or subprocess.CompletedProcess(args, 0, listing, b"")
+            kwargs["stdout"].write(result.stdout)
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(result.stderr)
+            kwargs["stderr"].flush()
+            self.returncode = result.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            return self.returncode
+
+        def terminate(self) -> None:
+            calls.append((["<terminate-listing>"], {}))
+
+        def kill(self) -> None:
+            return None
+
     def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         calls.append((args, kwargs))
-        if args[1] == "l":
-            return list_result or subprocess.CompletedProcess(args, 0, listing, b"")
         assert args[1] == "x"
         output_argument = next(argument for argument in args if argument.startswith("-o"))
         output_root = Path(output_argument[2:])
@@ -136,6 +155,7 @@ def _mock_external_run(
             target.write_bytes(payload)
         return extract_result or subprocess.CompletedProcess(args, 0, b"", b"")
 
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.Popen", FakeListingProcess)
     monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fake_run)
     return calls
 
@@ -274,14 +294,14 @@ def test_external_archive_uses_private_7zip_with_utf8_and_yaml_timeouts(
         "-bd",
         str(archive),
     ]
-    assert list_kwargs == {
-        "check": False,
-        "capture_output": True,
-        "stdin": subprocess.DEVNULL,
-        "timeout": 17,
-        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
-        "shell": False,
-    }
+    assert list_kwargs["stdin"] is subprocess.DEVNULL
+    assert list_kwargs["creationflags"] == int(
+        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+    assert list_kwargs["shell"] is False
+    assert list_kwargs["stdout"].closed
+    assert list_kwargs["stderr"].closed
+    assert "capture_output" not in list_kwargs
     extract_args, extract_kwargs = calls[1]
     assert extract_args == [
         str(settings.executable.resolve()),
@@ -437,14 +457,30 @@ def test_external_archive_rejects_list_timeout_without_running_extract(
 ) -> None:
     archive = _write_external_archive(tmp_path / "input.7z")
     settings = _extractor_settings(tmp_path)
-    calls = 0
+    calls: list[list[str]] = []
 
-    def time_out(*args: object, **kwargs: object) -> None:
-        nonlocal calls
-        calls += 1
-        raise subprocess.TimeoutExpired(cmd="7z", timeout=17)
+    class HangingListingProcess:
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            calls.append(args)
 
-    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", time_out)
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired(cmd="7z", timeout=timeout)
+
+        def terminate(self) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    monotonic_values = iter((0.0, 18.0))
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.Popen",
+        HangingListingProcess,
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.archive.time.monotonic",
+        lambda: next(monotonic_values),
+    )
 
     with pytest.raises(InvalidCalculationArchive, match="清单读取超时"):
         validate_and_extract_archive(
@@ -453,7 +489,7 @@ def test_external_archive_rejects_list_timeout_without_running_extract(
             archive_extractor=settings,
         )
 
-    assert calls == 1
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -509,6 +545,26 @@ def test_external_archive_rejects_unparseable_7zip_listing(
     assert len(calls) == 1
 
 
+def test_external_archive_rejects_oversized_listing_before_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "oversized-listing.7z")
+    settings = _extractor_settings(tmp_path, max_list_output_bytes=32)
+    entries = _valid_entries()
+    calls = _mock_external_run(monkeypatch, _slt_listing(entries), None)
+
+    with pytest.raises(InvalidCalculationArchive, match="清单输出超过限制"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 2
+    assert calls[1][0] == ["<terminate-listing>"]
+
+
 def test_external_archive_rejects_extract_timeout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -516,13 +572,10 @@ def test_external_archive_rejects_extract_timeout(
     archive = _write_external_archive(tmp_path / "input.rar")
     settings = _extractor_settings(tmp_path)
     listing = _slt_listing(_valid_entries())
-    calls = 0
+    calls = _mock_external_run(monkeypatch, listing, None)
 
     def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        nonlocal calls
-        calls += 1
-        if args[1] == "l":
-            return subprocess.CompletedProcess(args, 0, listing, b"")
+        calls.append((args, kwargs))
         raise subprocess.TimeoutExpired(cmd="7z", timeout=29)
 
     monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fake_run)
@@ -534,7 +587,7 @@ def test_external_archive_rejects_extract_timeout(
             archive_extractor=settings,
         )
 
-    assert calls == 2
+    assert len(calls) == 2
 
 
 def test_external_archive_rejects_extract_error_without_leaking_member_names(
@@ -725,6 +778,14 @@ def test_rejects_unpaired_middle_slab_figure(tmp_path: Path) -> None:
         "folder/LPT1.png",
         "trailing-dot./image.png",
         "trailing-space /image.png",
+        "bad*name.png",
+        "bad?name.png",
+        'bad"name.png',
+        "bad<name.png",
+        "bad>name.png",
+        "bad|name.png",
+        "COM¹.txt",
+        "folder/LPT¹.png",
     ],
 )
 def test_rejects_path_traversal_and_absolute_members(
@@ -778,6 +839,54 @@ def test_zip_rejects_symbolic_link_member(tmp_path: Path) -> None:
         validate_and_extract_archive(archive_path, tmp_path / "extracted")
 
 
+@pytest.mark.parametrize("file_first", [True, False])
+def test_zip_rejects_file_directory_prefix_conflicts_before_writing(
+    tmp_path: Path,
+    file_first: bool,
+) -> None:
+    entries = _valid_entries()
+    conflicting = [
+        ("conflict", b"file"),
+        ("conflict/child.png", b"child"),
+    ]
+    if not file_first:
+        conflicting.reverse()
+    entries.update(conflicting)
+    archive = _write_archive(tmp_path / "prefix-conflict.zip", entries)
+    destination = tmp_path / "extracted"
+
+    with pytest.raises(InvalidCalculationArchive, match="文件与目录路径冲突"):
+        validate_and_extract_archive(archive, destination)
+
+    assert not destination.exists() or not any(destination.iterdir())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        zipfile.BadZipFile("Bad CRC-32 for file"),
+        OSError("simulated ZIP read/write failure"),
+    ],
+)
+def test_zip_wraps_crc_and_os_errors_without_leaving_partial_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    archive = _write_archive(tmp_path / "broken-read.zip", _valid_entries())
+    destination = tmp_path / "extracted"
+
+    def fail_copy(*args: object, **kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr("src.calculation_book.archive.shutil.copyfileobj", fail_copy)
+
+    with pytest.raises(InvalidCalculationArchive, match="ZIP.*解压失败"):
+        validate_and_extract_archive(archive, destination)
+
+    assert not destination.exists() or not any(destination.iterdir())
+
+
 @pytest.mark.parametrize(
     "unsafe_name",
     [
@@ -792,6 +901,14 @@ def test_zip_rejects_symbolic_link_member(tmp_path: Path) -> None:
         "folder/LPT1.png",
         "trailing-dot./image.png",
         "trailing-space /image.png",
+        "bad*name.png",
+        "bad?name.png",
+        'bad"name.png',
+        "bad<name.png",
+        "bad>name.png",
+        "bad|name.png",
+        "COM¹.txt",
+        "folder/LPT¹.png",
     ],
 )
 def test_external_archive_rejects_unsafe_member_paths_before_extraction(
@@ -825,6 +942,33 @@ def test_external_archive_rejects_case_insensitive_duplicate_targets(
     calls = _mock_external_run(monkeypatch, listing, None)
 
     with pytest.raises(InvalidCalculationArchive, match="重复路径"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("file_first", [True, False])
+def test_external_archive_rejects_file_directory_prefix_conflicts_before_extract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_first: bool,
+) -> None:
+    archive = _write_external_archive(tmp_path / "prefix-conflict.rar")
+    settings = _extractor_settings(tmp_path)
+    conflicting = [
+        ("conflict", b"file"),
+        ("conflict/child.png", b"child"),
+    ]
+    if not file_first:
+        conflicting.reverse()
+    listing = _slt_listing(dict(conflicting), directories=())
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="文件与目录路径冲突"):
         validate_and_extract_archive(
             archive,
             tmp_path / "extracted",

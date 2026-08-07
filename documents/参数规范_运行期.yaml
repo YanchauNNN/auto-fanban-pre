@@ -90,6 +90,7 @@ runtime_options:
       executable: { type: str, default: "bin/7-Zip/7z.exe", desc: "部署包私有 7-Zip 可执行文件；仅用于普通单卷、无密码 RAR/7z，按运行部署根解析" }
       list_timeout_seconds: { type: int, default: 120, desc: "RAR/7z 文件清单读取超时秒数" }
       extract_timeout_seconds: { type: int, default: 300, desc: "RAR/7z 安全解压超时秒数" }
+      max_list_output_bytes: { type: int, default: 8388608, desc: "RAR/7z 文件清单标准输出最大字节数；超限立即终止私有 7-Zip，避免无界内存占用" }
     ai_normalization:
       enabled: { type: bool, default: true, desc: "用户确认非标准配筋表后，是否允许计算书 Worker 调用结构化模型规范化；HTTP 预检和标准表不调用模型" }
       skill_root: { type: str, default: "tools/ai/reinforcement-table-normalizer", desc: "计算书 Worker 与 AI 对话共用的配筋表规范化 Skill 根目录，按 RuntimeConfig base_dir 解析" }

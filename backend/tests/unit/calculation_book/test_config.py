@@ -38,6 +38,7 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     ).resolve()
     assert config.calculation_book.archive_extractor.list_timeout_seconds == 120
     assert config.calculation_book.archive_extractor.extract_timeout_seconds == 300
+    assert config.calculation_book.archive_extractor.max_list_output_bytes == 8_388_608
     assert config.calculation_book.ai_normalization.enabled is True
     assert config.calculation_book.ai_normalization.skill_root == (
         REPO_ROOT / "tools" / "ai" / "reinforcement-table-normalizer"
@@ -86,10 +87,15 @@ def test_calculation_book_archive_extractor_accepts_env_override(
         "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__LIST_TIMEOUT_SECONDS",
         "45",
     )
+    monkeypatch.setenv(
+        "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__MAX_LIST_OUTPUT_BYTES",
+        "4096",
+    )
 
     config = RuntimeConfig.from_yaml(REPO_ROOT / "documents" / "参数规范_运行期.yaml")
 
     assert config.calculation_book.archive_extractor.list_timeout_seconds == 45
+    assert config.calculation_book.archive_extractor.max_list_output_bytes == 4096
 
 
 def test_calculation_book_archive_extractor_resolves_in_terminal_package_layout(
@@ -106,6 +112,7 @@ runtime_options:
       executable: { type: str, default: "bin/7-Zip/7z.exe" }
       list_timeout_seconds: { type: int, default: 120 }
       extract_timeout_seconds: { type: int, default: 300 }
+      max_list_output_bytes: { type: int, default: 8388608 }
 """.strip(),
         encoding="utf-8",
     )
@@ -117,6 +124,12 @@ runtime_options:
     ).resolve()
     assert config.calculation_book.archive_extractor.list_timeout_seconds == 120
     assert config.calculation_book.archive_extractor.extract_timeout_seconds == 300
+    assert config.calculation_book.archive_extractor.max_list_output_bytes == 8_388_608
+
+
+def test_calculation_book_archive_extractor_rejects_non_positive_list_limit() -> None:
+    with pytest.raises(ValidationError):
+        ArchiveExtractorConfig(max_list_output_bytes=0)
 
 
 @pytest.mark.parametrize(
