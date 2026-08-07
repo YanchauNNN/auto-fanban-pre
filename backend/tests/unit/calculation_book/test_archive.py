@@ -40,6 +40,11 @@ def _valid_entries() -> dict[str, bytes]:
         (".rar", b"Rar!\x1a\x07\x00payload", ArchiveFormat.RAR),
         (".rar", b"Rar!\x1a\x07\x01\x00payload", ArchiveFormat.RAR),
         (".7z", b"7z\xbc\xaf'\x1cpayload", ArchiveFormat.SEVEN_Z),
+        (".ZIP", b"PK\x03\x04payload", ArchiveFormat.ZIP),
+        (".RAR", b"Rar!\x1a\x07\x01\x00payload", ArchiveFormat.RAR),
+        (".7Z", b"7z\xbc\xaf'\x1cpayload", ArchiveFormat.SEVEN_Z),
+        (".ZIP", b"PK\x05\x06", ArchiveFormat.ZIP),
+        (".ZIP", b"PK\x07\x08", ArchiveFormat.ZIP),
     ],
 )
 def test_detects_archive_format_from_suffix_and_magic_bytes(
@@ -68,6 +73,65 @@ def test_rejects_archive_suffix_and_magic_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(InvalidCalculationArchive, match="后缀.*签名.*不一致"):
         detect_archive_format(archive)
+
+
+@pytest.mark.parametrize("payload", [b"", b"P", b"PK\x03"])
+def test_rejects_empty_or_short_archive_signatures(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(payload)
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        detect_archive_format(archive)
+
+
+def test_validation_rejects_zip_content_renamed_as_rar_before_extraction(
+    tmp_path: Path,
+) -> None:
+    archive = _write_archive(tmp_path / "renamed.rar", _valid_entries())
+
+    with pytest.raises(InvalidCalculationArchive, match="后缀.*签名.*不一致"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_validation_rejects_unknown_rar_signature_without_calling_tar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "unknown.rar"
+    archive.write_bytes(b"not-a-rar")
+
+    def fail_if_tar_is_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("tar must not be called before archive signature validation")
+
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.run",
+        fail_if_tar_is_called,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_validation_fails_closed_for_7z_before_calling_tar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "input.7z"
+    archive.write_bytes(b"7z\xbc\xaf'\x1cpayload")
+
+    def fail_if_tar_is_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7z must not be routed through the legacy RAR tar path")
+
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.run",
+        fail_if_tar_is_called,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="私有解包器.*(?:尚未接入|不可用)"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
 
 
 def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> None:

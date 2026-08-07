@@ -436,18 +436,21 @@ def validate_and_extract_archive(
 ) -> CalculationArchiveContents:
     active_reinforcement_source = ReinforcementSource(reinforcement_source)
     active_limits = limits or ArchiveLimits()
-    if zipfile.is_zipfile(archive_path):
+    archive_format = detect_archive_format(archive_path)
+    if archive_format is ArchiveFormat.ZIP:
         resolved_root, extracted = _extract_zip(
             archive_path,
             destination,
             active_limits,
         )
-    else:
+    elif archive_format is ArchiveFormat.RAR:
         resolved_root, extracted = _extract_rar(
             archive_path,
             destination,
             active_limits,
         )
+    else:
+        raise InvalidCalculationArchive("RAR/7z 私有解包器尚未接入/不可用")
 
     content_root = _content_root(resolved_root, extracted)
     figures: list[ReinforcementFigure] = []
