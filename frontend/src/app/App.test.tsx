@@ -1156,6 +1156,10 @@ describe("homepage shell", () => {
     await user.click(workloadButton);
     expect(screen.getByTestId("module-workload-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("module-account-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workspace-page")).toHaveAttribute(
+      "data-layout-mode",
+      "bounded-workload",
+    );
   });
 
   it("shows task record labels and refresh feedback", async () => {

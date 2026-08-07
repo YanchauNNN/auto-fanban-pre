@@ -26,6 +26,38 @@ export type TaskGroupPresentationLabels = {
   emptyCurrentNodeLabel?: string;
 };
 
+const WORKFLOW_STATUS_LABELS: Readonly<Record<string, string>> = {
+  draft: "草稿",
+  submitted: "已提交",
+  in_review: "审批中",
+  three_review_approved: "三审通过",
+  archiving: "归档中",
+  archived: "已归档",
+  archive_failed: "归档失败",
+  cancelled: "已取消",
+};
+
+const ARCHIVE_STATUS_LABELS: Readonly<Record<string, string>> = {
+  pending: "待归档",
+  running: "归档中",
+  succeeded: "已归档",
+  failed: "归档失败",
+};
+
+const SETTLEMENT_STATUS_LABELS: Readonly<Record<string, string>> = {
+  pending: "待结算",
+  settled: "已结算",
+  invalid: "无效记录",
+  failed: "结算失败",
+};
+
+const WORKLOAD_ROLE_LABELS: Readonly<Record<string, string>> = {
+  initiator: "发起人",
+  one_review: "一审",
+  two_review: "二审",
+  three_review: "三审",
+};
+
 export function buildTaskGroupCardModels(
   items: readonly TaskGroupSummary[],
   labels: TaskGroupPresentationLabels = {},
@@ -60,7 +92,7 @@ export function buildTaskGroupCardModels(
 }
 
 export function getWorkflowStatusLabel(status: string, labels: TaskGroupPresentationLabels = {}) {
-  return labels.workflowStatusLabels?.[status] ?? status;
+  return labels.workflowStatusLabels?.[status] ?? WORKFLOW_STATUS_LABELS[status] ?? "其他流程状态";
 }
 
 export function getTaskGroupDisplayTitle(
@@ -81,7 +113,18 @@ export function getWorkloadEntryDisplayTitle(
 }
 
 export function getArchiveStatusLabel(status: string, labels: TaskGroupPresentationLabels = {}) {
-  return labels.archiveStatusLabels?.[status] ?? status;
+  return labels.archiveStatusLabels?.[status] ?? ARCHIVE_STATUS_LABELS[status] ?? "其他归档状态";
+}
+
+export function getSettlementStatusLabel(status: string) {
+  return SETTLEMENT_STATUS_LABELS[status] ?? "其他结算状态";
+}
+
+export function getWorkloadRoleLabel(
+  roleKey: string,
+  labels: TaskGroupPresentationLabels = {},
+) {
+  return labels.nodeLabels?.[roleKey] ?? WORKLOAD_ROLE_LABELS[roleKey] ?? "其他参与角色";
 }
 
 export function getCurrentNodeLabel(nodeKey: string | null, labels: TaskGroupPresentationLabels = {}) {

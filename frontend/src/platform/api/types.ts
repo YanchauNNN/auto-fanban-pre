@@ -196,6 +196,13 @@ export type WorkflowFactorSchema = {
   precision: number;
 };
 
+export type WorkflowNodeSchema = {
+  nodeKey: string;
+  nodeLabel: string;
+  roleField: string;
+  factorKey: string;
+};
+
 export type WorkloadStatusOption = {
   label: string;
   value: string;
@@ -218,6 +225,7 @@ export type ManagementSchema = {
   workflow: {
     terminalStatus: string;
     archiveTriggerStatus?: string;
+    nodes: readonly WorkflowNodeSchema[];
     factor: WorkflowFactorSchema;
     statusLabels: Record<string, string>;
     nodeLabels: Record<string, string>;

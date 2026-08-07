@@ -1,17 +1,28 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import {
   getCurrentNodeLabel,
+  getSettlementStatusLabel,
   getTaskGroupDisplayTitle,
   getWorkloadEntryDisplayTitle,
+  getWorkloadRoleLabel,
   getWorkflowStatusLabel,
   type TaskGroupPresentationLabels,
 } from "../../shared/task-groups/taskGroupPresentation";
 import type {
   AccountCreatePayload,
   TaskGroupSummary,
+  WorkflowNodeSchema,
   WorkflowApprovePayload,
   WorkloadQueryParams,
   WorkloadScopeResponse,
@@ -93,6 +104,19 @@ function getMonitorTone(item: TaskGroupSummary) {
   return "default";
 }
 
+function getMonitorPriority(item: TaskGroupSummary) {
+  if (item.canApprove) {
+    return 0;
+  }
+  if (item.archiveStatus === "failed" || item.workflowStatus === "archive_failed") {
+    return 1;
+  }
+  if (item.isRelatedToCurrentUser) {
+    return 2;
+  }
+  return 3;
+}
+
 function getMonitorHint(item: TaskGroupSummary) {
   if (item.archiveStatus === "failed") {
     return "归档失败，请优先检查异常。";
@@ -160,12 +184,14 @@ export function WorkloadPage() {
   const [approvalFactor, setApprovalFactor] = useState("");
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const approvalFactorInputRef = useRef<HTMLInputElement>(null);
   const [repairTarget, setRepairTarget] = useState<TaskGroupSummary | null>(null);
   const [repairMode, setRepairMode] = useState<RepairMode>("replace");
   const [repairReplaceAccountId, setRepairReplaceAccountId] = useState("");
   const [repairForm, setRepairForm] = useState(() => buildEmptyRepairForm(""));
   const [repairError, setRepairError] = useState<string | null>(null);
   const [repairSubmitting, setRepairSubmitting] = useState(false);
+  const repairAccountSelectRef = useRef<HTMLSelectElement>(null);
 
   const schemaQuery = useQuery({
     queryKey: ["form-schema", "management"],
@@ -237,14 +263,28 @@ export function WorkloadPage() {
       return rightTime - leftTime;
     });
   }, [historyQuery.data?.entries]);
+  const monitorItems = useMemo(
+    () =>
+      (monitorQuery.data?.items ?? [])
+        .map((item, originalIndex) => ({ item, originalIndex }))
+        .sort(
+          (left, right) =>
+            getMonitorPriority(left.item) - getMonitorPriority(right.item) ||
+            left.originalIndex - right.originalIndex,
+        )
+        .map(({ item }) => item),
+    [monitorQuery.data?.items],
+  );
   const cockpitStats = useMemo(() => {
     const items = monitorQuery.data?.items ?? [];
     return {
-      totalFlow: items.length,
       approvable: items.filter((item) => item.canApprove).length,
-      related: items.filter((item) => item.isRelatedToCurrentUser).length,
-      failed: items.filter((item) => item.archiveStatus === "failed").length,
-      historyCount: historyQuery.data?.entries.length ?? 0,
+      active: items.filter(
+        (item) => !["archived", "cancelled"].includes(item.workflowStatus),
+      ).length,
+      failed: items.filter(
+        (item) => item.archiveStatus === "failed" || item.workflowStatus === "archive_failed",
+      ).length,
       totalWorkload: historyQuery.data?.totalWorkloadA1 ?? 0,
     };
   }, [historyQuery.data, monitorQuery.data?.items]);
@@ -275,6 +315,9 @@ export function WorkloadPage() {
   const account = currentAccount;
   const workflowFactor = managementSchema.workflow.factor;
   const defaultAccountPassword = managementSchema.account.adminCreatedDefaultPassword;
+  const approvalPreview = approvalTarget
+    ? buildApprovalPreview(approvalTarget, approvalFactor)
+    : null;
 
   function openApprovalDialog(item: TaskGroupSummary) {
     setApprovalTarget(item);
@@ -424,283 +467,320 @@ export function WorkloadPage() {
         <div>
           <p className={styles.eyebrow}>Workflow & Workload</p>
           <h1>工作量模块</h1>
-          <p className={styles.description}>
-            这里集中承接当前流程监视、节点审批和按角色可见范围的历史工作量统计。
-          </p>
         </div>
+        <p className={styles.description}>优先处理待办与归档异常，并按权限范围核对已结算工作量。</p>
       </header>
 
       {feedback ? (
         <p
           className={feedback.tone === "success" ? styles.feedbackSuccess : styles.feedbackError}
-          role="status"
+          role={feedback.tone === "error" ? "alert" : "status"}
         >
           {feedback.message}
         </p>
       ) : null}
 
-      <section className={styles.cockpit}>
-        <div className={styles.cockpitHero} aria-hidden="true" />
-        <div className={styles.metricStrip}>
-          <MetricTile label="可见流程" value={`${cockpitStats.totalFlow}`} />
-          <MetricTile label="待我审批" value={`${cockpitStats.approvable}`} tone="hot" />
-          <MetricTile label="相关流程" value={`${cockpitStats.related}`} />
-          <MetricTile label="异常归档" value={`${cockpitStats.failed}`} tone="danger" />
-          <MetricTile label="历史记录" value={`${cockpitStats.historyCount}`} />
-          <MetricTile label="累计 A1" value={`${formatWorkload(cockpitStats.totalWorkload)} A1`} tone="strong" />
-        </div>
+      <section aria-label="工作量概览" className={styles.metricStrip} role="region">
+        <MetricTile label="待我审批" value={`${cockpitStats.approvable}`} tone="hot" />
+        <MetricTile label="流程中" value={`${cockpitStats.active}`} />
+        <MetricTile label="归档异常" value={`${cockpitStats.failed}`} tone="danger" />
+        <MetricTile
+          label="当前范围累计 A1"
+          value={`${formatWorkload(cockpitStats.totalWorkload)} A1`}
+          tone="strong"
+        />
       </section>
 
       <div className={styles.dashboardGrid}>
-      <section className={styles.sectionPrimary}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <p className={styles.eyebrow}>Current Flow</p>
-            <h2>当前流程监视</h2>
+        <section className={styles.sectionPrimary}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <p className={styles.eyebrow}>流程监控</p>
+              <h2>待我处理</h2>
+            </div>
+            <span className={styles.sectionHint}>{`${monitorQuery.data?.total ?? 0} 条流程`}</span>
           </div>
-          <span className={styles.sectionHint}>{`${monitorQuery.data?.total ?? 0} 条流程`}</span>
-        </div>
 
-        {monitorQuery.isLoading ? (
-          <p className={styles.muted}>正在加载流程监视...</p>
-        ) : monitorQuery.isError ? (
-          <p className={styles.feedbackError}>流程监视加载失败，请稍后刷新重试。</p>
-        ) : (monitorQuery.data?.items.length ?? 0) > 0 ? (
-          <div className={styles.monitorGrid}>
-            {(monitorQuery.data?.items ?? []).map((item) => {
-              const tone = getMonitorTone(item);
-              return (
-                <article className={styles[`monitorCard${capitalize(tone)}`]} key={item.groupId}>
-                  <div className={styles.monitorHeader}>
-                    <div>
-                      <strong>{getTaskGroupDisplayTitle(item)}</strong>
-                      <p className={styles.monitorHint}>{getMonitorHint(item)}</p>
-                    </div>
-                    <span className={styles.monitorBadge}>
-                      {getWorkflowStatusLabel(item.workflowStatus, taskGroupPresentationLabels)}
-                    </span>
-                  </div>
-                  <dl className={styles.monitorMeta}>
-                    <div>
-                      <dt>发起人</dt>
-                      <dd>{item.creatorName ?? item.ownerSnapshot?.creatorName ?? "未记录"}</dd>
-                    </div>
-                    <div>
-                      <dt>责任单位</dt>
-                      <dd>{item.creatorOffice ?? item.ownerSnapshot?.creatorOffice ?? "未记录"}</dd>
-                    </div>
-                    <div>
-                      <dt>当前节点</dt>
-                      <dd>{getCurrentNodeLabel(item.currentNodeKey, taskGroupPresentationLabels)}</dd>
-                    </div>
-                    <div>
-                      <dt>有效工作量</dt>
-                      <dd>{formatWorkload(item.effectiveWorkload)}</dd>
-                    </div>
-                  </dl>
-                  <WorkflowRail
-                    archiveStatus={item.archiveStatus}
-                    currentNodeKey={item.currentNodeKey}
-                    labels={taskGroupPresentationLabels}
-                    workflowStatus={item.workflowStatus}
-                  />
-                  <div className={styles.monitorActions}>
-                    <Link className={styles.secondaryLink} to={`/task-groups/${item.groupId}`}>
-                      查看任务包
-                    </Link>
-                    {item.canApprove ? (
-                      <button
-                        className={styles.primaryButton}
-                        onClick={() => openApprovalDialog(item)}
-                        type="button"
-                      >
-                        审批
-                      </button>
-                    ) : null}
-                    {isAdmin && item.currentNodeKey ? (
-                      <button
-                        className={styles.secondaryButton}
-                        onClick={() => openRepairDialog(item)}
-                        type="button"
-                      >
-                        修复当前节点
-                      </button>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <p className={styles.muted}>当前没有可见流程。</p>
-        )}
-      </section>
-
-      <section className={styles.sectionSecondary}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <p className={styles.eyebrow}>History</p>
-            <h2>历史与统计</h2>
-          </div>
-          <span className={styles.sectionHint}>按当前角色可见范围查询</span>
-        </div>
-
-        <div className={styles.scopeTabs}>
-          {availableScopes.map((scope) => (
-            <button
-              aria-pressed={selectedScope === scope}
-              className={selectedScope === scope ? styles.scopeTabActive : styles.scopeTab}
-              key={scope}
-              onClick={() => setSelectedScope(scope)}
-              type="button"
+          {monitorQuery.isLoading ? (
+            <p aria-label="正在加载流程监控" className={styles.muted} role="status">
+              正在加载流程监控...
+            </p>
+          ) : monitorQuery.isError ? (
+            <p aria-label="流程监控加载失败" className={styles.feedbackError} role="alert">
+              流程监控加载失败，请稍后刷新重试。
+            </p>
+          ) : monitorItems.length > 0 ? (
+            <div
+              aria-label="流程监控列表"
+              className={styles.monitorGrid}
+              role="region"
+              tabIndex={0}
             >
-              {workloadScopeLabels[scope] ?? scope}
-            </button>
-          ))}
-        </div>
+              {monitorItems.map((item) => {
+                const tone = getMonitorTone(item);
+                return (
+                  <article
+                    className={styles[`monitorCard${capitalize(tone)}`]}
+                    data-testid="workflow-item"
+                    key={item.groupId}
+                  >
+                    <div className={styles.monitorHeader}>
+                      <div>
+                        <strong>{getTaskGroupDisplayTitle(item)}</strong>
+                        <p className={styles.monitorHint}>{getMonitorHint(item)}</p>
+                      </div>
+                      <span className={styles.monitorBadge}>
+                        {getWorkflowStatusLabel(item.workflowStatus, taskGroupPresentationLabels)}
+                      </span>
+                    </div>
+                    <dl className={styles.monitorMeta}>
+                      <div>
+                        <dt>发起人</dt>
+                        <dd>{item.creatorName ?? item.ownerSnapshot?.creatorName ?? "未记录"}</dd>
+                      </div>
+                      <div>
+                        <dt>责任单位</dt>
+                        <dd>{item.creatorOffice ?? item.ownerSnapshot?.creatorOffice ?? "未记录"}</dd>
+                      </div>
+                      <div>
+                        <dt>当前节点</dt>
+                        <dd>{getCurrentNodeLabel(item.currentNodeKey, taskGroupPresentationLabels)}</dd>
+                      </div>
+                      <div>
+                        <dt>有效工作量</dt>
+                        <dd>{formatWorkload(item.effectiveWorkload)} A1</dd>
+                      </div>
+                    </dl>
+                    <WorkflowRail
+                      archiveStatus={item.archiveStatus}
+                      currentNodeKey={item.currentNodeKey}
+                      nodes={managementSchema.workflow.nodes ?? []}
+                      terminalStatus={managementSchema.workflow.terminalStatus}
+                      workflowStatus={item.workflowStatus}
+                    />
+                    <div className={styles.monitorActions}>
+                      <Link className={styles.secondaryLink} to={`/task-groups/${item.groupId}`}>
+                        查看任务包
+                      </Link>
+                      {item.canApprove ? (
+                        <button
+                          className={styles.primaryButton}
+                          onClick={() => openApprovalDialog(item)}
+                          type="button"
+                        >
+                          审批
+                        </button>
+                      ) : null}
+                      {isAdmin && item.currentNodeKey ? (
+                        <button
+                          className={styles.secondaryButton}
+                          onClick={() => openRepairDialog(item)}
+                          type="button"
+                        >
+                          修复当前节点
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className={styles.muted}>当前没有可见流程。</p>
+          )}
+        </section>
 
-        <form
-          className={styles.filterBar}
-          onSubmit={(event) => {
-            event.preventDefault();
-            setFeedback(null);
-          }}
-        >
-          <label className={styles.filterField}>
-            <span>开始日期</span>
-            <input
-              className={styles.input}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setFilters((current) => ({ ...current, startDate: value }));
-              }}
-              type="date"
-              value={filters.startDate}
-            />
-          </label>
-          <label className={styles.filterField}>
-            <span>结束日期</span>
-            <input
-              className={styles.input}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setFilters((current) => ({ ...current, endDate: value }));
-              }}
-              type="date"
-              value={filters.endDate}
-            />
-          </label>
-          <label className={styles.filterField}>
-            <span>结算状态</span>
-            <select
-              className={styles.input}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setFilters((current) => ({ ...current, status: value }));
-              }}
-              value={filters.status}
-            >
-              {workloadStatusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.checkboxField}>
-            <input
-              checked={filters.validOnly}
-              onChange={(event) => {
-                const checked = event.currentTarget.checked;
-                setFilters((current) => ({ ...current, validOnly: checked }));
-              }}
-              type="checkbox"
-            />
-            <span>仅看有效记录</span>
-          </label>
-        </form>
+        <section className={styles.sectionSecondary}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <p className={styles.eyebrow}>范围筛选</p>
+              <h2>工作量台账</h2>
+            </div>
+            <span className={styles.sectionHint}>只显示当前角色可见记录</span>
+          </div>
 
-        {historyQuery.isLoading ? (
-          <p className={styles.muted}>正在加载统计...</p>
-        ) : historyQuery.isError ? (
-          <p className={styles.feedbackError}>统计加载失败，请稍后刷新重试。</p>
-        ) : (
-          <HistoryPanel
-            currentAccountName={account.displayName}
-            data={historyQuery.data}
-            entries={historyEntries}
-          />
-        )}
-      </section>
+          <div aria-label="统计范围" className={styles.scopeTabs} role="group">
+            {availableScopes.map((scope) => (
+              <button
+                aria-pressed={selectedScope === scope}
+                className={selectedScope === scope ? styles.scopeTabActive : styles.scopeTab}
+                key={scope}
+                onClick={() => setSelectedScope(scope)}
+                type="button"
+              >
+                {workloadScopeLabels[scope] ?? "其他范围"}
+              </button>
+            ))}
+          </div>
+
+          <form
+            className={styles.filterBar}
+            onSubmit={(event) => {
+              event.preventDefault();
+              setFeedback(null);
+            }}
+          >
+            <label className={styles.filterField}>
+              <span>开始日期</span>
+              <input
+                className={styles.input}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setFilters((current) => ({ ...current, startDate: value }));
+                }}
+                type="date"
+                value={filters.startDate}
+              />
+            </label>
+            <label className={styles.filterField}>
+              <span>结束日期</span>
+              <input
+                className={styles.input}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setFilters((current) => ({ ...current, endDate: value }));
+                }}
+                type="date"
+                value={filters.endDate}
+              />
+            </label>
+            <label className={styles.filterField}>
+              <span>结算状态</span>
+              <select
+                className={styles.input}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setFilters((current) => ({ ...current, status: value }));
+                }}
+                value={filters.status}
+              >
+                {workloadStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.checkboxField}>
+              <input
+                checked={filters.validOnly}
+                onChange={(event) => {
+                  const checked = event.currentTarget.checked;
+                  setFilters((current) => ({ ...current, validOnly: checked }));
+                }}
+                type="checkbox"
+              />
+              <span>仅看有效记录</span>
+            </label>
+          </form>
+
+          {historyQuery.isLoading ? (
+            <p aria-label="正在加载工作量台账" className={styles.muted} role="status">
+              正在加载工作量台账...
+            </p>
+          ) : historyQuery.isError ? (
+            <p aria-label="工作量台账加载失败" className={styles.feedbackError} role="alert">
+              工作量台账加载失败，请稍后刷新重试。
+            </p>
+          ) : (
+            <HistoryPanel
+              currentAccountName={account.displayName}
+              data={historyQuery.data}
+              entries={historyEntries}
+              labels={taskGroupPresentationLabels}
+            />
+          )}
+        </section>
       </div>
 
       {approvalTarget ? (
-        <div
-          aria-label="审批当前节点"
-          aria-modal="true"
-          className={styles.modalBackdrop}
-          role="dialog"
+        <AccessibleModal
+          ariaLabel="审批当前节点"
+          initialFocusRef={approvalFactorInputRef}
+          onClose={() => setApprovalTarget(null)}
         >
-          <div className={styles.modalCard}>
-            <div className={styles.modalHeader}>
+          <div className={styles.modalHeader}>
+            <div>
+              <p className={styles.eyebrow}>审批</p>
+              <h3>审批当前节点</h3>
+            </div>
+            <button className={styles.closeButton} onClick={() => setApprovalTarget(null)} type="button">
+              关闭
+            </button>
+          </div>
+
+          <p className={styles.modalDescription}>
+            {`${getTaskGroupDisplayTitle(approvalTarget)} 当前处于 ${getCurrentNodeLabel(
+              approvalTarget.currentNodeKey,
+              taskGroupPresentationLabels,
+            )}。`}
+          </p>
+
+          {approvalPreview ? (
+            <dl className={styles.approvalSummary}>
               <div>
-                <p className={styles.eyebrow}>Approval</p>
-                <h3>审批当前节点</h3>
+                <dt>初始 A1</dt>
+                <dd>{formatWorkload(approvalPreview.initialWorkload)} A1</dd>
               </div>
-              <button className={styles.closeButton} onClick={() => setApprovalTarget(null)} type="button">
-                关闭
+              <div>
+                <dt>已应用系数</dt>
+                <dd>{approvalPreview.appliedFactor.toFixed(2)}</dd>
+              </div>
+              <div>
+                <dt>当前输入系数</dt>
+                <dd>{approvalPreview.inputFactorLabel}</dd>
+              </div>
+              <div>
+                <dt>预计最终 A1</dt>
+                <dd>{approvalPreview.projectedWorkloadLabel}</dd>
+              </div>
+            </dl>
+          ) : null}
+
+          <form className={styles.form} onSubmit={handleApprovalSubmit}>
+            <label className={styles.label} htmlFor="workflow-approval-factor">
+              当前输入系数
+            </label>
+            <input
+              className={styles.input}
+              id="workflow-approval-factor"
+              onChange={(event) => setApprovalFactor(event.currentTarget.value)}
+              ref={approvalFactorInputRef}
+              type="text"
+              value={approvalFactor}
+            />
+            <p className={styles.helpText}>
+              {`允许范围 ${formatApprovalFactor(
+                workflowFactor.min,
+                workflowFactor.precision,
+              )} 到 ${formatApprovalFactor(
+                workflowFactor.max,
+                workflowFactor.precision,
+              )}，最多 ${workflowFactor.precision} 位小数。`}
+            </p>
+            {approvalError ? (
+              <p className={styles.feedbackError} role="alert">
+                {approvalError}
+              </p>
+            ) : null}
+            <div className={styles.modalActions}>
+              <button className={styles.secondaryButton} onClick={() => setApprovalTarget(null)} type="button">
+                取消
+              </button>
+              <button className={styles.primaryButton} disabled={approvalSubmitting} type="submit">
+                {approvalSubmitting ? "提交中..." : "确认审批"}
               </button>
             </div>
-
-            <p className={styles.modalDescription}>
-              {`${getTaskGroupDisplayTitle(approvalTarget)} 当前处于 ${getCurrentNodeLabel(
-                approvalTarget.currentNodeKey,
-                taskGroupPresentationLabels,
-              )}。`}
-            </p>
-
-            <form className={styles.form} onSubmit={handleApprovalSubmit}>
-              <label className={styles.label} htmlFor="workflow-approval-factor">
-                审批系数
-              </label>
-              <input
-                className={styles.input}
-                id="workflow-approval-factor"
-                onChange={(event) => setApprovalFactor(event.currentTarget.value)}
-                type="text"
-                value={approvalFactor}
-              />
-              <p className={styles.helpText}>
-                {`允许范围 ${formatApprovalFactor(
-                  workflowFactor.min,
-                  workflowFactor.precision,
-                )} 到 ${formatApprovalFactor(
-                  workflowFactor.max,
-                  workflowFactor.precision,
-                )}，最多 ${workflowFactor.precision} 位小数。`}
-              </p>
-              {approvalError ? <p className={styles.feedbackError}>{approvalError}</p> : null}
-              <div className={styles.modalActions}>
-                <button className={styles.secondaryButton} onClick={() => setApprovalTarget(null)} type="button">
-                  取消
-                </button>
-                <button className={styles.primaryButton} disabled={approvalSubmitting} type="submit">
-                  {approvalSubmitting ? "提交中..." : "确认审批"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </AccessibleModal>
       ) : null}
 
       {repairTarget ? (
-        <div
-          aria-label="修复当前节点"
-          aria-modal="true"
-          className={styles.modalBackdrop}
-          role="dialog"
+        <AccessibleModal
+          ariaLabel="修复当前节点"
+          initialFocusRef={repairAccountSelectRef}
+          onClose={closeRepairDialog}
         >
-          <div className={styles.modalCard}>
             <div className={styles.modalHeader}>
               <div>
                 <p className={styles.eyebrow}>Repair</p>
@@ -747,6 +827,7 @@ export function WorkloadPage() {
                     className={styles.input}
                     id="workflow-repair-account"
                     onChange={(event) => setRepairReplaceAccountId(event.currentTarget.value)}
+                    ref={repairAccountSelectRef}
                     value={repairReplaceAccountId}
                   >
                     <option value="">请选择替换账号</option>
@@ -836,7 +917,11 @@ export function WorkloadPage() {
                 </>
               )}
 
-              {repairError ? <p className={styles.feedbackError}>{repairError}</p> : null}
+              {repairError ? (
+                <p className={styles.feedbackError} role="alert">
+                  {repairError}
+                </p>
+              ) : null}
               <div className={styles.modalActions}>
                 <button className={styles.secondaryButton} onClick={closeRepairDialog} type="button">
                   取消
@@ -846,8 +931,7 @@ export function WorkloadPage() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </AccessibleModal>
       ) : null}
     </main>
   );
@@ -857,10 +941,12 @@ function HistoryPanel({
   currentAccountName,
   data,
   entries,
+  labels,
 }: {
   currentAccountName: string;
   data: WorkloadScopeResponse | undefined;
   entries: WorkloadScopeResponse["entries"];
+  labels: TaskGroupPresentationLabels;
 }) {
   const topAccounts = useMemo(() => {
     return Object.entries(data?.totalsByAccount ?? {})
@@ -869,7 +955,12 @@ function HistoryPanel({
   }, [data?.totalsByAccount]);
 
   return (
-    <div className={styles.historyLayout}>
+    <div
+      aria-label="工作量记录"
+      className={styles.historyLayout}
+      role="region"
+      tabIndex={0}
+    >
       <div className={styles.historyHero}>
         <div>
           <span className={styles.heroLabel}>累计工作量 A1</span>
@@ -909,9 +1000,9 @@ function HistoryPanel({
                 <span>{formatWorkload(entry.workloadA1)}</span>
               </div>
               <div className={styles.historyCardMeta}>
-                <span>{entry.roleKey}</span>
+                <span>{getWorkloadRoleLabel(entry.roleKey, labels)}</span>
                 <span>{entry.displayName ?? entry.accountId ?? "未记录"}</span>
-                <span>{entry.settlementStatus}</span>
+                <span>{getSettlementStatusLabel(entry.settlementStatus)}</span>
                 <span>{formatTimestamp(entry.settledAt)}</span>
               </div>
             </article>
@@ -934,7 +1025,7 @@ function MetricTile({
   tone?: "default" | "hot" | "danger" | "strong";
 }) {
   return (
-    <article className={styles[`metricTile${capitalize(tone)}`]}>
+    <article className={styles[`metricTile${capitalize(tone)}`]} data-testid="workload-metric">
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
@@ -944,31 +1035,35 @@ function MetricTile({
 function WorkflowRail({
   archiveStatus,
   currentNodeKey,
-  labels,
+  nodes,
+  terminalStatus,
   workflowStatus,
 }: {
   archiveStatus: string;
   currentNodeKey: string | null;
-  labels: TaskGroupPresentationLabels;
+  nodes: readonly WorkflowNodeSchema[];
+  terminalStatus: string;
   workflowStatus: string;
 }) {
   const stages = [
-    { key: "one_review", label: labels.nodeLabels?.one_review ?? "一审" },
-    { key: "two_review", label: labels.nodeLabels?.two_review ?? "二审" },
-    { key: "three_review", label: labels.nodeLabels?.three_review ?? "三审" },
+    ...nodes.map((node) => ({ key: node.nodeKey, label: node.nodeLabel })),
     { key: "archive", label: "归档" },
   ];
   const currentIndex = currentNodeKey
     ? stages.findIndex((stage) => stage.key === currentNodeKey)
     : -1;
   const isTerminal =
-    workflowStatus === "three_review_approved" ||
+    workflowStatus === terminalStatus ||
     workflowStatus === "archived" ||
     archiveStatus === "succeeded";
   const hasFailed = archiveStatus === "failed" || workflowStatus === "archive_failed";
 
   return (
-    <ol className={styles.flowRail} aria-label="任务流程图">
+    <ol
+      aria-label="任务流程"
+      className={styles.flowRail}
+      style={{ gridTemplateColumns: `repeat(${Math.max(stages.length, 1)}, minmax(0, 1fr))` }}
+    >
       {stages.map((stage, index) => {
         let state = "pending";
         if (hasFailed && stage.key === "archive") {
@@ -980,15 +1075,88 @@ function WorkflowRail({
         } else if (index === currentIndex) {
           state = "current";
         }
+        const stateLabel = {
+          current: "当前",
+          done: "已完成",
+          failed: "异常",
+          pending: "待处理",
+        }[state];
         return (
-          <li className={styles[`flowNode${capitalize(state)}`]} key={stage.key}>
-            <span className={styles.flowDot} />
+          <li
+            aria-current={state === "current" ? "step" : undefined}
+            className={styles[`flowNode${capitalize(state)}`]}
+            key={stage.key}
+          >
+            <span aria-hidden="true" className={styles.flowDot} />
             <span>{stage.label}</span>
+            <span className={styles.flowStateLabel}>{stateLabel}</span>
           </li>
         );
       })}
     </ol>
   );
+}
+
+function AccessibleModal({
+  ariaLabel,
+  children,
+  initialFocusRef,
+  onClose,
+}: {
+  ariaLabel: string;
+  children: ReactNode;
+  initialFocusRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    initialFocusRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      returnFocusRef.current?.focus();
+    };
+  }, [initialFocusRef]);
+
+  return (
+    <div aria-label={ariaLabel} aria-modal="true" className={styles.modalBackdrop} role="dialog">
+      <div className={styles.modalCard}>{children}</div>
+    </div>
+  );
+}
+
+function buildApprovalPreview(item: TaskGroupSummary, inputValue: string) {
+  const initialWorkload = item.workload.initialWorkloadA1;
+  const appliedFactor =
+    initialWorkload > 0 && Number.isFinite(item.effectiveWorkload)
+      ? item.effectiveWorkload / initialWorkload
+      : 1;
+  const inputFactor = Number.parseFloat(inputValue);
+  const hasValidInput = Number.isFinite(inputFactor);
+  return {
+    initialWorkload,
+    appliedFactor,
+    inputFactorLabel: hasValidInput ? inputFactor.toFixed(2) : "待输入",
+    projectedWorkloadLabel: hasValidInput
+      ? `${formatWorkload(item.effectiveWorkload * inputFactor)} A1`
+      : "待输入",
+  };
 }
 
 function resolveErrorMessage(error: unknown, fallback: string) {

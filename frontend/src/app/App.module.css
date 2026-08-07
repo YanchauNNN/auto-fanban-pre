@@ -10,6 +10,22 @@
   padding: 0 1rem 1rem;
 }
 
+.workspacePageWorkload {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100svh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspacePageWorkload .shell,
+.workspacePageWorkload .mainColumn,
+.workspacePageWorkload .modulePanel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .titleStrip {
   position: sticky;
   top: 0;
@@ -1830,7 +1846,9 @@
   .jobsGrid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
+@media (max-width: 1080px) {
   .titleStripLayout {
     flex-direction: column;
     align-items: stretch;
@@ -1846,6 +1864,10 @@
 
   .workspacePage {
     padding-inline: 0.85rem;
+  }
+
+  .workspacePageWorkload {
+    height: 100svh;
   }
 
   .titleStrip {

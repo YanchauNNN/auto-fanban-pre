@@ -1098,7 +1098,13 @@ function WorkspacePage() {
   const activeAuditSummary = auditSummaryQueue[0] ?? null;
 
   return (
-    <div className={styles.workspacePage}>
+    <div
+      className={`${styles.workspacePage} ${
+        activeModule === "workload" ? styles.workspacePageWorkload : ""
+      }`}
+      data-layout-mode={activeModule === "workload" ? "bounded-workload" : "document"}
+      data-testid="workspace-page"
+    >
       <header className={styles.titleStrip} data-testid="title-strip">
         <div className={styles.titleStripLayout}>
           <div className={styles.titleStripBrand}>

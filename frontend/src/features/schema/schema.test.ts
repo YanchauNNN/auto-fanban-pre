@@ -263,6 +263,20 @@ describe("normalizeFormSchema", () => {
         },
         workflow: {
           terminal_status: "archived",
+          nodes: [
+            {
+              key: "quality_gate",
+              label: "质量复核",
+              assignee_source: "ied_reviewed_by",
+              factor_key: "quality_gate_factor",
+            },
+            {
+              key: "chief_review",
+              label: "总师审定",
+              assignee_source: "ied_approved_by",
+              factor_key: "chief_review_factor",
+            },
+          ],
           status_labels: {
             archived: "Archived",
           },
@@ -305,6 +319,20 @@ describe("normalizeFormSchema", () => {
     expect(normalized.management?.account.adminCreatedDefaultPassword).toBe("yaml-pass");
     expect(normalized.management?.workflow.factor.max).toBe(1.3);
     expect(normalized.management?.workflow.terminalStatus).toBe("archived");
+    expect(normalized.management?.workflow.nodes).toEqual([
+      {
+        nodeKey: "quality_gate",
+        nodeLabel: "质量复核",
+        roleField: "ied_reviewed_by",
+        factorKey: "quality_gate_factor",
+      },
+      {
+        nodeKey: "chief_review",
+        nodeLabel: "总师审定",
+        roleField: "ied_approved_by",
+        factorKey: "chief_review_factor",
+      },
+    ]);
     expect(normalized.management?.workflow.statusLabels.archived).toBe("Archived");
     expect(normalized.management?.workflow.nodeLabels.custom_review).toBe("Custom Review");
     expect(normalized.management?.workflow.emptyCurrentNodeLabel).toBe("No active node");

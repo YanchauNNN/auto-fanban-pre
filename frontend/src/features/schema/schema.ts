@@ -94,6 +94,12 @@ type RawFormSchema = {
     workflow?: {
       terminal_status?: string | null;
       archive_trigger_status?: string | null;
+      nodes?: readonly {
+        key?: string | null;
+        label?: string | null;
+        assignee_source?: string | null;
+        factor_key?: string | null;
+      }[];
       status_labels?: Record<string, string>;
       node_labels?: Record<string, string>;
       empty_current_node_label?: string | null;
@@ -477,6 +483,14 @@ function normalizeManagementSchema(
         value.workflow?.archive_trigger_status == null
           ? undefined
           : String(value.workflow.archive_trigger_status),
+      nodes: (value.workflow?.nodes ?? [])
+        .map((node) => ({
+          nodeKey: String(node.key ?? "").trim(),
+          nodeLabel: String(node.label ?? "").trim(),
+          roleField: String(node.assignee_source ?? "").trim(),
+          factorKey: String(node.factor_key ?? "").trim(),
+        }))
+        .filter((node) => node.nodeKey && node.nodeLabel),
       factor: {
         default: requiredNumber(value.workflow?.factor?.default, "workflow.factor.default"),
         min: requiredNumber(value.workflow?.factor?.min, "workflow.factor.min"),
