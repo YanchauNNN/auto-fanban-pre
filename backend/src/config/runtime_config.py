@@ -394,8 +394,18 @@ class CalculationBookAiSuggestionRuntimeConfig(BaseModel):
     log_retention_days: int = Field(default=30, gt=0)
 
 
+class ArchiveExtractorConfig(BaseModel):
+    """计算书 RAR/7z 私有解包器配置。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    executable: Path = Path("bin/7-Zip/7z.exe")
+    list_timeout_seconds: int = Field(default=120, gt=0)
+    extract_timeout_seconds: int = Field(default=300, gt=0)
+
+
 class CalculationBookRuntimeConfig(BaseModel):
-    """计算书业务资产、OCR 运行时和 ZIP/RAR 安全限制。"""
+    """计算书业务资产、OCR 运行时和 ZIP/RAR/7z 安全限制。"""
 
     template_dir: Path = Path("documents_bin/calculation_book")
     standard_reinforcement_template: Path = Path(
@@ -412,6 +422,9 @@ class CalculationBookRuntimeConfig(BaseModel):
     max_archive_files: int = 500
     max_single_file_mb: int = 50
     max_compression_ratio: float = 250.0
+    archive_extractor: ArchiveExtractorConfig = Field(
+        default_factory=ArchiveExtractorConfig
+    )
     ai_normalization: CalculationBookAiNormalizationRuntimeConfig = Field(
         default_factory=CalculationBookAiNormalizationRuntimeConfig
     )
@@ -700,15 +713,18 @@ class RuntimeConfig(BaseSettings):
     def _set_nested_value(self, path_tokens: list[str], value: Any) -> None:
         """按路径 token 在配置对象内写值，忽略未知键。"""
         cursor: Any = self
+        trail: list[tuple[Any, str]] = []
         for token in path_tokens[:-1]:
             if isinstance(cursor, BaseModel):
                 if not hasattr(cursor, token):
                     return
+                trail.append((cursor, token))
                 cursor = getattr(cursor, token)
                 continue
             if isinstance(cursor, dict):
                 if token not in cursor:
                     return
+                trail.append((cursor, token))
                 cursor = cursor[token]
                 continue
             return
@@ -716,6 +732,18 @@ class RuntimeConfig(BaseSettings):
         leaf = path_tokens[-1]
         if isinstance(cursor, BaseModel):
             if hasattr(cursor, leaf):
+                if cursor.model_config.get("frozen"):
+                    if not trail:
+                        return
+                    values = cursor.model_dump()
+                    values[leaf] = value
+                    replacement = cursor.__class__.model_validate(values)
+                    parent, parent_token = trail[-1]
+                    if isinstance(parent, BaseModel):
+                        setattr(parent, parent_token, replacement)
+                    elif isinstance(parent, dict):
+                        parent[parent_token] = replacement
+                    return
                 setattr(cursor, leaf, value)
         elif isinstance(cursor, dict):
             cursor[leaf] = value
@@ -809,6 +837,16 @@ class RuntimeConfig(BaseSettings):
         self.calculation_book.tessdata_dir = self._resolve_root_path(
             self.calculation_book.tessdata_dir,
             self.base_dir,
+        )
+        archive_extractor = self.calculation_book.archive_extractor
+        self.calculation_book.archive_extractor = ArchiveExtractorConfig.model_validate(
+            {
+                **archive_extractor.model_dump(),
+                "executable": self._resolve_root_path(
+                    archive_extractor.executable,
+                    self.base_dir,
+                ),
+            }
         )
         self.calculation_book.ai_normalization.skill_root = self._resolve_root_path(
             self.calculation_book.ai_normalization.skill_root,

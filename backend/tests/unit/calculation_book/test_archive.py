@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from src.calculation_book.archive import (
+    ArchiveFormat,
     ArchiveLimits,
     InvalidCalculationArchive,
+    detect_archive_format,
     validate_and_extract_archive,
 )
 from src.calculation_book.models import ReinforcementSource
@@ -29,6 +31,43 @@ def _valid_entries() -> dict[str, bytes]:
         "01/layout.png": b"layout",
         "02/model.png": b"model",
     }
+
+
+@pytest.mark.parametrize(
+    ("suffix", "signature", "expected"),
+    [
+        (".zip", b"PK\x03\x04payload", ArchiveFormat.ZIP),
+        (".rar", b"Rar!\x1a\x07\x00payload", ArchiveFormat.RAR),
+        (".rar", b"Rar!\x1a\x07\x01\x00payload", ArchiveFormat.RAR),
+        (".7z", b"7z\xbc\xaf'\x1cpayload", ArchiveFormat.SEVEN_Z),
+    ],
+)
+def test_detects_archive_format_from_suffix_and_magic_bytes(
+    tmp_path: Path,
+    suffix: str,
+    signature: bytes,
+    expected: ArchiveFormat,
+) -> None:
+    archive = tmp_path / f"input{suffix}"
+    archive.write_bytes(signature)
+
+    assert detect_archive_format(archive) is expected
+
+
+def test_rejects_unknown_archive_magic_bytes(tmp_path: Path) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(b"not-an-archive")
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        detect_archive_format(archive)
+
+
+def test_rejects_archive_suffix_and_magic_mismatch(tmp_path: Path) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(b"Rar!\x1a\x07\x01\x00")
+
+    with pytest.raises(InvalidCalculationArchive, match="后缀.*签名.*不一致"):
+        detect_archive_format(archive)
 
 
 def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> None:

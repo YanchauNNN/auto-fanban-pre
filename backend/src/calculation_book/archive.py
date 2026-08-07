@@ -8,6 +8,7 @@ import subprocess
 import zipfile
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 from .models import ReinforcementSource
@@ -37,6 +38,53 @@ _SLAB_Z_FIGURE_NAME = re.compile(
 
 class InvalidCalculationArchive(ValueError):
     pass
+
+
+class ArchiveFormat(StrEnum):
+    ZIP = "zip"
+    RAR = "rar"
+    SEVEN_Z = "7z"
+
+
+_ARCHIVE_FORMAT_BY_SUFFIX = {
+    ".zip": ArchiveFormat.ZIP,
+    ".rar": ArchiveFormat.RAR,
+    ".7z": ArchiveFormat.SEVEN_Z,
+}
+_ZIP_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+_RAR4_SIGNATURE = b"Rar!\x1a\x07\x00"
+_RAR5_SIGNATURE = b"Rar!\x1a\x07\x01\x00"
+_SEVEN_Z_SIGNATURE = b"7z\xbc\xaf'\x1c"
+
+
+def detect_archive_format(archive_path: Path) -> ArchiveFormat:
+    """Validate the filename suffix against the archive magic bytes."""
+    suffix = archive_path.suffix.lower()
+    suffix_format = _ARCHIVE_FORMAT_BY_SUFFIX.get(suffix)
+    if suffix_format is None:
+        raise InvalidCalculationArchive(f"不支持的压缩包后缀：{suffix or '无后缀'}")
+
+    try:
+        with archive_path.open("rb") as archive_file:
+            header = archive_file.read(8)
+    except OSError as exc:
+        raise InvalidCalculationArchive("压缩包文件读取失败") from exc
+
+    if header.startswith(_ZIP_SIGNATURES):
+        signature_format = ArchiveFormat.ZIP
+    elif header.startswith((_RAR4_SIGNATURE, _RAR5_SIGNATURE)):
+        signature_format = ArchiveFormat.RAR
+    elif header.startswith(_SEVEN_Z_SIGNATURE):
+        signature_format = ArchiveFormat.SEVEN_Z
+    else:
+        raise InvalidCalculationArchive("无法识别压缩包签名")
+
+    if suffix_format is not signature_format:
+        raise InvalidCalculationArchive(
+            "压缩包后缀与文件签名不一致："
+            f"{suffix} / {signature_format.value}"
+        )
+    return signature_format
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from src.config import mechanism_spec, runtime_config
 from src.config.mechanism_spec import MechanismSpecLoader
 from src.config.runtime_config import (
+    ArchiveExtractorConfig,
     CalculationBookAiNormalizationRuntimeConfig,
     RuntimeConfig,
 )
@@ -32,6 +33,11 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     assert config.calculation_book.max_archive_mb == 1024
     assert config.calculation_book.max_archive_files == 500
     assert config.calculation_book.max_compression_ratio == 250.0
+    assert config.calculation_book.archive_extractor.executable == (
+        REPO_ROOT / "bin" / "7-Zip" / "7z.exe"
+    ).resolve()
+    assert config.calculation_book.archive_extractor.list_timeout_seconds == 120
+    assert config.calculation_book.archive_extractor.extract_timeout_seconds == 300
     assert config.calculation_book.ai_normalization.enabled is True
     assert config.calculation_book.ai_normalization.skill_root == (
         REPO_ROOT / "tools" / "ai" / "reinforcement-table-normalizer"
@@ -64,6 +70,53 @@ def test_calculation_book_runtime_assets_come_from_runtime_yaml() -> None:
     ).resolve()
     assert suggestion.log_max_bytes == 10_485_760
     assert suggestion.log_retention_days == 30
+
+
+def test_calculation_book_archive_extractor_is_immutable() -> None:
+    config = ArchiveExtractorConfig()
+
+    with pytest.raises(ValidationError, match="frozen"):
+        config.list_timeout_seconds = 1
+
+
+def test_calculation_book_archive_extractor_accepts_env_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__LIST_TIMEOUT_SECONDS",
+        "45",
+    )
+
+    config = RuntimeConfig.from_yaml(REPO_ROOT / "documents" / "参数规范_运行期.yaml")
+
+    assert config.calculation_book.archive_extractor.list_timeout_seconds == 45
+
+
+def test_calculation_book_archive_extractor_resolves_in_terminal_package_layout(
+    tmp_path: Path,
+) -> None:
+    deploy_root = tmp_path / "FanBanServer"
+    runtime_spec = deploy_root / "documents" / "参数规范_运行期.yaml"
+    runtime_spec.parent.mkdir(parents=True)
+    runtime_spec.write_text(
+        """
+runtime_options:
+  calculation_book:
+    archive_extractor:
+      executable: { type: str, default: "bin/7-Zip/7z.exe" }
+      list_timeout_seconds: { type: int, default: 120 }
+      extract_timeout_seconds: { type: int, default: 300 }
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.from_yaml(runtime_spec)
+
+    assert config.calculation_book.archive_extractor.executable == (
+        deploy_root / "bin" / "7-Zip" / "7z.exe"
+    ).resolve()
+    assert config.calculation_book.archive_extractor.list_timeout_seconds == 120
+    assert config.calculation_book.archive_extractor.extract_timeout_seconds == 300
 
 
 @pytest.mark.parametrize(
