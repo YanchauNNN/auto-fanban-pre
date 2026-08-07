@@ -64,6 +64,8 @@ const DIRECTION_LABELS = {
   Z: "拉筋",
 } as const;
 
+const WALL_DIRECTIONS = ["X", "Y", "Z"] as const;
+
 const SLAB_GROUP_ORDER = [
   "top_x",
   "top_y",
@@ -1173,7 +1175,9 @@ function ReviewPanel({
       <div className={styles.reviewHeader}>
         <div>
           <p className={styles.stepBadge}>
-            {aiSuggested ? "02 · 云图核验" : "02 · 规范化核验"}
+            {phase === "confirm"
+              ? "03 · 确认提交"
+              : aiSuggested ? "02 · 云图核验" : "02 · 规范化核验"}
           </p>
           <h3
             ref={headingRef}
@@ -1237,6 +1241,13 @@ function ReviewPanel({
           ) : null}
         </div>
       </div>
+
+      {aiSuggested ? (
+        <p className={styles.aiBatchStatus} role="status">
+          <strong>等待任务生成 AI 建议</strong>
+          <span>当前仅核验云图分组与 SMX，配筋建议由任务统一生成。</span>
+        </p>
+      ) : null}
 
       {!aiSuggested ? <section
         aria-labelledby="calculation-book-matching-audit"
@@ -1368,16 +1379,35 @@ function ReviewPanel({
         </div>
       ) : null}
 
-      <div className={styles.evidenceSection}>
-        <div>
-          <h3>逐墙识别证据</h3>
-          <p>
-            {aiSuggested
-              ? "展开墙号可核对各方向图片与 SMX 识别值；存在疑点的方向会保留为待复核。"
-              : "展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。"}
-          </p>
+      {aiSuggested ? phase === "confirm" ? (
+        <details className={styles.confirmedWallEvidence}>
+          <summary>
+            <strong>已核验逐墙证据（{preflight.wallCount} 组）</strong>
+            <span>按需展开查看 X / Y / Z 方向</span>
+          </summary>
+          <div className={styles.confirmedWallEvidenceBody}>
+            <div>
+              <h3>逐墙识别证据</h3>
+              <p>墙号摘要便于快速复查；展开单墙可核对各方向图片与 SMX 识别值。</p>
+            </div>
+            <AiWallEvidenceGrid walls={preflight.walls} />
+          </div>
+        </details>
+      ) : (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐墙识别证据</h3>
+            <p>展开墙号可核对各方向图片与 SMX 识别值；存在疑点的方向会标记为需复核。</p>
+          </div>
+          <AiWallEvidenceGrid walls={preflight.walls} />
         </div>
-        {preflight.walls.map((wall) => (
+      ) : (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐墙识别证据</h3>
+            <p>展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。</p>
+          </div>
+          {preflight.walls.map((wall) => (
             <details
               className={styles.wallEvidence}
               key={`${phase}-${wall.wallId}`}
@@ -1391,19 +1421,60 @@ function ReviewPanel({
                 </span>
               </summary>
               <div className={styles.directionGrid}>
-                {(["X", "Y", "Z"] as const).map((direction) => (
+                {WALL_DIRECTIONS.map((direction) => (
                   <DirectionEvidence
                     direction={direction}
                     evidence={wall.directions[direction]}
-                    imageOnly={aiSuggested}
                     key={direction}
                   />
                 ))}
               </div>
             </details>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </section>
+  );
+}
+
+function AiWallEvidenceGrid({
+  walls,
+}: {
+  walls: CalculationBookPreflightResult["walls"];
+}) {
+  return (
+    <div className={styles.compactWallGrid}>
+      {walls.map((wall) => {
+        const completeDirectionCount = WALL_DIRECTIONS.filter(
+          (direction) => wall.directions[direction].smx !== null,
+        ).length;
+        return (
+          <details
+            className={`${styles.wallEvidence} ${styles.compactWallEvidence}`}
+            key={wall.wallId}
+          >
+            <summary>
+              <strong>{wall.wallId}</strong>
+              <span>
+                {completeDirectionCount === WALL_DIRECTIONS.length
+                  ? "3/3 方向完整"
+                  : `${completeDirectionCount}/3 方向 · 需复核`}
+              </span>
+            </summary>
+            <div className={styles.directionGrid}>
+              {WALL_DIRECTIONS.map((direction) => (
+                <DirectionEvidence
+                  direction={direction}
+                  evidence={wall.directions[direction]}
+                  imageOnly
+                  key={direction}
+                />
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </div>
   );
 }
 

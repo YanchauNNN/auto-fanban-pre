@@ -183,6 +183,46 @@ const preflightResult = {
   ],
 } as const;
 
+function aiWallEvidence(wallId: string, needsReview = false) {
+  const source = preflightResult.walls[0];
+  return {
+    ...source,
+    wallId,
+    baseWallId: wallId,
+    suggestedSourceRow: null,
+    directions: {
+      X: {
+        ...source.directions.X,
+        imageFilename: `${wallId}-X.JPEG`,
+        smx: needsReview ? null : source.directions.X.smx,
+        sourceCell: "",
+        originalText: "",
+        canonicalSpecification: "",
+        narrativeSpecification: "",
+        actualArea: null,
+      },
+      Y: {
+        ...source.directions.Y,
+        imageFilename: `${wallId}-Y.JPEG`,
+        sourceCell: "",
+        originalText: "",
+        canonicalSpecification: "",
+        narrativeSpecification: "",
+        actualArea: null,
+      },
+      Z: {
+        ...source.directions.Z,
+        imageFilename: `${wallId}-Z.JPEG`,
+        sourceCell: "",
+        originalText: "",
+        canonicalSpecification: "",
+        narrativeSpecification: "",
+        actualArea: null,
+      },
+    },
+  };
+}
+
 const aiPreflightResult = {
   ...preflightResult,
   preflightToken: "calculation-ai-preflight-1",
@@ -216,36 +256,9 @@ const aiPreflightResult = {
     },
   ],
   walls: [
-    {
-      ...preflightResult.walls[0],
-      suggestedSourceRow: null,
-      directions: {
-        X: {
-          ...preflightResult.walls[0].directions.X,
-          sourceCell: "",
-          originalText: "",
-          canonicalSpecification: "",
-          narrativeSpecification: "",
-          actualArea: null,
-        },
-        Y: {
-          ...preflightResult.walls[0].directions.Y,
-          sourceCell: "",
-          originalText: "",
-          canonicalSpecification: "",
-          narrativeSpecification: "",
-          actualArea: null,
-        },
-        Z: {
-          ...preflightResult.walls[0].directions.Z,
-          sourceCell: "",
-          originalText: "",
-          canonicalSpecification: "",
-          narrativeSpecification: "",
-          actualArea: null,
-        },
-      },
-    },
+    aiWallEvidence("N5012"),
+    aiWallEvidence("N5013"),
+    aiWallEvidence("N5014", true),
   ],
 } as const;
 
@@ -791,6 +804,102 @@ describe("CalculationBookWorkspace", () => {
     expect(createCalculationBook.mock.calls[0]?.[0]).not.toHaveProperty(
       "confirm_ai_normalization",
     );
+  });
+
+  it("compacts AI wall evidence and folds the confirmed wall set", async () => {
+    const user = userEvent.setup();
+    const aiSlabs = (["top_x", "top_y", "bottom_x", "bottom_y", "z"] as const)
+      .map((key) => ({
+        ...slabEvidence(key),
+        sourceRow: null,
+        sourceCell: "",
+        actualArea: null,
+      }));
+    const preflightCalculationBook = vi.fn().mockResolvedValue({
+      ...aiPreflightResult,
+      slabFigureCount: aiSlabs.length,
+      slabElevationCount: 1,
+      slabActualGroupCount: aiSlabs.length,
+      slabs: aiSlabs,
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.click(screen.getByRole("checkbox", { name: "无实配钢筋" }));
+    await user.click(screen.getByRole("checkbox", { name: "包含楼板应力" }));
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["rar"], "images-only.rar", { type: "application/vnd.rar" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    expect(await screen.findByText("云图核验结果")).toBeInTheDocument();
+    expect(screen.getAllByText("等待任务生成 AI 建议")).toHaveLength(1);
+    const reviewWallSummary = screen.getByText("N5012").closest("summary");
+    expect(reviewWallSummary).not.toBeNull();
+    expect(reviewWallSummary).toHaveTextContent("3/3 方向完整");
+    await user.click(reviewWallSummary as HTMLElement);
+    const reviewWall = reviewWallSummary?.closest("details");
+    expect(reviewWall).not.toBeNull();
+    expect(within(reviewWall as HTMLElement).getByText("X · 水平筋")).toBeInTheDocument();
+    expect(within(reviewWall as HTMLElement).getByText("Y · 竖向筋")).toBeInTheDocument();
+    expect(within(reviewWall as HTMLElement).getByText("Z · 拉筋")).toBeInTheDocument();
+    expect(screen.getByText("N5014").closest("summary")).toHaveTextContent("需复核");
+
+    await user.click(screen.getByRole("button", { name: "进入确认提交" }));
+
+    expect(screen.getByText("03 · 确认提交")).toBeInTheDocument();
+    const confirmedSummary = screen.getByText("已核验逐墙证据（59 组）").closest("summary");
+    const confirmedEvidence = confirmedSummary?.closest("details");
+    expect(confirmedEvidence).not.toBeNull();
+    expect(confirmedEvidence).not.toHaveAttribute("open");
+    const manualReviewHeading = screen.getByRole("heading", { name: "需人工复核" });
+    expect(confirmedEvidence).not.toContainElement(manualReviewHeading);
+
+    await user.click(confirmedSummary as HTMLElement);
+    const confirmedWallSummary = within(confirmedEvidence as HTMLElement)
+      .getByText("N5013")
+      .closest("summary");
+    expect(confirmedWallSummary).not.toBeNull();
+    await user.click(confirmedWallSummary as HTMLElement);
+    const confirmedWall = confirmedWallSummary?.closest("details");
+    expect(within(confirmedWall as HTMLElement).getByText("X · 水平筋")).toBeInTheDocument();
+    expect(within(confirmedWall as HTMLElement).getByText("Y · 竖向筋")).toBeInTheDocument();
+    expect(within(confirmedWall as HTMLElement).getByText("Z · 拉筋")).toBeInTheDocument();
+  });
+
+  it("keeps provided reinforcement source rows in each wall summary", async () => {
+    const user = userEvent.setup();
+    const preflightCalculationBook = vi.fn().mockResolvedValue(preflightResult);
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={minimalSlabSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("计算书模板"), "internal_structure");
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["zip"], "with-reinforcement.zip", { type: "application/zip" }),
+    );
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    const wallSummary = (await screen.findByText("N5012")).closest("summary");
+    expect(wallSummary).not.toBeNull();
+    expect(wallSummary).toHaveTextContent("配筋表第 2 行");
+    expect(screen.queryByText("已核验逐墙证据（1 组）")).not.toBeInTheDocument();
   });
 
   it("invalidates an existing preflight whenever either mode switch changes", async () => {

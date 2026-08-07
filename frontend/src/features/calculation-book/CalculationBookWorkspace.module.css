@@ -905,6 +905,96 @@
   gap: 0.72rem;
 }
 
+.aiBatchStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin: 0;
+  border-block: 1px solid rgba(20, 70, 128, 0.09);
+  padding: 0.58rem 0.7rem;
+  color: #66819d;
+  font-size: 0.82rem;
+}
+
+.aiBatchStatus strong {
+  color: #24537f;
+  white-space: nowrap;
+}
+
+.compactWallGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.compactWallEvidence {
+  min-width: 0;
+  border-radius: 13px;
+}
+
+.compactWallEvidence[open] {
+  grid-column: 1 / -1;
+}
+
+.compactWallEvidence summary {
+  gap: 0.5rem;
+  padding: 0.58rem 0.72rem;
+}
+
+.compactWallEvidence summary strong,
+.compactWallEvidence summary span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.confirmedWallEvidence {
+  overflow: hidden;
+  border: 1px solid rgba(20, 70, 128, 0.13);
+  border-radius: 16px;
+  background: rgba(247, 250, 254, 0.92);
+}
+
+.confirmedWallEvidence > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0.68rem 0.85rem;
+  color: #24537f;
+  cursor: pointer;
+}
+
+.confirmedWallEvidence > summary:hover {
+  background: rgba(232, 241, 251, 0.65);
+}
+
+.confirmedWallEvidence > summary span {
+  color: #7088a0;
+  font-size: 0.78rem;
+}
+
+.confirmedWallEvidenceBody {
+  display: grid;
+  gap: 0.7rem;
+  border-top: 1px solid rgba(20, 70, 128, 0.09);
+  padding: 0.75rem;
+}
+
+.confirmedWallEvidenceBody h3 {
+  color: #174777;
+  font-size: 1.05rem;
+}
+
+.confirmedWallEvidenceBody p {
+  margin-top: 0.25rem;
+  color: #66819d;
+  font-size: 0.84rem;
+}
+
 .evidenceSection > div:first-child {
   display: grid;
   gap: 0.35rem;
@@ -932,6 +1022,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  min-height: 44px;
+  box-sizing: border-box;
   padding: 0.78rem 0.9rem;
   color: #24537f;
   cursor: pointer;
@@ -939,6 +1031,12 @@
 
 .wallEvidence summary:hover {
   background: rgba(232, 241, 251, 0.65);
+}
+
+.wallEvidence summary:focus-visible,
+.confirmedWallEvidence > summary:focus-visible {
+  outline: 3px solid rgba(30, 111, 184, 0.5);
+  outline-offset: -3px;
 }
 
 .wallEvidence summary span {
@@ -1301,6 +1399,28 @@
 
   .ocrReviewPanel li small {
     text-align: left;
+  }
+
+  .aiBatchStatus {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .compactWallGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.42rem;
+  }
+
+  .compactWallEvidence summary {
+    gap: 0.18rem;
+    padding-inline: 0.58rem;
+  }
+
+  .confirmedWallEvidence > summary {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.18rem;
   }
 
   .wallEvidence summary {

@@ -840,7 +840,7 @@ calculation_book:
     - { key: "template_type", label: "计算书模板", type: "select", required: true }
     - { key: "project_no", label: "项目代号", type: "select", required: true, options_from: "enums.project_no" }
     - { key: "project_name", label: "项目名称", type: "text", required: true, derived_from: "enums.project_no.name" }
-    - { key: "internal_code", label: "内部编号", type: "text", required: true }
+    - { key: "internal_code", label: "内部编号", type: "text", required: true, placeholder: "例如：20161NH-JGS01" }
     - { key: "version", label: "版本", type: "text", required: true, default: "A" }
     - { key: "subproject_code", label: "子项代号或系统号", type: "select", required: true, options: ["RX", "KA", "NH", "SD", "SU", "DA", "DB"] }
     - { key: "subproject_name", label: "子项或系统名称", type: "select", required: true, options: ["内部结构", "燃料厂房", "核辅助厂房", "安全厂房SD区", "安全厂房SU区", "DA应急柴油机发电厂房", "DB应急柴油机发电厂房"] }

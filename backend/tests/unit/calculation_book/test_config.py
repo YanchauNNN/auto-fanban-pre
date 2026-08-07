@@ -245,6 +245,17 @@ def test_calculation_book_business_schema_exposes_reinforcement_source_enum() ->
     assert field["options"] == ["provided", "ai_suggested"]
 
 
+def test_calculation_book_business_schema_exposes_internal_code_placeholder() -> None:
+    business_spec = yaml.safe_load(
+        (REPO_ROOT / "documents" / "参数规范.yaml").read_text(encoding="utf-8")
+    )
+    fields = business_spec["calculation_book"]["fields"]
+
+    field = next(item for item in fields if item["key"] == "internal_code")
+
+    assert field["placeholder"] == "例如：20161NH-JGS01"
+
+
 def test_calculation_book_runtime_paths_resolve_in_terminal_package_layout(
     tmp_path: Path,
 ) -> None:
