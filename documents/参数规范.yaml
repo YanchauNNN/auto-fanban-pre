@@ -1411,7 +1411,8 @@ management_features:
     one_review:
       assignee_source: "ied_checked_by"
       require_checked_by: true
-    preserve_discipline_leader: true
+    preserve_fields:
+      - "ied_discipline_leader"
 
   workload:
     a1_equivalent:

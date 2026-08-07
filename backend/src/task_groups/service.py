@@ -9,6 +9,7 @@ from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
 from ..task_groups.serializers import TaskGroupSerializers
+from ..task_groups.submission_readiness import TaskGroupSubmissionReadinessPolicy
 from ..task_groups.submit_guards import TaskGroupSubmitGuards
 from ..task_groups.visibility import TaskGroupVisibility
 from ..workflow.input_validator import WorkflowInputValidator
@@ -33,6 +34,7 @@ class TaskGroupService:
         task_group_visibility: TaskGroupVisibility,
         workflow_visibility: WorkflowVisibility,
         serializers: TaskGroupSerializers,
+        submission_readiness: TaskGroupSubmissionReadinessPolicy,
         submit_guards: TaskGroupSubmitGuards,
         workload_calculator: WorkloadCalculator,
         workload_settlement_service: WorkloadSettlementService,
@@ -49,6 +51,7 @@ class TaskGroupService:
         self.task_group_visibility = task_group_visibility
         self.workflow_visibility = workflow_visibility
         self.serializers = serializers
+        self.submission_readiness = submission_readiness
         self.submit_guards = submit_guards
         self.workload_calculator = workload_calculator
         self.workload_settlement_service = workload_settlement_service
@@ -77,6 +80,7 @@ class TaskGroupService:
         group = self._require_group(group_id)
         if group.owner_snapshot and group.owner_snapshot.creator_account != initiator.account_id:
             raise ValueError("submitter_must_match_creator")
+        self.submission_readiness.ensure_ready(group)
         self.submit_guards.ensure_submit_allowed(
             group,
             overwrite_archive_existing=overwrite_archive_existing,
@@ -239,7 +243,7 @@ class TaskGroupService:
     def _permissions(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, bool]:
         current_node = self.workflow_service.current_node(group)
         can_view_detail = self.task_group_visibility.can_view(group, account)
-        can_submit = group.workflow.status.value == "draft" and (
+        can_submit = self.submission_readiness.inspect(group).is_ready and (
             group.owner_snapshot is None or group.owner_snapshot.creator_account == account.account_id
         )
         can_approve = current_node is not None and current_node.assignee_account == account.account_id

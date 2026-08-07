@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, cast
+from zipfile import ZipFile
 
+import pytest
 from API.app.main import create_app
 from fastapi.testclient import TestClient
 
-from src.models import JobArtifacts
+from src.models import JobArtifacts, JobStatus
+from src.workflow.models import WorkflowStatus
 
 from ..management_test_helpers import configure_management_env
 
@@ -20,11 +23,13 @@ def _login(client: TestClient, account_id: str) -> str:
 
 def _seed_group(client: TestClient, tmp_path: Path) -> str:
     runtime = cast(Any, client.app).state.runtime
+    creator = cast(Any, client.app).state.management.account_registry.to_snapshot("zhangsan")
     group = runtime.group_manager.create_group(
         batch_id="batch-1",
         source_filenames=["sample.dwg"],
         project_no="2016",
         run_audit_check=False,
+        creator_snapshot=creator,
     )
     group.shared_dir = runtime.config.get_group_dir(group.group_id) / "shared"
     group.shared_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +40,8 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
         batch_id="batch-1",
         group_id=group.group_id,
         source_filename="sample.dwg",
+        task_role="deliverable_main",
+        options={"include_ied_plan": False},
         params={
             "project_no": "2016",
             "classification": "非密",
@@ -54,13 +61,14 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
     job_dir = runtime.config.get_job_dir(job.job_id)
     job_dir.mkdir(parents=True, exist_ok=True)
     package_zip = job_dir / "package.zip"
-    ied_xlsx = job_dir / "ied.xlsx"
-    package_zip.write_bytes(b"zip")
-    ied_xlsx.write_bytes(b"xlsx")
-    job.artifacts = JobArtifacts(package_zip=package_zip, ied_xlsx=ied_xlsx)
+    with ZipFile(package_zip, "w") as archive:
+        archive.writestr("manifest.txt", "minimal deliverable package")
+    job.artifacts = JobArtifacts(package_zip=package_zip)
+    job.mark_succeeded()
     runtime.job_manager.update_job(job)
 
     group.child_job_ids = [job.job_id]
+    group.mark_succeeded()
     runtime.group_manager.update_group(group)
 
     (group.shared_dir / "source_input.dwg").write_text("dwg", encoding="utf-8")
@@ -94,6 +102,181 @@ def _seed_group(client: TestClient, tmp_path: Path) -> str:
     (group.shared_dir / "frames.json").write_text(json.dumps([frame_payload], ensure_ascii=False), encoding="utf-8")
     (group.shared_dir / "sheet_sets.json").write_text("[]", encoding="utf-8")
     return group.group_id
+
+
+def _runtime_group_and_child(client: TestClient, group_id: str):
+    runtime = cast(Any, client.app).state.runtime
+    group = runtime.group_manager.get_group(group_id)
+    assert group is not None
+    assert len(group.child_job_ids) == 1
+    child = runtime.job_manager.get_job(group.child_job_ids[0])
+    assert child is not None
+    return runtime, group, child
+
+
+def _assert_submit_blocked(
+    client: TestClient,
+    group_id: str,
+    expected_error: str,
+) -> None:
+    token = _login(client, "zhangsan")
+    detail = client.get(
+        f"/api/task-groups/{group_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["can_submit"] is False
+
+    submit = client.post(
+        f"/api/task-groups/{group_id}/submit",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert submit.status_code == 422
+    assert submit.json()["detail"] == expected_error
+
+
+@pytest.mark.parametrize(
+    "group_status",
+    [JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.FAILED],
+)
+def test_submit_requires_succeeded_task_group(monkeypatch, tmp_path, group_status: JobStatus) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        group.status = group_status
+        runtime.group_manager.update_group(group)
+
+        _assert_submit_blocked(client, group_id, "task_group_not_succeeded")
+
+
+def test_submit_requires_at_least_one_child_job(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        group.child_job_ids = []
+        runtime.group_manager.update_group(group)
+
+        _assert_submit_blocked(client, group_id, "task_group_children_missing")
+
+
+def test_submit_rejects_missing_child_job_record(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        group.child_job_ids = ["missing-child"]
+        runtime.group_manager.update_group(group)
+
+        _assert_submit_blocked(client, group_id, "task_group_child_not_found")
+
+
+def test_submit_requires_every_child_job_to_succeed(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.status = JobStatus.FAILED
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "task_group_child_not_succeeded")
+
+
+def test_submit_requires_deliverable_main_child(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.task_role = "audit_check"
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "deliverable_main_missing")
+
+
+def test_submit_requires_declared_deliverable_package(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.artifacts.package_zip = None
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "deliverable_package_not_declared")
+
+
+def test_submit_requires_existing_deliverable_package(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, _, child = _runtime_group_and_child(client, group_id)
+        child.artifacts.package_zip = tmp_path / "missing-package.zip"
+        runtime.job_manager.update_job(child)
+
+        _assert_submit_blocked(client, group_id, "deliverable_package_not_found")
+
+
+@pytest.mark.parametrize(
+    "workflow_status",
+    [status for status in WorkflowStatus if status is not WorkflowStatus.DRAFT],
+)
+def test_submit_and_restart_reject_non_draft_workflow(
+    monkeypatch,
+    tmp_path,
+    workflow_status: WorkflowStatus,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        runtime, group, _ = _runtime_group_and_child(client, group_id)
+        group.workflow.status = workflow_status
+        runtime.group_manager.update_group(group)
+        token = _login(client, "zhangsan")
+
+        detail = client.get(
+            f"/api/task-groups/{group_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert detail.status_code == 200
+        assert detail.json()["can_submit"] is False
+
+        for action in ("submit", "restart-submit"):
+            response = client.post(
+                f"/api/task-groups/{group_id}/{action}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 422
+            assert response.json()["detail"] == "workflow_not_draft"
+
+        persisted = runtime.group_manager.reload_group(group_id)
+        assert persisted is not None
+        assert persisted.workflow.status is workflow_status
+
+
+def test_submit_preserves_configured_discipline_leader_in_personnel_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        group_id = _seed_group(client, tmp_path)
+        submit = client.post(
+            f"/api/task-groups/{group_id}/submit",
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
+        )
+
+        assert submit.status_code == 200
+        discipline_leader = submit.json()["personnel_snapshot"]["members"]["ied_discipline_leader"]
+        assert discipline_leader["matched_account"] == "wangwu"
 
 
 def test_task_group_submit_and_approve_until_archive(monkeypatch, tmp_path) -> None:
@@ -153,7 +336,7 @@ def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch
 
         before_submit = client.get(
             f"/api/task-groups/{group_id}",
-            headers={"Authorization": f"Bearer {_login(client, 'admin')}"},
+            headers={"Authorization": f"Bearer {_login(client, 'zhangsan')}"},
         )
         assert before_submit.status_code == 200
         before_payload = before_submit.json()

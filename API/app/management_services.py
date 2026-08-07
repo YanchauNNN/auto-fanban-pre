@@ -13,6 +13,7 @@ from src.auth.password_service import PasswordService
 from src.auth.session_service import SessionService
 from src.task_groups.serializers import TaskGroupSerializers
 from src.task_groups.service import TaskGroupService
+from src.task_groups.submission_readiness import TaskGroupSubmissionReadinessPolicy
 from src.task_groups.submit_guards import TaskGroupSubmitGuards
 from src.task_groups.visibility import TaskGroupVisibility
 from src.workflow.assignee_resolver import WorkflowAssigneeResolver
@@ -74,6 +75,7 @@ class ManagementServices:
         workload_calculator = WorkloadCalculator()
         workload_settlement_service = WorkloadSettlementService(workload_calculator)
         workload_queries = WorkloadQueries()
+        submission_readiness = TaskGroupSubmissionReadinessPolicy(runtime.job_manager)
         task_group_service = TaskGroupService(
             group_manager=runtime.group_manager,
             job_manager=runtime.job_manager,
@@ -85,6 +87,7 @@ class ManagementServices:
             task_group_visibility=TaskGroupVisibility(),
             workflow_visibility=WorkflowVisibility(),
             serializers=TaskGroupSerializers(),
+            submission_readiness=submission_readiness,
             submit_guards=submit_guards,
             workload_calculator=workload_calculator,
             workload_settlement_service=workload_settlement_service,
