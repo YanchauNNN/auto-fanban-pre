@@ -1952,14 +1952,18 @@ class DeliverableApiRuntime:
 
     def refresh_summary_index(self, item_type: str, item_id: str) -> None:
         if item_type == "group":
-            group = self.group_manager.get_group(item_id)
+            group = self.group_manager.reload_group(item_id)
             if group is not None:
                 self._index_group_summary(group)
+            else:
+                self.queue_store.delete_summary(item_id)
             return
         if item_type == "job":
-            job = self.job_manager.get_job(item_id)
+            job = self.job_manager.reload_job(item_id)
             if job is not None and job.group_id is None:
                 self._index_job_summary(job)
+            elif job is None:
+                self.queue_store.delete_summary(item_id)
 
     def remove_summary_index(self, item_type: str, item_id: str) -> None:
         if item_type not in {"group", "job"}:
@@ -2774,6 +2778,7 @@ class DeliverableApiRuntime:
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
+            'state_version': group.state_version,
             'batch_id': group.batch_id,
             'is_group': True,
             'source_filename': source_filename,

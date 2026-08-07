@@ -35,6 +35,7 @@ def test_queue_initializes_required_tables(tmp_path: Path) -> None:
         "queue_items",
         "worker_heartbeats",
         "job_summaries",
+        "summary_tombstones",
         "activity_state",
     }
 
@@ -319,6 +320,70 @@ def test_summary_index_preserves_full_summary_payload(tmp_path: Path) -> None:
     assert item["artifacts"] == {"package_available": False}
     assert item["font_preflight_summary"] == {"status": "ok"}
     assert item["retry_available"] is False
+
+
+def test_group_summary_rejects_lower_state_version(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    common = {
+        "item_id": "group-1",
+        "is_group": True,
+        "created_at": _dt(),
+        "artifact_flags": {},
+    }
+    store.upsert_summary(
+        {
+            **common,
+            "state_version": 4,
+            "status": "running",
+            "current_node_key": "two_review",
+            "updated_at": _dt(4),
+        }
+    )
+
+    returned = store.upsert_summary(
+        {
+            **common,
+            "state_version": 2,
+            "status": "queued",
+            "current_node_key": "one_review",
+            "updated_at": _dt(5),
+        }
+    )
+
+    assert returned["state_version"] == 4
+    assert returned["status"] == "running"
+    assert returned["current_node_key"] == "two_review"
+    [stored] = store.list_summaries()["items"]
+    assert stored["state_version"] == 4
+    assert stored["current_node_key"] == "two_review"
+
+
+def test_summary_tombstone_rejects_late_upsert_after_delete(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    late_summary = {
+        "item_id": "group-old",
+        "is_group": True,
+        "state_version": 4,
+        "status": "succeeded",
+        "created_at": _dt(),
+        "updated_at": _dt(4),
+        "artifact_flags": {},
+    }
+    store.upsert_summary(late_summary)
+
+    assert store.delete_summary("group-old") is True
+    assert store.upsert_summary(late_summary) is None
+
+    page = store.list_summaries()
+    assert page["total"] == 0
+    assert store.upsert_summary(
+        {
+            **late_summary,
+            "item_id": "group-new",
+            "state_version": 1,
+        }
+    ) is not None
+    assert store.list_summaries()["total"] == 1
 
 
 def test_delete_summary_removes_only_requested_item(tmp_path: Path) -> None:

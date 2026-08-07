@@ -168,13 +168,16 @@ def test_archive_completion_does_not_convert_publish_failure_into_archive_failur
     assert group.workload.settlement_status is WorkloadSettlementStatus.SETTLED
 
 
-def test_retry_continues_with_later_groups_before_reporting_one_publish_failure() -> None:
+def test_retry_continues_with_later_groups_without_raising_one_publish_failure() -> None:
     first = _failed_group()
     second = _failed_group()
     second.group_id = "group-2"
     visited: list[str] = []
 
     class _Coordinator:
+        def needs_archive_reconciliation(self, group: TaskGroup) -> bool:
+            return group.archive.status is ArchiveStatus.FAILED
+
         def complete(self, group: TaskGroup) -> TaskGroup:
             visited.append(group.group_id)
             if group.group_id == first.group_id:
@@ -187,8 +190,75 @@ def test_retry_continues_with_later_groups_before_reporting_one_publish_failure(
         group_manager=_GroupManager([first, second]),
     )
 
-    with pytest.raises(RuntimeError, match="group-1"):
-        worker.run_once()
+    assert worker.run_once() == 2
 
     assert visited == ["group-1", "group-2"]
     assert second.archive.status is ArchiveStatus.SUCCEEDED
+
+
+def test_retry_resumes_settlement_without_recopying_succeeded_archive() -> None:
+    group = _failed_group()
+    group.archive.status = ArchiveStatus.SUCCEEDED
+    group.archive.completed_at = datetime.now()
+    group.workflow.status = WorkflowStatus.ARCHIVED
+    archive_service = _ArchiveService()
+    settlement = _SettlementService()
+    worker = ArchiveRetryWorker(
+        archive_coordinator=_coordinator(archive_service, settlement, _Writer()),
+        group_manager=_GroupManager([group]),
+    )
+
+    assert worker.run_once() == 1
+
+    assert archive_service.attempts == 0
+    assert settlement.calls == 1
+    assert group.status is JobStatus.SUCCEEDED
+    assert group.workload.settlement_status is WorkloadSettlementStatus.SETTLED
+
+
+def test_archive_retry_loop_survives_one_run_once_exception() -> None:
+    worker = ArchiveRetryWorker(
+        archive_coordinator=_coordinator(_ArchiveService(), _SettlementService(), _Writer()),
+        group_manager=_GroupManager([]),
+    )
+    calls = 0
+
+    def _fail_once() -> int:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("scan unavailable")
+
+    class _StopAfterOneRun:
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def wait(self, _interval: int) -> bool:
+            self.waits += 1
+            return self.waits > 1
+
+    worker.run_once = _fail_once  # type: ignore[method-assign]
+    worker._stop_event = _StopAfterOneRun()  # type: ignore[assignment]
+
+    worker._loop()
+
+    assert calls == 1
+
+
+def test_stop_warns_when_archive_retry_thread_does_not_exit(caplog) -> None:
+    worker = ArchiveRetryWorker(
+        archive_coordinator=_coordinator(_ArchiveService(), _SettlementService(), _Writer()),
+        group_manager=_GroupManager([]),
+    )
+
+    class _StuckThread:
+        def join(self, timeout: int) -> None:
+            assert timeout == 2
+
+        def is_alive(self) -> bool:
+            return True
+
+    worker._thread = _StuckThread()  # type: ignore[assignment]
+
+    worker.stop()
+
+    assert "archive retry worker did not stop" in caplog.text

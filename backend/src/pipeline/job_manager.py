@@ -181,8 +181,8 @@ class JobManager(IJobManager):
             return None
 
     def delete_job(self, job_id: str) -> None:
-        """Remove a job from cache and delete its persisted artifacts."""
-        self._jobs.pop(job_id, None)
+        """Delete persisted artifacts before evicting the cache entry."""
         job_dir = self.config.get_job_dir(job_id)
         if job_dir.exists():
-            shutil.rmtree(job_dir, ignore_errors=True)
+            shutil.rmtree(job_dir)
+        self._jobs.pop(job_id, None)

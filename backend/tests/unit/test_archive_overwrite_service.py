@@ -74,7 +74,7 @@ def test_summary_delete_failure_preserves_group_and_child_jobs() -> None:
     assert group_manager.deleted == []
 
 
-def test_child_delete_failure_restores_summary_before_reraising() -> None:
+def test_child_delete_failure_keeps_summary_removed_for_successor_driven_retry() -> None:
     group = TaskGroup(
         group_id="group-old",
         project_no="2016",
@@ -90,18 +90,61 @@ def test_child_delete_failure_restores_summary_before_reraising() -> None:
             raise RuntimeError("job delete failed")
 
     removed: list[tuple[str, str]] = []
-    restored: list[tuple[str, str]] = []
     group_manager = _ExistingGroupManager()
     service = ArchiveOverwriteService(
         group_manager,
         _FailingJobManager(),
         remove_summary_index=lambda item_type, item_id: removed.append((item_type, item_id)),
-        restore_summary_index=lambda item_type, item_id: restored.append((item_type, item_id)),
     )
 
     with pytest.raises(RuntimeError, match="job delete failed"):
         service.delete_group_records_by_id(group.group_id)
 
     assert removed == [("group", group.group_id)]
-    assert restored == [("group", group.group_id)]
     assert group_manager.deleted == []
+
+
+def test_partial_child_delete_can_be_retried_idempotently() -> None:
+    group = TaskGroup(
+        group_id="group-old",
+        project_no="2016",
+        child_job_ids=["job-1", "job-2"],
+    )
+
+    class _ExistingGroupManager(_GroupManager):
+        def get_group(self, _group_id: str):
+            return group
+
+    class _PartiallyFailingJobManager:
+        def __init__(self) -> None:
+            self.deleted: set[str] = set()
+            self.failed_once = False
+
+        def delete_job(self, job_id: str) -> None:
+            if job_id == "job-2" and not self.failed_once:
+                self.failed_once = True
+                raise RuntimeError("job-2 locked")
+            self.deleted.add(job_id)
+
+    manager = _ExistingGroupManager()
+    jobs = _PartiallyFailingJobManager()
+    removed: list[tuple[str, str]] = []
+    service = ArchiveOverwriteService(
+        manager,
+        jobs,
+        remove_summary_index=lambda item_type, item_id: removed.append((item_type, item_id)),
+    )
+
+    with pytest.raises(RuntimeError, match="job-2 locked"):
+        service.cleanup_replaced_group(
+            TaskGroup(
+                group_id="group-new",
+                project_no="2016",
+                replacement={"replaced_group_id": group.group_id},
+            )
+        )
+    service.delete_group_records_by_id(group.group_id)
+
+    assert jobs.deleted == {"job-1", "job-2"}
+    assert manager.deleted == [group.group_id]
+    assert removed == [("group", group.group_id), ("group", group.group_id)]

@@ -673,6 +673,10 @@ runtime_options:
     session_store_path: { type: str, default: "storage/runtime/sessions.json", desc: "登录态 JSON 文件路径" }
     archive_retry_interval_seconds: { type: int, default: 30, desc: "归档失败自动重试初始间隔（秒）" }
     archive_retry_max_interval_seconds: { type: int, default: 300, desc: "归档失败自动重试最大间隔（秒）" }
+    task_group_reconciliation_interval_seconds: { type: int, default: 30, desc: "任务组摘要发布与替换清理重试间隔（秒）" }
+    task_group_lock_timeout_seconds: { type: float, default: 5.0, desc: "任务组跨进程文件锁等待超时（秒）" }
+    task_group_lock_poll_interval_seconds: { type: float, default: 0.05, desc: "任务组跨进程文件锁轮询间隔（秒）" }
+    replacement_cleanup_claim_ttl_seconds: { type: float, default: 300.0, desc: "替换归档旧记录清理租约有效期（秒）" }
 
 
 

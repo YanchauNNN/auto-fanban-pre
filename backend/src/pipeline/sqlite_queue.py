@@ -103,6 +103,11 @@ class SQLiteQueueStore:
                 CREATE INDEX IF NOT EXISTS ix_job_summaries_status_updated
                 ON job_summaries(status, updated_at DESC);
 
+                CREATE TABLE IF NOT EXISTS summary_tombstones (
+                    item_id TEXT PRIMARY KEY,
+                    deleted_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS activity_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -528,7 +533,7 @@ class SQLiteQueueStore:
             "last_seen_at": row["last_seen_at"],
         }
 
-    def upsert_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
+    def upsert_summary(self, summary: dict[str, Any]) -> dict[str, Any] | None:
         now_value = _format_timestamp(_coerce_now(None))
         created_at = _format_timestamp(summary.get("created_at") or summary.get("updated_at") or now_value)
         updated_at = _format_timestamp(summary.get("updated_at") or created_at)
@@ -569,28 +574,59 @@ class SQLiteQueueStore:
         )
 
         with self._connect() as conn:
-            with conn:
-                conn.execute(
-                    f"""
-                    INSERT INTO job_summaries ({", ".join(columns)})
-                    VALUES ({placeholders})
-                    ON CONFLICT(item_id) DO UPDATE SET {update_assignments}
-                    """,
-                    tuple(values[column] for column in columns),
-                )
-            row = conn.execute(
-                "SELECT * FROM job_summaries WHERE item_id = ?", (summary["item_id"],)
-            ).fetchone()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                tombstone = conn.execute(
+                    "SELECT 1 FROM summary_tombstones WHERE item_id = ?",
+                    (summary["item_id"],),
+                ).fetchone()
+                if tombstone is not None:
+                    conn.commit()
+                    return None
+                existing = conn.execute(
+                    "SELECT * FROM job_summaries WHERE item_id = ?",
+                    (summary["item_id"],),
+                ).fetchone()
+                if not _is_stale_group_summary(existing, summary):
+                    conn.execute(
+                        f"""
+                        INSERT INTO job_summaries ({", ".join(columns)})
+                        VALUES ({placeholders})
+                        ON CONFLICT(item_id) DO UPDATE SET {update_assignments}
+                        """,
+                        tuple(values[column] for column in columns),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM job_summaries WHERE item_id = ?", (summary["item_id"],)
+                ).fetchone()
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         if row is None:
             raise RuntimeError("summary disappeared after upsert")
         return _summary_row_to_dict(row)
 
     def delete_summary(self, item_id: str) -> bool:
-        with self._connect() as conn, conn:
-            cursor = conn.execute(
-                "DELETE FROM job_summaries WHERE item_id = ?",
-                (item_id,),
-            )
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO summary_tombstones (item_id, deleted_at)
+                    VALUES (?, ?)
+                    ON CONFLICT(item_id) DO NOTHING
+                    """,
+                    (item_id, _format_timestamp(_coerce_now(None))),
+                )
+                cursor = conn.execute(
+                    "DELETE FROM job_summaries WHERE item_id = ?",
+                    (item_id,),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         return cursor.rowcount > 0
 
     def list_summaries(
@@ -714,6 +750,33 @@ def _summary_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         if "is_group" in item:
             item["is_group"] = bool(item["is_group"])
     return item
+
+
+def _is_stale_group_summary(
+    existing: sqlite3.Row | None,
+    incoming: dict[str, Any],
+) -> bool:
+    if existing is None or not bool(existing["is_group"]) or not bool(incoming.get("is_group")):
+        return False
+    incoming_version = _non_negative_int(incoming.get("state_version"))
+    if incoming_version is None:
+        return False
+    try:
+        existing_payload = json.loads(existing["summary_json"] or "{}")
+    except (TypeError, ValueError):
+        return False
+    existing_version = (
+        _non_negative_int(existing_payload.get("state_version"))
+        if isinstance(existing_payload, dict)
+        else None
+    )
+    return existing_version is not None and incoming_version < existing_version
+
+
+def _non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _json_dumps(value: Any) -> str:

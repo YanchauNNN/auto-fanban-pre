@@ -540,6 +540,10 @@ class ManagementRuntimeConfig(BaseModel):
     session_store_path: Path = Path("storage/runtime/sessions.json")
     archive_retry_interval_seconds: int = 30
     archive_retry_max_interval_seconds: int = 300
+    task_group_reconciliation_interval_seconds: int = Field(default=30, gt=0)
+    task_group_lock_timeout_seconds: float = Field(default=5.0, gt=0)
+    task_group_lock_poll_interval_seconds: float = Field(default=0.05, gt=0)
+    replacement_cleanup_claim_ttl_seconds: float = Field(default=300.0, gt=0)
 
 
 class RuntimeConfig(BaseSettings):

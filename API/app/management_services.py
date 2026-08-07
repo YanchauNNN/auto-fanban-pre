@@ -13,6 +13,7 @@ from src.auth.password_service import PasswordService
 from src.auth.session_service import SessionService
 from src.config import load_spec
 from src.task_groups.archive_coordinator import TaskGroupArchiveCoordinator
+from src.task_groups.reconciliation_worker import TaskGroupReconciliationWorker
 from src.task_groups.serializers import TaskGroupSerializers
 from src.task_groups.service import TaskGroupService
 from src.task_groups.state_writer import TaskGroupStateWriter
@@ -41,6 +42,7 @@ class ManagementServices:
     archive_service: ArchiveService
     archive_coordinator: TaskGroupArchiveCoordinator
     archive_retry_worker: ArchiveRetryWorker
+    task_group_reconciliation_worker: TaskGroupReconciliationWorker
     workload_calculator: WorkloadCalculator
     workload_settlement_service: WorkloadSettlementService
     workload_queries: WorkloadQueries
@@ -65,7 +67,6 @@ class ManagementServices:
             runtime.group_manager,
             runtime.job_manager,
             remove_summary_index=runtime.remove_summary_index,
-            restore_summary_index=runtime.refresh_summary_index,
         )
         archive_service = ArchiveService(
             group_manager=runtime.group_manager,
@@ -89,8 +90,17 @@ class ManagementServices:
             state_writer=state_writer,
             settlement_trigger=str(workload_cfg["settlement_trigger"]).strip(),
             overwrite_service=overwrite_service,
+            cleanup_claim_ttl_seconds=(
+                runtime.config.management.replacement_cleanup_claim_ttl_seconds
+            ),
         )
         archive_retry_worker = ArchiveRetryWorker(
+            archive_coordinator=archive_coordinator,
+            group_manager=runtime.group_manager,
+            config=runtime.config,
+        )
+        task_group_reconciliation_worker = TaskGroupReconciliationWorker(
+            state_writer=state_writer,
             archive_coordinator=archive_coordinator,
             group_manager=runtime.group_manager,
             config=runtime.config,
@@ -131,6 +141,7 @@ class ManagementServices:
             archive_service=archive_service,
             archive_coordinator=archive_coordinator,
             archive_retry_worker=archive_retry_worker,
+            task_group_reconciliation_worker=task_group_reconciliation_worker,
             workload_calculator=workload_calculator,
             workload_settlement_service=workload_settlement_service,
             workload_queries=workload_queries,
@@ -140,6 +151,8 @@ class ManagementServices:
 
     def start(self) -> None:
         self.archive_retry_worker.start()
+        self.task_group_reconciliation_worker.start()
 
     def stop(self) -> None:
+        self.task_group_reconciliation_worker.stop()
         self.archive_retry_worker.stop()

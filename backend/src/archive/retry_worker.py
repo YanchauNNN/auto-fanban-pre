@@ -6,7 +6,6 @@ import threading
 from ..config import RuntimeConfig, get_config
 from ..pipeline.group_manager import GroupManager
 from ..task_groups.archive_coordinator import TaskGroupArchiveCoordinator
-from .models import ArchiveStatus
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +35,8 @@ class ArchiveRetryWorker:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
+            if self._thread.is_alive():
+                logger.warning("archive retry worker did not stop")
 
     def _loop(self) -> None:
         interval = max(int(self.config.management.archive_retry_interval_seconds), 1)
@@ -47,18 +48,14 @@ class ArchiveRetryWorker:
 
     def run_once(self) -> int:
         attempted = 0
-        failures: list[tuple[str, Exception]] = []
         for group in self.group_manager.load_all_groups():
-            if group.archive.status != ArchiveStatus.FAILED:
+            if not self.archive_coordinator.needs_archive_reconciliation(group):
                 continue
             attempted += 1
             try:
                 self.archive_coordinator.complete(group)
-            except Exception as exc:  # noqa: BLE001
-                failures.append((group.group_id, exc))
-        if failures:
-            failed_ids = ", ".join(group_id for group_id, _ in failures)
-            raise RuntimeError(f"archive retry publication failed for: {failed_ids}") from failures[0][1]
+            except Exception:  # noqa: BLE001
+                logger.exception("archive reconciliation failed: %s", group.group_id)
         return attempted
 
     def retry_failed_once(self) -> int:
