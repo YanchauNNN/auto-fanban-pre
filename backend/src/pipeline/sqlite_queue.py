@@ -585,6 +585,14 @@ class SQLiteQueueStore:
             raise RuntimeError("summary disappeared after upsert")
         return _summary_row_to_dict(row)
 
+    def delete_summary(self, item_id: str) -> bool:
+        with self._connect() as conn, conn:
+            cursor = conn.execute(
+                "DELETE FROM job_summaries WHERE item_id = ?",
+                (item_id,),
+            )
+        return cursor.rowcount > 0
+
     def list_summaries(
         self,
         *,

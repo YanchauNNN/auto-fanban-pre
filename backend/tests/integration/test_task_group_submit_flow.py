@@ -659,6 +659,132 @@ def test_task_group_submit_and_approve_until_archive(monkeypatch, tmp_path) -> N
         assert detail["archive"]["status"] == "succeeded"
         assert detail["workload"]["settlement_status"] == "settled"
 
+        jobs = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert jobs.status_code == 200
+        summary = next(item for item in jobs.json()["items"] if item["group_id"] == group_id)
+        assert summary["status"] == "succeeded"
+        assert summary["workflow_status"] == "archived"
+        assert summary["archive_status"] == "succeeded"
+        assert summary["workload"]["settlement_status"] == "settled"
+        assert summary["effective_workload"] == detail["effective_workload"]
+
+
+def test_archive_retry_updates_api_only_summary_and_settles_workload(monkeypatch, tmp_path) -> None:
+    project_root = configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        admin_token = _login(client, "admin")
+        group_id = _seed_group(client, tmp_path)
+        owner_token = _login(client, "zhangsan")
+
+        submitted = client.post(
+            f"/api/task-groups/{group_id}/submit",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert submitted.status_code == 200
+        client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {_login(client, 'lisi')}"},
+        )
+        client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {_login(client, 'wangwu')}"},
+        )
+        failed_archive = client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"factor": 1.0},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert failed_archive.status_code == 200
+        assert failed_archive.json()["archive"]["status"] == "failed"
+        assert failed_archive.json()["status"] == "failed"
+
+        patched = client.patch(
+            "/api/admin/config",
+            json={"archive_root_path": str(project_root / "archive-root")},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert patched.status_code == 200
+        assert client.app.state.management.archive_retry_worker.run_once() == 1
+
+        jobs = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert jobs.status_code == 200
+        summary = next(item for item in jobs.json()["items"] if item["group_id"] == group_id)
+        assert summary["status"] == "succeeded"
+        assert summary["workflow_status"] == "archived"
+        assert summary["archive_status"] == "succeeded"
+        assert summary["workload"]["settlement_status"] == "settled"
+        assert summary["effective_workload"] == failed_archive.json()["effective_workload"]
+
+
+def test_api_only_summary_updates_after_submit_repair_and_approve(monkeypatch, tmp_path) -> None:
+    configure_management_env(monkeypatch, tmp_path)
+
+    with TestClient(create_app()) as client:
+        runtime = cast(Any, client.app).state.runtime
+        assert runtime.process_jobs_in_api is False
+        group_id = _seed_group(client, tmp_path)
+        runtime.refresh_summary_index("group", group_id)
+        owner_token = _login(client, "zhangsan")
+        admin_token = _login(client, "admin")
+
+        submitted = client.post(
+            f"/api/task-groups/{group_id}/submit",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert submitted.status_code == 200
+
+        after_submit = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        ).json()["items"]
+        submitted_summary = next(item for item in after_submit if item["group_id"] == group_id)
+        assert submitted_summary["status"] == "running"
+        assert submitted_summary["workflow_status"] == "in_review"
+        assert submitted_summary["current_node_key"] == "one_review"
+        assert submitted_summary["effective_workload"] > 0
+
+        repaired = client.post(
+            f"/api/workflow/{group_id}/repair-current-node",
+            json={"replace_with_account_id": "admin"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert repaired.status_code == 200
+        repaired_summary = next(
+            item
+            for item in client.get(
+                "/api/jobs",
+                headers={"Authorization": f"Bearer {owner_token}"},
+            ).json()["items"]
+            if item["group_id"] == group_id
+        )
+        assert repaired_summary["current_assignee_account"] == "admin"
+
+        approved = client.post(
+            f"/api/workflow/{group_id}/approve",
+            json={"node_key": "one_review", "factor": 1.1},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert approved.status_code == 200
+        approved_summary = next(
+            item
+            for item in client.get(
+                "/api/jobs",
+                headers={"Authorization": f"Bearer {owner_token}"},
+            ).json()["items"]
+            if item["group_id"] == group_id
+        )
+        assert approved_summary["current_node_key"] == "two_review"
+        assert approved_summary["effective_workload"] == approved.json()["effective_workload"]
+
 
 def test_task_group_detail_and_monitor_include_frontend_action_flags(monkeypatch, tmp_path) -> None:
     configure_management_env(monkeypatch, tmp_path)
@@ -970,6 +1096,9 @@ def test_task_group_submit_blocks_in_progress_duplicate_without_explicit_cancel(
 
         first_group_id = _seed_group(client, tmp_path)
         second_group_id = _seed_group(client, tmp_path)
+        runtime = cast(Any, client.app).state.runtime
+        runtime.refresh_summary_index("group", first_group_id)
+        runtime.refresh_summary_index("group", second_group_id)
 
         first_submit = client.post(
             f"/api/task-groups/{first_group_id}/submit",
@@ -992,5 +1121,11 @@ def test_task_group_submit_blocks_in_progress_duplicate_without_explicit_cancel(
         assert allowed.status_code == 200
         assert allowed.json()["workflow"]["duplicate_policy"] == "cancel_existing_in_progress"
 
-        runtime = cast(Any, client.app).state.management.task_group_service.group_manager
-        assert runtime.get_group(first_group_id) is None
+        group_manager = cast(Any, client.app).state.management.task_group_service.group_manager
+        assert group_manager.get_group(first_group_id) is None
+        summaries = client.get(
+            "/api/jobs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert summaries.status_code == 200
+        assert first_group_id not in {item["group_id"] for item in summaries.json()["items"]}

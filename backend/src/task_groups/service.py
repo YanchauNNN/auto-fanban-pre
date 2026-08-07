@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from ..accounts.account_registry import AccountRegistry
 from ..accounts.personnel_normalizer import PersonnelNormalizer
-from ..archive.service import ArchiveService
 from ..config import load_mechanism_spec, load_spec
 from ..models import AccountSnapshot, TaskGroup
 from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
+from ..task_groups.archive_coordinator import TaskGroupArchiveCoordinator
 from ..task_groups.serializers import TaskGroupSerializers
+from ..task_groups.state_writer import TaskGroupStateWriter
 from ..task_groups.submission_readiness import TaskGroupSubmissionReadinessPolicy
 from ..task_groups.submit_guards import TaskGroupSubmitGuards
 from ..task_groups.visibility import TaskGroupVisibility
@@ -17,7 +18,6 @@ from ..workflow.service import WorkflowService
 from ..workflow.visibility import WorkflowVisibility
 from ..workload.calculator import WorkloadCalculator
 from ..workload.queries import WorkloadQueries
-from ..workload.settlement_service import WorkloadSettlementService
 
 
 class TaskGroupService:
@@ -37,9 +37,9 @@ class TaskGroupService:
         submission_readiness: TaskGroupSubmissionReadinessPolicy,
         submit_guards: TaskGroupSubmitGuards,
         workload_calculator: WorkloadCalculator,
-        workload_settlement_service: WorkloadSettlementService,
         workload_queries: WorkloadQueries,
-        archive_service: ArchiveService,
+        state_writer: TaskGroupStateWriter,
+        archive_coordinator: TaskGroupArchiveCoordinator,
     ) -> None:
         self.group_manager = group_manager
         self.job_manager = job_manager
@@ -54,9 +54,9 @@ class TaskGroupService:
         self.submission_readiness = submission_readiness
         self.submit_guards = submit_guards
         self.workload_calculator = workload_calculator
-        self.workload_settlement_service = workload_settlement_service
         self.workload_queries = workload_queries
-        self.archive_service = archive_service
+        self.state_writer = state_writer
+        self.archive_coordinator = archive_coordinator
 
     def list_recent(self, account: AccountSnapshot, limit: int = 100) -> list[dict[str, object]]:
         groups = self.group_manager.list_groups(limit=limit)
@@ -94,7 +94,7 @@ class TaskGroupService:
         group.workload = self.workload_calculator.build_from_shared_prep(prep)
         group = self.workflow_service.start(group, initiator)
         group.mark_running("WORKFLOW_SUBMITTED")
-        self.group_manager.update_group(group)
+        self.state_writer.write(group)
         return self._serialize_detail(group, initiator)
 
     def restart_submit(
@@ -122,29 +122,17 @@ class TaskGroupService:
         group = self._require_group(group_id)
         self.workflow_service.approve(group, acting_account, factor, node_key=node_key)
         self._apply_factors(group)
-        mechanism_spec = load_mechanism_spec()
-        workflow_runtime = mechanism_spec.workflow_runtime
-        workload_cfg = dict(load_spec().get_management_features().get("workload") or {})
-        settlement_trigger = str(workload_cfg["settlement_trigger"]).strip()
+        workflow_runtime = load_mechanism_spec().workflow_runtime
         if group.workflow.status.value == workflow_runtime.archive_trigger_status:
-            try:
-                self.archive_service.archive_group(group)
-                if settlement_trigger == "archive_success":
-                    if group.archive.status.value == "succeeded":
-                        self.workload_settlement_service.settle(group)
-                elif settlement_trigger == "approval_terminal":
-                    self.workload_settlement_service.settle(group)
-                group.mark_succeeded()
-            except Exception as exc:  # noqa: BLE001
-                self.archive_service.mark_failed(group, str(exc))
-                group.mark_failed(str(exc))
-        self.group_manager.update_group(group)
+            self.archive_coordinator.complete(group)
+        else:
+            self.state_writer.write(group)
         return self._serialize_detail(group, acting_account)
 
     def repair_current_node(self, group_id: str, assignee_snapshot: AccountSnapshot) -> dict[str, object]:
         group = self._require_group(group_id)
         self.workflow_service.repair_current_node(group, assignee_snapshot)
-        self.group_manager.update_group(group)
+        self.state_writer.write(group)
         return self._serialize_detail(group, assignee_snapshot)
 
     def rebind_account_references(self, old_account_id: str, new_account_snapshot: AccountSnapshot) -> None:
@@ -172,7 +160,7 @@ class TaskGroupService:
                     node.acted_by_name = new_account_snapshot.display_name
                     changed = True
             if changed:
-                self.group_manager.update_group(group)
+                self.state_writer.write(group)
 
     def workflow_monitor(self, account: AccountSnapshot) -> list[dict[str, object]]:
         groups = self.group_manager.load_all_groups()

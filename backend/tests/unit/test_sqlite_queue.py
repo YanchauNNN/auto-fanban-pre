@@ -321,6 +321,28 @@ def test_summary_index_preserves_full_summary_payload(tmp_path: Path) -> None:
     assert item["retry_available"] is False
 
 
+def test_delete_summary_removes_only_requested_item(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    for item_id in ("group-old", "group-current"):
+        store.upsert_summary(
+            {
+                "item_id": item_id,
+                "is_group": True,
+                "status": "succeeded",
+                "updated_at": _dt(2),
+                "created_at": _dt(),
+                "artifact_flags": {},
+            }
+        )
+
+    assert store.delete_summary("group-old") is True
+    assert store.delete_summary("group-old") is False
+
+    page = store.list_summaries()
+    assert page["total"] == 1
+    assert page["items"][0]["item_id"] == "group-current"
+
+
 def test_activity_returns_lightweight_change_marker(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.upsert_summary(

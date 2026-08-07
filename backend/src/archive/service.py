@@ -13,7 +13,6 @@ from ..workflow.models import WorkflowStatus
 from .admin_config_store import AdminConfigStore
 from .identity import build_archive_identity
 from .models import ArchiveState, ArchiveStatus
-from .overwrite_service import ArchiveOverwriteService
 
 
 class ArchiveService:
@@ -24,13 +23,11 @@ class ArchiveService:
         job_manager: JobManager,
         shared_prep_service: SharedPrepService,
         admin_config_store: AdminConfigStore,
-        overwrite_service: ArchiveOverwriteService | None = None,
     ) -> None:
         self.group_manager = group_manager
         self.job_manager = job_manager
         self.shared_prep_service = shared_prep_service
         self.admin_config_store = admin_config_store
-        self.overwrite_service = overwrite_service
         self.derivation_engine = DerivationEngine()
 
     def archive_group(self, group: TaskGroup) -> TaskGroup:
@@ -55,8 +52,8 @@ class ArchiveService:
             document_revision=derived.document_revision,
         )
         target_dir = identity.target_dir(archive_root)
-        if self.overwrite_service is not None:
-            self.overwrite_service.clear_target_directory(target_dir)
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
         target_dir.mkdir(parents=True, exist_ok=True)
 
         copied_files = []
@@ -86,9 +83,6 @@ class ArchiveService:
         )
         group.workflow.status = WorkflowStatus.ARCHIVED
         group.workflow.archive_status = "succeeded"
-        if self.overwrite_service is not None:
-            self.overwrite_service.cleanup_replaced_group(group)
-        self.group_manager.update_group(group)
         return group
 
     def mark_failed(self, group: TaskGroup, error: str) -> TaskGroup:
@@ -97,5 +91,4 @@ class ArchiveService:
         group.archive.retry_count += 1
         group.workflow.status = WorkflowStatus.ARCHIVE_FAILED
         group.workflow.archive_status = "failed"
-        self.group_manager.update_group(group)
         return group

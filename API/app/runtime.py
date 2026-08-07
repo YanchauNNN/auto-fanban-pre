@@ -1961,6 +1961,11 @@ class DeliverableApiRuntime:
             if job is not None and job.group_id is None:
                 self._index_job_summary(job)
 
+    def remove_summary_index(self, item_type: str, item_id: str) -> None:
+        if item_type not in {"group", "job"}:
+            raise ValueError(f"unsupported summary item type: {item_type}")
+        self.queue_store.delete_summary(item_id)
+
     def _backfill_summary_index(self) -> None:
         for group in self.group_manager.load_all_groups():
             self._index_group_summary(group, touch_updated_at=False)
@@ -2758,6 +2763,14 @@ class DeliverableApiRuntime:
             or group.workload.initial_workload_a1
             or 0.0
         )
+        current_node = next(
+            (
+                node
+                for node in group.workflow.nodes
+                if node.node_key == group.workflow.current_node_key
+            ),
+            None,
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
@@ -2772,6 +2785,11 @@ class DeliverableApiRuntime:
             'legacy_visibility': group.legacy_visibility.model_dump(mode='json'),
             'project_no': group.project_no,
             'status': group.status.value,
+            'workflow_status': group.workflow.status.value,
+            'current_node_key': group.workflow.current_node_key,
+            'current_assignee_account': current_node.assignee_account if current_node else None,
+            'current_assignee_name': current_node.assignee_name if current_node else None,
+            'archive_status': group.archive.status.value,
             'stage': group.progress.stage,
             'percent': group.progress.percent,
             'message': group.progress.message,
