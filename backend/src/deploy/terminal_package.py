@@ -35,7 +35,7 @@ from ..config.mechanism_spec import (
     MechanismSpecLoader,
     load_mechanism_spec,
 )
-from .archive_runtime import archive_runtime_copy_plan
+from .archive_runtime import archive_runtime_copy_plan, validate_deployed_archive_runtime
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
@@ -3566,6 +3566,12 @@ def build_terminal_deploy_package(
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> Path:
+    deployment = _deployment_mechanism(repo_root)
+    archive_runtime_config = deployment.archive_runtime
+    if archive_runtime_config is None:
+        raise ValueError(
+            "参数规范-3.yaml 缺少 backend_mechanism.deployment_mechanism.archive_runtime"
+        )
     copy_plan = gather_copy_plan(repo_root)
     _ensure_exists(copy_plan)
     _validate_frontend_preview_assets(repo_root)
@@ -3593,6 +3599,13 @@ def build_terminal_deploy_package(
         python_installer=python_installer,
         url_rewrite_installer=url_rewrite_installer,
         arr_installer=arr_installer,
+    )
+    packaged_deployment = _deployment_mechanism(output_root)
+    if packaged_deployment.archive_runtime != archive_runtime_config:
+        raise ValueError("部署包内 archive_runtime 参数与构建输入不一致")
+    validate_deployed_archive_runtime(
+        output_root,
+        archive_runtime_config,
     )
     write_package_manifest(output_root, package_kind="full")
 

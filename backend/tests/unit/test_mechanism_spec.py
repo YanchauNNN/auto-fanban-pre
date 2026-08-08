@@ -109,10 +109,12 @@ def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> No
     assert runtime.source.sha256 == (
         "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"
     )
+    assert runtime.source.size_bytes == 1_657_896
     assert runtime.bootstrap.filename == "7zr.exe"
     assert runtime.bootstrap.sha256 == (
         "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72"
     )
+    assert runtime.bootstrap.size_bytes == 602_112
     assert runtime.cache_dir == "build/runtime-cache/7-Zip"
     assert runtime.destination_dir == "bin/7-Zip"
     assert runtime.required_handlers == ("7z", "zip", "Rar", "Rar5")

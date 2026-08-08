@@ -237,10 +237,12 @@ backend_mechanism:
         filename: "7z2602-x64.exe"
         url: "https://github.com/ip7z/7zip/releases/download/26.02/7z2602-x64.exe"
         sha256: "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"
+        size_bytes: 1657896
       bootstrap:
         filename: "7zr.exe"
         url: "https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe"
         sha256: "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72"
+        size_bytes: 602112
       license_url: "https://www.7-zip.org/license.txt"
       cache_dir: "build/runtime-cache/7-Zip"
       destination_dir: "bin/7-Zip"

@@ -11,6 +11,7 @@ from zipfile import ZipFile
 import pytest
 import yaml
 
+import src.deploy.terminal_package as terminal_package_mod
 from src.config.mechanism_spec import ArchiveRuntimeMechanismConfig
 from src.deploy.archive_runtime import ArchiveRuntimeError, render_archive_runtime_provenance
 from src.deploy.prereq_installers import ensure_prereq_installers
@@ -101,11 +102,13 @@ def _write_fake_archive_runtime(repo_root: Path) -> None:
             "filename": "7z-test-x64.exe",
             "url": "https://example.invalid/7z-test-x64.exe",
             "sha256": hashlib.sha256(b"fake-source").hexdigest(),
+            "size_bytes": len(b"fake-source"),
         },
         "bootstrap": {
             "filename": "7zr.exe",
             "url": "https://example.invalid/7zr.exe",
             "sha256": hashlib.sha256(b"fake-bootstrap").hexdigest(),
+            "size_bytes": len(b"fake-bootstrap"),
         },
         "license_url": "https://example.invalid/license.txt",
         "cache_dir": "build/runtime-cache/7-Zip",
@@ -364,6 +367,30 @@ def test_gather_copy_plan_rejects_missing_archive_runtime_cache(tmp_path: Path) 
 
     with pytest.raises(ArchiveRuntimeError, match="prepare_archive_runtime.py"):
         gather_copy_plan(repo_root)
+
+
+def test_full_build_rejects_archive_runtime_source_changed_after_gather(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    original_gather = terminal_package_mod.gather_copy_plan
+
+    def gather_then_tamper(root: Path):
+        plan = original_gather(root)
+        (root / "build" / "runtime-cache" / "7-Zip" / "7z.exe").write_bytes(
+            b"tampered-after-gather"
+        )
+        return plan
+
+    monkeypatch.setattr(terminal_package_mod, "gather_copy_plan", gather_then_tamper)
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.exe"):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    assert not (output_root / PACKAGE_MANIFEST).exists()
 
 
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
@@ -1199,6 +1226,43 @@ def test_publish_terminal_deploy_artifacts_tracks_archive_runtime_delta_changes(
         "License.txt",
         "PROVENANCE.txt",
     }
+
+
+def test_publish_rejects_tampered_deployed_runtime_and_preserves_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    baseline_exe = (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes()
+    baseline_manifest = (output_root / PACKAGE_MANIFEST).read_bytes()
+    original_write_support_files = terminal_package_mod._write_support_files
+
+    def write_support_then_tamper(package_root: Path, **kwargs: object) -> None:
+        original_write_support_files(package_root, **kwargs)
+        (package_root / "bin" / "7-Zip" / "7z.dll").write_bytes(
+            b"tampered-in-staging"
+        )
+
+    monkeypatch.setattr(
+        terminal_package_mod,
+        "_write_support_files",
+        write_support_then_tamper,
+    )
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.dll"):
+        publish_terminal_deploy_artifacts(
+            repo_root=repo_root,
+            output_root=output_root,
+            delta_root=delta_root,
+        )
+
+    assert (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes() == baseline_exe
+    assert (output_root / PACKAGE_MANIFEST).read_bytes() == baseline_manifest
+    assert not (output_root.parent / "_stg").exists()
 
 
 def test_publish_terminal_deploy_artifacts_without_baseline_writes_metadata_only_delta(tmp_path: Path) -> None:

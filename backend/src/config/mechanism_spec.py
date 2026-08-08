@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -27,6 +28,35 @@ _FORBIDDEN_TOP_LEVEL_KEYS = {
     "titleblock_extract",
 }
 _FACTORY_CODE_RE = re.compile(r"^(?:[A-Z][A-Z0-9]{1,3}|\d{3})$")
+_WINDOWS_INVALID_FILENAME_CHARS = frozenset('<>:"/\\|?*')
+_WINDOWS_RESERVED_FILENAME_STEMS = {
+    "aux",
+    "clock$",
+    "con",
+    "nul",
+    "prn",
+    *(f"com{number}" for number in range(1, 10)),
+    *(f"lpt{number}" for number in range(1, 10)),
+}
+
+
+def _windows_filename_key(value: str) -> str:
+    return unicodedata.normalize("NFC", value).rstrip(" .").casefold()
+
+
+def _validate_windows_basename(value: str, *, label: str) -> str:
+    if Path(value).name != value or value in {".", ".."}:
+        raise ValueError(f"{label} must be a basename")
+    if value != value.rstrip(" ."):
+        raise ValueError(f"{label} must not end with a dot or space")
+    if any(character in _WINDOWS_INVALID_FILENAME_CHARS for character in value):
+        raise ValueError(f"{label} contains a Windows-invalid character")
+    if any(ord(character) < 32 for character in value):
+        raise ValueError(f"{label} contains a control character")
+    stem = value.split(".", 1)[0].casefold()
+    if stem in _WINDOWS_RESERVED_FILENAME_STEMS:
+        raise ValueError(f"{label} uses a Windows-reserved name")
+    return value
 
 
 class PermissionsConfig(BaseModel):
@@ -349,13 +379,12 @@ class ArchiveRuntimeAssetConfig(BaseModel):
     filename: str = Field(min_length=1)
     url: str = Field(pattern=r"^https://")
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: PositiveInt
 
     @field_validator("filename")
     @classmethod
     def validate_filename(cls, value: str) -> str:
-        if Path(value).name != value or value in {".", ".."}:
-            raise ValueError("archive runtime asset filename must be a basename")
-        return value
+        return _validate_windows_basename(value, label="archive runtime asset filename")
 
 
 class ArchiveRuntimeFileConfig(BaseModel):
@@ -367,9 +396,7 @@ class ArchiveRuntimeFileConfig(BaseModel):
     @field_validator("filename")
     @classmethod
     def validate_filename(cls, value: str) -> str:
-        if Path(value).name != value or value in {".", ".."}:
-            raise ValueError("archive runtime required filename must be a basename")
-        return value
+        return _validate_windows_basename(value, label="archive runtime required filename")
 
 
 class ArchiveRuntimeMechanismConfig(BaseModel):
@@ -400,17 +427,23 @@ class ArchiveRuntimeMechanismConfig(BaseModel):
     @field_validator("provenance_filename")
     @classmethod
     def validate_provenance_filename(cls, value: str) -> str:
-        if Path(value).name != value or value in {".", ".."}:
-            raise ValueError("archive runtime provenance filename must be a basename")
-        return value
+        return _validate_windows_basename(
+            value,
+            label="archive runtime provenance filename",
+        )
 
     @model_validator(mode="after")
     def validate_required_names(self) -> ArchiveRuntimeMechanismConfig:
         filenames = [item.filename for item in self.required_files]
-        if len(filenames) != len(set(filenames)):
+        filename_keys = [_windows_filename_key(filename) for filename in filenames]
+        if len(filename_keys) != len(set(filename_keys)):
             raise ValueError("archive runtime required filenames must be unique")
-        if self.provenance_filename in filenames:
+        if _windows_filename_key(self.provenance_filename) in filename_keys:
             raise ValueError("archive runtime provenance filename must not be a required binary")
+        if _windows_filename_key(self.source.filename) == _windows_filename_key(
+            self.bootstrap.filename
+        ):
+            raise ValueError("archive runtime source and bootstrap filenames must be unique")
         handlers = list(self.required_handlers)
         if len(handlers) != len(set(handlers)):
             raise ValueError("archive runtime required handlers must be unique")

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+import src.deploy.archive_runtime as archive_runtime_mod
 from src.config.mechanism_spec import (
     ArchiveRuntimeAssetConfig,
     ArchiveRuntimeFileConfig,
@@ -18,6 +22,7 @@ from src.deploy.archive_runtime import (
     prepare_archive_runtime,
     render_archive_runtime_provenance,
     validate_archive_runtime_cache,
+    validate_deployed_archive_runtime,
 )
 from src.deploy.terminal_package import (
     PACKAGE_MANIFEST,
@@ -44,6 +49,7 @@ def _config(
     source_sha256: str | None = None,
     bootstrap_sha256: str | None = None,
     required_files: dict[str, bytes] | None = None,
+    cache_dir: str = "build/runtime-cache/7-Zip",
 ) -> ArchiveRuntimeMechanismConfig:
     file_payloads = required_files if required_files is not None else FILES
     return ArchiveRuntimeMechanismConfig(
@@ -53,14 +59,16 @@ def _config(
             filename="7z-test-x64.exe",
             url="https://example.invalid/7z-test-x64.exe",
             sha256=source_sha256 or _sha(SOURCE),
+            size_bytes=len(SOURCE),
         ),
         bootstrap=ArchiveRuntimeAssetConfig(
             filename="7zr.exe",
             url="https://example.invalid/7zr.exe",
             sha256=bootstrap_sha256 or _sha(BOOTSTRAP),
+            size_bytes=len(BOOTSTRAP),
         ),
         license_url="https://example.invalid/license.txt",
-        cache_dir="build/runtime-cache/7-Zip",
+        cache_dir=cache_dir,
         destination_dir="bin/7-Zip",
         provenance_filename="PROVENANCE.txt",
         required_files=tuple(
@@ -74,9 +82,10 @@ def _config(
     )
 
 
-def _downloader(url: str, destination: Path, timeout_sec: int) -> None:
+def _downloader(url: str, destination: Path, timeout_sec: int, expected_size: int) -> None:
     assert timeout_sec == 15
     payload = BOOTSTRAP if url.endswith("7zr.exe") else SOURCE
+    assert expected_size == len(payload)
     destination.write_bytes(payload)
 
 
@@ -93,6 +102,103 @@ def _runner_with_files(files: dict[str, bytes]):
         return subprocess.CompletedProcess(command, 0, stdout="Everything is Ok", stderr="")
 
     return _run, calls
+
+
+def _write_valid_runtime(runtime_dir: Path, config: ArchiveRuntimeMechanismConfig) -> None:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    for name, payload in FILES.items():
+        (runtime_dir / name).write_bytes(payload)
+    (runtime_dir / config.provenance_filename).write_text(
+        render_archive_runtime_provenance(config), encoding="utf-8"
+    )
+
+
+class _FakeResponse:
+    def __init__(self, payload: bytes, *, final_url: str = "https://cdn.example/file") -> None:
+        self._stream = io.BytesIO(payload)
+        self._final_url = final_url
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        return self._stream.read(size)
+
+    def geturl(self) -> str:
+        return self._final_url
+
+
+@pytest.mark.parametrize("payload", [SOURCE[:-1], SOURCE + b"too-long"])
+def test_download_asset_rejects_inexact_size(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+) -> None:
+    monkeypatch.setattr(
+        archive_runtime_mod,
+        "urlopen",
+        lambda *_args, **_kwargs: _FakeResponse(payload),
+    )
+    destination = tmp_path / "asset.exe"
+
+    with pytest.raises(ArchiveRuntimeError, match="大小"):
+        archive_runtime_mod._download_asset(
+            "https://example.invalid/asset.exe",
+            destination,
+            15,
+            len(SOURCE),
+        )
+
+    assert not destination.exists()
+
+
+def test_download_asset_rejects_http_redirect_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        archive_runtime_mod,
+        "urlopen",
+        lambda *_args, **_kwargs: _FakeResponse(SOURCE, final_url="http://cdn.example/file"),
+    )
+    destination = tmp_path / "asset.exe"
+
+    with pytest.raises(ArchiveRuntimeError, match="HTTPS"):
+        archive_runtime_mod._download_asset(
+            "https://example.invalid/asset.exe",
+            destination,
+            15,
+            len(SOURCE),
+        )
+
+    assert not destination.exists()
+
+
+def test_archive_runtime_config_rejects_windows_casefold_name_conflicts() -> None:
+    payload = _config().model_dump()
+    payload["required_files"] = [
+        {"filename": "7z.exe", "sha256": "0" * 64},
+        {"filename": "7Z.EXE", "sha256": "1" * 64},
+    ]
+
+    with pytest.raises(ValidationError, match="unique"):
+        ArchiveRuntimeMechanismConfig(**payload)
+
+    payload = _config().model_dump()
+    payload["provenance_filename"] = "7Z.ExE"
+    with pytest.raises(ValidationError, match="provenance"):
+        ArchiveRuntimeMechanismConfig(**payload)
+
+
+def test_archive_runtime_config_rejects_parent_traversal() -> None:
+    payload = _config().model_dump()
+    payload["cache_dir"] = "../outside"
+
+    with pytest.raises(ValidationError, match="package-relative"):
+        ArchiveRuntimeMechanismConfig(**payload)
 
 
 @pytest.mark.parametrize(
@@ -217,6 +323,91 @@ def test_validate_archive_runtime_cache_fails_closed(
 
     with pytest.raises(ArchiveRuntimeError, match="prepare_archive_runtime.py"):
         validate_archive_runtime_cache(tmp_path, config)
+
+
+def test_validate_archive_runtime_cache_rejects_symlink_escape(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    config = _config(cache_dir="runtime-link")
+    _write_valid_runtime(outside, config)
+    repo_root.mkdir()
+    link = repo_root / "runtime-link"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    with pytest.raises(ArchiveRuntimeError, match="重解析|链接|仓库"):
+        validate_archive_runtime_cache(repo_root, config)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction regression")
+def test_prepare_archive_runtime_rejects_junction_parent_escape(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    junction_parent = repo_root / "build" / "runtime-cache"
+    outside_parent = tmp_path / "outside-cache"
+    outside_parent.mkdir(parents=True)
+    junction_parent.parent.mkdir(parents=True)
+    created = subprocess.run(
+        ["cmd.exe", "/c", "mklink", "/J", str(junction_parent), str(outside_parent)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if created.returncode != 0:
+        pytest.skip(f"junction creation unavailable: {created.stderr or created.stdout}")
+    config = _config()
+    downloads: list[str] = []
+
+    def unexpected_downloader(
+        url: str,
+        _destination: Path,
+        _timeout_sec: int,
+        _expected_size: int,
+    ) -> None:
+        downloads.append(url)
+
+    runner, _ = _runner_with_files(FILES)
+    try:
+        with pytest.raises(ArchiveRuntimeError, match="重解析|链接|仓库"):
+            prepare_archive_runtime(
+                repo_root=repo_root,
+                config=config,
+                downloader=unexpected_downloader,
+                runner=runner,
+            )
+        assert downloads == []
+        assert not (outside_parent / "7-Zip").exists()
+    finally:
+        if junction_parent.exists():
+            os.rmdir(junction_parent)
+
+
+def test_validate_archive_runtime_cache_rejects_casefold_duplicate_entries(
+    tmp_path: Path,
+) -> None:
+    config = _config()
+    runtime_dir = tmp_path / config.cache_dir
+    _write_valid_runtime(runtime_dir, config)
+    alias = runtime_dir / "7Z.EXE"
+    alias.write_bytes(b"case-conflict")
+    if len(list(runtime_dir.iterdir())) == 4:
+        pytest.skip("filesystem is case-insensitive")
+
+    with pytest.raises(ArchiveRuntimeError, match="名称冲突"):
+        validate_archive_runtime_cache(tmp_path, config)
+
+
+def test_validate_deployed_archive_runtime_rechecks_exact_package_files(tmp_path: Path) -> None:
+    config = _config()
+    deployed = tmp_path / config.destination_dir
+    _write_valid_runtime(deployed, config)
+
+    assert validate_deployed_archive_runtime(tmp_path, config) == deployed.resolve()
+
+    (deployed / "7z.dll").write_bytes(b"tampered-after-copy")
+    with pytest.raises(ArchiveRuntimeError, match="7z.dll"):
+        validate_deployed_archive_runtime(tmp_path, config)
 
 
 def test_archive_runtime_copy_plan_contains_only_four_verified_files(tmp_path: Path) -> None:
