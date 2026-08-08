@@ -1021,6 +1021,7 @@ def test_external_archive_rejects_links_streams_reparse_and_special_types(
         ({}, {"Encrypted": "+"}, "加密"),
         ({"Volumes": "2"}, {}, "分卷"),
         ({"Multivolume": "+"}, {}, "分卷"),
+        ({}, {"Volume Index": "0"}, "分卷"),
         ({}, {"Volume Index": "1"}, "分卷"),
     ],
 )
@@ -1050,6 +1051,91 @@ def test_external_archive_rejects_encryption_and_multivolume_archives(
         )
 
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("volume_index", ["", "   "])
+def test_external_archive_accepts_real_7zip_false_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    volume_index: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "ordinary-single-volume.rar")
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    false_item_flags = {
+        "Folder": "-",
+        "Encrypted": "-",
+        "Solid": "-",
+        "Split Before": "-",
+        "Split After": "-",
+        "Volume Index": volume_index,
+    }
+    listing = _slt_listing(
+        entries,
+        directories=(),
+        archive_fields={
+            "Solid": "-",
+            "Encrypted": "-",
+            "Multivolume": "-",
+            "Volumes": "1",
+        },
+        item_fields=dict.fromkeys(entries, false_item_flags),
+    )
+    calls = _mock_external_run(monkeypatch, listing, entries)
+
+    contents = validate_and_extract_archive(
+        archive,
+        tmp_path / "extracted",
+        archive_extractor=settings,
+    )
+
+    assert [figure.direction for figure in contents.reinforcement_figures] == [
+        "X",
+        "Y",
+        "Z",
+    ]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("field", ["Split Before", "Split After"])
+def test_external_archive_rejects_enabled_split_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "split.rar")
+    settings = _extractor_settings(tmp_path)
+    name = "file.png"
+    listing = _slt_listing(
+        {name: b"x"},
+        directories=(),
+        item_fields={name: {field: "+"}},
+    )
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="分卷"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("value", ["", "-", "0", "false", "no"])
+def test_slt_flag_parser_recognizes_false_values(value: str) -> None:
+    assert archive_module._parse_slt_flag(value) is False
+
+
+@pytest.mark.parametrize("value", ["+", "1", "true", "yes"])
+def test_slt_flag_parser_recognizes_true_values(value: str) -> None:
+    assert archive_module._parse_slt_flag(value) is True
+
+
+def test_slt_flag_parser_rejects_unknown_nonempty_value() -> None:
+    with pytest.raises(InvalidCalculationArchive, match="清单.*无法解析"):
+        archive_module._parse_slt_flag("maybe")
 
 
 @pytest.mark.parametrize(

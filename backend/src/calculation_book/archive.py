@@ -161,6 +161,7 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 _SEVEN_Z_SAFE_FALSE_VALUES = {"", "-", "0", "false", "no"}
+_SEVEN_Z_SAFE_TRUE_VALUES = {"+", "1", "true", "yes"}
 _WINDOWS_FORBIDDEN_CHARACTERS = frozenset('*?"<>|')
 _WINDOWS_DEVICE_DIGIT_TRANSLATION = str.maketrans({"¹": "1", "²": "2", "³": "3"})
 
@@ -425,8 +426,13 @@ def _parse_slt_records(payload: bytes) -> list[dict[str, str]]:
     return records
 
 
-def _field_is_enabled(value: str | None) -> bool:
-    return value is not None and value.strip().casefold() not in _SEVEN_Z_SAFE_FALSE_VALUES
+def _parse_slt_flag(value: str | None) -> bool:
+    normalized = (value or "").strip().casefold()
+    if normalized in _SEVEN_Z_SAFE_FALSE_VALUES:
+        return False
+    if normalized in _SEVEN_Z_SAFE_TRUE_VALUES:
+        return True
+    raise InvalidCalculationArchive("压缩包清单无法解析")
 
 
 def _parse_nonnegative_size(value: str | None) -> int:
@@ -442,17 +448,18 @@ def _parse_nonnegative_size(value: str | None) -> int:
 def _record_is_directory(record: dict[str, str]) -> bool:
     folder = record.get("Folder")
     if folder is not None:
-        if folder.strip() == "+":
-            return True
-        if folder.strip() != "-":
-            raise InvalidCalculationArchive("压缩包清单无法解析")
+        return _parse_slt_flag(folder)
     attributes = record.get("Attributes", "").strip()
     return attributes[:1].upper() == "D"
 
 
 def _record_has_unsafe_type(record: dict[str, str]) -> bool:
-    for field in ("Symbolic Link", "Hard Link", "Alternate Stream", "Reparse"):
-        if _field_is_enabled(record.get(field)):
+    for field in ("Symbolic Link", "Hard Link"):
+        value = record.get(field)
+        if value is not None and value.strip().casefold() not in _SEVEN_Z_SAFE_FALSE_VALUES:
+            return True
+    for field in ("Alternate Stream", "Reparse"):
+        if _parse_slt_flag(record.get(field)):
             return True
     item_type = record.get("Type", "").strip().casefold()
     if item_type and item_type not in {"file", "directory"}:
@@ -463,11 +470,16 @@ def _record_has_unsafe_type(record: dict[str, str]) -> bool:
 
 def _validate_archive_metadata(records: list[dict[str, str]]) -> None:
     for record in records:
-        if _field_is_enabled(record.get("Encrypted")):
+        if _parse_slt_flag(record.get("Encrypted")):
             raise InvalidCalculationArchive("暂不支持加密压缩包")
-        if _field_is_enabled(record.get("Multivolume")):
+        if _parse_slt_flag(record.get("Multivolume")):
             raise InvalidCalculationArchive("暂不支持分卷压缩包")
-        if "Volume Index" in record:
+        if _parse_slt_flag(record.get("Split Before")):
+            raise InvalidCalculationArchive("暂不支持分卷压缩包")
+        if _parse_slt_flag(record.get("Split After")):
+            raise InvalidCalculationArchive("暂不支持分卷压缩包")
+        volume_index = record.get("Volume Index")
+        if volume_index is not None and volume_index.strip():
             raise InvalidCalculationArchive("暂不支持分卷压缩包")
         volumes = record.get("Volumes")
         if volumes is not None and _parse_nonnegative_size(volumes) != 1:
