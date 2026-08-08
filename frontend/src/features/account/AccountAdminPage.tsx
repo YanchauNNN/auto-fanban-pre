@@ -1,5 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type Ref,
+} from "react";
 
 import type {
   AccountRecord,
@@ -81,8 +89,19 @@ function formatInvalidRowErrors(errors: readonly string[]) {
     missing_password: "缺少密码",
     missing_role: "缺少角色",
   };
-  return errors.map((error) => labels[error] ?? error).join(" / ");
+  return errors.map((error) => labels[error] ?? "账号数据异常，请核对并修复").join(" / ");
 }
+
+const ACCOUNT_ERROR_MESSAGES: Record<string, string> = {
+  "account_id already exists": "账号已存在，请改用其他账号。",
+  "new account_id already exists": "新账号已存在，请改用其他账号。",
+  "invalid role": "账号角色无效，请重新选择。",
+  "account not found": "账号不存在，请刷新目录后重试。",
+  "account row not found": "账号数据行不存在，请刷新目录后重试。",
+  "missing account_id": "请填写账号。",
+  "missing display_name": "请填写姓名。",
+  "missing password": "请填写并确认密码。",
+};
 
 export function AccountAdminPage() {
   const adapter = useApiAdapter();
@@ -100,6 +119,10 @@ export function AccountAdminPage() {
   const [accountSubmitting, setAccountSubmitting] = useState(false);
   const [configSubmitting, setConfigSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [rovingDirectoryKey, setRovingDirectoryKey] = useState<string | null>(null);
+  const [editorFocusRequest, setEditorFocusRequest] = useState(0);
+  const accountIdInputRef = useRef<HTMLInputElement>(null);
+  const directoryItemRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const accountsQuery = useQuery({
     queryKey: ["accounts"],
@@ -124,13 +147,17 @@ export function AccountAdminPage() {
     () =>
       managementSchema?.account.validRoles.length
         ? [...managementSchema.account.validRoles]
-        : schemaQuery.isError && currentAccount?.role
-          ? [currentAccount.role]
-          : [],
-    [currentAccount?.role, managementSchema, schemaQuery.isError],
+        : [],
+    [managementSchema],
   );
   const defaultRole = roleOptions[0] ?? "";
-  const defaultPassword = managementSchema?.account.adminCreatedDefaultPassword ?? "";
+  const defaultPasswordConfigured = Boolean(
+    managementSchema?.account.adminCreatedDefaultPasswordConfigured,
+  );
+  const adminConfigUnavailable =
+    adminConfigQuery.isError || (!adminConfigQuery.isLoading && !adminConfigQuery.data);
+  const accountSchemaUnavailable =
+    schemaQuery.isError || (!schemaQuery.isLoading && !managementSchema);
 
   useEffect(() => {
     if (!archiveRootPathDirty) {
@@ -154,6 +181,9 @@ export function AccountAdminPage() {
     [accountItems],
   );
   const invalidRows = invalidRowsQuery.data?.items ?? [];
+  const validCountUnavailable = accountsQuery.isError;
+  const invalidCountUnavailable = invalidRowsQuery.isError;
+  const totalCountUnavailable = validCountUnavailable || invalidCountUnavailable;
   const normalizedSearch = directorySearch.trim().toLocaleLowerCase("zh-CN");
 
   const filteredAccounts = useMemo(() => {
@@ -187,6 +217,30 @@ export function AccountAdminPage() {
     );
   }, [directoryFilter, invalidRows, normalizedSearch]);
 
+  const visibleDirectoryKeys = useMemo(
+    () => [
+      ...filteredAccounts.map((account) => `account:${account.accountId}`),
+      ...filteredInvalidRows.map((row) => `row:${row.rowNumber}`),
+    ],
+    [filteredAccounts, filteredInvalidRows],
+  );
+
+  useEffect(() => {
+    if (!visibleDirectoryKeys.length) {
+      setRovingDirectoryKey(null);
+      return;
+    }
+    setRovingDirectoryKey((current) =>
+      current && visibleDirectoryKeys.includes(current) ? current : visibleDirectoryKeys[0],
+    );
+  }, [visibleDirectoryKeys]);
+
+  useEffect(() => {
+    if (editorFocusRequest > 0) {
+      accountIdInputRef.current?.focus();
+    }
+  }, [editorFocusRequest]);
+
   if (!currentAccount) {
     return null;
   }
@@ -199,11 +253,11 @@ export function AccountAdminPage() {
 
   if (isBootstrapping) {
     return (
-      <main className={styles.page}>
+      <section aria-label="账号管理工作区" className={styles.page}>
         <p aria-label="正在加载账号管理" className={styles.stateMessage} role="status">
           正在加载账号管理...
         </p>
-      </main>
+      </section>
     );
   }
 
@@ -214,6 +268,7 @@ export function AccountAdminPage() {
     setPasswordVisible(false);
     setAccountForm(buildEmptyAccountForm(defaultRole));
     setFeedback(null);
+    setEditorFocusRequest((current) => current + 1);
   }
 
   function switchToEditMode(account: AccountRecord) {
@@ -231,6 +286,8 @@ export function AccountAdminPage() {
       confirmPassword: "",
     });
     setFeedback(null);
+    setRovingDirectoryKey(`account:${account.accountId}`);
+    setEditorFocusRequest((current) => current + 1);
   }
 
   function switchToInvalidRow(row: InvalidAccountRow) {
@@ -240,6 +297,33 @@ export function AccountAdminPage() {
     setPasswordVisible(false);
     setAccountForm(buildFormFromInvalidRow(row, accountFieldMap, roleOptions, defaultRole));
     setFeedback(null);
+    setRovingDirectoryKey(`row:${row.rowNumber}`);
+    setEditorFocusRequest((current) => current + 1);
+  }
+
+  function handleDirectoryKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentKey: string,
+  ) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = Math.max(visibleDirectoryKeys.indexOf(currentKey), 0);
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? visibleDirectoryKeys.length - 1
+          : event.key === "ArrowDown"
+            ? (currentIndex + 1) % visibleDirectoryKeys.length
+            : (currentIndex - 1 + visibleDirectoryKeys.length) % visibleDirectoryKeys.length;
+    const nextKey = visibleDirectoryKeys[nextIndex];
+    if (!nextKey) {
+      return;
+    }
+    setRovingDirectoryKey(nextKey);
+    directoryItemRefs.current.get(nextKey)?.focus();
   }
 
   async function refreshManagementQueries() {
@@ -255,16 +339,22 @@ export function AccountAdminPage() {
 
   const passwordProvided = Boolean(accountForm.password.trim());
   const passwordsMismatch = accountForm.password !== accountForm.confirmPassword;
+  const selectedInvalidRow =
+    mode === "row"
+      ? invalidRows.find((row) => row.rowNumber === editingRowNumber) ?? null
+      : null;
+  const repairRequiresPassword = Boolean(selectedInvalidRow?.errors.includes("missing_password"));
   const requiredFieldsPresent = Boolean(
     accountForm.accountId.trim() && accountForm.displayName.trim() && accountForm.role,
   );
   const passwordIsValid =
-    mode === "create"
+    mode === "create" || repairRequiresPassword
       ? passwordProvided && !passwordsMismatch
       : !passwordProvided && !accountForm.confirmPassword
         ? true
         : passwordProvided && !passwordsMismatch;
-  const accountSubmitDisabled = !requiredFieldsPresent || !passwordIsValid || accountSubmitting;
+  const accountSubmitDisabled =
+    accountSchemaUnavailable || !requiredFieldsPresent || !passwordIsValid || accountSubmitting;
 
   async function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -278,7 +368,7 @@ export function AccountAdminPage() {
       accountId: accountForm.accountId.trim(),
       displayName: accountForm.displayName.trim(),
       role: accountForm.role,
-      ...(passwordProvided ? { password: accountForm.password.trim() } : {}),
+      ...(passwordProvided ? { password: accountForm.password } : {}),
     };
 
     setAccountSubmitting(true);
@@ -289,9 +379,16 @@ export function AccountAdminPage() {
         switchToCreateMode();
         setFeedback({ tone: "success", message: "无效账号行已修复。" });
       } else if (mode === "edit" && editingAccountId) {
-        await adapter.updateAccount(editingAccountId, basePayload);
+        const updated = await adapter.updateAccount(editingAccountId, basePayload);
+        setEditingAccountId(updated.accountId);
+        setRovingDirectoryKey(`account:${updated.accountId}`);
         setFeedback({ tone: "success", message: "账号信息已更新。" });
-        setAccountForm((current) => ({ ...current, password: "", confirmPassword: "" }));
+        setAccountForm((current) => ({
+          ...current,
+          accountId: updated.accountId,
+          password: "",
+          confirmPassword: "",
+        }));
       } else {
         await adapter.createAccount({
           officeCode: basePayload.officeCode ?? null,
@@ -306,7 +403,7 @@ export function AccountAdminPage() {
       }
       await refreshManagementQueries();
     } catch (error) {
-      const detail = resolveErrorMessage(error);
+      const detail = extractErrorDetail(error);
       if (mode === "create" && detail === "account_id already exists") {
         const existing = validAccounts.find((item) => item.accountId === basePayload.accountId);
         if (existing) {
@@ -315,7 +412,10 @@ export function AccountAdminPage() {
           return;
         }
       }
-      setFeedback({ tone: "error", message: detail || "账号操作失败，请稍后重试。" });
+      setFeedback({
+        tone: "error",
+        message: ACCOUNT_ERROR_MESSAGES[detail] ?? "账号操作失败，请稍后重试。",
+      });
     } finally {
       setAccountSubmitting(false);
     }
@@ -323,6 +423,9 @@ export function AccountAdminPage() {
 
   async function handleAdminConfigSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (adminConfigUnavailable) {
+      return;
+    }
     setConfigSubmitting(true);
     setFeedback(null);
     try {
@@ -330,10 +433,10 @@ export function AccountAdminPage() {
       await queryClient.invalidateQueries({ queryKey: ["admin-config"] });
       setArchiveRootPathDirty(false);
       setFeedback({ tone: "success", message: "归档配置已更新。" });
-    } catch (error) {
+    } catch {
       setFeedback({
         tone: "error",
-        message: resolveErrorMessage(error) || "归档配置保存失败，请稍后重试。",
+        message: "归档配置保存失败，请稍后重试。",
       });
     } finally {
       setConfigSubmitting(false);
@@ -345,25 +448,40 @@ export function AccountAdminPage() {
       ? [accountForm.role, ...roleOptions]
       : roleOptions;
   const passwordLabel =
-    mode === "edit" ? "新密码（可选）" : mode === "row" ? "密码（可选）" : "密码";
-  const confirmationLabel = mode === "edit" ? "确认新密码" : "确认密码";
+    mode === "edit"
+      ? "新密码（可选）"
+      : mode === "row"
+        ? repairRequiresPassword
+          ? "密码（必填）"
+          : "密码（可选）"
+        : "密码";
+  const confirmationLabel =
+    mode === "edit"
+      ? "确认新密码"
+      : mode === "row" && repairRequiresPassword
+        ? "确认密码（必填）"
+        : "确认密码";
 
   return (
-    <main className={styles.page}>
+    <section aria-label="账号管理工作区" className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Account Administration</p>
+          <p className={styles.eyebrow}>账号与权限</p>
           <h1>账号管理</h1>
           <p>在同一工作区检索账号、修复无效行并维护归档路径。</p>
         </div>
         <dl className={styles.headerMetrics}>
           <div>
             <dt>有效账号</dt>
-            <dd>{validAccounts.length}</dd>
+            <dd aria-label={validCountUnavailable ? "有效账号数量不可用" : undefined}>
+              {validCountUnavailable ? "—" : validAccounts.length}
+            </dd>
           </div>
           <div data-tone={invalidRows.length > 0 ? "warning" : "neutral"}>
             <dt>无效行</dt>
-            <dd>{invalidRows.length}</dd>
+            <dd aria-label={invalidCountUnavailable ? "无效行数量不可用" : undefined}>
+              {invalidCountUnavailable ? "—" : invalidRows.length}
+            </dd>
           </div>
         </dl>
       </header>
@@ -379,6 +497,7 @@ export function AccountAdminPage() {
         <form className={styles.archiveForm} onSubmit={handleAdminConfigSubmit}>
           <label htmlFor="admin-archive-root-path">归档根路径</label>
           <input
+            disabled={adminConfigUnavailable}
             id="admin-archive-root-path"
             onChange={(event) => {
               setArchiveRootPathDirty(true);
@@ -386,11 +505,22 @@ export function AccountAdminPage() {
             }}
             value={archiveRootPath}
           />
-          <button disabled={configSubmitting} type="submit">
+          <button disabled={configSubmitting || adminConfigUnavailable} type="submit">
             {configSubmitting ? "保存中..." : "保存归档配置"}
           </button>
         </form>
       </section>
+
+      {adminConfigUnavailable ? (
+        <p className={styles.feedbackError} role="alert">
+          归档配置加载失败，已停用保存，避免覆盖现有配置。
+        </p>
+      ) : null}
+      {accountSchemaUnavailable ? (
+        <p className={styles.feedbackError} role="alert">
+          账号规则加载失败，已停用账号保存，避免提交无效配置。
+        </p>
+      ) : null}
 
       {feedback ? (
         <p
@@ -408,7 +538,12 @@ export function AccountAdminPage() {
               <span className={styles.panelIndex}>01</span>
               <h2 id="account-directory-heading">账号目录</h2>
             </div>
-            <button className={styles.secondaryButton} onClick={switchToCreateMode} type="button">
+            <button
+              className={styles.secondaryButton}
+              disabled={accountSchemaUnavailable}
+              onClick={switchToCreateMode}
+              type="button"
+            >
               新建账号
             </button>
           </div>
@@ -430,14 +565,14 @@ export function AccountAdminPage() {
               onClick={() => setDirectoryFilter("all")}
               type="button"
             >
-              全部 {validAccounts.length + invalidRows.length}
+              全部 {totalCountUnavailable ? "不可用" : validAccounts.length + invalidRows.length}
             </button>
             <button
               aria-pressed={directoryFilter === "valid"}
               onClick={() => setDirectoryFilter("valid")}
               type="button"
             >
-              有效 {validAccounts.length}
+              有效 {validCountUnavailable ? "不可用" : validAccounts.length}
             </button>
             <button
               aria-pressed={directoryFilter === "invalid"}
@@ -445,7 +580,7 @@ export function AccountAdminPage() {
               onClick={() => setDirectoryFilter("invalid")}
               type="button"
             >
-              无效 {invalidRows.length}
+              无效 {invalidCountUnavailable ? "不可用" : invalidRows.length}
             </button>
           </div>
 
@@ -455,31 +590,58 @@ export function AccountAdminPage() {
             </p>
           ) : (
             <div className={styles.directoryList}>
-              {filteredAccounts.map((account) => (
-                <button
-                  aria-pressed={mode === "edit" && editingAccountId === account.accountId}
-                  className={styles.directoryItem}
-                  key={account.accountId}
-                  onClick={() => switchToEditMode(account)}
-                  type="button"
-                >
-                  <span className={styles.directoryStatus} data-tone="valid">有效</span>
-                  <span className={styles.directoryIdentity}>
-                    <strong>{account.displayName}</strong>
-                    <small>{account.accountId}</small>
-                  </span>
-                  <span className={styles.directoryDetails}>
-                    <small>{account.officeName ?? account.officeCode ?? "未配置科室"}</small>
-                    <small>{account.role}</small>
-                  </span>
-                </button>
-              ))}
-              {filteredInvalidRows.map((row) => (
-                <button
+              {filteredAccounts.map((account) => {
+                const directoryKey = `account:${account.accountId}`;
+                return (
+                  <button
+                    aria-pressed={mode === "edit" && editingAccountId === account.accountId}
+                    className={styles.directoryItem}
+                    key={account.accountId}
+                    onClick={() => switchToEditMode(account)}
+                    onFocus={() => setRovingDirectoryKey(directoryKey)}
+                    onKeyDown={(event) => handleDirectoryKeyDown(event, directoryKey)}
+                    ref={(node) => {
+                      if (node) {
+                        directoryItemRefs.current.set(directoryKey, node);
+                      } else {
+                        directoryItemRefs.current.delete(directoryKey);
+                      }
+                    }}
+                    tabIndex={rovingDirectoryKey === directoryKey ? 0 : -1}
+                    type="button"
+                  >
+                    <span className={styles.directoryStatus} data-tone="valid">
+                      有效
+                    </span>
+                    <span className={styles.directoryIdentity}>
+                      <strong>{account.displayName}</strong>
+                      <small>{account.accountId}</small>
+                    </span>
+                    <span className={styles.directoryDetails}>
+                      <small>{account.officeName ?? account.officeCode ?? "未配置科室"}</small>
+                      <small>{account.role}</small>
+                    </span>
+                  </button>
+                );
+              })}
+              {filteredInvalidRows.map((row) => {
+                const directoryKey = `row:${row.rowNumber}`;
+                return (
+                  <button
                   aria-pressed={mode === "row" && editingRowNumber === row.rowNumber}
                   className={styles.directoryItem}
                   key={`invalid-${row.rowNumber}`}
                   onClick={() => switchToInvalidRow(row)}
+                  onFocus={() => setRovingDirectoryKey(directoryKey)}
+                  onKeyDown={(event) => handleDirectoryKeyDown(event, directoryKey)}
+                  ref={(node) => {
+                    if (node) {
+                      directoryItemRefs.current.set(directoryKey, node);
+                    } else {
+                      directoryItemRefs.current.delete(directoryKey);
+                    }
+                  }}
+                  tabIndex={rovingDirectoryKey === directoryKey ? 0 : -1}
                   type="button"
                 >
                   <span className={styles.directoryStatus} data-tone="invalid">需修复</span>
@@ -491,8 +653,9 @@ export function AccountAdminPage() {
                     <small>{getRawAccountValue(row, accountFieldMap.displayName) || "姓名缺失"}</small>
                     <small>{formatInvalidRowErrors(row.errors)}</small>
                   </span>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
               {filteredAccounts.length === 0 && filteredInvalidRows.length === 0 ? (
                 <p className={styles.emptyState}>没有符合当前条件的账号。</p>
               ) : null}
@@ -531,6 +694,7 @@ export function AccountAdminPage() {
           <form className={styles.accountForm} onSubmit={handleAccountSubmit}>
             <EditorField
               id="admin-account-id"
+              inputRef={accountIdInputRef}
               label="账号"
               onChange={(value) => setAccountForm((current) => ({ ...current, accountId: value }))}
               value={accountForm.accountId}
@@ -592,9 +756,18 @@ export function AccountAdminPage() {
             <div className={styles.formFooter}>
               <div className={styles.formGuidance} aria-live="polite">
                 {mode === "edit" ? <p>留空则保持原密码不变。</p> : null}
-                {mode === "row" ? <p>留空时由后端沿用原行密码。</p> : null}
+                {mode === "row" && repairRequiresPassword ? (
+                  <p>原行缺少密码，请填写并确认新密码。</p>
+                ) : null}
+                {mode === "row" && !repairRequiresPassword ? (
+                  <p>留空时由后端沿用原行密码。</p>
+                ) : null}
                 {mode === "create" ? (
-                  <p>{`请显式填写并确认密码。参数规范默认值：${defaultPassword || "未配置"}。`}</p>
+                  <p>
+                    {defaultPasswordConfigured
+                      ? "系统默认密码策略已配置，创建时仍需显式填写密码。"
+                      : "系统未配置默认密码策略，请显式填写并确认密码。"}
+                  </p>
                 ) : null}
                 {(accountForm.password || accountForm.confirmPassword) && passwordsMismatch ? (
                   <p className={styles.validationError}>两次输入的密码不一致。</p>
@@ -613,13 +786,14 @@ export function AccountAdminPage() {
           </form>
         </section>
       </div>
-    </main>
+    </section>
   );
 }
 
 function EditorField({
   autoComplete,
   id,
+  inputRef,
   label,
   onChange,
   type = "text",
@@ -627,6 +801,7 @@ function EditorField({
 }: {
   autoComplete?: string;
   id: string;
+  inputRef?: Ref<HTMLInputElement>;
   label: string;
   onChange: (value: string) => void;
   type?: string;
@@ -641,12 +816,13 @@ function EditorField({
         onChange={(event) => onChange(event.currentTarget.value)}
         type={type}
         value={value}
+        ref={inputRef}
       />
     </label>
   );
 }
 
-function resolveErrorMessage(error: unknown) {
+function extractErrorDetail(error: unknown) {
   if (
     typeof error === "object" &&
     error &&

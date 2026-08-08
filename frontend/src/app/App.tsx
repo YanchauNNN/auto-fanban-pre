@@ -610,7 +610,7 @@ export function App() {
 function RequireSession({ children }: { children: ReactNode }) {
   const { sessionStatus } = useSession();
   if (sessionStatus === "loading") {
-    return <RoutePlaceholder description="正在确认登录状态..." title="正在进入平台" />;
+    return <RoutePlaceholder as="main" description="正在确认登录状态..." title="正在进入平台" />;
   }
   if (sessionStatus === "anonymous") {
     return <Navigate replace to="/login" />;
@@ -638,7 +638,9 @@ function LoginPage() {
     queryFn: () => adapter.getFormSchema(),
     staleTime: 60000,
   });
-  const defaultPassword = schemaQuery.data?.management?.account.adminCreatedDefaultPassword.trim();
+  const defaultPasswordConfigured = Boolean(
+    schemaQuery.data?.management?.account.adminCreatedDefaultPasswordConfigured,
+  );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -667,14 +669,14 @@ function LoginPage() {
       <section className={styles.loginHeroPanel}>
         <div className={styles.loginHeroContent}>
           <img alt="" className={styles.loginLogo} src={groupLogoUrl} />
-          <p className={styles.loginEyebrow}>Nuclear Design Workflow</p>
+          <p className={styles.loginEyebrow}>核电设计协同</p>
           <h1 className={styles.loginHeroTitle}>核电图纸业务协同平台</h1>
           <p className={styles.loginHeroBody}>统一进入出图、任务审批、账号管理和工作量结算。</p>
         </div>
       </section>
       <section className={styles.loginCardPanel}>
         <form className={styles.loginCard} onSubmit={handleSubmit}>
-          <p className={styles.loginCardEyebrow}>Account Login</p>
+          <p className={styles.loginCardEyebrow}>账号登录</p>
           <h2>登录平台</h2>
           <label className={styles.loginField} htmlFor="login-account-id">
             账号
@@ -698,7 +700,9 @@ function LoginPage() {
             />
           </label>
           {error ? <p className={styles.loginError} role="alert">{error}</p> : null}
-          {defaultPassword ? <p className={styles.loginHelper}>管理员新建账号默认密码：{defaultPassword}</p> : null}
+          {defaultPasswordConfigured ? (
+            <p className={styles.loginHelper}>初始密码由管理员提供，系统已配置账号密码策略。</p>
+          ) : null}
           <button className={styles.loginPrimaryButton} disabled={submitting} type="submit">
             {submitting ? "正在登录..." : "登录"}
           </button>

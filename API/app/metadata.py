@@ -203,8 +203,8 @@ class FormMetadataService:
                     if str(role).strip()
                 ],
                 "admin_roles": list(mechanism.permissions.account_admin_roles),
-                "admin_created_default_password": str(
-                    account_cfg.get("admin_created_default_password") or ""
+                "admin_created_default_password_configured": bool(
+                    str(account_cfg.get("admin_created_default_password") or "").strip()
                 ),
             },
             "workflow": {

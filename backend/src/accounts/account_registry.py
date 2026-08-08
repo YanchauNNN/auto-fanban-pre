@@ -70,6 +70,9 @@ class AccountRegistry:
             raise ValueError("account_id already exists")
         if payload.role not in self.valid_roles:
             raise ValueError("invalid role")
+        password = payload.password if payload.password is not None else self.default_password
+        if not password.strip():
+            raise ValueError("missing password")
         rows, headers = self.store.read_rows()
         row = self._build_row(
             office_code=payload.office_code,
@@ -77,7 +80,7 @@ class AccountRegistry:
             account_id=payload.account_id,
             display_name=payload.display_name,
             role=payload.role,
-            password=payload.password or self.default_password,
+            password=password,
         )
         rows.append(row)
         self.store.write_rows(rows, headers or list(row.keys()))
@@ -144,7 +147,7 @@ class AccountRegistry:
             payload.password
             if payload.password is not None
             else rows[target_index].get(self.field_map["password"], "")
-        ).strip()
+        )
 
         if not new_account_id:
             raise ValueError("missing account_id")
@@ -152,7 +155,7 @@ class AccountRegistry:
             raise ValueError("missing display_name")
         if new_role not in self.valid_roles:
             raise ValueError("invalid role")
-        if not password:
+        if not password.strip():
             raise ValueError("missing password")
 
         account_id_key = self.field_map["account_id"]
@@ -222,7 +225,7 @@ class AccountRegistry:
         account_id = row.get(self.field_map.get("account_id", ""), "").strip()
         display_name = row.get(self.field_map.get("display_name", ""), "").strip()
         role = row.get(self.field_map.get("role", ""), "").strip()
-        password = row.get(self.field_map.get("password", ""), "").strip()
+        password = str(row.get(self.field_map.get("password", ""), "") or "")
         errors: list[str] = []
         if not account_id:
             errors.append("missing_account_id")
@@ -232,7 +235,7 @@ class AccountRegistry:
             errors.append("missing_role")
         elif role not in self.valid_roles:
             errors.append("invalid_role")
-        if not password:
+        if not password.strip():
             errors.append("missing_password")
         if not account_id and not display_name and not role and not password:
             return None, errors

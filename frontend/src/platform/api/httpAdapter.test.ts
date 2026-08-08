@@ -9,6 +9,89 @@ describe("HttpAdapter", () => {
     vi.useRealTimers();
   });
 
+  it("keeps public account DTOs and invalid-row raw data free of passwords", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            items: [
+              {
+                office_code: "S01",
+                office_name: "结构一室",
+                account_id: "user-a",
+                display_name: "用户甲",
+                role: "设计人员",
+                password: "server-secret",
+                valid: true,
+                row_number: 2,
+                errors: [],
+              },
+            ],
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            items: [
+              {
+                row_number: 3,
+                raw: {
+                  账号: "broken-user",
+                  密码: "raw-secret",
+                  PASSWORD: "raw-secret-2",
+                  api_secret: "raw-secret-3",
+                },
+                errors: ["invalid_role"],
+              },
+            ],
+          }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    const accounts = await adapter.listAccounts();
+    const invalidRows = await adapter.listInvalidAccountRows();
+
+    expect(accounts.items[0]).not.toHaveProperty("password");
+    expect(invalidRows.items[0].raw).toEqual({ 账号: "broken-user" });
+    expect(JSON.stringify({ accounts, invalidRows })).not.toContain("server-secret");
+    expect(JSON.stringify({ accounts, invalidRows })).not.toContain("raw-secret");
+  });
+
+  it("omits an absent account password from create requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          office_code: "S01",
+          office_name: "结构一室",
+          account_id: "created-user",
+          display_name: "新建用户",
+          role: "设计人员",
+          valid: true,
+          row_number: 4,
+          errors: [],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+
+    await adapter.createAccount({
+      officeCode: "S01",
+      officeName: "结构一室",
+      accountId: "created-user",
+      displayName: "新建用户",
+      role: "设计人员",
+      password: "",
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(requestBody).not.toHaveProperty("password");
+  });
+
   it("normalizes task-group submission blockers from management detail", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

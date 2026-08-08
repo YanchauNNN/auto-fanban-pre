@@ -50,7 +50,7 @@
 
 .description {
   margin: 0.22rem 0 0;
-  color: #607890;
+  color: #4c657d;
   line-height: 1.35;
 }
 
@@ -75,7 +75,7 @@
 
 .todoButton strong {
   justify-self: end;
-  color: #bd681f;
+  color: #954b12;
   font-size: 1.2rem;
   line-height: 1;
 }
@@ -83,7 +83,7 @@
 .todoButton small {
   grid-column: 1 / -1;
   margin-top: 0.15rem;
-  color: #66819c;
+  color: #4c657d;
   font-size: 0.8125rem;
 }
 
@@ -127,7 +127,7 @@
 }
 
 .sectionIndex {
-  color: #7691ab;
+  color: #4c657d;
   font-family: "JetBrains Mono", Consolas, monospace;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -158,7 +158,7 @@
 
 .identityPrimary span {
   margin-top: 0.3rem;
-  color: #607b96;
+  color: #4c657d;
   font-family: "JetBrains Mono", Consolas, monospace;
 }
 
@@ -177,7 +177,7 @@
 }
 
 .identityList dt {
-  color: #698098;
+  color: #4c657d;
 }
 
 .identityList dd {
@@ -230,7 +230,7 @@
 
 .formMessage {
   min-height: 2.4rem;
-  color: #6a7f94;
+  color: #4c657d;
   line-height: 1.35;
 }
 
@@ -265,7 +265,7 @@
 .primaryButton:disabled {
   border-color: #c6d2df;
   background: #dbe3eb;
-  color: #73879a;
+  color: #4c657d;
   cursor: not-allowed;
 }
 
@@ -273,7 +273,7 @@
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  color: #688097;
+  color: #4c657d;
 }
 
 .totalWorkload strong {
@@ -334,7 +334,7 @@
 
 .settlementMain span,
 .settlementMeta span {
-  color: #6b8095;
+  color: #4c657d;
 }
 
 .settlementMeta {
@@ -358,8 +358,14 @@
 .textButton:focus-visible,
 .primaryButton:focus-visible,
 .field input:focus-visible {
-  outline: 3px solid rgba(34, 105, 175, 0.24);
+  outline: 3px solid #0b5fa5;
   outline-offset: 2px;
+}
+
+.settlementList:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid #0b5fa5;
+  outline-offset: -3px;
 }
 
 @media (max-width: 1080px) {

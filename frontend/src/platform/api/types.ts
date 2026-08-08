@@ -220,7 +220,7 @@ export type ManagementSchema = {
     };
     validRoles: readonly string[];
     adminRoles: readonly string[];
-    adminCreatedDefaultPassword: string;
+    adminCreatedDefaultPasswordConfigured: boolean;
   };
   workflow: {
     terminalStatus: string;
@@ -312,7 +312,6 @@ export type AccountRecord = {
   accountId: string;
   displayName: string;
   role: string;
-  password: string;
   valid: boolean;
   rowNumber: number | null;
   errors: string[];
@@ -342,7 +341,7 @@ export type AccountCreatePayload = {
   accountId: string;
   displayName: string;
   role: string;
-  password: string;
+  password?: string;
 };
 
 export type AccountUpdatePayload = {

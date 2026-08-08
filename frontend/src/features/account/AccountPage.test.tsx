@@ -9,6 +9,14 @@ const mockGetWorkloadMe = vi.fn();
 const mockChangePassword = vi.fn();
 const mockRefreshCurrentAccount = vi.fn();
 const mockOpenWorkload = vi.fn();
+let mockCurrentAccount: {
+  accountId: string;
+  displayName: string;
+  role: string;
+  officeCode: string | null;
+  officeName: string | null;
+  pendingTodoCount: number;
+} | null;
 
 vi.mock("../../platform/api/useApiAdapter", () => ({
   useApiAdapter: () => ({
@@ -19,28 +27,25 @@ vi.mock("../../platform/api/useApiAdapter", () => ({
 
 vi.mock("../../shared/session/SessionContext", () => ({
   useSession: () => ({
-    currentAccount: {
-      accountId: "wangdd",
-      displayName: "王丹丹",
-      role: "管理员",
-      officeCode: "25C0",
-      officeName: "建筑结构所",
-      pendingTodoCount: 2,
-    },
+    currentAccount: mockCurrentAccount,
     refreshCurrentAccount: mockRefreshCurrentAccount,
   }),
 }));
 
-function renderAccountPage() {
-  const queryClient = new QueryClient({
+function renderAccountPage(
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  });
+  }),
+) {
 
-  return render(
+  return {
+    ...render(
     <QueryClientProvider client={queryClient}>
       <AccountPage onOpenWorkload={mockOpenWorkload} />
     </QueryClientProvider>,
-  );
+    ),
+    queryClient,
+  };
 }
 
 function makeWorkloadResponse() {
@@ -72,6 +77,15 @@ beforeEach(() => {
   mockRefreshCurrentAccount.mockReset();
   mockOpenWorkload.mockReset();
 
+  mockCurrentAccount = {
+    accountId: "wangdd",
+    displayName: "王丹丹",
+    role: "管理员",
+    officeCode: "25C0",
+    officeName: "建筑结构所",
+    pendingTodoCount: 2,
+  };
+
   mockGetWorkloadMe.mockResolvedValue(makeWorkloadResponse());
   mockChangePassword.mockResolvedValue({
     accountId: "wangdd",
@@ -86,8 +100,9 @@ beforeEach(() => {
 
 describe("AccountPage", () => {
   it("organizes identity, security, and recent settlements into three semantic regions", async () => {
-    renderAccountPage();
+    const { container } = renderAccountPage();
 
+    expect(container.firstElementChild?.tagName).toBe("SECTION");
     const identity = screen.getByRole("region", { name: "身份摘要" });
     expect(within(identity).getByText("王丹丹")).toBeInTheDocument();
     expect(within(identity).getByText("wangdd")).toBeInTheDocument();
@@ -99,6 +114,53 @@ describe("AccountPage", () => {
     expect(within(settlements).getByText("已结算")).toBeInTheDocument();
     expect(within(settlements).queryByText("initiator")).not.toBeInTheDocument();
     expect(within(settlements).queryByText("settled")).not.toBeInTheDocument();
+    const settlementList = within(settlements).getByRole("list", { name: "最近结算记录" });
+    expect(settlementList).toHaveAttribute("tabindex", "0");
+    settlementList.focus();
+    expect(settlementList).toHaveFocus();
+  });
+
+  it("isolates workload cache by the signed-in account on a shared QueryClient", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rendered = renderAccountPage(queryClient);
+    expect(await screen.findByText("2016-JG001")).toBeInTheDocument();
+
+    mockCurrentAccount = {
+      accountId: "user-b",
+      displayName: "用户乙",
+      role: "设计人员",
+      officeCode: "25C1",
+      officeName: "结构一室",
+      pendingTodoCount: 0,
+    };
+    mockGetWorkloadMe.mockResolvedValueOnce({
+      ...makeWorkloadResponse(),
+      entries: [
+        {
+          ...makeWorkloadResponse().entries[0],
+          accountId: "user-b",
+          displayName: "用户乙",
+          groupDisplayName: "乙账号结算",
+          albumInternalCode: "B-001",
+        },
+      ],
+    });
+    rendered.rerender(
+      <QueryClientProvider client={queryClient}>
+        <AccountPage onOpenWorkload={mockOpenWorkload} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("乙账号结算")).toBeInTheDocument();
+    expect(screen.queryByText("2016-JG001")).not.toBeInTheDocument();
+    expect(mockGetWorkloadMe).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not request account workload when there is no signed-in account", () => {
+    mockCurrentAccount = null;
+    renderAccountPage();
+
+    expect(mockGetWorkloadMe).not.toHaveBeenCalled();
   });
 
   it("opens the workload module from the pending-work button", async () => {
@@ -143,6 +205,19 @@ describe("AccountPage", () => {
       expect(mockChangePassword).toHaveBeenCalledWith("new-password");
     });
     expect(mockRefreshCurrentAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits the exact confirmed password without trimming it", async () => {
+    const user = userEvent.setup();
+    renderAccountPage();
+
+    await user.type(screen.getByLabelText("新密码"), "  exact password  ");
+    await user.type(screen.getByLabelText("确认新密码"), "  exact password  ");
+    await user.click(screen.getByRole("button", { name: "更新密码" }));
+
+    await waitFor(() => {
+      expect(mockChangePassword).toHaveBeenCalledWith("  exact password  ");
+    });
   });
 
   it("announces workload loading and error states", async () => {

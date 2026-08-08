@@ -37,7 +37,7 @@
 
 .pageHeader > div > p:last-child {
   margin-top: 0.18rem;
-  color: #637b92;
+  color: #4c657d;
 }
 
 .eyebrow {
@@ -77,7 +77,7 @@
 }
 
 .headerMetrics dt {
-  color: #667e95;
+  color: #4c657d;
 }
 
 .headerMetrics dd {
@@ -88,7 +88,7 @@
 }
 
 .headerMetrics div[data-tone="warning"] dd {
-  color: #ad5e24;
+  color: #954b12;
 }
 
 .archiveStrip {
@@ -111,7 +111,7 @@
 
 .stripTitle span,
 .panelIndex {
-  color: #718aa2;
+  color: #4c657d;
   font-family: "JetBrains Mono", Consolas, monospace;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -311,7 +311,7 @@
 
 .directoryIdentity small,
 .directoryDetails small {
-  color: #697f95;
+  color: #4c657d;
   font-size: 0.8125rem;
 }
 
@@ -347,7 +347,7 @@
 }
 
 .formGuidance {
-  color: #687f96;
+  color: #4c657d;
   line-height: 1.4;
 }
 
@@ -387,7 +387,7 @@
 .emptyState {
   margin: 0;
   padding: 1rem;
-  color: #698097;
+  color: #4c657d;
 }
 
 .archiveForm button:disabled,
@@ -395,7 +395,7 @@
 .secondaryButton:disabled {
   border-color: #c6d2df;
   background: #dbe3eb;
-  color: #73879a;
+  color: #4c657d;
   cursor: not-allowed;
 }
 
@@ -406,10 +406,14 @@
 .archiveForm button:focus-visible,
 .primaryButton:focus-visible,
 .secondaryButton:focus-visible,
-.filters button:focus-visible,
+.filters button:focus-visible {
+  outline: 3px solid #0b5fa5;
+  outline-offset: 2px;
+}
+
 .directoryItem:focus-visible {
-  outline: 3px solid rgba(34, 105, 175, 0.24);
-  outline-offset: -1px;
+  outline: 3px solid #0b5fa5;
+  outline-offset: -3px;
 }
 
 @media (max-width: 1080px) {

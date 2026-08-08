@@ -489,6 +489,50 @@ function makeGroupJobDetail(jobId: string) {
 }
 
 describe("homepage shell", () => {
+  it("keeps exactly one main landmark while the real session bootstrap is loading", () => {
+    mockGetMe.mockImplementation(() => new Promise(() => {}));
+
+    render(<App />);
+
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByRole("main", { name: "正在进入平台加载状态" })).toBeInTheDocument();
+    expect(screen.getByText("加载中")).toBeInTheDocument();
+  });
+
+  it("never renders the configured default password on the login page", async () => {
+    window.localStorage.clear();
+    window.history.replaceState({}, "", "/login");
+    mockGetFormSchema.mockResolvedValue({
+      schemaVersion: "frontend-form@1",
+      uploadLimits: { maxFiles: 50, allowedExts: [".dwg"], maxTotalMb: 2048 },
+      sections: [],
+      management: {
+        account: {
+          fieldMap: {
+            officeCode: "科室编码",
+            officeName: "科室",
+            accountId: "账号",
+            displayName: "姓名",
+            role: "角色",
+            password: "密码",
+          },
+          validRoles: ["设计人员", "管理员"],
+          adminRoles: ["管理员"],
+          adminCreatedDefaultPasswordConfigured: true,
+          adminCreatedDefaultPassword: "must-never-render",
+        },
+      },
+    });
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "登录平台" })).toBeInTheDocument();
+    expect(
+      await screen.findByText("初始密码由管理员提供，系统已配置账号密码策略。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/must-never-render/)).not.toBeInTheDocument();
+  });
+
   it("shows a clear loading state before form schema is ready", async () => {
     mockGetFormSchema.mockImplementation(() => new Promise(() => {}));
 
@@ -1166,7 +1210,7 @@ describe("homepage shell", () => {
 
   it("switches visible module panels from the toolbar", async () => {
     const user = userEvent.setup();
-    render(<App />);
+    const { container } = render(<App />);
 
     const toolbar = await screen.findByTestId("module-toolbar");
     const accountButton = within(toolbar).getByRole("button", { name: "账号模块" });
@@ -1175,6 +1219,8 @@ describe("homepage shell", () => {
     await user.click(accountButton);
     expect(screen.getByTestId("module-account-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("module-business-panel")).not.toBeInTheDocument();
+    expect(container.querySelectorAll("main")).toHaveLength(1);
+    expect(screen.queryByText(/^Loading$/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-page")).toHaveAttribute(
       "data-layout-mode",
       "bounded-account",

@@ -47,8 +47,9 @@ export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) 
   } | null>(null);
 
   const workloadQuery = useQuery({
-    queryKey: ["workload", "me", "account-summary"],
+    queryKey: ["workload", "me", "account-summary", currentAccount?.accountId ?? null],
     queryFn: () => adapter.getWorkloadMe(),
+    enabled: Boolean(currentAccount?.accountId),
   });
 
   const recentEntries = useMemo(() => {
@@ -79,7 +80,7 @@ export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) 
     setSubmitting(true);
     setFeedback(null);
     try {
-      await adapter.changePassword(newPassword.trim());
+      await adapter.changePassword(newPassword);
       await refreshCurrentAccount();
       setNewPassword("");
       setConfirmPassword("");
@@ -92,10 +93,10 @@ export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) 
   }
 
   return (
-    <main className={styles.page}>
+    <section aria-label="个人账号工作区" className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>Personal Account</p>
+          <p className={styles.eyebrow}>个人工作台</p>
           <h1>我的账号</h1>
           <p className={styles.description}>查看身份、安全设置和最近已结算工作量。</p>
         </div>
@@ -233,7 +234,12 @@ export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) 
               最近结算加载失败，请稍后刷新重试。
             </p>
           ) : recentEntries.length > 0 ? (
-            <div aria-label="最近结算记录" className={styles.settlementList} role="list">
+            <div
+              aria-label="最近结算记录"
+              className={styles.settlementList}
+              role="list"
+              tabIndex={0}
+            >
               {recentEntries.map((entry) => (
                 <article
                   className={styles.settlementRow}
@@ -257,6 +263,6 @@ export function AccountPage({ onOpenWorkload }: { onOpenWorkload: () => void }) 
           )}
         </section>
       </div>
-    </main>
+    </section>
   );
 }

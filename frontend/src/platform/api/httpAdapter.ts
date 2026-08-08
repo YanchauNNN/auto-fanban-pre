@@ -487,7 +487,6 @@ type RawAccountRecord = {
   account_id: string;
   display_name: string;
   role: string;
-  password?: string | null;
   valid?: boolean | null;
   row_number?: number | null;
   errors?: string[] | null;
@@ -498,6 +497,30 @@ type RawInvalidAccountRow = {
   raw?: Record<string, string> | null;
   errors?: string[] | null;
 };
+
+const SENSITIVE_ACCOUNT_RAW_KEY_MARKERS = [
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "token",
+  "apikey",
+  "accesskey",
+  "密码",
+  "密碼",
+  "口令",
+] as const;
+
+function sanitizeInvalidAccountRaw(
+  payload: Record<string, string> | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(payload ?? {}).filter(([key]) => {
+      const normalizedKey = key.toLocaleLowerCase("en-US").replace(/[^\p{L}\p{N}]/gu, "");
+      return !SENSITIVE_ACCOUNT_RAW_KEY_MARKERS.some((marker) => normalizedKey.includes(marker));
+    }),
+  );
+}
 
 type RawAdminConfig = {
   archive_root_path?: string | null;
@@ -2369,7 +2392,6 @@ export class HttpAdapter implements ApiAdapter {
       accountId: payload?.account_id ?? "",
       displayName: payload?.display_name ?? "",
       role: payload?.role ?? "",
-      password: payload?.password ?? "",
       valid: payload?.valid ?? true,
       rowNumber: payload?.row_number ?? null,
       errors: payload?.errors ?? [],
@@ -2379,7 +2401,11 @@ export class HttpAdapter implements ApiAdapter {
   private normalizeInvalidAccountRow(
     payload: RawInvalidAccountRow | null | undefined,
   ): InvalidAccountRow {
-    return { rowNumber: payload?.row_number ?? 0, raw: payload?.raw ?? {}, errors: payload?.errors ?? [] };
+    return {
+      rowNumber: payload?.row_number ?? 0,
+      raw: sanitizeInvalidAccountRaw(payload?.raw),
+      errors: payload?.errors ?? [],
+    };
   }
 
   private normalizeAdminConfig(payload: RawAdminConfig | null | undefined): AdminConfig {
@@ -2464,7 +2490,7 @@ export class HttpAdapter implements ApiAdapter {
       account_id: payload.accountId,
       display_name: payload.displayName,
       role: payload.role,
-      password: payload.password,
+      ...(payload.password ? { password: payload.password } : {}),
     };
   }
 
