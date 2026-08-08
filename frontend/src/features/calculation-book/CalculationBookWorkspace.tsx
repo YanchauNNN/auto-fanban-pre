@@ -816,7 +816,7 @@ export function CalculationBookWorkspace({
               <aside className={styles.archivePanel}>
                 <label className={styles.uploadBox}>
                   <span>{archive ? archive.name : "上传压缩包"}</span>
-                  <small>{archive ? formatFileSize(archive.size) : "单个 .zip 或 .rar 文件"}</small>
+                  <small>{archive ? formatFileSize(archive.size) : "单个 .zip、.rar 或 .7z 文件"}</small>
                   <input
                     accept={calculationSchema.archive.accept.join(",")}
                     aria-label="选择计算图片压缩包"
@@ -942,7 +942,7 @@ export function CalculationBookWorkspace({
                         : calculationSchema.archive.description}
                     </p>
                     <div className={styles.tree} aria-label="压缩包必需结构">
-                      <div className={styles.treeRoot}>计算图片.zip（或 .rar）</div>
+                      <div className={styles.treeRoot}>计算图片.zip / .rar / .7z</div>
                       <div><span>├─</span> 墙体01-X.png</div>
                       <div><span>├─</span> 墙体01-Y.png</div>
                       <div><span>├─</span> 墙体01-Z.png</div>
@@ -951,7 +951,7 @@ export function CalculationBookWorkspace({
                       <div><span>└─</span> 02 / 墙体有限元模型图</div>
                     </div>
                     <div className={styles.validationList} aria-live="polite">
-                      <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR</span>
+                      <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR / 7Z</span>
                       <span>根目录 X / Y / Z 图片</span>
                       <span>{aiSuggested ? "不包含 Excel 配筋表" : "根目录墙体配筋表"}</span>
                       <span>01 与 02 子目录</span>

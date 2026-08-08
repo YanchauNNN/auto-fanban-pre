@@ -322,6 +322,21 @@ def test_calculation_book_business_schema_exposes_internal_code_placeholder() ->
     assert field["placeholder"] == "例如：20161NH-JGS01"
 
 
+def test_calculation_book_business_schema_exposes_all_supported_archive_formats() -> None:
+    business_spec = yaml.safe_load(
+        (REPO_ROOT / "documents" / "参数规范.yaml").read_text(encoding="utf-8")
+    )
+
+    archive = business_spec["calculation_book"]["archive"]
+    submission = business_spec["submission_contracts"]["calculation_book"]
+
+    assert archive["accept"] == [".zip", ".rar", ".7z"]
+    assert archive["description"].startswith("ZIP/RAR/7Z 压缩包")
+    assert submission["preflight_desc"].startswith(
+        "上传并暂存 ZIP/RAR/7Z 压缩包"
+    )
+
+
 def test_calculation_book_runtime_paths_resolve_in_terminal_package_layout(
     tmp_path: Path,
 ) -> None:
