@@ -107,7 +107,7 @@ function makeFormSchema() {
       account: {
         validRoles: ["设计人员", "管理员"],
         adminRoles: ["管理员"],
-        adminCreatedDefaultPassword: "yaml-pass",
+        adminCreatedDefaultPasswordConfigured: true,
       },
       workflow: {
         terminalStatus: "three_review_approved",
@@ -194,8 +194,8 @@ beforeEach(() => {
     scope: "admin",
     filters: { startDate: null, endDate: null, status: null, validOnly: false },
     officeName: null,
-    totalWorkloadA1: 2.84,
-    totalsByAccount: { zengtj: 1.42, hbjjswd: 1.42 },
+    totalWorkloadA1: 5.68,
+    totalsByAccount: { zengtj: 1.42, lisi: 1.42, wangwu: 1.42, hbjjswd: 1.42 },
     entries: [
       {
         groupId: "group-1",
@@ -206,6 +206,39 @@ beforeEach(() => {
         displayName: "曾添君",
         workloadA1: 1.42,
         settledAt: "2026-05-29T14:27:15+08:00",
+        settlementStatus: "settled",
+      },
+      {
+        groupId: "group-1",
+        groupDisplayName: "2016-JG001",
+        albumInternalCode: "2016-JG001",
+        roleKey: "one_review",
+        accountId: "lisi",
+        displayName: "李四",
+        workloadA1: 1.42,
+        settledAt: "2026-05-29T14:28:15+08:00",
+        settlementStatus: "settled",
+      },
+      {
+        groupId: "group-1",
+        groupDisplayName: "2016-JG001",
+        albumInternalCode: "2016-JG001",
+        roleKey: "two_review",
+        accountId: "wangwu",
+        displayName: "王五",
+        workloadA1: 1.42,
+        settledAt: "2026-05-29T14:29:15+08:00",
+        settlementStatus: "settled",
+      },
+      {
+        groupId: "group-1",
+        groupDisplayName: "2016-JG001",
+        albumInternalCode: "2016-JG001",
+        roleKey: "three_review",
+        accountId: "hbjjswd",
+        displayName: "管理员",
+        workloadA1: 1.42,
+        settledAt: "2026-05-29T14:30:15+08:00",
         settlementStatus: "settled",
       },
     ],
@@ -246,9 +279,10 @@ describe("WorkloadPage", () => {
     renderWorkloadPage();
 
     expect(await screen.findByRole("heading", { name: "工作量模块" })).toBeInTheDocument();
-    expect(await screen.findAllByText("2016-JG001")).toHaveLength(2);
+    expect((await screen.findAllByText("2016-JG001")).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("group-1")).not.toBeInTheDocument();
-    expect(screen.getByText("2.84")).toBeInTheDocument();
+    expect(screen.getByText("5.68 A1")).toBeInTheDocument();
+    expect(screen.getByText("5.68")).toBeInTheDocument();
     expect(screen.getAllByText("曾添君").length).toBeGreaterThanOrEqual(1);
 
     expect(mockGetWorkflowMonitor).toHaveBeenCalledTimes(1);
@@ -353,6 +387,47 @@ describe("WorkloadPage", () => {
       expect.stringContaining("相关流程"),
       expect.stringContaining("普通流程"),
     ]);
+  });
+
+  it("treats either workflow or archive failure as the same archive exception", async () => {
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 2,
+      items: [
+        makeMonitorItem({
+          archiveStatus: "pending",
+          canApprove: false,
+          currentNodeKey: null,
+          displayName: "流程状态异常",
+          groupId: "workflow-failed",
+          isRelatedToCurrentUser: false,
+          workflowStatus: "archive_failed",
+        }),
+        makeMonitorItem({
+          archiveStatus: "failed",
+          canApprove: false,
+          currentNodeKey: null,
+          displayName: "归档状态异常",
+          groupId: "archive-failed",
+          isRelatedToCurrentUser: false,
+          workflowStatus: "three_review_approved",
+        }),
+      ],
+    });
+
+    renderWorkloadPage();
+
+    const monitor = await screen.findByRole("region", { name: "流程监控列表" });
+    const failedItems = within(monitor).getAllByTestId("workflow-item");
+    expect(failedItems).toHaveLength(2);
+    failedItems.forEach((item) => {
+      expect(item.className).toContain("monitorCardFailed");
+      expect(within(item).getByText("归档失败，请优先检查异常。")).toBeInTheDocument();
+      expect(within(item).getByText("归档异常")).toBeInTheDocument();
+    });
+    const overview = screen.getByRole("region", { name: "工作量概览" });
+    const failedMetric = within(overview).getByText("归档异常").closest("article");
+    expect(failedMetric).not.toBeNull();
+    expect(within(failedMetric as HTMLElement).getByText("2")).toBeInTheDocument();
   });
 
   it("renders custom workflow nodes in schema order and marks the current step", async () => {
@@ -537,7 +612,7 @@ describe("WorkloadPage", () => {
 
     const ledger = await screen.findByRole("region", { name: "工作量记录" });
     expect(within(ledger).getByText("发起人")).toBeInTheDocument();
-    expect(within(ledger).getByText("已结算")).toBeInTheDocument();
+    expect(within(ledger).getAllByText("已结算")).toHaveLength(4);
     expect(within(ledger).queryByText("initiator")).not.toBeInTheDocument();
     expect(within(ledger).queryByText("settled")).not.toBeInTheDocument();
     expect(ledger).toHaveAttribute("tabindex", "0");
@@ -545,6 +620,62 @@ describe("WorkloadPage", () => {
       "tabindex",
       "0",
     );
+  });
+
+  it("uses a nested section landmark and natural Chinese utility headings", async () => {
+    const user = userEvent.setup();
+    renderWorkloadPage();
+
+    expect(await screen.findByRole("region", { name: "工作量模块" })).toBeInTheDocument();
+    expect(screen.queryByRole("main")).not.toBeInTheDocument();
+    expect(screen.getByText("流程与工作量")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow & Workload")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "修复当前节点" }));
+    expect(screen.getByText("节点修复")).toBeInTheDocument();
+    expect(screen.queryByText("Repair")).not.toBeInTheDocument();
+  });
+
+  it("uses the configured backend password policy without exposing or submitting its secret", async () => {
+    const user = userEvent.setup();
+    renderWorkloadPage();
+
+    await user.click(await screen.findByRole("button", { name: "修复当前节点" }));
+    await user.click(screen.getByRole("button", { name: "新增账号并修复" }));
+    expect(screen.getByText(/已配置默认策略/)).toBeInTheDocument();
+    expect(screen.queryByText(/yaml-pass/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("新账号"), "repair-user");
+    await user.type(screen.getByLabelText("姓名"), "修复用户");
+    await user.click(screen.getByRole("button", { name: "确认修复" }));
+
+    await waitFor(() => expect(mockRepairCurrentNode).toHaveBeenCalledTimes(1));
+    const repairPayload = mockRepairCurrentNode.mock.calls[0]?.[1];
+    expect(repairPayload?.createAccountPayload).not.toHaveProperty("password");
+  });
+
+  it("warns when the backend default account policy is not configured", async () => {
+    const user = userEvent.setup();
+    const schema = makeFormSchema();
+    mockGetFormSchema.mockResolvedValue({
+      management: {
+        ...schema.management,
+        account: {
+          ...schema.management.account,
+          adminCreatedDefaultPasswordConfigured: false,
+        },
+      },
+    });
+    renderWorkloadPage();
+
+    await user.click(await screen.findByRole("button", { name: "修复当前节点" }));
+    await user.click(screen.getByRole("button", { name: "新增账号并修复" }));
+
+    expect(screen.getByText(/尚未配置默认策略/)).toBeInTheDocument();
+    expect(screen.queryByText(/已配置默认策略/)).not.toBeInTheDocument();
+    const confirmButton = screen.getByRole("button", { name: "确认修复" });
+    expect(confirmButton).toBeDisabled();
+    await user.click(confirmButton);
+    expect(mockRepairCurrentNode).not.toHaveBeenCalled();
   });
 
   it("exposes loading and error feedback with status semantics", async () => {

@@ -105,8 +105,12 @@ function getAvailableScopes(
   return scopes;
 }
 
+function hasArchiveFailure(item: Pick<TaskGroupSummary, "archiveStatus" | "workflowStatus">) {
+  return item.archiveStatus === "failed" || item.workflowStatus === "archive_failed";
+}
+
 function getMonitorTone(item: TaskGroupSummary) {
-  if (item.archiveStatus === "failed") {
+  if (hasArchiveFailure(item)) {
     return "failed";
   }
   if (item.canApprove) {
@@ -122,7 +126,7 @@ function getMonitorPriority(item: TaskGroupSummary) {
   if (item.canApprove) {
     return 0;
   }
-  if (item.archiveStatus === "failed" || item.workflowStatus === "archive_failed") {
+  if (hasArchiveFailure(item)) {
     return 1;
   }
   if (item.isRelatedToCurrentUser) {
@@ -132,7 +136,7 @@ function getMonitorPriority(item: TaskGroupSummary) {
 }
 
 function getMonitorHint(item: TaskGroupSummary) {
-  if (item.archiveStatus === "failed") {
+  if (hasArchiveFailure(item)) {
     return "归档失败，请优先检查异常。";
   }
   if (item.canApprove) {
@@ -294,9 +298,7 @@ export function WorkloadPage() {
     return {
       approvable: items.filter((item) => item.canApprove).length,
       active: items.filter((item) => ACTIVE_WORKFLOW_STATUSES.has(item.workflowStatus)).length,
-      failed: items.filter(
-        (item) => item.archiveStatus === "failed" || item.workflowStatus === "archive_failed",
-      ).length,
+      failed: items.filter(hasArchiveFailure).length,
       totalWorkload: historyQuery.data?.totalWorkloadA1 ?? 0,
     };
   }, [historyQuery.data, monitorQuery.data?.items]);
@@ -312,21 +314,22 @@ export function WorkloadPage() {
   }
   if (schemaQuery.isLoading && !schemaQuery.data) {
     return (
-      <main className={styles.page}>
+      <section aria-label="工作量模块加载状态" className={styles.page}>
         <p className={styles.muted}>正在加载管理参数...</p>
-      </main>
+      </section>
     );
   }
   if (!managementSchema) {
     return (
-      <main className={styles.page}>
+      <section aria-label="工作量模块错误状态" className={styles.page}>
         <p className={styles.feedbackError}>管理参数未加载，无法进入工作量模块。</p>
-      </main>
+      </section>
     );
   }
   const account = currentAccount;
   const workflowFactor = managementSchema.workflow.factor;
-  const defaultAccountPassword = managementSchema.account.adminCreatedDefaultPassword;
+  const defaultAccountPolicyConfigured =
+    managementSchema.account.adminCreatedDefaultPasswordConfigured;
   const approvalPreview = approvalTarget
     ? buildApprovalPreview(approvalTarget, approvalFactor)
     : null;
@@ -440,13 +443,17 @@ export function WorkloadPage() {
           replaceWithAccountId: repairReplaceAccountId,
         });
       } else {
+        if (!defaultAccountPolicyConfigured) {
+          setRepairError("后台尚未配置默认策略，请联系管理员完成配置后再操作。");
+          setRepairSubmitting(false);
+          return;
+        }
         const payload: AccountCreatePayload = {
           officeCode: repairForm.officeCode.trim() || null,
           officeName: repairForm.officeName.trim() || null,
           accountId: repairForm.accountId.trim(),
           displayName: repairForm.displayName.trim(),
           role: repairForm.role,
-          password: defaultAccountPassword,
         };
         if (!payload.accountId || !payload.displayName) {
           setRepairError("请先完整填写新账号和姓名。");
@@ -474,10 +481,10 @@ export function WorkloadPage() {
   }
 
   return (
-    <main className={styles.page}>
+    <section aria-label="工作量模块" className={styles.page}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Workflow & Workload</p>
+          <p className={styles.eyebrow}>流程与工作量</p>
           <h1>工作量模块</h1>
         </div>
         <p className={styles.description}>优先处理待办与归档异常，并按权限范围核对已结算工作量。</p>
@@ -542,7 +549,12 @@ export function WorkloadPage() {
                         <p className={styles.monitorHint}>{getMonitorHint(item)}</p>
                       </div>
                       <span className={styles.monitorBadge}>
-                        {getWorkflowStatusLabel(item.workflowStatus, taskGroupPresentationLabels)}
+                        {hasArchiveFailure(item)
+                          ? "归档异常"
+                          : getWorkflowStatusLabel(
+                              item.workflowStatus,
+                              taskGroupPresentationLabels,
+                            )}
                       </span>
                     </div>
                     <dl className={styles.monitorMeta}>
@@ -797,7 +809,7 @@ export function WorkloadPage() {
         >
             <div className={styles.modalHeader}>
               <div>
-                <p className={styles.eyebrow}>Repair</p>
+                <p className={styles.eyebrow}>节点修复</p>
                 <h3>修复当前节点</h3>
               </div>
               <button className={styles.closeButton} onClick={closeRepairDialog} type="button">
@@ -925,8 +937,13 @@ export function WorkloadPage() {
                       </option>
                     ))}
                   </select>
-                  <p className={styles.helpText}>
-                    {`新建修复账号时，默认密码来自参数规范：${defaultAccountPassword || "未配置"}。`}
+                  <p
+                    className={styles.helpText}
+                    role={defaultAccountPolicyConfigured ? undefined : "alert"}
+                  >
+                    {defaultAccountPolicyConfigured
+                      ? "新建修复账号时，将采用后台已配置默认策略。"
+                      : "后台尚未配置默认策略，请联系管理员完成配置后再操作。"}
                   </p>
                 </>
               )}
@@ -940,14 +957,21 @@ export function WorkloadPage() {
                 <button className={styles.secondaryButton} onClick={closeRepairDialog} type="button">
                   取消
                 </button>
-                <button className={styles.primaryButton} disabled={repairSubmitting} type="submit">
+                <button
+                  className={styles.primaryButton}
+                  disabled={
+                    repairSubmitting ||
+                    (repairMode === "create" && !defaultAccountPolicyConfigured)
+                  }
+                  type="submit"
+                >
                   {repairSubmitting ? "提交中..." : "确认修复"}
                 </button>
               </div>
             </form>
         </AccessibleModal>
       ) : null}
-    </main>
+    </section>
   );
 }
 
@@ -1062,14 +1086,15 @@ function WorkflowRail({
   const currentIndex = currentNodeKey
     ? nodes.findIndex((node) => node.nodeKey === currentNodeKey)
     : -1;
+  const archiveHasFailed = hasArchiveFailure({ archiveStatus, workflowStatus });
   const approvalIsComplete =
+    archiveHasFailed ||
     workflowStatus === terminalStatus ||
     workflowStatus === "archiving" ||
-    workflowStatus === "archive_failed" ||
     workflowStatus === "archived" ||
-    ["running", "failed", "succeeded"].includes(archiveStatus);
+    ["running", "succeeded"].includes(archiveStatus);
   const archiveState =
-    archiveStatus === "failed" || workflowStatus === "archive_failed"
+    archiveHasFailed
       ? "failed"
       : archiveStatus === "succeeded" || workflowStatus === "archived"
         ? "done"

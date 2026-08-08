@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 
 from ..models import AccountSnapshot, TaskGroup
 from ..task_groups.display_name import build_task_group_display_fields
@@ -122,7 +123,7 @@ class WorkloadQueries:
         filters: WorkloadQueryFilters | None = None,
     ) -> dict[str, object]:
         active_filters = filters or WorkloadQueryFilters()
-        totals: dict[str, float] = {}
+        raw_totals: dict[str, Decimal] = {}
         entries: list[dict[str, object]] = []
         for group in groups:
             if not self._group_matches(group, active_filters):
@@ -132,16 +133,21 @@ class WorkloadQueries:
                 if not self._entry_matches(entry.settled_at, active_filters):
                     continue
                 key = entry.account_id or 'unknown'
-                totals[key] = round(totals.get(key, 0.0) + float(entry.workload_a1), 2)
+                raw_totals[key] = raw_totals.get(key, Decimal('0')) + Decimal(
+                    str(entry.workload_a1)
+                )
                 payload = entry.model_dump(mode='json')
                 payload['group_id'] = group.group_id
                 payload['group_display_name'] = group_display_fields['display_name']
                 payload['album_internal_code'] = group_display_fields['album_internal_code']
                 payload['settlement_status'] = group.workload.settlement_status.value
                 entries.append(payload)
+        totals = {key: round(float(value), 2) for key, value in raw_totals.items()}
+        total_workload_a1 = round(sum(totals.values()), 2)
         return {
             'scope': 'admin',
             'filters': active_filters.as_dict(),
+            'total_workload_a1': total_workload_a1,
             'entries': entries,
             'totals_by_account': totals,
         }
@@ -168,6 +174,4 @@ class WorkloadQueries:
         settled_date = settled_at.date()
         if filters.start_date and settled_date < filters.start_date:
             return False
-        if filters.end_date and settled_date > filters.end_date:
-            return False
-        return True
+        return not (filters.end_date and settled_date > filters.end_date)
