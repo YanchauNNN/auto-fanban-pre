@@ -20,7 +20,11 @@ from .ai_reinforcement_schema import (
     ReinforcementNormalizationWarning,
     ValidatedAiReinforcement,
 )
-from .archive import ArchiveLimits, validate_and_extract_archive
+from .archive import (
+    ArchiveExtractorSettings,
+    ArchiveLimits,
+    validate_and_extract_archive,
+)
 from .matching import (
     RecognizedFigure,
     ReinforcementAssignment,
@@ -692,9 +696,11 @@ class CalculationBookProcessor:
         assets: CalculationBookAssets,
         mechanism: CalculationBookMechanism | None = None,
         ocr_recognizer: OcrRecognizer | None = None,
+        archive_extractor: ArchiveExtractorSettings | None = None,
     ) -> None:
         self.assets = assets
         self.mechanism = mechanism or CalculationBookMechanism()
+        self.archive_extractor = archive_extractor
         self.ocr_recognizer = ocr_recognizer or (
             lambda path, direction: recognize_stress_legend(
                 path,
@@ -716,12 +722,18 @@ class CalculationBookProcessor:
         report = progress or (lambda _stage, _percent, _message, _details: None)
         extraction_root = output_dir / "extracted"
 
-        report(CalculationBookStage.VALIDATE_ARCHIVE, 10, "正在校验计算图片 ZIP", {})
+        report(
+            CalculationBookStage.VALIDATE_ARCHIVE,
+            10,
+            "正在校验计算图片压缩包",
+            {},
+        )
         contents = validate_and_extract_archive(
             archive_path,
             extraction_root,
             reinforcement_source=params.reinforcement_source,
             limits=self.mechanism.archive_limits,
+            archive_extractor=self.archive_extractor,
         )
         _audit(
             audit,

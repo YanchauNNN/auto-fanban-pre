@@ -35,6 +35,49 @@ from src.calculation_book.reinforcement_input import (
 ASSET_ROOT = Path(__file__).resolve().parents[4] / "documents_bin" / "calculation_book"
 
 
+def test_processor_forwards_private_archive_extractor_and_uses_neutral_copy(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.processor as processor_module
+
+    extractor = SimpleNamespace(
+        executable=tmp_path / "7z.exe",
+        list_timeout_seconds=120,
+        extract_timeout_seconds=300,
+        max_list_output_bytes=1024,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_extract(*_args, **kwargs):
+        observed.update(kwargs)
+        raise RuntimeError("stop after forwarding")
+
+    monkeypatch.setattr(
+        processor_module,
+        "validate_and_extract_archive",
+        fake_extract,
+    )
+    progress_messages: list[str] = []
+    processor = CalculationBookProcessor(
+        assets=CalculationBookAssets(template_root=ASSET_ROOT),
+        archive_extractor=extractor,
+    )
+
+    with pytest.raises(RuntimeError, match="stop after forwarding"):
+        processor.process(
+            archive_path=tmp_path / "input.7z",
+            output_dir=tmp_path / "output",
+            params=_params(),
+            progress=lambda _stage, _percent, message, _details: (
+                progress_messages.append(message)
+            ),
+        )
+
+    assert observed["archive_extractor"] is extractor
+    assert progress_messages == ["正在校验计算图片压缩包"]
+
+
 def _write_png(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (1200, 800), "white").save(path)

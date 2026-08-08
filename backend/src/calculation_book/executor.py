@@ -258,7 +258,7 @@ class CalculationBookJobExecutor:
     def execute(self, job: Job) -> None:
         config = get_config()
         if not job.input_files:
-            raise FileNotFoundError("计算书任务缺少上传的 ZIP/RAR")
+            raise FileNotFoundError("计算书任务缺少上传的压缩包")
         started_at = time.perf_counter()
         archive_path = Path(job.input_files[0])
         work_dir = job.work_dir or config.get_job_dir(job.job_id)
@@ -924,6 +924,7 @@ class CalculationBookJobExecutor:
             assets=CalculationBookAssets(
                 template_root=runtime.template_dir,
             ),
+            archive_extractor=runtime.archive_extractor,
             mechanism=CalculationBookMechanism(
                 archive_limits=ArchiveLimits(
                     max_files=runtime.max_archive_files,

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .archive import (
+    ArchiveExtractorSettings,
     ArchiveLimits,
     CalculationArchiveContents,
     InvalidCalculationArchive,
@@ -378,6 +379,7 @@ def run_calculation_book_preflight(
     include_slab_stress: bool = False,
     ocr_recognizer: OcrRecognizer | None = None,
     archive_limits: ArchiveLimits | None = None,
+    archive_extractor: ArchiveExtractorSettings | None = None,
 ) -> dict[str, Any]:
     active_reinforcement_source = ReinforcementSource(reinforcement_source)
     contents = validate_and_extract_archive(
@@ -385,6 +387,7 @@ def run_calculation_book_preflight(
         extraction_root,
         reinforcement_source=active_reinforcement_source,
         limits=archive_limits,
+        archive_extractor=archive_extractor,
     )
     if include_slab_stress and not contents.slab_figures:
         raise InvalidCalculationArchive(

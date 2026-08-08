@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import Workbook
@@ -11,6 +12,40 @@ from src.calculation_book.archive import InvalidCalculationArchive
 from src.calculation_book.models import ReinforcementSource
 from src.calculation_book.ocr import StressLegendReading
 from src.calculation_book.preflight import run_calculation_book_preflight
+
+
+def test_preflight_forwards_private_archive_extractor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import src.calculation_book.preflight as preflight_module
+
+    extractor = SimpleNamespace(
+        executable=tmp_path / "7z.exe",
+        list_timeout_seconds=120,
+        extract_timeout_seconds=300,
+        max_list_output_bytes=1024,
+    )
+    observed: dict[str, object] = {}
+
+    def fake_extract(*_args, **kwargs):
+        observed.update(kwargs)
+        raise InvalidCalculationArchive("stop after forwarding")
+
+    monkeypatch.setattr(
+        preflight_module,
+        "validate_and_extract_archive",
+        fake_extract,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="stop after forwarding"):
+        run_calculation_book_preflight(
+            archive_path=tmp_path / "input.rar",
+            extraction_root=tmp_path / "extracted",
+            archive_extractor=extractor,
+        )
+
+    assert observed["archive_extractor"] is extractor
 
 
 def _build_duplicate_archive(
