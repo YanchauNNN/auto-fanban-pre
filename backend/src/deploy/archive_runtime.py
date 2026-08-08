@@ -133,6 +133,11 @@ def render_archive_runtime_provenance(config: ArchiveRuntimeMechanismConfig) -> 
         f"bootstrap_sha256={config.bootstrap.sha256}",
         f"bootstrap_size_bytes={config.bootstrap.size_bytes}",
         f"license_url={config.license_url}",
+        f"probe_fixture_source={config.probe.fixture_source_relative_path}",
+        f"probe_fixture_source_sha256={config.probe.fixture_source_sha256}",
+        f"probe_fixture_decoded_sha256={config.probe.fixture_decoded_sha256}",
+        f"probe_payload_filename={config.probe.payload_filename}",
+        f"probe_payload_sha256={config.probe.payload_sha256}",
     ]
     lines.extend(
         f"required_file={item.filename} sha256={item.sha256}"

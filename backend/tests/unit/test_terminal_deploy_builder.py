@@ -57,6 +57,12 @@ ARCHIVE_RUNTIME_FILES = {
     "7z.dll": b"fake-portable-7z-dll",
     "License.txt": b"fake-7zip-license",
 }
+ARCHIVE_PROBE_PAYLOAD = b"fanban archive runtime smoke payload v1\n"
+ARCHIVE_PROBE_RAR_B64 = (
+    b"UmFyIRoHAQAzkrXlCgEFBgAFAQGAgAD3WFxjNQIDC6gABKgAIAuotTmAAAAZ"
+    b"YXJjaGl2ZS1ydW50aW1lLXNtb2tlLnR4dAoDAnaBI2gpJ90BZmFuYmFuIGFy"
+    b"Y2hpdmUgcnVudGltZSBzbW9rZSBwYXlsb2FkIHYxCh13VlEDBQQA\n"
+)
 
 
 def _pick_free_port() -> int:
@@ -95,6 +101,13 @@ def _relative_files(root: Path) -> set[str]:
 
 
 def _write_fake_archive_runtime(repo_root: Path) -> None:
+    fixture_dir = repo_root / "backend" / "src" / "deploy" / "fixtures"
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    (fixture_dir / "archive-runtime-smoke-rar5.rar.b64").write_bytes(
+        ARCHIVE_PROBE_RAR_B64
+    )
+    (fixture_dir / "archive-runtime-smoke.txt").write_bytes(ARCHIVE_PROBE_PAYLOAD)
+    _write_file(fixture_dir / "PROVENANCE.md", "synthetic RAR5 fixture provenance\n")
     archive_runtime_payload = {
         "version": "26.02-test",
         "architecture": "x64",
@@ -122,6 +135,20 @@ def _write_fake_archive_runtime(repo_root: Path) -> None:
         "version_marker": "7-Zip 26.02-test (x64)",
         "download_timeout_sec": 15,
         "prepare_timeout_sec": 20,
+        "probe": {
+            "timeout_sec": 5,
+            "max_output_bytes": 131072,
+            "fixture_source_relative_path": "fixtures/archive-runtime-smoke-rar5.rar.b64",
+            "fixture_encoding": "base64",
+            "fixture_source_sha256": hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest(),
+            "fixture_source_size_bytes": len(ARCHIVE_PROBE_RAR_B64),
+            "fixture_decoded_sha256": "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886",
+            "fixture_decoded_size_bytes": 129,
+            "payload_source_relative_path": "fixtures/archive-runtime-smoke.txt",
+            "payload_filename": "archive-runtime-smoke.txt",
+            "payload_sha256": hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest(),
+            "payload_size_bytes": len(ARCHIVE_PROBE_PAYLOAD),
+        },
     }
     mechanism_payload = {
         "schema_version": "1",
@@ -440,6 +467,13 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert manifest_files["bin/7-Zip/7z.dll"] == hashlib.sha256(
         ARCHIVE_RUNTIME_FILES["7z.dll"]
     ).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke-rar5.rar.b64"
+    ] == hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke.txt"
+    ] == hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest()
+    assert "backend-runtime/backend/src/deploy/fixtures/PROVENANCE.md" in manifest_files
 
 
 def test_build_terminal_deploy_package_copies_standard_reinforcement_template(
@@ -687,6 +721,13 @@ ai_layer:
     assert "package-manifest.json" in deploy_readme
     assert "done_received=false" in deploy_readme
     assert "不能单独判定为失败" in deploy_readme
+    assert "bin/7-Zip/7z.exe" in deploy_readme
+    assert "7z.dll" in deploy_readme
+    assert "License.txt" in deploy_readme
+    assert "PROVENANCE.txt" in deploy_readme
+    assert "不会安装 7-Zip，也不会加入 PATH" in deploy_readme
+    assert "RAR5 冒烟样本仅含合成测试数据" in deploy_readme
+    assert "archive_runtime_probe" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -942,6 +983,14 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "backend-start-cwd:" in start_backend
     assert "backend-command:" in start_backend
     assert "backend-env: {0}={1}" in start_backend
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in start_backend
+    assert 'Join-Path $root "bin\\7-Zip\\7z.exe"' in start_backend
+    assert "Invoke-ArchiveRuntimeProbe" in start_backend
+    assert "src.deploy.archive_runtime_probe" in start_backend
+    assert 'Join-Path $PackageRoot "backend-runtime\\backend"' in start_backend
+    probe_call = "Invoke-ArchiveRuntimeProbe -PythonPath $python -PackageRoot $root"
+    assert start_backend.count(probe_call) == 1
+    assert start_backend.index(probe_call) < start_backend.index('"API.app.main:create_app"')
     assert "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" in start_backend
     assert "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" in start_backend
     assert '$pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR")' in start_backend
@@ -1041,6 +1090,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "quick" in prepare_terminal
     assert "Blocking issues detail" in prepare_terminal
     assert "$probe.blocking_issues" in prepare_terminal
+    assert "$probe.archive_runtime.status -ne \"pass\"" in prepare_terminal
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in prepare_terminal
+    assert "$expectedArchiveExecutable" in prepare_terminal
     assert "[1/4]" in prepare_terminal
     assert "Invoke-RestMethod" in check_health
     assert "/api/system/ping" in check_health
@@ -1083,6 +1135,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "ReuseQuickProbeJson" not in deep_check
     assert "probe_target_env.json" not in deep_check
     assert "$probeArgs = @{" in deep_check
+    assert "$probe.blocking_issues.Count -gt 0" in deep_check
+    assert "deep 环境探测未通过" in deep_check
     assert "Test-DotNet48OrAboveInstalled" in install_runtime
     assert "Get-VcRuntimeInfo" in install_runtime
     assert "Expand-PackagePythonRuntime" in install_runtime
@@ -1504,6 +1558,48 @@ $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $OutJson -Encoding ut
     assert deep_probe["storage_root"] == storage_root
     assert deep_probe["office_probe_mode"] == "deep"
     assert deep_probe["reuse_quick_probe_json"] == ""
+
+
+def test_generated_deep_check_terminal_fails_on_blocking_issues(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    probe_stub = r'''param(
+    [string]$OutJson = "",
+    [string]$RepoRoot = "",
+    [int]$Port = 8000,
+    [string]$StorageRoot = "",
+    [string]$OfficeProbeMode = ""
+)
+$payload = [ordered]@{
+    blocking_issues = @([ordered]@{
+        section = "archive_runtime"
+        code = "archive_runtime_probe"
+        message = "private archive runtime probe failed"
+    })
+}
+$payload | ConvertTo-Json -Depth 6 | Out-File -LiteralPath $OutJson -Encoding utf8
+'''
+    (output_root / "scripts" / "probe_target_env.ps1").write_text(
+        probe_stub,
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(output_root / "scripts" / "deep_check_terminal.ps1"),
+        ],
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
 
 
 def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(

@@ -881,7 +881,8 @@ function Set-BackendRuntimeEnvironment {
         [string]$AiGatewayConfigPath,
         [string]$CadScriptDir,
         [string]$DotNetBridgeDllPath,
-        [string]$CtbName
+        [string]$CtbName,
+        [string]$ArchiveExecutable
     )
 
     if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
@@ -915,6 +916,7 @@ function Set-BackendRuntimeEnvironment {
     }
 
     Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE" -Value "terminal_cnpe_intranet_qwen_fast"
+    Set-Item -Path "Env:FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" -Value $ArchiveExecutable
 
     if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
         Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
@@ -935,7 +937,8 @@ function Set-BackendRuntimeEnvironment {
         @("FANBAN_AI_SPEC_PATH", $env:FANBAN_AI_SPEC_PATH),
         @("FANBAN_AI_GATEWAY_CONFIG_PATH", $env:FANBAN_AI_GATEWAY_CONFIG_PATH),
         @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
-        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
+        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH),
+        @("FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE", $env:FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE)
     )
     foreach ($entry in $requiredEnv) {
         $name = [string]$entry[0]
@@ -951,6 +954,40 @@ function Set-BackendRuntimeEnvironment {
     ("backend-env: FANBAN_AI_GATEWAY_CONFIG_PATH={0}" -f $env:FANBAN_AI_GATEWAY_CONFIG_PATH) |
         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
     ("backend-env: FANBAN_AI_GATEWAY_PROFILE={0}" -f $env:FANBAN_AI_GATEWAY_PROFILE) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Invoke-ArchiveRuntimeProbe {
+    param(
+        [string]$PythonPath,
+        [string]$PackageRoot
+    )
+
+    $probeWorkingDirectory = Join-Path $PackageRoot "backend-runtime\backend"
+    $locationPushed = $false
+    try {
+        Push-Location $probeWorkingDirectory
+        $locationPushed = $true
+        $probeOutput = & $PythonPath -X utf8 -m src.deploy.archive_runtime_probe --package-root $PackageRoot 2>&1
+        $probeExitCode = $LASTEXITCODE
+        $probeText = (($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+    } finally {
+        if ($locationPushed) {
+            Pop-Location
+        }
+    }
+    $probePayload = $null
+    if (-not [string]::IsNullOrWhiteSpace($probeText)) {
+        try {
+            $probePayload = $probeText | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $probePayload = $null
+        }
+    }
+    if ($probeExitCode -ne 0 -or $null -eq $probePayload -or [string]$probePayload.status -ne "pass") {
+        throw "私有 7-Zip 运行时探针未通过，API/worker 未启动"
+    }
+    ("archive-runtime-probe: status={0} version={1}" -f $probePayload.status, $probePayload.version_marker) |
         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 }
 
@@ -1440,6 +1477,7 @@ try {
     $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
     $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
     $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
+    $managedArchiveExecutable = Join-Path $root "bin\7-Zip\7z.exe"
 
     Set-BackendRuntimeEnvironment `
         -SpecPath $managedSpecPath `
@@ -1449,7 +1487,8 @@ try {
         -AiGatewayConfigPath $managedAiGatewayConfigPath `
         -CadScriptDir $managedCadScriptDir `
         -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
-        -CtbName $managedCtbName
+        -CtbName $managedCtbName `
+        -ArchiveExecutable $managedArchiveExecutable
 
     $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
     $previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
@@ -1463,6 +1502,7 @@ try {
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
         ("backend-start-cwd: " + (Get-Location).Path) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        Invoke-ArchiveRuntimeProbe -PythonPath $python -PackageRoot $root
         Test-BackendImportPreflight -PythonPath $python -BackendRuntimeRoot (Get-Location).Path
         "Starting backend supervisor..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
 
@@ -1829,9 +1869,21 @@ if ($probe.blocking_issues.Count -gt 0) {
     Write-Host ("探针结果文件: " + $probeJson)
     throw ("环境探测未通过，blocking issues = " + $probe.blocking_issues.Count)
 }
+if ($null -eq $probe.archive_runtime -or $probe.archive_runtime.status -ne "pass") {
+    throw "私有 7-Zip 运行时探针未通过，拒绝生成 runtime.env.ps1"
+}
 
 Write-Host "[4/4] 生成运行环境文件..."
 $envMap = $probe.recommended_runtime.recommended_env
+$expectedArchiveExecutable = [System.IO.Path]::GetFullPath((Join-Path $root "bin\7-Zip\7z.exe"))
+$recommendedArchiveExecutable = [string]$envMap.FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE
+if (
+    [string]::IsNullOrWhiteSpace($recommendedArchiveExecutable) -or
+    -not (Test-Path -LiteralPath $expectedArchiveExecutable -PathType Leaf) -or
+    [System.IO.Path]::GetFullPath($recommendedArchiveExecutable) -ne $expectedArchiveExecutable
+) {
+    throw "探针未返回固定的私有 7-Zip 绝对路径，拒绝生成 runtime.env.ps1"
+}
 $lines = @(
     '$ErrorActionPreference = "Stop"',
     ''
@@ -1889,6 +1941,13 @@ $probeArgs = @{
 
 Write-Host "开始执行深度环境检查..."
 & (Join-Path $PSScriptRoot "probe_target_env.ps1") @probeArgs
+$probe = Get-Content -LiteralPath $probeJson -Raw | ConvertFrom-Json
+if ($probe.blocking_issues.Count -gt 0) {
+    foreach ($issue in $probe.blocking_issues) {
+        Write-Host ("- [{0}/{1}] {2}" -f $issue.section, $issue.code, $issue.message)
+    }
+    throw ("deep 环境探测未通过，blocking issues = " + $probe.blocking_issues.Count)
+}
 Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 '''
     _write_text(output_root / "scripts" / "deep_check_terminal.ps1", deep_check_terminal)
@@ -3398,6 +3457,7 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 - `python-runtime/`: 目标机离线 Python 运行时
 - `python-packages/`: 随包分发的 Python site-packages
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
+- `bin/7-Zip/`: 私有便携压缩运行时，仅含 `7z.exe`、`7z.dll`、`License.txt`、`PROVENANCE.txt`
 - `documents/Resources/`: 受管打印和校准资源
 - `documents/AI/`: AI 模型接入配置
 - `documents_bin/`: 模板与词库资源
@@ -3440,6 +3500,13 @@ if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查
 - `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
 - `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
 - `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
+
+## 私有 7-Zip 运行时
+
+- 计算书 ZIP、RAR、7z 解包固定使用 `bin/7-Zip/7z.exe`；部署不会安装 7-Zip，也不会加入 PATH，更不会回退到系统 `tar.exe` 或同名命令。
+- `7z.exe`、`7z.dll`、`License.txt` 按 `documents\参数规范-3.yaml` 中的 SHA-256 复验；`PROVENANCE.txt` 则按同一配置重新渲染后做精确内容比较。
+- `scripts\probe_target_env.ps1` 和 `scripts\start_backend.ps1` 都调用同一个 Python `archive_runtime_probe`：先验版本与 7z/zip/Rar/Rar5 handler，再执行 ZIP、7z、RAR5 的 list+x 微烟测；任一失败都会阻断准备或 API/worker 启动。
+- RAR5 冒烟样本仅含合成测试数据，来源和哈希记录在 `backend-runtime/backend/src/deploy/fixtures/PROVENANCE.md`；包内不分发 WinRAR 二进制或许可材料。
 
 ## AI 模型接入检查
 

@@ -399,6 +399,49 @@ class ArchiveRuntimeFileConfig(BaseModel):
         return _validate_windows_basename(value, label="archive runtime required filename")
 
 
+class ArchiveRuntimeProbeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    timeout_sec: PositiveInt
+    max_output_bytes: PositiveInt
+    fixture_source_relative_path: str = Field(min_length=1)
+    fixture_encoding: Literal["base64"]
+    fixture_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fixture_source_size_bytes: PositiveInt
+    fixture_decoded_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fixture_decoded_size_bytes: PositiveInt
+    payload_source_relative_path: str = Field(min_length=1)
+    payload_filename: str = Field(min_length=1)
+    payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_size_bytes: PositiveInt
+
+    @field_validator("fixture_source_relative_path", "payload_source_relative_path")
+    @classmethod
+    def validate_source_relative_path(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("archive runtime probe source paths must be module-relative")
+        return path.as_posix()
+
+    @field_validator("payload_filename")
+    @classmethod
+    def validate_payload_filename(cls, value: str) -> str:
+        return _validate_windows_basename(
+            value,
+            label="archive runtime probe payload filename",
+        )
+
+    @model_validator(mode="after")
+    def validate_probe_paths(self) -> ArchiveRuntimeProbeConfig:
+        if Path(self.payload_source_relative_path).name != self.payload_filename:
+            raise ValueError(
+                "archive runtime probe payload source basename must match payload_filename"
+            )
+        if not self.fixture_source_relative_path.casefold().endswith(".b64"):
+            raise ValueError("base64 archive runtime probe fixture must use a .b64 source")
+        return self
+
+
 class ArchiveRuntimeMechanismConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -415,6 +458,7 @@ class ArchiveRuntimeMechanismConfig(BaseModel):
     version_marker: str = Field(min_length=1)
     download_timeout_sec: PositiveInt
     prepare_timeout_sec: PositiveInt
+    probe: ArchiveRuntimeProbeConfig
 
     @field_validator("cache_dir", "destination_dir")
     @classmethod

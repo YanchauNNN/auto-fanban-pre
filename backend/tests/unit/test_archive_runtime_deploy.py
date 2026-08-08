@@ -15,6 +15,7 @@ from src.config.mechanism_spec import (
     ArchiveRuntimeAssetConfig,
     ArchiveRuntimeFileConfig,
     ArchiveRuntimeMechanismConfig,
+    ArchiveRuntimeProbeConfig,
 )
 from src.deploy.archive_runtime import (
     ArchiveRuntimeError,
@@ -79,6 +80,20 @@ def _config(
         version_marker="7-Zip 26.02-test (x64)",
         download_timeout_sec=15,
         prepare_timeout_sec=20,
+        probe=ArchiveRuntimeProbeConfig(
+            timeout_sec=5,
+            max_output_bytes=131_072,
+            fixture_source_relative_path="fixtures/archive-runtime-smoke-rar5.rar.b64",
+            fixture_encoding="base64",
+            fixture_source_sha256=_sha(b"fixture-source"),
+            fixture_source_size_bytes=len(b"fixture-source"),
+            fixture_decoded_sha256=_sha(b"fixture-decoded"),
+            fixture_decoded_size_bytes=len(b"fixture-decoded"),
+            payload_source_relative_path="fixtures/archive-runtime-smoke.txt",
+            payload_filename="archive-runtime-smoke.txt",
+            payload_sha256=_sha(b"payload"),
+            payload_size_bytes=len(b"payload"),
+        ),
     )
 
 

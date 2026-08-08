@@ -146,6 +146,24 @@ def test_probe_target_env_can_reuse_quick_probe_baseline_for_deep_checks() -> No
     assert "Import-ProbeBaseline" in script_text
     assert "reused_quick_probe_json" in script_text
     assert "复用 quick 探针结果" in script_text
+    assert '"archive_runtime"' in script_text
+
+
+def test_probe_target_env_runs_private_archive_runtime_probe_fail_closed() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Get-ArchiveRuntimeFacts" in script_text
+    assert "src.deploy.archive_runtime_probe" in script_text
+    assert "Get-Command 7z" not in script_text
+    assert "where.exe 7z" not in script_text
+    assert 'section = "archive_runtime"' in script_text
+    assert 'code = "archive_runtime_probe"' in script_text
+    assert "$archiveRuntimeFacts.status -eq \"pass\"" in script_text
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in script_text
+    assert 'Join-Path $actualRepoRoot "bin\\7-Zip\\7z.exe"' in script_text
 
 
 def test_probe_target_env_uses_safer_excel_template_open_strategy() -> None:

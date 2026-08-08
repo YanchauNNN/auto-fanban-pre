@@ -118,6 +118,28 @@ def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> No
     assert runtime.cache_dir == "build/runtime-cache/7-Zip"
     assert runtime.destination_dir == "bin/7-Zip"
     assert runtime.required_handlers == ("7z", "zip", "Rar", "Rar5")
+    assert runtime.probe.timeout_sec == 30
+    assert runtime.probe.max_output_bytes == 1_048_576
+    assert runtime.probe.fixture_source_relative_path == (
+        "fixtures/archive-runtime-smoke-rar5.rar.b64"
+    )
+    assert runtime.probe.fixture_encoding == "base64"
+    assert runtime.probe.fixture_source_sha256 == (
+        "324185d843a8046ad64fbaa434c80c2568e49662c3f16c5c7e24ce7eacc2bc92"
+    )
+    assert runtime.probe.fixture_source_size_bytes == 173
+    assert runtime.probe.fixture_decoded_sha256 == (
+        "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886"
+    )
+    assert runtime.probe.fixture_decoded_size_bytes == 129
+    assert runtime.probe.payload_source_relative_path == (
+        "fixtures/archive-runtime-smoke.txt"
+    )
+    assert runtime.probe.payload_filename == "archive-runtime-smoke.txt"
+    assert runtime.probe.payload_sha256 == (
+        "6eaab97fc311dcba726775b8aa04165069688caa965df2fde9e12813cb74802f"
+    )
+    assert runtime.probe.payload_size_bytes == 40
     assert {item.filename: item.sha256 for item in runtime.required_files} == {
         "7z.exe": "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d",
         "7z.dll": "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8",
@@ -125,6 +147,8 @@ def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> No
     }
     with pytest.raises(ValidationError, match="frozen"):
         runtime.version = "changed"
+    with pytest.raises(ValidationError, match="frozen"):
+        runtime.probe.timeout_sec = 1
 
 
 def test_mechanism_spec_rejects_duplicate_submission_task_roles(tmp_path: Path) -> None:

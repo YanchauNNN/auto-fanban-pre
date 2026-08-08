@@ -737,7 +737,7 @@ function Import-ProbeBaseline {
         $raw = Get-Content -LiteralPath $PathText -Raw -ErrorAction Stop
         $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
         $baseline = ConvertTo-PlainValue -Value $parsed
-        foreach ($key in @("host", "repo", "python", "sqlite", "storage", "network", "autocad")) {
+        foreach ($key in @("host", "repo", "python", "archive_runtime", "sqlite", "storage", "network", "autocad")) {
             if (-not $baseline.Contains($key)) {
                 Write-Warning ("quick 探针结果缺少必要字段，忽略复用: " + $key)
                 return $null
@@ -1028,6 +1028,76 @@ function Get-PythonFacts {
         }
         import_checks = $imports
     }
+}
+
+function Get-ArchiveRuntimeFacts {
+    param(
+        [string]$ActualRepoRoot,
+        [object]$PythonFacts
+    )
+
+    $pythonExe = [string]$PythonFacts.selected.executable
+    if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        return New-CheckResult -Status "fail" -Error "package Python is unavailable for the archive runtime probe"
+    }
+
+    $deployedBackendRoot = Join-Path $ActualRepoRoot "backend-runtime\backend"
+    $deployedProbe = Join-Path $deployedBackendRoot "src\deploy\archive_runtime_probe.py"
+    $developmentBackendRoot = Join-Path $ActualRepoRoot "backend"
+    $developmentProbe = Join-Path $developmentBackendRoot "src\deploy\archive_runtime_probe.py"
+    $workingDirectory = ""
+    $moduleName = ""
+    if (Test-Path -LiteralPath $deployedProbe -PathType Leaf) {
+        $workingDirectory = $deployedBackendRoot
+        $moduleName = "src.deploy.archive_runtime_probe"
+    } elseif (Test-Path -LiteralPath $developmentProbe -PathType Leaf) {
+        $workingDirectory = $developmentBackendRoot
+        $moduleName = "src.deploy.archive_runtime_probe"
+    } else {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe module is missing"
+    }
+
+    $locationPushed = $false
+    try {
+        Push-Location $workingDirectory
+        $locationPushed = $true
+        $invoke = Invoke-ExternalCommand -FilePath $pythonExe -Arguments @(
+            "-X",
+            "utf8",
+            "-m",
+            $moduleName,
+            "--package-root",
+            $ActualRepoRoot
+        )
+    } catch {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe could not start"
+    } finally {
+        if ($locationPushed) {
+            Pop-Location
+        }
+    }
+
+    $probePayload = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$invoke.stdout)) {
+        try {
+            $probePayload = ConvertTo-PlainValue -Value ([string]$invoke.stdout | ConvertFrom-Json -ErrorAction Stop)
+        } catch {
+            $probePayload = $null
+        }
+    }
+    if ($null -eq $probePayload) {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe returned invalid JSON"
+    }
+    if (-not [bool]$invoke.success -or [string]$probePayload.status -ne "pass") {
+        return [ordered]@{
+            status = "fail"
+            ok = $false
+            code = if ($probePayload.Contains("code")) { [string]$probePayload.code } else { "archive_runtime_probe" }
+            error = if ($probePayload.Contains("error")) { [string]$probePayload.error } else { "archive runtime probe failed" }
+            details = @{}
+        }
+    }
+    return $probePayload
 }
 
 function Test-SqliteProbe {
@@ -2534,67 +2604,75 @@ $reusedSections = @()
 if ($OfficeProbeMode -eq "deep" -and -not [string]::IsNullOrWhiteSpace($ReuseQuickProbeJson)) {
     $quickBaseline = Import-ProbeBaseline -PathText $ReuseQuickProbeJson
     if ($null -ne $quickBaseline) {
-        $reusedSections = @("host", "repo", "python", "sqlite", "storage", "network", "autocad")
+        $reusedSections = @("host", "repo", "python", "archive_runtime", "sqlite", "storage", "network", "autocad")
     }
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "1/8" -Message "复用 quick 探针结果：主机基础信息"
+    Write-ProbeStage -Stage "1/9" -Message "复用 quick 探针结果：主机基础信息"
     $hostFacts = $quickBaseline.host
 } else {
-    Write-ProbeStage -Stage "1/8" -Message "收集主机基础信息"
+    Write-ProbeStage -Stage "1/9" -Message "收集主机基础信息"
     $hostFacts = Get-HostFacts
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "2/8" -Message "复用 quick 探针结果：仓库和模板资源"
+    Write-ProbeStage -Stage "2/9" -Message "复用 quick 探针结果：仓库和模板资源"
     $repoFacts = $quickBaseline.repo
 } else {
-    Write-ProbeStage -Stage "2/8" -Message "检查仓库和模板资源"
+    Write-ProbeStage -Stage "2/9" -Message "检查仓库和模板资源"
     $repoFacts = Get-RepoFacts -ActualRepoRoot $actualRepoRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "3/8" -Message "复用 quick 探针结果：Python 运行环境"
+    Write-ProbeStage -Stage "3/9" -Message "复用 quick 探针结果：Python 运行环境"
     $pythonFacts = $quickBaseline.python
 } else {
-    Write-ProbeStage -Stage "3/8" -Message "检查 Python 运行环境"
+    Write-ProbeStage -Stage "3/9" -Message "检查 Python 运行环境"
     $pythonFacts = Get-PythonFacts -ActualRepoRoot $actualRepoRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "4/8" -Message "复用 quick 探针结果：SQLite 读写探针"
+    Write-ProbeStage -Stage "4/9" -Message "复用 quick 探针结果：私有压缩运行时"
+    $archiveRuntimeFacts = $quickBaseline.archive_runtime
+} else {
+    Write-ProbeStage -Stage "4/9" -Message "检查私有 7-Zip 压缩运行时"
+    $archiveRuntimeFacts = Get-ArchiveRuntimeFacts -ActualRepoRoot $actualRepoRoot -PythonFacts $pythonFacts
+}
+
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "5/9" -Message "复用 quick 探针结果：SQLite 读写探针"
     $sqliteFacts = $quickBaseline.sqlite
 } else {
-    Write-ProbeStage -Stage "4/8" -Message "执行 SQLite 读写探针"
+    Write-ProbeStage -Stage "5/9" -Message "执行 SQLite 读写探针"
     $sqliteFacts = Test-SqliteProbe -PythonExe ([string]$pythonFacts.selected.executable)
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "5/8" -Message "复用 quick 探针结果：storage 目录和磁盘空间"
+    Write-ProbeStage -Stage "6/9" -Message "复用 quick 探针结果：storage 目录和磁盘空间"
     $storageFacts = $quickBaseline.storage
 } else {
-    Write-ProbeStage -Stage "5/8" -Message "检查 storage 目录和磁盘空间"
+    Write-ProbeStage -Stage "6/9" -Message "检查 storage 目录和磁盘空间"
     $storageFacts = Get-StorageFacts -ActualStorageRoot $actualStorageRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "6/8" -Message "复用 quick 探针结果：网络端口和防火墙状态"
+    Write-ProbeStage -Stage "7/9" -Message "复用 quick 探针结果：网络端口和防火墙状态"
     $networkFacts = $quickBaseline.network
 } else {
-    Write-ProbeStage -Stage "6/8" -Message "检查网络端口和防火墙状态"
+    Write-ProbeStage -Stage "7/9" -Message "检查网络端口和防火墙状态"
     $networkFacts = Get-NetworkFacts -TargetPort $Port
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "7/8" -Message "复用 quick 探针结果：AutoCAD / 打印资源"
+    Write-ProbeStage -Stage "8/9" -Message "复用 quick 探针结果：AutoCAD / 打印资源"
     $autocadFacts = $quickBaseline.autocad
 } else {
-    Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
+    Write-ProbeStage -Stage "8/9" -Message "检查 AutoCAD / 打印资源"
 $autocadFacts = Get-AutoCADFacts -ActualRepoRoot $actualRepoRoot
 }
 
-Write-ProbeStage -Stage "8/8" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
+Write-ProbeStage -Stage "9/9" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
 $officeFacts = Get-OfficeFacts -RepoFacts $repoFacts -ProbeMode $OfficeProbeMode
 
 $serviceHostingFacts = Get-ServiceHostingFacts -ActualRepoRoot $actualRepoRoot
@@ -2626,6 +2704,14 @@ if ($pythonFacts.selected.status -ne "pass") {
         section = "python"
         code = "python_version"
         message = "python 3.13+ is unavailable"
+    }
+}
+
+if ($archiveRuntimeFacts.status -ne "pass") {
+    $blockingIssues += [ordered]@{
+        section = "archive_runtime"
+        code = "archive_runtime_probe"
+        message = if ([string]::IsNullOrWhiteSpace([string]$archiveRuntimeFacts.error)) { "private archive runtime probe failed" } else { [string]$archiveRuntimeFacts.error }
     }
 }
 foreach ($importEntry in $pythonFacts.import_checks.GetEnumerator()) {
@@ -2821,6 +2907,7 @@ if ($serviceHostingFacts.unregister_task_script.status -ne "pass") {
 $readyForWebService = (
     $repoFacts.status -eq "pass" -and
     $pythonFacts.status -eq "pass" -and
+    $archiveRuntimeFacts.status -eq "pass" -and
     $sqliteFacts.status -eq "pass" -and
     $storageFacts.status -eq "pass" -and
     $autocadFacts.status -eq "pass" -and
@@ -2866,6 +2953,7 @@ $recommendedRuntime = [ordered]@{
         FANBAN_CONCURRENCY__MAX_JOBS = [string]$recommendedMaxActiveJobs
         FANBAN_LIFECYCLE__RETENTION_HOURS = "168"
         FANBAN_UPLOAD_LIMITS__MIN_FREE_DISK_MB = "20480"
+        FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE = (Resolve-FullPathOrRaw (Join-Path $actualRepoRoot "bin\7-Zip\7z.exe"))
     }
 }
 
@@ -2903,6 +2991,7 @@ $result = [ordered]@{
     host = $hostFacts
     repo = $repoFacts
     python = $pythonFacts
+    archive_runtime = $archiveRuntimeFacts
     sqlite = $sqliteFacts
     storage = $storageFacts
     network = $networkFacts
@@ -2933,6 +3022,7 @@ Write-Host ("Script version: " + $script:ProbeVersion)
 Write-Host ("Output JSON: " + $actualOutJson)
 Write-Host ("Repo status: " + $repoFacts.status)
 Write-Host ("Python status: " + $pythonFacts.status)
+Write-Host ("Archive runtime status: " + $archiveRuntimeFacts.status)
 Write-Host ("AutoCAD status: " + $autocadFacts.status)
 Write-Host ("Office status: " + $officeFacts.status + " (mode: " + $officeFacts.probe_mode + ")")
 Write-Host ("Ready for web service: " + $readyForWebService)
