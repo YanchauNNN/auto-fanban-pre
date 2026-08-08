@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_validator
 
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
@@ -343,6 +343,80 @@ class InstallerConfig(BaseModel):
     url: str
 
 
+class ArchiveRuntimeAssetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    filename: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https://")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        if Path(value).name != value or value in {".", ".."}:
+            raise ValueError("archive runtime asset filename must be a basename")
+        return value
+
+
+class ArchiveRuntimeFileConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    filename: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        if Path(value).name != value or value in {".", ".."}:
+            raise ValueError("archive runtime required filename must be a basename")
+        return value
+
+
+class ArchiveRuntimeMechanismConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str = Field(min_length=1)
+    architecture: Literal["x64"] = "x64"
+    source: ArchiveRuntimeAssetConfig
+    bootstrap: ArchiveRuntimeAssetConfig
+    license_url: str = Field(pattern=r"^https://")
+    cache_dir: str = Field(min_length=1)
+    destination_dir: str = Field(min_length=1)
+    provenance_filename: str = Field(min_length=1)
+    required_files: tuple[ArchiveRuntimeFileConfig, ...] = Field(min_length=1)
+    required_handlers: tuple[str, ...] = Field(min_length=1)
+    version_marker: str = Field(min_length=1)
+    download_timeout_sec: PositiveInt
+    prepare_timeout_sec: PositiveInt
+
+    @field_validator("cache_dir", "destination_dir")
+    @classmethod
+    def validate_relative_dir(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("archive runtime directories must be package-relative")
+        return path.as_posix()
+
+    @field_validator("provenance_filename")
+    @classmethod
+    def validate_provenance_filename(cls, value: str) -> str:
+        if Path(value).name != value or value in {".", ".."}:
+            raise ValueError("archive runtime provenance filename must be a basename")
+        return value
+
+    @model_validator(mode="after")
+    def validate_required_names(self) -> ArchiveRuntimeMechanismConfig:
+        filenames = [item.filename for item in self.required_files]
+        if len(filenames) != len(set(filenames)):
+            raise ValueError("archive runtime required filenames must be unique")
+        if self.provenance_filename in filenames:
+            raise ValueError("archive runtime provenance filename must not be a required binary")
+        handlers = list(self.required_handlers)
+        if len(handlers) != len(set(handlers)):
+            raise ValueError("archive runtime required handlers must be unique")
+        return self
+
+
 class DeploymentMechanismConfig(BaseModel):
     spec_name: str = "参数规范.yaml"
     runtime_spec_name: str = "参数规范_运行期.yaml"
@@ -350,6 +424,7 @@ class DeploymentMechanismConfig(BaseModel):
     default_frontend_api_port: int = 8000
     managed_pdf2_pc3_name: str = "打印PDF2.pc3"
     managed_monochrome_ctb_name: str = "fanban_monochrome.ctb"
+    archive_runtime: ArchiveRuntimeMechanismConfig | None = None
     installers: dict[str, InstallerConfig] = Field(
         default_factory=lambda: {
             "dotnet48": InstallerConfig(

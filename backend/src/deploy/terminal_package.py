@@ -35,6 +35,7 @@ from ..config.mechanism_spec import (
     MechanismSpecLoader,
     load_mechanism_spec,
 )
+from .archive_runtime import archive_runtime_copy_plan
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
@@ -112,7 +113,7 @@ def _deployment_mechanism(root: Path | None = None) -> DeploymentMechanismConfig
 
 def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
     deployment = _deployment_mechanism(repo_root)
-    return [
+    plan = [
         CopyPlanEntry(repo_root / "frontend" / "dist", Path("frontend-dist")),
         CopyPlanEntry(repo_root / "API", Path("backend-runtime") / "API"),
         CopyPlanEntry(repo_root / "backend" / "src", Path("backend-runtime") / "backend" / "src"),
@@ -192,6 +193,11 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         ),
     ]
+    plan.extend(
+        CopyPlanEntry(entry.source, entry.destination)
+        for entry in archive_runtime_copy_plan(repo_root, deployment.archive_runtime)
+    )
+    return plan
 
 
 def _ensure_exists(copy_plan: list[CopyPlanEntry]) -> None:
