@@ -3096,15 +3096,16 @@ def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
     now = time.time()
     old_zip = cache_root / "calculation-preflight-old.zip"
     old_rar = cache_root / "calculation-preflight-old.rar"
+    old_7z = cache_root / "calculation-preflight-old.7z"
     fresh_zip = cache_root / "calculation-preflight-fresh.zip"
     unrelated = cache_root / "user-upload.zip"
     wrong_suffix = cache_root / "calculation-preflight-old.txt"
     matching_directory = cache_root / "calculation-preflight-folder.zip"
-    for path in (old_zip, old_rar, fresh_zip, unrelated, wrong_suffix):
+    for path in (old_zip, old_rar, old_7z, fresh_zip, unrelated, wrong_suffix):
         path.write_bytes(b"payload")
     matching_directory.mkdir()
     old_mtime = now - 1801
-    for path in (old_zip, old_rar, unrelated, wrong_suffix):
+    for path in (old_zip, old_rar, old_7z, unrelated, wrong_suffix):
         os.utime(path, (old_mtime, old_mtime))
     os.utime(matching_directory, (old_mtime, old_mtime))
 
@@ -3122,6 +3123,7 @@ def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
 
     assert not old_zip.exists()
     assert not old_rar.exists()
+    assert not old_7z.exists()
     assert fresh_zip.is_file()
     assert unrelated.is_file()
     assert wrong_suffix.is_file()
@@ -3156,6 +3158,88 @@ def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
     ):
         _cleanup_calculation_preflight_cache(linked_root, now=now)
     assert outside_old.is_file()
+
+
+def test_calculation_preflight_accepts_7z_forwards_config_and_fixes_mime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_preflight(**kwargs):
+        observed.update(kwargs)
+        return {
+            "confirmations": [],
+            "requires_ai_normalization": False,
+            "requires_wall_count_confirmation": False,
+            "format_inspection": {},
+        }
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        fake_preflight,
+    )
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "calculation-images.7z",
+                    b"7z\xbc\xaf'\x1cpayload",
+                    "text/plain",
+                )
+            },
+        )
+        assert response.status_code == 200, response.text
+        runtime = client.app.state.runtime
+        token = response.json()["preflight_token"]
+        cached = runtime._calculation_preflight_tokens[token]
+
+        assert (
+            observed["archive_extractor"]
+            is runtime.config.calculation_book.archive_extractor
+        )
+        assert cached["content_type"] == "application/x-7z-compressed"
+        assert Path(str(cached["archive_path"])).suffix == ".7z"
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload", "content_type"),
+    [
+        ("input.rar", b"Rar!\x1a\x07\x01\x00payload", "application/vnd.rar"),
+        ("input.7z", b"7z\xbc\xaf'\x1cpayload", "application/x-7z-compressed"),
+    ],
+)
+def test_calculation_preflight_missing_private_extractor_is_stable_and_uncached(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    filename: str,
+    payload: bytes,
+    content_type: str,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        extractor = runtime.config.calculation_book.archive_extractor
+        runtime.config.calculation_book.archive_extractor = extractor.model_copy(
+            update={"executable": (tmp_path / "missing-7z.exe").resolve()}
+        )
+
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={"archive": (filename, payload, content_type)},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"]["upload_errors"] == {
+            "archive": ["RAR/7z 私有解包器不存在"]
+        }
+        assert runtime._calculation_preflight_tokens == {}
+        cache_root = (
+            runtime.config.storage_dir
+            / "runtime"
+            / "calculation-preflight"
+        )
+        assert not tuple(cache_root.glob("calculation-preflight-*"))
 
 
 def _calculation_archive_bytes(

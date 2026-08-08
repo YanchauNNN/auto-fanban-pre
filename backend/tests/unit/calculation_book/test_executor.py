@@ -35,7 +35,7 @@ from src.calculation_book.executor import (
 from src.calculation_book.processor import CalculationBookStage
 from src.calculation_book.rebar_candidates import generate_rebar_candidates
 from src.calculation_book.rebar_recommender import RebarSuggestionInput
-from src.config import get_config
+from src.config import get_config, load_mechanism_spec
 from src.models import Job, JobStatus, JobType
 
 
@@ -299,6 +299,26 @@ def _executor(processor: FakeProcessor, normalizer: FakeNormalizer):
             profile="intranet-test",
         ),
     )
+
+
+def test_executor_builds_processor_with_runtime_archive_extractor() -> None:
+    import src.calculation_book.executor as executor_module
+
+    runtime = executor_module.get_config().calculation_book
+    processor = CalculationBookJobExecutor._build_processor(
+        runtime=runtime,
+        mechanism_spec=load_mechanism_spec().calculation_book,
+    )
+
+    assert processor.archive_extractor is runtime.archive_extractor
+
+
+def test_executor_missing_input_uses_archive_neutral_copy(tmp_path: Path) -> None:
+    job = _job(tmp_path, options={})
+    job.input_files = []
+
+    with pytest.raises(FileNotFoundError, match="上传的压缩包"):
+        CalculationBookJobExecutor(processor=FakeProcessor()).execute(job)
 
 
 def test_ai_job_normalizes_once_before_ocr_and_persists_only_safe_audit(

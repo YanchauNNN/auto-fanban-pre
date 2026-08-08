@@ -8,7 +8,7 @@
 # ============================================================================
 
 schema_version: "1.0"
-last_updated: "2026-05-26"
+last_updated: "2026-08-08"
 
 backend_mechanism:
   permissions:
@@ -230,6 +230,47 @@ backend_mechanism:
     default_frontend_api_port: 8000
     managed_pdf2_pc3_name: "打印PDF2.pc3"
     managed_monochrome_ctb_name: "fanban_monochrome.ctb"
+    archive_runtime:
+      version: "26.02"
+      architecture: "x64"
+      source:
+        filename: "7z2602-x64.exe"
+        url: "https://github.com/ip7z/7zip/releases/download/26.02/7z2602-x64.exe"
+        sha256: "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"
+        size_bytes: 1657896
+      bootstrap:
+        filename: "7zr.exe"
+        url: "https://github.com/ip7z/7zip/releases/download/26.02/7zr.exe"
+        sha256: "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72"
+        size_bytes: 602112
+      license_url: "https://www.7-zip.org/license.txt"
+      cache_dir: "build/runtime-cache/7-Zip"
+      destination_dir: "bin/7-Zip"
+      provenance_filename: "PROVENANCE.txt"
+      required_files:
+        - filename: "7z.exe"
+          sha256: "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d"
+        - filename: "7z.dll"
+          sha256: "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8"
+        - filename: "License.txt"
+          sha256: "519ac0a4bded9c18ea02e0afb71f663d8c47373bd9facd3ac96a79f51d77765d"
+      required_handlers: ["7z", "zip", "Rar", "Rar5"]
+      version_marker: "7-Zip 26.02 (x64)"
+      download_timeout_sec: 120
+      prepare_timeout_sec: 120
+      probe:
+        timeout_sec: 30
+        max_output_bytes: 1048576
+        fixture_source_relative_path: "fixtures/archive-runtime-smoke-rar5.rar.b64"
+        fixture_encoding: "base64"
+        fixture_source_sha256: "324185d843a8046ad64fbaa434c80c2568e49662c3f16c5c7e24ce7eacc2bc92"
+        fixture_source_size_bytes: 173
+        fixture_decoded_sha256: "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886"
+        fixture_decoded_size_bytes: 129
+        payload_source_relative_path: "fixtures/archive-runtime-smoke.txt"
+        payload_filename: "archive-runtime-smoke.txt"
+        payload_sha256: "6eaab97fc311dcba726775b8aa04165069688caa965df2fde9e12813cb74802f"
+        payload_size_bytes: 40
     installers:
       dotnet48:
         filename: "ndp48-x86-x64-allos-enu.exe"

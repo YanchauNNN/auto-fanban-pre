@@ -9,7 +9,11 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+import yaml
 
+import src.deploy.terminal_package as terminal_package_mod
+from src.config.mechanism_spec import ArchiveRuntimeMechanismConfig
+from src.deploy.archive_runtime import ArchiveRuntimeError, render_archive_runtime_provenance
 from src.deploy.prereq_installers import ensure_prereq_installers
 from src.deploy.terminal_package import (
     DELTA_DELETE_LIST,
@@ -48,6 +52,17 @@ DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 REGISTER_TASK_SCRIPT = "register_backend_task.ps1"
 UNREGISTER_TASK_SCRIPT = "unregister_backend_task.ps1"
+ARCHIVE_RUNTIME_FILES = {
+    "7z.exe": b"fake-portable-7z-exe",
+    "7z.dll": b"fake-portable-7z-dll",
+    "License.txt": b"fake-7zip-license",
+}
+ARCHIVE_PROBE_PAYLOAD = b"fanban archive runtime smoke payload v1\n"
+ARCHIVE_PROBE_RAR_B64 = (
+    b"UmFyIRoHAQAzkrXlCgEFBgAFAQGAgAD3WFxjNQIDC6gABKgAIAuotTmAAAAZ"
+    b"YXJjaGl2ZS1ydW50aW1lLXNtb2tlLnR4dAoDAnaBI2gpJ90BZmFuYmFuIGFy"
+    b"Y2hpdmUgcnVudGltZSBzbW9rZSBwYXlsb2FkIHYxCh13VlEDBQQA\n"
+)
 
 
 def _pick_free_port() -> int:
@@ -83,6 +98,78 @@ def _find_unused_tcp_port() -> int:
 
 def _relative_files(root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
+
+
+def _write_fake_archive_runtime(repo_root: Path) -> None:
+    fixture_dir = repo_root / "backend" / "src" / "deploy" / "fixtures"
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    (fixture_dir / "archive-runtime-smoke-rar5.rar.b64").write_bytes(
+        ARCHIVE_PROBE_RAR_B64
+    )
+    (fixture_dir / "archive-runtime-smoke.txt").write_bytes(ARCHIVE_PROBE_PAYLOAD)
+    _write_file(fixture_dir / "PROVENANCE.md", "synthetic RAR5 fixture provenance\n")
+    archive_runtime_payload = {
+        "version": "26.02-test",
+        "architecture": "x64",
+        "source": {
+            "filename": "7z-test-x64.exe",
+            "url": "https://example.invalid/7z-test-x64.exe",
+            "sha256": hashlib.sha256(b"fake-source").hexdigest(),
+            "size_bytes": len(b"fake-source"),
+        },
+        "bootstrap": {
+            "filename": "7zr.exe",
+            "url": "https://example.invalid/7zr.exe",
+            "sha256": hashlib.sha256(b"fake-bootstrap").hexdigest(),
+            "size_bytes": len(b"fake-bootstrap"),
+        },
+        "license_url": "https://example.invalid/license.txt",
+        "cache_dir": "build/runtime-cache/7-Zip",
+        "destination_dir": "bin/7-Zip",
+        "provenance_filename": "PROVENANCE.txt",
+        "required_files": [
+            {"filename": name, "sha256": hashlib.sha256(payload).hexdigest()}
+            for name, payload in ARCHIVE_RUNTIME_FILES.items()
+        ],
+        "required_handlers": ["7z", "zip", "Rar", "Rar5"],
+        "version_marker": "7-Zip 26.02-test (x64)",
+        "download_timeout_sec": 15,
+        "prepare_timeout_sec": 20,
+        "probe": {
+            "timeout_sec": 5,
+            "max_output_bytes": 131072,
+            "fixture_source_relative_path": "fixtures/archive-runtime-smoke-rar5.rar.b64",
+            "fixture_encoding": "base64",
+            "fixture_source_sha256": hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest(),
+            "fixture_source_size_bytes": len(ARCHIVE_PROBE_RAR_B64),
+            "fixture_decoded_sha256": "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886",
+            "fixture_decoded_size_bytes": 129,
+            "payload_source_relative_path": "fixtures/archive-runtime-smoke.txt",
+            "payload_filename": "archive-runtime-smoke.txt",
+            "payload_sha256": hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest(),
+            "payload_size_bytes": len(ARCHIVE_PROBE_PAYLOAD),
+        },
+    }
+    mechanism_payload = {
+        "schema_version": "1",
+        "backend_mechanism": {
+            "deployment_mechanism": {"archive_runtime": archive_runtime_payload}
+        },
+    }
+    _write_file(
+        repo_root / "documents" / MECHANISM_SPEC_NAME,
+        yaml.safe_dump(mechanism_payload, allow_unicode=True, sort_keys=False),
+    )
+    config = ArchiveRuntimeMechanismConfig(**archive_runtime_payload)
+    cache_dir = repo_root / config.cache_dir
+    for name, payload in ARCHIVE_RUNTIME_FILES.items():
+        target = cache_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    _write_file(
+        cache_dir / config.provenance_filename,
+        render_archive_runtime_provenance(config),
+    )
 
 
 def _make_fake_repo(repo_root: Path) -> None:
@@ -210,7 +297,7 @@ runtime_options:
         desc: "test Skill root"
 """.strip(),
     )
-    _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
+    _write_fake_archive_runtime(repo_root)
     _write_file(repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME, "terminal install plan")
     _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
     _write_file(repo_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME, "schema_version: '1'")
@@ -287,6 +374,50 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
         Path("tools") / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
     ) in rel_pairs
+    assert (
+        Path("build/runtime-cache/7-Zip/7z.exe"),
+        Path("bin/7-Zip/7z.exe"),
+    ) in rel_pairs
+    assert (
+        Path("build/runtime-cache/7-Zip/PROVENANCE.txt"),
+        Path("bin/7-Zip/PROVENANCE.txt"),
+    ) in rel_pairs
+
+
+def test_gather_copy_plan_rejects_missing_archive_runtime_cache(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    cache_dir = repo_root / "build" / "runtime-cache" / "7-Zip"
+    for path in cache_dir.iterdir():
+        path.unlink()
+    cache_dir.rmdir()
+
+    with pytest.raises(ArchiveRuntimeError, match="prepare_archive_runtime.py"):
+        gather_copy_plan(repo_root)
+
+
+def test_full_build_rejects_archive_runtime_source_changed_after_gather(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    original_gather = terminal_package_mod.gather_copy_plan
+
+    def gather_then_tamper(root: Path):
+        plan = original_gather(root)
+        (root / "build" / "runtime-cache" / "7-Zip" / "7z.exe").write_bytes(
+            b"tampered-after-gather"
+        )
+        return plan
+
+    monkeypatch.setattr(terminal_package_mod, "gather_copy_plan", gather_then_tamper)
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.exe"):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    assert not (output_root / PACKAGE_MANIFEST).exists()
 
 
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
@@ -318,6 +449,31 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "__pycache__"
         / "terminal_package.cpython-313.pyc"
     ).exists()
+    archive_runtime = output_root / "bin" / "7-Zip"
+    assert {path.name for path in archive_runtime.iterdir()} == {
+        "7z.exe",
+        "7z.dll",
+        "License.txt",
+        "PROVENANCE.txt",
+    }
+    assert (archive_runtime / "7z.exe").read_bytes() == ARCHIVE_RUNTIME_FILES["7z.exe"]
+    assert not (archive_runtime / "7zr.exe").exists()
+    assert not (archive_runtime / "7z-test-x64.exe").exists()
+    manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
+    manifest_files = {item["path"]: item["sha256"] for item in manifest["files"]}
+    assert manifest_files["bin/7-Zip/7z.exe"] == hashlib.sha256(
+        ARCHIVE_RUNTIME_FILES["7z.exe"]
+    ).hexdigest()
+    assert manifest_files["bin/7-Zip/7z.dll"] == hashlib.sha256(
+        ARCHIVE_RUNTIME_FILES["7z.dll"]
+    ).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke-rar5.rar.b64"
+    ] == hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke.txt"
+    ] == hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest()
+    assert "backend-runtime/backend/src/deploy/fixtures/PROVENANCE.md" in manifest_files
 
 
 def test_build_terminal_deploy_package_copies_standard_reinforcement_template(
@@ -565,6 +721,13 @@ ai_layer:
     assert "package-manifest.json" in deploy_readme
     assert "done_received=false" in deploy_readme
     assert "不能单独判定为失败" in deploy_readme
+    assert "bin/7-Zip/7z.exe" in deploy_readme
+    assert "7z.dll" in deploy_readme
+    assert "License.txt" in deploy_readme
+    assert "PROVENANCE.txt" in deploy_readme
+    assert "不会安装 7-Zip，也不会加入 PATH" in deploy_readme
+    assert "RAR5 冒烟样本仅含合成测试数据" in deploy_readme
+    assert "archive_runtime_probe" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -820,6 +983,14 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "backend-start-cwd:" in start_backend
     assert "backend-command:" in start_backend
     assert "backend-env: {0}={1}" in start_backend
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in start_backend
+    assert 'Join-Path $root "bin\\7-Zip\\7z.exe"' in start_backend
+    assert "Invoke-ArchiveRuntimeProbe" in start_backend
+    assert "src.deploy.archive_runtime_probe" in start_backend
+    assert 'Join-Path $PackageRoot "backend-runtime\\backend"' in start_backend
+    probe_call = "Invoke-ArchiveRuntimeProbe -PythonPath $python -PackageRoot $root"
+    assert start_backend.count(probe_call) == 1
+    assert start_backend.index(probe_call) < start_backend.index('"API.app.main:create_app"')
     assert "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" in start_backend
     assert "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" in start_backend
     assert '$pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR")' in start_backend
@@ -919,6 +1090,9 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "quick" in prepare_terminal
     assert "Blocking issues detail" in prepare_terminal
     assert "$probe.blocking_issues" in prepare_terminal
+    assert "$probe.archive_runtime.status -ne \"pass\"" in prepare_terminal
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in prepare_terminal
+    assert "$expectedArchiveExecutable" in prepare_terminal
     assert "[1/4]" in prepare_terminal
     assert "Invoke-RestMethod" in check_health
     assert "/api/system/ping" in check_health
@@ -961,6 +1135,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "ReuseQuickProbeJson" not in deep_check
     assert "probe_target_env.json" not in deep_check
     assert "$probeArgs = @{" in deep_check
+    assert "$probe.blocking_issues.Count -gt 0" in deep_check
+    assert "deep 环境探测未通过" in deep_check
     assert "Test-DotNet48OrAboveInstalled" in install_runtime
     assert "Get-VcRuntimeInfo" in install_runtime
     assert "Expand-PackagePythonRuntime" in install_runtime
@@ -1071,6 +1247,76 @@ def test_publish_terminal_deploy_artifacts_writes_delta_for_added_modified_and_d
 
     delete_list = (delta_root / DELTA_DIR_NAME / DELTA_DELETE_LIST).read_text(encoding="utf-8")
     assert "documents/Resources/fanban_monochrome.ctb" in delete_list
+
+
+def test_publish_terminal_deploy_artifacts_tracks_archive_runtime_delta_changes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    baseline_runtime = output_root / "bin" / "7-Zip"
+    (baseline_runtime / "7z.exe").unlink()
+    (baseline_runtime / "7z.dll").write_bytes(b"old-runtime-dll")
+    (baseline_runtime / "7zr.exe").write_bytes(b"must-be-deleted")
+
+    publish_terminal_deploy_artifacts(
+        repo_root=repo_root,
+        output_root=output_root,
+        delta_root=delta_root,
+    )
+
+    payload = json.loads(
+        (delta_root / DELTA_DIR_NAME / DELTA_MANIFEST).read_text(encoding="utf-8")
+    )
+    assert "bin/7-Zip/7z.exe" in payload["added_files"]
+    assert "bin/7-Zip/7z.dll" in payload["modified_files"]
+    assert "bin/7-Zip/7zr.exe" in payload["deleted_files"]
+    assert {path.name for path in (output_root / "bin" / "7-Zip").iterdir()} == {
+        "7z.exe",
+        "7z.dll",
+        "License.txt",
+        "PROVENANCE.txt",
+    }
+
+
+def test_publish_rejects_tampered_deployed_runtime_and_preserves_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    baseline_exe = (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes()
+    baseline_manifest = (output_root / PACKAGE_MANIFEST).read_bytes()
+    original_write_support_files = terminal_package_mod._write_support_files
+
+    def write_support_then_tamper(package_root: Path, **kwargs: object) -> None:
+        original_write_support_files(package_root, **kwargs)
+        (package_root / "bin" / "7-Zip" / "7z.dll").write_bytes(
+            b"tampered-in-staging"
+        )
+
+    monkeypatch.setattr(
+        terminal_package_mod,
+        "_write_support_files",
+        write_support_then_tamper,
+    )
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.dll"):
+        publish_terminal_deploy_artifacts(
+            repo_root=repo_root,
+            output_root=output_root,
+            delta_root=delta_root,
+        )
+
+    assert (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes() == baseline_exe
+    assert (output_root / PACKAGE_MANIFEST).read_bytes() == baseline_manifest
+    assert not (output_root.parent / "_stg").exists()
 
 
 def test_publish_terminal_deploy_artifacts_without_baseline_writes_metadata_only_delta(tmp_path: Path) -> None:
@@ -1312,6 +1558,48 @@ $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $OutJson -Encoding ut
     assert deep_probe["storage_root"] == storage_root
     assert deep_probe["office_probe_mode"] == "deep"
     assert deep_probe["reuse_quick_probe_json"] == ""
+
+
+def test_generated_deep_check_terminal_fails_on_blocking_issues(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    probe_stub = r'''param(
+    [string]$OutJson = "",
+    [string]$RepoRoot = "",
+    [int]$Port = 8000,
+    [string]$StorageRoot = "",
+    [string]$OfficeProbeMode = ""
+)
+$payload = [ordered]@{
+    blocking_issues = @([ordered]@{
+        section = "archive_runtime"
+        code = "archive_runtime_probe"
+        message = "private archive runtime probe failed"
+    })
+}
+$payload | ConvertTo-Json -Depth 6 | Out-File -LiteralPath $OutJson -Encoding utf8
+'''
+    (output_root / "scripts" / "probe_target_env.ps1").write_text(
+        probe_stub,
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(output_root / "scripts" / "deep_check_terminal.ps1"),
+        ],
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
 
 
 def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(

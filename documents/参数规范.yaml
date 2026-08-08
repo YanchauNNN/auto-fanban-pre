@@ -856,12 +856,12 @@ calculation_book:
     - { key: "include_slab_stress", label: "包含楼板应力", type: "checkbox", required: false, default: false }
     - { key: "reinforcement_source", label: "配筋来源", type: "select", required: false, default: "provided", options: ["provided", "ai_suggested"] }
   archive:
-    accept: [".zip", ".rar"]
+    accept: [".zip", ".rar", ".7z"]
     root_figure_pattern: "<墙号><可选字母后缀><可选-1或-2>-X|Y|Z.(png|jpg|jpeg|bmp)"
     required_root_directions: ["X", "Y", "Z"]
     required_root_workbook: "根目录必须且只能包含 1 个 .xlsx 墙体配筋表"
     required_folders: ["01", "02"]
-    description: "ZIP 或 RAR 内保留 X/Y/Z 应力图、1 个墙体配筋表以及含首图的 01、02 子目录；允许全部内容位于单层总目录中；字母后缀墙号独立处理，重复配筋行、-1/-2 图片组或表图墙号差异转为完成详情提醒，局部存疑字段留空但不阻断任务"
+    description: "ZIP/RAR/7Z 压缩包内保留 X/Y/Z 应力图、1 个墙体配筋表以及含首图的 01、02 子目录；允许全部内容位于单层总目录中；字母后缀墙号独立处理，重复配筋行、-1/-2 图片组或表图墙号差异转为完成详情提醒，局部存疑字段留空但不阻断任务"
   reinforcement_normalization:
     wall_id: "统一转大写；S7157A 与 S7157 为不同墙体"
     horizontal_vertical: "统一为 <层数>D<直径>间距<间距>，例如 1D25间距200"
@@ -1530,7 +1530,7 @@ submission_contracts:
     endpoint: "POST /api/jobs/calculation-books"
     desc: "创建计算书异步任务；不占用 CAD 槽，成功后产出一个 DOCX"
     preflight_endpoint: "POST /api/jobs/calculation-books/preflight"
-    preflight_desc: "上传并暂存 ZIP 或 RAR，先执行确定性格式检查；标准配筋表无需 AI，非标准配筋表返回 AI 启动确认提示，创建任务必须携带对应的一次性预检令牌"
+    preflight_desc: "上传并暂存 ZIP/RAR/7Z 压缩包，先执行确定性格式检查；标准配筋表无需 AI，非标准配筋表返回 AI 启动确认提示，创建任务必须携带对应的一次性预检令牌"
     transport:
       content_type: "multipart/form-data"
       preflight_archive_field: "archive"

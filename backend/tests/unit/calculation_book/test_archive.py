@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
+from src.calculation_book import archive as archive_module
 from src.calculation_book.archive import (
+    ArchiveFormat,
     ArchiveLimits,
     InvalidCalculationArchive,
+    detect_archive_format,
     validate_and_extract_archive,
 )
 from src.calculation_book.models import ReinforcementSource
@@ -29,6 +37,589 @@ def _valid_entries() -> dict[str, bytes]:
         "01/layout.png": b"layout",
         "02/model.png": b"model",
     }
+
+
+def _write_external_archive(path: Path) -> Path:
+    if path.suffix.lower() == ".rar":
+        path.write_bytes(b"Rar!\x1a\x07\x01\x00payload")
+    else:
+        path.write_bytes(b"7z\xbc\xaf'\x1cpayload")
+    return path
+
+
+def _extractor_settings(
+    tmp_path: Path,
+    *,
+    executable: Path | None = None,
+    list_timeout_seconds: int = 17,
+    extract_timeout_seconds: int = 29,
+    max_list_output_bytes: int = 8_388_608,
+) -> SimpleNamespace:
+    active_executable = executable or (tmp_path / "private 7-Zip" / "7z.exe")
+    if executable is None:
+        active_executable.parent.mkdir(parents=True)
+        active_executable.write_bytes(b"private-seven-zip")
+    return SimpleNamespace(
+        executable=active_executable,
+        list_timeout_seconds=list_timeout_seconds,
+        extract_timeout_seconds=extract_timeout_seconds,
+        max_list_output_bytes=max_list_output_bytes,
+    )
+
+
+def _slt_listing(
+    files: dict[str, bytes],
+    *,
+    directories: tuple[str, ...] = ("01", "02"),
+    archive_fields: dict[str, str] | None = None,
+    item_fields: dict[str, dict[str, str]] | None = None,
+    omit_packed_size_for: set[str] | None = None,
+) -> bytes:
+    metadata = {
+        "Path": "input archive.rar",
+        "Type": "Rar5",
+        "Physical Size": "1024",
+        "Solid": "+",
+        "Blocks": "1",
+        "Encrypted": "-",
+        "Multivolume": "-",
+        "Volumes": "1",
+    }
+    metadata.update(archive_fields or {})
+    records = ["\n".join(f"{key} = {value}" for key, value in metadata.items())]
+    for directory in directories:
+        records.append(
+            "\n".join(
+                (
+                    f"Path = {directory}",
+                    "Size = 0",
+                    "Packed Size = 0",
+                    "Attributes = D",
+                    "Folder = +",
+                    "Encrypted = -",
+                )
+            )
+        )
+    for name, payload in files.items():
+        fields = {
+            "Path": name,
+            "Size": str(len(payload)),
+            "Attributes": "A",
+            "Folder": "-",
+            "Encrypted": "-",
+        }
+        if name not in (omit_packed_size_for or set()):
+            fields["Packed Size"] = str(max(len(payload), 1))
+        fields.update((item_fields or {}).get(name, {}))
+        records.append("\n".join(f"{key} = {value}" for key, value in fields.items()))
+    return ("\n\n----------\n\n" + "\n\n".join(records) + "\n").encode("utf-8")
+
+
+def _mock_external_run(
+    monkeypatch: pytest.MonkeyPatch,
+    listing: bytes,
+    extracted_files: dict[str, bytes] | None,
+    *,
+    list_result: subprocess.CompletedProcess[bytes] | None = None,
+    extract_result: subprocess.CompletedProcess[bytes] | None = None,
+) -> list[tuple[list[str], dict[str, Any]]]:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    class FakeListingProcess:
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            calls.append((args, kwargs))
+            result = list_result or subprocess.CompletedProcess(args, 0, listing, b"")
+            kwargs["stdout"].write(result.stdout)
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(result.stderr)
+            kwargs["stderr"].flush()
+            self.returncode = result.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            return self.returncode
+
+        def terminate(self) -> None:
+            calls.append((["<terminate-listing>"], {}))
+
+        def kill(self) -> None:
+            return None
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append((args, kwargs))
+        assert args[1] == "x"
+        output_argument = next(argument for argument in args if argument.startswith("-o"))
+        output_root = Path(output_argument[2:])
+        for name, payload in (extracted_files or {}).items():
+            target = output_root.joinpath(*name.replace("\\", "/").split("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(payload)
+        return extract_result or subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.Popen", FakeListingProcess)
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("suffix", "signature", "expected"),
+    [
+        (".zip", b"PK\x03\x04payload", ArchiveFormat.ZIP),
+        (".rar", b"Rar!\x1a\x07\x00payload", ArchiveFormat.RAR),
+        (".rar", b"Rar!\x1a\x07\x01\x00payload", ArchiveFormat.RAR),
+        (".7z", b"7z\xbc\xaf'\x1cpayload", ArchiveFormat.SEVEN_Z),
+        (".ZIP", b"PK\x03\x04payload", ArchiveFormat.ZIP),
+        (".RAR", b"Rar!\x1a\x07\x01\x00payload", ArchiveFormat.RAR),
+        (".7Z", b"7z\xbc\xaf'\x1cpayload", ArchiveFormat.SEVEN_Z),
+        (".ZIP", b"PK\x05\x06", ArchiveFormat.ZIP),
+        (".ZIP", b"PK\x07\x08", ArchiveFormat.ZIP),
+    ],
+)
+def test_detects_archive_format_from_suffix_and_magic_bytes(
+    tmp_path: Path,
+    suffix: str,
+    signature: bytes,
+    expected: ArchiveFormat,
+) -> None:
+    archive = tmp_path / f"input{suffix}"
+    archive.write_bytes(signature)
+
+    assert detect_archive_format(archive) is expected
+
+
+def test_rejects_unknown_archive_magic_bytes(tmp_path: Path) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(b"not-an-archive")
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        detect_archive_format(archive)
+
+
+def test_rejects_archive_suffix_and_magic_mismatch(tmp_path: Path) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(b"Rar!\x1a\x07\x01\x00")
+
+    with pytest.raises(InvalidCalculationArchive, match="后缀.*签名.*不一致"):
+        detect_archive_format(archive)
+
+
+@pytest.mark.parametrize("payload", [b"", b"P", b"PK\x03"])
+def test_rejects_empty_or_short_archive_signatures(
+    tmp_path: Path,
+    payload: bytes,
+) -> None:
+    archive = tmp_path / "input.zip"
+    archive.write_bytes(payload)
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        detect_archive_format(archive)
+
+
+def test_validation_rejects_zip_content_renamed_as_rar_before_extraction(
+    tmp_path: Path,
+) -> None:
+    archive = _write_archive(tmp_path / "renamed.rar", _valid_entries())
+
+    with pytest.raises(InvalidCalculationArchive, match="后缀.*签名.*不一致"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_validation_rejects_unknown_rar_signature_without_calling_tar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "unknown.rar"
+    archive.write_bytes(b"not-a-rar")
+
+    def fail_if_tar_is_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("tar must not be called before archive signature validation")
+
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.run",
+        fail_if_tar_is_called,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="无法识别.*签名"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_validation_fails_closed_for_7z_before_calling_tar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = tmp_path / "input.7z"
+    archive.write_bytes(b"7z\xbc\xaf'\x1cpayload")
+
+    def fail_if_tar_is_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7z must not be routed through the legacy RAR tar path")
+
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.run",
+        fail_if_tar_is_called,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="私有解包器.*(?:尚未接入|不可用)"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+@pytest.mark.parametrize("suffix", [".rar", ".7z"])
+def test_external_archive_uses_private_7zip_with_utf8_and_yaml_timeouts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / f"input archive{suffix}")
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    listing = _slt_listing(
+        entries,
+        omit_packed_size_for={"01/layout.png"},
+    )
+    calls = _mock_external_run(monkeypatch, listing, entries)
+
+    contents = validate_and_extract_archive(
+        archive,
+        tmp_path / "destination with spaces",
+        archive_extractor=settings,
+    )
+
+    assert contents.layout_image.read_bytes() == b"layout"
+    assert contents.model_image.read_bytes() == b"model"
+    assert len(calls) == 2
+    list_args, list_kwargs = calls[0]
+    assert list_args == [
+        str(settings.executable.resolve()),
+        "l",
+        "-slt",
+        "-sccUTF-8",
+        "-bd",
+        str(archive),
+    ]
+    assert list_kwargs["stdin"] is subprocess.DEVNULL
+    assert list_kwargs["creationflags"] == int(
+        getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
+    assert list_kwargs["shell"] is False
+    assert list_kwargs["stdout"].closed
+    assert list_kwargs["stderr"].closed
+    assert "capture_output" not in list_kwargs
+    extract_args, extract_kwargs = calls[1]
+    assert extract_args == [
+        str(settings.executable.resolve()),
+        "x",
+        "-y",
+        "-bd",
+        "-bb0",
+        "-sccUTF-8",
+        f"-o{tmp_path / 'destination with spaces'}",
+        str(archive),
+    ]
+    assert extract_kwargs == {
+        "check": False,
+        "capture_output": True,
+        "stdin": subprocess.DEVNULL,
+        "timeout": 29,
+        "creationflags": int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
+        "shell": False,
+    }
+
+
+@pytest.mark.parametrize("relative_name", ["-input.rar", "@input.7z"])
+def test_external_archive_resolves_switch_like_relative_paths_before_7zip_calls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_name: str,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    archive = _write_external_archive(Path(relative_name))
+    resolved_archive = archive.resolve(strict=True)
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    calls = _mock_external_run(monkeypatch, _slt_listing(entries), entries)
+
+    validate_and_extract_archive(
+        archive,
+        tmp_path / "extracted",
+        archive_extractor=settings,
+    )
+
+    assert len(calls) == 2
+    for args, _ in calls:
+        assert args[-1] == str(resolved_archive)
+        assert Path(args[-1]).is_absolute()
+        assert not args[-1].startswith(("-", "@"))
+        assert relative_name not in args
+
+
+@pytest.mark.parametrize("unsafe_kind", ["symlink", "reparse"])
+def test_external_archive_rejects_unsafe_archive_file_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_kind: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "unsafe-input.rar")
+    settings = _extractor_settings(tmp_path)
+    archive_size = archive.stat().st_size
+    if unsafe_kind == "symlink":
+        real_lstat = Path.lstat
+        archive_absolute = Path(os.path.abspath(archive))
+
+        def mark_archive_as_symlink(path: Path) -> os.stat_result:
+            file_stat = real_lstat(path)
+            if Path(os.path.abspath(path)) != archive_absolute:
+                return file_stat
+            values = list(file_stat)
+            values[0] = stat.S_IFLNK | 0o777
+            return os.stat_result(values)
+
+        monkeypatch.setattr(Path, "lstat", mark_archive_as_symlink)
+    else:
+        real_is_reparse_point = archive_module._is_reparse_point
+
+        def mark_archive_as_reparse(file_stat: os.stat_result) -> bool:
+            return (
+                stat.S_ISREG(file_stat.st_mode)
+                and file_stat.st_size == archive_size
+            ) or real_is_reparse_point(file_stat)
+
+        monkeypatch.setattr(
+            "src.calculation_book.archive._is_reparse_point",
+            mark_archive_as_reparse,
+        )
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7-Zip must not run for an unsafe archive path")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match="归档文件.*不安全"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+
+def test_external_archive_rejects_directory_archive_path_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive_directory = tmp_path / "directory.rar"
+    archive_directory.mkdir()
+    settings = _extractor_settings(tmp_path)
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("7-Zip must not run for an archive directory")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match="归档文件.*普通文件"):
+        archive_module._extract_external_archive(
+            archive_directory,
+            tmp_path / "extracted",
+            ArchiveLimits(),
+            archive_format=ArchiveFormat.RAR,
+            archive_extractor=settings,
+        )
+
+
+@pytest.mark.parametrize(
+    ("executable", "message"),
+    [
+        (Path("bin/7-Zip/7z.exe"), "绝对路径"),
+        (Path("C:/missing-private-7zip/7z.exe"), "不存在"),
+    ],
+)
+def test_external_archive_rejects_non_absolute_or_missing_private_extractor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    executable: Path,
+    message: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.rar")
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("no executable discovery or subprocess call is allowed")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+    monkeypatch.setattr("src.calculation_book.archive.shutil.which", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match=message):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=_extractor_settings(tmp_path, executable=executable),
+        )
+
+
+def test_external_archive_rejects_list_timeout_without_running_extract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.7z")
+    settings = _extractor_settings(tmp_path)
+    calls: list[list[str]] = []
+
+    class HangingListingProcess:
+        def __init__(self, args: list[str], **kwargs: Any) -> None:
+            calls.append(args)
+
+        def wait(self, timeout: float | None = None) -> int:
+            raise subprocess.TimeoutExpired(cmd="7z", timeout=timeout)
+
+        def terminate(self) -> None:
+            return None
+
+        def kill(self) -> None:
+            return None
+
+    monotonic_values = iter((0.0, 18.0))
+    monkeypatch.setattr(
+        "src.calculation_book.archive.subprocess.Popen",
+        HangingListingProcess,
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.archive.time.monotonic",
+        lambda: next(monotonic_values),
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="清单读取超时"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("stderr", "message"),
+    [
+        (b"ERROR: Can not open the file as archive", "损坏|格式无效"),
+        (b"ERROR: Data Error\nprivate/member/secret.png", "读取失败"),
+    ],
+)
+def test_external_archive_rejects_7zip_list_errors_without_leaking_member_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: bytes,
+    message: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.rar")
+    settings = _extractor_settings(tmp_path)
+    result = subprocess.CompletedProcess(["7z"], 2, b"", stderr + b"X" * 2_000)
+    calls = _mock_external_run(
+        monkeypatch,
+        b"",
+        None,
+        list_result=result,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match=message) as exc_info:
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert "secret.png" not in str(exc_info.value)
+    assert len(str(exc_info.value)) < 600
+    assert len(calls) == 1
+
+
+def test_external_archive_rejects_unparseable_7zip_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.7z")
+    settings = _extractor_settings(tmp_path)
+    calls = _mock_external_run(monkeypatch, b"arbitrary banner only", None)
+
+    with pytest.raises(InvalidCalculationArchive, match="清单.*无法解析"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+def test_external_archive_rejects_oversized_listing_before_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "oversized-listing.7z")
+    settings = _extractor_settings(tmp_path, max_list_output_bytes=32)
+    entries = _valid_entries()
+    calls = _mock_external_run(monkeypatch, _slt_listing(entries), None)
+
+    with pytest.raises(InvalidCalculationArchive, match="清单输出超过限制"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 2
+    assert calls[1][0] == ["<terminate-listing>"]
+
+
+def test_external_archive_rejects_extract_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.rar")
+    settings = _extractor_settings(tmp_path)
+    listing = _slt_listing(_valid_entries())
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    def fake_run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append((args, kwargs))
+        raise subprocess.TimeoutExpired(cmd="7z", timeout=29)
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fake_run)
+
+    with pytest.raises(InvalidCalculationArchive, match="解压超时"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 2
+
+
+def test_external_archive_rejects_extract_error_without_leaking_member_names(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.7z")
+    settings = _extractor_settings(tmp_path)
+    listing = _slt_listing(_valid_entries())
+    extract_result = subprocess.CompletedProcess(
+        ["7z"],
+        2,
+        b"",
+        b"ERROR: Data Error\nprivate/member/secret.png" + b"X" * 2_000,
+    )
+    calls = _mock_external_run(
+        monkeypatch,
+        listing,
+        None,
+        extract_result=extract_result,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="解压失败") as exc_info:
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert "secret.png" not in str(exc_info.value)
+    assert len(str(exc_info.value)) < 600
+    assert len(calls) == 2
 
 
 def test_extracts_only_the_required_calculation_structure(tmp_path: Path) -> None:
@@ -179,6 +770,22 @@ def test_rejects_unpaired_middle_slab_figure(tmp_path: Path) -> None:
         "/absolute.png",
         "C:/windows/system32/unsafe.png",
         "01/../../outside.png",
+        "//server/share/unsafe.png",
+        "bad\x01name.png",
+        "image.png:secret",
+        "CON",
+        "folder/aux.txt",
+        "folder/LPT1.png",
+        "trailing-dot./image.png",
+        "trailing-space /image.png",
+        "bad*name.png",
+        "bad?name.png",
+        'bad"name.png',
+        "bad<name.png",
+        "bad>name.png",
+        "bad|name.png",
+        "COM¹.txt",
+        "folder/LPT¹.png",
     ],
 )
 def test_rejects_path_traversal_and_absolute_members(
@@ -193,6 +800,463 @@ def test_rejects_path_traversal_and_absolute_members(
         validate_and_extract_archive(archive, tmp_path / "extracted")
 
     assert not (tmp_path / "outside.png").exists()
+
+
+def test_zip_rejects_case_insensitive_duplicate_targets(tmp_path: Path) -> None:
+    entries = _valid_entries()
+    entries["A.png"] = b"first"
+    entries["a.PNG"] = b"second"
+    archive = _write_archive(tmp_path / "duplicate-case.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="重复路径"):
+        validate_and_extract_archive(archive, tmp_path / "extracted")
+
+
+def test_zip_counts_directories_toward_entry_limit(tmp_path: Path) -> None:
+    entries = _valid_entries()
+    entries["extra-directory/"] = b""
+    archive = _write_archive(tmp_path / "directory-limit.zip", entries)
+
+    with pytest.raises(InvalidCalculationArchive, match="条目数量.*6"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            limits=ArchiveLimits(max_files=6),
+        )
+
+
+def test_zip_rejects_symbolic_link_member(tmp_path: Path) -> None:
+    archive_path = tmp_path / "symlink.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for name, payload in _valid_entries().items():
+            archive.writestr(name, payload)
+        link = zipfile.ZipInfo("unsafe-link")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        archive.writestr(link, b"RX1-X.png")
+
+    with pytest.raises(InvalidCalculationArchive, match="不安全文件类型"):
+        validate_and_extract_archive(archive_path, tmp_path / "extracted")
+
+
+@pytest.mark.parametrize("file_first", [True, False])
+def test_zip_rejects_file_directory_prefix_conflicts_before_writing(
+    tmp_path: Path,
+    file_first: bool,
+) -> None:
+    entries = _valid_entries()
+    conflicting = [
+        ("conflict", b"file"),
+        ("conflict/child.png", b"child"),
+    ]
+    if not file_first:
+        conflicting.reverse()
+    entries.update(conflicting)
+    archive = _write_archive(tmp_path / "prefix-conflict.zip", entries)
+    destination = tmp_path / "extracted"
+
+    with pytest.raises(InvalidCalculationArchive, match="文件与目录路径冲突"):
+        validate_and_extract_archive(archive, destination)
+
+    assert not destination.exists() or not any(destination.iterdir())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        zipfile.BadZipFile("Bad CRC-32 for file"),
+        OSError("simulated ZIP read/write failure"),
+    ],
+)
+def test_zip_wraps_crc_and_os_errors_without_leaving_partial_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    archive = _write_archive(tmp_path / "broken-read.zip", _valid_entries())
+    destination = tmp_path / "extracted"
+
+    def fail_copy(*args: object, **kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr("src.calculation_book.archive.shutil.copyfileobj", fail_copy)
+
+    with pytest.raises(InvalidCalculationArchive, match="ZIP.*解压失败"):
+        validate_and_extract_archive(archive, destination)
+
+    assert not destination.exists() or not any(destination.iterdir())
+
+
+@pytest.mark.parametrize(
+    "unsafe_name",
+    [
+        "../outside.png",
+        "/absolute.png",
+        "C:/windows/system32/unsafe.png",
+        "\\\\server\\share\\unsafe.png",
+        "bad\x01name.png",
+        "image.png:secret",
+        "CON",
+        "folder/aux.txt",
+        "folder/LPT1.png",
+        "trailing-dot./image.png",
+        "trailing-space /image.png",
+        "bad*name.png",
+        "bad?name.png",
+        'bad"name.png',
+        "bad<name.png",
+        "bad>name.png",
+        "bad|name.png",
+        "COM¹.txt",
+        "folder/LPT¹.png",
+    ],
+)
+def test_external_archive_rejects_unsafe_member_paths_before_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_name: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "unsafe.rar")
+    settings = _extractor_settings(tmp_path)
+    listing = _slt_listing({unsafe_name: b"unsafe"}, directories=())
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="不安全路径"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+    assert not (tmp_path / "outside.png").exists()
+
+
+def test_external_archive_rejects_case_insensitive_duplicate_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "duplicate.7z")
+    settings = _extractor_settings(tmp_path)
+    listing = _slt_listing({"A.png": b"a", "a.PNG": b"b"}, directories=())
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="重复路径"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("file_first", [True, False])
+def test_external_archive_rejects_file_directory_prefix_conflicts_before_extract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    file_first: bool,
+) -> None:
+    archive = _write_external_archive(tmp_path / "prefix-conflict.rar")
+    settings = _extractor_settings(tmp_path)
+    conflicting = [
+        ("conflict", b"file"),
+        ("conflict/child.png", b"child"),
+    ]
+    if not file_first:
+        conflicting.reverse()
+    listing = _slt_listing(dict(conflicting), directories=())
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="文件与目录路径冲突"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "unsafe_fields",
+    [
+        {"Symbolic Link": "target.png"},
+        {"Hard Link": "target.png"},
+        {"Alternate Stream": "+"},
+        {"Reparse": "+"},
+        {"Attributes": "_ lrwxrwxrwx"},
+        {"Type": "Character Device"},
+    ],
+)
+def test_external_archive_rejects_links_streams_reparse_and_special_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_fields: dict[str, str],
+) -> None:
+    archive = _write_external_archive(tmp_path / "unsafe-type.rar")
+    settings = _extractor_settings(tmp_path)
+    name = "unsafe.png"
+    listing = _slt_listing(
+        {name: b"unsafe"},
+        directories=(),
+        item_fields={name: unsafe_fields},
+    )
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="不安全文件类型"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("archive_fields", "item_fields", "message"),
+    [
+        ({"Encrypted": "+"}, {}, "加密"),
+        ({}, {"Encrypted": "+"}, "加密"),
+        ({"Volumes": "2"}, {}, "分卷"),
+        ({"Multivolume": "+"}, {}, "分卷"),
+        ({}, {"Volume Index": "0"}, "分卷"),
+        ({}, {"Volume Index": "1"}, "分卷"),
+    ],
+)
+def test_external_archive_rejects_encryption_and_multivolume_archives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    archive_fields: dict[str, str],
+    item_fields: dict[str, str],
+    message: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "unsupported.7z")
+    settings = _extractor_settings(tmp_path)
+    name = "file.png"
+    listing = _slt_listing(
+        {name: b"x"},
+        directories=(),
+        archive_fields=archive_fields,
+        item_fields={name: item_fields},
+    )
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match=message):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("volume_index", ["", "   "])
+def test_external_archive_accepts_real_7zip_false_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    volume_index: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "ordinary-single-volume.rar")
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    false_item_flags = {
+        "Folder": "-",
+        "Encrypted": "-",
+        "Solid": "-",
+        "Split Before": "-",
+        "Split After": "-",
+        "Volume Index": volume_index,
+    }
+    listing = _slt_listing(
+        entries,
+        directories=(),
+        archive_fields={
+            "Solid": "-",
+            "Encrypted": "-",
+            "Multivolume": "-",
+            "Volumes": "1",
+        },
+        item_fields=dict.fromkeys(entries, false_item_flags),
+    )
+    calls = _mock_external_run(monkeypatch, listing, entries)
+
+    contents = validate_and_extract_archive(
+        archive,
+        tmp_path / "extracted",
+        archive_extractor=settings,
+    )
+
+    assert [figure.direction for figure in contents.reinforcement_figures] == [
+        "X",
+        "Y",
+        "Z",
+    ]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("field", ["Split Before", "Split After"])
+def test_external_archive_rejects_enabled_split_flags(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "split.rar")
+    settings = _extractor_settings(tmp_path)
+    name = "file.png"
+    listing = _slt_listing(
+        {name: b"x"},
+        directories=(),
+        item_fields={name: {field: "+"}},
+    )
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match="分卷"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("value", ["", "-", "0", "false", "no"])
+def test_slt_flag_parser_recognizes_false_values(value: str) -> None:
+    assert archive_module._parse_slt_flag(value) is False
+
+
+@pytest.mark.parametrize("value", ["+", "1", "true", "yes"])
+def test_slt_flag_parser_recognizes_true_values(value: str) -> None:
+    assert archive_module._parse_slt_flag(value) is True
+
+
+def test_slt_flag_parser_rejects_unknown_nonempty_value() -> None:
+    with pytest.raises(InvalidCalculationArchive, match="清单.*无法解析"):
+        archive_module._parse_slt_flag("maybe")
+
+
+@pytest.mark.parametrize(
+    ("files", "directories", "limits", "message"),
+    [
+        ({}, (), ArchiveLimits(), "没有文件"),
+        ({"a": b"x"}, ("d",), ArchiveLimits(max_files=1), "条目数量"),
+        ({"a": b"xx"}, (), ArchiveLimits(max_single_file_bytes=1), "单个文件"),
+        (
+            {"a": b"xx", "b": b"yy"},
+            (),
+            ArchiveLimits(max_total_bytes=3),
+            "总大小",
+        ),
+        ({"a": b"x" * 20}, (), ArchiveLimits(max_compression_ratio=1.0), "压缩比"),
+    ],
+)
+def test_external_archive_enforces_entry_size_and_ratio_limits_before_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    files: dict[str, bytes],
+    directories: tuple[str, ...],
+    limits: ArchiveLimits,
+    message: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "limited.rar")
+    settings = _extractor_settings(tmp_path)
+    listing = _slt_listing(files, directories=directories)
+    calls = _mock_external_run(monkeypatch, listing, None)
+
+    with pytest.raises(InvalidCalculationArchive, match=message):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+            limits=limits,
+        )
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mutation", ["extra", "missing", "wrong-size"])
+def test_external_archive_postcheck_requires_exact_declared_file_set_and_sizes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    archive = _write_external_archive(tmp_path / "postcheck.7z")
+    settings = _extractor_settings(tmp_path)
+    declared = _valid_entries()
+    extracted = dict(declared)
+    if mutation == "extra":
+        extracted["unexpected.txt"] = b"extra"
+    elif mutation == "missing":
+        extracted.pop("RX1-Z.png")
+    else:
+        extracted["RX1-Y.png"] = b"wrong-size"
+    calls = _mock_external_run(monkeypatch, _slt_listing(declared), extracted)
+
+    with pytest.raises(InvalidCalculationArchive, match="解压后校验失败"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 2
+
+
+def test_external_archive_postcheck_rejects_reparse_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "postcheck-reparse.rar")
+    settings = _extractor_settings(tmp_path)
+    entries = _valid_entries()
+    calls = _mock_external_run(monkeypatch, _slt_listing(entries), entries)
+    real_is_reparse_point = archive_module._is_reparse_point
+
+    def mark_layout_as_reparse(file_stat: os.stat_result) -> bool:
+        return (
+            stat.S_ISREG(file_stat.st_mode)
+            and file_stat.st_size == len(entries["01/layout.png"])
+        ) or real_is_reparse_point(file_stat)
+
+    monkeypatch.setattr(
+        "src.calculation_book.archive._is_reparse_point",
+        mark_layout_as_reparse,
+    )
+
+    with pytest.raises(InvalidCalculationArchive, match="解压后校验失败"):
+        validate_and_extract_archive(
+            archive,
+            tmp_path / "extracted",
+            archive_extractor=settings,
+        )
+
+    assert len(calls) == 2
+
+
+def test_external_archive_rejects_non_empty_destination_before_subprocess(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    archive = _write_external_archive(tmp_path / "input.rar")
+    settings = _extractor_settings(tmp_path)
+    destination = tmp_path / "not-empty"
+    destination.mkdir()
+    (destination / "existing.txt").write_text("keep", encoding="utf-8")
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        pytest.fail("subprocess must not run for a non-empty destination")
+
+    monkeypatch.setattr("src.calculation_book.archive.subprocess.run", fail_if_called)
+
+    with pytest.raises(InvalidCalculationArchive, match="目标目录.*为空"):
+        validate_and_extract_archive(
+            archive,
+            destination,
+            archive_extractor=settings,
+        )
 
 
 @pytest.mark.parametrize(

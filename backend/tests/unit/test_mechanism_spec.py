@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from src.config.mechanism_spec import (
     MechanismSpecLoader,
@@ -91,6 +92,63 @@ def test_repo_mechanism_spec_exposes_typed_task_group_submission_rules() -> None
     assert [artifact.field for artifact in deliverable.artifacts] == ["package_zip", "ied_xlsx"]
     assert deliverable.artifacts[1].required_when is not None
     assert deliverable.artifacts[1].required_when.field == "include_ied_plan"
+
+
+def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    MechanismSpecLoader.clear_cache()
+
+    runtime = MechanismSpecLoader.load(
+        repo_root / "documents" / "参数规范-3.yaml"
+    ).deployment_mechanism.archive_runtime
+
+    assert runtime is not None
+    assert runtime.version == "26.02"
+    assert runtime.architecture == "x64"
+    assert runtime.source.filename == "7z2602-x64.exe"
+    assert runtime.source.sha256 == (
+        "6745fa76dc2ea031596d8678f6f6b99c3c1b435b4164a63485adbbc7b8d82ef0"
+    )
+    assert runtime.source.size_bytes == 1_657_896
+    assert runtime.bootstrap.filename == "7zr.exe"
+    assert runtime.bootstrap.sha256 == (
+        "56b8cc9f4971cef253644fafe54063ed7fdca551d4dee0f8c6baa81b855acd72"
+    )
+    assert runtime.bootstrap.size_bytes == 602_112
+    assert runtime.cache_dir == "build/runtime-cache/7-Zip"
+    assert runtime.destination_dir == "bin/7-Zip"
+    assert runtime.required_handlers == ("7z", "zip", "Rar", "Rar5")
+    assert runtime.probe.timeout_sec == 30
+    assert runtime.probe.max_output_bytes == 1_048_576
+    assert runtime.probe.fixture_source_relative_path == (
+        "fixtures/archive-runtime-smoke-rar5.rar.b64"
+    )
+    assert runtime.probe.fixture_encoding == "base64"
+    assert runtime.probe.fixture_source_sha256 == (
+        "324185d843a8046ad64fbaa434c80c2568e49662c3f16c5c7e24ce7eacc2bc92"
+    )
+    assert runtime.probe.fixture_source_size_bytes == 173
+    assert runtime.probe.fixture_decoded_sha256 == (
+        "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886"
+    )
+    assert runtime.probe.fixture_decoded_size_bytes == 129
+    assert runtime.probe.payload_source_relative_path == (
+        "fixtures/archive-runtime-smoke.txt"
+    )
+    assert runtime.probe.payload_filename == "archive-runtime-smoke.txt"
+    assert runtime.probe.payload_sha256 == (
+        "6eaab97fc311dcba726775b8aa04165069688caa965df2fde9e12813cb74802f"
+    )
+    assert runtime.probe.payload_size_bytes == 40
+    assert {item.filename: item.sha256 for item in runtime.required_files} == {
+        "7z.exe": "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d",
+        "7z.dll": "69fd4df057985c40e510e2fac182881c7f85e90aa13ec703f763a8fdb2ce61f8",
+        "License.txt": "519ac0a4bded9c18ea02e0afb71f663d8c47373bd9facd3ac96a79f51d77765d",
+    }
+    with pytest.raises(ValidationError, match="frozen"):
+        runtime.version = "changed"
+    with pytest.raises(ValidationError, match="frozen"):
+        runtime.probe.timeout_sec = 1
 
 
 def test_mechanism_spec_rejects_duplicate_submission_task_roles(tmp_path: Path) -> None:

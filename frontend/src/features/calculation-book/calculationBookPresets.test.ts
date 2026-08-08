@@ -97,7 +97,7 @@ const schema = {
     },
   ],
   archive: {
-    accept: [".zip", ".rar"],
+    accept: [".zip", ".rar", ".7z"],
     requiredRootDirections: ["X", "Y", "Z"],
     requiredFolders: ["01", "02"],
     rootFigurePattern: "<wall>-X|Y|Z.png",

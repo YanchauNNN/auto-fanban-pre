@@ -28,7 +28,7 @@ from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
 from src.cad.slot_pool import CADSlotPool
-from src.calculation_book.archive import ArchiveLimits
+from src.calculation_book.archive import ArchiveFormat, ArchiveLimits
 from src.calculation_book.diagnostic_log import (
     calculation_book_log_filename,
     calculation_book_log_matches_terminal_state,
@@ -76,6 +76,20 @@ _UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT = (
     "unsafe calculation preflight cache root"
 )
 STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE = "标准配筋模板不可用"
+_CALCULATION_ARCHIVE_MIME_BY_FORMAT = {
+    ArchiveFormat.ZIP: "application/zip",
+    ArchiveFormat.RAR: "application/vnd.rar",
+    ArchiveFormat.SEVEN_Z: "application/x-7z-compressed",
+}
+_CALCULATION_ARCHIVE_SUFFIXES = frozenset(
+    f".{archive_format.value}" for archive_format in ArchiveFormat
+)
+
+
+def _calculation_archive_content_type(suffix: str) -> str:
+    return _CALCULATION_ARCHIVE_MIME_BY_FORMAT[
+        ArchiveFormat(suffix.removeprefix("."))
+    ]
 
 
 def _validate_calculation_preflight_cache_root(cache_root: Path) -> None:
@@ -118,7 +132,7 @@ def _cleanup_calculation_preflight_cache(
     for candidate in candidates:
         if (
             not candidate.name.startswith("calculation-preflight-")
-            or candidate.suffix.lower() not in {".zip", ".rar"}
+            or candidate.suffix.lower() not in _CALCULATION_ARCHIVE_SUFFIXES
         ):
             continue
         try:
@@ -1134,7 +1148,7 @@ class DeliverableApiRuntime:
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail={
                         "upload_errors": {
-                            "archive": ["预检文件已失效，请重新选择 ZIP 或 RAR 并预检"]
+                            "archive": ["预检文件已失效，请重新选择压缩包并预检"]
                         },
                         "param_errors": {},
                     },
@@ -1238,9 +1252,9 @@ class DeliverableApiRuntime:
         active_reinforcement_source = ReinforcementSource(reinforcement_source)
         upload_errors: dict[str, list[str]] = {}
         archive_suffix = Path(archive.filename).suffix.lower()
-        if archive_suffix not in {".zip", ".rar"}:
+        if archive_suffix not in _CALCULATION_ARCHIVE_SUFFIXES:
             upload_errors.setdefault("archive", []).append(
-                "only .zip or .rar files are allowed"
+                "only .zip, .rar or .7z files are allowed"
             )
         if not archive.content:
             upload_errors.setdefault("archive", []).append("archive is empty")
@@ -1281,6 +1295,7 @@ class DeliverableApiRuntime:
                         max_single_file_bytes=runtime.max_single_file_mb * 1024 * 1024,
                         max_compression_ratio=runtime.max_compression_ratio,
                     ),
+                    archive_extractor=runtime.archive_extractor,
                     ocr_recognizer=lambda path, direction: recognize_stress_legend(
                         path,
                         direction=direction,
@@ -1359,13 +1374,8 @@ class DeliverableApiRuntime:
                             Path(archive.filename).name
                             or "calculation-images.zip"
                         ),
-                        "content_type": (
-                            archive.content_type
-                            or (
-                                "application/vnd.rar"
-                                if archive_suffix == ".rar"
-                                else "application/zip"
-                            )
+                        "content_type": _calculation_archive_content_type(
+                            archive_suffix
                         ),
                         "include_slab_stress": include_slab_stress,
                         "reinforcement_source": active_reinforcement_source.value,

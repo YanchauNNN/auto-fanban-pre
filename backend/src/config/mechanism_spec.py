@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, PositiveInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator, model_validator
 
 DEFAULT_MECHANISM_SPEC_PATH = Path("documents") / "参数规范-3.yaml"
 MECHANISM_SPEC_PATH_ENV_VAR = "FANBAN_MECHANISM_SPEC_PATH"
@@ -27,6 +28,35 @@ _FORBIDDEN_TOP_LEVEL_KEYS = {
     "titleblock_extract",
 }
 _FACTORY_CODE_RE = re.compile(r"^(?:[A-Z][A-Z0-9]{1,3}|\d{3})$")
+_WINDOWS_INVALID_FILENAME_CHARS = frozenset('<>:"/\\|?*')
+_WINDOWS_RESERVED_FILENAME_STEMS = {
+    "aux",
+    "clock$",
+    "con",
+    "nul",
+    "prn",
+    *(f"com{number}" for number in range(1, 10)),
+    *(f"lpt{number}" for number in range(1, 10)),
+}
+
+
+def _windows_filename_key(value: str) -> str:
+    return unicodedata.normalize("NFC", value).rstrip(" .").casefold()
+
+
+def _validate_windows_basename(value: str, *, label: str) -> str:
+    if Path(value).name != value or value in {".", ".."}:
+        raise ValueError(f"{label} must be a basename")
+    if value != value.rstrip(" ."):
+        raise ValueError(f"{label} must not end with a dot or space")
+    if any(character in _WINDOWS_INVALID_FILENAME_CHARS for character in value):
+        raise ValueError(f"{label} contains a Windows-invalid character")
+    if any(ord(character) < 32 for character in value):
+        raise ValueError(f"{label} contains a control character")
+    stem = value.split(".", 1)[0].casefold()
+    if stem in _WINDOWS_RESERVED_FILENAME_STEMS:
+        raise ValueError(f"{label} uses a Windows-reserved name")
+    return value
 
 
 class PermissionsConfig(BaseModel):
@@ -343,6 +373,127 @@ class InstallerConfig(BaseModel):
     url: str
 
 
+class ArchiveRuntimeAssetConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    filename: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https://")
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: PositiveInt
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        return _validate_windows_basename(value, label="archive runtime asset filename")
+
+
+class ArchiveRuntimeFileConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    filename: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("filename")
+    @classmethod
+    def validate_filename(cls, value: str) -> str:
+        return _validate_windows_basename(value, label="archive runtime required filename")
+
+
+class ArchiveRuntimeProbeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    timeout_sec: PositiveInt
+    max_output_bytes: PositiveInt
+    fixture_source_relative_path: str = Field(min_length=1)
+    fixture_encoding: Literal["base64"]
+    fixture_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fixture_source_size_bytes: PositiveInt
+    fixture_decoded_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fixture_decoded_size_bytes: PositiveInt
+    payload_source_relative_path: str = Field(min_length=1)
+    payload_filename: str = Field(min_length=1)
+    payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_size_bytes: PositiveInt
+
+    @field_validator("fixture_source_relative_path", "payload_source_relative_path")
+    @classmethod
+    def validate_source_relative_path(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("archive runtime probe source paths must be module-relative")
+        return path.as_posix()
+
+    @field_validator("payload_filename")
+    @classmethod
+    def validate_payload_filename(cls, value: str) -> str:
+        return _validate_windows_basename(
+            value,
+            label="archive runtime probe payload filename",
+        )
+
+    @model_validator(mode="after")
+    def validate_probe_paths(self) -> ArchiveRuntimeProbeConfig:
+        if Path(self.payload_source_relative_path).name != self.payload_filename:
+            raise ValueError(
+                "archive runtime probe payload source basename must match payload_filename"
+            )
+        if not self.fixture_source_relative_path.casefold().endswith(".b64"):
+            raise ValueError("base64 archive runtime probe fixture must use a .b64 source")
+        return self
+
+
+class ArchiveRuntimeMechanismConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    version: str = Field(min_length=1)
+    architecture: Literal["x64"] = "x64"
+    source: ArchiveRuntimeAssetConfig
+    bootstrap: ArchiveRuntimeAssetConfig
+    license_url: str = Field(pattern=r"^https://")
+    cache_dir: str = Field(min_length=1)
+    destination_dir: str = Field(min_length=1)
+    provenance_filename: str = Field(min_length=1)
+    required_files: tuple[ArchiveRuntimeFileConfig, ...] = Field(min_length=1)
+    required_handlers: tuple[str, ...] = Field(min_length=1)
+    version_marker: str = Field(min_length=1)
+    download_timeout_sec: PositiveInt
+    prepare_timeout_sec: PositiveInt
+    probe: ArchiveRuntimeProbeConfig
+
+    @field_validator("cache_dir", "destination_dir")
+    @classmethod
+    def validate_relative_dir(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("archive runtime directories must be package-relative")
+        return path.as_posix()
+
+    @field_validator("provenance_filename")
+    @classmethod
+    def validate_provenance_filename(cls, value: str) -> str:
+        return _validate_windows_basename(
+            value,
+            label="archive runtime provenance filename",
+        )
+
+    @model_validator(mode="after")
+    def validate_required_names(self) -> ArchiveRuntimeMechanismConfig:
+        filenames = [item.filename for item in self.required_files]
+        filename_keys = [_windows_filename_key(filename) for filename in filenames]
+        if len(filename_keys) != len(set(filename_keys)):
+            raise ValueError("archive runtime required filenames must be unique")
+        if _windows_filename_key(self.provenance_filename) in filename_keys:
+            raise ValueError("archive runtime provenance filename must not be a required binary")
+        if _windows_filename_key(self.source.filename) == _windows_filename_key(
+            self.bootstrap.filename
+        ):
+            raise ValueError("archive runtime source and bootstrap filenames must be unique")
+        handlers = list(self.required_handlers)
+        if len(handlers) != len(set(handlers)):
+            raise ValueError("archive runtime required handlers must be unique")
+        return self
+
+
 class DeploymentMechanismConfig(BaseModel):
     spec_name: str = "参数规范.yaml"
     runtime_spec_name: str = "参数规范_运行期.yaml"
@@ -350,6 +501,7 @@ class DeploymentMechanismConfig(BaseModel):
     default_frontend_api_port: int = 8000
     managed_pdf2_pc3_name: str = "打印PDF2.pc3"
     managed_monochrome_ctb_name: str = "fanban_monochrome.ctb"
+    archive_runtime: ArchiveRuntimeMechanismConfig | None = None
     installers: dict[str, InstallerConfig] = Field(
         default_factory=lambda: {
             "dotnet48": InstallerConfig(

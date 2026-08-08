@@ -14,7 +14,13 @@ const calculationFields = [
   { key: "template_type", label: "计算书模板", type: "select", required: true },
   { key: "project_no", label: "项目代号", type: "select", required: true },
   { key: "project_name", label: "项目名称", type: "text", required: true },
-  { key: "internal_code", label: "内部编号", type: "text", required: true },
+  {
+    key: "internal_code",
+    label: "内部编号",
+    type: "text",
+    required: true,
+    placeholder: "例如：20161NH-JGS01",
+  },
   { key: "version", label: "版本", type: "text", required: true, defaultValue: "A" },
   { key: "subproject_code", label: "子项代号或系统号", type: "select", required: true, options: ["RX"] },
   { key: "subproject_name", label: "子项或系统名称", type: "select", required: true, options: ["内部结构"] },
@@ -53,7 +59,7 @@ const schema = {
     projectOptions: [{ value: "2016", label: "浙江金七门核电厂1、2号机组" }],
     fields: calculationFields,
     archive: {
-      accept: [".zip", ".rar"],
+      accept: [".zip", ".rar", ".7z"],
       requiredRootDirections: ["X", "Y", "Z"],
       requiredFolders: ["01", "02"],
       rootFigurePattern: "<墙号>-X|Y|Z.png",
@@ -706,6 +712,12 @@ describe("CalculationBookWorkspace", () => {
     const uploadBox = uploadInput.closest("label");
     expect(uploadBox).not.toBeNull();
     expect(within(uploadBox as HTMLElement).getByText("上传压缩包")).toBeInTheDocument();
+    expect(uploadInput).toHaveAttribute("accept", ".zip,.rar,.7z");
+    expect(within(uploadBox as HTMLElement).getByText("单个 .zip、.rar 或 .7z 文件")).toBeInTheDocument();
+    expect(screen.getByLabelText("内部编号")).toHaveAttribute(
+      "placeholder",
+      "例如：20161NH-JGS01",
+    );
     const slabToggle = screen.getByRole("checkbox", { name: "包含楼板应力" });
     const slabBox = slabToggle.closest("label");
     const presetPanel = screen.getByRole("heading", { name: "参数预设" }).closest("section");
@@ -723,13 +735,18 @@ describe("CalculationBookWorkspace", () => {
     );
     await user.click(screen.getByText("压缩包结构要求"));
     expect(archiveHelp).toHaveAttribute("open");
+    expect(screen.getByText("计算图片.zip / .rar / .7z")).toBeInTheDocument();
+    expect(screen.getByText("单个 ZIP / RAR / 7Z")).toBeInTheDocument();
     expect(screen.getByText("墙体01-X.png")).toBeInTheDocument();
     expect(screen.getByText("墙体01-Y.png")).toBeInTheDocument();
     expect(screen.getByText("墙体01-Z.png")).toBeInTheDocument();
     expect(screen.getByText("01 / 厂房标高布置图")).toBeInTheDocument();
     expect(screen.getByText("02 / 墙体有限元模型图")).toBeInTheDocument();
-    await user.upload(uploadInput, new File(["zip"], "business-package.zip", { type: "application/zip" }));
-    expect(within(uploadBox as HTMLElement).getByText("business-package.zip")).toBeInTheDocument();
+    await user.upload(
+      uploadInput,
+      new File(["7z"], "business-package.7z", { type: "application/x-7z-compressed" }),
+    );
+    expect(within(uploadBox as HTMLElement).getByText("business-package.7z")).toBeInTheDocument();
     expect(screen.queryByLabelText("实配钢筋规格")).not.toBeInTheDocument();
 
     await user.keyboard("{Escape}");

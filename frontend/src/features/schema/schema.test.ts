@@ -545,6 +545,43 @@ describe("normalizeFormSchema", () => {
       }),
     ]);
   });
+
+  it("preserves all calculation-book archive formats supplied by the business schema", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [],
+        archive: {
+          accept: [".zip", ".rar", ".7z"],
+        },
+      },
+    });
+
+    expect(normalized.calculationBook?.archive.accept).toEqual([".zip", ".rar", ".7z"]);
+  });
+
+  it("falls back to every supported calculation-book archive format", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [],
+      },
+    });
+
+    expect(normalized.calculationBook?.archive.accept).toEqual([".zip", ".rar", ".7z"]);
+  });
 });
 
 describe("evaluateRequiredWhen", () => {
