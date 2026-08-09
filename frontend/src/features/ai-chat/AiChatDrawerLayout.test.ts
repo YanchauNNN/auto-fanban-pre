@@ -36,4 +36,28 @@ describe("AI chat drawer layout", () => {
 
     expect(assistantMessageRule).toContain("width: 86%;");
   });
+
+  it("uses one desktop mascot at the drawer top-left for hide and resize", () => {
+    const css = readFileSync(
+      resolve(process.cwd(), "src/features/ai-chat/AiChatDrawer.module.css"),
+      "utf8",
+    );
+    const drawerSource = readFileSync(
+      resolve(process.cwd(), "src/features/ai-chat/AiChatDrawer.tsx"),
+      "utf8",
+    );
+    const handleRule = css.match(/\.drawerMascotHandle\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const bubbleRule = css.match(/\.drawerMascotBubble\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+    const headerRule = css.match(/\.header\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+
+    expect(handleRule).toContain("position: absolute;");
+    expect(handleRule).toContain("top: 0.18rem;");
+    expect(handleRule).toContain("left: 0.45rem;");
+    expect(bubbleRule).toContain("top: calc(100% + 0.12rem);");
+    expect(bubbleRule).toContain("left: 0.25rem;");
+    expect(headerRule).toContain("padding: 1rem 1rem 0.75rem 6.35rem;");
+    expect(drawerSource).toContain("<AiDrawerMascotHandle");
+    expect(drawerSource).not.toContain("className={styles.resizeHandle}");
+    expect(drawerSource).not.toContain('aria-label="关闭 AI 助手"');
+  });
 });

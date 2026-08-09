@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -172,6 +172,74 @@ describe("AiChatDrawer attachments", () => {
     await user.click(screen.getByRole("button", { name: "打开 AI 助手" }));
 
     expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
+  });
+
+  it("uses the open-drawer mascot as the only hide and resize control", async () => {
+    const { adapter } = createAdapter();
+    renderDrawer(adapter);
+
+    const handle = await screen.findByRole("button", {
+      name: "隐藏或调整 AI 助手窗口",
+    });
+    expect(handle).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "关闭 AI 助手" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("separator", { name: "调整 AI 助手窗口大小" })).not.toBeInTheDocument();
+
+    fireEvent.click(handle);
+
+    expect(screen.getByRole("dialog", { name: "AI 助手" })).toHaveAttribute(
+      "data-animation-state",
+      "closing",
+    );
+  });
+
+  it("resizes after the pointer crosses the threshold without hiding on the generated click", async () => {
+    const { adapter } = createAdapter();
+    renderDrawer(adapter);
+    const handle = await screen.findByRole("button", {
+      name: "隐藏或调整 AI 助手窗口",
+    });
+    const dialog = screen.getByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.pointerDown(handle, { clientX: 200, clientY: 200, pointerId: 11 });
+    fireEvent.pointerMove(window, { clientX: 170, clientY: 160, pointerId: 11 });
+    fireEvent.pointerUp(handle, { clientX: 170, clientY: 160, pointerId: 11 });
+    fireEvent.click(handle);
+
+    expect(dialog).toHaveStyle({ "--ai-drawer-width": "750px" });
+    expect(dialog).toHaveStyle({ "--ai-drawer-height": "768px" });
+    expect(dialog).toHaveAttribute("data-animation-state", "open");
+  });
+
+  it("treats movement within the threshold as a click instead of a resize", async () => {
+    const { adapter } = createAdapter();
+    renderDrawer(adapter);
+    const handle = await screen.findByRole("button", {
+      name: "隐藏或调整 AI 助手窗口",
+    });
+    const dialog = screen.getByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.pointerDown(handle, { clientX: 200, clientY: 200, pointerId: 12 });
+    fireEvent.pointerMove(window, { clientX: 198, clientY: 198, pointerId: 12 });
+    fireEvent.pointerUp(handle, { clientX: 198, clientY: 198, pointerId: 12 });
+    fireEvent.click(handle);
+
+    expect(dialog).toHaveStyle({ "--ai-drawer-width": "720px" });
+    expect(dialog).toHaveAttribute("data-animation-state", "closing");
+  });
+
+  it("keeps arrow-key resizing on the open-drawer mascot", async () => {
+    const { adapter } = createAdapter();
+    renderDrawer(adapter);
+    const handle = await screen.findByRole("button", {
+      name: "隐藏或调整 AI 助手窗口",
+    });
+    const dialog = screen.getByRole("dialog", { name: "AI 助手" });
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+
+    expect(dialog).toHaveStyle({ "--ai-drawer-width": "744px" });
+    expect(dialog).toHaveAttribute("data-animation-state", "open");
   });
 
   it("uploads, displays, removes, and sends a ready attachment", async () => {

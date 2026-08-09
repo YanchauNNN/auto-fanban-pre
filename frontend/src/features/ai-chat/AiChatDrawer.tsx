@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 
 import type { AiAttachment, ApiAdapter } from "../../platform/api/types";
+import { AiDrawerMascotHandle } from "./AiDrawerMascotHandle";
 import styles from "./AiChatDrawer.module.css";
 import { AiMascotTrigger } from "./AiMascotTrigger";
 import { AiMessageContent } from "./AiMessageContent";
@@ -26,6 +27,7 @@ const MIN_DRAWER_WIDTH = 380;
 const MIN_DRAWER_HEIGHT = 460;
 const DEFAULT_DRAWER_WIDTH = 720;
 const DEFAULT_DRAWER_HEIGHT = 820;
+const RESIZE_DRAG_THRESHOLD_PX = 5;
 
 type DrawerSize = {
   width: number;
@@ -71,6 +73,9 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   const conversationMenuRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusOnCloseRef = useRef(false);
   const drawerTransitionTimerRef = useRef<number | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const suppressMascotClickRef = useRef(false);
+  const suppressMascotClickTimerRef = useRef<number | null>(null);
   const chat = useAiChat(adapter, isDrawerVisible);
   const selectedConversationIdRef = useRef(chat.selectedConversationId);
   const pendingConversationIdRef = useRef("");
@@ -137,6 +142,10 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     () => () => {
       if (drawerTransitionTimerRef.current !== null) {
         window.clearTimeout(drawerTransitionTimerRef.current);
+      }
+      resizeCleanupRef.current?.();
+      if (suppressMascotClickTimerRef.current !== null) {
+        window.clearTimeout(suppressMascotClickTimerRef.current);
       }
       revokePreviewUrls(pendingAttachmentsRef.current);
     },
@@ -555,27 +564,66 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     openConversationMenu(conversationId, rect.left, rect.bottom);
   }
 
-  function handleResizePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+  function handleResizePointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault();
     event.currentTarget.focus();
-    const start = { x: event.clientX, y: event.clientY, size: drawerSize };
+    resizeCleanupRef.current?.();
+    const start = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+      size: drawerSize,
+      dragged: false,
+    };
     const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== start.pointerId) {
+        return;
+      }
+      const deltaX = start.x - moveEvent.clientX;
+      const deltaY = start.y - moveEvent.clientY;
+      if (!start.dragged && Math.hypot(deltaX, deltaY) <= RESIZE_DRAG_THRESHOLD_PX) {
+        return;
+      }
+      start.dragged = true;
       setDrawerSize(
         clampDrawerSize({
-          width: start.size.width + start.x - moveEvent.clientX,
-          height: start.size.height + start.y - moveEvent.clientY,
+          width: start.size.width + deltaX,
+          height: start.size.height + deltaY,
         }),
       );
     };
-    const handlePointerUp = () => {
+    const cleanupResizeListeners = () => {
       window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointerup", finishResize);
+      window.removeEventListener("pointercancel", finishResize);
+      if (resizeCleanupRef.current === cleanupResizeListeners) {
+        resizeCleanupRef.current = null;
+      }
+    };
+    const finishResize = (finishEvent: PointerEvent) => {
+      if (finishEvent.pointerId !== start.pointerId) {
+        return;
+      }
+      cleanupResizeListeners();
+      if (!start.dragged) {
+        return;
+      }
+      suppressMascotClickRef.current = true;
+      if (suppressMascotClickTimerRef.current !== null) {
+        window.clearTimeout(suppressMascotClickTimerRef.current);
+      }
+      suppressMascotClickTimerRef.current = window.setTimeout(() => {
+        suppressMascotClickRef.current = false;
+        suppressMascotClickTimerRef.current = null;
+      });
     };
     window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp, { once: true });
+    window.addEventListener("pointerup", finishResize);
+    window.addEventListener("pointercancel", finishResize);
+    resizeCleanupRef.current = cleanupResizeListeners;
   }
 
-  function handleResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+  function handleResizeKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     const step = event.shiftKey ? 48 : 24;
     const deltaByKey: Record<string, Partial<DrawerSize>> = {
       ArrowLeft: { width: step },
@@ -594,6 +642,18 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         height: current.height + (delta.height ?? 0),
       }),
     );
+  }
+
+  function handleMascotHide() {
+    if (suppressMascotClickRef.current) {
+      suppressMascotClickRef.current = false;
+      if (suppressMascotClickTimerRef.current !== null) {
+        window.clearTimeout(suppressMascotClickTimerRef.current);
+        suppressMascotClickTimerRef.current = null;
+      }
+      return;
+    }
+    handleClose();
   }
 
   if (!isDrawerVisible) {
@@ -640,19 +700,11 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         } as CSSProperties
       }
     >
-      <div
-        aria-label="调整 AI 助手窗口大小"
-        aria-valuemax={Math.max(MIN_DRAWER_WIDTH, window.innerWidth)}
-        aria-valuemin={MIN_DRAWER_WIDTH}
-        aria-valuenow={drawerSize.width}
-        className={styles.resizeHandle}
-        role="separator"
-        tabIndex={0}
-        onKeyDown={handleResizeKeyDown}
-        onPointerDown={handleResizePointerDown}
-      >
-        <span aria-hidden="true" />
-      </div>
+      <AiDrawerMascotHandle
+        onHide={handleMascotHide}
+        onResizeKeyDown={handleResizeKeyDown}
+        onResizePointerDown={handleResizePointerDown}
+      />
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>AI Assistant</p>
@@ -660,14 +712,6 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         </div>
         <div className={styles.headerActions}>
           <span className={styles.modelBadge}>{state?.model || "读取中"}</span>
-          <button
-            aria-label="关闭 AI 助手"
-            className={styles.iconButton}
-            type="button"
-            onClick={handleClose}
-          >
-            <span aria-hidden="true">›</span>
-          </button>
         </div>
       </header>
 

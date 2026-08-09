@@ -712,7 +712,7 @@ describe("homepage shell", () => {
     expect(await within(drawer).findByText("你的测试编号是 AI-0711。")).toBeInTheDocument();
     expect(within(drawer).getByText("已使用 2 条历史消息")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("button", { name: "关闭 AI 助手" }));
+    await user.click(within(drawer).getByRole("button", { name: "隐藏或调整 AI 助手窗口" }));
     await screen.findByRole("button", { name: "打开 AI 助手" });
     expect(document.body.style.overflow).toBe("");
   });
@@ -786,7 +786,7 @@ describe("homepage shell", () => {
 
     await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
     const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
-    const handle = within(drawer).getByRole("separator", { name: "调整 AI 助手窗口大小" });
+    const handle = within(drawer).getByRole("button", { name: "隐藏或调整 AI 助手窗口" });
     const initialWidth = drawer.style.getPropertyValue("--ai-drawer-width");
     const initialHeight = drawer.style.getPropertyValue("--ai-drawer-height");
 
