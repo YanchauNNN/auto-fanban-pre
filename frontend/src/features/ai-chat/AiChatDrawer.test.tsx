@@ -143,11 +143,35 @@ function renderDrawer(adapter: ApiAdapter) {
   );
 }
 
+function renderClosedDrawer(adapter: ApiAdapter) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AiChatDrawer adapter={adapter} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("AiChatDrawer attachments", () => {
   afterEach(() => {
     cleanup();
     window.localStorage.clear();
     vi.restoreAllMocks();
+  });
+
+  it("opens the existing AI drawer from the mascot instead of the vertical AI label", async () => {
+    const user = userEvent.setup();
+    const { adapter } = createAdapter();
+    renderClosedDrawer(adapter);
+
+    expect(screen.getByText("点我进入AI功能")).toBeInTheDocument();
+    expect(screen.queryByText("AI", { selector: "button span" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "打开 AI 助手" }));
+
+    expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
   });
 
   it("uploads, displays, removes, and sends a ready attachment", async () => {

@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 
 import type { AiAttachment, ApiAdapter } from "../../platform/api/types";
 import styles from "./AiChatDrawer.module.css";
+import { AiMascotTrigger } from "./AiMascotTrigger";
 import { AiMessageContent } from "./AiMessageContent";
 import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
 
@@ -596,18 +597,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   }
 
   if (!isDrawerVisible) {
-    return (
-      <button
-        aria-label="打开 AI 助手"
-        className={styles.collapsedTab}
-        ref={collapsedButtonRef}
-        type="button"
-        onClick={handleOpen}
-      >
-        <span>AI</span>
-        <span aria-hidden="true">‹</span>
-      </button>
-    );
+    return <AiMascotTrigger buttonRef={collapsedButtonRef} onOpen={handleOpen} />;
   }
 
   const busy =
