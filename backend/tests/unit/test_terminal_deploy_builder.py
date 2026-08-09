@@ -1482,6 +1482,31 @@ def test_generated_check_health_reports_frontend_iis_residency_and_http(
     assert "Frontend AppPool:" in check_health
 
 
+def test_generated_check_health_requires_ready_storage_and_live_worker(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    check_health = (output_root / "scripts" / "check_health.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'code = "api_not_ready"' in check_health
+    assert 'code = "storage_not_writable"' in check_health
+    assert 'code = "worker_not_alive"' in check_health
+    assert 'code = "worker_count_invalid"' in check_health
+    assert "$apiHealthResponse.ready -eq $true" in check_health
+    assert "$apiHealthResponse.storage_writable -eq $true" in check_health
+    assert "$apiHealthResponse.worker_alive -eq $true" in check_health
+    assert "[int]$apiHealthResponse.worker_count -gt 0" in check_health
+    assert "$apiHealthIssues.Count -eq 0" in check_health
+    assert "api_health_issues = $apiHealthIssues" in check_health
+
+
 def test_build_terminal_deploy_package_init_storage_does_not_hardcode_slot_count(
     tmp_path: Path,
 ) -> None:

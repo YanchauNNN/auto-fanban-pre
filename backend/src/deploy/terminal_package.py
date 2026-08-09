@@ -2373,6 +2373,7 @@ $apiPingResponse = $null
 $apiHealthStatus = "fail"
 $apiHealthError = ""
 $apiHealthResponse = $null
+$apiHealthIssues = @()
 $taskStatus = "skip"
 $taskSettingsStatus = "skip"
 $taskEventStatus = "skip"
@@ -2522,10 +2523,51 @@ try {
 
 try {
     $apiHealthResponse = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec $HttpTimeoutSec
-    $apiHealthStatus = "pass"
+    $hasReady = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["ready"])
+    $hasStorageWritable = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["storage_writable"])
+    $hasWorkerAlive = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["worker_alive"])
+    $hasWorkerCount = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["worker_count"])
+    $apiReady = ($hasReady -and $apiHealthResponse.ready -eq $true)
+    $storageWritable = ($hasStorageWritable -and $apiHealthResponse.storage_writable -eq $true)
+    $workerAlive = ($hasWorkerAlive -and $apiHealthResponse.worker_alive -eq $true)
+    $workerCountValid = ($hasWorkerCount -and [int]$apiHealthResponse.worker_count -gt 0)
+
+    if (-not $apiReady) {
+        $apiHealthIssues += [ordered]@{
+            code = "api_not_ready"
+            message = "health response did not report ready=true"
+        }
+    }
+    if (-not $storageWritable) {
+        $apiHealthIssues += [ordered]@{
+            code = "storage_not_writable"
+            message = "health response did not report storage_writable=true"
+        }
+    }
+    if (-not $workerAlive) {
+        $apiHealthIssues += [ordered]@{
+            code = "worker_not_alive"
+            message = "health response did not report worker_alive=true"
+        }
+    }
+    if (-not $workerCountValid) {
+        $apiHealthIssues += [ordered]@{
+            code = "worker_count_invalid"
+            message = "health response did not report worker_count greater than zero"
+        }
+    }
+
+    $apiHealthStatus = if ($apiHealthIssues.Count -eq 0) { "pass" } else { "fail" }
+    if ($apiHealthStatus -ne "pass") {
+        $apiHealthError = (@($apiHealthIssues | ForEach-Object { $_.message }) -join "; ")
+    }
 } catch {
     $apiHealthStatus = "fail"
     $apiHealthError = $_.Exception.Message
+    $apiHealthIssues += [ordered]@{
+        code = "api_health_request_failed"
+        message = $_.Exception.Message
+    }
 }
 
 $backendListener = Get-BackendListenerSnapshot -BackendPort $ApiPort
@@ -2583,6 +2625,7 @@ $summary = [ordered]@{
     api_ping_url = $PingUrl
     api_health_status = $apiHealthStatus
     api_health_url = $Url
+    api_health_issues = $apiHealthIssues
     task_status = $taskStatus
     task_settings_status = $taskSettingsStatus
     task_event_status = $taskEventStatus
@@ -2642,6 +2685,7 @@ $fullReport = [ordered]@{
             url = $Url
             error = $apiHealthError
             response = $apiHealthResponse
+            issues = $apiHealthIssues
         }
     }
     iis_proxy = [ordered]@{
