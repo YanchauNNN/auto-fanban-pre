@@ -230,6 +230,16 @@ backend_mechanism:
     default_frontend_api_port: 8000
     managed_pdf2_pc3_name: "打印PDF2.pc3"
     managed_monochrome_ctb_name: "fanban_monochrome.ctb"
+    business_probes:
+      schema_version: "fanban-business-probe@1"
+      results_relative_dir: "probe-results"
+      request_timeout_sec: 15
+      office_worker_timeout_sec: 90
+      task_timeout_sec: 3600
+      log_retention_days: 14
+      max_event_context_bytes: 131072
+      required_health_fields: ["ready", "storage_writable", "worker_alive", "worker_count"]
+      sensitive_key_patterns: ["password", "authorization", "token", "api_key", "apikey", "secret", "cookie"]
     archive_runtime:
       version: "26.02"
       architecture: "x64"

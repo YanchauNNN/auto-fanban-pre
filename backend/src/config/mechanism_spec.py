@@ -494,6 +494,52 @@ class ArchiveRuntimeMechanismConfig(BaseModel):
         return self
 
 
+class BusinessProbeMechanismConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default="fanban-business-probe@1", min_length=1)
+    results_relative_dir: str = Field(default="probe-results", min_length=1)
+    request_timeout_sec: PositiveInt = 15
+    office_worker_timeout_sec: PositiveInt = 90
+    task_timeout_sec: PositiveInt = 3600
+    log_retention_days: PositiveInt = 14
+    max_event_context_bytes: PositiveInt = 131_072
+    required_health_fields: tuple[
+        Literal["ready", "storage_writable", "worker_alive", "worker_count"],
+        ...,
+    ] = (
+        "ready",
+        "storage_writable",
+        "worker_alive",
+        "worker_count",
+    )
+    sensitive_key_patterns: tuple[str, ...] = (
+        "password",
+        "authorization",
+        "token",
+        "api_key",
+        "apikey",
+        "secret",
+        "cookie",
+    )
+
+    @field_validator("results_relative_dir")
+    @classmethod
+    def validate_results_relative_dir(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("results_relative_dir must be package-relative")
+        return path.as_posix()
+
+    @field_validator("required_health_fields", "sensitive_key_patterns")
+    @classmethod
+    def validate_unique_probe_values(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = [item.casefold() for item in value]
+        if not value or len(normalized) != len(set(normalized)):
+            raise ValueError("deployment business probe values must be non-empty and unique")
+        return value
+
+
 class DeploymentMechanismConfig(BaseModel):
     spec_name: str = "参数规范.yaml"
     runtime_spec_name: str = "参数规范_运行期.yaml"
@@ -502,6 +548,9 @@ class DeploymentMechanismConfig(BaseModel):
     managed_pdf2_pc3_name: str = "打印PDF2.pc3"
     managed_monochrome_ctb_name: str = "fanban_monochrome.ctb"
     archive_runtime: ArchiveRuntimeMechanismConfig | None = None
+    business_probes: BusinessProbeMechanismConfig = Field(
+        default_factory=BusinessProbeMechanismConfig
+    )
     installers: dict[str, InstallerConfig] = Field(
         default_factory=lambda: {
             "dotnet48": InstallerConfig(

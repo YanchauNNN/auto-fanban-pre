@@ -257,6 +257,85 @@ def test_mechanism_spec_exposes_job_activity_timing_defaults(tmp_path: Path) -> 
     assert spec.api_runtime.jobs_activity_stream_retry_ms == 5000
 
 
+def test_mechanism_spec_exposes_typed_deployment_business_probes(
+    tmp_path: Path,
+) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "deployment_mechanism": {
+                    "business_probes": {
+                        "schema_version": "fanban-business-probe@1",
+                        "results_relative_dir": "probe-results",
+                        "request_timeout_sec": 15,
+                        "office_worker_timeout_sec": 45,
+                        "task_timeout_sec": 900,
+                        "log_retention_days": 14,
+                        "max_event_context_bytes": 131072,
+                        "required_health_fields": [
+                            "ready",
+                            "storage_writable",
+                            "worker_alive",
+                            "worker_count",
+                        ],
+                        "sensitive_key_patterns": [
+                            "password",
+                            "authorization",
+                            "token",
+                        ],
+                    },
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    config = MechanismSpecLoader.load(spec_path).deployment_mechanism.business_probes
+
+    assert config.schema_version == "fanban-business-probe@1"
+    assert config.results_relative_dir == "probe-results"
+    assert config.office_worker_timeout_sec == 45
+    assert config.required_health_fields == (
+        "ready",
+        "storage_writable",
+        "worker_alive",
+        "worker_count",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("results_relative_dir", "C:/outside"),
+        ("request_timeout_sec", 0),
+        ("office_worker_timeout_sec", -1),
+        ("task_timeout_sec", 0),
+    ],
+)
+def test_mechanism_spec_rejects_invalid_deployment_business_probe_config(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    spec_path = _write_mechanism_spec(
+        tmp_path / "documents" / "mechanism.yaml",
+        {
+            "schema_version": "1.0",
+            "backend_mechanism": {
+                "deployment_mechanism": {
+                    "business_probes": {field: value},
+                },
+            },
+        },
+    )
+    MechanismSpecLoader.clear_cache()
+
+    with pytest.raises(ValueError, match=field):
+        MechanismSpecLoader.load(spec_path)
+
+
 @pytest.mark.parametrize("invalid_timeout", [0, -1])
 def test_mechanism_spec_rejects_nonpositive_worker_claim_timeout(
     tmp_path: Path,
