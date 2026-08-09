@@ -28,3 +28,27 @@ http://127.0.0.1:18182/api/system/ping
 
 AI 状态检查：
 http://127.0.0.1:18182/api/ai/state
+
+
+计算书 AI 测试空间 codex-calculation-ai-unified（API、Worker、前端分别在三个 PowerShell 窗口执行）
+
+API：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'; $env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'; uv run --project backend python -X utf8 -m uvicorn API.app.main:app --host 127.0.0.1 --port 8010
+
+Worker：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'; $env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'; uv run --project backend python -X utf8 -m API.app.worker
+
+前端：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified\frontend'; $env:VITE_API_PROXY_TARGET='http://127.0.0.1:8010'; npm.cmd run dev -- --host 127.0.0.1 --port 5175 --strictPort
+
+前端访问地址：
+http://127.0.0.1:5175/
+
+API 连通检查：
+http://127.0.0.1:8010/api/system/ping
+
+系统与 Worker 健康检查：
+http://127.0.0.1:8010/api/system/health
+
+AI 状态检查：
+http://127.0.0.1:8010/api/ai/state
