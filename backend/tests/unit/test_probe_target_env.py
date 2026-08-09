@@ -52,6 +52,66 @@ def test_probe_target_env_deep_checks_run_with_timeout_worker() -> None:
     assert "Stop-Process" in script_text
 
 
+def test_probe_target_env_bounds_direct_word_and_excel_com_checks() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+    start = script_text.index("function Get-OfficeFacts")
+    end = script_text.index("function Get-HostFacts")
+    office_facts_text = script_text[start:end]
+
+    assert (
+        '$wordCom = Invoke-OfficeWorkerWithTimeout -TaskName "word_com"'
+        in office_facts_text
+    )
+    assert (
+        '$excelCom = Invoke-OfficeWorkerWithTimeout -TaskName "excel_com"'
+        in office_facts_text
+    )
+    assert "$wordCom = Test-WordCom" not in office_facts_text
+    assert "$excelCom = Test-ExcelCom" not in office_facts_text
+
+
+def test_probe_target_env_records_bounded_office_process_evidence() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Invoke-BoundedChildProcess" in script_text
+    assert "RedirectStandardOutput" in script_text
+    assert "RedirectStandardError" in script_text
+    assert "elapsed_ms" in script_text
+    assert "office_processes_before" in script_text
+    assert "office_processes_after" in script_text
+    assert "office_processes_residual" in script_text
+    assert 'error_code = "office_worker_timeout"' in script_text
+
+
+def test_probe_target_env_reads_both_office_registry_views() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "Microsoft.Win32.RegistryView]::Registry64" in script_text
+    assert "Microsoft.Win32.RegistryView]::Registry32" in script_text
+    assert "registration_views" in script_text
+    assert "app_paths" in script_text
+
+
+def test_probe_target_env_classifies_office_call_rejected_hresult() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "function Get-OfficeErrorCode" in script_text
+    assert '"0x80010001"' in script_text
+    assert '"office_call_rejected"' in script_text
+
+
 def test_probe_target_env_python_import_uses_temp_script_not_dash_c() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(

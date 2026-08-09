@@ -24,6 +24,73 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _powershell_executable() -> str:
+    executable = shutil.which("powershell") or shutil.which("powershell.exe")
+    if not executable:
+        pytest.skip("Windows PowerShell is unavailable")
+    return executable
+
+
+@pytest.mark.integration
+def test_bounded_child_process_times_out_and_keeps_logs(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    probe_script = repo_root / "tools" / "probe_target_env.ps1"
+    stdout_path = tmp_path / "child.stdout.log"
+    stderr_path = tmp_path / "child.stderr.log"
+    harness = tmp_path / "invoke-bounded-child.ps1"
+    harness.write_text(
+        f'''$ErrorActionPreference = "Stop"
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+    {_ps_quote(str(probe_script))},
+    [ref]$tokens,
+    [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw "probe_target_env.ps1 parse failed" }}
+$functionAst = @($ast.FindAll({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-BoundedChildProcess"
+}}, $true)) | Select-Object -First 1
+if ($null -eq $functionAst) {{ throw "missing Invoke-BoundedChildProcess" }}
+Invoke-Expression $functionAst.Extent.Text
+$result = Invoke-BoundedChildProcess `
+    -FilePath "powershell.exe" `
+    -ArgumentList @("-NoProfile", "-Command", "Write-Output before-timeout; Start-Sleep -Seconds 5") `
+    -TimeoutSec 1 `
+    -StdoutPath {_ps_quote(str(stdout_path))} `
+    -StderrPath {_ps_quote(str(stderr_path))}
+$result | ConvertTo-Json -Depth 8 -Compress
+if (-not $result.timed_out) {{ exit 4 }}
+''',
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            _powershell_executable(),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(harness),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout.strip())
+    assert payload["timed_out"] is True
+    assert payload["elapsed_ms"] >= 900
+    assert stdout_path.exists()
+    assert stderr_path.exists()
+
+
 def _build_real_archive_probe_package(tmp_path: Path) -> tuple[Path, Path]:
     repo_root = Path(__file__).resolve().parents[3]
     config = MechanismSpecLoader.load(
