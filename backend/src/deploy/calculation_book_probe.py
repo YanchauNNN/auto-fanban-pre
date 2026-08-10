@@ -33,15 +33,21 @@ _REQUIRED_ASSETS = (
     "钢筋的公称直径、公称面积表.xlsx",
 )
 _REQUIRED_SKILLS = {
-    "ansys-mapdl-18-2": Path("storage/ai/skills/ansys-mapdl-18-2/SKILL.md"),
-    "building-structure-standards": Path(
-        "storage/ai/skills/building-structure-standards/SKILL.md"
+    "ansys-mapdl-18-2": (
+        Path("storage/ai/skills/ansys-mapdl-18-2/SKILL.md"),
+        Path("tools/ai/ansys-mapdl-18-2/SKILL.md"),
     ),
-    "reinforcement-table-normalizer": Path(
-        "storage/ai/skills/reinforcement-table-normalizer/SKILL.md"
+    "building-structure-standards": (
+        Path("storage/ai/skills/building-structure-standards/SKILL.md"),
+        Path("tools/ai/building-structure-standards/SKILL.md"),
     ),
-    "recommend-rebar-from-smx": Path(
-        "tools/ai/recommend-rebar-from-smx/SKILL.md"
+    "reinforcement-table-normalizer": (
+        Path("tools/ai/reinforcement-table-normalizer/SKILL.md"),
+        Path("storage/ai/skills/reinforcement-table-normalizer/SKILL.md"),
+    ),
+    "recommend-rebar-from-smx": (
+        Path("tools/ai/recommend-rebar-from-smx/SKILL.md"),
+        Path("storage/ai/skills/recommend-rebar-from-smx/SKILL.md"),
     ),
 }
 _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
@@ -131,11 +137,17 @@ def _check_assets(package_root: Path, reporter: ProbeReporter) -> None:
 
 
 def _check_skills(package_root: Path, reporter: ProbeReporter) -> None:
-    missing = [
-        skill_id
-        for skill_id, relative_path in _REQUIRED_SKILLS.items()
-        if not (package_root / relative_path).is_file()
-    ]
+    resolved: dict[str, str] = {}
+    missing: list[str] = []
+    for skill_id, candidates in _REQUIRED_SKILLS.items():
+        match = next(
+            (relative_path for relative_path in candidates if (package_root / relative_path).is_file()),
+            None,
+        )
+        if match is None:
+            missing.append(skill_id)
+        else:
+            resolved[skill_id] = match.as_posix()
     if missing:
         reporter.event(
             "ai_skills",
@@ -148,7 +160,7 @@ def _check_skills(package_root: Path, reporter: ProbeReporter) -> None:
     reporter.event(
         "ai_skills",
         "PASS",
-        context={"skill_ids": list(_REQUIRED_SKILLS)},
+        context={"skill_paths": resolved},
     )
 
 

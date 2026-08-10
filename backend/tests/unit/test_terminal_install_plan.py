@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 INSTALL_PLAN = REPO_ROOT / "documents" / "终端实装安装计划.md"
 

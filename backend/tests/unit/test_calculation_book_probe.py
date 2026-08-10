@@ -18,7 +18,7 @@ _SKILL_PATHS = {
         "storage/ai/skills/building-structure-standards/SKILL.md"
     ),
     "reinforcement-table-normalizer": Path(
-        "storage/ai/skills/reinforcement-table-normalizer/SKILL.md"
+        "tools/ai/reinforcement-table-normalizer/SKILL.md"
     ),
     "recommend-rebar-from-smx": Path(
         "tools/ai/recommend-rebar-from-smx/SKILL.md"
