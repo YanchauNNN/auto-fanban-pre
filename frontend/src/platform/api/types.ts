@@ -1052,6 +1052,7 @@ export type ApiAdapter = {
     options: {
       includeSlabStress: boolean;
       reinforcementSource: ReinforcementSource;
+      params?: SubmissionParams;
     },
   ) => Promise<CalculationBookPreflightResult>;
   listTaskGroups?: () => Promise<TaskGroupList>;

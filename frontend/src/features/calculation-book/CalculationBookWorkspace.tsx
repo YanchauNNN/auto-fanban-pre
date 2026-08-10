@@ -291,6 +291,9 @@ export function CalculationBookWorkspace({
   const selectedPreset =
     savedPresets.find((preset) => preset.id === selectedPresetId) ?? null;
   const fieldErrorCount = Object.values(fieldErrors).filter((messages) => messages.length > 0).length;
+  const errorFieldLabels = activeSchema.fields
+    .filter((field) => fieldErrors[field.key]?.length)
+    .map((field) => field.label);
   const hasValidationErrors = fieldErrorCount > 0 || formErrors.length > 0;
   const slabEvidenceGroups = buildSlabEvidenceGroups(preflight?.slabs ?? []);
   const slabEvidenceIssues =
@@ -511,22 +514,16 @@ export function CalculationBookWorkspace({
     }
   }
 
-  function focusFirstValidationError(
+  function focusValidationSummary(
     nextFieldErrors: Record<string, string[]>,
     nextFormErrors: string[],
   ) {
+    if (Object.keys(nextFieldErrors).length === 0 && nextFormErrors.length === 0) {
+      return;
+    }
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        const firstInvalidField = activeSchema.fields.find(
-          (field) => nextFieldErrors[field.key]?.length,
-        );
-        if (firstInvalidField) {
-          document.getElementById(`calculation-book-${firstInvalidField.key}`)?.focus();
-          return;
-        }
-        if (nextFormErrors.length > 0) {
-          errorSummaryRef.current?.focus();
-        }
+        errorSummaryRef.current?.focus();
       });
     });
   }
@@ -576,7 +573,7 @@ export function CalculationBookWorkspace({
     setFieldErrors(nextFieldErrors);
     setFormErrors(nextFormErrors);
     if (Object.keys(nextFieldErrors).length > 0 || nextFormErrors.length > 0) {
-      focusFirstValidationError(nextFieldErrors, nextFormErrors);
+      focusValidationSummary(nextFieldErrors, nextFormErrors);
       return false;
     }
     return true;
@@ -608,17 +605,19 @@ export function CalculationBookWorkspace({
             };
           }).detail
         : undefined;
-    const nextApiFormErrors =
-      Object.values(detail?.upload_errors ?? {}).flat().length > 0
-        ? Object.values(detail?.upload_errors ?? {}).flat()
-        : [fallback];
     const nextApiFieldErrors = detail?.param_errors ?? {};
+    const uploadErrors = Object.values(detail?.upload_errors ?? {}).flat();
+    const nextApiFormErrors = uploadErrors.length > 0
+      ? uploadErrors
+      : Object.keys(nextApiFieldErrors).length > 0
+        ? []
+        : [fallback];
     if (Object.keys(nextApiFieldErrors).length > 0) {
       setPhase("input");
     }
     setFieldErrors(nextApiFieldErrors);
     setFormErrors(nextApiFormErrors);
-    focusFirstValidationError(nextApiFieldErrors, nextApiFormErrors);
+    focusValidationSummary(nextApiFieldErrors, nextApiFormErrors);
   }
 
   async function handlePreflight() {
@@ -641,6 +640,7 @@ export function CalculationBookWorkspace({
             values.reinforcement_source === "ai_suggested"
               ? "ai_suggested"
               : "provided",
+          params: buildParams(),
         },
       );
       setPreflight(result);
@@ -966,6 +966,7 @@ export function CalculationBookWorkspace({
                   <ErrorPanel
                     panelRef={errorSummaryRef}
                     fieldErrorCount={fieldErrorCount}
+                    fieldLabels={errorFieldLabels}
                     formErrors={formErrors}
                   />
                 ) : null}
@@ -1005,6 +1006,7 @@ export function CalculationBookWorkspace({
               <ErrorPanel
                 panelRef={errorSummaryRef}
                 fieldErrorCount={fieldErrorCount}
+                fieldLabels={errorFieldLabels}
                 formErrors={formErrors}
               />
             </div>
@@ -1586,16 +1588,20 @@ function DirectionEvidence({
 
 const ErrorPanel = ({
   fieldErrorCount,
+  fieldLabels,
   formErrors,
   panelRef,
 }: {
   fieldErrorCount: number;
+  fieldLabels: string[];
   formErrors: string[];
   panelRef: RefObject<HTMLDivElement>;
 }) => (
   <div ref={panelRef} className={styles.errorPanel} role="alert" tabIndex={-1}>
     {fieldErrorCount > 0 ? (
-      <strong>请修正 {fieldErrorCount} 个参数，已定位到第一个错误字段。</strong>
+      <strong>
+        请修正 {fieldErrorCount} 个参数。错误字段：{fieldLabels.join("、")}。
+      </strong>
     ) : null}
     {formErrors.map((message) => <p key={message}>{message}</p>)}
   </div>

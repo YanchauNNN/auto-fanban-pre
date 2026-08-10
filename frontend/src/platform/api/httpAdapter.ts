@@ -1121,6 +1121,7 @@ export class HttpAdapter implements ApiAdapter {
     options: {
       includeSlabStress: boolean;
       reinforcementSource: ReinforcementSource;
+      params?: SubmissionParams;
     },
   ): Promise<CalculationBookPreflightResult> {
     const formData = new FormData();
@@ -1130,6 +1131,9 @@ export class HttpAdapter implements ApiAdapter {
       String(options.includeSlabStress),
     );
     formData.append("reinforcement_source", options.reinforcementSource);
+    if (options.params) {
+      formData.append("params_json", JSON.stringify(options.params));
+    }
     const payload = await this.fetchJson<{
       preflight_token: string;
       reinforcement_source?: ReinforcementSource | null;

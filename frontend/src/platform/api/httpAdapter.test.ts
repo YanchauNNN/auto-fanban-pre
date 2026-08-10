@@ -633,6 +633,10 @@ describe("HttpAdapter", () => {
     const result = await adapter.preflightCalculationBook(archive, {
       includeSlabStress: true,
       reinforcementSource: "ai_suggested",
+      params: {
+        document_name: "11.450m~15.950m配筋计算书",
+        roof_top_elevation: 15.95,
+      },
     });
 
     expect(result).toEqual(expect.objectContaining({
@@ -653,7 +657,12 @@ describe("HttpAdapter", () => {
       })],
     }));
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.body as FormData).get("reinforcement_source")).toBe("ai_suggested");
+    const body = init.body as FormData;
+    expect(body.get("reinforcement_source")).toBe("ai_suggested");
+    expect(JSON.parse(String(body.get("params_json")))).toEqual({
+      document_name: "11.450m~15.950m配筋计算书",
+      roof_top_elevation: 15.95,
+    });
   });
 
   it("maps calculation-book AI normalization warnings from completed task details", async () => {

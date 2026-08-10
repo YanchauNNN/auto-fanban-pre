@@ -124,3 +124,32 @@ def test_rejects_inconsistent_temperature_range() -> None:
 
     with pytest.raises(ValidationError, match="最低温度"):
         CalculationBookParams.model_validate(payload)
+
+
+def test_relationship_errors_are_collected_on_every_editable_field() -> None:
+    payload = _valid_payload()
+    payload.update(
+        document_name="11111",
+        raft_slab_top_elevation=15,
+        roof_top_elevation=15,
+        factory_extreme_min_temperature=15,
+        factory_extreme_max_temperature=15,
+    )
+
+    with pytest.raises(ValidationError) as captured:
+        CalculationBookParams.model_validate(payload)
+
+    errors_by_field = {
+        (str(error["loc"][-1]) if error["loc"] else "<root>"): str(error["msg"])
+        for error in captured.value.errors(include_url=False)
+    }
+    assert set(errors_by_field) >= {
+        "document_name",
+        "roof_top_elevation",
+        "factory_extreme_max_temperature",
+    }
+    assert "标高范围" in errors_by_field["document_name"]
+    assert "筏板顶标高 15m" in errors_by_field["roof_top_elevation"]
+    assert "历史最低温度 15℃" in errors_by_field[
+        "factory_extreme_max_temperature"
+    ]

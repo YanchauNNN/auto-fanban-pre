@@ -626,6 +626,7 @@ describe("CalculationBookWorkspace", () => {
     expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
       includeSlabStress: true,
       reinforcementSource: "ai_suggested",
+      params: expect.any(Object),
     });
   });
 
@@ -798,6 +799,7 @@ describe("CalculationBookWorkspace", () => {
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: false,
       reinforcementSource: "ai_suggested",
+      params: expect.any(Object),
     });
     expect(await screen.findByText("云图核验结果")).toBeInTheDocument();
     expect(screen.getByText("02 云图核验")).toHaveAttribute("aria-current", "step");
@@ -1011,6 +1013,7 @@ describe("CalculationBookWorkspace", () => {
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: false,
       reinforcementSource: "provided",
+      params: expect.any(Object),
     });
     await waitFor(() => expect(createCalculationBook).toHaveBeenCalledTimes(1));
     expect(createCalculationBook).toHaveBeenCalledWith(
@@ -1032,7 +1035,7 @@ describe("CalculationBookWorkspace", () => {
     expect(onBatchCreated).toHaveBeenCalledWith({ batchId: "batch-calc", jobs: [] });
   });
 
-  it("announces validation errors and focuses the first required field", async () => {
+  it("marks every invalid field and focuses the error summary instead of an input", async () => {
     const user = userEvent.setup();
     const adapter = {
       preflightCalculationBook: vi.fn(),
@@ -1054,12 +1057,83 @@ describe("CalculationBookWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "预检并核对" }));
 
-    expect(screen.getByRole("alert")).toHaveTextContent("请修正 15 个参数");
-    await waitFor(() =>
-      expect(screen.getByLabelText("计算书模板")).toHaveFocus(),
-    );
-    expect(screen.getByLabelText("计算书模板")).toHaveAttribute("aria-required", "true");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("请修正 15 个参数");
+    await waitFor(() => expect(alert).toHaveFocus());
+    expect(screen.getByLabelText("计算书模板")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("场地土温")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("计算书模板")).not.toHaveFocus();
     expect(adapter.preflightCalculationBook).not.toHaveBeenCalled();
+  });
+
+  it("shows every backend parameter error beside its field without focusing the first input", async () => {
+    const user = userEvent.setup();
+    const parameterSchema: FormSchema = {
+      ...schema,
+      calculationBook: {
+        ...schema.calculationBook!,
+        fields: [
+          calculationFields[8],
+          calculationFields[11],
+          calculationFields[12],
+          calculationFields[13],
+          calculationFields[14],
+          calculationFields[calculationFields.length - 2],
+          calculationFields[calculationFields.length - 1],
+        ],
+      },
+    };
+    const preflightCalculationBook = vi.fn().mockRejectedValue({
+      detail: {
+        upload_errors: {},
+        param_errors: {
+          document_name: ["文件名称必须包含形如 11.450m~15.950m 的厂房标高范围"],
+          roof_top_elevation: ["屋面顶标高必须大于筏板顶标高 15m（当前为 15m）"],
+          factory_extreme_max_temperature: ["历史最高温度必须大于历史最低温度 15℃（当前为 15℃）"],
+        },
+      },
+    });
+    render(
+      <CalculationBookWorkspace
+        adapter={{ preflightCalculationBook } as unknown as ApiAdapter}
+        isOpen
+        schema={parameterSchema}
+        onBatchCreated={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    for (const label of [
+      "文件名称",
+      "筏板顶标高",
+      "屋面顶标高",
+      "历史最低温度",
+      "历史最高温度",
+    ]) {
+      await user.type(screen.getByLabelText(label), "15");
+    }
+    await user.upload(
+      screen.getByLabelText("选择计算图片压缩包"),
+      new File(["rar"], "calculation.rar", { type: "application/vnd.rar" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "预检并核对" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("文件名称、屋面顶标高、历史最高温度");
+    await waitFor(() => expect(alert).toHaveFocus());
+    for (const label of ["文件名称", "屋面顶标高", "历史最高温度"]) {
+      expect(screen.getByLabelText(label)).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByLabelText(label)).not.toHaveFocus();
+    }
+    expect(screen.getByText(/文件名称必须包含形如/)).toBeInTheDocument();
+    expect(screen.getByText(/屋面顶标高必须大于/)).toBeInTheDocument();
+    expect(screen.getByText(/历史最高温度必须大于/)).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("文件名称"));
+    await user.type(screen.getByLabelText("文件名称"), "11.450m~15.950m配筋计算书");
+    expect(screen.getByLabelText("文件名称")).not.toHaveAttribute("aria-invalid");
+    expect(screen.getByLabelText("屋面顶标高")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("历史最高温度")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("locks close, cancel, and Escape while preflight is pending", async () => {
@@ -1482,6 +1556,7 @@ describe("CalculationBookWorkspace", () => {
     expect(preflightCalculationBook).toHaveBeenCalledWith(archive, {
       includeSlabStress: true,
       reinforcementSource: "provided",
+      params: expect.any(Object),
     });
 
     await user.click(screen.getByRole("button", { name: "进入确认提交" }));
@@ -1689,6 +1764,7 @@ describe("CalculationBookWorkspace", () => {
     expect(preflightCalculationBook).toHaveBeenLastCalledWith(archive, {
       includeSlabStress: true,
       reinforcementSource: "provided",
+      params: expect.any(Object),
     });
   });
 });

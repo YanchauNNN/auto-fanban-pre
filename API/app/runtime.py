@@ -92,6 +92,27 @@ def _calculation_archive_content_type(suffix: str) -> str:
     ]
 
 
+def _validate_calculation_book_params(
+    raw_params: dict[str, Any],
+) -> tuple[CalculationBookParams | None, dict[str, list[str]]]:
+    try:
+        return CalculationBookParams.model_validate(raw_params), {}
+    except Exception as exc:  # noqa: BLE001
+        param_errors: dict[str, list[str]] = {}
+        errors_method = getattr(exc, "errors", None)
+        if callable(errors_method):
+            for error in errors_method():
+                location = error.get("loc") or ("params_json",)
+                field = str(location[-1])
+                message = str(error.get("msg") or "invalid")
+                param_errors.setdefault(field, []).append(
+                    message.removeprefix("Value error, ")
+                )
+        else:
+            param_errors.setdefault("params_json", []).append(str(exc))
+        return None, param_errors
+
+
 def _validate_calculation_preflight_cache_root(cache_root: Path) -> None:
     root_stat = cache_root.lstat()
     is_junction = getattr(cache_root, "is_junction", lambda: False)
@@ -1021,21 +1042,7 @@ class DeliverableApiRuntime:
         raw_params: dict[str, Any],
         creator_snapshot: AccountSnapshot | None = None,
     ) -> dict[str, Any]:
-        param_errors: dict[str, list[str]] = {}
-        params: CalculationBookParams | None = None
-        try:
-            params = CalculationBookParams.model_validate(raw_params)
-        except Exception as exc:  # noqa: BLE001
-            errors_method = getattr(exc, "errors", None)
-            if callable(errors_method):
-                for error in errors_method():
-                    location = error.get("loc") or ("params_json",)
-                    field = str(location[-1])
-                    param_errors.setdefault(field, []).append(
-                        str(error.get("msg") or "invalid")
-                    )
-            else:
-                param_errors.setdefault("params_json", []).append(str(exc))
+        params, param_errors = _validate_calculation_book_params(raw_params)
 
         if param_errors or params is None:
             raise HTTPException(
@@ -1248,8 +1255,23 @@ class DeliverableApiRuntime:
         archive: UploadedFilePayload,
         include_slab_stress: bool = False,
         reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
+        raw_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        active_reinforcement_source = ReinforcementSource(reinforcement_source)
+        params: CalculationBookParams | None = None
+        if raw_params is not None:
+            params, param_errors = _validate_calculation_book_params(raw_params)
+            if param_errors or params is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"upload_errors": {}, "param_errors": param_errors},
+                )
+        active_reinforcement_source = (
+            params.reinforcement_source
+            if params is not None
+            else ReinforcementSource(reinforcement_source)
+        )
+        if params is not None:
+            include_slab_stress = params.include_slab_stress
         upload_errors: dict[str, list[str]] = {}
         archive_suffix = Path(archive.filename).suffix.lower()
         if archive_suffix not in _CALCULATION_ARCHIVE_SUFFIXES:

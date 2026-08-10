@@ -170,12 +170,29 @@ async def create_calculation_book(
 async def preflight_calculation_book(
     request: Request,
     archive: UploadFile = File(...),
+    params_json: str | None = Form(None),
     include_slab_stress: bool = Form(False),
     reinforcement_source: ReinforcementSource = Form(
         ReinforcementSource.PROVIDED
     ),
     _=Depends(require_current_account),
 ) -> JSONResponse:
+    params: dict[str, Any] | None = None
+    if params_json is not None:
+        try:
+            params = json.loads(params_json)
+        except json.JSONDecodeError as exc:
+            return JSONResponse(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                content={
+                    "detail": {
+                        "upload_errors": {},
+                        "param_errors": {
+                            "params_json": [f"invalid_json:{exc.msg}"]
+                        },
+                    }
+                },
+            )
     upload = UploadedFilePayload(
         filename=archive.filename or "calculation-images.zip",
         content=await archive.read(),
@@ -186,6 +203,7 @@ async def preflight_calculation_book(
         archive=upload,
         include_slab_stress=include_slab_stress,
         reinforcement_source=reinforcement_source,
+        raw_params=params,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=payload)
 

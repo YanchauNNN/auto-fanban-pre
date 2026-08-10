@@ -3203,6 +3203,67 @@ def test_calculation_preflight_accepts_7z_forwards_config_and_fixes_mime(
         assert Path(str(cached["archive_path"])).suffix == ".7z"
 
 
+def test_calculation_preflight_rejects_all_invalid_editable_params_before_archive_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def unexpected_preflight(**_kwargs):
+        raise AssertionError("archive preflight must not run for invalid params")
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        unexpected_preflight,
+    )
+    params = {
+        "template_type": "internal_structure",
+        "project_no": "JQ",
+        "project_name": "测试项目",
+        "internal_code": "JQ00-NN-001",
+        "version": "A",
+        "subproject_code": "RX",
+        "subproject_name": "内部结构",
+        "design_phase": "施工图设计",
+        "document_name": "11111",
+        "workshop_length": 15,
+        "workshop_width": 15,
+        "raft_slab_top_elevation": 15,
+        "roof_top_elevation": 15,
+        "factory_extreme_min_temperature": 15,
+        "factory_extreme_max_temperature": 15,
+        "site_soil_temperature": 15,
+        "include_slab_stress": True,
+        "reinforcement_source": "ai_suggested",
+    }
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+                "params_json": json.dumps(params, ensure_ascii=False),
+            },
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    b"Rar!\x1a\x07\x01\x00payload",
+                    "application/vnd.rar",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]["param_errors"]
+    assert set(errors) >= {
+        "document_name",
+        "roof_top_elevation",
+        "factory_extreme_max_temperature",
+    }
+    assert "标高范围" in errors["document_name"][0]
+    assert "筏板顶标高 15m" in errors["roof_top_elevation"][0]
+    assert "历史最低温度 15℃" in errors["factory_extreme_max_temperature"][0]
+
+
 @pytest.mark.parametrize(
     ("filename", "payload", "content_type"),
     [

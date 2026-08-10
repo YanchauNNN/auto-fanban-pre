@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, computed_field, field_validator
 
 
 class CalculationBookTemplate(StrEnum):
@@ -71,20 +71,59 @@ class CalculationBookParams(BaseModel):
             normalized[str(wall_id).strip().upper()] = row_number
         return normalized
 
-    @model_validator(mode="after")
-    def validate_relationships(self) -> CalculationBookParams:
-        if self.factory_extreme_min_temperature >= self.factory_extreme_max_temperature:
-            raise ValueError("历史最低温度必须小于历史最高温度")
-        if self.raft_slab_top_elevation >= self.roof_top_elevation:
-            raise ValueError("筏板顶标高必须小于屋面顶标高")
+    @field_validator("document_name")
+    @classmethod
+    def validate_document_elevation_range(cls, value: str) -> str:
+        if _ELEVATION_RANGE.search(value) is None:
+            raise ValueError(
+                "文件名称必须包含形如 11.450m~15.950m 的厂房标高范围"
+            )
+        return value
+
+    @field_validator("roof_top_elevation")
+    @classmethod
+    def validate_roof_above_raft(
+        cls,
+        value: float,
+        info: ValidationInfo,
+    ) -> float:
+        raft = info.data.get("raft_slab_top_elevation")
+        if isinstance(raft, int | float) and value <= float(raft):
+            raise ValueError(
+                "屋面顶标高必须大于筏板顶标高 "
+                f"{float(raft):g}m（当前为 {value:g}m）"
+            )
+        return value
+
+    @field_validator("factory_extreme_max_temperature")
+    @classmethod
+    def validate_maximum_above_minimum(
+        cls,
+        value: float,
+        info: ValidationInfo,
+    ) -> float:
+        minimum = info.data.get("factory_extreme_min_temperature")
+        if isinstance(minimum, int | float) and value <= float(minimum):
+            raise ValueError(
+                "历史最高温度必须大于历史最低温度 "
+                f"{float(minimum):g}℃（当前为 {value:g}℃）"
+            )
+        return value
+
+    @field_validator("confirm_ai_normalization")
+    @classmethod
+    def validate_ai_mode_confirmation(
+        cls,
+        value: bool,
+        info: ValidationInfo,
+    ) -> bool:
         if (
-            self.reinforcement_source is ReinforcementSource.AI_SUGGESTED
-            and self.confirm_ai_normalization
+            info.data.get("reinforcement_source")
+            is ReinforcementSource.AI_SUGGESTED
+            and value
         ):
             raise ValueError("AI 推荐配筋不能同时确认配筋表 AI 规范化")
-        if _ELEVATION_RANGE.search(self.document_name) is None:
-            raise ValueError("文件名称必须包含形如 0.000m~15.000m 的厂房标高范围")
-        return self
+        return value
 
     @computed_field
     @property
