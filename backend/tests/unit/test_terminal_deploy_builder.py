@@ -35,6 +35,10 @@ TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.m
 AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
 AI_SPEC_NAME = "参数规范_AI.yaml"
 AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
+BUSINESS_PROBE_SCRIPT_NAME = "probe_business_modules.ps1"
+CALCULATION_PROBE_SCRIPT_NAME = "probe_calculation_book.ps1"
+DEPLOYMENT_PROBE_SCRIPT_NAME = "run_deployment_probes.ps1"
+CALCULATION_SMOKE_SCRIPT_NAME = "smoke_calculation_book_ai_suggestion.py"
 REBAR_SUGGESTION_SKILL_ID = "recommend-rebar-from-smx"
 REBAR_SUGGESTION_SKILL_ROOT = Path("tools/ai/recommend-rebar-from-smx")
 REBAR_SUGGESTION_REQUIRED_FILES = (
@@ -304,6 +308,22 @@ runtime_options:
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "documents_bin" / "~$规范库.xlsx", "office lock")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
+    _write_file(
+        repo_root / "tools" / BUSINESS_PROBE_SCRIPT_NAME,
+        "Write-Host business-probe",
+    )
+    _write_file(
+        repo_root / "tools" / CALCULATION_PROBE_SCRIPT_NAME,
+        "Write-Host calculation-probe",
+    )
+    _write_file(
+        repo_root / "tools" / DEPLOYMENT_PROBE_SCRIPT_NAME,
+        "Write-Host deployment-probes",
+    )
+    _write_file(
+        repo_root / "tools" / CALCULATION_SMOKE_SCRIPT_NAME,
+        "print('{}')\n",
+    )
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
     _write_file(repo_root / "tools" / "diagnose_iis_frontend_503.ps1", "Write-Host diagnose-503")
@@ -374,6 +394,16 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
         Path("tools") / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
     ) in rel_pairs
+    for script_name in (
+        BUSINESS_PROBE_SCRIPT_NAME,
+        CALCULATION_PROBE_SCRIPT_NAME,
+        DEPLOYMENT_PROBE_SCRIPT_NAME,
+        CALCULATION_SMOKE_SCRIPT_NAME,
+    ):
+        assert (
+            Path("tools") / script_name,
+            Path("scripts") / script_name,
+        ) in rel_pairs
     assert (
         Path("build/runtime-cache/7-Zip/7z.exe"),
         Path("bin/7-Zip/7z.exe"),
@@ -460,6 +490,15 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert not (archive_runtime / "7zr.exe").exists()
     assert not (archive_runtime / "7z-test-x64.exe").exists()
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["business_probes"] == {
+        "schema_version": "fanban-deployment-probes@1",
+        "entrypoints": {
+            "account_workload": f"scripts/{BUSINESS_PROBE_SCRIPT_NAME}",
+            "all": f"scripts/{DEPLOYMENT_PROBE_SCRIPT_NAME}",
+            "calculation_book": f"scripts/{CALCULATION_PROBE_SCRIPT_NAME}",
+            "environment": "scripts/check_health.ps1",
+        },
+    }
     manifest_files = {item["path"]: item["sha256"] for item in manifest["files"]}
     assert manifest_files["bin/7-Zip/7z.exe"] == hashlib.sha256(
         ARCHIVE_RUNTIME_FILES["7z.exe"]
@@ -702,6 +741,10 @@ ai_layer:
     assert (output_root / "scripts" / "probe_target_env.ps1").exists()
     assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
     assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
+    assert (output_root / "scripts" / BUSINESS_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / CALCULATION_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / DEPLOYMENT_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / CALCULATION_SMOKE_SCRIPT_NAME).exists()
     assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).exists()
     assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).read_bytes() == (
         repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME
@@ -1435,6 +1478,56 @@ if ($errors -and $errors.Count -gt 0) {
             encoding="utf-8",
         )
         assert completed.returncode == 0, f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
+
+
+def test_business_probe_launchers_use_packaged_runtime_without_cli_secrets() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    launcher_paths = [
+        repo_root / "tools" / BUSINESS_PROBE_SCRIPT_NAME,
+        repo_root / "tools" / CALCULATION_PROBE_SCRIPT_NAME,
+        repo_root / "tools" / DEPLOYMENT_PROBE_SCRIPT_NAME,
+    ]
+
+    for path in launcher_paths:
+        text = path.read_text(encoding="utf-8")
+        assert "--password" not in text.casefold()
+        assert "[string]$Password" not in text
+        assert "python-runtime\\python.exe" in text
+        assert "backend-runtime\\backend" in text
+
+        script = f'\n$target = "{str(path).replace("\\", "\\\\")}"\n' + """
+$tokens = $null
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $target,
+    [ref]$tokens,
+    [ref]$errors
+) | Out-Null
+if ($errors -and $errors.Count -gt 0) {
+    $errors | ForEach-Object { Write-Output $_.Message }
+    exit 1
+}
+"""
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert completed.returncode == 0, (
+            f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
+        )
+
+    business_text = launcher_paths[0].read_text(encoding="utf-8")
+    calculation_text = launcher_paths[1].read_text(encoding="utf-8")
+    combined_text = launcher_paths[2].read_text(encoding="utf-8")
+    assert "src.deploy.business_module_probe" in business_text
+    assert "src.deploy.calculation_book_probe" in calculation_text
+    assert CALCULATION_SMOKE_SCRIPT_NAME in calculation_text
+    assert "check_health.ps1" in combined_text
+    assert BUSINESS_PROBE_SCRIPT_NAME in combined_text
+    assert CALCULATION_PROBE_SCRIPT_NAME in combined_text
+    assert "summary.json" in combined_text
 
 
 def test_generated_configure_iis_site_keeps_frontend_app_pool_resident(

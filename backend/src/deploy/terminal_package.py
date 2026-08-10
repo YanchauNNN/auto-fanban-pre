@@ -86,6 +86,18 @@ REBAR_SUGGESTION_REQUIRED_FILES = (
     Path("references/ranking-rules.md"),
     Path("scripts/validate_fixtures.py"),
 )
+BUSINESS_PROBE_ENTRYPOINTS = {
+    "account_workload": "scripts/probe_business_modules.ps1",
+    "all": "scripts/run_deployment_probes.ps1",
+    "calculation_book": "scripts/probe_calculation_book.ps1",
+    "environment": "scripts/check_health.ps1",
+}
+BUSINESS_PROBE_SOURCE_FILES = (
+    "probe_business_modules.ps1",
+    "probe_calculation_book.ps1",
+    "run_deployment_probes.ps1",
+    "smoke_calculation_book_ai_suggestion.py",
+)
 
 
 @dataclass(frozen=True)
@@ -174,6 +186,10 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
         ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
+        *(
+            CopyPlanEntry(repo_root / "tools" / filename, Path("scripts") / filename)
+            for filename in BUSINESS_PROBE_SOURCE_FILES
+        ),
         CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
         CopyPlanEntry(repo_root / "tools" / "cad_env_sync.ps1", Path("scripts") / "cad_env_sync.ps1"),
         CopyPlanEntry(
@@ -623,6 +639,10 @@ def write_package_manifest(package_root: Path, *, package_kind: str) -> dict[str
         "generated_at_utc": _timestamp_utc(),
         "package_kind": package_kind,
         "file_count": len(file_map),
+        "business_probes": {
+            "schema_version": "fanban-deployment-probes@1",
+            "entrypoints": dict(BUSINESS_PROBE_ENTRYPOINTS),
+        },
         "files": [file_map[key] for key in sorted(file_map)],
     }
     _write_json(package_root / PACKAGE_MANIFEST, manifest)
