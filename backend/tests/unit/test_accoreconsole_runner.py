@@ -679,6 +679,49 @@ def test_runtime_preferences_content_writes_support_path(tmp_path: Path) -> None
     assert any("[M5][RUNTIME]" in line and "support_path=" in line for line in content)
 
 
+def test_runtime_preferences_content_guards_optional_autocad_com_preferences(
+    tmp_path: Path,
+) -> None:
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+
+    content = runner._build_runtime_preferences_content(
+        {
+            "plotters_dir": str(tmp_path / "Plotters"),
+            "pmp_dir": str(tmp_path / "PMP Files"),
+            "plot_styles_dir": str(tmp_path / "Plot Styles"),
+            "spool_dir": str(tmp_path / "spool"),
+            "support_path": str(tmp_path / "font-lib"),
+        },
+    )
+
+    preference_lines = [line for line in content if "vla-put-" in line]
+    assert preference_lines
+    assert all("vl-catch-all-apply" in line for line in preference_lines)
+    assert any("vl-catch-all-error-p _m5prefs" in line for line in content)
+
+
+def test_runtime_preferences_materialize_isolated_font_defaults(tmp_path: Path) -> None:
+    runner = AcCoreConsoleRunner(config=RuntimeConfig())
+    task_data: dict[str, object] = {}
+
+    runner._ensure_runtime_font_preferences(
+        task_data=task_data,
+        workspace_dir=tmp_path,
+    )
+    runtime = task_data["runtime"]
+    assert isinstance(runtime, dict)
+    font_map_path = Path(str(runtime["font_map_path"]))
+    assert font_map_path.is_file()
+    assert font_map_path.parent == tmp_path
+    assert runtime["font_alt"] == "simsun.ttc"
+
+    content = runner._build_runtime_preferences_content(runtime)
+
+    escaped_font_map = runner._escape_lisp_string(str(font_map_path))
+    assert any(f'setvar "FONTMAP" "{escaped_font_map}"' in line for line in content)
+    assert any('setvar "FONTALT" "simsun.ttc"' in line for line in content)
+
+
 def test_run_accepts_nonzero_when_result_exists(tmp_path: Path, monkeypatch):
     cfg = RuntimeConfig()
     fake_exe = tmp_path / "accoreconsole.exe"

@@ -415,7 +415,12 @@ class DeliverableWorkerRuntime:
         last_error: sqlite3.OperationalError | None = None
         for attempt in range(1, attempts + 1):
             try:
-                runtime.refresh_summary_index(current_item_type, current_item_id)
+                refresh_summary = getattr(
+                    runtime,
+                    "refresh_active_summary_index",
+                    runtime.refresh_summary_index,
+                )
+                refresh_summary(current_item_type, current_item_id)
                 return
             except sqlite3.OperationalError as exc:
                 if not self._is_sqlite_locked_error(exc):

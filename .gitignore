@@ -21,11 +21,16 @@ storage/
 documents/AI/ansys-mapdl-*-private-offline-*.zip
 documents/AI/ansys-mapdl-*-public-scaffold-*.zip
 tmp/
+/.tmp/
 /build/
 /dist/
+/bin/7-Zip/
 output/
 outputs/
+/output.lnk
+/t/
 plot.log
+/backend/acad.err
 .pytest_cache/
 .ruff_cache/
 .uv-cache/

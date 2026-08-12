@@ -44,6 +44,40 @@ class RetryConfig(BaseModel):
     retry_backoff_ms: int = 1000
 
 
+class ArchiveExtractorRuntimeConfig(BaseModel):
+    """RAR/7z 私有解包器配置。"""
+
+    executable: Path = Path("bin/7-Zip/7z.exe")
+    fallback_executables: list[Path] = Field(default_factory=list)
+    list_timeout_seconds: int = Field(default=120, gt=0)
+    extract_timeout_seconds: int = Field(default=300, gt=0)
+    max_list_output_bytes: int = Field(default=8_388_608, gt=0)
+
+    def effective_executable(self) -> Path:
+        for candidate in (self.executable, *self.fallback_executables):
+            if candidate.is_file():
+                return candidate
+        return self.executable
+
+
+class ChangePageExtractRuntimeConfig(BaseModel):
+    """变更页码提取的上传、安全解压与文本输出配置。"""
+
+    max_archives: int = Field(default=50, gt=0)
+    allowed_extensions: list[str] = Field(default_factory=lambda: [".zip", ".rar", ".7z"])
+    max_upload_total_mb: int = Field(default=2048, gt=0)
+    max_archive_upload_mb: int = Field(default=1024, gt=0)
+    max_archive_files: int = Field(default=500, gt=0)
+    max_extracted_total_mb: int = Field(default=1024, gt=0)
+    max_single_file_mb: int = Field(default=50, gt=0)
+    max_compression_ratio: float = Field(default=250.0, gt=0)
+    zip_metadata_encodings: list[str] = Field(default_factory=lambda: ["utf-8", "gbk"])
+    result_line_template: str = "{name}，共{pages}页；"
+    archive_extractor: ArchiveExtractorRuntimeConfig = Field(
+        default_factory=ArchiveExtractorRuntimeConfig,
+    )
+
+
 class ODAConfig(BaseModel):
     """ODA转换器配置"""
 
@@ -504,6 +538,7 @@ class FontPreflightRuntimeConfig(BaseModel):
     font_compatibility_exempt_style_names: list[str] = Field(
         default_factory=lambda: ["宋体", "ST"],
     )
+    font_compatibility_font_alt: str = "tssdchn.shx"
     titleblock_print_style_replacements: dict[str, dict[str, str]] = Field(
         default_factory=dict,
     )
@@ -575,6 +610,9 @@ class RuntimeConfig(BaseSettings):
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     retries: RetryConfig = Field(default_factory=RetryConfig)
+    change_page_extract: ChangePageExtractRuntimeConfig = Field(
+        default_factory=ChangePageExtractRuntimeConfig,
+    )
     oda: ODAConfig = Field(default_factory=ODAConfig)
     module5_export: Module5ExportConfig = Field(default_factory=Module5ExportConfig)
     autocad: AutoCADConfig = Field(default_factory=AutoCADConfig)
@@ -620,6 +658,9 @@ class RuntimeConfig(BaseSettings):
             "concurrency": ConcurrencyConfig(**cls._extract(runtime_opts, "concurrency")),
             "timeouts": TimeoutConfig(**cls._extract(runtime_opts, "timeouts")),
             "retries": RetryConfig(**cls._extract(runtime_opts, "retries")),
+            "change_page_extract": ChangePageExtractRuntimeConfig(
+                **cls._extract(runtime_opts, "change_page_extract"),
+            ),
             "oda": ODAConfig(**cls._extract(runtime_opts, "oda_converter")),
             "module5_export": Module5ExportConfig(
                 **cls._extract(runtime_opts, "module5_export"),
@@ -736,20 +777,28 @@ class RuntimeConfig(BaseSettings):
 
         leaf = path_tokens[-1]
         if isinstance(cursor, BaseModel):
-            if hasattr(cursor, leaf):
-                if cursor.model_config.get("frozen"):
-                    if not trail:
-                        return
-                    values = cursor.model_dump()
-                    values[leaf] = value
-                    replacement = cursor.__class__.model_validate(values)
-                    parent, parent_token = trail[-1]
-                    if isinstance(parent, BaseModel):
-                        setattr(parent, parent_token, replacement)
-                    elif isinstance(parent, dict):
-                        parent[parent_token] = replacement
+            if leaf not in cursor.__class__.model_fields:
+                return
+
+            values = cursor.model_dump()
+            values[leaf] = value
+            replacement: Any = cursor.__class__.model_validate(values)
+            if not trail:
+                setattr(cursor, leaf, getattr(replacement, leaf))
+                return
+
+            for parent, parent_token in reversed(trail):
+                if isinstance(parent, dict):
+                    parent[parent_token] = replacement
                     return
-                setattr(cursor, leaf, value)
+                if not isinstance(parent, BaseModel):
+                    return
+                if not parent.model_config.get("frozen"):
+                    setattr(parent, parent_token, replacement)
+                    return
+                parent_values = parent.model_dump()
+                parent_values[parent_token] = replacement
+                replacement = parent.__class__.model_validate(parent_values)
         elif isinstance(cursor, dict):
             cursor[leaf] = value
 
@@ -865,6 +914,15 @@ class RuntimeConfig(BaseSettings):
             self.calculation_book.ai_suggestion.log_dir,
             self._resolve_runtime_root(base_dir),
         )
+        archive_executable = self.change_page_extract.archive_extractor.executable
+        if not archive_executable.is_absolute():
+            self.change_page_extract.archive_extractor.executable = (
+                self.base_dir / archive_executable
+            ).resolve()
+        self.change_page_extract.archive_extractor.fallback_executables = [
+            path if path.is_absolute() else (self.base_dir / path).resolve()
+            for path in self.change_page_extract.archive_extractor.fallback_executables
+        ]
 
     def _normalize_root_paths(self, base_dir: Path) -> None:
         """???????????????????? Path???????????"""

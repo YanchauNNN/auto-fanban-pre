@@ -43,6 +43,22 @@ def test_font_preflight_bridge_honors_exempt_style_names() -> None:
     assert "IsFontCompatibilityExemptStyle(styleName)" in titleblock_method
 
 
+def test_font_preflight_bridge_can_replace_legacy_ttf_family_descriptor() -> None:
+    processor_source = Path(
+        "backend/src/cad/dotnet/Module5CadBridge/FontPreflightProcessor.cs"
+    ).read_text(encoding="utf-8")
+    compatibility_method = processor_source.split(
+        "private FontCompatibilityMatch? ResolveCompatibilityMatch",
+        maxsplit=1,
+    )[1].split("private bool TryGetCompatibilityReplacement", maxsplit=1)[0]
+
+    assert "styleRecord.Font" in compatibility_method
+    assert "new FontCompatibilityMatch(" in compatibility_method
+    assert '"typeface"' in compatibility_method
+    assert "typeFaceReplacement" in compatibility_method
+    assert 'replacementKind.Equals("typeface"' in processor_source
+
+
 def test_release_bridge_build_disables_debug_symbols() -> None:
     project_source = Path(
         "backend/src/cad/dotnet/Module5CadBridge/Module5CadBridge.csproj"

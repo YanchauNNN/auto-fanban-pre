@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 import sys
@@ -9,8 +10,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
+from pypdf import PdfWriter
 
 from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 from src.config import SpecLoader, reload_config
@@ -290,6 +293,52 @@ def test_worker_run_once_claims_and_executes_queued_job(monkeypatch, tmp_path: P
     assert persisted is not None
     assert persisted.status == JobStatus.SUCCEEDED
     assert processor.processed == [job.job_id]
+    assert queue_store.list_queue_items()[0]["status"] == "done"
+
+
+def test_worker_run_once_executes_change_page_extract_without_cad_slot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+
+    archive_path = tmp_path / "storage" / "incoming" / "pages.zip"
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    writer.write(pdf)
+    with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("附图1 第一份.pdf", pdf.getvalue())
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CHANGE_PAGE_EXTRACT.value,
+        project_no="",
+        input_files=[archive_path],
+        source_filename=archive_path.name,
+        task_role="change_page_extract",
+    )
+    manager.update_job(job)
+
+    queue_store = SQLiteQueueStore(tmp_path / "storage" / "runtime" / "fanban_queue.sqlite3")
+    queue_store.initialize()
+    queue_store.enqueue("job", job.job_id)
+
+    from API.app.worker import DeliverableWorkerRuntime
+
+    worker = DeliverableWorkerRuntime(worker_id="worker-change-page-test")
+    try:
+        assert worker.run_once() is True
+    finally:
+        worker.stop()
+
+    persisted = manager.reload_job(job.job_id)
+    assert persisted is not None
+    assert persisted.status == JobStatus.SUCCEEDED
+    assert persisted.slot_id is None
+    assert persisted.artifacts.change_page_result_json is not None
+    assert persisted.artifacts.change_page_result_json.is_file()
     assert queue_store.list_queue_items()[0]["status"] == "done"
 
 

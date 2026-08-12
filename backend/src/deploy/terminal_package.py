@@ -209,10 +209,11 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         ),
     ]
-    plan.extend(
-        CopyPlanEntry(entry.source, entry.destination)
-        for entry in archive_runtime_copy_plan(repo_root, deployment.archive_runtime)
-    )
+    if deployment.archive_runtime is not None:
+        plan.extend(
+            CopyPlanEntry(entry.source, entry.destination)
+            for entry in archive_runtime_copy_plan(repo_root, deployment.archive_runtime)
+        )
     return plan
 
 
@@ -221,6 +222,25 @@ def _ensure_exists(copy_plan: list[CopyPlanEntry]) -> None:
     if missing:
         joined = "\n".join(missing)
         raise FileNotFoundError(f"离线部署包缺少必要源文件/目录:\n{joined}")
+
+
+def _validate_calculation_book_template_sync(repo_root: Path) -> None:
+    canonical = repo_root / "documents_bin" / "计算书模板文件.xlsx"
+    runtime_copy = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    if not canonical.is_file() or not runtime_copy.is_file():
+        return
+    if hashlib.sha256(canonical.read_bytes()).digest() != hashlib.sha256(
+        runtime_copy.read_bytes()
+    ).digest():
+        raise ValueError(
+            "计算书标准配筋模板内容不一致：请先同步 documents_bin/计算书模板文件.xlsx "
+            "与 documents_bin/calculation_book/计算书模板文件.xlsx"
+        )
 
 
 def _validate_frontend_preview_assets(repo_root: Path) -> None:
@@ -3705,6 +3725,7 @@ def build_terminal_deploy_package(
         )
     copy_plan = gather_copy_plan(repo_root)
     _ensure_exists(copy_plan)
+    _validate_calculation_book_template_sync(repo_root)
     _validate_frontend_preview_assets(repo_root)
 
     if output_root.exists():

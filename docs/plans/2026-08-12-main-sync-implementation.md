@@ -84,16 +84,16 @@
 
 **Files:**
 - Modify: `backend/src/deploy/terminal_package.py`
-- Modify: `tools/prepare_archive_runtime.py`
-- Modify: deployment probe scripts and their tests as required.
+- Modify: `backend/tests/unit/test_terminal_deploy_builder.py`
+- Verify: deployment probe scripts and their existing tests.
 - Verify: `documents_bin/计算书模板文件.xlsx`
 - Verify: `documents_bin/calculation_book/计算书模板文件.xlsx`
-- Modify: `documents/终端实装安装计划.md`
+- Verify: `documents/终端实装安装计划.md`
 
 **Steps:**
 
 1. Add a failing test that detects template hash drift between business source and packaged runtime copy.
-2. Make package preparation copy and verify the canonical template and all new probe/plugin files.
+2. Make package preparation reject drift between the canonical template and runtime copy, then verify all new probe/plugin files.
 3. Verify Office COM, CAD/AcCore, account, workload, calculation-book and change-page probes emit complete logs.
 4. Run deployment-package unit tests and manifest checks.
 

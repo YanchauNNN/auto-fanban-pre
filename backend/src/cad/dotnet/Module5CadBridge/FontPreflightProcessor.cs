@@ -74,6 +74,7 @@ internal sealed class FontPreflightProcessor
                 }
 
                 var styleName = styleRecord.Name ?? string.Empty;
+                TraceStyleDescriptor(styleRecord);
                 var isExemptStyle = IsFontCompatibilityExemptStyle(styleName);
                 BridgeReplacementTarget? explicitTarget = null;
                 var hasExplicitTarget = !isExemptStyle && targetByStyleName.TryGetValue(styleName, out explicitTarget);
@@ -116,7 +117,11 @@ internal sealed class FontPreflightProcessor
                     result.Errors.Add($"FONT_REPLACEMENT_FONT_MISSING:{replacementKind}");
                     continue;
                 }
-                if (replacementKind.Equals("bigfont", StringComparison.OrdinalIgnoreCase))
+                if (replacementKind.Equals("typeface", StringComparison.OrdinalIgnoreCase))
+                {
+                    TryUpdateTextStyleFontDescriptor(styleRecord, replacementFont);
+                }
+                else if (replacementKind.Equals("bigfont", StringComparison.OrdinalIgnoreCase))
                 {
                     styleRecord.BigFontFileName = replacementFont;
                 }
@@ -394,6 +399,25 @@ internal sealed class FontPreflightProcessor
             return new FontCompatibilityMatch(kind, fontName, replacement.Trim());
         }
 
+        try
+        {
+            var typeFace = (styleRecord.Font.TypeFace ?? string.Empty).Trim();
+            if (TryGetCompatibilityReplacement(typeFace, out var typeFaceReplacement))
+            {
+                return new FontCompatibilityMatch(
+                    "typeface",
+                    typeFace,
+                    typeFaceReplacement.Trim()
+                );
+            }
+        }
+        catch (Exception ex)
+        {
+            _trace.Log(
+                $"[DOTNET][FONT][WARN] inspect compatibility typeface failed style={styleRecord.Name} err={ex.Message}"
+            );
+        }
+
         return null;
     }
 
@@ -437,10 +461,34 @@ internal sealed class FontPreflightProcessor
         return !IsFontResourceAvailable(fontName, db);
     }
 
-    private static bool IsEmptyFontStyle(TextStyleTableRecord styleRecord)
+    private bool IsRepairableEmptyShxStyle(TextStyleTableRecord styleRecord)
     {
-        return string.IsNullOrWhiteSpace(styleRecord.FileName)
-            && string.IsNullOrWhiteSpace(styleRecord.BigFontFileName);
+        if (!string.IsNullOrWhiteSpace(styleRecord.FileName)
+            || !string.IsNullOrWhiteSpace(styleRecord.BigFontFileName))
+        {
+            return false;
+        }
+
+        try
+        {
+            var descriptor = styleRecord.Font;
+            if (!string.IsNullOrWhiteSpace(descriptor.TypeFace))
+            {
+                _trace.Log(
+                    $"[DOTNET][FONT][EMPTY_STYLE_TTF_DESCRIPTOR_SKIP] style={styleRecord.Name} typeface={descriptor.TypeFace}"
+                );
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _trace.Log(
+                $"[DOTNET][FONT][WARN] inspect empty-style descriptor failed style={styleRecord.Name} err={ex.Message}"
+            );
+            return false;
+        }
+
+        return true;
     }
 
     private bool IsFontCompatibilityExemptStyle(string styleName)
@@ -1164,7 +1212,7 @@ internal sealed class FontPreflightProcessor
             return;
         }
 
-        if (!IsEmptyFontStyle(styleRecord))
+        if (!IsRepairableEmptyShxStyle(styleRecord))
         {
             return;
         }
@@ -1465,12 +1513,25 @@ internal sealed class FontPreflightProcessor
     {
         var fontName = (styleRecord.FileName ?? string.Empty).Trim();
         var bigfontName = (styleRecord.BigFontFileName ?? string.Empty).Trim();
+        var typeFace = string.Empty;
+        try
+        {
+            typeFace = (styleRecord.Font.TypeFace ?? string.Empty).Trim();
+        }
+        catch
+        {
+            // Keep legacy file-name based diagnostics when descriptor access fails.
+        }
+        var descriptorOnlyTtf = string.IsNullOrWhiteSpace(fontName)
+            && string.IsNullOrWhiteSpace(bigfontName)
+            && !string.IsNullOrWhiteSpace(typeFace);
         return new Dictionary<string, object>
         {
             ["style_name"] = styleRecord.Name,
-            ["font_name"] = fontName,
+            ["font_name"] = descriptorOnlyTtf ? typeFace : fontName,
             ["bigfont_name"] = bigfontName,
-            ["kind"] = DetectKind(fontName, bigfontName),
+            ["typeface"] = typeFace,
+            ["kind"] = descriptorOnlyTtf ? "ttf" : DetectKind(fontName, bigfontName),
             ["used_in_block"] = usage.UsedInBlock || usage.UsedInAttribute,
         };
     }
@@ -1811,6 +1872,23 @@ internal sealed class FontPreflightProcessor
         catch (Exception ex)
         {
             _trace.Log($"[DOTNET][FONT][WARN] update typeface failed style={styleRecord.Name} err={ex.Message}");
+        }
+    }
+
+    private void TraceStyleDescriptor(TextStyleTableRecord styleRecord)
+    {
+        try
+        {
+            var descriptor = styleRecord.Font;
+            _trace.Log(
+                $"[DOTNET][FONT][STYLE] style={styleRecord.Name} font={styleRecord.FileName ?? string.Empty} bigfont={styleRecord.BigFontFileName ?? string.Empty} typeface={descriptor.TypeFace} bold={descriptor.Bold} italic={descriptor.Italic} charset={descriptor.CharacterSet} pitch={descriptor.PitchAndFamily}"
+            );
+        }
+        catch (Exception ex)
+        {
+            _trace.Log(
+                $"[DOTNET][FONT][WARN] inspect descriptor failed style={styleRecord.Name} err={ex.Message}"
+            );
         }
     }
 

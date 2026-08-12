@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { TaskConfigModal } from "./TaskConfigModal";
@@ -74,5 +75,45 @@ describe("TaskConfigModal", () => {
 
     expect(onSecondaryClose).toHaveBeenCalledTimes(1);
     expect(onPrimaryClose).not.toHaveBeenCalled();
+  });
+
+  it("moves focus into the dialog, traps Tab, and restores the opener", async () => {
+    const user = userEvent.setup();
+
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            打开参数
+          </button>
+          {open ? (
+            <TaskConfigModal title="参数弹窗" onRequestClose={() => setOpen(false)}>
+              <button type="button">第一项</button>
+              <button type="button">最后一项</button>
+            </TaskConfigModal>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "打开参数" });
+    await user.click(opener);
+
+    const first = screen.getByRole("button", { name: "第一项" });
+    const last = screen.getByRole("button", { name: "最后一项" });
+    expect(first).toHaveFocus();
+
+    last.focus();
+    await user.tab();
+    expect(first).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "参数弹窗" })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
   });
 });

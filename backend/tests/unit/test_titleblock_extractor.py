@@ -984,6 +984,27 @@ def test_parse_1818_title_splits_scope_token_from_mixed_chinese_line() -> None:
     assert title_en == "HL\nReinforcement drawing of slab at elevation 4.200m"
 
 
+def test_parse_1818_title_keeps_scope_token_with_chinese_when_english_repeats_it() -> None:
+    extractor = TitleblockExtractor()
+    extractor.set_project_no("1818")
+
+    title_cn, title_en = extractor._parse_title_bilingual(
+        [
+            _item("NF 厂房", x=10.0, y=40.0),
+            _item("标高36.400m,38.200m楼板底视 模板图", x=5.0, y=30.0),
+            _item("NF Building", x=10.0, y=20.0),
+            _item(
+                "Level 36.400m,38.200m Bottom View Formwork",
+                x=5.0,
+                y=10.0,
+            ),
+        ]
+    )
+
+    assert title_cn == "NF厂房\n标高36.400m,38.200m楼板底视 模板图"
+    assert title_en == "NF Building\nLevel 36.400m,38.200m Bottom View Formwork"
+
+
 def test_parse_non_1818_title_keeps_all_lines_as_chinese_title() -> None:
     extractor = TitleblockExtractor()
     extractor.set_project_no("2016")

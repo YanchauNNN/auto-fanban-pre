@@ -20,9 +20,10 @@ def test_terminal_install_plan_leads_with_copyable_operator_commands() -> None:
     assert "-RunCalculationSmoke" in text
     assert "-CalculationArchive" in text
     assert "install\\register_backend_task.ps1" in text
-    assert "robocopy" in text
-    assert "/XD storage logs" in text
-    assert "/XF 姓名角色表.csv" in text
+    assert "直接覆盖到 `D:\\FanBanServer`" in text
+    assert "$DeployRoot = 'D:\\FanBanServer'" in text
+    assert "D:\\FanBanUpdate" not in text
+    assert "$PackageRoot" not in text
 
 
 def test_terminal_install_plan_is_concise_utf8_and_names_log_handoff() -> None:

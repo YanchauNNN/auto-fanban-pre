@@ -16,6 +16,7 @@ from src.config.mechanism_spec import (
     ArchiveRuntimeFileConfig,
     ArchiveRuntimeMechanismConfig,
     ArchiveRuntimeProbeConfig,
+    DeploymentMechanismConfig,
 )
 from src.deploy.archive_runtime import (
     ArchiveRuntimeError,
@@ -443,6 +444,39 @@ def test_archive_runtime_copy_plan_contains_only_four_verified_files(tmp_path: P
         ("License.txt", "bin/7-Zip/License.txt"),
         ("PROVENANCE.txt", "bin/7-Zip/PROVENANCE.txt"),
     ]
+
+
+def test_terminal_package_copy_plan_includes_private_archive_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.deploy.terminal_package as terminal_package
+
+    config = _config()
+    runner, _ = _runner_with_files(FILES)
+    prepare_archive_runtime(
+        repo_root=tmp_path,
+        config=config,
+        downloader=_downloader,
+        runner=runner,
+    )
+    monkeypatch.setattr(
+        terminal_package,
+        "_deployment_mechanism",
+        lambda _root=None: DeploymentMechanismConfig(archive_runtime=config),
+    )
+
+    destinations = {
+        entry.destination.as_posix()
+        for entry in terminal_package.gather_copy_plan(tmp_path)
+    }
+
+    assert {
+        "bin/7-Zip/7z.exe",
+        "bin/7-Zip/7z.dll",
+        "bin/7-Zip/License.txt",
+        "bin/7-Zip/PROVENANCE.txt",
+    } <= destinations
 
 
 def test_archive_runtime_files_are_recorded_in_full_and_delta_manifests(tmp_path: Path) -> None:

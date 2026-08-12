@@ -153,6 +153,11 @@ class FontPreflightService:
             if font_compatibility_mode
             else []
         )
+        font_compatibility_font_alt = (
+            self._resolve_font_compatibility_font_alt()
+            if font_compatibility_mode
+            else None
+        )
         titleblock_print_style_replacements = (
             self._resolve_titleblock_print_style_replacements()
             if font_compatibility_mode
@@ -178,6 +183,8 @@ class FontPreflightService:
                 existing_support_path=str(base_runtime.get("support_path") or ""),
             ),
         )
+        if font_compatibility_font_alt:
+            base_runtime["font_alt"] = font_compatibility_font_alt
 
         workspace_root = (workspace_dir or (source_dwg.parent / f".font-preflight-{uuid4().hex[:8]}")).resolve()
         workspace = (workspace_root / _safe_bridge_token(source_dwg.stem)).resolve()
@@ -334,6 +341,8 @@ class FontPreflightService:
                 normalized_result["font_map_path"] = str(font_runtime_plan.font_map_path)
             if font_runtime_plan.font_alt:
                 normalized_result["font_alt"] = font_runtime_plan.font_alt
+        elif font_compatibility_font_alt:
+            normalized_result["font_alt"] = font_compatibility_font_alt
         if (
             policy == "replace_missing"
             and bool(normalized_result.get("font_replacement_applied"))
@@ -434,6 +443,25 @@ class FontPreflightService:
             seen.add(key)
             results.append(style_name)
         return results
+
+    def _resolve_font_compatibility_font_alt(self) -> str | None:
+        configured = Path(
+            str(
+                getattr(
+                    self.config.font_preflight,
+                    "font_compatibility_font_alt",
+                    "",
+                )
+                or ""
+            ).strip()
+        ).name
+        if not configured:
+            return None
+        if not self._is_runtime_font_available(configured):
+            raise ValueError(
+                f"font_compatibility_font_alt is unavailable: {configured}"
+            )
+        return configured
 
     def _resolve_titleblock_print_style_replacements(self) -> list[dict[str, str]]:
         configured = getattr(
@@ -607,6 +635,15 @@ class FontPreflightService:
                     return True
             except Exception:  # noqa: BLE001
                 continue
+        try:
+            if any(
+                str(option.get("family") or "").strip().casefold()
+                == normalized.casefold()
+                for option in self.inventory.list_options(preferred_kinds={"ttf"})
+            ):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
         for fonts_dir in self.config.font_preflight.font_library_dirs:
             for candidate_name in self._font_file_candidates(normalized):
                 try:

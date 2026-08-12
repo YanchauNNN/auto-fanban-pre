@@ -1824,4 +1824,111 @@ describe("HttpAdapter", () => {
       taskRole: "仅拆图",
     });
   });
+
+  it("creates one change-page extraction job per uploaded archive", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          batch_id: "batch-pages-1",
+          jobs: [
+            {
+              job_id: "pages-job-1",
+              batch_id: "batch-pages-1",
+              source_filename: "变更一.zip",
+              task_kind: "change_page_extract",
+              job_mode: "extract",
+              project_no: null,
+              status: "queued",
+              stage: "INIT",
+              percent: 0,
+              message: "",
+              created_at: "2026-08-10T10:00:00+08:00",
+              finished_at: null,
+              findings_count: 0,
+              affected_drawings_count: 0,
+              retry_available: false,
+              artifacts: {
+                package_available: false,
+                ied_available: false,
+                report_available: false,
+                replaced_dwg_available: false,
+              },
+            },
+          ],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const zip = new File(["zip"], "变更一.zip", { type: "application/zip" });
+    const rar = new File(["rar"], "变更二.rar", { type: "application/vnd.rar" });
+    const created = await adapter.createChangePageExtract([zip, rar]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/jobs/change-page-extract",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+    const formData = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(formData.getAll("files[]")).toEqual([zip, rar]);
+    expect(created.jobs[0]).toMatchObject({
+      jobId: "pages-job-1",
+      taskKind: "change_page_extract",
+      jobMode: "extract",
+    });
+  });
+
+  it("normalizes change-page extraction details for result rendering", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          job_id: "pages-job-1",
+          batch_id: "batch-pages-1",
+          source_filename: "变更一.zip",
+          task_kind: "change_page_extract",
+          job_mode: "extract",
+          project_no: null,
+          status: "succeeded",
+          stage: "CHANGE_PAGE_COMPLETE",
+          percent: 100,
+          message: "页码提取完成",
+          created_at: "2026-08-10T10:00:00+08:00",
+          finished_at: "2026-08-10T10:00:02+08:00",
+          started_at: "2026-08-10T10:00:01+08:00",
+          findings_count: 0,
+          affected_drawings_count: 0,
+          retry_available: false,
+          artifacts: {
+            package_available: false,
+            ied_available: false,
+            report_available: false,
+            replaced_dwg_available: false,
+          },
+          change_page_result: {
+            archive_name: "变更一.zip",
+            items: [
+              { name: "附图1：布置图", pages: 2, relative_path: "子目录/附图1：布置图.pdf" },
+            ],
+            text: "附图1：布置图，共2页；",
+            pdf_count: 1,
+            total_pages: 2,
+            ignored_file_count: 1,
+          },
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new HttpAdapter("http://127.0.0.1:8000/");
+    const detail = await adapter.getJobDetail("pages-job-1");
+
+    expect(detail.changePageResult).toEqual({
+      archiveName: "变更一.zip",
+      items: [{ name: "附图1：布置图", pages: 2, relativePath: "子目录/附图1：布置图.pdf" }],
+      text: "附图1：布置图，共2页；",
+      pdfCount: 1,
+      totalPages: 2,
+      ignoredFileCount: 1,
+    });
+  });
 });

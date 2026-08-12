@@ -86,6 +86,9 @@ const STAGE_LABELS: Record<string, string> = {
   SELECT_REBAR: "匹配并核验实配钢筋",
   RENDER_CALCULATION_BOOK: "渲染 Word 计算书",
   FINALIZE_ARTIFACT: "整理计算书产物",
+  EXTRACT_ARCHIVE: "解压压缩包",
+  COUNT_PDF_PAGES: "统计 PDF 页数",
+  CHANGE_PAGE_COMPLETE: "页码提取完成",
 };
 
 const STAGE_MESSAGES: Record<string, string> = {
@@ -105,6 +108,9 @@ const STAGE_MESSAGES: Record<string, string> = {
   SELECT_REBAR: "正在匹配并核验实配钢筋",
   RENDER_CALCULATION_BOOK: "正在生成 Word 计算书",
   FINALIZE_ARTIFACT: "正在整理计算书产物",
+  EXTRACT_ARCHIVE: "正在安全解压压缩包",
+  COUNT_PDF_PAGES: "正在统计 PDF 页数",
+  CHANGE_PAGE_COMPLETE: "页码提取已完成",
 };
 
 export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[] {
@@ -212,6 +218,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     if (job.taskKind === "calculation_book") {
       return "计算书完成";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取完成";
+    }
     return "出图完成";
   }
 
@@ -228,6 +237,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     if (job.taskKind === "calculation_book") {
       return "计算书失败";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取失败";
+    }
     return "出图失败";
   }
 
@@ -243,6 +255,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     }
     if (job.taskKind === "calculation_book") {
       return "计算书已取消";
+    }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取已取消";
     }
     return "出图已取消";
   }
@@ -262,6 +277,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
   }
   if (job.taskKind === "calculation_book") {
     return "计算书处理中";
+  }
+  if (job.taskKind === "change_page_extract") {
+    return "页码提取处理中";
   }
   return "出图处理中";
 }
@@ -285,6 +303,9 @@ export function getMessageLabel(job: PresentableJob): string {
     if (job.taskKind === "calculation_book") {
       return "计算书任务已完成";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "变更页码提取任务已完成";
+    }
     return "交付任务已完成";
   }
 
@@ -300,6 +321,9 @@ export function getMessageLabel(job: PresentableJob): string {
     }
     if (job.taskKind === "calculation_book") {
       return "计算书任务已取消";
+    }
+    if (job.taskKind === "change_page_extract") {
+      return "变更页码提取任务已取消";
     }
     return "交付任务已取消";
   }
@@ -329,6 +353,9 @@ export function getMessageLabel(job: PresentableJob): string {
   if (job.taskKind === "calculation_book") {
     return job.status === "succeeded" ? "计算书任务已完成" : "计算书任务进行中";
   }
+  if (job.taskKind === "change_page_extract") {
+    return job.status === "succeeded" ? "变更页码提取任务已完成" : "变更页码提取任务进行中";
+  }
   return job.status === "succeeded" ? "交付任务已完成" : "交付任务进行中";
 }
 
@@ -345,6 +372,9 @@ export function getTaskKindLabel(kind: TaskKind): string {
   }
   if (kind === "calculation_book") {
     return "计算书";
+  }
+  if (kind === "change_page_extract") {
+    return "变更页码提取";
   }
   return "交付";
 }

@@ -541,6 +541,28 @@ def test_build_terminal_deploy_package_copies_standard_reinforcement_template(
     assert packaged.read_bytes() == expected
 
 
+def test_build_terminal_deploy_package_rejects_standard_template_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    canonical = repo_root / "documents_bin" / "计算书模板文件.xlsx"
+    runtime_copy = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    canonical.write_bytes(b"PK\x03\x04canonical")
+    runtime_copy.write_bytes(b"PK\x03\x04stale")
+
+    with pytest.raises(ValueError, match="计算书标准配筋模板内容不一致"):
+        build_terminal_deploy_package(
+            repo_root=repo_root,
+            output_root=tmp_path / "build" / "fanban-terminal-deploy",
+        )
+
+
 def test_terminal_package_materializes_ansys_skill_without_copying_private_archive(
     tmp_path: Path,
 ) -> None:

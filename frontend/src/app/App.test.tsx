@@ -17,6 +17,7 @@ const mockCreateBatch = vi.fn();
 const mockCreateAuditCheck = vi.fn();
 const mockCreateAuditReplace = vi.fn();
 const mockCreateCalculationBook = vi.fn();
+const mockCreateChangePageExtract = vi.fn();
 const mockListJobs = vi.fn();
 const mockGetJobsActivity = vi.fn();
 const mockSubscribeJobsActivity = vi.fn();
@@ -88,6 +89,7 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     createAuditCheck: mockCreateAuditCheck,
     createAuditReplace: mockCreateAuditReplace,
     createCalculationBook: mockCreateCalculationBook,
+    createChangePageExtract: mockCreateChangePageExtract,
     listJobs: mockListJobs,
     getJobsActivity: mockGetJobsActivity,
     subscribeJobsActivity: mockSubscribeJobsActivity,
@@ -118,6 +120,7 @@ beforeEach(() => {
   mockCreateAuditCheck.mockReset();
   mockCreateAuditReplace.mockReset();
   mockCreateCalculationBook.mockReset();
+  mockCreateChangePageExtract.mockReset();
   mockListJobs.mockReset();
   mockGetJobsActivity.mockReset();
   mockSubscribeJobsActivity.mockReset();
@@ -636,6 +639,7 @@ describe("homepage shell", () => {
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "标准化出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "计算书" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "变更页码提取" })).toBeInTheDocument();
 
     const toolbar = screen.getByTestId("module-toolbar");
     expect(within(toolbar).getByRole("button", { name: "业务模块" })).toHaveAttribute(
@@ -1259,6 +1263,14 @@ describe("homepage shell", () => {
 
     await user.click(await screen.findByRole("button", { name: "标准化出图" }));
     expect(await screen.findByRole("dialog", { name: "标准化出图配置" })).toBeInTheDocument();
+  });
+
+  it("opens the change page extraction workspace from the homepage", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "变更页码提取" }));
+    expect(await screen.findByRole("dialog", { name: "变更页码提取" })).toBeInTheDocument();
   });
 
   it("removes the continue-draft entry immediately after clearing a deliverable draft", async () => {
