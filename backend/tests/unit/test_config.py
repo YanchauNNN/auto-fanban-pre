@@ -637,6 +637,28 @@ runtime_options:
             "ST",
         ]
 
+    def test_runtime_config_reads_font_compatibility_font_alt(
+        self,
+        tmp_path: Path,
+    ):
+        """兼容打印使用的 AutoCAD 字体兜底应从运行期 YAML 落盘读取。"""
+        runtime_spec = tmp_path / "documents" / "参数规范_运行期.yaml"
+        runtime_spec.parent.mkdir(parents=True)
+        runtime_spec.write_text(
+            """
+runtime_options:
+  font_preflight:
+    font_compatibility_font_alt:
+      type: str
+      default: "tssdchn.shx"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        config = RuntimeConfig.from_yaml(runtime_spec)
+
+        assert config.font_preflight.font_compatibility_font_alt == "tssdchn.shx"
+
     def test_runtime_factory_index_maps_include_1915_target_template(self):
         """1915 作为翻版目标项目时应有无需岛号的厂房索引图模板。"""
         repo_root = Path(__file__).resolve().parents[3]
@@ -722,4 +744,38 @@ runtime_options:
             "提资单号：",
         ]
         assert config.audit_check.project_no_context_whitelist_separator_pattern == r"\s*[:：]?\s*"
+
+    def test_change_page_extract_runtime_is_yaml_backed(self):
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(repo_root / "documents" / "参数规范_运行期.yaml")
+        change_page = config.change_page_extract
+
+        assert change_page.max_archives == 50
+        assert change_page.allowed_extensions == [".zip", ".rar", ".7z"]
+        assert change_page.zip_metadata_encodings == ["utf-8", "gbk"]
+        assert change_page.result_line_template == "{name}，共{pages}页；"
+        assert change_page.archive_extractor.executable == (
+            repo_root / "bin" / "7-Zip" / "7z.exe"
+        ).resolve()
+        assert change_page.archive_extractor.fallback_executables == [
+            (repo_root / "build" / "runtime-cache" / "7-Zip" / "7z.exe").resolve()
+        ]
+
+    def test_archive_extractor_prefers_existing_primary_then_development_fallback(self, tmp_path):
+        from src.config.runtime_config import ArchiveExtractorRuntimeConfig
+
+        primary = tmp_path / "bin" / "7-Zip" / "7z.exe"
+        fallback = tmp_path / "build" / "runtime-cache" / "7-Zip" / "7z.exe"
+        config = ArchiveExtractorRuntimeConfig(
+            executable=primary,
+            fallback_executables=[fallback],
+        )
+
+        fallback.parent.mkdir(parents=True)
+        fallback.write_bytes(b"fallback")
+        assert config.effective_executable() == fallback
+
+        primary.parent.mkdir(parents=True)
+        primary.write_bytes(b"primary")
+        assert config.effective_executable() == primary
 

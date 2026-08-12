@@ -88,6 +88,10 @@ const AuditCheckWorkspace = lazy(async () => ({
 const AuditCheckSummaryModal = lazy(async () => ({
   default: (await import("../features/audit-check/AuditCheckSummaryModal")).AuditCheckSummaryModal,
 }));
+const ChangePageExtractWorkspace = lazy(async () => ({
+  default: (await import("../features/change-page-extract/ChangePageExtractWorkspace"))
+    .ChangePageExtractWorkspace,
+}));
 const PreviewPdfModal = lazy(async () => ({
   default: (await import("./PreviewPdfModal")).PreviewPdfModal,
 }));
@@ -457,6 +461,9 @@ const TUTORIAL_PREVIEW_ADAPTER: ApiAdapter = {
   createAuditReplace: async () => {
     throw new Error("Tutorial preview cannot create real tasks.");
   },
+  createChangePageExtract: async () => {
+    throw new Error("Tutorial preview cannot create real tasks.");
+  },
   rememberAuditReplaceFactoryCodes: async () => ({ factoryCodes: [] }),
   listJobs: async () => ({
     total: 1,
@@ -560,6 +567,7 @@ function WorkspacePage() {
   } | null>(null);
 
   const [auditConfigOpen, setAuditConfigOpen] = useState(false);
+  const [changePageExtractOpen, setChangePageExtractOpen] = useState(false);
   const [auditDraftAvailable, setAuditDraftAvailable] = useState(false);
   const [auditSummaryQueue, setAuditSummaryQueue] = useState<JobDetail[]>([]);
   const [auditNotice, setAuditNotice] = useState<string | null>(null);
@@ -1065,6 +1073,15 @@ function WorkspacePage() {
                     >
                       标准化出图
                     </button>
+                    <button
+                      className={styles.primaryActionButton}
+                      aria-busy={!actionsReady}
+                      disabled={entryActionsDisabled}
+                      type="button"
+                      onClick={() => setChangePageExtractOpen(true)}
+                    >
+                      变更页码提取
+                    </button>
                     {deliverableDraftAvailable ? (
                       <button
                         className={styles.secondaryActionButton}
@@ -1271,6 +1288,14 @@ function WorkspacePage() {
               onClose={() => setAuditConfigOpen(false)}
               onDraftAvailabilityChange={setAuditDraftAvailable}
               schema={schemaQuery.data}
+            />
+          ) : null}
+          {changePageExtractOpen ? (
+            <ChangePageExtractWorkspace
+              adapter={adapter}
+              isOpen
+              onBatchCreated={handleBatchCreated}
+              onClose={() => setChangePageExtractOpen(false)}
             />
           ) : null}
         </Suspense>
@@ -1957,6 +1982,23 @@ function GroupDetailPanel({ adapter, detail }: { adapter: ApiAdapter; detail: Jo
         <section className={styles.quickDownloadSection}>
           <h2>快捷下载</h2>
           <div className={styles.downloadGrid}>{quickDownloadItems}</div>
+        </section>
+      ) : null}
+
+      {detail.taskKind === "change_page_extract" ? (
+        <section className={styles.detailSection}>
+          <h2>变更页码提取结果</h2>
+          {detail.changePageResult ? (
+            <div className={styles.resultStack}>
+              <div className={styles.resultSummaryGrid}>
+                <InfoBlock label="PDF 数量" value={String(detail.changePageResult.pdfCount)} />
+                <InfoBlock label="合计页数" value={String(detail.changePageResult.totalPages)} />
+              </div>
+              <pre className={styles.changePageResultText}>{detail.changePageResult.text}</pre>
+            </div>
+          ) : (
+            <p className={styles.muted}>当前还没有可展示的页码提取结果。</p>
+          )}
         </section>
       ) : null}
 

@@ -8,13 +8,16 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
+from pypdf import PdfWriter
 
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
+from src.change_page_extract import ChangePageExtractExecutor
 
 
 class FakeFontPreflightService:
@@ -543,6 +546,26 @@ def _poll_job(client: TestClient, job_id: str, timeout_sec: float = 3.0) -> dict
             return payload
         time.sleep(0.05)
     raise AssertionError(f"job {job_id} did not finish within {timeout_sec}s")
+
+
+def _change_page_archive(*entries: tuple[str, int]) -> bytes:
+    payload = BytesIO()
+    with ZipFile(payload, "w", compression=ZIP_DEFLATED) as archive:
+        for filename, page_count in entries:
+            pdf = BytesIO()
+            writer = PdfWriter()
+            for _ in range(page_count):
+                writer.add_blank_page(width=72, height=72)
+            writer.write(pdf)
+            archive.writestr(filename, pdf.getvalue())
+    return payload.getvalue()
+
+
+class ChangePageOnlyProcessor:
+    def __call__(self, job: Job) -> None:
+        if job.job_type != JobType.CHANGE_PAGE_EXTRACT:
+            raise AssertionError(f"unexpected job type: {job.job_type}")
+        ChangePageExtractExecutor().execute(job)
 
 
 def test_health_endpoint_returns_runtime_status(monkeypatch, tmp_path: Path) -> None:
@@ -2102,6 +2125,120 @@ def test_create_batch_processes_jobs_and_exposes_downloads(
         preview_download = client.get(f"/api/jobs/{job_id}/download/preview")
         assert preview_download.status_code == 200
         assert preview_download.content == b"%PDF-plain"
+
+
+def test_change_page_extract_creates_one_independent_job_per_archive(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path, processor=ChangePageOnlyProcessor()) as client:
+        response = client.post(
+            "/api/jobs/change-page-extract",
+            files=[
+                (
+                    "files[]",
+                    (
+                        "first.zip",
+                        _change_page_archive(("附图2 第二份.pdf", 2), ("附图1 第一份.pdf", 1)),
+                        "application/zip",
+                    ),
+                ),
+                (
+                    "files[]",
+                    (
+                        "second.zip",
+                        _change_page_archive(("资料/报告.pdf", 3)),
+                        "application/zip",
+                    ),
+                ),
+            ],
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert len(payload["jobs"]) == 2
+        assert {job["batch_id"] for job in payload["jobs"]} == {payload["batch_id"]}
+
+        details = [_poll_job(client, item["job_id"]) for item in payload["jobs"]]
+        assert [detail["status"] for detail in details] == ["succeeded", "succeeded"], [
+            (detail.get("failure_reason"), detail.get("message")) for detail in details
+        ]
+        assert all(detail["task_kind"] == "change_page_extract" for detail in details)
+        assert all(detail["slot_id"] is None for detail in details)
+        assert details[0]["change_page_result"]["text"].splitlines() == [
+            "附图1：第一份，共1页；",
+            "附图2：第二份，共2页；",
+        ]
+        assert details[1]["change_page_result"]["pdf_count"] == 1
+        assert details[1]["change_page_result"]["total_pages"] == 3
+
+
+def test_change_page_extract_keeps_other_archive_running_when_one_archive_is_invalid(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path, processor=ChangePageOnlyProcessor()) as client:
+        response = client.post(
+            "/api/jobs/change-page-extract",
+            files=[
+                ("files[]", ("broken.zip", b"not-a-zip", "application/zip")),
+                (
+                    "files[]",
+                    ("valid.zip", _change_page_archive(("附图1 正常.pdf", 1)), "application/zip"),
+                ),
+            ],
+        )
+
+        assert response.status_code == 201
+        details = [_poll_job(client, item["job_id"]) for item in response.json()["jobs"]]
+        assert details[0]["status"] == "failed"
+        assert details[1]["status"] == "succeeded", [
+            (detail.get("failure_reason"), detail.get("message")) for detail in details
+        ]
+        assert details[1]["change_page_result"]["text"] == "附图1：正常，共1页；"
+
+
+def test_change_page_extract_rejects_unsupported_upload_extension(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path, processor=ChangePageOnlyProcessor()) as client:
+        response = client.post(
+            "/api/jobs/change-page-extract",
+            files=[("files[]", ("pages.tar", b"tar", "application/x-tar"))],
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["upload_errors"]["files"] == [
+        "only .zip, .rar and .7z files are allowed"
+    ]
+
+
+def test_real_change_page_archive_runs_through_formal_api(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    sample = repo_root / "test" / "王景霞反馈" / "新功能开发" / "变更.zip"
+
+    with _create_client(monkeypatch, tmp_path, processor=ChangePageOnlyProcessor()) as client:
+        response = client.post(
+            "/api/jobs/change-page-extract",
+            files=[("files[]", (sample.name, sample.read_bytes(), "application/zip"))],
+        )
+
+        assert response.status_code == 201
+        job_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+
+    assert detail["status"] == "succeeded", detail.get("failure_reason")
+    assert detail["task_kind"] == "change_page_extract"
+    assert detail["slot_id"] is None
+    assert detail["change_page_result"]["pdf_count"] == 10
+    assert detail["change_page_result"]["total_pages"] == 10
+    assert len(detail["change_page_result"]["text"].splitlines()) == 10
+    assert "附图1" in detail["change_page_result"]["text"]
+    assert "钢衬里筒壁" in detail["change_page_result"]["text"]
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(

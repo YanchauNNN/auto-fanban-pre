@@ -2,6 +2,7 @@ import { normalizeFormSchema } from "../../features/schema/schema";
 import type {
   ApiAdapter,
   ApiError,
+  ChangePageResult,
   CreateAuditReplaceParams,
   CreateBatchPayload,
   DeliverableOutputs,
@@ -55,7 +56,7 @@ type RawJobSummary = {
   is_group?: boolean;
   source_filename?: string | null;
   source_filenames?: string[] | null;
-  task_kind?: "deliverable" | "audit_check" | "audit_replace" | null;
+  task_kind?: "deliverable" | "audit_check" | "audit_replace" | "change_page_extract" | null;
   job_mode?: string | null;
   project_no: string | null;
   status: string;
@@ -168,6 +169,18 @@ type RawJobDetail = RawJobSummary & {
     action_count?: number | null;
     report_json?: string | null;
     message?: string | null;
+  } | null;
+  change_page_result?: {
+    archive_name?: string | null;
+    items?: Array<{
+      name?: string | null;
+      pages?: number | null;
+      relative_path?: string | null;
+    }> | null;
+    text?: string | null;
+    pdf_count?: number | null;
+    total_pages?: number | null;
+    ignored_file_count?: number | null;
   } | null;
 };
 
@@ -545,6 +558,26 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createChangePageExtract(files: File[]): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files[]", file);
+    }
+
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/change-page-extract", {
+      method: "POST",
+      body: formData,
+    });
+
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
   async getJobsActivity(): Promise<JobsActivity> {
     const payload = await this.fetchJson<{
       total: number;
@@ -617,6 +650,28 @@ export class HttpAdapter implements ApiAdapter {
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
       replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
       factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
+      changePageResult: this.normalizeChangePageResult(payload.change_page_result),
+    };
+  }
+
+  private normalizeChangePageResult(
+    payload: RawJobDetail["change_page_result"],
+  ): ChangePageResult | null {
+    if (!payload) {
+      return null;
+    }
+
+    return {
+      archiveName: payload.archive_name ?? "",
+      items: (payload.items ?? []).map((item) => ({
+        name: item.name ?? "",
+        pages: Number(item.pages ?? 0),
+        relativePath: item.relative_path ?? "",
+      })),
+      text: payload.text ?? "",
+      pdfCount: Number(payload.pdf_count ?? 0),
+      totalPages: Number(payload.total_pages ?? 0),
+      ignoredFileCount: Number(payload.ignored_file_count ?? 0),
     };
   }
 

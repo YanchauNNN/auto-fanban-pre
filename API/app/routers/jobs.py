@@ -128,6 +128,25 @@ async def create_audit_batch(
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
 
 
+@router.post("/change-page-extract")
+async def create_change_page_extract_batch(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    files: list[UploadFile] = File(..., alias="files[]"),
+) -> JSONResponse:
+    _resolve_optional_account(request, authorization)
+    uploads = [
+        UploadedFilePayload(
+            filename=upload.filename or "archive.zip",
+            content=await upload.read(),
+            content_type=upload.content_type,
+        )
+        for upload in files
+    ]
+    payload = request.app.state.runtime.create_change_page_extract_batch(files=uploads)
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=payload)
+
+
 @router.get("")
 def list_jobs(
     request: Request,

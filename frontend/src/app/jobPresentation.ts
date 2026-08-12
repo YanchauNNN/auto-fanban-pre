@@ -81,6 +81,9 @@ const STAGE_LABELS: Record<string, string> = {
   PACKAGE_ZIP: "生成交付压缩包",
   AUDIT_CHECK: "执行纠错识别",
   EXPORT_REPORT: "导出纠错报告",
+  EXTRACT_ARCHIVE: "解压压缩包",
+  COUNT_PDF_PAGES: "统计 PDF 页数",
+  CHANGE_PAGE_COMPLETE: "页码提取完成",
 };
 
 const STAGE_MESSAGES: Record<string, string> = {
@@ -95,6 +98,9 @@ const STAGE_MESSAGES: Record<string, string> = {
   PACKAGE_ZIP: "正在整理交付压缩包",
   AUDIT_CHECK: "正在执行纠错识别",
   EXPORT_REPORT: "正在导出纠错报告",
+  EXTRACT_ARCHIVE: "正在安全解压压缩包",
+  COUNT_PDF_PAGES: "正在统计 PDF 页数",
+  CHANGE_PAGE_COMPLETE: "页码提取已完成",
 };
 
 export function buildJobCardModels(items: readonly JobSummary[]): JobCardModel[] {
@@ -199,6 +205,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     if (job.taskKind === "audit_replace") {
       return "标准化出图完成";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取完成";
+    }
     return "出图完成";
   }
 
@@ -212,6 +221,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     if (job.taskKind === "audit_replace") {
       return "标准化出图失败";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取失败";
+    }
     return "出图失败";
   }
 
@@ -224,6 +236,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
     }
     if (job.taskKind === "audit_replace") {
       return "标准化出图已取消";
+    }
+    if (job.taskKind === "change_page_extract") {
+      return "页码提取已取消";
     }
     return "出图已取消";
   }
@@ -240,6 +255,9 @@ export function getStageLabel(stage: string | null, job: PresentableJob): string
   }
   if (job.taskKind === "audit_replace") {
     return "标准化出图处理中";
+  }
+  if (job.taskKind === "change_page_extract") {
+    return "页码提取处理中";
   }
   return "出图处理中";
 }
@@ -260,6 +278,9 @@ export function getMessageLabel(job: PresentableJob): string {
     if (job.taskKind === "audit_replace") {
       return "标准化出图任务已完成";
     }
+    if (job.taskKind === "change_page_extract") {
+      return "变更页码提取任务已完成";
+    }
     return "交付任务已完成";
   }
 
@@ -272,6 +293,9 @@ export function getMessageLabel(job: PresentableJob): string {
     }
     if (job.taskKind === "audit_replace") {
       return "标准化出图任务已取消";
+    }
+    if (job.taskKind === "change_page_extract") {
+      return "变更页码提取任务已取消";
     }
     return "交付任务已取消";
   }
@@ -298,6 +322,9 @@ export function getMessageLabel(job: PresentableJob): string {
   if (job.taskKind === "audit_replace") {
     return job.status === "succeeded" ? "标准化出图任务已完成" : "标准化出图任务进行中";
   }
+  if (job.taskKind === "change_page_extract") {
+    return job.status === "succeeded" ? "变更页码提取任务已完成" : "变更页码提取任务进行中";
+  }
   return job.status === "succeeded" ? "交付任务已完成" : "交付任务进行中";
 }
 
@@ -311,6 +338,9 @@ export function getTaskKindLabel(kind: TaskKind): string {
   }
   if (kind === "audit_replace") {
     return "标准化出图";
+  }
+  if (kind === "change_page_extract") {
+    return "变更页码提取";
   }
   return "交付";
 }

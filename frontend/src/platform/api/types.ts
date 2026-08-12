@@ -1,4 +1,8 @@
-export type TaskKind = "deliverable" | "audit_check" | "audit_replace";
+export type TaskKind =
+  | "deliverable"
+  | "audit_check"
+  | "audit_replace"
+  | "change_page_extract";
 export type TaskIntent = TaskKind;
 export type PreviewMode = "plain" | "annotated";
 
@@ -117,6 +121,21 @@ export type FindingGroup = {
   issueType?: string;
   summary?: string;
   details?: string[];
+};
+
+export type ChangePageResultItem = {
+  name: string;
+  pages: number;
+  relativePath: string;
+};
+
+export type ChangePageResult = {
+  archiveName: string;
+  items: ChangePageResultItem[];
+  text: string;
+  pdfCount: number;
+  totalPages: number;
+  ignoredFileCount: number;
 };
 
 export type ReplaceSummary = {
@@ -302,6 +321,7 @@ export type JobDetail = JobSummary & {
   findingGroups?: FindingGroup[];
   replaceSummary?: ReplaceSummary;
   factoryIndexMap?: FactoryIndexMapSummary | null;
+  changePageResult?: ChangePageResult | null;
 };
 
 export type JobList = {
@@ -385,6 +405,7 @@ export type ApiAdapter = {
     params: SubmissionParams,
     files: File[],
   ) => Promise<CreateBatchPayload>;
+  createChangePageExtract: (files: File[]) => Promise<CreateBatchPayload>;
   createAuditCheck: (
     projectNo: string,
     unitNo: string,

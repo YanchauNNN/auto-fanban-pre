@@ -270,6 +270,7 @@ function createAdapter(): ApiAdapter {
     preflightFonts: vi.fn(),
     createAuditCheck: vi.fn(),
     createAuditReplace: vi.fn(),
+    createChangePageExtract: vi.fn(),
     rememberAuditReplaceFactoryCodes: vi.fn().mockResolvedValue({ factoryCodes: [] }),
     createSplitOnlyBatch: vi.fn(),
     listJobs: vi.fn(),

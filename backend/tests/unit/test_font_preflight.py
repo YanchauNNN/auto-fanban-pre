@@ -167,6 +167,25 @@ def test_dotnet_empty_style_compatibility_does_not_mutate_text_entities() -> Non
     assert "TargetMatchedCount <= 0" not in empty_style_section
 
 
+def test_dotnet_empty_style_compatibility_preserves_ttf_descriptor_styles() -> None:
+    source_path = (
+        Path(__file__).parents[2]
+        / "src"
+        / "cad"
+        / "dotnet"
+        / "Module5CadBridge"
+        / "FontPreflightProcessor.cs"
+    )
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index("private bool IsRepairableEmptyShxStyle(")
+    end = source.index("private bool IsFontCompatibilityExemptStyle", start)
+    policy_section = source[start:end]
+
+    assert "styleRecord.Font" in policy_section
+    assert "descriptor.TypeFace" in policy_section
+    assert "EMPTY_STYLE_TTF_DESCRIPTOR_SKIP" in policy_section
+
+
 def test_dotnet_titleblock_print_replacement_only_switches_entity_style() -> None:
     source_path = (
         Path(__file__).parents[2]
@@ -352,6 +371,50 @@ def test_font_preflight_service_runs_compatibility_replacement_without_missing_f
     }
 
 
+def test_font_preflight_service_accepts_installed_ttf_family_compatibility_target(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "FangSong (simfang.ttf)",
+                        "value": "simfang.ttf",
+                        "family": "FangSong",
+                        "path": r"C:\Windows\Fonts\simfang.ttf",
+                        "kind": "ttf",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {
+        "FangSong_GB2312": "FangSong",
+    }
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+    )
+
+    replace_call = bridge.calls[1]
+    assert replace_call["font_compatibility_replacements"] == {
+        "FangSong_GB2312": "FangSong",
+    }
+    assert result["font_compatibility_replacements"] == {
+        "FangSong_GB2312": "FangSong",
+    }
+
+
 def test_font_preflight_service_passes_exempt_style_names_to_replace_pass(
     tmp_path: Path,
 ) -> None:
@@ -398,6 +461,62 @@ def test_font_preflight_service_passes_exempt_style_names_to_replace_pass(
     ]
 
 
+def test_font_preflight_service_uses_compatibility_font_alt_without_editing_exempt_style(
+    tmp_path: Path,
+) -> None:
+    bridge = _OkBridge()
+    service = FontPreflightService(
+        inventory=cast(
+            Any,
+            _FakeInventory(
+                [
+                    {
+                        "label": "tssdchn.shx",
+                        "value": "tssdchn.shx",
+                        "family": "tssdchn",
+                        "path": r"D:\AutoCAD\Fonts\tssdchn.shx",
+                        "kind": "bigfont",
+                    }
+                ]
+            ),
+        ),
+        bridge=cast(Any, bridge),
+    )
+    service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {}
+    service.config.font_preflight.empty_style_replacement = {}
+    service.config.font_preflight.font_compatibility_font_alt = "tssdchn.shx"
+    service.config.font_preflight.font_compatibility_exempt_style_names = ["宋体", "ST"]
+    source = tmp_path / "sample.dwg"
+    source.write_text("dwg", encoding="utf-8")
+
+    result = service.inspect_dwg(
+        source_dwg=source,
+        replacement_policy="none",
+        font_compatibility_mode=True,
+        workspace_dir=tmp_path / "work",
+    )
+
+    assert bridge.calls[0]["slot_runtime"]["font_alt"] == "tssdchn.shx"
+    assert result["font_alt"] == "tssdchn.shx"
+
+
+def test_pipeline_extracts_font_runtime_from_preflight_summary() -> None:
+    summary = {
+        "files": [
+            {
+                "font_map_path": r"D:\jobs\font\current.fmp",
+                "font_alt": "tssdchn.shx",
+            }
+        ]
+    }
+
+    assert PipelineExecutor._font_runtime_overrides_from_summary(summary) == {
+        "font_map_path": r"D:\jobs\font\current.fmp",
+        "font_alt": "tssdchn.shx",
+    }
+
+
 def test_font_preflight_service_builds_titleblock_print_replacement_regions(
     tmp_path: Path,
 ) -> None:
@@ -427,6 +546,7 @@ def test_font_preflight_service_builds_titleblock_print_replacement_regions(
         bridge=cast(Any, bridge),
     )
     service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {}
     service.config.font_preflight.empty_style_replacement = {}
     service.config.font_preflight.titleblock_print_style_replacements = {
         "图签缺失样式": {
@@ -569,6 +689,9 @@ def test_font_preflight_service_skips_empty_style_replacement_without_target_reg
         bridge=cast(Any, bridge),
     )
     service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {
+        "hztxt.shx": "tssdchn.shx"
+    }
     service.config.font_preflight.empty_style_replacement = {
         "font": "tssdeng.shx",
         "bigfont": "tssdchn.shx",
@@ -620,6 +743,7 @@ def test_font_preflight_service_builds_empty_style_target_regions_from_frames(
         bridge=cast(Any, bridge),
     )
     service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {}
     service.config.font_preflight.empty_style_replacement = {
         "font": "tssdeng.shx",
         "bigfont": "tssdchn.shx",
@@ -694,6 +818,7 @@ def test_font_preflight_service_reports_empty_style_patch(tmp_path: Path) -> Non
         bridge=cast(Any, bridge),
     )
     service.config.font_preflight.verify_after_replace = False
+    service.config.font_preflight.font_compatibility_replacements = {}
     service.config.font_preflight.empty_style_replacement = {
         "font": "tssdeng.shx",
         "bigfont": "tssdchn.shx",

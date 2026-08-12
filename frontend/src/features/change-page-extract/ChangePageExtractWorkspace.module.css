@@ -1,0 +1,212 @@
+.workspace {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.15rem 1.2rem;
+}
+
+.header,
+.resultsHeader,
+.resultTitle,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.header {
+  align-items: flex-start;
+}
+
+.header h2,
+.uploadPanel h3,
+.results h3,
+.resultTitle h4 {
+  margin: 0;
+  color: #123f70;
+}
+
+.header p,
+.uploadPanel p {
+  margin: 0.35rem 0 0;
+  color: #58789b;
+}
+
+.kicker {
+  font-family: "Rajdhani", sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #5d84b3;
+}
+
+.uploadPanel,
+.results {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  border-radius: 8px;
+  background: rgba(244, 248, 253, 0.94);
+}
+
+.fileList {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fileList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(20, 70, 128, 0.08);
+  border-radius: 6px;
+  background: #fff;
+  color: #214e7e;
+}
+
+.emptyState,
+.pendingText {
+  color: #617f9d;
+}
+
+.actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.fileButton,
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fileButton,
+.primaryButton {
+  border: 0;
+  color: #fff;
+  background: #1c61a9;
+}
+
+.secondaryButton {
+  border: 1px solid rgba(20, 70, 128, 0.18);
+  color: #174781;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.errorPanel {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(188, 61, 61, 0.22);
+  border-radius: 6px;
+  background: #fff5f3;
+  color: #a52e29;
+}
+
+.errorPanel p {
+  margin: 0;
+}
+
+.errorPanel p + p {
+  margin-top: 0.35rem;
+}
+
+.resultList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.resultCard {
+  min-width: 0;
+  padding: 0.9rem;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.resultTitle h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}
+
+.resultTitle span {
+  flex: 0 0 auto;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(20, 70, 128, 0.08);
+  color: #174781;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.resultTitle span[data-status="failed"] {
+  background: rgba(188, 61, 61, 0.1);
+  color: #a52e29;
+}
+
+.resultMeta {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 0.65rem;
+  color: #58789b;
+  font-size: 0.9rem;
+}
+
+.resultText {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  border: 1px solid rgba(20, 70, 128, 0.1);
+  border-radius: 6px;
+  background: #f7fafe;
+  color: #123f70;
+  font-family: "Noto Sans SC", sans-serif;
+  line-height: 1.7;
+}
+
+.failureText {
+  margin: 0.75rem 0 0;
+  color: #a52e29;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .header,
+  .resultsHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resultList {
+    grid-template-columns: 1fr;
+  }
+}

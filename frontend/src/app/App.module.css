@@ -1440,6 +1440,21 @@
   color: #163f6d;
 }
 
+.changePageResultText {
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  border: 1px solid rgba(20, 70, 128, 0.12);
+  border-radius: 8px;
+  background: rgba(247, 250, 254, 0.96);
+  color: #123f70;
+  font-family: "Noto Sans SC", sans-serif;
+  line-height: 1.7;
+}
+
 .drawingQuantityCopy {
   grid-column: 2;
   display: flex;

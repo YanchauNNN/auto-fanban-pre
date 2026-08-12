@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -174,13 +175,22 @@ class InstalledFontInventory:
                         {
                             "label": f"{name} ({resolved.name})",
                             "value": resolved.name,
-                            "family": name,
+                            "family": self._normalize_registry_family_name(name),
                             "path": str(resolved),
                             "kind": "ttf",
                             "source": "windows_fonts",
                         }
                     )
         return results
+
+    @staticmethod
+    def _normalize_registry_family_name(name: str) -> str:
+        return re.sub(
+            r"\s+\((?:TrueType|OpenType)\)\s*$",
+            "",
+            str(name or "").strip(),
+            flags=re.IGNORECASE,
+        ).strip()
 
     def _iter_windows_font_files(self) -> list[dict[str, str]]:
         if not self.windows_fonts_dir.exists() or not self.windows_fonts_dir.is_dir():

@@ -786,7 +786,17 @@ class PipelineExecutor:
                 details={"split_done": done},
             )
             try:
-                slot_runtime = job.params.get("cad_slot_runtime")
+                raw_slot_runtime = job.params.get("cad_slot_runtime")
+                slot_runtime = (
+                    dict(raw_slot_runtime)
+                    if isinstance(raw_slot_runtime, dict)
+                    else {}
+                )
+                slot_runtime.update(
+                    self._font_runtime_overrides_from_summary(
+                        job.font_preflight_summary,
+                    )
+                )
                 result = self.cad_dxf_executor.execute_source_dxf(
                     job_id=job.job_id,
                     source_dxf=source_dxf,
@@ -794,7 +804,7 @@ class PipelineExecutor:
                     sheet_sets=group["sheet_sets"],
                     output_dir=drawings_dir,
                     task_root=task_root,
-                    slot_runtime=slot_runtime if isinstance(slot_runtime, dict) else None,
+                    slot_runtime=slot_runtime or None,
                     plot_style_key=requested_plot_style_key,
                 )
                 context["cad_dxf_results"][str(source_dxf)] = result
@@ -813,6 +823,24 @@ class PipelineExecutor:
                 for sheet_set in group["sheet_sets"]:
                     if "DXF执行失败" not in sheet_set.flags:
                         sheet_set.flags.append("DXF执行失败")
+
+    @staticmethod
+    def _font_runtime_overrides_from_summary(
+        summary: dict[str, Any] | None,
+    ) -> dict[str, str]:
+        if not isinstance(summary, dict):
+            return {}
+        raw_files = summary.get("files")
+        candidates = raw_files if isinstance(raw_files, list) else [summary]
+        overrides: dict[str, str] = {}
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            for key in ("font_map_path", "font_alt"):
+                value = str(item.get(key) or "").strip()
+                if value and key not in overrides:
+                    overrides[key] = value
+        return overrides
 
     # ==================================================================
     # 阶段 8 (Stage B): EXPORT_PDF_AND_DWG — 统一导出

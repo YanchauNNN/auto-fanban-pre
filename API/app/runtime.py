@@ -22,6 +22,7 @@ from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
+from src.change_page_extract import ChangePageExtractExecutor
 from src.cad import FrameDetector, ODAConverter
 from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
@@ -81,6 +82,9 @@ class PipelineJobProcessor:
         return PipelineExecutor(font_preflight_service=self.font_preflight_service)
 
     def __call__(self, job: Job) -> None:
+        if job.job_type == JobType.CHANGE_PAGE_EXTRACT:
+            ChangePageExtractExecutor().execute(job)
+            return
         if job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get("mode", "")).strip().lower()
             if mode == "replace":
@@ -91,6 +95,9 @@ class PipelineJobProcessor:
         self._deliverable_executor().execute(job)
 
     def execute_slot_bound_phase(self, job: Job) -> Callable[[], None] | None:
+        if job.job_type == JobType.CHANGE_PAGE_EXTRACT:
+            self(job)
+            return None
         if job.job_type == JobType.AUDIT_REPLACE:
             self(job)
             return None
@@ -672,6 +679,42 @@ class DeliverableApiRuntime:
             self._enqueue_job(job.job_id)
             jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
+
+    def create_change_page_extract_batch(
+        self,
+        *,
+        files: list[UploadedFilePayload],
+    ) -> dict[str, Any]:
+        upload_errors = self._validate_change_page_extract_uploads(files)
+        if upload_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": upload_errors, "param_errors": {}},
+            )
+
+        batch_id = self._new_batch_id()
+        self._log_submission(
+            endpoint="/api/jobs/change-page-extract",
+            batch_id=batch_id,
+            files=files,
+        )
+        jobs: list[dict[str, Any]] = []
+        for upload in files:
+            source_filename = Path(upload.filename).name or "archive.zip"
+            job = self.job_manager.create_job(
+                job_type=JobType.CHANGE_PAGE_EXTRACT.value,
+                project_no="",
+                options={},
+                params={},
+                batch_id=batch_id,
+                source_filename=source_filename,
+                task_role="change_page_extract",
+            )
+            self._store_job_upload(job, upload)
+            self.job_manager.update_job(job)
+            jobs.append(self._index_job_summary(job))
+            self._enqueue_job(job.job_id)
+        return {"batch_id": batch_id, "jobs": jobs}
 
     @staticmethod
     def _resolve_params_for_upload(raw_params: dict[str, Any], filename: str) -> dict[str, Any]:
@@ -1348,6 +1391,9 @@ class DeliverableApiRuntime:
         job = self.job_manager.get_job(job_id)
         if job is None or job.status != JobStatus.QUEUED:
             return
+        if job.job_type == JobType.CHANGE_PAGE_EXTRACT:
+            self._run_non_cad_job(job)
+            return
         slot = None
         completion_deferred = False
         try:
@@ -1404,6 +1450,18 @@ class DeliverableApiRuntime:
                 self.cad_slot_pool.release(slot.slot_id)
             if not completion_deferred:
                 self._signal_job_completion(job.job_id)
+
+    def _run_non_cad_job(self, job: Job) -> None:
+        try:
+            job.work_dir = self.config.get_job_dir(job.job_id)
+            job.work_dir.mkdir(parents=True, exist_ok=True)
+            self.job_processor(job)
+        except Exception as exc:  # noqa: BLE001
+            if job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
+                job.mark_failed(str(exc))
+        finally:
+            self.job_manager.update_job(job)
+            self._signal_job_completion(job.job_id)
 
     def _enqueue_group(self, group_id: str) -> None:
         if not self.process_jobs_in_api:
@@ -1563,6 +1621,39 @@ class DeliverableApiRuntime:
             errors.setdefault('files', []).append(f'total upload exceeds {limits.max_total_mb} MB')
         return errors
 
+    def _validate_change_page_extract_uploads(
+        self,
+        files: list[UploadedFilePayload],
+    ) -> dict[str, list[str]]:
+        errors: dict[str, list[str]] = {}
+        limits = self.config.change_page_extract
+        if not files:
+            errors.setdefault("files", []).append("at least one archive is required")
+            return errors
+        if len(files) > limits.max_archives:
+            errors.setdefault("files", []).append(
+                f"too many archives: max {limits.max_archives}"
+            )
+        allowed = {value.casefold() for value in limits.allowed_extensions}
+        invalid = [
+            upload.filename
+            for upload in files
+            if Path(upload.filename).suffix.casefold() not in allowed
+        ]
+        if invalid:
+            errors.setdefault("files", []).append("only .zip, .rar and .7z files are allowed")
+        max_archive_bytes = limits.max_archive_upload_mb * 1024 * 1024
+        if any(len(upload.content) > max_archive_bytes for upload in files):
+            errors.setdefault("files", []).append(
+                f"single archive exceeds {limits.max_archive_upload_mb} MB"
+            )
+        max_total_bytes = limits.max_upload_total_mb * 1024 * 1024
+        if sum(len(upload.content) for upload in files) > max_total_bytes:
+            errors.setdefault("files", []).append(
+                f"total upload exceeds {limits.max_upload_total_mb} MB"
+            )
+        return errors
+
     def _store_job_upload(self, job: Job, upload: UploadedFilePayload) -> None:
         job_dir = self.config.get_job_dir(job.job_id)
         upload_dir = job_dir / 'uploads'
@@ -1652,6 +1743,9 @@ class DeliverableApiRuntime:
             else:
                 task_kind = 'audit_replace'
                 job_mode = mode or 'replace'
+        elif job.job_type == JobType.CHANGE_PAGE_EXTRACT:
+            task_kind = 'change_page_extract'
+            job_mode = 'extract'
         elif job.job_type == JobType.DELIVERABLE and self._coerce_bool(job.options.get('split_only')):
             job_mode = 'split_only'
         failure_display = self._build_failure_display(
@@ -1756,6 +1850,10 @@ class DeliverableApiRuntime:
                         'report_json': str(factory_index_map.get('report_json') or '') or None,
                         'message': str(factory_index_map.get('message') or ''),
                     }
+        elif job.job_type == JobType.CHANGE_PAGE_EXTRACT:
+            payload['change_page_result'] = self._load_json_artifact(
+                job.artifacts.change_page_result_json
+            )
         return payload
 
     def _serialize_job_artifacts(self, job: Job, *, include_urls: bool = False, job_id: str | None = None) -> dict[str, Any]:

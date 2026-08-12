@@ -15,6 +15,7 @@ from ..config.mechanism_spec import (
 )
 from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
 from ..cad.plot_resource_manager import PDF2_PMP_NAME
+from .archive_runtime import archive_runtime_copy_plan
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
@@ -73,7 +74,7 @@ def _deployment_mechanism(root: Path | None = None) -> DeploymentMechanismConfig
 
 def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
     deployment = _deployment_mechanism(repo_root)
-    return [
+    plan = [
         CopyPlanEntry(repo_root / "frontend" / "dist", Path("frontend-dist")),
         CopyPlanEntry(repo_root / "API", Path("backend-runtime") / "API"),
         CopyPlanEntry(repo_root / "backend" / "src", Path("backend-runtime") / "backend" / "src"),
@@ -132,6 +133,12 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             Path("tools") / "diagnose_iis_frontend_503.ps1",
         ),
     ]
+    if deployment.archive_runtime is not None:
+        plan.extend(
+            CopyPlanEntry(entry.source, entry.destination)
+            for entry in archive_runtime_copy_plan(repo_root, deployment.archive_runtime)
+        )
+    return plan
 
 
 def _ensure_exists(copy_plan: list[CopyPlanEntry]) -> None:

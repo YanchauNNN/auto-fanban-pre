@@ -1,8 +1,14 @@
 主空间 main（默认端口）
 
+API：
 cd E:\project\auto-fanban-pre
 uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8000
 
+Worker：
+cd E:\project\auto-fanban-pre
+uv run --project backend python -X utf8 -m API.app.worker
+
+前端：
 cd E:\project\auto-fanban-pre\frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 

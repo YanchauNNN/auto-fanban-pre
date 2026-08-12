@@ -70,6 +70,24 @@ runtime_options:
     max_retries:      { type: int, default: 2, desc: "失败重试次数" }
     retry_backoff_ms: { type: int, default: 1000, desc: "重试退避间隔（毫秒）" }
 
+  change_page_extract:
+    max_archives: { type: int, default: 50, desc: "变更页码提取单次最多上传的独立压缩包数量" }
+    allowed_extensions: { type: "list[str]", default: [".zip", ".rar", ".7z"], desc: "允许上传的压缩包后缀；后端还会核对文件签名" }
+    max_upload_total_mb: { type: int, default: 2048, desc: "单批压缩包上传总大小上限 MB" }
+    max_archive_upload_mb: { type: int, default: 1024, desc: "单个压缩包上传大小上限 MB" }
+    max_archive_files: { type: int, default: 500, desc: "单个压缩包允许的最大条目数" }
+    max_extracted_total_mb: { type: int, default: 1024, desc: "单个压缩包解压后文件总大小上限 MB" }
+    max_single_file_mb: { type: int, default: 50, desc: "压缩包内单个文件解压大小上限 MB" }
+    max_compression_ratio: { type: float, default: 250.0, desc: "ZIP 单文件或 RAR/7z 总体最大压缩比" }
+    zip_metadata_encodings: { type: "list[str]", default: ["utf-8", "gbk"], desc: "ZIP 中文文件名元数据候选编码，按内容质量自动选择" }
+    result_line_template: { type: str, default: "{name}，共{pages}页；", desc: "每个 PDF 页码结果的可复制文本模板" }
+    archive_extractor:
+      executable: { type: str, default: "bin/7-Zip/7z.exe", desc: "部署包私有 7-Zip；仅用于普通单卷、无密码 RAR/7z" }
+      fallback_executables: { type: "list[str]", default: ["build/runtime-cache/7-Zip/7z.exe"], desc: "开发环境备用私有 7-Zip 路径；仅在主路径不存在时按顺序使用，不搜索系统 PATH" }
+      list_timeout_seconds: { type: int, default: 120, desc: "RAR/7z 文件清单读取超时秒数" }
+      extract_timeout_seconds: { type: int, default: 300, desc: "RAR/7z 安全解压超时秒数" }
+      max_list_output_bytes: { type: int, default: 8388608, desc: "RAR/7z 文件清单标准输出最大字节数" }
+
   # --------------------------------------------------------------------------
   # 3) 路径与外部程序
   # --------------------------------------------------------------------------
@@ -591,12 +609,12 @@ runtime_options:
       desc: "缺失 bigfont 时的优先替代字体文件顺序"
     font_compatibility_replacements:
       type: object
-      default: { "hztxt.shx": "tssdchn.shx" }
-      desc: "字体兼容模式启用时的强制字体映射；即使源字体存在也会在字体预检替换阶段把源字体文件写成目标字体文件"
+      default: { "hztxt.shx": "tssdchn.shx", "FangSong_GB2312": "FangSong" }
+      desc: "字体兼容模式启用时的强制字体映射；支持 SHX 文件名和旧 TTF 家族名。SHX 映射写入目标字体文件，TTF 家族映射只更新任务副本的 FontDescriptor，不修改文字实体、坐标或对齐"
     empty_style_replacement:
       type: object
       default: { "font": "tssdeng.shx", "bigfont": "tssdchn.shx" }
-      desc: "字体兼容模式启用时，对任务副本中 FileName 为空的文字样式直接写入的兜底 SHX/BigFont；只修改 TextStyleTableRecord，不修改文字实体、坐标、对齐或插入点"
+      desc: "字体兼容模式启用时，仅对任务副本中 FileName、BigFontFileName 和 TTF TypeFace 均为空的文字样式写入兜底 SHX/BigFont；已有 FangSong_GB2312、宋体等 TTF 描述符的样式保持原样，不修改文字实体、坐标、对齐或插入点"
     empty_style_target_fields:
       type: "list[str]"
       default: ["external_code", "internal_code", "page_info"]
@@ -605,6 +623,10 @@ runtime_options:
       type: "list[str]"
       default: ["宋体", "ST"]
       desc: "字体兼容模式启用时的文字样式名豁免列表；命中后不执行 hztxt 等兼容映射，也不执行空 FileName 样式兜底写入"
+    font_compatibility_font_alt:
+      type: str
+      default: "tssdchn.shx"
+      desc: "字体兼容模式打印时显式传给 AutoCAD 的 FONTALT；用于让缺少旧式 TTF 描述符（如 FangSong_GB2312）的文字保持与当前 CAD 兼容显示一致，不修改文字实体或豁免样式表"
     titleblock_print_style_replacements:
       type: object
       default: {}

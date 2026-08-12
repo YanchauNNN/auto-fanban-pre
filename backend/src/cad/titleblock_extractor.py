@@ -1056,9 +1056,15 @@ class TitleblockExtractor(ITitleblockExtractor):
         for idx, normalized in enumerate(normalized_lines):
             scope_token, cn_remainder = self._split_leading_scope_token_from_cn_line(normalized)
             if scope_token:
-                en_lines.append(scope_token)
-                if cn_remainder:
-                    cn_lines.append(cn_remainder)
+                if self._english_title_repeats_scope_token(
+                    scope_token,
+                    normalized_lines[idx + 1 :],
+                ):
+                    cn_lines.append(f"{scope_token}{cn_remainder or ''}")
+                else:
+                    en_lines.append(scope_token)
+                    if cn_remainder:
+                        cn_lines.append(cn_remainder)
                 continue
 
             language = self._classify_title_line(normalized)
@@ -1398,6 +1404,25 @@ class TitleblockExtractor(ITitleblockExtractor):
         if cls._looks_like_english_title_line(rest):
             return None, None
         return scope, rest
+
+    @classmethod
+    def _english_title_repeats_scope_token(
+        cls,
+        scope_token: str,
+        following_lines: list[str],
+    ) -> bool:
+        scope = cls._normalize_spaces(scope_token).upper()
+        if not scope:
+            return False
+        prefix_pattern = re.compile(
+            rf"^{re.escape(scope)}(?=\s|[-_/])",
+            re.IGNORECASE,
+        )
+        return any(
+            prefix_pattern.search(cls._normalize_spaces(line)) is not None
+            and cls._looks_like_english_title_line(line)
+            for line in following_lines
+        )
 
     @staticmethod
     def _looks_like_compact_cn_title_token(text: str) -> bool:

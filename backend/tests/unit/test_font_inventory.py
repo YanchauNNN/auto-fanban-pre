@@ -63,3 +63,14 @@ def test_font_inventory_skips_failed_windows_registry_source() -> None:
     )
 
     assert inventory.list_options(preferred_kinds={"ttf"}) == []
+
+
+def test_font_inventory_normalizes_registry_family_suffix() -> None:
+    assert (
+        InstalledFontInventory._normalize_registry_family_name("FangSong (TrueType)")
+        == "FangSong"
+    )
+    assert (
+        InstalledFontInventory._normalize_registry_family_name("宋体 (TrueType)")
+        == "宋体"
+    )

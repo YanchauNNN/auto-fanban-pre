@@ -111,6 +111,10 @@ class AcCoreConsoleRunner:
         runtime_log = workspace_dir / "accoreconsole.log"
         module5_trace_log = workspace_dir / "module5_trace.log"
         task_data = json.loads(task_json.read_text(encoding="utf-8"))
+        self._ensure_runtime_font_preferences(
+            task_data=task_data,
+            workspace_dir=workspace_dir,
+        )
         self._write_runtime_script(
             runtime_scr=runtime_scr,
             task_json=task_json,
@@ -570,26 +574,51 @@ class AcCoreConsoleRunner:
         support_path = self._escape_lisp_string(str(runtime.get("support_path", "")))
         font_map_path = self._escape_lisp_string(str(runtime.get("font_map_path", "")))
         font_alt = self._escape_lisp_string(str(runtime.get("font_alt", "")))
-        if not any((plotters_dir, pmp_dir, plot_styles_dir, spool_dir, support_path, font_map_path, font_alt)):
-            return []
-
-        content = [
-            "(vl-load-com)",
-            '(setq _m5prefs (vla-get-Files (vla-get-Preferences (vlax-get-acad-object))))',
-        ]
+        content = ["(vl-load-com)"]
+        if any((plotters_dir, pmp_dir, plot_styles_dir, spool_dir, support_path)):
+            content.append(
+                "(setq _m5prefs (vl-catch-all-apply 'vla-get-Preferences "
+                "(list (vlax-get-acad-object))))"
+            )
+            content.append(
+                "(if (not (vl-catch-all-error-p _m5prefs)) "
+                "(setq _m5prefs (vl-catch-all-apply 'vla-get-Files (list _m5prefs))))"
+            )
+            content.append(
+                "(if (vl-catch-all-error-p _m5prefs) (setq _m5prefs nil))"
+            )
         if plotters_dir:
-            content.append(f'(vla-put-PrinterConfigPath _m5prefs "{plotters_dir}")')
+            content.append(
+                "(if _m5prefs (vl-catch-all-apply 'vla-put-PrinterConfigPath "
+                f'(list _m5prefs "{plotters_dir}")))'
+            )
         if pmp_dir:
-            content.append(f'(vla-put-PrinterDescPath _m5prefs "{pmp_dir}")')
+            content.append(
+                "(if _m5prefs (vl-catch-all-apply 'vla-put-PrinterDescPath "
+                f'(list _m5prefs "{pmp_dir}")))'
+            )
         if plot_styles_dir:
-            content.append(f'(vla-put-PrinterStyleSheetPath _m5prefs "{plot_styles_dir}")')
+            content.append(
+                "(if _m5prefs (vl-catch-all-apply 'vla-put-PrinterStyleSheetPath "
+                f'(list _m5prefs "{plot_styles_dir}")))'
+            )
         if spool_dir:
-            content.append(f'(vla-put-PrintSpoolerPath _m5prefs "{spool_dir}")')
+            content.append(
+                "(if _m5prefs (vl-catch-all-apply 'vla-put-PrintSpoolerPath "
+                f'(list _m5prefs "{spool_dir}")))'
+            )
         if support_path:
             content.append(
-                '(vla-put-SupportPath _m5prefs '
-                f'(if (> (strlen (vla-get-SupportPath _m5prefs)) 0) '
-                f'(strcat (vla-get-SupportPath _m5prefs) ";{support_path}") "{support_path}"))'
+                "(setq _m5support (if _m5prefs "
+                "(vl-catch-all-apply 'vla-get-SupportPath (list _m5prefs)) \"\"))"
+            )
+            content.append(
+                "(if (vl-catch-all-error-p _m5support) (setq _m5support \"\"))"
+            )
+            content.append(
+                "(if _m5prefs (vl-catch-all-apply 'vla-put-SupportPath "
+                f'(list _m5prefs (if (> (strlen _m5support) 0) '
+                f'(strcat _m5support ";{support_path}") "{support_path}"))))'
             )
         if font_map_path:
             content.append(f'(setvar "FONTMAP" "{font_map_path}")')
@@ -600,6 +629,25 @@ class AcCoreConsoleRunner:
             f'font_map_path={font_map_path} font_alt={font_alt}\\n")'
         )
         return content
+
+    def _ensure_runtime_font_preferences(
+        self,
+        *,
+        task_data: dict[str, Any],
+        workspace_dir: Path,
+    ) -> None:
+        raw_runtime = task_data.get("runtime")
+        runtime = dict(raw_runtime) if isinstance(raw_runtime, dict) else {}
+        if not str(runtime.get("font_map_path") or "").strip():
+            empty_font_map = (workspace_dir / "fanban.empty.fmp").resolve()
+            empty_font_map.write_text("", encoding="ascii")
+            runtime["font_map_path"] = str(empty_font_map)
+        if not str(runtime.get("font_alt") or "").strip():
+            defaults = dict(self.config.font_preflight.default_fontalt_by_kind)
+            font_alt = str(defaults.get("ttf") or defaults.get("shx") or "").strip()
+            if font_alt:
+                runtime["font_alt"] = font_alt
+        task_data["runtime"] = runtime
 
     @staticmethod
     def _escape_lisp_string(value: str) -> str:

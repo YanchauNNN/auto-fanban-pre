@@ -21,8 +21,12 @@ storage/
 tmp/
 /build/
 /dist/
+/bin/7-Zip/
 output/
+/output.lnk
+/t/
 plot.log
+/backend/acad.err
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
