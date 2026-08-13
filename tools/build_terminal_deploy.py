@@ -10,6 +10,7 @@ from shutil import which
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPO_ROOT / "backend"
+DEFAULT_ARCHIVE_NAME = "AI测试终端部署包.zip"
 
 
 def _resolve_optional_path(raw: str | None) -> Path | None:
@@ -17,6 +18,12 @@ def _resolve_optional_path(raw: str | None) -> Path | None:
         return None
     path = Path(raw).expanduser()
     return path if path.exists() else None
+
+
+def _resolve_archive_output(output_root: Path, raw: str | None) -> Path:
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return output_root.parent / DEFAULT_ARCHIVE_NAME
 
 
 def _run_frontend_build(repo_root: Path) -> None:
@@ -31,7 +38,11 @@ def main() -> int:
     if str(BACKEND_ROOT) not in sys.path:
         sys.path.insert(0, str(BACKEND_ROOT))
 
-    from src.deploy import ensure_prereq_installers, publish_terminal_deploy_artifacts
+    from src.deploy import (
+        ensure_prereq_installers,
+        publish_terminal_deploy_artifacts,
+        publish_terminal_deploy_zip,
+    )
 
     parser = argparse.ArgumentParser(description="?????????")
     parser.add_argument(
@@ -43,6 +54,16 @@ def main() -> int:
         "--skip-frontend-build",
         action="store_true",
         help="?? frontend/dist ???????????",
+    )
+    parser.add_argument(
+        "--archive-output",
+        default="",
+        help="正式部署 ZIP 输出路径；默认位于完整部署目录旁",
+    )
+    parser.add_argument(
+        "--skip-archive",
+        action="store_true",
+        help="仅生成部署目录，不生成正式部署 ZIP",
     )
     parser.add_argument(
         "--dotnet-installer",
@@ -84,7 +105,7 @@ def main() -> int:
         url_rewrite_installer=_resolve_optional_path(args.url_rewrite_installer),
         arr_installer=_resolve_optional_path(args.arr_installer),
     )
-    publish_terminal_deploy_artifacts(
+    artifacts = publish_terminal_deploy_artifacts(
         repo_root=REPO_ROOT,
         output_root=output_root,
         dotnet_installer=installers.dotnet,
@@ -93,7 +114,15 @@ def main() -> int:
         url_rewrite_installer=installers.url_rewrite,
         arr_installer=installers.arr,
     )
-    print(output_root)
+    print(artifacts.full_root)
+    print(artifacts.delta_root)
+    if not args.skip_archive:
+        archive = publish_terminal_deploy_zip(
+            package_root=artifacts.full_root,
+            archive_path=_resolve_archive_output(output_root, args.archive_output),
+        )
+        print(archive.archive_path)
+        print(archive.sha256_path)
     return 0
 
 

@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 import shutil
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 
@@ -69,6 +71,7 @@ DEPLOY_IGNORE_PATTERNS = (
     BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB,
 )
 PACKAGE_MANIFEST = "package-manifest.json"
+DEFAULT_TERMINAL_DEPLOY_ARCHIVE_NAME = "AI测试终端部署包.zip"
 DELTA_DIR_NAME = "_delta"
 DELTA_MANIFEST = "delta-manifest.json"
 DELTA_OVERWRITE_LIST = "覆盖清单.txt"
@@ -110,6 +113,13 @@ class CopyPlanEntry:
 class DeployArtifacts:
     full_root: Path
     delta_root: Path
+
+
+@dataclass(frozen=True)
+class DeployZipArtifact:
+    archive_path: Path
+    sha256_path: Path
+    sha256: str
 
 
 def _deployment_mechanism(root: Path | None = None) -> DeploymentMechanismConfig:
@@ -667,6 +677,195 @@ def write_package_manifest(package_root: Path, *, package_kind: str) -> dict[str
     }
     _write_json(package_root / PACKAGE_MANIFEST, manifest)
     return manifest
+
+
+def _read_package_manifest(package_root: Path) -> dict[str, object]:
+    manifest_path = package_root / PACKAGE_MANIFEST
+    if not manifest_path.is_file():
+        raise ValueError(f"package manifest 不存在: {manifest_path}")
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"package manifest 无法读取: {manifest_path}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+        raise ValueError("package manifest 缺少 files 列表")
+    return payload
+
+
+def _manifest_file_map(package_root: Path) -> dict[str, dict[str, object]]:
+    manifest = _read_package_manifest(package_root)
+    file_map: dict[str, dict[str, object]] = {}
+    for raw_entry in manifest["files"]:
+        if not isinstance(raw_entry, dict):
+            raise ValueError("package manifest files 条目格式无效")
+        path = raw_entry.get("path")
+        size = raw_entry.get("size")
+        sha256 = raw_entry.get("sha256")
+        if (
+            not isinstance(path, str)
+            or not path
+            or not isinstance(size, int)
+            or size < 0
+            or not isinstance(sha256, str)
+            or len(sha256) != 64
+        ):
+            raise ValueError("package manifest files 条目字段无效")
+        if path in file_map:
+            raise ValueError(f"package manifest 存在重复路径: {path}")
+        file_map[path] = raw_entry
+    if manifest.get("file_count") != len(file_map):
+        raise ValueError("package manifest file_count 与 files 列表不一致")
+    return file_map
+
+
+def _hash_archive_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    with archive.open(info, "r") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_terminal_deploy_zip(package_root: Path, archive_path: Path) -> None:
+    manifest_files = _manifest_file_map(package_root)
+    source_files = {
+        path.relative_to(package_root).as_posix(): path
+        for path in _iter_package_files(package_root)
+    }
+    expected_source_files = set(manifest_files) | {PACKAGE_MANIFEST}
+    if set(source_files) != expected_source_files:
+        missing = sorted(expected_source_files - set(source_files))
+        extra = sorted(set(source_files) - expected_source_files)
+        raise ValueError(
+            f"package manifest 与部署目录不一致: missing={missing[:5]}, extra={extra[:5]}"
+        )
+
+    prefix = f"{package_root.name}/"
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        bad_member = archive.testzip()
+        if bad_member is not None:
+            raise ValueError(f"部署 ZIP CRC 校验失败: {bad_member}")
+
+        infos = archive.infolist()
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            raise ValueError("部署 ZIP 存在重复路径")
+        for info in infos:
+            if any(ord(character) > 127 for character in info.filename) and not (
+                info.flag_bits & 0x800
+            ):
+                raise ValueError(f"部署 ZIP 中文路径缺少 UTF-8 标志: {info.filename}")
+            if not info.filename.startswith(prefix):
+                raise ValueError(f"部署 ZIP 条目不在 {prefix} 下: {info.filename}")
+
+        archive_files = {
+            info.filename[len(prefix) :]: info for info in infos if not info.is_dir()
+        }
+        if set(archive_files) != expected_source_files:
+            missing = sorted(expected_source_files - set(archive_files))
+            extra = sorted(set(archive_files) - expected_source_files)
+            raise ValueError(
+                f"部署 ZIP 与 package manifest 文件集合不一致: "
+                f"missing={missing[:5]}, extra={extra[:5]}"
+            )
+
+        manifest_info = archive_files[PACKAGE_MANIFEST]
+        if archive.read(manifest_info) != source_files[PACKAGE_MANIFEST].read_bytes():
+            raise ValueError("部署 ZIP 内 package manifest 与部署目录不一致")
+
+        for relative_path, manifest_entry in manifest_files.items():
+            info = archive_files[relative_path]
+            if info.file_size != manifest_entry["size"]:
+                raise ValueError(f"package manifest 文件大小不一致: {relative_path}")
+            if _hash_archive_member(archive, info) != manifest_entry["sha256"]:
+                raise ValueError(f"package manifest SHA-256 不一致: {relative_path}")
+
+
+def publish_terminal_deploy_zip(
+    *,
+    package_root: Path,
+    archive_path: Path,
+) -> DeployZipArtifact:
+    package_root = package_root.resolve()
+    archive_path = archive_path.resolve()
+    if not package_root.is_dir():
+        raise ValueError(f"部署目录不存在: {package_root}")
+    _manifest_file_map(package_root)
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid4().hex
+    temporary_archive = archive_path.with_name(f".{archive_path.name}.{token}.tmp")
+    sha256_path = archive_path.with_name(f"{archive_path.name}.sha256")
+    temporary_sha256 = sha256_path.with_name(f".{sha256_path.name}.{token}.tmp")
+    backup_archive = archive_path.with_name(f".{archive_path.name}.{token}.bak")
+    backup_sha256 = sha256_path.with_name(f".{sha256_path.name}.{token}.bak")
+    archive_backed_up = False
+    sha256_backed_up = False
+    archive_published = False
+    sha256_published = False
+    try:
+        with zipfile.ZipFile(
+            temporary_archive,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+            strict_timestamps=False,
+        ) as archive:
+            archive.write(package_root, arcname=f"{package_root.name}/")
+            for path in sorted(
+                package_root.rglob("*"),
+                key=lambda item: item.relative_to(package_root).as_posix(),
+            ):
+                relative_path = path.relative_to(package_root).as_posix()
+                archive.write(path, arcname=f"{package_root.name}/{relative_path}")
+
+        _validate_terminal_deploy_zip(package_root, temporary_archive)
+        digest = _hash_file(temporary_archive)
+        temporary_sha256.write_text(
+            f"{digest}  {archive_path.name}\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        try:
+            if archive_path.exists():
+                os.replace(archive_path, backup_archive)
+                archive_backed_up = True
+            if sha256_path.exists():
+                os.replace(sha256_path, backup_sha256)
+                sha256_backed_up = True
+            os.replace(temporary_archive, archive_path)
+            archive_published = True
+            os.replace(temporary_sha256, sha256_path)
+            sha256_published = True
+        except BaseException:
+            if archive_published:
+                archive_path.unlink(missing_ok=True)
+            if sha256_published:
+                sha256_path.unlink(missing_ok=True)
+            if archive_backed_up:
+                os.replace(backup_archive, archive_path)
+                archive_backed_up = False
+            if sha256_backed_up:
+                os.replace(backup_sha256, sha256_path)
+                sha256_backed_up = False
+            raise
+        backup_archive.unlink(missing_ok=True)
+        archive_backed_up = False
+        backup_sha256.unlink(missing_ok=True)
+        sha256_backed_up = False
+        return DeployZipArtifact(
+            archive_path=archive_path,
+            sha256_path=sha256_path,
+            sha256=digest,
+        )
+    finally:
+        temporary_archive.unlink(missing_ok=True)
+        temporary_sha256.unlink(missing_ok=True)
+        if not archive_backed_up:
+            backup_archive.unlink(missing_ok=True)
+        if not sha256_backed_up:
+            backup_sha256.unlink(missing_ok=True)
 
 
 def _copy_relative_file(source_root: Path, destination_root: Path, rel_path: str) -> None:
