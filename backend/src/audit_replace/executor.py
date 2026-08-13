@@ -238,6 +238,10 @@ class AuditReplaceExecutor:
                     str(postprocess_config.get("issue_month_format") or "%Y.%m"),
                 ),
                 target_revision=str(postprocess_config.get("target_revision") or "A"),
+                target_status=str(postprocess_config.get("target_status") or "CFC"),
+                status_pattern=str(
+                    postprocess_config.get("status_pattern") or r"^[A-Z]{2,6}$"
+                ),
                 target_revision_description=str(
                     postprocess_config.get("target_revision_description") or "首次出版",
                 ),
@@ -247,6 +251,21 @@ class AuditReplaceExecutor:
                     if str(value)
                 ],
                 date_pattern=str(postprocess_config.get("date_pattern") or r"\d{4}\.\d{2}"),
+                source_project_no=mapping.source_project_no,
+                target_project_no=mapping.target_project_no,
+            )
+        )
+        replace_entries.extend(
+            self._build_internal_code_revision_suffix_entries(
+                items=annotated_items,
+                existing_entries=replace_entries,
+                pattern=str(
+                    postprocess_config.get("internal_code_revision_suffix_pattern")
+                    or (
+                        r"^(?P<code>\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2})\s*"
+                        r"[（(]\s*[A-Z]\s*(?:版)?\s*[）)]$"
+                    )
+                ),
                 source_project_no=mapping.source_project_no,
                 target_project_no=mapping.target_project_no,
             )
@@ -708,6 +727,8 @@ class AuditReplaceExecutor:
         target_revision: str,
         target_revision_description: str,
         date_pattern: str,
+        target_status: str = "CFC",
+        status_pattern: str = r"^[A-Z]{2,6}$",
         revision_description_keywords: list[str] | None = None,
         source_project_no: str = "",
         target_project_no: str = "",
@@ -723,6 +744,10 @@ class AuditReplaceExecutor:
             compiled_date_pattern = re.compile(date_pattern)
         except re.error:
             compiled_date_pattern = re.compile(r"\d{4}\.\d{2}")
+        try:
+            compiled_status_pattern = re.compile(status_pattern)
+        except re.error:
+            compiled_status_pattern = re.compile(r"^[A-Z]{2,6}$")
 
         revision_groups_by_frame = cls._group_items_by_frame_key_and_context(
             items,
@@ -776,6 +801,55 @@ class AuditReplaceExecutor:
                     )
                 existing_handles.add(handle)
                 handled_date_handles.add(handle)
+
+        status_groups_by_frame = cls._group_items_by_frame_key_and_context(
+            items,
+            field_context="titleblock_status",
+        )
+        for frame_key, status_group in status_groups_by_frame.items():
+            status_group = [
+                item
+                for item in status_group
+                if (
+                    compiled_status_pattern.fullmatch(str(item.raw_text or "").strip())
+                    or str(item.raw_text or "").strip().casefold() == target_status.casefold()
+                )
+            ]
+            revisions = sorted(
+                revision_groups_by_frame.get(frame_key, []),
+                key=lambda item: cls._item_y(item) or 0.0,
+            )
+            keep_revision = revisions[0] if revisions else None
+            sorted_statuses = sorted(status_group, key=lambda item: cls._item_y(item) or 0.0)
+            keep_status = sorted_statuses[0] if keep_revision is None else None
+            for status_item in sorted_statuses:
+                handle = str(status_item.entity_handle or "")
+                if not handle or handle in existing_handles:
+                    continue
+                if keep_revision is not None:
+                    paired_revision = cls._nearest_same_row_item(status_item, revisions)
+                    is_keep = paired_revision is keep_revision
+                else:
+                    is_keep = status_item is keep_status
+                raw_text = str(status_item.raw_text or "")
+                replacement_text = target_status if is_keep else ""
+                if raw_text.strip() == replacement_text:
+                    continue
+                entries.append(
+                    cls._make_standardization_entry(
+                        status_item,
+                        matched_text=raw_text,
+                        replacement_text=replacement_text,
+                        message=(
+                            "titleblock_status_target_cfc"
+                            if is_keep
+                            else "titleblock_status_clear_non_target_revision"
+                        ),
+                        source_project_no=source_project_no,
+                        target_project_no=target_project_no,
+                    )
+                )
+                existing_handles.add(handle)
 
         for item in items:
             if item.field_context != "titleblock_date":
@@ -845,6 +919,52 @@ class AuditReplaceExecutor:
                     )
                     existing_handles.add(handle)
 
+        return entries
+
+    @classmethod
+    def _build_internal_code_revision_suffix_entries(
+        cls,
+        *,
+        items: list[Any],
+        existing_entries: list[dict[str, Any]],
+        pattern: str,
+        source_project_no: str = "",
+        target_project_no: str = "",
+    ) -> list[dict[str, Any]]:
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            return []
+        existing_suffix_handles = {
+            str(entry.get("entity_handle"))
+            for entry in existing_entries
+            if entry.get("entity_handle")
+            and entry.get("status") == "pending"
+            and entry.get("message") == "internal_code_revision_suffix_removed"
+        }
+        entries: list[dict[str, Any]] = []
+        for item in items:
+            handle = str(item.entity_handle or "")
+            if not handle or handle in existing_suffix_handles:
+                continue
+            raw_text = str(item.raw_text or "")
+            match = compiled.fullmatch(raw_text.strip())
+            if match is None:
+                continue
+            code = str(match.groupdict().get("code") or "").strip()
+            if not code or code == raw_text:
+                continue
+            entries.append(
+                cls._make_standardization_entry(
+                    item,
+                    matched_text=raw_text,
+                    replacement_text=code,
+                    message="internal_code_revision_suffix_removed",
+                    source_project_no=source_project_no,
+                    target_project_no=target_project_no,
+                )
+            )
+            existing_suffix_handles.add(handle)
         return entries
 
     @staticmethod

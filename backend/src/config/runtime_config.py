@@ -222,7 +222,10 @@ class AuditCheckGenericIdentifierConfig(BaseModel):
 
     regex: str = r"^[A-Z]{3}\d{4}[A-Z]$"
     exempt_embed_patterns: list[str] = Field(
-        default_factory=lambda: [r"^[A-Z]{3}\d{4}[A-Z]$"],
+        default_factory=lambda: [
+            r"^[A-Z]{3}\d{4}[A-Z]$",
+            r"^(?:[0-9][A-Z]{2})[A-Z]{3}\d{4}[A-Z][,，]?$",
+        ],
     )
 
 

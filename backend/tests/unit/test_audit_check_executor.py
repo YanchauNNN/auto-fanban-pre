@@ -272,6 +272,37 @@ def test_audit_field_context_mapper_uses_sheet_page_roi_for_field_context(
     assert annotated.field_context == "titleblock_internal_code"
 
 
+def test_audit_field_context_mapper_maps_titleblock_status_roi(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-status-roi",
+            source_file=tmp_path / "demo.dxf",
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=700),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(internal_code="20169QF-JGS03-001"),
+    )
+    mapper = AuditFieldContextMapper([frame], [])
+
+    annotated = mapper.annotate(
+        ScanTextItem(
+            raw_text="CFC",
+            entity_type="DBText",
+            position_x=848.0,
+            position_y=130.0,
+        )
+    )
+
+    assert annotated.internal_code == "20169QF-JGS03-001"
+    assert annotated.field_context == "titleblock_status"
+
+
 def test_audit_check_executor_reuses_shared_prep_without_rerunning_oda_or_detection(
     monkeypatch,
     tmp_path: Path,

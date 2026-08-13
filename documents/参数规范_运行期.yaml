@@ -286,8 +286,10 @@ runtime_options:
         desc: "generic_identifier_like 的文本分类规则（收紧为 3位大写字母+4位数字+1位大写字母）"
       exempt_embed_patterns:
         type: "list[str]"
-        default: ["^[A-Z]{3}\\d{4}[A-Z]$"]
-        desc: "嵌入项目号时允许豁免的严格格式；默认仅豁免 3位大写字母+4位数字+1位大写字母"
+        default:
+          - "^[A-Z]{3}\\d{4}[A-Z]$"
+          - "^(?:[0-9][A-Z]{2})[A-Z]{3}\\d{4}[A-Z][,，]?$"
+        desc: "嵌入项目号时允许豁免的严格格式；覆盖 FVV2026P 和带机组厂房前缀的 2RCFVV2026P，不豁免普通内部编码"
     context_rules:
       date_like:
         type: "list[str]"

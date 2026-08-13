@@ -167,6 +167,50 @@ def test_match_engine_only_whitelists_exact_three_letters_plus_project_no_plus_o
     assert any(item.raw_text == "12ABC2016X" and item.matched_text == "2016" for item in findings)
 
 
+def test_match_engine_whitelists_prefixed_embed_identifier_for_all_scanned_text_kinds() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "2026"],
+        allowed_texts={"1907": {"1907"}, "2026": {"2026"}},
+        foreign_texts={"1907": {"2026"}, "2026": {"1907"}},
+        token_projects={"1907": {"1907"}, "2026": {"2026"}},
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    protected_types = [
+        "DBText",
+        "MText",
+        "AttributeReference",
+        "AttributeDefinition",
+        "Dimension",
+        "MLeader",
+        "TableCell",
+    ]
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            *[
+                ScanTextItem(
+                    raw_text="2RCFVV2026P," if index == 0 else "2RCFVV2026P",
+                    entity_type=entity_type,
+                    entity_handle=f"PROTECTED-{index}",
+                )
+                for index, entity_type in enumerate(protected_types)
+            ],
+            ScanTextItem(
+                raw_text="20262RC-JGS38-001",
+                entity_type="DBText",
+                entity_handle="INTERNAL-CODE",
+            ),
+        ],
+    )
+
+    assert all("FVV2026P" not in finding.raw_text for finding in findings)
+    assert any(
+        finding.raw_text == "20262RC-JGS38-001" and finding.matched_text == "2026"
+        for finding in findings
+    )
+
+
 def test_match_engine_ignores_yaml_project_no_context_whitelist(tmp_path: Path) -> None:
     wb = Workbook()
     ws = wb.active

@@ -1135,9 +1135,12 @@ titleblock_extract:
     date_pattern: "\\d{4}\\.\\d{2}"
     issue_month_format: "%Y.%m"
     target_revision: "A"
+    target_status: "CFC"
+    status_pattern: "^[A-Z]{2,6}$"
     target_revision_description: "首次出版"
-    revision_description_keywords: ["出版", "升版"]
-    desc: "翻版后图签标准化：日期替换为当日年月；版次和版本说明仅保留y值最小的A版行"
+    revision_description_keywords: ["初版", "出版", "升版"]
+    internal_code_revision_suffix_pattern: '^(?P<code>\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2})\s*[（(]\s*[A-Z]\s*(?:版)?\s*[）)]$'
+    desc: "翻版后图签标准化：日期替换为当月；版次、状态、日期和版本说明仅保留y值最小的A/CFC行；清理完整内部编码后的括号版次"
 
   # --------------------------------------------------------------------------
   # 3.8 锚点检测配置

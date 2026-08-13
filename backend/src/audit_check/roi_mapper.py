@@ -108,6 +108,7 @@ class AuditFieldContextMapper:
             "external_code": "titleblock_external_code",
             "date": "titleblock_date",
             "revision": "titleblock_revision",
+            "status": "titleblock_status",
             "revision_description": "titleblock_revision_description",
         }
         regions: list[_FieldRegion] = []

@@ -16,6 +16,9 @@ class TestSpecLoader:
     def test_load_spec(self, spec: BusinessSpec):
         """测试加载规范"""
         assert spec.schema_version == "2.0"
+        postprocess = spec.titleblock_extract["replace_postprocess"]
+        assert postprocess["target_status"] == "CFC"
+        assert postprocess["status_pattern"] == "^[A-Z]{2,6}$"
 
     def test_get_paper_variants(self, spec: BusinessSpec):
         """测试获取图幅配置"""
@@ -197,6 +200,7 @@ class TestRuntimeConfig:
         assert runtime_config.audit_check.generic_identifier_like.regex == r"^[A-Z]{3}\d{4}[A-Z]$"
         assert runtime_config.audit_check.generic_identifier_like.exempt_embed_patterns == [
             r"^[A-Z]{3}\d{4}[A-Z]$",
+            r"^(?:[0-9][A-Z]{2})[A-Z]{3}\d{4}[A-Z][,，]?$",
         ]
         assert runtime_config.audit_check.context_rules.date_like[0] == r"^\d{4}[-/.]\d{1,2}$"
         assert runtime_config.audit_check.matching_policy.suppress_project_no_in_dimension_like is True
