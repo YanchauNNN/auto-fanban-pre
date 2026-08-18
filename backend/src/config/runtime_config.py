@@ -280,6 +280,8 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"
+    additional_unit_text_patterns: list[str] = Field(default_factory=list)
+    protected_unit_text_patterns: dict[str, list[str]] = Field(default_factory=dict)
     external_code_pattern: str = r"a^"
     external_code_requires_titleblock_roi_context: bool = True
     short_factory_code_pattern: str = r"a^"

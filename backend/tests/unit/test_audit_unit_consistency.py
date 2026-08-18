@@ -86,6 +86,23 @@ def test_unit_consistency_supports_project_specific_unit_ranges_and_island_text(
         ]
 
 
+def test_unit_consistency_protects_plant_unit_pair_but_checks_reactor_unit() -> None:
+    findings = _engine().evaluate(
+        project_no="1907",
+        unit_no="5",
+        items=[
+            ScanTextItem(
+                raw_text="1.本设计为三门核电厂5、6号机组的6反应堆厂房安全壳(RC)结构施工图。",
+                entity_type="TEXT",
+            ),
+        ],
+    )
+
+    assert [(finding.matched_text, finding.context_kind) for finding in findings] == [
+        ("6反应堆", "unit_consistency"),
+    ]
+
+
 def test_unit_consistency_accepts_unlisted_unit_for_configured_project() -> None:
     findings = _engine().evaluate(
         project_no="1907",

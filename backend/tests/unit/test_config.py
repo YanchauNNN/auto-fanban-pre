@@ -689,6 +689,10 @@ runtime_options:
         assert unit_consistency.unit_no_pattern == "^[0-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
+        assert unit_consistency.protected_unit_text_patterns["1907"]
+        assert unit_consistency.additional_unit_text_patterns == [
+            r"(?P<unit_no>[0-9])\s*反\s*应\s*堆",
+        ]
 
     def test_runtime_standard_review_reads_values_from_yaml(self):
         """规范审查的开关、规范库路径和 y 容差应由运行期 YAML 提供。"""

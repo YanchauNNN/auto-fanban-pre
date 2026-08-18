@@ -384,8 +384,19 @@ runtime_options:
         desc: "内部编码中的机组号提取规则；{project_no} 会替换为当前项目号；支持常规20261RB-JGS11及紧凑20260SC2JGS01格式"
       explicit_unit_text_pattern:
         type: str
-        default: "(?P<unit_no>[0-9])\\s*号\\s*(?:机组|岛)"
+        default: "(?P<unit_no>[0-9])\\s*号\\s*(?:机\\s*组|岛)"
         desc: "明确中文机组/岛文字中的机组号提取规则；X号岛与X号机组等价"
+      additional_unit_text_patterns:
+        type: "list[str]"
+        default:
+          - "(?P<unit_no>[0-9])\\s*反\\s*应\\s*堆"
+        desc: "除X号机组/X号岛外允许执行机组号转换的中文语义模式；每项必须包含unit_no命名组"
+      protected_unit_text_patterns:
+        type: "dict[str,list[str]]"
+        default:
+          "1907":
+            - "三\\s*门\\s*核\\s*电\\s*(?:厂|项\\s*目)\\s*5\\s*[、,，]\\s*6\\s*号\\s*机\\s*组"
+        desc: "按项目保护的文本片段；片段内机组数字不转换，片段外的X反应堆等仍正常转换"
       external_code_pattern:
         type: str
         default: "(?<![A-Z0-9])(?P<prefix>[A-Z]{2})(?P<unit_no>[0-9])(?P<body>[A-Z0-9]{16})(?![A-Z0-9])"

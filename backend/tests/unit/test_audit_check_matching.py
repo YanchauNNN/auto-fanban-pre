@@ -47,6 +47,49 @@ def test_lexicon_loader_includes_row1_and_row2_and_ignores_note_columns(tmp_path
     assert "SHARED" not in lexicon.foreign_texts["1418"]
 
 
+def test_lexicon_loader_streams_worksheet_once_and_closes_workbook(monkeypatch) -> None:
+    class _StreamingWorksheet:
+        def __init__(self) -> None:
+            self.iteration_count = 0
+
+        def iter_rows(self, *, values_only: bool):
+            assert values_only is True
+            self.iteration_count += 1
+            yield ("备注", "2016", "2026")
+            yield ("项目名称", "旧项目", "新项目")
+
+        def cell(self, *args, **kwargs):
+            raise AssertionError("read-only worksheets must not be accessed cell by cell")
+
+    class _StreamingWorkbook:
+        sheetnames = ["词库"]
+
+        def __init__(self) -> None:
+            self.worksheet = _StreamingWorksheet()
+            self.closed = False
+
+        def __getitem__(self, name: str):
+            assert name == "词库"
+            return self.worksheet
+
+        def close(self) -> None:
+            self.closed = True
+
+    workbook = _StreamingWorkbook()
+    monkeypatch.setattr(
+        "src.audit_check.lexicon.load_workbook",
+        lambda *args, **kwargs: workbook,
+    )
+
+    lexicon = AuditLexiconLoader().load("unused.xlsx")
+
+    assert workbook.worksheet.iteration_count == 1
+    assert workbook.closed is True
+    assert lexicon.project_options == ["2016", "2026"]
+    assert lexicon.allowed_texts["2016"] == {"2016", "旧项目"}
+    assert lexicon.allowed_texts["2026"] == {"2026", "新项目"}
+
+
 def test_match_engine_reports_code_like_project_no_and_short_code_but_suppresses_noise(
     tmp_path: Path,
 ) -> None:

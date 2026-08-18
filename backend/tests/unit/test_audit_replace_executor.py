@@ -291,6 +291,134 @@ def test_rewrite_target_unit_text_limits_short_factory_codes_to_whitelist() -> N
     )
 
 
+def test_rewrite_target_unit_text_expands_parallel_factory_code_groups() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "6RC 6RX",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "5RC 5RX"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "6NH 6NX",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["NH"],
+        )
+        == "5NH 5NX"
+    )
+
+
+def test_rewrite_target_unit_text_protects_plant_identity_but_rewrites_reactor() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "三门核电厂5、6号机组的6反应堆厂房安全壳",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "三门核电厂5、6号机组的5反应堆厂房安全壳"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "三门核电项目5、6号机组",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "三门核电项目5、6号机组"
+    )
+
+
+def test_rewrite_target_unit_text_preserves_mtext_formatting_in_protected_span() -> None:
+    source = (
+        r"三 门 核 电 项 目 {\fTimes New Roman|b0|i0|c0|p18;5}、"
+        r"{\fTimes New Roman|b0|i0|c0|p18;6\fTimes New Roman|b0|i0|c161|p18; }"
+        r"号 机 组的6反应堆"
+    )
+
+    assert rewrite_target_unit_text(
+        source,
+        target_project_no="1907",
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    ) == source.replace("的6反应堆", "的5反应堆")
+
+
+def test_audit_replace_applies_protected_plant_pair_and_reactor_unit_together(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    source_text = "1.本设计为三门核电厂5、6号机组的6反应堆厂房安全壳(RC)结构施工图。"
+    source_dxf = tmp_path / "protected-unit-source.dxf"
+    output_dxf = tmp_path / "protected-unit-output.dxf"
+    doc = ezdxf.new("R2018")
+    entity = doc.modelspace().add_text(source_text)
+    doc.saveas(source_dxf)
+
+    lexicon = AuditLexicon(
+        project_options=["1907"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": set()},
+        token_projects={},
+    )
+    findings = AuditMatchEngine(lexicon).evaluate(
+        project_no="1907",
+        unit_no="5",
+        items=[
+            ScanTextItem(
+                raw_text=source_text,
+                entity_type="DBText",
+                entity_handle=entity.dxf.handle,
+            ),
+        ],
+    )
+    mapping = ReplaceMapping(source_project_no="1907", target_project_no="1907")
+    executor = AuditReplaceExecutor()
+    entries = executor._build_replace_entries(
+        findings,
+        mapping,
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    )
+
+    executor._apply_replacements(
+        source_dxf=source_dxf,
+        output_dxf=output_dxf,
+        entries=entries,
+        target_project_no="1907",
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    )
+
+    replaced = ezdxf.readfile(output_dxf).entitydb.get(entity.dxf.handle)
+    assert replaced is not None
+    assert replaced.dxf.text == source_text.replace("6反应堆", "5反应堆")
+    assert [(entry["matched_text"], entry["replacement_text"]) for entry in entries] == [
+        ("6反应堆", "5反应堆"),
+    ]
+
+
+def test_audit_replace_executor_expands_selected_factory_code_from_yaml() -> None:
+    assert AuditReplaceExecutor._unit_factory_codes(
+        {"unit_factory_codes": ["RC"]}
+    ) == ["RC", "RX"]
+    assert AuditReplaceExecutor._unit_factory_codes(
+        {"unit_factory_codes": ["NH"]}
+    ) == ["NH", "NX"]
+
+
 def test_audit_replace_executor_rewrites_target_units_after_factory_index_output(
     tmp_path: Path,
     monkeypatch,

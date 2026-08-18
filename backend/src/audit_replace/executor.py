@@ -15,9 +15,19 @@ from ..audit_check.bridge import AuditDotNetScanner
 from ..audit_check.lexicon import AuditLexiconLoader
 from ..audit_check.matcher import AuditMatchEngine
 from ..audit_check.roi_mapper import AuditFieldContextMapper
+from ..audit_check.unit_text_rules import (
+    compile_protected_text_patterns,
+    compile_unit_text_patterns,
+    iter_unprotected_unit_text_matches,
+)
 from ..cad import A4MultipageGrouper, FrameDetector, ODAConverter, TitleblockExtractor
 from ..cad.dwg_version import detect_dwg_version_code_or_none
-from ..config import get_config, load_mechanism_spec, load_spec, normalize_audit_replace_factory_codes
+from ..config import (
+    expand_audit_replace_factory_codes,
+    get_config,
+    load_mechanism_spec,
+    load_spec,
+)
 from ..models import Job
 from ..pipeline.shared_prep import SharedPrepService
 from ..workload.calculator import WorkloadCalculator
@@ -59,6 +69,29 @@ def normalize_unit_no(value: object) -> str:
     return match.group(0) if match else ""
 
 
+def _rewrite_configured_unit_text(
+    text: str,
+    *,
+    source_unit: str,
+    target_unit: str,
+    unit_text_patterns: list[str],
+    protected_patterns: list[str],
+) -> str:
+    replacements: set[tuple[int, int]] = set()
+    for match in iter_unprotected_unit_text_matches(
+        text,
+        unit_patterns=compile_unit_text_patterns(unit_text_patterns),
+        protected_patterns=compile_protected_text_patterns(protected_patterns),
+    ):
+        if str(match.group("unit_no") or "").strip() == source_unit:
+            replacements.add(match.span("unit_no"))
+
+    updated = text
+    for start, end in sorted(replacements, reverse=True):
+        updated = f"{updated[:start]}{target_unit}{updated[end:]}"
+    return updated
+
+
 def rewrite_target_unit_text(
     text: str,
     *,
@@ -74,6 +107,27 @@ def rewrite_target_unit_text(
 
     updated = text
     target_project_no = str(target_project_no or "").strip()
+    unit_config = get_config().audit_check.unit_consistency
+    unit_text_patterns = [str(unit_config.explicit_unit_text_pattern or "").strip()]
+    unit_text_patterns.extend(
+        str(pattern).strip()
+        for pattern in unit_config.additional_unit_text_patterns
+        if str(pattern).strip()
+    )
+    unit_text_patterns = [pattern for pattern in unit_text_patterns if pattern]
+    protected_patterns = [
+        str(pattern).strip()
+        for pattern in unit_config.protected_unit_text_patterns.get(target_project_no, [])
+        if str(pattern).strip()
+    ]
+    updated = _rewrite_configured_unit_text(
+        updated,
+        source_unit=source_unit,
+        target_unit=target_unit,
+        unit_text_patterns=unit_text_patterns,
+        protected_patterns=protected_patterns,
+    )
+
     factory_code_alternation = _factory_code_alternation(unit_factory_codes)
     if target_project_no and factory_code_alternation:
         code_pattern = re.compile(
@@ -85,12 +139,6 @@ def rewrite_target_unit_text(
             lambda match: f"{match.group(1)}{target_unit}{match.group('factory_code')}{match.group('rest')}",
             updated,
         )
-
-    explicit_unit_pattern = re.compile(
-        rf"{re.escape(source_unit)}(?P<suffix>\s*号\s*(?:机\s*组|岛))",
-        re.IGNORECASE,
-    )
-    updated = explicit_unit_pattern.sub(lambda match: f"{target_unit}{match.group('suffix')}", updated)
 
     if not factory_code_alternation:
         return updated
@@ -122,10 +170,12 @@ def rewrite_target_unit_text(
 
 
 def _factory_code_alternation(unit_factory_codes: list[str] | None) -> str:
-    codes = normalize_audit_replace_factory_codes(
+    mechanism = load_mechanism_spec().audit_replace
+    codes = expand_audit_replace_factory_codes(
         unit_factory_codes
         if unit_factory_codes is not None
-        else load_mechanism_spec().audit_replace.unit_factory_codes,
+        else mechanism.unit_factory_codes,
+        mechanism.unit_factory_code_alias_groups,
     )
     return "|".join(re.escape(code) for code in sorted(codes, key=len, reverse=True))
 
@@ -391,9 +441,11 @@ class AuditReplaceExecutor:
 
     @staticmethod
     def _unit_factory_codes(params: dict[str, Any]) -> list[str]:
+        mechanism = load_mechanism_spec().audit_replace
         if "unit_factory_codes" not in params:
-            return normalize_audit_replace_factory_codes(
-                load_mechanism_spec().audit_replace.unit_factory_codes,
+            return expand_audit_replace_factory_codes(
+                mechanism.unit_factory_codes,
+                mechanism.unit_factory_code_alias_groups,
             )
         raw = params.get("unit_factory_codes")
         if isinstance(raw, str):
@@ -402,7 +454,10 @@ class AuditReplaceExecutor:
             values = list(raw)
         else:
             values = []
-        return normalize_audit_replace_factory_codes(values)
+        return expand_audit_replace_factory_codes(
+            values,
+            mechanism.unit_factory_code_alias_groups,
+        )
 
     def _should_skip_factory_index_for_unit_without_template(
         self,

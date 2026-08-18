@@ -17,6 +17,10 @@ test/dist/src/*.pyc
 .codex-smoke/
 .codex_smoke/
 .codex_tmp*/
+/.pf/
+/.pt/
+/backend/.test-tmp-*/
+/backend/debug_artifacts/
 storage/
 documents/AI/ansys-mapdl-*-private-offline-*.zip
 documents/AI/ansys-mapdl-*-public-scaffold-*.zip

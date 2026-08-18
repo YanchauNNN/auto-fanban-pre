@@ -209,6 +209,7 @@ class ProjectInferenceConfig(BaseModel):
 
 class AuditReplaceMechanismConfig(BaseModel):
     unit_factory_codes: list[str] = Field(default_factory=list)
+    unit_factory_code_alias_groups: list[list[str]] = Field(default_factory=list)
     batch_filename_identity_regex: str = (
         r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
     )
@@ -709,6 +710,26 @@ def normalize_audit_replace_factory_codes(values: list[str] | tuple[str, ...] | 
         seen.add(code)
         normalized.append(code)
     return normalized
+
+
+def expand_audit_replace_factory_codes(
+    values: list[str] | tuple[str, ...] | set[str],
+    alias_groups: list[list[str]] | tuple[tuple[str, ...], ...],
+) -> list[str]:
+    selected = normalize_audit_replace_factory_codes(values)
+    groups = [
+        normalize_audit_replace_factory_codes(group)
+        for group in alias_groups
+        if isinstance(group, (list, tuple, set))
+    ]
+    expanded: list[str] = []
+    for code in selected:
+        matching_groups = [group for group in groups if code in group]
+        candidates = [member for group in matching_groups for member in group] or [code]
+        for candidate in candidates:
+            if candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
 
 
 def append_audit_replace_factory_codes(

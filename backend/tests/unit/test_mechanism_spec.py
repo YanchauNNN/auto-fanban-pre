@@ -217,6 +217,10 @@ def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> Non
             "backend_mechanism": {
                 "audit_replace": {
                     "unit_factory_codes": ["RC", "HL"],
+                    "unit_factory_code_alias_groups": [
+                        ["RC", "RX"],
+                        ["NH", "NX"],
+                    ],
                     "batch_filename_identity_regex": (
                         r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
                     ),
@@ -229,6 +233,10 @@ def test_mechanism_spec_reads_audit_replace_factory_codes(tmp_path: Path) -> Non
     spec = MechanismSpecLoader.load(spec_path)
 
     assert spec.audit_replace.unit_factory_codes == ["RC", "HL"]
+    assert spec.audit_replace.unit_factory_code_alias_groups == [
+        ["RC", "RX"],
+        ["NH", "NX"],
+    ]
     assert spec.audit_replace.batch_filename_identity_regex == (
         r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
     )

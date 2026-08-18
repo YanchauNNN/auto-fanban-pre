@@ -12,6 +12,7 @@ from .mechanism_spec import (
     MechanismSpec,
     MechanismSpecLoader,
     append_audit_replace_factory_codes,
+    expand_audit_replace_factory_codes,
     load_mechanism_spec,
     normalize_audit_replace_factory_codes,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "MechanismSpec",
     "MechanismSpecLoader",
     "append_audit_replace_factory_codes",
+    "expand_audit_replace_factory_codes",
     "load_mechanism_spec",
     "normalize_audit_replace_factory_codes",
     "AiSpec",
