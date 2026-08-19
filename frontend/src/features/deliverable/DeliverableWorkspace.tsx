@@ -1094,6 +1094,23 @@ export function DeliverableWorkspace({
                       </button>
                     </>
                   )}
+                  <button
+                    aria-pressed={draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true"}
+                    className={`${styles.intentChip} ${
+                      draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true"
+                        ? styles.intentChipActive
+                        : ""
+                    }`}
+                    type="button"
+                    onClick={() =>
+                      handleFieldChange(
+                        ALIGN_INTERNAL_EXTERNAL_CODES_KEY,
+                        draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true" ? "false" : "true",
+                      )
+                    }
+                  >
+                    对齐内外部编码
+                  </button>
                 </div>
                 <div className={styles.intentHelp}>
                   {pendingReplaceConfig?.runDeliverable ? (
@@ -1121,6 +1138,11 @@ export function DeliverableWorkspace({
                         : null}
                     </p>
                   )}
+                  <p>
+                    {draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true"
+                      ? "已开启内外部编码对齐：系统会以内部编码末尾三位图纸号，校正外部编码第 9 至 11 位。只修改任务工作副本，不改原始上传图纸。"
+                      : "未开启内外部编码对齐，系统会保留图纸中的原始内外部编码。"}
+                  </p>
                 </div>
               </div>
             </section>
@@ -1193,24 +1215,6 @@ export function DeliverableWorkspace({
                     <span className={styles.helperText}>
                       这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的{" "}
                       <code>plot_style_key</code>。
-                    </span>
-                    <label className={styles.compatibilityToggle}>
-                      <input
-                        aria-label="是否对齐内外部编码"
-                        checked={draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true"}
-                        name={ALIGN_INTERNAL_EXTERNAL_CODES_KEY}
-                        type="checkbox"
-                        onChange={(event) =>
-                          handleFieldChange(
-                            ALIGN_INTERNAL_EXTERNAL_CODES_KEY,
-                            event.currentTarget.checked ? "true" : "false",
-                          )
-                        }
-                      />
-                      <span>是否对齐内外部编码</span>
-                    </label>
-                    <span className={styles.helperText}>
-                      开启后以内部编码末尾三位图纸号对齐外部编码第 9 至 11 位，仅修改任务工作副本。
                     </span>
                   </section>
 
