@@ -484,6 +484,23 @@ runtime_options:
       type: "list[str]"
       default: ["paper_size_text", "scale_text"]
       desc: "参与一致性检查与自动修正的图签字段"
+    internal_external_code_alignment:
+      internal_sheet_pattern:
+        type: str
+        default: "-(?P<sheet>\\d{3})$"
+        desc: "从标准或紧凑内部编码末尾提取三位图纸号的正则，命名组必须为 sheet"
+      external_code_length:
+        type: int
+        default: 19
+        desc: "允许参与自动对齐的外部编码固定长度"
+      external_sheet_start_1_based:
+        type: int
+        default: 9
+        desc: "外部编码中图纸号的起始位，按用户可见的一基位置计数"
+      sheet_number_length:
+        type: int
+        default: 3
+        desc: "内外部编码图纸号位数"
 
   # --------------------------------------------------------------------------
   # 6) 上传限制与资源保护

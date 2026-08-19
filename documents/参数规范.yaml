@@ -186,6 +186,17 @@ doc_generation:
         default: "非密"
         desc: "密级，写入封面/设计文件/IED"
 
+    # ========== 出图参数 ==========
+    drawing:
+      align_internal_external_codes:
+        type: bool
+        required: false
+        source: frontend
+        default: false
+        desc: "是否按内部编码末尾三位图纸号，对齐外部编码第9~11位；仅修改任务工作副本，不修改原始上传DWG"
+        ui:
+          widget: checkbox
+
     # ========== 图签提取的全局聚合值（来自001图纸） ==========
     from_titleblock:
       engineering_no:    { type: str, required: true, source: "dxf:frames[001].titleblock.engineering_no", desc: "工程号(4位)" }
@@ -1408,6 +1419,11 @@ submission_contracts:
           default: "red_wider"
           allowed_values: ["red_wider", "same_width", "grayscale", "review_white"]
           desc: "本次出图打印样式 key；空值时回退 runtime_options.module5_export.plot.default_plot_style_key"
+        align_internal_external_codes:
+          type: bool
+          required: false
+          default: false
+          desc: "开启后，以内部编码末尾三位图纸号对齐外部编码第9~11位；仅作用于任务工作副本"
     response:
       batch_id: "批次号"
       jobs: "JobSummary 列表；run_audit_check=true 时返回 group summary"

@@ -205,6 +205,11 @@ class TestRuntimeConfig:
         assert runtime_config.deliverable_consistency_fix.source_scope == "staged_source_before_split"
         assert runtime_config.deliverable_consistency_fix.paper_size.template_range == "B53:B79"
         assert runtime_config.deliverable_consistency_fix.fields == ["paper_size_text", "scale_text"]
+        alignment = runtime_config.deliverable_consistency_fix.internal_external_code_alignment
+        assert alignment.internal_sheet_pattern == r"-(?P<sheet>\d{3})$"
+        assert alignment.external_code_length == 19
+        assert alignment.external_sheet_start_1_based == 9
+        assert alignment.sheet_number_length == 3
 
     def test_a2_half_uses_default_pdf2_pc3_from_runtime_yaml(self):
         """A2+0.5 媒体已进入打印PDF2后，运行期不应再切换到打印PDF3。"""

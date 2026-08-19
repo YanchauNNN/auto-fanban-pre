@@ -88,6 +88,14 @@ class TitleblockConsistencyService:
         self.scale_candidate_match_tol = float(
             scale_fit_cfg.get("scale_candidate_match_tol", 0.015)
         )
+        alignment_cfg = self.config.deliverable_consistency_fix.internal_external_code_alignment
+        self._internal_sheet_re = re.compile(
+            str(alignment_cfg.internal_sheet_pattern),
+            re.IGNORECASE,
+        )
+        self._external_code_length = int(alignment_cfg.external_code_length)
+        self._external_sheet_start = int(alignment_cfg.external_sheet_start_1_based) - 1
+        self._sheet_number_length = int(alignment_cfg.sheet_number_length)
 
     def paper_text_from_variant(self, variant_id: str | None) -> str:
         raw = str(variant_id or "").strip().upper()
@@ -181,6 +189,77 @@ class TitleblockConsistencyService:
 
         return plans
 
+    def build_external_code_alignment_plan(
+        self,
+        frame: FrameMeta,
+    ) -> FieldConsistencyPlan | None:
+        """Build a task-copy patch that aligns the external sheet number."""
+        internal_code = self._compact_text(frame.titleblock.internal_code)
+        external_code = self._compact_text(frame.titleblock.external_code)
+        if not internal_code and not external_code:
+            return None
+
+        roi_name = self._field_roi_name("external_code")
+        raw_fragments = self._sort_fragments(list(frame.raw_extracts.get(roi_name, [])))
+        marker_page = isinstance(frame.raw_extracts.get("A4_page_marker_meta"), dict)
+        continuation_page = int(frame.titleblock.page_index or 0) > 1
+        if not raw_fragments and (marker_page or continuation_page):
+            return None
+
+        internal_match = self._internal_sheet_re.search(internal_code)
+        if internal_match is None:
+            if not external_code:
+                return None
+            raise ValueError(f"内部编码末尾缺少三位图纸号: {internal_code or '<空>'}")
+        if not external_code:
+            raise ValueError(f"外部编码缺失: {internal_code}")
+        if len(external_code) != self._external_code_length or not external_code.isalnum():
+            raise ValueError(
+                f"外部编码格式不符合{self._external_code_length}位字母数字要求: {external_code}"
+            )
+
+        sheet_number = str(internal_match.group("sheet") or "")
+        if len(sheet_number) != self._sheet_number_length or not sheet_number.isdigit():
+            raise ValueError(f"内部编码图纸号格式错误: {internal_code}")
+
+        sequence_end = self._external_sheet_start + self._sheet_number_length
+        if self._external_sheet_start < 0 or sequence_end > len(external_code):
+            raise ValueError("外部编码图纸号位置配置超出编码长度")
+
+        expected_text = (
+            external_code[: self._external_sheet_start]
+            + sheet_number
+            + external_code[sequence_end:]
+        )
+        if expected_text == external_code:
+            return None
+
+        fragments = self._select_external_code_fragment_window(raw_fragments, external_code)
+        if not fragments:
+            raise ValueError(f"外部编码ROI无法定位完整文本: {external_code}")
+
+        replacements = self._plan_external_code_replacements(
+            fragments,
+            current_text=external_code,
+            expected_text=expected_text,
+        )
+        if not replacements:
+            raise ValueError(f"外部编码ROI无法生成安全替换计划: {external_code}")
+
+        roi_bbox = self._resolve_roi_bbox(frame, "external_code")
+        if roi_bbox is None:
+            raise ValueError(f"外部编码ROI配置缺失: {frame.runtime.roi_profile_id or 'BASE10'}")
+
+        return FieldConsistencyPlan(
+            frame_id=frame.frame_id,
+            field_name="external_code",
+            expected_text=expected_text,
+            current_text=external_code,
+            roi_bbox=roi_bbox,
+            replacements=replacements,
+            fragments=fragments,
+        )
+
     def build_sheet_set_plans(self, sheet_set: SheetSet) -> list[FieldConsistencyPlan]:
         master_page = sheet_set.master_page
         master_frame = getattr(master_page, "frame_meta", None)
@@ -264,6 +343,13 @@ class TitleblockConsistencyService:
                             fragment["text"] = replacement.new_text
             return
 
+        if plan is not None and plan.field_name == "external_code":
+            frame.titleblock.external_code = plan.expected_text
+            for replacement in plan.replacements:
+                if 0 <= replacement.index < len(plan.fragments):
+                    plan.fragments[replacement.index]["text"] = replacement.new_text
+            return
+
         paper_text = self.drawing_paper_text(frame)
         if paper_text:
             frame.titleblock.paper_size_text = paper_text
@@ -314,6 +400,76 @@ class TitleblockConsistencyService:
             replacements=replacements,
             fragments=fragments,
         )
+
+    def _select_external_code_fragment_window(
+        self,
+        fragments: list[dict[str, Any]],
+        external_code: str,
+    ) -> list[dict[str, Any]]:
+        normalized = [self._external_fragment_text(fragment.get("text")) for fragment in fragments]
+        for start in range(len(fragments)):
+            combined = ""
+            selected: list[dict[str, Any]] = []
+            for index in range(start, len(fragments)):
+                fragment_text = normalized[index]
+                if not fragment_text:
+                    continue
+                combined += fragment_text
+                selected.append(fragments[index])
+                if len(combined) > len(external_code):
+                    break
+                if combined == external_code:
+                    return selected
+        return []
+
+    def _plan_external_code_replacements(
+        self,
+        fragments: list[dict[str, Any]],
+        *,
+        current_text: str,
+        expected_text: str,
+    ) -> list[TextReplacement]:
+        replacements: list[TextReplacement] = []
+        offset = 0
+        for index, fragment in enumerate(fragments):
+            raw_text = str(fragment.get("text") or "")
+            normalized = self._external_fragment_text(raw_text)
+            if not normalized:
+                continue
+            fragment_end = offset + len(normalized)
+            if current_text[offset:fragment_end] != normalized:
+                return []
+            expected_fragment = expected_text[offset:fragment_end]
+            if normalized != expected_fragment:
+                replacements.append(
+                    TextReplacement(
+                        index=index,
+                        old_text=raw_text,
+                        new_text=self._replace_alnum_text(raw_text, expected_fragment),
+                    )
+                )
+            offset = fragment_end
+        if offset != len(current_text):
+            return []
+        return replacements
+
+    @staticmethod
+    def _external_fragment_text(value: Any) -> str:
+        return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+
+    @staticmethod
+    def _replace_alnum_text(raw_text: str, replacement: str) -> str:
+        replacement_index = 0
+        output: list[str] = []
+        for character in raw_text:
+            if character.isascii() and character.isalnum():
+                output.append(replacement[replacement_index])
+                replacement_index += 1
+            else:
+                output.append(character)
+        if replacement_index != len(replacement):
+            return replacement
+        return "".join(output)
 
     def _field_roi_name(self, field_name: str) -> str:
         field_def = self.spec.get_field_definitions().get(field_name)

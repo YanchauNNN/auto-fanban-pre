@@ -193,6 +193,29 @@ const schemaWithIedPlan: FormSchema = {
   ),
 };
 
+const schemaWithCodeAlignment: FormSchema = {
+  ...schema,
+  sections: [
+    ...schema.sections,
+    {
+      id: "drawing",
+      title: "出图设置",
+      fields: [
+        {
+          key: "align_internal_external_codes",
+          label: "是否对齐内外部编码",
+          type: "checkbox",
+          required: false,
+          requiredWhen: null,
+          defaultValue: "false",
+          description: "以内部编码末三位对齐外部编码第9至11位。",
+          options: [],
+        },
+      ],
+    },
+  ],
+};
+
 const schemaWithRequiredIedPlanFields: FormSchema = {
   ...schemaWithIedPlan,
   sections: schemaWithIedPlan.sections.map((section) =>
@@ -2510,6 +2533,40 @@ describe("DeliverableWorkspace", () => {
       expect(submittedValues).not.toHaveProperty("upgrade_revision");
       expect(submittedValues).not.toHaveProperty("upgrade_note_text");
       expect(adapter.createAuditCheck).not.toHaveBeenCalled();
+    });
+  });
+
+  it("submits internal and external code alignment only after the user enables it", async () => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult());
+    adapter.createBatch = vi.fn().mockResolvedValue({ batchId: "batch-alignment", jobs: [] });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "20161RC-JGS01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schemaWithCodeAlignment}
+      />,
+    );
+
+    const checkbox = screen.getByLabelText("是否对齐内外部编码");
+    expect(checkbox).not.toBeChecked();
+    await user.click(checkbox);
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ align_internal_external_codes: true }),
+        expect.any(Array),
+        false,
+      );
     });
   });
 
