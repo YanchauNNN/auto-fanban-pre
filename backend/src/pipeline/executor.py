@@ -597,6 +597,9 @@ class PipelineExecutor:
         source_to_plans: dict[Path, list[Any]] = {}
         source_to_scale_out_of_range: dict[Path, list[dict[str, Any]]] = {}
         report: dict[str, Any] = {"sources": []}
+        align_internal_external_codes = self._coerce_bool(
+            job.params.get("align_internal_external_codes")
+        )
 
         for frame in all_frames:
             source_path = Path(frame.runtime.cad_source_file or frame.runtime.source_file)
@@ -616,6 +619,18 @@ class PipelineExecutor:
                     }
                 )
             plans = self.titleblock_consistency.build_frame_plans(frame)
+            if align_internal_external_codes:
+                try:
+                    alignment_plan = (
+                        self.titleblock_consistency.build_external_code_alignment_plan(frame)
+                    )
+                except ValueError as exc:
+                    internal_code = str(frame.titleblock.internal_code or frame.frame_id)
+                    raise RuntimeError(
+                        f"内外部编码对齐失败: {internal_code}: {exc}"
+                    ) from exc
+                if alignment_plan is not None:
+                    plans.append(alignment_plan)
             if plans:
                 source_to_plans.setdefault(source_path, []).extend(plans)
 
@@ -629,7 +644,7 @@ class PipelineExecutor:
                 source_to_plans.setdefault(source_path, []).append(plan)
 
         if not source_to_plans and not source_to_scale_out_of_range:
-            self._update_progress(job, message="图签图幅/比例一致性已通过", force=True)
+            self._update_progress(job, message="图签一致性已通过", force=True)
             return
 
         work_dir = self._require_work_dir(job)
@@ -728,6 +743,7 @@ class PipelineExecutor:
             "paper_size_text": "PAPER_SIZE",
             "scale_text": "SCALE",
             "a4_marker_revision": "A4_MARKER_REVISION",
+            "external_code": "EXTERNAL_CODE",
         }
         prefix = mapping.get(field_name)
         if prefix:

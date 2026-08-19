@@ -995,6 +995,7 @@ export type TaskConfigPreset = {
   name: string;
   intent: TaskIntent;
   runAuditCheck: boolean;
+  fontCompatibilityMode: boolean;
   values: Record<string, string>;
   replaceConfig: ReplaceTaskConfig;
   updatedAt: string;
@@ -1004,6 +1005,7 @@ export type TaskConfigDraft = {
   intent: TaskIntent;
   runAuditCheck: boolean;
   runSplitOnly?: boolean;
+  fontCompatibilityMode?: boolean;
   files: File[];
   values: Record<string, string>;
   fieldErrors: Record<string, string[]>;

@@ -236,6 +236,119 @@ def test_build_frame_plans_skips_scale_autofix_when_geom_scale_is_out_of_toleran
     assert [plan.field_name for plan in plans] == []
 
 
+def test_build_external_code_alignment_plan_updates_positions_9_to_11_only() -> None:
+    service = TitleblockConsistencyService()
+    external_code = "JD1RCF11005B25C42SD"
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-code-alignment",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=1000),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(
+            internal_code="20161RC-JGS01-003",
+            external_code=external_code,
+        ),
+        raw_extracts={
+            "外部编码": [
+                {"text": character, "x": float(index), "y": 10.0}
+                for index, character in enumerate(external_code)
+            ],
+        },
+    )
+
+    plan = service.build_external_code_alignment_plan(frame)
+
+    assert plan is not None
+    assert plan.field_name == "external_code"
+    assert plan.current_text == "JD1RCF11005B25C42SD"
+    assert plan.expected_text == "JD1RCF11003B25C42SD"
+    assert plan.replacements == [
+        TextReplacement(index=10, old_text="5", new_text="3"),
+    ]
+
+
+def test_build_external_code_alignment_plan_supports_compact_internal_code() -> None:
+    service = TitleblockConsistencyService()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-compact-code-alignment",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=1000),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        ),
+        titleblock=TitleblockFields(
+            internal_code="20260SC2JGS01-012",
+            external_code="HP0SC2J1003B25C42SD",
+        ),
+        raw_extracts={
+            "外部编码": [
+                {"text": "HP0SC2J1003B25C42SD", "x": 10.0, "y": 10.0},
+            ],
+        },
+    )
+
+    plan = service.build_external_code_alignment_plan(frame)
+
+    assert plan is not None
+    assert plan.expected_text == "HP0SC2J1012B25C42SD"
+    assert plan.replacements == [
+        TextReplacement(
+            index=0,
+            old_text="HP0SC2J1003B25C42SD",
+            new_text="HP0SC2J1012B25C42SD",
+        ),
+    ]
+
+
+def test_build_external_code_alignment_plan_returns_none_when_already_aligned() -> None:
+    service = TitleblockConsistencyService()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-code-already-aligned",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=1000),
+            roi_profile_id="BASE10",
+        ),
+        titleblock=TitleblockFields(
+            internal_code="20161RC-JGS01-003",
+            external_code="JD1RCF11003B25C42SD",
+        ),
+    )
+
+    assert service.build_external_code_alignment_plan(frame) is None
+
+
+def test_build_external_code_alignment_plan_skips_marker_page_without_external_roi() -> None:
+    service = TitleblockConsistencyService()
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="frame-code-marker-page",
+            source_file=Path(__file__),
+            outer_bbox=BBox(xmin=0, ymin=0, xmax=1000, ymax=1000),
+            roi_profile_id="BASE10",
+        ),
+        titleblock=TitleblockFields(
+            external_code="JD1RCF11005B25C42SD",
+            page_index=2,
+            page_total=2,
+        ),
+        raw_extracts={
+            "A4_page_marker_meta": {
+                "internal_code": "20161RC-JGS01-003",
+                "revision": "A",
+            },
+        },
+    )
+
+    assert service.build_external_code_alignment_plan(frame) is None
+
+
 def test_build_sheet_set_plans_creates_a4_marker_revision_fix_plan() -> None:
     service = TitleblockConsistencyService()
     source_file = Path(__file__)

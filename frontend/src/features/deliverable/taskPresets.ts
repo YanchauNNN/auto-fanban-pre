@@ -30,7 +30,10 @@ export function loadTaskPresets(): TaskConfigPreset[] {
 
 export function createTaskPreset(
   name: string,
-  draft: Pick<TaskConfigDraft, "intent" | "runAuditCheck" | "values" | "replaceConfig">,
+  draft: Pick<
+    TaskConfigDraft,
+    "intent" | "runAuditCheck" | "fontCompatibilityMode" | "values" | "replaceConfig"
+  >,
 ): TaskConfigPreset {
   const now = new Date().toISOString();
 
@@ -39,6 +42,7 @@ export function createTaskPreset(
     name: name.trim(),
     intent: draft.intent,
     runAuditCheck: draft.runAuditCheck,
+    fontCompatibilityMode: draft.fontCompatibilityMode ?? true,
     values: omitPresetManagedValues(draft.values),
     replaceConfig: { ...draft.replaceConfig },
     updatedAt: now,
@@ -48,7 +52,10 @@ export function createTaskPreset(
 export function updateTaskPreset(
   id: string,
   name: string,
-  draft: Pick<TaskConfigDraft, "intent" | "runAuditCheck" | "values" | "replaceConfig">,
+  draft: Pick<
+    TaskConfigDraft,
+    "intent" | "runAuditCheck" | "fontCompatibilityMode" | "values" | "replaceConfig"
+  >,
 ): TaskConfigPreset {
   const now = new Date().toISOString();
 
@@ -57,6 +64,7 @@ export function updateTaskPreset(
     name: name.trim(),
     intent: draft.intent,
     runAuditCheck: draft.runAuditCheck,
+    fontCompatibilityMode: draft.fontCompatibilityMode ?? true,
     values: omitPresetManagedValues(draft.values),
     replaceConfig: { ...draft.replaceConfig },
     updatedAt: now,
@@ -99,6 +107,7 @@ export function applyTaskPreset(
     ...currentDraft,
     intent: preset.intent,
     runAuditCheck: preset.runAuditCheck ?? false,
+    fontCompatibilityMode: preset.fontCompatibilityMode ?? true,
     values: {
       ...currentDraft.values,
       ...preset.values,
@@ -145,6 +154,7 @@ function normalizeStoredPreset(preset: TaskConfigPreset): TaskConfigPreset {
   return {
     ...preset,
     runAuditCheck: preset.runAuditCheck ?? false,
+    fontCompatibilityMode: preset.fontCompatibilityMode ?? true,
     replaceConfig: buildReplaceConfig(preset.replaceConfig),
   };
 }

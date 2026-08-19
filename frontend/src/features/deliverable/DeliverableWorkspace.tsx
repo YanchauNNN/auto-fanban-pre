@@ -78,7 +78,11 @@ const LEGACY_UPGRADE_KEYS = new Set([
 const UPGRADE_ENTRIES_KEY = "upgrade_entries";
 const DEFAULT_UPGRADE_REVISION = "B";
 const INCLUDE_IED_PLAN_KEY = "include_ied_plan";
-const MANUALLY_POSITIONED_FIELDS = new Set([INCLUDE_IED_PLAN_KEY]);
+const ALIGN_INTERNAL_EXTERNAL_CODES_KEY = "align_internal_external_codes";
+const MANUALLY_POSITIONED_FIELDS = new Set([
+  INCLUDE_IED_PLAN_KEY,
+  ALIGN_INTERNAL_EXTERNAL_CODES_KEY,
+]);
 const FONT_REPLACEMENT_OVERRIDES_STORAGE_KEY = "auto-fanban.font-replacement-overrides";
 const LAST_FONT_REPLACEMENT_STORAGE_KEY = "auto-fanban.last-font-replacement";
 const LAST_FONT_REPLACEMENTS_STORAGE_KEY = "auto-fanban.last-font-replacements";
@@ -130,7 +134,6 @@ export function DeliverableWorkspace({
   const [fontReplacementDialogMode, setFontReplacementDialogMode] =
     useState<FontReplacementDialogMode | null>(null);
   const [fontRiskConfirmation, setFontRiskConfirmation] = useState<FontPreflightResult | null>(null);
-  const [fontCompatibilityMode, setFontCompatibilityMode] = useState(true);
   const [pendingSubmitMode, setPendingSubmitMode] = useState<SubmitMode>("deliverable");
   const [savedPresets, setSavedPresets] = useState<TaskConfigPreset[]>(() => loadTaskPresets());
   const [selectedPresetId, setSelectedPresetId] = useState("");
@@ -199,6 +202,7 @@ export function DeliverableWorkspace({
     () => getUpgradeEntriesForDraft(draft.values, getUpgradeRevisionFallback(draft.values)),
     [draft.values],
   );
+  const fontCompatibilityMode = draft.fontCompatibilityMode ?? true;
   const splitOnlyMode = Boolean(draft.runSplitOnly && !pendingReplaceConfig?.runDeliverable);
   const selectedPreset = useMemo(
     () => savedPresets.find((preset) => preset.id === selectedPresetId) ?? null,
@@ -382,7 +386,6 @@ export function DeliverableWorkspace({
 
       setDraft(createTaskConfigDraft(schema));
       setShowAdvanced(false);
-      setFontCompatibilityMode(true);
       resetFontPreflightState();
       onDraftAvailabilityChange(false);
       onClearPendingReplaceFlow?.();
@@ -1191,6 +1194,24 @@ export function DeliverableWorkspace({
                       这里控制本次出图使用的打印样式。默认使用系统值，提交时会传入稳定的{" "}
                       <code>plot_style_key</code>。
                     </span>
+                    <label className={styles.compatibilityToggle}>
+                      <input
+                        aria-label="是否对齐内外部编码"
+                        checked={draft.values[ALIGN_INTERNAL_EXTERNAL_CODES_KEY] === "true"}
+                        name={ALIGN_INTERNAL_EXTERNAL_CODES_KEY}
+                        type="checkbox"
+                        onChange={(event) =>
+                          handleFieldChange(
+                            ALIGN_INTERNAL_EXTERNAL_CODES_KEY,
+                            event.currentTarget.checked ? "true" : "false",
+                          )
+                        }
+                      />
+                      <span>是否对齐内外部编码</span>
+                    </label>
+                    <span className={styles.helperText}>
+                      开启后以内部编码末尾三位图纸号对齐外部编码第 9 至 11 位，仅修改任务工作副本。
+                    </span>
                   </section>
 
                   {showAdvanced && advancedSections.length > 0 ? (
@@ -1242,7 +1263,12 @@ export function DeliverableWorkspace({
                   disabled={
                     isSubmitting || isAwaitingSubmitPreflight || isOpeningFontReplacementReview
                   }
-                  onChange={(event) => setFontCompatibilityMode(event.currentTarget.checked)}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      fontCompatibilityMode: event.currentTarget.checked,
+                    }))
+                  }
                   type="checkbox"
                 />
                 <span>以字体兼容模式打印</span>
@@ -2201,6 +2227,10 @@ function hasTaskConfigDraft(schema: FormSchema, draft: TaskConfigDraft) {
   }
 
   if (draft.runSplitOnly) {
+    return true;
+  }
+
+  if ((draft.fontCompatibilityMode ?? true) !== true) {
     return true;
   }
 

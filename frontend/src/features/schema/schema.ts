@@ -132,6 +132,7 @@ type RawAuditReplaceFactoryIndexMaps = NonNullable<
 
 const SECTION_TITLES: Record<string, string> = {
   project: "任务与项目",
+  drawing: "出图设置",
   from_titleblock: "子项信息",
   cover: "图册与封面",
   catalog: "目录与升版",
@@ -144,6 +145,7 @@ const FIELD_LABELS: Record<string, string> = {
   unit_no: "机组号",
   cover_variant: "封面模板",
   classification: "密级",
+  align_internal_external_codes: "是否对齐内外部编码",
   subitem_name: "子项名称（中文）",
   subitem_name_en: "子项名称（英文）",
   album_title_cn: "图册名称（中文）",

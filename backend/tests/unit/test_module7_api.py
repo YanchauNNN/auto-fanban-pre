@@ -847,6 +847,12 @@ def test_form_schema_returns_deliverable_fields_and_options(
         for field in section["fields"]
         if field["key"] == "include_ied_plan"
     )
+    align_internal_external_codes = next(
+        field
+        for section in payload["deliverable"]["sections"]
+        for field in section["fields"]
+        if field["key"] == "align_internal_external_codes"
+    )
 
     assert "2016" in project_no["options"]
     assert "1915" in project_no["options"]
@@ -883,6 +889,8 @@ def test_form_schema_returns_deliverable_fields_and_options(
     ]
     assert include_ied_plan["type"] == "checkbox"
     assert include_ied_plan["default"] is True
+    assert align_internal_external_codes["type"] == "checkbox"
+    assert align_internal_external_codes["default"] is False
 
 
 def test_create_batch_requires_ied_publish_fields_when_status_is_publish(

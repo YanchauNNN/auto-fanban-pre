@@ -373,6 +373,15 @@ class DeliverableConsistencyPaperSizeConfig(BaseModel):
     template_range: str = "B53:B79"
 
 
+class DeliverableInternalExternalCodeAlignmentConfig(BaseModel):
+    """交付图签一致性修正 - 内外部编码对齐配置。"""
+
+    internal_sheet_pattern: str = r"-(?P<sheet>\d{3})$"
+    external_code_length: int = Field(default=19, gt=0)
+    external_sheet_start_1_based: int = Field(default=9, gt=0)
+    sheet_number_length: int = Field(default=3, gt=0)
+
+
 class DeliverableConsistencyFixConfig(BaseModel):
     """交付图签一致性修正配置"""
 
@@ -383,6 +392,9 @@ class DeliverableConsistencyFixConfig(BaseModel):
         default_factory=DeliverableConsistencyPaperSizeConfig,
     )
     fields: list[str] = Field(default_factory=lambda: ["paper_size_text", "scale_text"])
+    internal_external_code_alignment: DeliverableInternalExternalCodeAlignmentConfig = Field(
+        default_factory=DeliverableInternalExternalCodeAlignmentConfig,
+    )
 
 
 class UploadLimitsConfig(BaseModel):

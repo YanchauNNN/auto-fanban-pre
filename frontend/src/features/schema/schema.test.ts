@@ -436,6 +436,48 @@ describe("normalizeFormSchema", () => {
     });
   });
 
+  it("normalizes the internal and external code alignment option as disabled by default", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [
+          {
+            id: "drawing",
+            title: "drawing",
+            fields: [
+              {
+                key: "align_internal_external_codes",
+                label: "align_internal_external_codes",
+                type: "checkbox",
+                required: false,
+                required_when: null,
+                source: "frontend",
+                default: false,
+                format: null,
+                desc: "是否对齐内外部编码",
+                options: [],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(normalized.sections[0]?.fields[0]).toEqual(
+      expect.objectContaining({
+        key: "align_internal_external_codes",
+        label: "是否对齐内外部编码",
+        type: "checkbox",
+        defaultValue: "false",
+      }),
+    );
+  });
+
   it("prioritizes 河北分公司-建筑结构所 responsible units while keeping combobox metadata", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",

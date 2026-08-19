@@ -96,6 +96,7 @@ describe("taskPresets", () => {
 
   it("saves and loads named task presets from localStorage", () => {
     const draft = createTaskConfigDraft(schema);
+    draft.fontCompatibilityMode = false;
     draft.intent = "audit_replace";
     draft.values.project_no = "2016";
     draft.values.album_title_cn = "示例图册";
@@ -121,6 +122,7 @@ describe("taskPresets", () => {
     expect(loadTaskPresets()[0].values.upgrade_entries).toBe(
       '[{"revision":"B","sheet_codes":"001、003","is_added":false}]',
     );
+    expect(loadTaskPresets()[0].fontCompatibilityMode).toBe(false);
   });
 
   it("renames and deletes saved presets", () => {
@@ -188,6 +190,7 @@ describe("taskPresets", () => {
     const preset = createTaskPreset("翻版方案", {
       intent: "audit_replace",
       runAuditCheck: true,
+      fontCompatibilityMode: false,
       values: {
         ...draft.values,
         project_no: "2020",
@@ -218,6 +221,7 @@ describe("taskPresets", () => {
     expect(nextDraft.values.ied_prepared_date).toBe(new Date().toISOString().slice(0, 10));
     expect(nextDraft.intent).toBe("audit_replace");
     expect(nextDraft.runAuditCheck).toBe(true);
+    expect(nextDraft.fontCompatibilityMode).toBe(false);
     expect(nextDraft.replaceConfig.sourceIslandNo).toBe("4");
     expect(nextDraft.replaceConfig.targetProjectNo).toBe("1818");
     expect(nextDraft.replaceConfig.targetIslandNo).toBe("3");

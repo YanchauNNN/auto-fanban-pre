@@ -81,6 +81,7 @@ class GlobalDocParams(BaseModel):
     unit_no: str | None = None
     cover_variant: str = "通用"
     classification: str = "非密"
+    align_internal_external_codes: bool = False
 
     # === 图签提取的全局聚合值（来自001图纸） ===
     engineering_no: str | None = None
