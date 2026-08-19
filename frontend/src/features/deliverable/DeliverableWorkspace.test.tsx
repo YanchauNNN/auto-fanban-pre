@@ -2561,9 +2561,34 @@ describe("DeliverableWorkspace", () => {
       />,
     );
 
-    const checkbox = screen.getByLabelText("是否对齐内外部编码");
-    expect(checkbox).not.toBeChecked();
-    await user.click(checkbox);
+    const secondaryTaskCard = screen.getByRole("heading", { name: "次级任务开关" }).parentElement
+      ?.parentElement;
+    const printSettingsSection = screen.getByRole("heading", { name: "打印设置" }).closest("section");
+    expect(secondaryTaskCard).not.toBeNull();
+    expect(printSettingsSection).not.toBeNull();
+
+    const alignmentButton = within(secondaryTaskCard as HTMLElement).getByRole("button", {
+      name: "对齐内外部编码",
+    });
+    expect(alignmentButton).toHaveAttribute("aria-pressed", "false");
+    expect(
+      within(secondaryTaskCard as HTMLElement).getByText(
+        "未开启内外部编码对齐，系统会保留图纸中的原始内外部编码。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(printSettingsSection as HTMLElement).queryByRole("button", {
+        name: "对齐内外部编码",
+      }),
+    ).not.toBeInTheDocument();
+
+    await user.click(alignmentButton);
+    expect(alignmentButton).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(secondaryTaskCard as HTMLElement).getByText(
+        "已开启内外部编码对齐：系统会以内部编码末尾三位图纸号，校正外部编码第 9 至 11 位。只修改任务工作副本，不改原始上传图纸。",
+      ),
+    ).toBeInTheDocument();
     await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
     await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
     await user.click(screen.getByRole("button", { name: "创建交付任务" }));
