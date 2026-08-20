@@ -91,6 +91,8 @@ const PLOT_STYLE_OPTIONS = [
   { key: "same_width", label: "同线宽" },
   { key: "grayscale", label: "灰度" },
   { key: "review_white", label: "交审图" },
+  { key: "telecom", label: "通信" },
+  { key: "telecom_thin", label: "通信-细线" },
 ] as const;
 
 type FontSubmitConfig = {

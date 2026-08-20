@@ -157,9 +157,13 @@ class TestRuntimeConfig:
             "same_width": "fanban_monochrome-same width.ctb",
             "grayscale": "fanban_monochrome-huidu.ctb",
             "review_white": "打白图.ctb",
+            "telecom": "通信打印样式.ctb",
+            "telecom_thin": "通信打印样式细线.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
         assert "fanban_monochrome-huidu.ctb" in runtime_config.plot_assets.managed_ctb_names
+        assert "通信打印样式.ctb" in runtime_config.plot_assets.managed_ctb_names
+        assert "通信打印样式细线.ctb" in runtime_config.plot_assets.managed_ctb_names
         assert runtime_config.module5_export.plot.paper_variant_pc3_overrides == {}
         assert runtime_config.module5_export.plot.plot_offset_mm == {"x": 0.0, "y": 0.0}
         assert runtime_config.module5_export.plot.plot_window_bottom_left_expand_ratio == 0.0001

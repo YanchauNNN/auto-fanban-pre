@@ -623,6 +623,43 @@ describe("DeliverableWorkspace", () => {
     expect(screen.getByText("子项名称（中文），例如：反应堆厂房")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "红色更宽" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "灰度" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "通信" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "通信-细线" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it.each([
+    ["通信", "telecom"],
+    ["通信-细线", "telecom_thin"],
+  ])("submits %s as the selected plot style", async (label, plotStyleKey) => {
+    const user = userEvent.setup();
+    const adapter = createAdapter();
+    adapter.preflightFonts = vi.fn().mockResolvedValue(createOkFontPreflightResult());
+    adapter.createBatch = vi.fn().mockResolvedValue({ batchId: `batch-${plotStyleKey}`, jobs: [] });
+
+    render(
+      <DeliverableWorkspace
+        adapter={adapter}
+        incomingFiles={[new File(["dwg"], "2016-A01.dwg", { type: "application/acad" })]}
+        isOpen
+        onBatchCreated={vi.fn()}
+        onClose={vi.fn()}
+        onDraftAvailabilityChange={vi.fn()}
+        schema={schema}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("图册名称（中文）"), "示例图册");
+    await user.type(screen.getByLabelText("子项名称（中文）"), "反应堆厂房");
+    await user.click(screen.getByRole("button", { name: label }));
+    await user.click(screen.getByRole("button", { name: "创建交付任务" }));
+
+    await waitFor(() => {
+      expect(adapter.createBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ plot_style_key: plotStyleKey }),
+        expect.arrayContaining([expect.objectContaining({ name: "2016-A01.dwg" })]),
+        false,
+      );
+    });
   });
 
   it("shows all file category candidates inside a scrollable dropdown menu", async () => {
