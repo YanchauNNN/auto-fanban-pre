@@ -166,6 +166,8 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / "Resources" / PMP_NAME, _valid_pmp_text("repo-pmp"))
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome.ctb")
     _write_file(repo_root / "documents" / "Resources" / "fanban_monochrome-huidu.ctb")
+    _write_file(repo_root / "documents" / "Resources" / "通信打印样式.ctb")
+    _write_file(repo_root / "documents" / "Resources" / "通信打印样式细线.ctb")
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
     _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
@@ -319,6 +321,8 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (
         output_root / "documents" / "Resources" / "fanban_monochrome-huidu.ctb"
     ).exists()
+    assert (output_root / "documents" / "Resources" / "通信打印样式.ctb").exists()
+    assert (output_root / "documents" / "Resources" / "通信打印样式细线.ctb").exists()
     assert (output_root / "documents" / SPEC_NAME).exists()
     assert (output_root / "documents" / MECHANISM_SPEC_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()

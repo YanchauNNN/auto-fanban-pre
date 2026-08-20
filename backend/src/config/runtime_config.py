@@ -135,6 +135,8 @@ class Module5PlotConfig(BaseModel):
             "same_width": "fanban_monochrome-same width.ctb",
             "grayscale": "fanban_monochrome-huidu.ctb",
             "review_white": "打白图.ctb",
+            "telecom": "通信打印样式.ctb",
+            "telecom_thin": "通信打印样式细线.ctb",
             "steel_liner": "结构二室大图.ctb",
         }
     )
@@ -508,6 +510,8 @@ class PlotAssetsConfig(BaseModel):
             "fanban_monochrome-same width.ctb",
             "fanban_monochrome-huidu.ctb",
             "打白图.ctb",
+            "通信打印样式.ctb",
+            "通信打印样式细线.ctb",
             "结构二室大图.ctb",
         ],
     )

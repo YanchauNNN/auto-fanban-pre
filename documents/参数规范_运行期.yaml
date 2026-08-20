@@ -104,7 +104,7 @@ runtime_options:
     pmp_name: { type: str, default: "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp", desc: "托管打印资源使用的 PMP 文件名" }
     managed_ctb_names:
       type: "list[str]"
-      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "fanban_monochrome-huidu.ctb", "打白图.ctb", "结构二室大图.ctb"]
+      default: ["fanban_monochrome.ctb", "fanban_monochrome-same width.ctb", "fanban_monochrome-huidu.ctb", "打白图.ctb", "通信打印样式.ctb", "通信打印样式细线.ctb", "结构二室大图.ctb"]
       desc: "系统需要确保部署到 AutoCAD 可见目录的托管 CTB 文件名集合"
     min_valid_ctb_bytes: { type: int, default: 512, desc: "CTB 文件最小有效体积；小于该阈值视为无效资源" }
     source_priority:
@@ -160,7 +160,7 @@ runtime_options:
         default: {}
         desc: "特殊图幅到备用 PC3 的映射；打印PDF2 已包含 A2+0.5(921.00 x 450.00 毫米) 媒体，默认无需切换备用 PC3"
       ctb_name: { type: str, default: "fanban_monochrome.ctb", desc: "CAD 打印样式 CTB 名称" }
-      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/grayscale/review_white/steel_liner" }
+      default_plot_style_key: { type: str, default: "red_wider", desc: "默认打印样式 key：red_wider/same_width/grayscale/review_white/telecom/telecom_thin/steel_liner" }
       plot_style_profiles:
         type: object
         default:
@@ -168,6 +168,8 @@ runtime_options:
           same_width: "fanban_monochrome-same width.ctb"
           grayscale: "fanban_monochrome-huidu.ctb"
           review_white: "打白图.ctb"
+          telecom: "通信打印样式.ctb"
+          telecom_thin: "通信打印样式细线.ctb"
           steel_liner: "结构二室大图.ctb"
         desc: "打印样式 key 到 CTB 文件名的映射"
       paper_from_frame: { type: bool, default: true, desc: "是否按图框纸张推导打印图幅" }
