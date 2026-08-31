@@ -786,6 +786,10 @@ ai_layer:
     assert "不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`" in deploy_readme
     assert "ARR proxy timeout 低于 600 秒" in deploy_readme
     assert "scripts\\test_ai_model_connectivity.ps1" in deploy_readme
+    assert "http://models.ai.cnpe.cc/qwen_medium/v1/chat/completions" in deploy_readme
+    assert "Qwen3.8-27B" in deploy_readme
+    assert "qwen_fast/v1/chat/completions" not in deploy_readme
+    assert "Qwen3.6-35A3" not in deploy_readme
     assert "script.sha256" in deploy_readme
     assert "package-manifest.json" in deploy_readme
     assert "done_received=false" in deploy_readme

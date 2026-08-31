@@ -99,11 +99,11 @@ Expected: no stale production/configuration references; fixture-only test data m
 
 **Files:**
 - Test: `backend/tests/unit/ai/test_ai_connectivity_script.py`
-- Test: `backend/tests/unit/ai/test_ai_chat_client.py`
+- Test: `backend/tests/unit/ai/test_chat_client.py`
 
 **Step 1: Run local simulated gateway tests**
 
-Run: `uv run --project backend pytest backend/tests/unit/ai/test_ai_connectivity_script.py backend/tests/unit/ai/test_ai_chat_client.py -q`
+Run: `uv run --project backend pytest backend/tests/unit/ai/test_ai_connectivity_script.py backend/tests/unit/ai/test_chat_client.py -q`
 
 Expected: PASS for ordinary JSON completions and SSE streaming diagnostics.
 
@@ -138,5 +138,4 @@ Expected: pre-existing dirty files are preserved and clearly separated from this
 
 **Step 3: Commit only after user-directed integration**
 
-Do not stage or commit unrelated dirty files. If a commit is requested, add only the six implementation/test/documentation files listed above.
-
+Do not stage or commit unrelated dirty files. Add only the YAML source, deployment generator, two focused tests, and this plan correction.

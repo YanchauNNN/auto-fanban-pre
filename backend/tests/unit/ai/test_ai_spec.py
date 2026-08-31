@@ -231,12 +231,12 @@ def test_gateway_profile_env_switches_to_terminal_intranet_chain(monkeypatch) ->
     spec = AiSpecLoader.load(repo_root / "documents" / "AI" / "参数规范_AI.yaml")
     gateway = spec.resolve_gateway()
 
-    assert gateway.base_url == "http://models.ai.cnpe.cc/qwen_fast/v1"
+    assert gateway.base_url == "http://models.ai.cnpe.cc/qwen_medium/v1"
     assert gateway.api_key_env_var == ""
     assert gateway.api_key is None
     assert gateway.api_key_policy == "none"
-    assert spec.models.chat.model == "Qwen3.6-35A3"
-    assert spec.models.structured.model == "Qwen3.6-35A3"
+    assert spec.models.chat.model == "Qwen3.8-27B"
+    assert spec.models.structured.model == "Qwen3.8-27B"
     profile = spec.resolve_gateway_profile()
     assert profile is not None
     assert profile.network_mode == "intranet_only"

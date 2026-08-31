@@ -2,11 +2,11 @@
 # This file stores operational endpoint parameters only. Never write API keys here.
 
 schema_version: "0.1"
-last_updated: "2026-07-14"
+last_updated: "2026-08-31"
 
 # Development uses the internet MiniMax gateway on the current workstation.
-# Terminal deployment can switch to terminal_cnpe_intranet_qwen_fast without
-# changing application code.
+# Terminal deployment uses the stable terminal_cnpe_intranet_qwen_fast profile
+# identifier for compatibility; that profile now resolves to Qwen3.8.
 active_profile: "development_minimax"
 
 profiles:
@@ -52,12 +52,12 @@ profiles:
     application_api_forwarded_for_probe: "198.18.0.73"
 
   terminal_cnpe_intranet_qwen_fast:
-    description: "Terminal deployment through CNPE intranet OpenAI-compatible model gateway"
+    description: "Terminal deployment through CNPE intranet Qwen3.8 OpenAI-compatible model gateway"
     architecture: "intranet_openai_compatible_gateway"
-    provider: "cnpe-qwen-fast"
+    provider: "cnpe-qwen-medium"
     protocol: "openai_compatible"
     network_mode: "intranet_only"
-    base_url: "http://models.ai.cnpe.cc/qwen_fast/v1"
+    base_url: "http://models.ai.cnpe.cc/qwen_medium/v1"
     allowed_hosts: ["models.ai.cnpe.cc"]
     # Keep this explicit and limited to approved internal MCP hosts.
     mcp_allowed_hosts: ["127.0.0.1", "localhost", "models.ai.cnpe.cc"]
@@ -67,8 +67,8 @@ profiles:
     api_key_env_var: ""
     api_key_required: false
     authorization_scheme: "none"
-    chat_model: "Qwen3.6-35A3"
-    structured_model: "Qwen3.6-35A3"
+    chat_model: "Qwen3.8-27B"
+    structured_model: "Qwen3.8-27B"
     stream_enabled: true
     timeout_sec: 60
     connect_timeout_sec: 15
