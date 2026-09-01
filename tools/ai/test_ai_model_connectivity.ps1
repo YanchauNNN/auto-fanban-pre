@@ -35,7 +35,15 @@ function Get-FileSha256 {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return $null
     }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString("X2") })
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
 }
 
 function ConvertTo-StringArray {
