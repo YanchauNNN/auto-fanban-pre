@@ -898,6 +898,63 @@ def test_extract_fields_flags_empty_status_roi(tmp_path, monkeypatch) -> None:
     assert "状态为空" in frame.runtime.flags
 
 
+def test_extract_fields_splits_single_text_revision_date_status_row(
+    tmp_path, monkeypatch
+) -> None:
+    dxf_path = tmp_path / "combined-revision-row.dxf"
+    ezdxf.new("R2018").saveas(dxf_path)
+
+    extractor = TitleblockExtractor()
+    extractor.anchor_texts = []
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f-combined-revision-row",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=150.0),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        )
+    )
+    items = [_item("A     2026.08   CFC", x=30.0, y=130.0)]
+    monkeypatch.setattr(extractor, "_load_text_items", lambda _path: items)
+
+    extractor.extract_fields(dxf_path, frame)
+
+    assert frame.titleblock.revision == "A"
+    assert frame.titleblock.date == "2026.08"
+    assert frame.titleblock.status == "CFC"
+    assert "状态为空" not in frame.runtime.flags
+
+
+def test_extract_fields_does_not_invent_revision_or_status_from_plain_date(
+    tmp_path, monkeypatch
+) -> None:
+    dxf_path = tmp_path / "plain-date.dxf"
+    ezdxf.new("R2018").saveas(dxf_path)
+
+    extractor = TitleblockExtractor()
+    extractor.anchor_texts = []
+    frame = FrameMeta(
+        runtime=FrameRuntime(
+            frame_id="f-plain-date",
+            source_file=dxf_path,
+            outer_bbox=BBox(xmin=0.0, ymin=0.0, xmax=200.0, ymax=150.0),
+            roi_profile_id="BASE10",
+            sx=1.0,
+            sy=1.0,
+        )
+    )
+    items = [_item("2026.08", x=30.0, y=130.0)]
+    monkeypatch.setattr(extractor, "_load_text_items", lambda _path: items)
+
+    extractor.extract_fields(dxf_path, frame)
+
+    assert frame.titleblock.date == "2026.08"
+    assert frame.titleblock.revision is None
+    assert frame.titleblock.status is None
+
+
 def test_extract_fields_keeps_page_fragments_out_of_title_roi(tmp_path, monkeypatch) -> None:
     dxf_path = tmp_path / "sample.dxf"
     ezdxf.new("R2018").saveas(dxf_path)

@@ -1047,7 +1047,7 @@ class PipelineExecutor:
         candidates = PipelineExecutor._primary_doc_frame_candidates(frames, sheet_sets)
 
         exact_001 = [frame for frame in candidates if PipelineExecutor._is_exact_001_frame(frame)]
-        frame = PipelineExecutor._first_readable_frame(exact_001)
+        frame = PipelineExecutor._best_available_frame(exact_001)
         if frame is not None:
             return frame
 
@@ -1055,7 +1055,7 @@ class PipelineExecutor:
             frame for frame in candidates
             if PipelineExecutor._same_code_page_index(frame) == 1
         ]
-        frame = PipelineExecutor._first_readable_frame(same_code_primary)
+        frame = PipelineExecutor._best_available_frame(same_code_primary)
         if frame is not None:
             return frame
 
@@ -1070,7 +1070,7 @@ class PipelineExecutor:
                 frame.titleblock.internal_code or "",
             ),
         )
-        return PipelineExecutor._first_readable_frame(sequenced)
+        return PipelineExecutor._best_available_frame(sequenced)
 
     @staticmethod
     def _primary_doc_frame_candidates(frames: list[Any], sheet_sets: list[Any]) -> list[Any]:
@@ -1114,25 +1114,24 @@ class PipelineExecutor:
             return 0
 
     @staticmethod
-    def _has_required_doc_fields(frame: Any) -> bool:
+    def _available_doc_field_count(frame: Any) -> int:
         tb = getattr(frame, "titleblock", None)
         if tb is None:
-            return False
-        required = [
+            return 0
+        fields = [
             getattr(tb, "engineering_no", None),
             getattr(tb, "subitem_no", None),
             getattr(tb, "discipline", None),
             getattr(tb, "revision", None),
             getattr(tb, "status", None),
         ]
-        return all(str(value or "").strip() for value in required)
+        return sum(bool(str(value or "").strip()) for value in fields)
 
     @staticmethod
-    def _first_readable_frame(frames: list[Any]) -> Any | None:
-        for frame in frames:
-            if PipelineExecutor._has_required_doc_fields(frame):
-                return frame
-        return None
+    def _best_available_frame(frames: list[Any]) -> Any | None:
+        if not frames:
+            return None
+        return max(frames, key=PipelineExecutor._available_doc_field_count)
 
     @staticmethod
     def _fill_if_missing(target: dict, key: str, value: object | None) -> None:
