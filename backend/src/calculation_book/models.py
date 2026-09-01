@@ -32,6 +32,7 @@ class CalculationBookParams(BaseModel):
     internal_code: str = Field(min_length=3, max_length=100)
     version: str = Field(default="A", min_length=1, max_length=16)
     subproject_code: str = Field(min_length=1, max_length=16)
+    level_code: str
     subproject_name: str = Field(min_length=1, max_length=100)
     design_phase: str = Field(min_length=1, max_length=100)
     document_name: str = Field(min_length=1, max_length=240)
@@ -48,10 +49,17 @@ class CalculationBookParams(BaseModel):
     manual_confirmations: dict[str, int] = Field(default_factory=dict)
     preflight_token: str = Field(default="", max_length=100)
 
-    @field_validator("project_no", "version", "subproject_code")
+    @field_validator("project_no", "version", "subproject_code", "level_code")
     @classmethod
     def normalize_codes(cls, value: str) -> str:
         return value.strip().upper()
+
+    @field_validator("level_code")
+    @classmethod
+    def validate_level_code(cls, value: str) -> str:
+        if re.fullmatch(r"[A-Z]", value) is None:
+            raise ValueError("层位码必须是单个英文字母")
+        return value
 
     @field_validator("manual_confirmations", mode="before")
     @classmethod
@@ -75,9 +83,7 @@ class CalculationBookParams(BaseModel):
     @classmethod
     def validate_document_elevation_range(cls, value: str) -> str:
         if _ELEVATION_RANGE.search(value) is None:
-            raise ValueError(
-                "文件名称必须包含形如 11.450m~15.950m 的厂房标高范围"
-            )
+            raise ValueError("文件名称必须包含形如 11.450m~15.950m 的厂房标高范围")
         return value
 
     @field_validator("roof_top_elevation")
@@ -89,10 +95,7 @@ class CalculationBookParams(BaseModel):
     ) -> float:
         raft = info.data.get("raft_slab_top_elevation")
         if isinstance(raft, int | float) and value <= float(raft):
-            raise ValueError(
-                "屋面顶标高必须大于筏板顶标高 "
-                f"{float(raft):g}m（当前为 {value:g}m）"
-            )
+            raise ValueError(f"屋面顶标高必须大于筏板顶标高 {float(raft):g}m（当前为 {value:g}m）")
         return value
 
     @field_validator("factory_extreme_max_temperature")
@@ -105,8 +108,7 @@ class CalculationBookParams(BaseModel):
         minimum = info.data.get("factory_extreme_min_temperature")
         if isinstance(minimum, int | float) and value <= float(minimum):
             raise ValueError(
-                "历史最高温度必须大于历史最低温度 "
-                f"{float(minimum):g}℃（当前为 {value:g}℃）"
+                f"历史最高温度必须大于历史最低温度 {float(minimum):g}℃（当前为 {value:g}℃）"
             )
         return value
 
@@ -117,11 +119,7 @@ class CalculationBookParams(BaseModel):
         value: bool,
         info: ValidationInfo,
     ) -> bool:
-        if (
-            info.data.get("reinforcement_source")
-            is ReinforcementSource.AI_SUGGESTED
-            and value
-        ):
+        if info.data.get("reinforcement_source") is ReinforcementSource.AI_SUGGESTED and value:
             raise ValueError("AI 推荐配筋不能同时确认配筋表 AI 规范化")
         return value
 

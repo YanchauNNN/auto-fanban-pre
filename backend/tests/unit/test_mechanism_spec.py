@@ -94,6 +94,15 @@ def test_repo_mechanism_spec_exposes_typed_task_group_submission_rules() -> None
     assert deliverable.artifacts[1].required_when.field == "include_ied_plan"
 
 
+def test_repo_mechanism_spec_exposes_ai_normalization_correction_limit() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    MechanismSpecLoader.clear_cache()
+
+    spec = MechanismSpecLoader.load(repo_root / "documents" / "参数规范-3.yaml")
+
+    assert spec.calculation_book.ai_normalization.schema_correction_max_attempts == 2
+
+
 def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> None:
     repo_root = Path(__file__).resolve().parents[3]
     MechanismSpecLoader.clear_cache()
@@ -132,9 +141,7 @@ def test_repo_mechanism_spec_exposes_frozen_archive_runtime_supply_chain() -> No
         "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886"
     )
     assert runtime.probe.fixture_decoded_size_bytes == 129
-    assert runtime.probe.payload_source_relative_path == (
-        "fixtures/archive-runtime-smoke.txt"
-    )
+    assert runtime.probe.payload_source_relative_path == ("fixtures/archive-runtime-smoke.txt")
     assert runtime.probe.payload_filename == "archive-runtime-smoke.txt"
     assert runtime.probe.payload_sha256 == (
         "6eaab97fc311dcba726775b8aa04165069688caa965df2fde9e12813cb74802f"

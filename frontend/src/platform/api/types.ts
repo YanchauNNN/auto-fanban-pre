@@ -25,6 +25,9 @@ export type CalculationBookField = {
   defaultValue?: string;
   unit?: string;
   placeholder?: string;
+  pattern?: string;
+  maxLength?: number;
+  uppercase?: boolean;
   options?: readonly string[];
   optionsFrom?: string;
   derivedFrom?: string;

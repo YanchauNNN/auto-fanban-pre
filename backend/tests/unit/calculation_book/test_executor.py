@@ -57,6 +57,7 @@ def _params() -> dict[str, object]:
         "internal_code": "JQ00-NN-001",
         "version": "A",
         "subproject_code": "RX",
+        "level_code": "R",
         "subproject_name": "internal structure",
         "design_phase": "construction",
         "document_name": "0.000m~15.000m calculation book",
@@ -103,9 +104,7 @@ class FakeNormalizer:
         include_slab: bool,
         expected_source_row_count: int | None = None,
     ):
-        self.calls.append(
-            (workbook_path, include_slab, expected_source_row_count)
-        )
+        self.calls.append((workbook_path, include_slab, expected_source_row_count))
         if self.failure is not None:
             raise self.failure
         default_warnings = (
@@ -222,9 +221,7 @@ class FakeProcessor:
             ai_suggested_direction_count=(
                 len(suggestion.selected) if suggestion is not None else 0
             ),
-            ai_blank_direction_count=(
-                len(suggestion.warnings) if suggestion is not None else 0
-            ),
+            ai_blank_direction_count=(len(suggestion.warnings) if suggestion is not None else 0),
         )
 
 
@@ -237,9 +234,7 @@ class FakeRebarInvoker:
         self.calls += 1
         item = request.items[0]
         candidate = (
-            item.candidates[-1]
-            if self.invalid_first and self.calls == 1
-            else item.candidates[0]
+            item.candidates[-1] if self.invalid_first and self.calls == 1 else item.candidates[0]
         )
         response = AiRebarSuggestionResponse.model_validate(
             {
@@ -439,9 +434,7 @@ def test_executor_canonicalizes_duplicate_warnings_and_hides_missing_excel_evide
 
     _executor(
         FakeProcessor(),
-        FakeNormalizer(
-            warnings=(duplicate_alias, preferred_duplicate, image_only)
-        ),
+        FakeNormalizer(warnings=(duplicate_alias, preferred_duplicate, image_only)),
     ).execute(job)
 
     assert job.progress.details["calculation_book_warnings"] == [
@@ -551,13 +544,9 @@ def test_normalization_callback_initialization_failure_is_persisted_as_failed(
 
     assert job.status == JobStatus.FAILED
     assert processor.callbacks == []
-    persisted = json.loads(
-        (job.work_dir / "job.json").read_text(encoding="utf-8")
-    )
+    persisted = json.loads((job.work_dir / "job.json").read_text(encoding="utf-8"))
     assert persisted["status"] == "failed"
-    assert persisted["errors"] == [
-        "AI reinforcement normalizer initialization failed"
-    ]
+    assert persisted["errors"] == ["AI reinforcement normalizer initialization failed"]
 
 
 def test_client_params_cannot_enable_ai_normalization(tmp_path: Path) -> None:
@@ -624,9 +613,7 @@ def test_real_normalizer_builder_uses_structured_model_and_task_limits(
 ) -> None:
     calls: list[dict[str, object]] = []
     fake_spec = SimpleNamespace(
-        resolve_models=lambda: SimpleNamespace(
-            structured=SimpleNamespace(model="structured-prod")
-        ),
+        resolve_models=lambda: SimpleNamespace(structured=SimpleNamespace(model="structured-prod")),
         resolve_gateway_profile_name=lambda: "prod-intranet",
     )
     monkeypatch.setattr(
@@ -636,6 +623,14 @@ def test_real_normalizer_builder_uses_structured_model_and_task_limits(
     monkeypatch.setattr(
         "src.calculation_book.executor.build_chat_client",
         lambda spec, **kwargs: calls.append({"spec": spec, **kwargs}) or object(),
+    )
+    monkeypatch.setattr(
+        "src.calculation_book.executor.load_mechanism_spec",
+        lambda: SimpleNamespace(
+            calculation_book=SimpleNamespace(
+                ai_normalization=SimpleNamespace(schema_correction_max_attempts=2)
+            )
+        ),
     )
     settings = SimpleNamespace(
         enabled=True,
@@ -671,6 +666,7 @@ def test_real_normalizer_builder_uses_structured_model_and_task_limits(
     )
     assert built.normalizer.skill_root == settings.skill_root
     assert built.normalizer.limits.max_non_empty_cells == 123
+    assert built.normalizer.max_correction_attempts == 2
 
 
 def test_unexpected_normalizer_failure_drops_original_exception_chain(
@@ -678,9 +674,7 @@ def test_unexpected_normalizer_failure_drops_original_exception_chain(
 ) -> None:
     processor = FakeProcessor()
     normalizer = FakeNormalizer(
-        failure=RuntimeError(
-            "unexpected raw model response secret-token-and-cell-value"
-        )
+        failure=RuntimeError("unexpected raw model response secret-token-and-cell-value")
     )
     job = _job(tmp_path, options={"ai_reinforcement_normalization": True})
 
@@ -714,9 +708,7 @@ def test_unexpected_normalizer_failure_drops_original_exception_chain(
 def test_real_normalizer_builder_fails_closed_when_disabled(tmp_path: Path) -> None:
     config = SimpleNamespace(
         ai_spec_path=tmp_path / "ai.yaml",
-        calculation_book=SimpleNamespace(
-            ai_normalization=SimpleNamespace(enabled=False)
-        ),
+        calculation_book=SimpleNamespace(ai_normalization=SimpleNamespace(enabled=False)),
     )
 
     with pytest.raises(RuntimeError, match="disabled"):
@@ -758,9 +750,7 @@ def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
 
     executor = CalculationBookJobExecutor(
         processor=processor,
-        rebar_suggestion_factory=(
-            lambda config: factory_calls.append(config) or invoker
-        ),
+        rebar_suggestion_factory=(lambda config: factory_calls.append(config) or invoker),
     )
     executor.execute(job)
 
@@ -769,9 +759,7 @@ def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
     assert job.status == JobStatus.SUCCEEDED
     assert job.artifacts.calculation_log is not None
     assert job.artifacts.calculation_log.is_file()
-    assert job.artifacts.calculation_log == (
-        central_log_dir / f"calculation-book-{job.job_id}.log"
-    )
+    assert job.artifacts.calculation_log == (central_log_dir / f"calculation-book-{job.job_id}.log")
     assert create_kwargs["log_dir"] == central_log_dir
     assert create_kwargs["retention_days"] == 17
     assert "work_dir" not in create_kwargs
@@ -793,9 +781,7 @@ def test_ai_suggestion_job_builds_one_invoker_and_persists_safe_summary_and_log(
 
     records = [
         json.loads(line)
-        for line in job.artifacts.calculation_log.read_text(
-            encoding="utf-8"
-        ).splitlines()
+        for line in job.artifacts.calculation_log.read_text(encoding="utf-8").splitlines()
     ]
     assert records[0]["event"] == "task_started"
     assert records[-1]["event"] == "task_completed"
@@ -880,9 +866,7 @@ def test_ai_base_failure_limit_succeeds_with_blank_result_and_safe_metadata(
     assert job.artifacts.calculation_log is not None
     records = [
         json.loads(line)
-        for line in job.artifacts.calculation_log.read_text(
-            encoding="utf-8"
-        ).splitlines()
+        for line in job.artifacts.calculation_log.read_text(encoding="utf-8").splitlines()
     ]
     assert records[-1]["event"] == "task_completed"
     assert sum(record["event"] == "ai_call_failed" for record in records) == 3
@@ -977,9 +961,7 @@ def test_ai_suggestion_job_writes_failed_terminal_record_and_closes_log(
     assert job.artifacts.calculation_log is not None
     records = [
         json.loads(line)
-        for line in job.artifacts.calculation_log.read_text(
-            encoding="utf-8"
-        ).splitlines()
+        for line in job.artifacts.calculation_log.read_text(encoding="utf-8").splitlines()
     ]
     assert records[-1]["event"] == "task_failed"
     assert records[-1]["details"]["error_code"] == "RuntimeError"
@@ -1015,9 +997,7 @@ def test_ai_job_closes_and_hides_log_when_failed_terminal_cannot_be_written(
         },
     )
     job.params["reinforcement_source"] = "ai_suggested"
-    fake_log = FailingTerminalLog(
-        tmp_path / "job" / "calculation-book" / "logs" / "failed.log"
-    )
+    fake_log = FailingTerminalLog(tmp_path / "job" / "calculation-book" / "logs" / "failed.log")
     monkeypatch.setattr(
         "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
         lambda **_kwargs: fake_log,
@@ -1061,9 +1041,7 @@ def test_ai_job_fails_and_hides_log_when_success_close_is_not_durable(
         },
     )
     job.params["reinforcement_source"] = "ai_suggested"
-    fake_log = CloseFailingLog(
-        tmp_path / "job" / "calculation-book" / "logs" / "failed.log"
-    )
+    fake_log = CloseFailingLog(tmp_path / "job" / "calculation-book" / "logs" / "failed.log")
     monkeypatch.setattr(
         "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
         lambda **_kwargs: fake_log,
@@ -1111,11 +1089,7 @@ def test_ai_job_hides_word_but_keeps_failed_log_when_completion_record_fails(
     )
     job.params["reinforcement_source"] = "ai_suggested"
     fake_log = CompletionWriteFailingLog(
-        tmp_path
-        / "job"
-        / "calculation-book"
-        / "logs"
-        / "calculation-book-calc-job.log"
+        tmp_path / "job" / "calculation-book" / "logs" / "calculation-book-calc-job.log"
     )
     monkeypatch.setattr(
         "src.calculation_book.executor.CalculationBookDiagnosticLog.create_for_job",
@@ -1188,8 +1162,7 @@ def test_real_rebar_suggestion_builder_uses_one_structured_skill_capability(
     )
     monkeypatch.setattr(
         "src.calculation_book.executor.build_rebar_suggestion_task",
-        lambda spec, **kwargs: calls.append({"spec": spec, **kwargs})
-        or fake_invoker,
+        lambda spec, **kwargs: calls.append({"spec": spec, **kwargs}) or fake_invoker,
     )
     settings = SimpleNamespace(
         enabled=True,
@@ -1230,9 +1203,7 @@ def test_real_rebar_suggestion_builder_fails_closed_when_disabled(
     tmp_path: Path,
 ) -> None:
     config = SimpleNamespace(
-        calculation_book=SimpleNamespace(
-            ai_suggestion=SimpleNamespace(enabled=False)
-        )
+        calculation_book=SimpleNamespace(ai_suggestion=SimpleNamespace(enabled=False))
     )
 
     with pytest.raises(RebarSuggestionUnavailable) as exc_info:

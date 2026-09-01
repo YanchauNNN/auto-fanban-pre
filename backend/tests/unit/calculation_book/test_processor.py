@@ -16,6 +16,7 @@ from src.calculation_book.processor import (
     CalculationBookAssets,
     CalculationBookProcessor,
     CalculationBookStage,
+    build_cover_code_context,
 )
 from src.calculation_book.rebar_recommender import (
     RebarSuggestionInput,
@@ -69,9 +70,7 @@ def test_processor_forwards_private_archive_extractor_and_uses_neutral_copy(
             archive_path=tmp_path / "input.7z",
             output_dir=tmp_path / "output",
             params=_params(),
-            progress=lambda _stage, _percent, message, _details: (
-                progress_messages.append(message)
-            ),
+            progress=lambda _stage, _percent, message, _details: progress_messages.append(message),
         )
 
     assert observed["archive_extractor"] is extractor
@@ -130,9 +129,7 @@ def _build_zip(
                 "拉筋",
             ]
         )
-        sheet.append(
-            ["N5012 墙", "1D32间距200", "1D28间距200", "1C14间距400*400"]
-        )
+        sheet.append(["N5012 墙", "1D32间距200", "1D28间距200", "1C14间距400*400"])
         if include_slab:
             slab_sheet = workbook.create_sheet("楼板配筋")
             slab_sheet.append(
@@ -183,6 +180,7 @@ def _params(
             "internal_code": "JQ00-NN-001",
             "version": "A",
             "subproject_code": "RX",
+            "level_code": "R",
             "subproject_name": "内部结构",
             "design_phase": "施工图设计",
             "document_name": "0.000m~15.000m配筋计算书",
@@ -197,6 +195,21 @@ def _params(
             "reinforcement_source": reinforcement_source,
         }
     )
+
+
+def test_cover_code_context_uses_project_plant_and_level_code_from_yaml() -> None:
+    params = _params().model_copy(
+        update={"project_no": "2016", "subproject_code": "NH", "level_code": "r"}
+    )
+
+    assert build_cover_code_context(params) == {
+        "cover_code_1": "J",
+        "cover_code_2": "D",
+        "cover_code_3": "X",
+        "cover_code_4": "N",
+        "cover_code_5": "H",
+        "cover_code_6": "R",
+    }
 
 
 def _all_paragraphs(document: Document):
@@ -258,9 +271,7 @@ def test_processor_renders_a_real_docx_and_reports_all_stages(tmp_path: Path) ->
     assert result.output_path.suffix == ".docx"
     assert result.figure_count == 3
     assert len(result.selections) == 3
-    assert result.selections[2].actual_area == pytest.approx(
-        math.pi * 7**2 * 2.5 * 2.5
-    )
+    assert result.selections[2].actual_area == pytest.approx(math.pi * 7**2 * 2.5 * 2.5)
     assert stages == [
         CalculationBookStage.VALIDATE_ARCHIVE,
         CalculationBookStage.OCR_REINFORCEMENT,
@@ -310,10 +321,7 @@ def test_processor_inserts_five_slab_groups_before_wall_results(
     assert result.figure_count == 8
     document = Document(result.output_path)
     text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
-    transition = (
-        "墙体的配筋计算结果如下。"
-        "配筋结果为单侧配筋量、其单位为mm2/m。"
-    )
+    transition = "墙体的配筋计算结果如下。配筋结果为单侧配筋量、其单位为mm2/m。"
     assert text.index("11.45m楼板顶层水平钢筋") < text.index(transition)
     assert text.index(transition) < text.index("墙N5012-水平向钢筋")
     assert "11.45m楼板纵向拉筋计算配筋面积为0mm2/m。" in text
@@ -601,10 +609,7 @@ def test_ai_missing_slab_rows_keeps_named_groups_blank_and_completes(
     )
 
     assert result.output_path.is_file()
-    [warning] = [
-        item for item in result.normalization_warnings
-        if item.code == "image_only_slab"
-    ]
+    [warning] = [item for item in result.normalization_warnings if item.code == "image_only_slab"]
     assert warning.identity == "11.45"
     assert warning.blank_fields == expected_keys
     document = Document(result.output_path)
@@ -756,11 +761,7 @@ def _select_first_suggestions(
                     direction=item.direction,
                 ).selected,
                 reason="测试选择精确候选",
-                source=(
-                    "fixed_rule"
-                    if item.direction == "Z" and item.smx == 0
-                    else "ai"
-                ),
+                source=("fixed_rule" if item.direction == "Z" and item.smx == 0 else "ai"),
             )
         )
     return RebarSuggestionResult(
@@ -817,9 +818,7 @@ def test_ai_suggested_processor_skips_excel_and_renders_five_or_seven_slab_items
             reinforcement_source="ai_suggested",
             template_type=template_type,
         ),
-        reinforcement_normalizer=lambda *_args: pytest.fail(
-            "无实配钢筋模式不得启动 Excel 规范化"
-        ),
+        reinforcement_normalizer=lambda *_args: pytest.fail("无实配钢筋模式不得启动 Excel 规范化"),
         rebar_suggester=suggest,
         progress=lambda stage, _percent, _message, _details: stages.append(stage),
         audit=lambda event, payload: audit_events.append((event, payload)),
@@ -854,13 +853,9 @@ def test_ai_suggested_processor_skips_excel_and_renders_five_or_seven_slab_items
     document = Document(result.output_path)
     text = "\n".join(paragraph.text for paragraph in _all_paragraphs(document))
     disclosure = (
-        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，"
-        "供设计人员复核。"
+        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，供设计人员复核。"
     )
-    transition = (
-        "墙体的配筋计算结果如下。"
-        "配筋结果为单侧配筋量、其单位为mm2/m。"
-    )
+    transition = "墙体的配筋计算结果如下。配筋结果为单侧配筋量、其单位为mm2/m。"
     assert disclosure in text
     assert "建议选用钢筋" in text
     assert text.index("11.45m楼板中层竖向钢筋") < text.index(transition)

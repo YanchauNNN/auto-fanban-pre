@@ -14,8 +14,9 @@ description: Use when a calculation-book task preflight has identified a non-sta
 ## 硬约束
 
 - `deterministic-audit` 模式的顶层必须是 `{"schema_version":"hybrid-1","source_row_count":N,"patch_rows":[],"review_sources":[]}`；`patch_rows` 只能与后端 issue 来源行一一守恒，`review_sources` 只能引用 duplicate 来源行。
+- `review_sources` 的每一项只能有 `source_sheet` 与 `source_row` 两个字段，例如 `{"source_sheet":"2016墙体配筋","source_row":275}`。不得在其中返回 `wall_id`、`source_cells` 或任何说明字段。
 
-- 非 `deterministic-audit` 模式的顶层必须是对象：`{"schema_version":"1","source_row_count":... ,"rows":[...]}`。禁止解释文字、多个代码块或 JSON 数组。
+- 非 `deterministic-audit` 模式的顶层必须是对象：`{"schema_version":"1","source_row_count":... ,"rows":[...]}`。响应必须从 `{` 开始、以 `}` 结束；禁止解释文字、Markdown 代码块、多个对象、JSON 数组或 schema 外字段。
 - `rows` 同时支持 `kind="wall"` 和 `kind="slab"`。`include_slab=false` 时不得杜撰 slab 行。
 - 模型禁止返回、计算或解释 `actual_area`。后端确定性解析器使用精确公式产生实际配筋面积。
 - 每个输出行只能是 `normalized` 或 `needs_review`。确定字段必须保留；未确定字段必须为 `null`，并在 `blank_fields` 中列出，同时填写有限、可定位的 `reason`。

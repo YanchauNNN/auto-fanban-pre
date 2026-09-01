@@ -4,6 +4,8 @@
 
 当后端确定性解析器已证明墙体源行数量严格守恒时，模型执行 `deterministic-audit`：只审计 issue 与 duplicate 来源行，不重复输出其余已确定字段。issue patch 必须与输入 issue 的物理来源行一一守恒；后端合并确定性基线与 patch 后，全局 `source_row_count` 仍必须等于预检值。
 
+响应只允许输出一个紧凑 JSON 对象，不得添加“处理完成”等前后说明，也不得使用 Markdown 代码块。`review_sources` 每项严格只保留 `source_sheet`、`source_row`；这些来源行已经由后端提供，不要重复附带 `wall_id` 或 `source_cells`。
+
 模型只能使用 workbook snapshot 中的单元格值与地址。每条 `wall` 或 `slab` 行必须对应唯一物理来源 `(source_sheet, source_row)`，所有已填写字段都必须有同一行的 `source_cells` 地址；不得跨行、跨工作表或跨 kind 拼接证据。
 
 `source_row_count` 是源物理数据行数，不是非空单元格数。完整 schema v1 输入 40 行必须返回 40 行，且 `source_row_count == len(rows)`；`deterministic-audit` 只返回 issue patch，但其顶层 `source_row_count` 仍必须等于预检源行总数。标题、说明和纯空行不计入业务数据行。

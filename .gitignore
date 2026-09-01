@@ -24,6 +24,7 @@ test/dist/src/*.pyc
 storage/
 documents/AI/ansys-mapdl-*-private-offline-*.zip
 documents/AI/ansys-mapdl-*-public-scaffold-*.zip
+/documents/规范下载/
 tmp/
 /.tmp/
 /build/

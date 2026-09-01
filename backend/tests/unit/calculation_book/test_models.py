@@ -15,6 +15,7 @@ def _valid_payload() -> dict[str, object]:
         "internal_code": "JQ00-NN-001",
         "version": "A",
         "subproject_code": "RX",
+        "level_code": "r",
         "subproject_name": "内部结构",
         "design_phase": "施工图设计",
         "document_name": "0.000m~15.000m配筋计算书",
@@ -38,6 +39,16 @@ def test_calculation_params_are_strict_and_derive_template_values() -> None:
     assert params.document_serial_number == "01"
     assert params.plant_elevation_range == "0.000m~15.000m"
     assert "RX" not in params.other_plants
+    assert params.level_code == "R"
+
+
+@pytest.mark.parametrize("value", ["", "RR", "1", "层"])
+def test_calculation_params_reject_invalid_level_code(value: str) -> None:
+    payload = _valid_payload()
+    payload["level_code"] = value
+
+    with pytest.raises(ValidationError, match="层位码"):
+        CalculationBookParams.model_validate(payload)
 
 
 def test_calculation_params_accept_optional_slab_stress() -> None:
@@ -55,10 +66,7 @@ def test_calculation_params_accept_ai_suggested_reinforcement() -> None:
 
     params = CalculationBookParams.model_validate(payload)
 
-    assert (
-        params.reinforcement_source
-        is calculation_models.ReinforcementSource.AI_SUGGESTED
-    )
+    assert params.reinforcement_source is calculation_models.ReinforcementSource.AI_SUGGESTED
 
 
 def test_ai_suggested_reinforcement_rejects_ai_normalization_confirmation() -> None:
@@ -150,6 +158,4 @@ def test_relationship_errors_are_collected_on_every_editable_field() -> None:
     }
     assert "标高范围" in errors_by_field["document_name"]
     assert "筏板顶标高 15m" in errors_by_field["roof_top_elevation"]
-    assert "历史最低温度 15℃" in errors_by_field[
-        "factory_extreme_max_temperature"
-    ]
+    assert "历史最低温度 15℃" in errors_by_field["factory_extreme_max_temperature"]

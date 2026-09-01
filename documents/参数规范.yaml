@@ -19,14 +19,14 @@ last_updated: "2026-04-08"
 enums:
   # 项目号（用于模板切换和词库匹配）
   project_no:
-    - { id: "1818", name: "巴基斯坦恰希玛核电厂五号机组" }
-    - { id: "2016", name: "浙江金七门核电厂1、2号机组" }
-    - { id: "1915", name: "华能霞浦核电项目压水堆一期工程" }
-    - { id: "2026", name: "江苏徐圩核能供热发电厂一期工程" }
-    - { id: "1916", name: "福建漳州核电厂3、4号机组" }
-    - { id: "1907", name: "三门核电项目5、6号机组" }
-    - { id: "2035", name: "600MV高温气冷堆示范工程" }
-    - { id: "1418", name: "海南昌江核电厂3、4号机组" }
+    - { id: "1818", name: "巴基斯坦恰希玛核电厂五号机组", calculation_book_code: "PC" }
+    - { id: "2016", name: "浙江金七门核电厂1、2号机组", calculation_book_code: "JD" }
+    - { id: "1915", name: "华能霞浦核电项目压水堆一期工程", calculation_book_code: "HP" }
+    - { id: "2026", name: "江苏徐圩核能供热发电厂一期工程", calculation_book_code: "XZ" }
+    - { id: "1916", name: "福建漳州核电厂3、4号机组", calculation_book_code: "FY" }
+    - { id: "1907", name: "三门核电项目5、6号机组", calculation_book_code: "SM" }
+    - { id: "2035", name: "600MV高温气冷堆示范工程", calculation_book_code: "" }
+    - { id: "1418", name: "海南昌江核电厂3、4号机组", calculation_book_code: "HL" }
 
   # 封面模板变体（非1818使用）
   cover_variant: ["通用", "压力容器", "核安全设备"]
@@ -844,6 +844,13 @@ doc_generation:
 # 计算书业务契约
 # ============================================================================
 calculation_book:
+  cover_code:
+    project_no_field: "project_no"
+    project_code_property: "calculation_book_code"
+    fixed_third_cell: "X"
+    plant_code_field: "subproject_code"
+    level_code_field: "level_code"
+    unconfigured_project_policy: "blank"
   templates:
     - { value: "internal_structure", label: "内部结构计算书" }
     - { value: "nuclear_island_plant", label: "核岛厂房计算书" }
@@ -854,6 +861,7 @@ calculation_book:
     - { key: "internal_code", label: "内部编号", type: "text", required: true, placeholder: "例如：20161NH-JGS01" }
     - { key: "version", label: "版本", type: "text", required: true, default: "A" }
     - { key: "subproject_code", label: "子项代号或系统号", type: "select", required: true, options: ["RX", "KA", "NH", "SD", "SU", "DA", "DB"] }
+    - { key: "level_code", label: "层位码", type: "text", required: true, placeholder: "例如：R", pattern: "^[A-Za-z]$", max_length: 1, uppercase: true }
     - { key: "subproject_name", label: "子项或系统名称", type: "select", required: true, options: ["内部结构", "燃料厂房", "核辅助厂房", "安全厂房SD区", "安全厂房SU区", "DA应急柴油机发电厂房", "DB应急柴油机发电厂房"] }
     - { key: "design_phase", label: "设计阶段", type: "select", required: true, options: ["施工图设计"] }
     - { key: "document_name", label: "文件名称", type: "text", required: true, placeholder: "例如：0.000m~15.000m配筋计算书" }

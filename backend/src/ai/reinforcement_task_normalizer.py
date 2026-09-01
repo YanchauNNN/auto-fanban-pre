@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -28,7 +28,7 @@ from ..calculation_book.reinforcement_workbook import build_workbook_snapshot
 from .chat_client import ChatClientError, ChatClientProtocol, ChatCompletionResult
 
 _SKILL_ID = "reinforcement_table_normalizer"
-_FENCED_JSON = re.compile(r"\A```json[ \t]*\r?\n(?P<body>.*)\r?\n```[ \t]*\Z", re.DOTALL)
+_ValidatedPayload = TypeVar("_ValidatedPayload")
 NormalizationErrorCode = Literal[
     "skill_missing",
     "snapshot_too_large",
@@ -89,15 +89,18 @@ class ReinforcementTaskNormalizer:
         client: ChatClientProtocol,
         skill_root: Path,
         limits: ReinforcementTaskNormalizerLimits,
+        max_correction_attempts: int = 0,
     ) -> None:
+        if max_correction_attempts < 0:
+            raise ValueError("max_correction_attempts must not be negative")
         self._client = client
         self.skill_root = Path(skill_root)
         self.limits = limits
+        self.max_correction_attempts = max_correction_attempts
 
     def __repr__(self) -> str:
         return (
-            "ReinforcementTaskNormalizer("
-            f"skill_root={self.skill_root!r}, limits={self.limits!r})"
+            f"ReinforcementTaskNormalizer(skill_root={self.skill_root!r}, limits={self.limits!r})"
         )
 
     def normalize(
@@ -129,33 +132,42 @@ class ReinforcementTaskNormalizer:
             include_slab=include_slab,
             expected_source_row_count=expected_source_row_count,
         )
-        completion = self._complete(messages)
-        raw_payload = self._decode_model_output(completion.content)
-        try:
-            payload = AiReinforcementPayload.model_validate(raw_payload)
-        except ValidationError as exc:
-            raise ReinforcementTaskNormalizationError(
-                "model_schema_invalid",
-                "model output does not match reinforcement schema v1",
-            ) from exc
-        if not include_slab and any(
-            isinstance(row, AiSlabReinforcementRow) for row in payload.rows
-        ):
-            raise ReinforcementTaskNormalizationError(
-                "model_schema_invalid",
-                "model output contains slab rows while slab normalization is disabled",
-            )
-        try:
-            return validate_ai_reinforcement_payload(
-                payload,
-                snapshot=snapshot,
-                expected_source_row_count=expected_source_row_count,
-            )
-        except InvalidAiReinforcementPayload as exc:
-            raise ReinforcementTaskNormalizationError(
-                "model_schema_invalid",
-                "model output failed reinforcement evidence or row-conservation validation",
-            ) from exc
+
+        def validate_response(content: str) -> ValidatedAiReinforcement:
+            last_error: ReinforcementTaskNormalizationError | None = None
+            for raw_payload in self._decode_model_output(content):
+                try:
+                    payload = AiReinforcementPayload.model_validate(
+                        self._sanitize_full_payload(raw_payload)
+                    )
+                    if not include_slab and any(
+                        isinstance(row, AiSlabReinforcementRow) for row in payload.rows
+                    ):
+                        raise ReinforcementTaskNormalizationError(
+                            "model_schema_invalid",
+                            "model output contains slab rows while slab normalization is disabled",
+                        )
+                    return validate_ai_reinforcement_payload(
+                        payload,
+                        snapshot=snapshot,
+                        expected_source_row_count=expected_source_row_count,
+                    )
+                except ValidationError:
+                    last_error = ReinforcementTaskNormalizationError(
+                        "model_schema_invalid",
+                        "model output does not match reinforcement schema v1",
+                    )
+                except InvalidAiReinforcementPayload:
+                    last_error = ReinforcementTaskNormalizationError(
+                        "model_schema_invalid",
+                        "model output failed reinforcement evidence or row-conservation validation",
+                    )
+                except ReinforcementTaskNormalizationError as exc:
+                    last_error = exc
+            assert last_error is not None
+            raise last_error
+
+        return self._complete_until_valid(messages, validate_response)
 
     @staticmethod
     def _deterministic_baseline(
@@ -246,15 +258,42 @@ class ReinforcementTaskNormalizer:
             include_slab=include_slab,
             expected_source_row_count=expected_source_row_count,
         )
-        completion = self._complete(messages)
-        raw_payload = self._decode_model_output(completion.content)
-        try:
-            audit = _HybridAuditPayload.model_validate(raw_payload)
-        except ValidationError as exc:
-            raise ReinforcementTaskNormalizationError(
-                "model_schema_invalid",
-                "model output does not match hybrid audit schema v1",
-            ) from exc
+
+        def validate_response(content: str) -> ValidatedAiReinforcement:
+            last_error: ReinforcementTaskNormalizationError | None = None
+            for raw_payload in self._decode_model_output(content):
+                try:
+                    audit = _HybridAuditPayload.model_validate(
+                        self._sanitize_hybrid_payload(raw_payload)
+                    )
+                    return self._validate_hybrid_audit(
+                        audit,
+                        baseline=baseline,
+                        workbook_path=workbook_path,
+                        expected_source_row_count=expected_source_row_count,
+                    )
+                except ValidationError:
+                    last_error = ReinforcementTaskNormalizationError(
+                        "model_schema_invalid",
+                        "model output does not match hybrid audit schema v1",
+                    )
+                except ReinforcementTaskNormalizationError as exc:
+                    last_error = exc
+            assert last_error is not None
+            raise last_error
+
+        return self._complete_until_valid(messages, validate_response)
+
+    def _validate_hybrid_audit(
+        self,
+        audit: _HybridAuditPayload,
+        *,
+        baseline: _DeterministicBaseline,
+        workbook_path: Path,
+        expected_source_row_count: int,
+    ) -> ValidatedAiReinforcement:
+        schedule = baseline.wall_schedule
+        duplicate_ids = set(schedule.duplicate_wall_ids)
         if audit.source_row_count != expected_source_row_count:
             raise ReinforcementTaskNormalizationError(
                 "model_schema_invalid",
@@ -267,30 +306,19 @@ class ReinforcementTaskNormalizer:
             if row.wall_id in duplicate_ids
         }
         reported_sources = {
-            (source.source_sheet, source.source_row)
-            for source in audit.review_sources
+            (source.source_sheet, source.source_row) for source in audit.review_sources
         }
-        if (
-            len(reported_sources) != len(audit.review_sources)
-            or not reported_sources.issubset(duplicate_sources)
+        if len(reported_sources) != len(audit.review_sources) or not reported_sources.issubset(
+            duplicate_sources
         ):
             raise ReinforcementTaskNormalizationError(
                 "model_schema_invalid",
                 "deterministic audit review sources are not duplicate-row evidence",
             )
 
-        issue_sources = {
-            (issue.source_sheet, issue.source_row)
-            for issue in schedule.issues
-        }
-        patch_sources = {
-            (row.source_sheet, row.source_row)
-            for row in audit.patch_rows
-        }
-        if (
-            len(patch_sources) != len(audit.patch_rows)
-            or patch_sources != issue_sources
-        ):
+        issue_sources = {(issue.source_sheet, issue.source_row) for issue in schedule.issues}
+        patch_sources = {(row.source_sheet, row.source_row) for row in audit.patch_rows}
+        if len(patch_sources) != len(audit.patch_rows) or patch_sources != issue_sources:
             raise ReinforcementTaskNormalizationError(
                 "model_schema_invalid",
                 "hybrid audit patches do not conserve deterministic issue rows",
@@ -339,6 +367,37 @@ class ReinforcementTaskNormalizer:
             source_row_count=expected_source_row_count,
         )
 
+    def _complete_until_valid(
+        self,
+        messages: list[dict[str, str]],
+        validator: Callable[[str], _ValidatedPayload],
+    ) -> _ValidatedPayload:
+        current_messages = messages
+        last_error: ReinforcementTaskNormalizationError | None = None
+        for attempt in range(self.max_correction_attempts + 1):
+            completion = self._complete(current_messages)
+            try:
+                return validator(completion.content)
+            except ReinforcementTaskNormalizationError as exc:
+                if exc.code not in {"model_output_invalid", "model_schema_invalid"}:
+                    raise
+                last_error = exc
+                if attempt >= self.max_correction_attempts:
+                    break
+                current_messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "上一次响应未通过结构或证据校验。只返回一个紧凑 JSON 对象；"
+                            "不要解释、不要使用 Markdown 代码块、不要增加 schema 以外字段。"
+                            "必须保持源行数量和来源单元格证据守恒。"
+                        ),
+                    },
+                ]
+        assert last_error is not None
+        raise last_error from None
+
     @staticmethod
     def _audit_messages(
         *,
@@ -357,6 +416,8 @@ class ReinforcementTaskNormalizer:
             '"patch_rows":[],"review_sources":[]}。'
             "patch_rows 必须与 issues 的物理来源行一一守恒，"
             "格式与 wall schema v1 行完全一致；"
+            'review_sources 每项只能包含 {"source_sheet":"表名","source_row":行号}，'
+            "严禁增加 wall_id、source_cells 或说明字段；"
             "review_sources 只能列出 duplicate_wall_ids 对应的来源行；"
             "没有额外复核行时必须返回空数组。完整 Skill 如下：\n\n"
             f"{skill_text}"
@@ -454,6 +515,7 @@ class ReinforcementTaskNormalizer:
         system = (
             f"执行 skill_id={_SKILL_ID}。只返回 schema v1 的单个 JSON 对象；"
             "必须返回无缩进、无换行的紧凑 JSON，不得输出不必要空白；"
+            "严禁解释文字、Markdown 代码块和 schema 之外的字段；"
             "不得返回/计算实际配筋面积（actual_area），不得输出文件或生成 Excel。"
             "未知值必须使用 status=needs_review，未确定字段保持 null，并填写 blank_fields 和 reason。"
             "必须保留 source_sheet/source_row/source_cells 证据和物理来源行守恒；"
@@ -462,18 +524,14 @@ class ReinforcementTaskNormalizer:
         )
         include_slab_text = "true" if include_slab else "false"
         row_count_constraint = (
-            "expected_source_row_count 未提供；请按 snapshot 识别物理来源行，"
-            "不得杜撰固定源行数。"
+            "expected_source_row_count 未提供；请按 snapshot 识别物理来源行，不得杜撰固定源行数。"
             if expected_source_row_count is None
             else (
-                "schema 的 source_row_count 与 rows 数量都必须等于 "
-                f"{expected_source_row_count}。"
+                f"schema 的 source_row_count 与 rows 数量都必须等于 {expected_source_row_count}。"
             )
         )
         scope_instruction = (
-            "同时识别 wall 与 slab。"
-            if include_slab
-            else "仅识别 wall，忽略 slab；不得杜撰 slab。"
+            "同时识别 wall 与 slab。" if include_slab else "仅识别 wall，忽略 slab；不得杜撰 slab。"
         )
         user = (
             f"include_slab={include_slab_text}。{scope_instruction}"
@@ -487,21 +545,95 @@ class ReinforcementTaskNormalizer:
         ]
 
     @staticmethod
-    def _decode_model_output(content: str) -> dict[str, object]:
-        candidate = content.strip()
-        fenced = _FENCED_JSON.fullmatch(candidate)
-        if fenced is not None:
-            candidate = fenced.group("body")
-        try:
-            decoded = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError) as exc:
+    def _decode_model_output(content: str) -> tuple[dict[str, object], ...]:
+        if not isinstance(content, str):
             raise ReinforcementTaskNormalizationError(
                 "model_output_invalid",
-                "model output is not plain JSON or one complete json code fence",
-            ) from exc
-        if not isinstance(decoded, dict):
-            raise ReinforcementTaskNormalizationError(
-                "model_output_invalid",
-                "model output must be one JSON object",
+                "model output does not contain a JSON object",
             )
-        return decoded
+        decoder = json.JSONDecoder()
+        candidates: list[dict[str, object]] = []
+        for index, char in enumerate(content):
+            if char != "{":
+                continue
+            try:
+                decoded, _ = decoder.raw_decode(content, index)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict) and decoded not in candidates:
+                candidates.append(decoded)
+        if not candidates:
+            raise ReinforcementTaskNormalizationError(
+                "model_output_invalid",
+                "model output does not contain a JSON object",
+            )
+        return tuple(candidates)
+
+    @staticmethod
+    def _sanitize_full_payload(payload: dict[str, object]) -> dict[str, object]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if key in {"schema_version", "source_row_count", "rows"}
+        } | {
+            "rows": [
+                ReinforcementTaskNormalizer._sanitize_row(row)
+                for row in payload.get("rows", [])
+                if isinstance(row, dict)
+            ]
+        }
+
+    @staticmethod
+    def _sanitize_hybrid_payload(payload: dict[str, object]) -> dict[str, object]:
+        patch_rows = payload.get("patch_rows", [])
+        review_sources = payload.get("review_sources", [])
+        return {
+            "schema_version": payload.get("schema_version"),
+            "source_row_count": payload.get("source_row_count"),
+            "patch_rows": [
+                ReinforcementTaskNormalizer._sanitize_row(row)
+                for row in patch_rows
+                if isinstance(row, dict)
+            ]
+            if isinstance(patch_rows, list)
+            else patch_rows,
+            "review_sources": [
+                {
+                    key: value
+                    for key, value in source.items()
+                    if key in {"source_sheet", "source_row"}
+                }
+                for source in review_sources
+                if isinstance(source, dict)
+            ]
+            if isinstance(review_sources, list)
+            else review_sources,
+        }
+
+    @staticmethod
+    def _sanitize_row(row: dict[str, object]) -> dict[str, object]:
+        kind = row.get("kind")
+        if kind == "wall":
+            allowed = set(AiWallReinforcementRow.model_fields)
+            cell_fields = {"wall", "X", "Y", "Z"}
+        elif kind == "slab":
+            allowed = set(AiSlabReinforcementRow.model_fields)
+            cell_fields = {
+                "elevation",
+                "top_x",
+                "top_y",
+                "middle_x",
+                "middle_y",
+                "bottom_x",
+                "bottom_y",
+                "z",
+            }
+        else:
+            return {key: value for key, value in row.items() if key == "kind"}
+        sanitized = {key: value for key, value in row.items() if key in allowed}
+        source_cells = sanitized.get("source_cells")
+        if isinstance(source_cells, dict):
+            sanitized["source_cells"] = {
+                key: value for key, value in source_cells.items() if key in cell_fields
+            }
+        return sanitized

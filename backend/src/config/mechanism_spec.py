@@ -210,9 +210,7 @@ class ProjectInferenceConfig(BaseModel):
 class AuditReplaceMechanismConfig(BaseModel):
     unit_factory_codes: list[str] = Field(default_factory=list)
     unit_factory_code_alias_groups: list[list[str]] = Field(default_factory=list)
-    batch_filename_identity_regex: str = (
-        r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
-    )
+    batch_filename_identity_regex: str = r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
 
 
 class CalculationBookAiSuggestionDirectionConfig(BaseModel):
@@ -260,9 +258,12 @@ class CalculationBookAiSuggestionMechanismConfig(BaseModel):
         }
     )
     word_declaration: str = (
-        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，"
-        "供设计人员复核。"
+        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，供设计人员复核。"
     )
+
+
+class CalculationBookAiNormalizationMechanismConfig(BaseModel):
+    schema_correction_max_attempts: int = Field(default=2, ge=0, le=5)
 
 
 class CalculationBookMechanismConfig(BaseModel):
@@ -285,6 +286,9 @@ class CalculationBookMechanismConfig(BaseModel):
     ocr_header_scale: int = Field(default=4, ge=1)
     ocr_legend_scale: int = Field(default=3, ge=1)
     chapter: str = "7.1"
+    ai_normalization: CalculationBookAiNormalizationMechanismConfig = Field(
+        default_factory=CalculationBookAiNormalizationMechanismConfig
+    )
     ai_suggestion: CalculationBookAiSuggestionMechanismConfig = Field(
         default_factory=CalculationBookAiSuggestionMechanismConfig
     )
@@ -598,8 +602,12 @@ class BackendMechanismConfig(BaseModel):
     )
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
     api_runtime: ApiRuntimeMechanismConfig = Field(default_factory=ApiRuntimeMechanismConfig)
-    cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(default_factory=CadRuntimeMechanismConfig)
-    deployment_mechanism: DeploymentMechanismConfig = Field(default_factory=DeploymentMechanismConfig)
+    cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(
+        default_factory=CadRuntimeMechanismConfig
+    )
+    deployment_mechanism: DeploymentMechanismConfig = Field(
+        default_factory=DeploymentMechanismConfig
+    )
 
 
 class MechanismSpec(BaseModel):
@@ -700,7 +708,9 @@ def load_mechanism_spec(spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH) -> 
     return MechanismSpecLoader.load(spec_path)
 
 
-def normalize_audit_replace_factory_codes(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+def normalize_audit_replace_factory_codes(
+    values: list[str] | tuple[str, ...] | set[str],
+) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -738,7 +748,9 @@ def append_audit_replace_factory_codes(
     spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH,
 ) -> list[str]:
     path = _resolve_mechanism_spec_path(spec_path)
-    existing = normalize_audit_replace_factory_codes(load_mechanism_spec(path).audit_replace.unit_factory_codes)
+    existing = normalize_audit_replace_factory_codes(
+        load_mechanism_spec(path).audit_replace.unit_factory_codes
+    )
     updated = normalize_audit_replace_factory_codes([*existing, *values])
     if updated != existing:
         _write_audit_replace_factory_codes(path, updated)
@@ -772,8 +784,7 @@ def _write_audit_replace_factory_codes(path: Path, values: list[str]) -> None:
             "schema_version: '1.0'\n"
             "backend_mechanism:\n"
             "  audit_replace:\n"
-            "    unit_factory_codes:\n"
-            + "".join(f'      - "{value}"\n' for value in values),
+            "    unit_factory_codes:\n" + "".join(f'      - "{value}"\n' for value in values),
             encoding="utf-8",
         )
         return
@@ -796,7 +807,7 @@ def _write_audit_replace_factory_codes(path: Path, values: list[str]) -> None:
     codes_index = _find_yaml_key(lines, "unit_factory_codes", 4, audit_index + 1, audit_end)
     replacement = _factory_code_yaml_block(values, include_parent=False)
     if codes_index is None:
-        lines[audit_index + 1:audit_index + 1] = replacement
+        lines[audit_index + 1 : audit_index + 1] = replacement
     else:
         codes_end = _find_yaml_sequence_block_end(lines, codes_index, 4)
         lines[codes_index:codes_end] = replacement

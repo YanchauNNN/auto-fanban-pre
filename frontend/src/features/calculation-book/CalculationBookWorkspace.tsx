@@ -320,12 +320,13 @@ export function CalculationBookWorkspace({
   const busy = busyAction !== null;
 
   function updateValue(field: CalculationBookField, nextValue: string) {
+    const normalizedValue = field.uppercase ? nextValue.toUpperCase() : nextValue;
     setPresetNotice(null);
     setValues((current) => {
-      const next = { ...current, [field.key]: nextValue };
+      const next = { ...current, [field.key]: normalizedValue };
       if (field.key === "project_no") {
         next.project_name =
-          calculationSchema?.projectOptions.find((option) => option.value === nextValue)?.label ?? "";
+          calculationSchema?.projectOptions.find((option) => option.value === normalizedValue)?.label ?? "";
       }
       return next;
     });
@@ -554,8 +555,11 @@ export function CalculationBookWorkspace({
   function validateInput() {
     const nextFieldErrors: Record<string, string[]> = {};
     for (const field of activeSchema.fields) {
-      if (field.required && !String(values[field.key] ?? "").trim()) {
+      const value = String(values[field.key] ?? "").trim();
+      if (field.required && !value) {
         nextFieldErrors[field.key] = [`请填写${field.label}`];
+      } else if (value && field.pattern && !new RegExp(field.pattern).test(value)) {
+        nextFieldErrors[field.key] = [`${field.label}格式不正确`];
       }
     }
     const nextFormErrors: string[] = [];
@@ -1672,6 +1676,8 @@ function FieldGroup({
                   aria-required={field.required}
                   id={fieldId}
                   placeholder={field.placeholder}
+                  maxLength={field.maxLength}
+                  pattern={field.pattern}
                   readOnly={readOnly}
                   required={field.required}
                   step={field.type === "number" ? "any" : undefined}

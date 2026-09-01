@@ -65,6 +65,9 @@ type RawFormSchema = {
       default?: string | number | boolean | null;
       unit?: string | null;
       placeholder?: string | null;
+      pattern?: string | null;
+      max_length?: number | null;
+      uppercase?: boolean | null;
       options?: readonly string[] | null;
       options_from?: string | null;
       derived_from?: string | null;
@@ -333,6 +336,9 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
               defaultValue: field.default == null ? undefined : String(field.default),
               unit: field.unit ?? undefined,
               placeholder: field.placeholder ?? undefined,
+              pattern: field.pattern ?? undefined,
+              maxLength: field.max_length ?? undefined,
+              uppercase: field.uppercase ?? undefined,
               options: field.options ?? undefined,
               optionsFrom: field.options_from ?? undefined,
               derivedFrom: field.derived_from ?? undefined,

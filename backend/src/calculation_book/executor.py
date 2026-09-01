@@ -156,6 +156,7 @@ def build_reinforcement_task_normalizer(
     """Build the queued task's structured-model normalizer from runtime config."""
 
     settings = config.calculation_book.ai_normalization
+    mechanism_settings = load_mechanism_spec().calculation_book.ai_normalization
     if not settings.enabled:
         raise ReinforcementNormalizationUnavailable(
             "ai_normalization_disabled",
@@ -181,6 +182,7 @@ def build_reinforcement_task_normalizer(
                 max_snapshot_chars=settings.max_snapshot_chars,
                 max_skill_chars=settings.max_skill_chars,
             ),
+            max_correction_attempts=(mechanism_settings.schema_correction_max_attempts),
         ),
         metadata=ReinforcementNormalizerMetadata(
             model=resolved_models.structured.model,
@@ -231,13 +233,9 @@ class CalculationBookJobExecutor:
     ) -> None:
         if normalizer is not None and normalizer_factory is not None:
             raise ValueError("normalizer and normalizer_factory are mutually exclusive")
-        if (
-            rebar_suggestion_invoker is not None
-            and rebar_suggestion_factory is not None
-        ):
+        if rebar_suggestion_invoker is not None and rebar_suggestion_factory is not None:
             raise ValueError(
-                "rebar_suggestion_invoker and rebar_suggestion_factory "
-                "are mutually exclusive"
+                "rebar_suggestion_invoker and rebar_suggestion_factory are mutually exclusive"
             )
         self._processor = processor
         self._normalizer = normalizer
@@ -247,13 +245,9 @@ class CalculationBookJobExecutor:
                 profile=("injected" if normalizer is not None else "not_initialized"),
             )
         )
-        self._normalizer_factory = (
-            normalizer_factory or build_reinforcement_task_normalizer
-        )
+        self._normalizer_factory = normalizer_factory or build_reinforcement_task_normalizer
         self._rebar_suggestion_invoker = rebar_suggestion_invoker
-        self._rebar_suggestion_factory = (
-            rebar_suggestion_factory or build_rebar_suggestion_invoker
-        )
+        self._rebar_suggestion_factory = rebar_suggestion_factory or build_rebar_suggestion_invoker
 
     def execute(self, job: Job) -> None:
         config = get_config()
@@ -266,9 +260,7 @@ class CalculationBookJobExecutor:
         job.work_dir = work_dir
         params = CalculationBookParams.model_validate(job.params)
         runtime = config.calculation_book
-        ai_suggestion_mode = (
-            params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
-        )
+        ai_suggestion_mode = params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
         try:
             self._validate_server_mode(
                 job=job,
@@ -326,9 +318,7 @@ class CalculationBookJobExecutor:
         try:
             job.mark_running(stage=CalculationBookStage.VALIDATE_ARCHIVE.value)
             self._persist(job)
-            requires_ai = (
-                job.options.get("ai_reinforcement_normalization") is True
-            )
+            requires_ai = job.options.get("ai_reinforcement_normalization") is True
             reinforcement_normalizer = None
             if requires_ai:
                 reinforcement_normalizer = self._normalization_callback(
@@ -394,9 +384,7 @@ class CalculationBookJobExecutor:
                 }
             )
             warnings = getattr(result, "normalization_warnings", ())
-            job.progress.details["calculation_book_warnings"] = (
-                self._safe_warnings(warnings)
-            )
+            job.progress.details["calculation_book_warnings"] = self._safe_warnings(warnings)
             ai_result = getattr(result, "ai_rebar_suggestion", None)
             if ai_suggestion_mode:
                 if not isinstance(ai_result, RebarSuggestionResult):
@@ -404,18 +392,12 @@ class CalculationBookJobExecutor:
                         "ai_suggestion_result_missing",
                         "AI rebar suggestion result is unavailable",
                     )
-                job.progress.details["ai_rebar_suggestion"] = (
-                    self._safe_rebar_suggestion_summary(
-                        ai_result,
-                        suggested_direction_count=(
-                            result.ai_suggested_direction_count
-                        ),
-                        blank_direction_count=result.ai_blank_direction_count,
-                        warning_count=len(
-                            job.progress.details["calculation_book_warnings"]
-                        ),
-                        fallback_metadata=rebar_suggestion_metadata,
-                    )
+                job.progress.details["ai_rebar_suggestion"] = self._safe_rebar_suggestion_summary(
+                    ai_result,
+                    suggested_direction_count=(result.ai_suggested_direction_count),
+                    blank_direction_count=result.ai_blank_direction_count,
+                    warning_count=len(job.progress.details["calculation_book_warnings"]),
+                    fallback_metadata=rebar_suggestion_metadata,
                 )
             if diagnostic_log is not None:
                 diagnostic_log.write(
@@ -524,9 +506,7 @@ class CalculationBookJobExecutor:
         metadata: dict[str, str],
     ) -> Callable[[tuple[RebarSuggestionInput, ...]], RebarSuggestionResult]:
         try:
-            invoker = self._rebar_suggestion_invoker or (
-                self._rebar_suggestion_factory(config)
-            )
+            invoker = self._rebar_suggestion_invoker or (self._rebar_suggestion_factory(config))
         except RebarSuggestionUnavailable:
             raise
         except Exception:
@@ -563,9 +543,7 @@ class CalculationBookJobExecutor:
                     else settings.skill_version
                 )[:160],
                 "skill_sha256": str(
-                    skill_metadata.skill_sha256
-                    if skill_metadata is not None
-                    else ""
+                    skill_metadata.skill_sha256 if skill_metadata is not None else ""
                 )[:160],
                 "model": str(
                     skill_metadata.model
@@ -584,9 +562,7 @@ class CalculationBookJobExecutor:
                 items=items,
                 invoker=invoker,
                 batch_size=settings.batch_size,
-                max_consecutive_base_failures=(
-                    settings.max_consecutive_base_failures
-                ),
+                max_consecutive_base_failures=(settings.max_consecutive_base_failures),
                 audit=audit,
             )
 
@@ -597,9 +573,7 @@ class CalculationBookJobExecutor:
         *,
         diagnostic_log: CalculationBookDiagnosticLog,
         job: Job,
-        update_progress: Callable[
-            [CalculationBookStage, int, str, dict[str, object]], None
-        ],
+        update_progress: Callable[[CalculationBookStage, int, str, dict[str, object]], None],
     ) -> Callable[[str, dict[str, object]], None]:
         highest_repair_round = 0
 
@@ -649,34 +623,24 @@ class CalculationBookJobExecutor:
                 "ai_suggestion_count_invalid",
                 "AI rebar suggestion direction counts are invalid",
             )
-        skill_sha256 = str(
-            result.skill_sha256
-            or fallback_metadata.get("skill_sha256", "")
-        ).strip()
+        skill_sha256 = str(result.skill_sha256 or fallback_metadata.get("skill_sha256", "")).strip()
         if re.fullmatch(r"[0-9A-Fa-f]{64}", skill_sha256) is None:
             raise RebarSuggestionUnavailable(
                 "ai_suggestion_skill_metadata_invalid",
                 "AI rebar suggestion Skill metadata is invalid",
             )
         return {
-            "skill_id": str(
-                result.skill_id or fallback_metadata.get("skill_id", "")
-            )[:160],
+            "skill_id": str(result.skill_id or fallback_metadata.get("skill_id", ""))[:160],
             "skill_version": str(
-                result.skill_version
-                or fallback_metadata.get("skill_version", "")
+                result.skill_version or fallback_metadata.get("skill_version", "")
             )[:160],
             "skill_sha256": skill_sha256,
-            "model": str(
-                result.model or fallback_metadata.get("model", "")
-            )[:160],
+            "model": str(result.model or fallback_metadata.get("model", ""))[:160],
             "call_count": max(0, int(result.call_count)),
             "suggested_direction_count": suggested_direction_count,
             "blank_direction_count": blank_direction_count,
             "repair_round_count": max(0, int(result.repair_round_count)),
-            "validation": (
-                "passed_with_warnings" if warning_count else "passed"
-            ),
+            "validation": ("passed_with_warnings" if warning_count else "passed"),
         }
 
     @staticmethod
@@ -703,9 +667,7 @@ class CalculationBookJobExecutor:
         *,
         job: Job,
         config: Any,
-        update_progress: Callable[
-            [CalculationBookStage, int, str, dict[str, object]], None
-        ],
+        update_progress: Callable[[CalculationBookStage, int, str, dict[str, object]], None],
     ) -> Callable[[Path, bool], Any]:
         def normalize(workbook_path: Path, include_slab: bool) -> Any:
             started_at = time.perf_counter()
@@ -728,9 +690,7 @@ class CalculationBookJobExecutor:
                 validated = normalizer.normalize(
                     workbook_path,
                     include_slab=include_slab,
-                    expected_source_row_count=(
-                        self._expected_source_row_count(job)
-                    ),
+                    expected_source_row_count=(self._expected_source_row_count(job)),
                 )
             except (
                 ReinforcementTaskNormalizationError,
@@ -790,9 +750,7 @@ class CalculationBookJobExecutor:
                 "source_row_count": validated.source_row_count,
                 "normalized_wall_count": len(validated.wall_schedule.rows),
                 "normalized_slab_count": (
-                    len(validated.slab_schedule.rows)
-                    if validated.slab_schedule is not None
-                    else 0
+                    len(validated.slab_schedule.rows) if validated.slab_schedule is not None else 0
                 ),
                 "review_warning_count": len(validated.warnings),
                 "duration_ms": max(
@@ -855,11 +813,7 @@ class CalculationBookJobExecutor:
         scope = raw_scope if raw_scope in {"wall", "slab"} else "reinforcement"
         allowed_fields = _WALL_FIELDS if scope == "wall" else _SLAB_FIELDS
         raw_blank_fields = getattr(warning, "blank_fields", ())
-        blank_fields = [
-            str(field)
-            for field in raw_blank_fields
-            if str(field) in allowed_fields
-        ]
+        blank_fields = [str(field) for field in raw_blank_fields if str(field) in allowed_fields]
         raw_code = str(getattr(warning, "code", "needs_review"))
         code = _WARNING_CODE_ALIASES.get(raw_code, raw_code)
         if code not in _WARNING_CODES:
@@ -877,8 +831,7 @@ class CalculationBookJobExecutor:
         allowed_directions = set(allowed_fields) | {"X", "Y", "Z"}
         direction = (
             str(raw_direction)
-            if raw_direction is not None
-            and str(raw_direction) in allowed_directions
+            if raw_direction is not None and str(raw_direction) in allowed_directions
             else None
         )
         raw_sheet = str(getattr(warning, "source_sheet", "") or "").strip()
@@ -893,9 +846,7 @@ class CalculationBookJobExecutor:
         source_cells = {
             str(field): str(address).upper()
             for field, address in (
-                raw_source_cells.items()
-                if isinstance(raw_source_cells, dict)
-                else ()
+                raw_source_cells.items() if isinstance(raw_source_cells, dict) else ()
             )
             if has_excel_evidence
             and str(field) in allowed_fields
@@ -943,12 +894,8 @@ class CalculationBookJobExecutor:
                 expected_count=mechanism_spec.ocr_legend_value_count,
                 min_confidence=mechanism_spec.ocr_min_confidence,
                 min_vertical_ratio=mechanism_spec.ocr_min_vertical_ratio,
-                endpoint_absolute_tolerance=(
-                    mechanism_spec.ocr_endpoint_absolute_tolerance
-                ),
-                endpoint_relative_tolerance=(
-                    mechanism_spec.ocr_endpoint_relative_tolerance
-                ),
+                endpoint_absolute_tolerance=(mechanism_spec.ocr_endpoint_absolute_tolerance),
+                endpoint_relative_tolerance=(mechanism_spec.ocr_endpoint_relative_tolerance),
                 header_crop=tuple(mechanism_spec.ocr_header_crop),
                 legend_crop=tuple(mechanism_spec.ocr_legend_crop),
                 header_scale=mechanism_spec.ocr_header_scale,

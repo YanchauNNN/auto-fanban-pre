@@ -555,6 +555,41 @@ describe("normalizeFormSchema", () => {
     ]);
   });
 
+  it("preserves YAML-backed level-code input constraints", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "level_code",
+            label: "层位码",
+            type: "text",
+            required: true,
+            placeholder: "例如：R",
+            pattern: "^[A-Za-z]$",
+            max_length: 1,
+            uppercase: true,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields[0]).toEqual(
+      expect.objectContaining({
+        key: "level_code",
+        pattern: "^[A-Za-z]$",
+        maxLength: 1,
+        uppercase: true,
+      }),
+    );
+  });
+
   it("preserves the calculation-book reinforcement source enum and safe default", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",

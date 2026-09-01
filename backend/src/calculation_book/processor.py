@@ -14,7 +14,7 @@ from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from docxtpl import DocxTemplate, InlineImage
 
-from ..config import load_mechanism_spec
+from ..config import load_mechanism_spec, load_spec
 from ..config.mechanism_spec import CalculationBookAiSuggestionMechanismConfig
 from .ai_reinforcement_schema import (
     ReinforcementNormalizationWarning,
@@ -139,6 +139,13 @@ def _format_actual_area(value: float | int) -> str:
     return f"{round(float(value), 1):g}"
 
 
+def build_cover_code_context(params: CalculationBookParams) -> dict[str, str]:
+    cells = load_spec().build_calculation_book_cover_cells(params.model_dump(mode="python"))
+    if len(cells) != 6:
+        raise ValueError("计算书六位封面编码规则未正确配置")
+    return {f"cover_code_{index}": value for index, value in enumerate(cells, start=1)}
+
+
 def _apply_manual_confirmations(
     plan: ReinforcementMatchingPlan,
     *,
@@ -161,9 +168,7 @@ def _selection(
     if cell is None:
         return None
     if figure.reading is None:
-        raise ValueError(
-            f"{assignment.output_wall_id}-{direction} 没有有效 OCR 结果却存在配筋值"
-        )
+        raise ValueError(f"{assignment.output_wall_id}-{direction} 没有有效 OCR 结果却存在配筋值")
     config = cell.selected
     calculation_area = select_calculation_reference(
         figure.reading,
@@ -201,9 +206,7 @@ def _wall_rows(
             row[f"{prefix}_calc"] = _format_number(selection.calculation_area)
             row[f"{prefix}_actual"] = _format_actual_area(selection.actual_area)
             row[f"{prefix}_margin"] = (
-                "-"
-                if selection.margin_percent is None
-                else f"{selection.margin_percent:.1f}%"
+                "-" if selection.margin_percent is None else f"{selection.margin_percent:.1f}%"
             )
         rows.append(row)
     return rows
@@ -284,8 +287,7 @@ def _reinforcement_figure_rows(
                         width=Mm(140),
                     ),
                     "caption": (
-                        f"{assignment.output_wall_id}-"
-                        f"{direction_labels[figure.source.direction]}"
+                        f"{assignment.output_wall_id}-{direction_labels[figure.source.direction]}"
                     ),
                     "narrative": narrative,
                     "sm_value": sm_value,
@@ -323,8 +325,7 @@ def _slab_figure_rows(
         if cell is not None:
             if assignment.figure.reading is None:
                 raise ValueError(
-                    f"楼板 {assignment.elevation}-{assignment.key} "
-                    "没有有效 OCR 结果却存在配筋值"
+                    f"楼板 {assignment.elevation}-{assignment.key} 没有有效 OCR 结果却存在配筋值"
                 )
             narrative = build_slab_reinforcement_narrative(
                 elevation=assignment.elevation,
@@ -746,8 +747,7 @@ class CalculationBookProcessor:
                 + 2
             ),
             relative_paths=sorted(
-                path.relative_to(contents.root).as_posix()
-                for path in contents.extracted_files
+                path.relative_to(contents.root).as_posix() for path in contents.extracted_files
             ),
         )
 
@@ -779,9 +779,7 @@ class CalculationBookProcessor:
                 if normalized is not None
                 else load_reinforcement_schedule(workbook)
             )
-            normalization_warnings = (
-                normalized.warnings if normalized is not None else ()
-            )
+            normalization_warnings = normalized.warnings if normalized is not None else ()
             recognized = []
             for figure in contents.reinforcement_figures:
                 _audit(
@@ -841,9 +839,7 @@ class CalculationBookProcessor:
                         group=figure.position,
                     )
                     reading = self.ocr_recognizer(figure.path, figure.direction)
-                    recognized_slabs.append(
-                        RecognizedSlabFigure(source=figure, reading=reading)
-                    )
+                    recognized_slabs.append(RecognizedSlabFigure(source=figure, reading=reading))
                     _audit(
                         audit,
                         "ocr_completed",
@@ -954,27 +950,21 @@ class CalculationBookProcessor:
                 assignment.cell_for(direction) is not None
                 for assignment in assignments
                 for direction in ("X", "Y", "Z")
-            ) + sum(
-                assignment.rebar_cell is not None
-                for assignment in slab_plan.assignments
-            )
+            ) + sum(assignment.rebar_cell is not None for assignment in slab_plan.assignments)
             ai_blank_direction_count = (
-                wall_direction_count
-                + slab_direction_count
-                - ai_suggested_direction_count
+                wall_direction_count + slab_direction_count - ai_suggested_direction_count
             )
 
         report(CalculationBookStage.RENDER_CALCULATION_BOOK, 75, "正在渲染 Word 计算书", {})
         template_path = resolve_template_path(self.assets.template_root, params.template_type)
         document = DocxTemplate(template_path)
         context = params.model_dump(mode="python")
+        context.update(build_cover_code_context(params))
         slab_figure_rows = _slab_figure_rows(
             document=document,
             plan=slab_plan,
             chapter=self.mechanism.chapter,
-            is_ai_suggested=(
-                params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
-            ),
+            is_ai_suggested=(params.reinforcement_source is ReinforcementSource.AI_SUGGESTED),
             audit=audit,
         )
         reinforcement_figure_rows = _reinforcement_figure_rows(
@@ -982,9 +972,7 @@ class CalculationBookProcessor:
             assignments=assignments,
             chapter=self.mechanism.chapter,
             start_index=len(slab_figure_rows) + 1,
-            is_ai_suggested=(
-                params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
-            ),
+            is_ai_suggested=(params.reinforcement_source is ReinforcementSource.AI_SUGGESTED),
             audit=audit,
         )
         unmatched_rows = (
@@ -1017,8 +1005,7 @@ class CalculationBookProcessor:
                 ],
                 "ai_rebar_disclosure": (
                     self.mechanism.ai_suggestion.word_declaration
-                    if params.reinforcement_source
-                    is ReinforcementSource.AI_SUGGESTED
+                    if params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
                     else ""
                 ),
             }
@@ -1038,9 +1025,7 @@ class CalculationBookProcessor:
             95,
             "计算书生成完成",
             {
-                "figure_count": (
-                    len(recognized) + len(recognized_slabs) + len(unmatched_rows)
-                ),
+                "figure_count": (len(recognized) + len(recognized_slabs) + len(unmatched_rows)),
                 "output_filename": final_path.name,
                 "template_type": params.template_type.value,
             },
@@ -1057,8 +1042,7 @@ class CalculationBookProcessor:
                     *slab_plan.warnings,
                     *(
                         _unknown_image_warnings(contents.ignored_root_images)
-                        if params.reinforcement_source
-                        is ReinforcementSource.AI_SUGGESTED
+                        if params.reinforcement_source is ReinforcementSource.AI_SUGGESTED
                         else ()
                     ),
                 )

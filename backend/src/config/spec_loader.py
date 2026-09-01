@@ -1,4 +1,4 @@
-﻿"""
+"""
 瑙勮寖鍔犺浇鍣?- 璇诲彇 documents/鍙傛暟瑙勮寖.yaml
 
 鑱岃矗锛?
@@ -28,6 +28,7 @@ SPEC_PATH_ENV_VAR = "FANBAN_SPEC_PATH"
 
 class PaperVariant(BaseModel):
     """鏍囧噯鍥惧箙灏哄"""
+
     W: float
     H: float
     profile: str
@@ -35,6 +36,7 @@ class PaperVariant(BaseModel):
 
 class ROIProfile(BaseModel):
     """ROI閰嶇疆"""
+
     description: str
     tolerance: float
     outer_frame: list[float]
@@ -43,12 +45,14 @@ class ROIProfile(BaseModel):
 
 class FieldDefinition(BaseModel):
     """瀛楁瑙ｆ瀽瀹氫箟"""
+
     roi: str
     parse: dict[str, Any]
 
 
 class CoverBinding(BaseModel):
     """灏侀潰钀界偣閰嶇疆"""
+
     cell: str
     label: str | None = None
     desc: str | None = None
@@ -64,6 +68,7 @@ class CoverBinding(BaseModel):
 
 class BusinessSpec(BaseModel):
     """Business spec loaded from ????.yaml."""
+
     schema_version: str
     _source_path: Path | None = PrivateAttr(default=None)
 
@@ -112,8 +117,11 @@ class BusinessSpec(BaseModel):
         bindings = self.doc_generation.get("templates", {}).get("cover_bindings", {})
         key = "1818" if project_no == "1818" else "common"
         raw = bindings.get(key, {})
-        return {k: CoverBinding(**v) if isinstance(v, dict) else CoverBinding(cell=str(v))
-                for k, v in raw.items() if not k.startswith("split_")}
+        return {
+            k: CoverBinding(**v) if isinstance(v, dict) else CoverBinding(cell=str(v))
+            for k, v in raw.items()
+            if not k.startswith("split_")
+        }
 
     def get_catalog_bindings(self) -> dict[str, Any]:
         """鑾峰彇鐩綍钀界偣閰嶇疆"""
@@ -138,12 +146,12 @@ class BusinessSpec(BaseModel):
     def get_defaults(self) -> dict[str, Any]:
         """Get default values."""
         return self.doc_generation.get("rules", {}).get("defaults", {})
+
     def get_same_code_multipage_suffix_pattern(self) -> str:
         """普通图纸同编码多页输出后缀模板。"""
         rules = self.doc_generation.get("rules", {})
         pattern = str(rules.get("same_code_multipage_suffix_pattern") or "").strip()
         return pattern or "{page_index}@{page_total}"
-
 
     def get_template_path(self, doc_type: str, project_no: str, variant: str = "") -> str:
         """鑾峰彇妯℃澘璺緞"""
@@ -156,9 +164,7 @@ class BusinessSpec(BaseModel):
                     normalized_variant = str(variant or "").strip()
                     return str(
                         self.resolve_repo_path(
-                            cover_1818.get(normalized_variant)
-                            or cover_1818.get("default")
-                            or ""
+                            cover_1818.get(normalized_variant) or cover_1818.get("default") or ""
                         )
                     )
                 return str(self.resolve_repo_path(cover_1818))
@@ -181,6 +187,43 @@ class BusinessSpec(BaseModel):
                 name = str(item.get("name") or "").strip()
                 return name or None
         return None
+
+    def get_project_property(
+        self,
+        project_no: str,
+        property_name: str,
+    ) -> str:
+        """Return one YAML-backed project property without hard-coded mappings."""
+        for item in self.enums.get("project_no", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id") or "").strip() != str(project_no or "").strip():
+                continue
+            return str(item.get(property_name) or "").strip()
+        return ""
+
+    def build_calculation_book_cover_cells(
+        self,
+        values: dict[str, Any],
+    ) -> tuple[str, ...]:
+        config = self.calculation_book.get("cover_code", {})
+        if not isinstance(config, dict):
+            return ()
+        project_no_field = str(config.get("project_no_field") or "project_no")
+        project_property = str(config.get("project_code_property") or "")
+        project_code = self.get_project_property(
+            str(values.get(project_no_field) or ""),
+            project_property,
+        ).upper()
+        fixed_value = str(config.get("fixed_third_cell") or "").upper()
+        plant_code = str(values.get(str(config.get("plant_code_field") or "")) or "").upper()
+        level_code = str(values.get(str(config.get("level_code_field") or "")) or "").upper()
+        return (
+            *project_code[:2].ljust(2),
+            fixed_value,
+            *plant_code[:2].ljust(2),
+            level_code,
+        )
 
     def get_management_features(self) -> dict[str, Any]:
         return self.management_features

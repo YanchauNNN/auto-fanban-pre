@@ -159,6 +159,7 @@ def _params(*, include_slab_stress: bool) -> dict[str, object]:
         "internal_code": "JQ00-NN-001",
         "version": "A",
         "subproject_code": "RX",
+        "level_code": "R",
         "subproject_name": "内部结构",
         "design_phase": "施工图设计",
         "document_name": "0.000m~15.000m配筋计算书",

@@ -19,3 +19,16 @@ def test_get_template_path_supports_deployed_documents_bin_layout(tmp_path: Path
     spec = SpecLoader.load(deploy_spec)
 
     assert Path(spec.get_template_path("design", "2016")) == expected_template
+
+
+def test_calculation_book_cover_cells_are_fully_yaml_backed() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    SpecLoader.clear_cache()
+    spec = SpecLoader.load(repo_root / "documents" / "参数规范.yaml")
+
+    assert spec.build_calculation_book_cover_cells(
+        {"project_no": "2016", "subproject_code": "NH", "level_code": "r"}
+    ) == ("J", "D", "X", "N", "H", "R")
+    assert spec.build_calculation_book_cover_cells(
+        {"project_no": "2035", "subproject_code": "NH", "level_code": "Q"}
+    ) == (" ", " ", "X", "N", "H", "Q")

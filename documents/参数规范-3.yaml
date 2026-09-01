@@ -127,6 +127,8 @@ backend_mechanism:
     ocr_header_scale: 4
     ocr_legend_scale: 3
     chapter: "7.1"
+    ai_normalization:
+      schema_correction_max_attempts: 2
     ai_suggestion:
       margin_ratio: 0.10
       xy:
