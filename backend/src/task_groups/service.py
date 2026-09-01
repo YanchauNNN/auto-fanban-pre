@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from ..accounts.account_registry import AccountRegistry
 from ..accounts.personnel_normalizer import PersonnelNormalizer
-from ..archive.service import ArchiveService
-from ..config import load_spec
+from ..config import load_mechanism_spec, load_spec
 from ..models import AccountSnapshot, TaskGroup
 from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
+from ..task_groups.archive_coordinator import TaskGroupArchiveCoordinator
 from ..task_groups.serializers import TaskGroupSerializers
+from ..task_groups.state_writer import TaskGroupStateWriter
+from ..task_groups.submission_readiness import TaskGroupSubmissionReadinessPolicy
 from ..task_groups.submit_guards import TaskGroupSubmitGuards
 from ..task_groups.visibility import TaskGroupVisibility
 from ..workflow.input_validator import WorkflowInputValidator
@@ -16,7 +18,6 @@ from ..workflow.service import WorkflowService
 from ..workflow.visibility import WorkflowVisibility
 from ..workload.calculator import WorkloadCalculator
 from ..workload.queries import WorkloadQueries
-from ..workload.settlement_service import WorkloadSettlementService
 
 
 class TaskGroupService:
@@ -33,11 +34,12 @@ class TaskGroupService:
         task_group_visibility: TaskGroupVisibility,
         workflow_visibility: WorkflowVisibility,
         serializers: TaskGroupSerializers,
+        submission_readiness: TaskGroupSubmissionReadinessPolicy,
         submit_guards: TaskGroupSubmitGuards,
         workload_calculator: WorkloadCalculator,
-        workload_settlement_service: WorkloadSettlementService,
         workload_queries: WorkloadQueries,
-        archive_service: ArchiveService,
+        state_writer: TaskGroupStateWriter,
+        archive_coordinator: TaskGroupArchiveCoordinator,
     ) -> None:
         self.group_manager = group_manager
         self.job_manager = job_manager
@@ -49,11 +51,12 @@ class TaskGroupService:
         self.task_group_visibility = task_group_visibility
         self.workflow_visibility = workflow_visibility
         self.serializers = serializers
+        self.submission_readiness = submission_readiness
         self.submit_guards = submit_guards
         self.workload_calculator = workload_calculator
-        self.workload_settlement_service = workload_settlement_service
         self.workload_queries = workload_queries
-        self.archive_service = archive_service
+        self.state_writer = state_writer
+        self.archive_coordinator = archive_coordinator
 
     def list_recent(self, account: AccountSnapshot, limit: int = 100) -> list[dict[str, object]]:
         groups = self.group_manager.list_groups(limit=limit)
@@ -77,6 +80,7 @@ class TaskGroupService:
         group = self._require_group(group_id)
         if group.owner_snapshot and group.owner_snapshot.creator_account != initiator.account_id:
             raise ValueError("submitter_must_match_creator")
+        self.submission_readiness.ensure_ready(group)
         self.submit_guards.ensure_submit_allowed(
             group,
             overwrite_archive_existing=overwrite_archive_existing,
@@ -90,7 +94,7 @@ class TaskGroupService:
         group.workload = self.workload_calculator.build_from_shared_prep(prep)
         group = self.workflow_service.start(group, initiator)
         group.mark_running("WORKFLOW_SUBMITTED")
-        self.group_manager.update_group(group)
+        self.state_writer.write(group)
         return self._serialize_detail(group, initiator)
 
     def restart_submit(
@@ -118,21 +122,17 @@ class TaskGroupService:
         group = self._require_group(group_id)
         self.workflow_service.approve(group, acting_account, factor, node_key=node_key)
         self._apply_factors(group)
-        if group.workflow.status.value == "three_review_approved":
-            try:
-                self.archive_service.archive_group(group)
-                self.workload_settlement_service.settle(group)
-                group.mark_succeeded()
-            except Exception as exc:  # noqa: BLE001
-                self.archive_service.mark_failed(group, str(exc))
-                group.mark_failed(str(exc))
-        self.group_manager.update_group(group)
+        workflow_runtime = load_mechanism_spec().workflow_runtime
+        if group.workflow.status.value == workflow_runtime.archive_trigger_status:
+            self.archive_coordinator.complete(group)
+        else:
+            self.state_writer.write(group)
         return self._serialize_detail(group, acting_account)
 
     def repair_current_node(self, group_id: str, assignee_snapshot: AccountSnapshot) -> dict[str, object]:
         group = self._require_group(group_id)
         self.workflow_service.repair_current_node(group, assignee_snapshot)
-        self.group_manager.update_group(group)
+        self.state_writer.write(group)
         return self._serialize_detail(group, assignee_snapshot)
 
     def rebind_account_references(self, old_account_id: str, new_account_snapshot: AccountSnapshot) -> None:
@@ -160,7 +160,7 @@ class TaskGroupService:
                     node.acted_by_name = new_account_snapshot.display_name
                     changed = True
             if changed:
-                self.group_manager.update_group(group)
+                self.state_writer.write(group)
 
     def workflow_monitor(self, account: AccountSnapshot) -> list[dict[str, object]]:
         groups = self.group_manager.load_all_groups()
@@ -192,8 +192,10 @@ class TaskGroupService:
         one_review_source = str((workflow_cfg.get("one_review") or {}).get("assignee_source") or "").strip()
         if one_review_source:
             field_names.add(one_review_source)
-        if bool(workflow_cfg.get("preserve_discipline_leader")):
-            field_names.add("ied_discipline_leader")
+        for field_name in workflow_cfg.get("preserve_fields") or []:
+            field_text = str(field_name).strip()
+            if field_text:
+                field_names.add(field_text)
         values = {field_name: primary_job.params.get(field_name) for field_name in sorted(field_names)}
         return self.personnel_normalizer.normalize_fields(values)
 
@@ -203,14 +205,17 @@ class TaskGroupService:
             str(node_cfg.get("key") or ""): str(node_cfg.get("factor_key") or "")
             for node_cfg in workflow_cfg.get("nodes") or []
         }
+        group.workload.node_factors = {}
         for node in group.workflow.nodes:
+            if node.node_key:
+                group.workload.node_factors[node.node_key] = node.factor
             factor_key = factor_keys.get(node.node_key)
             if factor_key and hasattr(group.workload, factor_key):
                 setattr(group.workload, factor_key, node.factor)
         self.workload_calculator.refresh_final(group.workload)
 
     def _require_group(self, group_id: str) -> TaskGroup:
-        group = self.group_manager.get_group(group_id)
+        group = self.group_manager.reload_group(group_id)
         if group is None:
             raise ValueError("group not found")
         return group
@@ -220,13 +225,26 @@ class TaskGroupService:
         return self.serializers.summarize(group, **permissions)
 
     def _serialize_detail(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, object]:
-        permissions = self._permissions(group, account)
-        return self.serializers.detail(group, **permissions)
+        readiness = self.submission_readiness.inspect(group)
+        permissions = self._permissions(group, account, submission_ready=readiness.is_ready)
+        return self.serializers.detail(
+            group,
+            **permissions,
+            submit_blockers=readiness.error_codes,
+        )
 
-    def _permissions(self, group: TaskGroup, account: AccountSnapshot) -> dict[str, bool]:
+    def _permissions(
+        self,
+        group: TaskGroup,
+        account: AccountSnapshot,
+        *,
+        submission_ready: bool | None = None,
+    ) -> dict[str, bool]:
         current_node = self.workflow_service.current_node(group)
         can_view_detail = self.task_group_visibility.can_view(group, account)
-        can_submit = group.workflow.status.value == "draft" and (
+        if submission_ready is None:
+            submission_ready = self.submission_readiness.inspect(group).is_ready
+        can_submit = submission_ready and (
             group.owner_snapshot is None or group.owner_snapshot.creator_account == account.account_id
         )
         can_approve = current_node is not None and current_node.assignee_account == account.account_id

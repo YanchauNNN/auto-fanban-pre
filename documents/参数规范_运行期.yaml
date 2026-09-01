@@ -94,6 +94,49 @@ runtime_options:
   cad_runtime:
     slot_count: { type: int, default: 8, desc: "CAD 槽位池数量；会限制重任务最大并发数，API runtime 不应再硬编码" }
 
+  calculation_book:
+    template_dir: { type: str, default: "documents_bin/calculation_book", desc: "计算书 Word 模板目录" }
+    standard_reinforcement_template: { type: str, default: "documents_bin/calculation_book/计算书模板文件.xlsx", desc: "计算书标准配筋模板" }
+    rebar_table: { type: str, default: "documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx", desc: "钢筋公称面积表" }
+    tesseract_exe: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe", desc: "计算书 OCR 使用的 Tesseract 可执行文件" }
+    tessdata_dir: { type: str, default: "documents_bin/calculation_book/Tesseract-OCR/tessdata", desc: "Tesseract 语言数据目录" }
+    max_archive_mb: { type: int, default: 1024, desc: "计算图片 ZIP/RAR/7z 上传及解压总大小上限 MB；覆盖当前 605.7 MB 真实业务样本" }
+    max_archive_files: { type: int, default: 500, desc: "计算图片 ZIP/RAR/7z 最大文件数" }
+    max_single_file_mb: { type: int, default: 50, desc: "ZIP/RAR/7z 内单个文件解压大小上限 MB" }
+    max_compression_ratio: { type: float, default: 250.0, desc: "ZIP 单文件或 RAR/7z 总体最大压缩比；覆盖当前真实业务位图最大约 226.1 倍" }
+    archive_extractor:
+      executable: { type: str, default: "bin/7-Zip/7z.exe", desc: "部署包私有 7-Zip 可执行文件；仅用于普通单卷、无密码 RAR/7z，按运行部署根解析" }
+      list_timeout_seconds: { type: int, default: 120, desc: "RAR/7z 文件清单读取超时秒数" }
+      extract_timeout_seconds: { type: int, default: 300, desc: "RAR/7z 安全解压超时秒数" }
+      max_list_output_bytes: { type: int, default: 8388608, desc: "RAR/7z 文件清单标准输出最大字节数；超限立即终止私有 7-Zip，避免无界内存占用" }
+    ai_normalization:
+      enabled: { type: bool, default: true, desc: "用户确认非标准配筋表后，是否允许计算书 Worker 调用结构化模型规范化；HTTP 预检和标准表不调用模型" }
+      skill_root: { type: str, default: "tools/ai/reinforcement-table-normalizer", desc: "计算书 Worker 与 AI 对话共用的配筋表规范化 Skill 根目录，按 RuntimeConfig base_dir 解析" }
+      max_non_empty_cells: { type: int, default: 10000, desc: "发送模型前安全快照允许的最大非空单元格数；覆盖当前 2549 单元格真实非标准表" }
+      max_snapshot_chars: { type: int, default: 500000, desc: "发送模型前稳定紧凑 workbook snapshot 的最大字符数" }
+      max_skill_chars: { type: int, default: 100000, desc: "SKILL.md 与 normalization-rules.md 合计最大字符数" }
+      request_timeout_seconds: { type: int, default: 600, desc: "计算书结构化模型单次请求独立超时秒数；覆盖确定性审计和无法形成基线时的完整 schema v1 回退" }
+      max_output_tokens: { type: int, default: 65536, desc: "结构化模型紧凑 JSON 最大输出 token；确定性审计只返回 patch，完整表回退仍覆盖大批量源行" }
+      temperature: { type: float, default: 0.0, desc: "计算书结构化规范化模型温度" }
+      max_retries: { type: int, default: 0, desc: "计算书结构化规范化请求由共享客户端执行的重试次数；0 表示只调用一次" }
+    ai_suggestion:
+      enabled: { type: bool, default: true, desc: "未提供实配钢筋时，是否允许计算书 Worker 调用 AI Skill 根据 SMX 生成配筋建议" }
+      skill_root: { type: str, default: "tools/ai/recommend-rebar-from-smx", desc: "AI 配筋建议 Skill 根目录，随源码仓库或部署资源根解析" }
+      skill_version: { type: str, default: "1.0.0", desc: "写入审计日志的 AI 配筋建议 Skill 契约版本" }
+      batch_size: { type: int, default: 20, desc: "单次模型请求处理的墙体或楼板方向记录上限" }
+      request_timeout_seconds: { type: int, default: 600, desc: "AI 配筋建议单次模型请求超时秒数" }
+      max_output_tokens: { type: int, default: 65536, desc: "AI 配筋建议结构化 JSON 最大输出 token" }
+      temperature: { type: float, default: 0.0, desc: "AI 配筋建议模型温度，保持确定性输出" }
+      max_skill_bytes: { type: int, default: 131072, desc: "Skill 主文件与直接引用文件合计最大 UTF-8 字节数" }
+      max_reference_files: { type: int, default: 8, desc: "Skill 主文件允许直接加载的 references 文件数上限" }
+      max_request_bytes: { type: int, default: 1048576, desc: "单批结构化模型请求 JSON 最大 UTF-8 字节数" }
+      max_response_bytes: { type: int, default: 1048576, desc: "单次结构化模型响应在解析前允许的最大 UTF-8 字节数" }
+      max_identifier_chars: { type: int, default: 200, desc: "任务与关联标识最大字符数" }
+      max_consecutive_base_failures: { type: int, default: 3, desc: "单个配筋条目连续基础调用失败后留空并提示复核的阈值" }
+      log_dir: { type: str, default: "storage/logs/calculation-book-ai-suggestion", desc: "每任务独立 AI 配筋建议审计日志目录，随运行部署根解析" }
+      log_max_bytes: { type: int, default: 10485760, desc: "单个任务 AI 配筋建议审计日志最大字节数；不得低于8192字节，内部固定预留终态记录空间" }
+      log_retention_days: { type: int, default: 30, desc: "AI 配筋建议审计日志保留天数" }
+
   plot_assets:
     asset_roots:
       type: "list[str]"
@@ -245,8 +288,10 @@ runtime_options:
         desc: "generic_identifier_like 的文本分类规则（收紧为 3位大写字母+4位数字+1位大写字母）"
       exempt_embed_patterns:
         type: "list[str]"
-        default: ["^[A-Z]{3}\\d{4}[A-Z]$"]
-        desc: "嵌入项目号时允许豁免的严格格式；默认仅豁免 3位大写字母+4位数字+1位大写字母"
+        default:
+          - "^[A-Z]{3}\\d{4}[A-Z]$"
+          - "^(?:[0-9][A-Z]{2})[A-Z]{3}\\d{4}[A-Z][,，]?$"
+        desc: "嵌入项目号时允许豁免的严格格式；覆盖 FVV2026P 和带机组厂房前缀的 2RCFVV2026P，不豁免普通内部编码"
     context_rules:
       date_like:
         type: "list[str]"
@@ -341,8 +386,19 @@ runtime_options:
         desc: "内部编码中的机组号提取规则；{project_no} 会替换为当前项目号；支持常规20261RB-JGS11及紧凑20260SC2JGS01格式"
       explicit_unit_text_pattern:
         type: str
-        default: "(?P<unit_no>[0-9])\\s*号\\s*(?:机组|岛)"
+        default: "(?P<unit_no>[0-9])\\s*号\\s*(?:机\\s*组|岛)"
         desc: "明确中文机组/岛文字中的机组号提取规则；X号岛与X号机组等价"
+      additional_unit_text_patterns:
+        type: "list[str]"
+        default:
+          - "(?P<unit_no>[0-9])\\s*反\\s*应\\s*堆"
+        desc: "除X号机组/X号岛外允许执行机组号转换的中文语义模式；每项必须包含unit_no命名组"
+      protected_unit_text_patterns:
+        type: "dict[str,list[str]]"
+        default:
+          "1907":
+            - "三\\s*门\\s*核\\s*电\\s*(?:厂|项\\s*目)\\s*5\\s*[、,，]\\s*6\\s*号\\s*机\\s*组"
+        desc: "按项目保护的文本片段；片段内机组数字不转换，片段外的X反应堆等仍正常转换"
       external_code_pattern:
         type: str
         default: "(?<![A-Z0-9])(?P<prefix>[A-Z]{2})(?P<unit_no>[0-9])(?P<body>[A-Z0-9]{16})(?![A-Z0-9])"
@@ -676,6 +732,10 @@ runtime_options:
     session_store_path: { type: str, default: "storage/runtime/sessions.json", desc: "登录态 JSON 文件路径" }
     archive_retry_interval_seconds: { type: int, default: 30, desc: "归档失败自动重试初始间隔（秒）" }
     archive_retry_max_interval_seconds: { type: int, default: 300, desc: "归档失败自动重试最大间隔（秒）" }
+    task_group_reconciliation_interval_seconds: { type: int, default: 30, desc: "任务组摘要发布与替换清理重试间隔（秒）" }
+    task_group_lock_timeout_seconds: { type: float, default: 5.0, desc: "任务组跨进程文件锁等待超时（秒）" }
+    task_group_lock_poll_interval_seconds: { type: float, default: 0.05, desc: "任务组跨进程文件锁轮询间隔（秒）" }
+    replacement_cleanup_claim_ttl_seconds: { type: float, default: 300.0, desc: "替换归档旧记录清理租约有效期（秒）" }
 
 
 

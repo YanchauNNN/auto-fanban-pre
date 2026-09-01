@@ -7,7 +7,19 @@ from ..management_test_helpers import configure_management_env
 from .test_task_group_submit_flow import _login, _seed_group
 
 
+def _stub_cad_slot_pool(monkeypatch) -> None:
+    import API.app.runtime as runtime_module
+
+    class _ApiOnlyCadSlotPool:
+        def __init__(self, *, config, slot_count) -> None:
+            self.config = config
+            self.slot_count = slot_count
+
+    monkeypatch.setattr(runtime_module, "CADSlotPool", _ApiOnlyCadSlotPool)
+
+
 def test_workload_queries_return_expected_scopes(monkeypatch, tmp_path) -> None:
+    _stub_cad_slot_pool(monkeypatch)
     project_root = configure_management_env(monkeypatch, tmp_path)
 
     with TestClient(create_app()) as client:
@@ -35,10 +47,23 @@ def test_workload_queries_return_expected_scopes(monkeypatch, tmp_path) -> None:
         assert institute.status_code == 200
         assert institute.json()["scope"] == "institute"
         assert admin.status_code == 200
-        assert admin.json()["scope"] == "admin"
+        admin_payload = admin.json()
+        assert admin_payload["scope"] == "admin"
+        assert admin_payload["entries"]
+        assert admin_payload["totals_by_account"]
+        assert admin_payload["total_workload_a1"] > 0
+        assert admin_payload["total_workload_a1"] == round(
+            sum(float(entry["workload_a1"]) for entry in admin_payload["entries"]),
+            2,
+        )
+        assert admin_payload["total_workload_a1"] == round(
+            sum(float(value) for value in admin_payload["totals_by_account"].values()),
+            2,
+        )
 
 
 def test_workload_queries_support_basic_filters(monkeypatch, tmp_path) -> None:
+    _stub_cad_slot_pool(monkeypatch)
     project_root = configure_management_env(monkeypatch, tmp_path)
 
     with TestClient(create_app()) as client:
@@ -77,3 +102,5 @@ def test_workload_queries_support_basic_filters(monkeypatch, tmp_path) -> None:
         assert settled_only.json()["filters"]["status"] == "settled"
         assert settled_only.json()["filters"]["valid_only"] is True
         assert settled_only.json()["entries"]
+        assert settled_only.json()["entries"][0]["group_display_name"] == "2016-JG001"
+        assert settled_only.json()["entries"][0]["album_internal_code"] == "2016-JG001"

@@ -42,7 +42,7 @@ class DerivationEngine:
         derived = DerivedFields()
 
         # 获取001图纸
-        frame_001 = ctx.get_frame_001()
+        frame_001 = ctx.get_frame_001() or self._first_internal_code_frame(ctx)
 
         # === 编码派生 ===
         if frame_001:
@@ -163,6 +163,25 @@ class DerivationEngine:
         if match:
             return match.group(1)
         return internal_code
+
+    @staticmethod
+    def _first_internal_code_frame(ctx: DocContext):
+        candidates = list(ctx.frames)
+        for sheet_set in ctx.sheet_sets:
+            master_page = sheet_set.master_page
+            master_frame = master_page.frame_meta if master_page else None
+            if master_frame is not None:
+                candidates.append(master_frame)
+
+        for frame in candidates:
+            internal_code = str(frame.titleblock.internal_code or "").strip()
+            if internal_code.endswith("-001"):
+                return frame
+
+        for frame in candidates:
+            if str(frame.titleblock.internal_code or "").strip():
+                return frame
+        return None
 
     def _extract_mid5_last2(self, internal_code: str) -> str | None:
         """从图纸级内部编码的图册主体末尾提取两位图册号。"""

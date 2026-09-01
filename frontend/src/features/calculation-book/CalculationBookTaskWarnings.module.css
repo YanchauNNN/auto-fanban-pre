@@ -1,0 +1,269 @@
+.panel {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 22px;
+  border: 1px solid rgba(53, 104, 154, 0.22);
+  border-radius: 16px;
+  background: #f8fbfe;
+  color: #17334f;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header h3,
+.header p {
+  margin: 0;
+}
+
+.header h3 {
+  margin-top: 4px;
+  color: #102f4d;
+  font-size: 1.05rem;
+}
+
+.header > div > p:last-child {
+  margin-top: 8px;
+  color: #5b6f82;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  color: #537ca4;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.warningCount,
+.completeState {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.warningCount {
+  border: 1px solid rgba(191, 122, 25, 0.28);
+  background: #fff6e7;
+  color: #8b5410;
+}
+
+.completeState {
+  background: #eaf4fb;
+  color: #336a96;
+}
+
+.suggestionSummary {
+  display: grid;
+  gap: 10px;
+}
+
+.suggestionMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.suggestionMetrics span,
+.suggestionMeta span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border: 1px solid rgba(53, 104, 154, 0.14);
+  border-radius: 11px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.suggestionMetrics small,
+.suggestionMeta small {
+  color: #6a8196;
+  font-size: 0.7rem;
+}
+
+.suggestionMetrics strong {
+  color: #174f83;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 1.28rem;
+  line-height: 1;
+}
+
+.suggestionMeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(110px, 0.55fr);
+  gap: 8px;
+}
+
+.suggestionMeta strong {
+  overflow-wrap: anywhere;
+  color: #294d6e;
+  font-size: 0.78rem;
+}
+
+.groups {
+  display: grid;
+  gap: 10px;
+}
+
+.groupToggle {
+  justify-self: center;
+  min-height: 44px;
+  border: 1px solid rgba(53, 104, 154, 0.24);
+  border-radius: 999px;
+  background: #fff;
+  color: #24577f;
+  padding: 9px 18px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.groupToggle:hover {
+  border-color: rgba(36, 116, 180, 0.48);
+  background: #f1f7fc;
+}
+
+.groupToggle:focus-visible {
+  outline: 3px solid rgba(36, 116, 180, 0.36);
+  outline-offset: 3px;
+}
+
+.group {
+  border-top: 1px solid rgba(53, 104, 154, 0.16);
+}
+
+.group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 2px;
+  color: #244c70;
+  cursor: pointer;
+  font-weight: 760;
+  list-style: none;
+}
+
+.group summary::-webkit-details-marker {
+  display: none;
+}
+
+.group summary::after {
+  content: "展开证据";
+  margin-left: auto;
+  color: #66829b;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.group[open] summary::after {
+  content: "收起证据";
+}
+
+.group summary:focus-visible {
+  outline: 3px solid rgba(36, 116, 180, 0.36);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.items {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 14px;
+}
+
+.item {
+  display: grid;
+  gap: 8px;
+  padding: 15px 16px;
+  border-left: 3px solid #d79a38;
+  background: #fff;
+}
+
+.item p {
+  margin: 0;
+  color: #4e6275;
+  line-height: 1.6;
+}
+
+.itemHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.itemHeading > span {
+  color: #8b5410;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.blankFields {
+  color: #314f69 !important;
+  font-weight: 650;
+}
+
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  color: #6a7e90;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.imageEvidence {
+  width: fit-content;
+  color: #6a7e90;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+@media (max-width: 720px) {
+  .panel {
+    padding: 18px;
+  }
+
+  .header {
+    display: grid;
+    gap: 12px;
+  }
+
+  .warningCount,
+  .completeState {
+    width: fit-content;
+  }
+
+  .group summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .group summary::after {
+    grid-column: 1 / -1;
+    margin-left: 0;
+  }
+
+  .suggestionMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .suggestionMeta {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group summary {
+    scroll-behavior: auto;
+  }
+}

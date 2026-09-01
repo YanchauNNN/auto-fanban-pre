@@ -2,7 +2,7 @@ import { useQueries } from "@tanstack/react-query";
 import { startTransition, useState } from "react";
 
 import type { ApiAdapter, CreateBatchPayload, JobSummary } from "../../platform/api/types";
-import { TaskConfigModal } from "../deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
 import styles from "./ChangePageExtractWorkspace.module.css";
 
 type ChangePageExtractWorkspaceProps = {
@@ -13,6 +13,7 @@ type ChangePageExtractWorkspaceProps = {
 };
 
 const ALLOWED_EXTENSIONS = new Set([".zip", ".rar", ".7z"]);
+const MAX_ARCHIVES = 50;
 const ACTIVE_STATUSES = new Set(["queued", "running", "cancel_requested"]);
 
 export function ChangePageExtractWorkspace({
@@ -49,6 +50,9 @@ export function ChangePageExtractWorkspace({
     const nextErrors: string[] = [];
     if (files.length === 0) {
       nextErrors.push("请至少选择一个压缩包。");
+    }
+    if (files.length > MAX_ARCHIVES) {
+      nextErrors.push(`一次最多选择 ${MAX_ARCHIVES} 个压缩包。`);
     }
     if (files.some((file) => !ALLOWED_EXTENSIONS.has(getExtension(file.name)))) {
       nextErrors.push("仅支持 ZIP、RAR、7z 压缩包。");

@@ -47,6 +47,49 @@ def test_lexicon_loader_includes_row1_and_row2_and_ignores_note_columns(tmp_path
     assert "SHARED" not in lexicon.foreign_texts["1418"]
 
 
+def test_lexicon_loader_streams_worksheet_once_and_closes_workbook(monkeypatch) -> None:
+    class _StreamingWorksheet:
+        def __init__(self) -> None:
+            self.iteration_count = 0
+
+        def iter_rows(self, *, values_only: bool):
+            assert values_only is True
+            self.iteration_count += 1
+            yield ("备注", "2016", "2026")
+            yield ("项目名称", "旧项目", "新项目")
+
+        def cell(self, *args, **kwargs):
+            raise AssertionError("read-only worksheets must not be accessed cell by cell")
+
+    class _StreamingWorkbook:
+        sheetnames = ["词库"]
+
+        def __init__(self) -> None:
+            self.worksheet = _StreamingWorksheet()
+            self.closed = False
+
+        def __getitem__(self, name: str):
+            assert name == "词库"
+            return self.worksheet
+
+        def close(self) -> None:
+            self.closed = True
+
+    workbook = _StreamingWorkbook()
+    monkeypatch.setattr(
+        "src.audit_check.lexicon.load_workbook",
+        lambda *args, **kwargs: workbook,
+    )
+
+    lexicon = AuditLexiconLoader().load("unused.xlsx")
+
+    assert workbook.worksheet.iteration_count == 1
+    assert workbook.closed is True
+    assert lexicon.project_options == ["2016", "2026"]
+    assert lexicon.allowed_texts["2016"] == {"2016", "旧项目"}
+    assert lexicon.allowed_texts["2026"] == {"2026", "新项目"}
+
+
 def test_match_engine_reports_code_like_project_no_and_short_code_but_suppresses_noise(
     tmp_path: Path,
 ) -> None:
@@ -165,6 +208,50 @@ def test_match_engine_only_whitelists_exact_three_letters_plus_project_no_plus_o
     assert all(item.raw_text != "ABC2016X" for item in findings)
     assert any(item.raw_text == "ABCD2016X" and item.matched_text == "2016" for item in findings)
     assert any(item.raw_text == "12ABC2016X" and item.matched_text == "2016" for item in findings)
+
+
+def test_match_engine_whitelists_prefixed_embed_identifier_for_all_scanned_text_kinds() -> None:
+    lexicon = AuditLexicon(
+        project_options=["1907", "2026"],
+        allowed_texts={"1907": {"1907"}, "2026": {"2026"}},
+        foreign_texts={"1907": {"2026"}, "2026": {"1907"}},
+        token_projects={"1907": {"1907"}, "2026": {"2026"}},
+    )
+    engine = AuditMatchEngine(lexicon)
+
+    protected_types = [
+        "DBText",
+        "MText",
+        "AttributeReference",
+        "AttributeDefinition",
+        "Dimension",
+        "MLeader",
+        "TableCell",
+    ]
+    findings = engine.evaluate(
+        project_no="1907",
+        items=[
+            *[
+                ScanTextItem(
+                    raw_text="2RCFVV2026P," if index == 0 else "2RCFVV2026P",
+                    entity_type=entity_type,
+                    entity_handle=f"PROTECTED-{index}",
+                )
+                for index, entity_type in enumerate(protected_types)
+            ],
+            ScanTextItem(
+                raw_text="20262RC-JGS38-001",
+                entity_type="DBText",
+                entity_handle="INTERNAL-CODE",
+            ),
+        ],
+    )
+
+    assert all("FVV2026P" not in finding.raw_text for finding in findings)
+    assert any(
+        finding.raw_text == "20262RC-JGS38-001" and finding.matched_text == "2026"
+        for finding in findings
+    )
 
 
 def test_match_engine_ignores_yaml_project_no_context_whitelist(tmp_path: Path) -> None:

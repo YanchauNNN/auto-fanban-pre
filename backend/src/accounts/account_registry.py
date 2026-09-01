@@ -19,7 +19,7 @@ class AccountRegistry:
         self.account_cfg = dict(features.get("account") or {})
         self.field_map = dict(self.account_cfg.get("fields") or {})
         self.valid_roles = {str(item) for item in self.account_cfg.get("valid_roles") or []}
-        self.default_password = str(self.account_cfg.get("admin_created_default_password") or "password")
+        self.default_password = str(self.account_cfg["admin_created_default_password"])
 
     def list_accounts(self) -> tuple[list[AccountRecord], list[InvalidAccountRow]]:
         rows, _ = self.store.read_rows()
@@ -70,6 +70,9 @@ class AccountRegistry:
             raise ValueError("account_id already exists")
         if payload.role not in self.valid_roles:
             raise ValueError("invalid role")
+        password = payload.password if payload.password is not None else self.default_password
+        if not password.strip():
+            raise ValueError("missing password")
         rows, headers = self.store.read_rows()
         row = self._build_row(
             office_code=payload.office_code,
@@ -77,7 +80,7 @@ class AccountRegistry:
             account_id=payload.account_id,
             display_name=payload.display_name,
             role=payload.role,
-            password=payload.password or self.default_password,
+            password=password,
         )
         rows.append(row)
         self.store.write_rows(rows, headers or list(row.keys()))
@@ -113,6 +116,76 @@ class AccountRegistry:
         if updated is None:
             raise ValueError("failed to update account")
         return old_account, updated
+
+    def update_account_row(
+        self,
+        row_number: int,
+        payload: AccountUpdatePayload,
+    ) -> tuple[AccountRecord | None, AccountRecord]:
+        rows, headers = self.store.read_rows()
+        target_index = row_number - 2
+        if target_index < 0 or target_index >= len(rows):
+            raise ValueError("account row not found")
+
+        old_account, _ = self._parse_row(rows[target_index], row_number)
+        new_account_id = str(
+            payload.account_id
+            if payload.account_id is not None
+            else rows[target_index].get(self.field_map["account_id"], "")
+        ).strip()
+        display_name = str(
+            payload.display_name
+            if payload.display_name is not None
+            else rows[target_index].get(self.field_map["display_name"], "")
+        ).strip()
+        new_role = str(
+            payload.role
+            if payload.role is not None
+            else rows[target_index].get(self.field_map["role"], "")
+        ).strip()
+        password = str(
+            payload.password
+            if payload.password is not None
+            else rows[target_index].get(self.field_map["password"], "")
+        )
+
+        if not new_account_id:
+            raise ValueError("missing account_id")
+        if not display_name:
+            raise ValueError("missing display_name")
+        if new_role not in self.valid_roles:
+            raise ValueError("invalid role")
+        if not password.strip():
+            raise ValueError("missing password")
+
+        account_id_key = self.field_map["account_id"]
+        for index, row in enumerate(rows):
+            if index == target_index:
+                continue
+            if str(row.get(account_id_key, "")).strip() == new_account_id:
+                raise ValueError("new account_id already exists")
+
+        rows[target_index] = self._build_row(
+            office_code=(
+                payload.office_code
+                if payload.office_code is not None
+                else rows[target_index].get(self.field_map["office_code"], "")
+            ),
+            office_name=(
+                payload.office_name
+                if payload.office_name is not None
+                else rows[target_index].get(self.field_map["office_name"], "")
+            ),
+            account_id=new_account_id,
+            display_name=display_name,
+            role=new_role,
+            password=password,
+        )
+        self.store.write_rows(rows, headers)
+        updated = self.get_account(new_account_id)
+        if updated is None:
+            raise ValueError("failed to update account row")
+        return (old_account if old_account and old_account.valid else None), updated
 
     def set_password(self, account_id: str, new_password: str) -> AccountRecord:
         rows, headers = self.store.read_rows()
@@ -152,7 +225,7 @@ class AccountRegistry:
         account_id = row.get(self.field_map.get("account_id", ""), "").strip()
         display_name = row.get(self.field_map.get("display_name", ""), "").strip()
         role = row.get(self.field_map.get("role", ""), "").strip()
-        password = row.get(self.field_map.get("password", ""), "").strip()
+        password = str(row.get(self.field_map.get("password", ""), "") or "")
         errors: list[str] = []
         if not account_id:
             errors.append("missing_account_id")
@@ -162,7 +235,7 @@ class AccountRegistry:
             errors.append("missing_role")
         elif role not in self.valid_roles:
             errors.append("invalid_role")
-        if not password:
+        if not password.strip():
             errors.append("missing_password")
         if not account_id and not display_name and not role and not password:
             return None, errors

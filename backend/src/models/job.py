@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .task_group_management import TaskOwnerSnapshot
+
 
 class JobStatus(StrEnum):
     """任务状态枚举"""
@@ -27,6 +29,7 @@ class JobType(StrEnum):
     """任务类型"""
     DELIVERABLE = "deliverable"       # 流水线A: 交付包生成
     AUDIT_REPLACE = "audit_replace"   # 流水线B: 词库检查/替换
+    CALCULATION_BOOK = "calculation_book"
     CHANGE_PAGE_EXTRACT = "change_page_extract"
 
 
@@ -42,6 +45,8 @@ class JobArtifacts(BaseModel):
     report_xlsx: Path | None = None
     report_json: Path | None = None
     replaced_dwg: Path | None = None
+    calculation_docx: Path | None = None
+    calculation_log: Path | None = None
     change_page_result_json: Path | None = None
 
 
@@ -64,6 +69,7 @@ class Job(BaseModel):
     group_id: str | None = None
     task_role: str | None = None
     shared_run_id: str | None = None
+    owner_snapshot: TaskOwnerSnapshot | None = None
 
     # ????
     slot_id: str | None = None

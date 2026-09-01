@@ -1,0 +1,1700 @@
+import {
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+
+import type {
+  ApiAdapter,
+  CalculationBookDirectionEvidence,
+  CalculationBookField,
+  CalculationBookPreflightResult,
+  CalculationBookSlabEvidence,
+  CreateBatchPayload,
+  FormSchema,
+  SubmissionParams,
+} from "../../platform/api/types";
+import { TaskConfigModal } from "../../shared/ui/TaskConfigModal";
+import {
+  applyCalculationBookPreset,
+  createCalculationBookPreset,
+  deleteCalculationBookPreset,
+  loadCalculationBookPresets,
+  renameCalculationBookPreset,
+  saveCalculationBookPreset,
+  updateCalculationBookPreset,
+  type CalculationBookPreset,
+} from "./calculationBookPresets";
+import styles from "./CalculationBookWorkspace.module.css";
+
+type Props = {
+  adapter: ApiAdapter;
+  schema: FormSchema;
+  isOpen: boolean;
+  onBatchCreated: (payload: CreateBatchPayload) => void;
+  onClose: () => void;
+};
+
+type Phase = "input" | "review" | "confirm";
+type TemplateDownloadState = "idle" | "loading" | "success" | "error";
+
+const REINFORCEMENT_TEMPLATE_URL =
+  "/api/jobs/calculation-books/reinforcement-template";
+const REINFORCEMENT_TEMPLATE_FILENAME = "标准配筋模板.xlsx";
+const REINFORCEMENT_TEMPLATE_FEEDBACK_ID =
+  "calculation-book-template-download-feedback";
+
+const NUMERIC_FIELDS = new Set([
+  "workshop_length",
+  "workshop_width",
+  "raft_slab_top_elevation",
+  "roof_top_elevation",
+  "factory_extreme_min_temperature",
+  "factory_extreme_max_temperature",
+  "site_soil_temperature",
+]);
+
+const DIRECTION_LABELS = {
+  X: "水平筋",
+  Y: "竖向筋",
+  Z: "拉筋",
+} as const;
+
+const WALL_DIRECTIONS = ["X", "Y", "Z"] as const;
+
+const SLAB_GROUP_ORDER = [
+  "top_x",
+  "top_y",
+  "middle_x",
+  "middle_y",
+  "bottom_x",
+  "bottom_y",
+  "z",
+] as const;
+
+const SLAB_GROUP_LABELS: Record<string, string> = {
+  top_x: "TOP-X · 上表面 X 向",
+  top_y: "TOP-Y · 上表面 Y 向",
+  middle_x: "MIDDLE-X · 中部 X 向",
+  middle_y: "MIDDLE-Y · 中部 Y 向",
+  bottom_x: "BOTTOM-X · 下表面 X 向",
+  bottom_y: "BOTTOM-Y · 下表面 Y 向",
+  z: "Z · Z 向",
+};
+
+const FIVE_SLAB_GROUPS = ["top_x", "top_y", "bottom_x", "bottom_y", "z"] as const;
+
+type SlabEvidenceGroup = {
+  elevation: string;
+  items: CalculationBookSlabEvidence[];
+  expectedCount: 5 | 7;
+  hasMiddle: boolean;
+  sourceRows: number[];
+  issues: string[];
+  complete: boolean;
+};
+
+function formatSlabKey(key: string): string {
+  return key.toUpperCase().replace("_", "-");
+}
+
+function compareElevations(left: string, right: string): number {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return left.localeCompare(right, "zh-CN", { numeric: true });
+}
+
+function buildSlabEvidenceGroups(
+  slabs: readonly CalculationBookSlabEvidence[],
+): SlabEvidenceGroup[] {
+  const grouped = slabs.reduce((groups, item) => {
+    const current = groups.get(item.elevation) ?? [];
+    current.push(item);
+    groups.set(item.elevation, current);
+    return groups;
+  }, new Map<string, CalculationBookSlabEvidence[]>());
+
+  return Array.from(grouped, ([elevation, rawItems]) => {
+    const counts = rawItems.reduce((result, item) => {
+      const key = item.key.toLowerCase();
+      result.set(key, (result.get(key) ?? 0) + 1);
+      return result;
+    }, new Map<string, number>());
+    const hasMiddle = counts.has("middle_x") || counts.has("middle_y");
+    const expectedCount: 5 | 7 = hasMiddle ? 7 : 5;
+    const expectedKeys = hasMiddle ? SLAB_GROUP_ORDER : FIVE_SLAB_GROUPS;
+    const missingKeys = expectedKeys.filter((key) => !counts.has(key));
+    const duplicateKeys = Array.from(counts)
+      .filter(([, count]) => count > 1)
+      .map(([key]) => key);
+    const unexpectedKeys = Array.from(counts.keys()).filter(
+      (key) => !SLAB_GROUP_ORDER.includes(key as (typeof SLAB_GROUP_ORDER)[number]),
+    );
+    const sourceRows = Array.from(
+      new Set(
+        rawItems.flatMap((item) => item.sourceRow === null ? [] : [item.sourceRow]),
+      ),
+    ).sort((left, right) => left - right);
+    const issues = [
+      ...(missingKeys.length > 0
+        ? [`缺少 ${missingKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(duplicateKeys.length > 0
+        ? [`重复 ${duplicateKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(unexpectedKeys.length > 0
+        ? [`存在未知组 ${unexpectedKeys.map(formatSlabKey).join("、")}`]
+        : []),
+      ...(sourceRows.length > 1
+        ? [`同一标高来自配筋表多行：${sourceRows.join("、")}`]
+        : []),
+    ];
+    const order = new Map<string, number>(
+      SLAB_GROUP_ORDER.map((key, index) => [key, index]),
+    );
+    const items = [...rawItems].sort((left, right) => {
+      const leftOrder = order.get(left.key.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = order.get(right.key.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder || left.key.localeCompare(right.key);
+    });
+    return {
+      elevation,
+      items,
+      expectedCount,
+      hasMiddle,
+      sourceRows,
+      issues,
+      complete: issues.length === 0 && items.length === expectedKeys.length,
+    };
+  }).sort((left, right) => compareElevations(left.elevation, right.elevation));
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) {
+    return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  }
+  if (bytes >= 1024 ** 2) {
+    return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  }
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+export function CalculationBookWorkspace({
+  adapter,
+  schema,
+  isOpen,
+  onBatchCreated,
+  onClose,
+}: Props) {
+  const calculationSchema = schema.calculationBook;
+  const initialValues = useMemo(
+    () =>
+      Object.fromEntries(
+        (calculationSchema?.fields ?? []).map((field) => [
+          field.key,
+          field.defaultValue ?? "",
+        ]),
+      ),
+    [calculationSchema],
+  );
+  const [values, setValues] = useState<Record<string, string>>(initialValues);
+  const [archive, setArchive] = useState<File | null>(null);
+  const [phase, setPhase] = useState<Phase>("input");
+  const [preflight, setPreflight] = useState<CalculationBookPreflightResult | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [formErrors, setFormErrors] = useState<string[]>([]);
+  const [busyAction, setBusyAction] = useState<"preflight" | "submit" | null>(null);
+  const [savedPresets, setSavedPresets] = useState<CalculationBookPreset[]>(
+    () => loadCalculationBookPresets(),
+  );
+  const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
+  const [templateDownloadState, setTemplateDownloadState] =
+    useState<TemplateDownloadState>("idle");
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const initialFocusRef = useRef<HTMLSelectElement>(null);
+  const errorSummaryRef = useRef<HTMLDivElement>(null);
+  const reviewHeadingRef = useRef<HTMLHeadingElement>(null);
+  const wasOpenRef = useRef(false);
+  const templateDownloadRequestRef = useRef(0);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      setValues(initialValues);
+      setArchive(null);
+      setPhase("input");
+      setPreflight(null);
+      setFieldErrors({});
+      setFormErrors([]);
+      setBusyAction(null);
+      setSavedPresets(loadCalculationBookPresets());
+      setSelectedPresetId("");
+      setPresetName("");
+      setPresetError(null);
+      setPresetNotice(null);
+      setTemplateDownloadState("idle");
+      templateDownloadRequestRef.current += 1;
+    } else if (!isOpen && wasOpenRef.current) {
+      templateDownloadRequestRef.current += 1;
+    }
+    wasOpenRef.current = isOpen;
+  }, [initialValues, isOpen]);
+
+  useEffect(
+    () => () => {
+      templateDownloadRequestRef.current += 1;
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    initialFocusRef.current?.focus({ preventScroll: true });
+    return () => {
+      previousFocus?.focus();
+    };
+  }, [isOpen]);
+
+  if (!isOpen || !calculationSchema) {
+    return null;
+  }
+
+  const activeSchema = calculationSchema;
+  const slabField = calculationSchema.fields.find(
+    (field) => field.key === "include_slab_stress",
+  );
+  const reinforcementSourceField = calculationSchema.fields.find(
+    (field) => field.key === "reinforcement_source",
+  );
+  const aiSuggested = values.reinforcement_source === "ai_suggested";
+  const projectFields = calculationSchema.fields.filter(
+    (field) =>
+      !NUMERIC_FIELDS.has(field.key)
+      && field.key !== "include_slab_stress"
+      && field.key !== "reinforcement_source",
+  );
+  const workshopFields = calculationSchema.fields.filter((field) => NUMERIC_FIELDS.has(field.key));
+  const selectedPreset =
+    savedPresets.find((preset) => preset.id === selectedPresetId) ?? null;
+  const fieldErrorCount = Object.values(fieldErrors).filter((messages) => messages.length > 0).length;
+  const errorFieldLabels = activeSchema.fields
+    .filter((field) => fieldErrors[field.key]?.length)
+    .map((field) => field.label);
+  const hasValidationErrors = fieldErrorCount > 0 || formErrors.length > 0;
+  const slabEvidenceGroups = buildSlabEvidenceGroups(preflight?.slabs ?? []);
+  const slabEvidenceIssues =
+    preflight && !preflight.requiresAiNormalization && values.include_slab_stress === "true"
+      ? slabEvidenceGroups.length > 0
+        ? slabEvidenceGroups.flatMap((group) =>
+            group.issues.map((issue) => `${group.elevation}m：${issue}`),
+          )
+        : ["已勾选楼板应力，但预检结果未返回楼板云图证据"]
+      : [];
+  const slabEvidenceComplete = slabEvidenceIssues.length === 0;
+  const normalizationAuditConserved =
+    !preflight ||
+    (
+      preflight.reinforcementSourceRowCount
+        === preflight.reinforcementNormalizedRowCount
+          + preflight.reinforcementIssueRowCount
+      && preflight.normalizationIssues.length
+        === preflight.reinforcementIssueRowCount
+    );
+  const normalizationComplete =
+    preflight?.requiresAiNormalization
+    || normalizationAuditConserved;
+  const busy = busyAction !== null;
+
+  function updateValue(field: CalculationBookField, nextValue: string) {
+    const normalizedValue = field.uppercase ? nextValue.toUpperCase() : nextValue;
+    setPresetNotice(null);
+    setValues((current) => {
+      const next = { ...current, [field.key]: normalizedValue };
+      if (field.key === "project_no") {
+        next.project_name =
+          calculationSchema?.projectOptions.find((option) => option.value === normalizedValue)?.label ?? "";
+      }
+      return next;
+    });
+    setFieldErrors((current) => ({ ...current, [field.key]: [] }));
+    if (
+      (field.key === "include_slab_stress" || field.key === "reinforcement_source")
+      && preflight
+    ) {
+      resetPreflight();
+    }
+  }
+
+  function resetPreflight() {
+    setPhase("input");
+    setPreflight(null);
+  }
+
+  function handleArchive(file: File | null) {
+    setArchive(file);
+    setFormErrors([]);
+    resetPreflight();
+  }
+
+  function handlePresetSelectionChange(nextId: string) {
+    if (busy) {
+      return;
+    }
+    setSelectedPresetId(nextId);
+    setPresetName(savedPresets.find((preset) => preset.id === nextId)?.name ?? "");
+    setPresetError(null);
+    setPresetNotice(null);
+  }
+
+  function reportPresetFailure(error: unknown) {
+    setPresetNotice(null);
+    setPresetError(
+      error instanceof Error
+        ? error.message
+        : "计算书预设操作失败，请稍后重试。",
+    );
+  }
+
+  function handleSavePreset() {
+    if (busy) {
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      const preset = createCalculationBookPreset(trimmedName, activeSchema, values);
+      setSavedPresets(saveCalculationBookPreset(preset));
+      setSelectedPresetId(preset.id);
+      setPresetName(preset.name);
+      setPresetError(null);
+      setPresetNotice("已保存计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleApplyPreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPreset) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    setValues(applyCalculationBookPreset(activeSchema, values, selectedPreset));
+    setFieldErrors({});
+    setFormErrors([]);
+    resetPreflight();
+    setPresetError(null);
+    setPresetNotice("已应用计算书方案。");
+  }
+
+  function handleUpdatePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      const preset = updateCalculationBookPreset(
+        selectedPresetId,
+        trimmedName,
+        activeSchema,
+        values,
+      );
+      setSavedPresets(saveCalculationBookPreset(preset));
+      setPresetName(preset.name);
+      setPresetError(null);
+      setPresetNotice("已更新计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleRenamePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    const trimmedName = presetName.trim();
+    if (!trimmedName) {
+      setPresetNotice(null);
+      setPresetError("请先填写计算书方案名称。");
+      return;
+    }
+    try {
+      setSavedPresets(renameCalculationBookPreset(selectedPresetId, trimmedName));
+      setPresetName(trimmedName);
+      setPresetError(null);
+      setPresetNotice("已重命名计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function handleDeletePreset() {
+    if (busy) {
+      return;
+    }
+    if (!selectedPresetId) {
+      setPresetNotice(null);
+      setPresetError("请先选择一个已保存计算书方案。");
+      return;
+    }
+    try {
+      setSavedPresets(deleteCalculationBookPreset(selectedPresetId));
+      setSelectedPresetId("");
+      setPresetName("");
+      setPresetError(null);
+      setPresetNotice("已删除计算书方案。");
+    } catch (error) {
+      reportPresetFailure(error);
+    }
+  }
+
+  function requestClose() {
+    if (!busy) {
+      onClose();
+    }
+  }
+
+  async function handleTemplateDownload() {
+    if (templateDownloadState === "loading") {
+      return;
+    }
+    const requestId = templateDownloadRequestRef.current + 1;
+    templateDownloadRequestRef.current = requestId;
+    setTemplateDownloadState("loading");
+    try {
+      if (!adapter.downloadArtifact) {
+        throw new Error("当前后台不支持文件下载。");
+      }
+      await adapter.downloadArtifact(
+        REINFORCEMENT_TEMPLATE_URL,
+        REINFORCEMENT_TEMPLATE_FILENAME,
+      );
+      if (templateDownloadRequestRef.current === requestId) {
+        setTemplateDownloadState("success");
+      }
+    } catch {
+      if (templateDownloadRequestRef.current === requestId) {
+        setTemplateDownloadState("error");
+      }
+    }
+  }
+
+  function focusValidationSummary(
+    nextFieldErrors: Record<string, string[]>,
+    nextFormErrors: string[],
+  ) {
+    if (Object.keys(nextFieldErrors).length === 0 && nextFormErrors.length === 0) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        errorSummaryRef.current?.focus();
+      });
+    });
+  }
+
+  function trapFocus(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab" || !surfaceRef.current) {
+      return;
+    }
+    const focusable = Array.from(
+      surfaceRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.offsetParent !== null || element === document.activeElement);
+    if (focusable.length === 0) {
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  function validateInput() {
+    const nextFieldErrors: Record<string, string[]> = {};
+    for (const field of activeSchema.fields) {
+      const value = String(values[field.key] ?? "").trim();
+      if (field.required && !value) {
+        nextFieldErrors[field.key] = [`请填写${field.label}`];
+      } else if (value && field.pattern && !new RegExp(field.pattern).test(value)) {
+        nextFieldErrors[field.key] = [`${field.label}格式不正确`];
+      }
+    }
+    const nextFormErrors: string[] = [];
+    if (!archive) {
+      nextFormErrors.push("请选择计算图片压缩包。");
+    } else if (
+      !activeSchema.archive.accept.some((extension) =>
+        archive.name.toLowerCase().endsWith(extension.toLowerCase()),
+      )
+    ) {
+      nextFormErrors.push(
+        `计算图片必须使用 ${activeSchema.archive.accept.join(" 或 ")} 格式。`,
+      );
+    }
+    setFieldErrors(nextFieldErrors);
+    setFormErrors(nextFormErrors);
+    if (Object.keys(nextFieldErrors).length > 0 || nextFormErrors.length > 0) {
+      focusValidationSummary(nextFieldErrors, nextFormErrors);
+      return false;
+    }
+    return true;
+  }
+
+  function buildParams(): SubmissionParams {
+    return Object.fromEntries(
+      activeSchema.fields.map((field) => {
+        const raw = String(values[field.key] ?? "").trim();
+        return [
+          field.key,
+          field.type === "number"
+            ? Number(raw)
+            : field.type === "checkbox"
+              ? raw === "true"
+              : raw,
+        ];
+      }),
+    );
+  }
+
+  function applyApiError(error: unknown, fallback: string) {
+    const detail =
+      typeof error === "object" && error && "detail" in error
+        ? (error as {
+            detail?: {
+              upload_errors?: Record<string, string[]>;
+              param_errors?: Record<string, string[]>;
+            };
+          }).detail
+        : undefined;
+    const nextApiFieldErrors = detail?.param_errors ?? {};
+    const uploadErrors = Object.values(detail?.upload_errors ?? {}).flat();
+    const nextApiFormErrors = uploadErrors.length > 0
+      ? uploadErrors
+      : Object.keys(nextApiFieldErrors).length > 0
+        ? []
+        : [fallback];
+    if (Object.keys(nextApiFieldErrors).length > 0) {
+      setPhase("input");
+    }
+    setFieldErrors(nextApiFieldErrors);
+    setFormErrors(nextApiFormErrors);
+    focusValidationSummary(nextApiFieldErrors, nextApiFormErrors);
+  }
+
+  async function handlePreflight() {
+    if (busy || !validateInput()) {
+      return;
+    }
+    setBusyAction("preflight");
+    setFieldErrors({});
+    setFormErrors([]);
+    try {
+      if (!adapter.preflightCalculationBook) {
+        throw new Error("当前后台不支持计算书预检。");
+      }
+      const result = await adapter.preflightCalculationBook(
+        archive as File,
+        {
+          includeSlabStress:
+            String(values.include_slab_stress ?? "false") === "true",
+          reinforcementSource:
+            values.reinforcement_source === "ai_suggested"
+              ? "ai_suggested"
+              : "provided",
+          params: buildParams(),
+        },
+      );
+      setPreflight(result);
+      setPhase(result.requiresAiNormalization ? "confirm" : "review");
+      window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
+    } catch (error) {
+      applyApiError(error, "计算书预检失败，请根据提示修正压缩包后重试。");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleCreate() {
+    if (
+      busy ||
+      !preflight ||
+      !archive ||
+      !slabEvidenceComplete ||
+      !normalizationComplete
+    ) {
+      return;
+    }
+    setBusyAction("submit");
+    setFieldErrors({});
+    setFormErrors([]);
+    try {
+      if (!adapter.createCalculationBook) {
+        throw new Error("当前后台不支持计算书任务。");
+      }
+      const params: SubmissionParams = {
+        ...buildParams(),
+        preflight_token: preflight.preflightToken,
+        ...(preflight.requiresAiNormalization
+          ? { confirm_ai_normalization: true }
+          : {}),
+      };
+      const payload = await adapter.createCalculationBook(params);
+      startTransition(() => onBatchCreated(payload));
+      onClose();
+    } catch (error) {
+      applyApiError(error, "计算书任务创建失败，请检查确认项后重试。");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (phase === "input") {
+      if (!validateInput()) {
+        return;
+      }
+      if (preflight) {
+        setPhase(preflight.requiresAiNormalization ? "confirm" : "review");
+        window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
+      } else {
+        void handlePreflight();
+      }
+    } else if (phase === "review") {
+      if (!slabEvidenceComplete || !normalizationComplete) {
+        return;
+      }
+      setPhase("confirm");
+      window.requestAnimationFrame(() => reviewHeadingRef.current?.focus());
+    } else {
+      void handleCreate();
+    }
+  }
+
+  return (
+    <TaskConfigModal
+      dialogClassName={styles.dialog}
+      title="创建计算书"
+      onRequestClose={requestClose}
+    >
+      <div ref={surfaceRef} className={styles.surface} onKeyDown={trapFocus}>
+        <header className={styles.header}>
+          <div className={styles.headerMain}>
+            <div className={styles.headerCopy}>
+              <p className={styles.kicker}>Calculation Book</p>
+              <h2>创建计算书</h2>
+              <p>上传文件并完成核验后，再进入后台任务队列。</p>
+            </div>
+            <div className={styles.templateDownloadControl}>
+              <button
+                aria-busy={templateDownloadState === "loading"}
+                aria-describedby={
+                  templateDownloadState === "idle"
+                    ? undefined
+                    : REINFORCEMENT_TEMPLATE_FEEDBACK_ID
+                }
+                className={styles.templateDownloadButton}
+                disabled={templateDownloadState === "loading"}
+                type="button"
+                onClick={() => void handleTemplateDownload()}
+              >
+                <svg
+                  aria-hidden="true"
+                  focusable="false"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2h14v-2" />
+                </svg>
+                <span>下载标准配筋模板</span>
+              </button>
+              {templateDownloadState !== "idle" ? (
+                <span
+                  aria-atomic="true"
+                  aria-live={templateDownloadState === "error" ? "assertive" : "polite"}
+                  className={styles.templateDownloadFeedback}
+                  id={REINFORCEMENT_TEMPLATE_FEEDBACK_ID}
+                  role={templateDownloadState === "error" ? "alert" : "status"}
+                >
+                  {templateDownloadState === "loading"
+                    ? "正在下载…"
+                    : templateDownloadState === "success"
+                      ? "已开始下载"
+                      : "下载失败，请重试"}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <button
+            aria-label="关闭创建计算书"
+            className={styles.closeButton}
+            disabled={busy}
+            type="button"
+            onClick={requestClose}
+          >
+            关闭
+          </button>
+        </header>
+
+        <form noValidate onSubmit={handleSubmit}>
+          <nav className={styles.steps} aria-label="计算书创建步骤">
+            <span
+              aria-current={phase === "input" ? "step" : undefined}
+              data-state={phase === "input" ? "current" : "completed"}
+            >
+              01 文件与参数
+            </span>
+            <span
+              aria-current={phase === "review" ? "step" : undefined}
+              data-state={phase === "input" ? "pending" : phase === "review" ? "current" : "completed"}
+            >
+              {aiSuggested ? "02 云图核验" : "02 规范化核验"}
+            </span>
+            <span
+              aria-current={phase === "confirm" ? "step" : undefined}
+              data-state={phase === "confirm" ? "current" : "pending"}
+            >
+              03 确认提交
+            </span>
+          </nav>
+
+          {busy ? (
+            <div
+              className={styles.progress}
+              role="progressbar"
+              aria-valuetext={busyAction === "preflight" ? "正在预检计算书文件" : "正在创建计算书任务"}
+            >
+              <span />
+              {busyAction === "preflight"
+                ? aiSuggested
+                  ? "正在读取云图 SMX…"
+                  : "正在读取图例与配筋表…"
+                : "正在提交任务…"}
+            </div>
+          ) : null}
+
+          {phase === "input" ? (
+            <div className={styles.content}>
+              <aside className={styles.archivePanel}>
+                <label className={styles.uploadBox}>
+                  <span>{archive ? archive.name : "上传压缩包"}</span>
+                  <small>{archive ? formatFileSize(archive.size) : "单个 .zip、.rar 或 .7z 文件"}</small>
+                  <input
+                    accept={calculationSchema.archive.accept.join(",")}
+                    aria-label="选择计算图片压缩包"
+                    type="file"
+                    onChange={(event) => handleArchive(event.currentTarget.files?.[0] ?? null)}
+                  />
+                </label>
+                <div className={styles.modeOptions}>
+                  {reinforcementSourceField ? (
+                    <label className={styles.slabToggle}>
+                      <input
+                        aria-describedby="calculation-book-rebar-source-help"
+                        aria-labelledby="calculation-book-rebar-source-label"
+                        checked={aiSuggested}
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateValue(
+                            reinforcementSourceField,
+                            event.currentTarget.checked ? "ai_suggested" : "provided",
+                          )}
+                      />
+                      <span>
+                        <strong id="calculation-book-rebar-source-label">无实配钢筋</strong>
+                        <small id="calculation-book-rebar-source-help">
+                          {aiSuggested
+                            ? "压缩包不得包含 Excel；人工智能将按云图 SMX 给出配筋建议，并由后端逐项校验。"
+                            : "默认使用实配钢筋；压缩包需包含唯一的 Excel 配筋表。"}
+                        </small>
+                      </span>
+                    </label>
+                  ) : null}
+                  {slabField ? (
+                    <label className={styles.slabToggle}>
+                      <input
+                        aria-describedby="calculation-book-slab-toggle-help"
+                        aria-labelledby="calculation-book-slab-toggle-label"
+                        checked={values[slabField.key] === "true"}
+                        type="checkbox"
+                        onChange={(event) =>
+                          updateValue(
+                            slabField,
+                            String(event.currentTarget.checked),
+                          )}
+                      />
+                      <span>
+                        <strong id="calculation-book-slab-toggle-label">{slabField.label}</strong>
+                        <small id="calculation-book-slab-toggle-help">
+                          按文件名自动识别 5 组；含 MIDDLE-X / MIDDLE-Y 时自动识别 7 组。
+                          {aiSuggested
+                            ? "楼板配筋建议同样由云图 SMX 生成，页面不手工输入。"
+                            : "楼板配筋仅从 Excel 读取，页面不手工输入。"}
+                        </small>
+                      </span>
+                    </label>
+                  ) : null}
+                </div>
+                <section className={styles.presetPanel} aria-labelledby="calculation-book-presets-title">
+                  <div className={styles.presetHeader}>
+                    <h4 id="calculation-book-presets-title">参数预设</h4>
+                    <span>{savedPresets.length} 个</span>
+                  </div>
+                  <div className={styles.presetStack}>
+                    <input
+                      aria-label="计算书方案名称"
+                      className={styles.presetInput}
+                      disabled={busy}
+                      placeholder="输入方案名称"
+                      type="text"
+                      value={presetName}
+                      onChange={(event) => {
+                        setPresetName(event.currentTarget.value);
+                        setPresetError(null);
+                        setPresetNotice(null);
+                      }}
+                    />
+                    <select
+                      aria-label="已保存计算书方案"
+                      className={styles.presetSelect}
+                      disabled={busy}
+                      value={selectedPresetId}
+                      onChange={(event) => handlePresetSelectionChange(event.currentTarget.value)}
+                    >
+                      <option value="">选择已保存方案</option>
+                      {savedPresets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>{preset.name}</option>
+                      ))}
+                    </select>
+                    <div className={styles.presetActions}>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleSavePreset}>
+                        保存为新方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleApplyPreset}>
+                        应用方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleUpdatePreset}>
+                        更新当前方案
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleRenamePreset}>
+                        重命名
+                      </button>
+                      <button className={styles.secondaryButton} disabled={busy} type="button" onClick={handleDeletePreset}>
+                        删除
+                      </button>
+                    </div>
+                    {presetError ? (
+                      <p aria-live="assertive" className={styles.presetError} role="alert">
+                        {presetError}
+                      </p>
+                    ) : null}
+                    {presetNotice ? (
+                      <p aria-live="polite" className={styles.presetNotice} role="status">
+                        {presetNotice}
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+                <details className={styles.archiveHelp}>
+                  <summary>压缩包结构要求</summary>
+                  <div className={styles.archiveHelpBody}>
+                    <p className={styles.helper}>
+                      {aiSuggested
+                        ? "仅上传结果云图和 01、02 子目录，不包含 Excel 配筋表。"
+                        : calculationSchema.archive.description}
+                    </p>
+                    <div className={styles.tree} aria-label="压缩包必需结构">
+                      <div className={styles.treeRoot}>计算图片.zip / .rar / .7z</div>
+                      <div><span>├─</span> 墙体01-X.png</div>
+                      <div><span>├─</span> 墙体01-Y.png</div>
+                      <div><span>├─</span> 墙体01-Z.png</div>
+                      {!aiSuggested ? <div><span>├─</span> 计算书模板文件.xlsx</div> : null}
+                      <div><span>├─</span> 01 / 厂房标高布置图</div>
+                      <div><span>└─</span> 02 / 墙体有限元模型图</div>
+                    </div>
+                    <div className={styles.validationList} aria-live="polite">
+                      <span data-ready={archive ? "true" : "false"}>单个 ZIP / RAR / 7Z</span>
+                      <span>根目录 X / Y / Z 图片</span>
+                      <span>{aiSuggested ? "不包含 Excel 配筋表" : "根目录墙体配筋表"}</span>
+                      <span>01 与 02 子目录</span>
+                    </div>
+                  </div>
+                </details>
+              </aside>
+
+              <section className={styles.formPanel}>
+                <div className={styles.stepBadge}>02 · 参数</div>
+                {hasValidationErrors ? (
+                  <ErrorPanel
+                    panelRef={errorSummaryRef}
+                    fieldErrorCount={fieldErrorCount}
+                    fieldLabels={errorFieldLabels}
+                    formErrors={formErrors}
+                  />
+                ) : null}
+                <FieldGroup
+                  fields={projectFields}
+                  initialFocusRef={initialFocusRef}
+                  projectOptions={calculationSchema.projectOptions}
+                  templateOptions={calculationSchema.templates}
+                  values={values}
+                  errors={fieldErrors}
+                  onChange={updateValue}
+                  title="工程基本信息"
+                />
+                <FieldGroup
+                  fields={workshopFields}
+                  projectOptions={calculationSchema.projectOptions}
+                  templateOptions={calculationSchema.templates}
+                  values={values}
+                  errors={fieldErrors}
+                  onChange={updateValue}
+                  title="厂房与温度参数"
+                />
+              </section>
+            </div>
+          ) : preflight ? (
+            <ReviewPanel
+              headingRef={reviewHeadingRef}
+              phase={phase}
+              preflight={preflight}
+              slabEvidenceGroups={slabEvidenceGroups}
+              slabEvidenceIssues={slabEvidenceIssues}
+            />
+          ) : null}
+
+          {phase !== "input" && hasValidationErrors ? (
+            <div className={styles.reviewErrors}>
+              <ErrorPanel
+                panelRef={errorSummaryRef}
+                fieldErrorCount={fieldErrorCount}
+                fieldLabels={errorFieldLabels}
+                formErrors={formErrors}
+              />
+            </div>
+          ) : null}
+
+          <footer className={styles.footer}>
+            <div aria-live="polite">
+              <strong id="calculation-book-submit-status">
+                {busyAction === "preflight"
+                  ? "正在核验文件…"
+                  : busyAction === "submit"
+                    ? "正在创建任务…"
+                      : phase === "input"
+                      ? preflight?.requiresAiNormalization
+                        ? "已完成格式检查，继续确认 AI 处理"
+                        : "先预检，再创建任务"
+                      : phase === "review"
+                        ? !normalizationComplete
+                          ? "预检数据校验失败，不能提交"
+                          : slabEvidenceComplete
+                          ? aiSuggested
+                            ? "云图核验完成，进入确认提交"
+                            : "核验完成，进入确认提交"
+                          : "楼板证据不完整，不能提交"
+                        : preflight?.requiresAiNormalization
+                          ? "确认后，人工智能将在任务中规范化配筋表"
+                          : aiSuggested
+                            ? "确认后，人工智能将在任务中生成配筋建议"
+                            : "核验完成，可以创建任务"}
+              </strong>
+              <span>
+                {phase === "input"
+                  ? preflight?.requiresAiNormalization
+                    ? "返回确认后才能启动任务。"
+                    : aiSuggested
+                      ? "预检会读取云图 SMX、检查墙体与方向分组，不读取配筋表。"
+                      : "预检会读取图例、规范化配筋并检查图片对应关系。"
+                  : phase === "review"
+                    ? aiSuggested
+                      ? "需人工复核的方向会明确列出；建议配筋在任务生成过程中完成。"
+                      : "确认识别证据无误后，再检查最终提交摘要。"
+                    : preflight?.requiresAiNormalization
+                      ? "无法确定的字段会留空，任务仍会完成，并在任务详情中提醒补充。"
+                      : aiSuggested
+                        ? "后端会验证每项 AI 选择；无法收敛的字段留空并在任务详情中提醒。"
+                        : "压缩包已由预检暂存，创建时不会重复上传；完成后可下载 DOCX。"}
+              </span>
+            </div>
+            <div className={styles.footerActions}>
+              {phase !== "input" ? (
+                <button
+                  className={styles.secondaryButton}
+                  disabled={busy}
+                  type="button"
+                  onClick={() => setPhase(
+                    preflight?.requiresAiNormalization
+                      ? "input"
+                      : phase === "confirm" ? "review" : "input",
+                  )}
+                >
+                  {preflight?.requiresAiNormalization
+                    ? "返回修改"
+                    : phase === "confirm" ? "返回核验" : "返回修改"}
+                </button>
+              ) : null}
+              <button
+                className={styles.secondaryButton}
+                disabled={busy}
+                type="button"
+                onClick={requestClose}
+              >
+                取消
+              </button>
+              <button
+                aria-describedby="calculation-book-submit-status"
+                className={styles.primaryButton}
+                data-busy={busy ? "true" : "false"}
+                disabled={
+                  busy ||
+                  (phase !== "input" && !normalizationComplete) ||
+                  (phase !== "input" && !slabEvidenceComplete)
+                }
+                type="submit"
+              >
+                {busyAction === "preflight"
+                  ? "正在预检…"
+                  : busyAction === "submit"
+                    ? "正在创建…"
+                    : phase === "input"
+                      ? preflight?.requiresAiNormalization
+                        ? "继续 AI 确认"
+                        : preflight ? "继续核对" : "预检并核对"
+                    : preflight?.requiresAiNormalization
+                      ? "确认并开始任务"
+                      : phase === "review"
+                        ? "进入确认提交"
+                        : "创建计算书任务"}
+              </button>
+            </div>
+          </footer>
+        </form>
+      </div>
+    </TaskConfigModal>
+  );
+}
+
+function AiNormalizationConfirmation({
+  preflight,
+  headingRef,
+}: {
+  preflight: CalculationBookPreflightResult;
+  headingRef: RefObject<HTMLHeadingElement>;
+}) {
+  return (
+    <section
+      aria-labelledby="calculation-book-ai-confirmation-title"
+      className={styles.aiConfirmation}
+      role="region"
+    >
+      <p className={styles.stepBadge}>03 · AI 规范化确认</p>
+      <h3 id="calculation-book-ai-confirmation-title" ref={headingRef} tabIndex={-1}>
+        {preflight.aiConfirmationMessage
+          ?? "您上传的墙体配筋表非标准格式，程序将启动人工智能。"}
+      </h3>
+      <p>
+        系统将在任务生成过程中读取墙体及楼板配筋数据，并转换为后端可校验的结构化字段。
+      </p>
+      {preflight.aiReinforcementExpectedSourceRowCount !== null ? (
+        <strong>
+          预计需规范化 {preflight.aiReinforcementExpectedSourceRowCount} 行源数据
+        </strong>
+      ) : (
+        <strong>源数据行数将在任务中严格校验</strong>
+      )}
+      <p className={styles.aiConfirmationNote}>
+        对于无法确定的局部字段，计算书会保留空白并继续生成；任务完成后可在查看任务页面补充核对。
+      </p>
+    </section>
+  );
+}
+
+function ReviewPanel({
+  phase,
+  preflight,
+  slabEvidenceGroups,
+  slabEvidenceIssues,
+  headingRef,
+}: {
+  phase: Exclude<Phase, "input">;
+  preflight: CalculationBookPreflightResult;
+  slabEvidenceGroups: SlabEvidenceGroup[];
+  slabEvidenceIssues: string[];
+  headingRef: RefObject<HTMLHeadingElement>;
+}) {
+  if (preflight.requiresAiNormalization) {
+    return <AiNormalizationConfirmation headingRef={headingRef} preflight={preflight} />;
+  }
+
+  const normalizationAuditConserved =
+    preflight.reinforcementSourceRowCount
+      === preflight.reinforcementNormalizedRowCount
+        + preflight.reinforcementIssueRowCount
+    && preflight.normalizationIssues.length
+      === preflight.reinforcementIssueRowCount;
+  const aiSuggested = preflight.reinforcementSource === "ai_suggested";
+  return (
+    <section className={styles.reviewPanel}>
+      <div className={styles.reviewHeader}>
+        <div>
+          <p className={styles.stepBadge}>
+            {phase === "confirm"
+              ? "03 · 确认提交"
+              : aiSuggested ? "02 · 云图核验" : "02 · 规范化核验"}
+          </p>
+          <h3
+            ref={headingRef}
+            tabIndex={-1}
+          >
+            {phase === "review"
+              ? aiSuggested ? "云图核验结果" : "文件与配筋对应结果"
+              : "最终确认与提交"}
+          </h3>
+          <p>
+            {aiSuggested
+              ? phase === "review"
+                ? "这里只核对云图分组与 SMX 识别结果；配筋建议将在任务中由人工智能生成并由后端校验。"
+                : "本次不读取实配钢筋表。确认后将按云图 SMX 生成配筋建议。"
+              : phase === "review"
+                ? "所有数值均保留图片和 Excel 单元格证据，请先核对识别结果。"
+                : `本次采用配筋表：${preflight.reinforcementWorkbook}。确认后即可创建任务。`}
+          </p>
+        </div>
+        <div className={styles.summaryCards}>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.wallCount} 个墙体图组`
+            : `共 ${preflight.wallCount} 面墙`}
+          >
+            <strong>{preflight.wallCount}</strong>
+            <small>{aiSuggested ? "墙体图组" : "面墙"}</small>
+          </span>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.wallDirectionFigureCount} 张墙体方向图`
+            : `共 ${preflight.figureCount} 张云图`}
+          >
+            <strong>{aiSuggested
+              ? preflight.wallDirectionFigureCount
+              : preflight.figureCount}</strong>
+            <small>{aiSuggested ? "墙体方向图" : "云图"}</small>
+          </span>
+          <span aria-label={aiSuggested
+            ? `共 ${preflight.zZeroOrMissingSmxCount} 张 Z 向零值或无 SMX 图`
+            : `共 ${preflight.zeroFigureCount} 张 Z 向零值图`}
+          >
+            <strong>{aiSuggested
+              ? preflight.zZeroOrMissingSmxCount
+              : preflight.zeroFigureCount}</strong>
+            <small>{aiSuggested ? "Z 向零值/无 SMX" : "Z 向零值"}</small>
+          </span>
+          {preflight.slabFigureCount > 0 ? (
+            <>
+              <span aria-label={`共 ${preflight.slabElevationCount} 个楼板标高`}>
+                <strong>{preflight.slabElevationCount}</strong><small>楼板标高</small>
+              </span>
+              <span aria-label={aiSuggested
+                ? `共 ${preflight.slabActualGroupCount} 组楼板方向图`
+                : `共 ${preflight.slabFigureCount} 张楼板云图`}
+              >
+                <strong>{aiSuggested
+                  ? preflight.slabActualGroupCount
+                  : preflight.slabFigureCount}</strong>
+                <small>{aiSuggested ? "楼板方向组" : "楼板云图"}</small>
+              </span>
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {aiSuggested ? (
+        <p className={styles.aiBatchStatus} role="status">
+          <strong>等待任务生成 AI 建议</strong>
+          <span>当前仅核验云图分组与 SMX，配筋建议由任务统一生成。</span>
+        </p>
+      ) : null}
+
+      {!aiSuggested ? <section
+        aria-labelledby="calculation-book-matching-audit"
+        className={styles.matchingAudit}
+      >
+        <div>
+          <h3 id="calculation-book-matching-audit">配筋表与图片匹配</h3>
+          <p>
+            {preflight.normalizationTriggered
+              ? "检测到非标准写法，已自动启用确定性配筋规范化。"
+              : "配筋表已符合标准写法，无需转换。"}
+          </p>
+        </div>
+        <div className={styles.matchingFlow}>
+          <span aria-label={`配筋源行 ${preflight.reinforcementSourceRowCount}`}>
+            <strong>{preflight.reinforcementSourceRowCount}</strong>
+            <small>配筋源行</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`规范化行 ${preflight.reinforcementNormalizedRowCount}`}>
+            <strong>{preflight.reinforcementNormalizedRowCount}</strong>
+            <small>规范化行</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`配筋表唯一墙号 ${preflight.reinforcementUniqueWallCount}`}>
+            <strong>{preflight.reinforcementUniqueWallCount}</strong>
+            <small>配筋表唯一墙号</small>
+          </span>
+          <i aria-hidden="true">↔</i>
+          <span aria-label={`图片墙组 ${preflight.imageWallGroupCount}`}>
+            <strong>{preflight.imageWallGroupCount}</strong>
+            <small>图片墙组</small>
+          </span>
+          <i aria-hidden="true">→</i>
+          <span aria-label={`已匹配墙号 ${preflight.matchedUniqueWallCount}`}>
+            <strong>{preflight.matchedUniqueWallCount}</strong>
+            <small>已匹配墙号</small>
+          </span>
+        </div>
+        {!normalizationAuditConserved ? (
+          <p className={styles.auditIssue} role="alert">
+            规范化审计数据不守恒：源行数必须等于规范化行数与问题行数之和，且问题明细数量必须一致。已阻止提交，请重新预检。
+          </p>
+        ) : null}
+      </section> : null}
+
+      {aiSuggested && preflight.reviewItems.length > 0 ? (
+        <section
+          aria-labelledby="calculation-book-ocr-review-title"
+          className={styles.ocrReviewPanel}
+        >
+          <div>
+            <h3 id="calculation-book-ocr-review-title">需人工复核</h3>
+            <p>以下图片不阻断任务；对应建议可能留空，并会在任务完成后的详情中继续提醒。</p>
+          </div>
+          <ul>
+            {preflight.reviewItems.map((item, index) => (
+              <li key={`${item.code}-${item.identity}-${item.direction ?? "all"}-${index}`}>
+                <strong>
+                  {item.identity}{item.direction ? ` · ${item.direction}` : ""}
+                </strong>
+                <span>{item.reason}</span>
+                <small>{item.imageFilename}</small>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {preflight.warnings.filter((warning) => warning.filenames.length > 0).map((warning) => (
+        <div className={styles.warningPanel} key={warning.code} role="status">
+          <strong>
+            {warning.code === "slab_ignored_by_choice"
+              ? "压缩包包含楼板云图，本次未勾选楼板应力，已跳过"
+              : "以下根目录图片未按墙号-X/Y/Z规则进入计算"}
+          </strong>
+          <p>{warning.filenames.join("、")}</p>
+        </div>
+      ))}
+
+      {slabEvidenceIssues.length > 0 ? (
+        <div className={styles.slabEvidenceError} role="alert">
+          <strong>楼板云图证据不完整，已阻止进入提交</strong>
+          {slabEvidenceIssues.map((issue) => <p key={issue}>{issue}</p>)}
+        </div>
+      ) : null}
+
+      {slabEvidenceGroups.length > 0 ? (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐标高楼板识别证据</h3>
+            <p>
+              {aiSuggested
+                ? "这里只核对图片分组和 SMX；配筋建议会在任务生成过程中写入计算书。"
+                : "这里只核对图片、Excel 单元格和精确公式结果；实配钢筋不在页面重复录入。"}
+            </p>
+          </div>
+          {slabEvidenceGroups.map((group, groupIndex) => (
+            <details
+              className={styles.wallEvidence}
+              key={`slab-${group.elevation}`}
+              open={groupIndex === 0}
+            >
+              <summary>
+                <strong>{group.elevation}m 楼板</strong>
+                <span>
+                  <b data-complete={group.complete ? "true" : "false"}>
+                    {group.items.length}/{group.expectedCount}{" "}
+                    {group.complete ? "完整" : "异常"}
+                    {group.hasMiddle ? " · 含 MIDDLE" : ""}
+                  </b>
+                  {" · "}
+                  {group.sourceRows.length > 0
+                    ? `配筋表第 ${group.sourceRows.join("、")} 行`
+                    : aiSuggested ? "等待任务生成 AI 建议" : "无对应配筋行"}
+                </span>
+              </summary>
+              <div className={styles.slabDirectionGrid}>
+                {group.items.map((item) => (
+                  <SlabEvidenceCard
+                    evidence={item}
+                    imageOnly={aiSuggested}
+                    key={`${item.elevation}-${item.key}`}
+                  />
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      ) : null}
+
+      {aiSuggested ? phase === "confirm" ? (
+        <details className={styles.confirmedWallEvidence}>
+          <summary>
+            <strong>已核验逐墙证据（{preflight.wallCount} 组）</strong>
+            <span>按需展开查看 X / Y / Z 方向</span>
+          </summary>
+          <div className={styles.confirmedWallEvidenceBody}>
+            <div>
+              <h3>逐墙识别证据</h3>
+              <p>墙号摘要便于快速复查；展开单墙可核对各方向图片与 SMX 识别值。</p>
+            </div>
+            <AiWallEvidenceGrid walls={preflight.walls} />
+          </div>
+        </details>
+      ) : (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐墙识别证据</h3>
+            <p>展开墙号可核对各方向图片与 SMX 识别值；存在疑点的方向会标记为需复核。</p>
+          </div>
+          <AiWallEvidenceGrid walls={preflight.walls} />
+        </div>
+      ) : (
+        <div className={styles.evidenceSection}>
+          <div>
+            <h3>逐墙识别证据</h3>
+            <p>展开墙号可核对图例范围、原始写法、成品表写法，以及按精确公式计算后的实配面积显示值。</p>
+          </div>
+          {preflight.walls.map((wall) => (
+            <details
+              className={styles.wallEvidence}
+              key={`${phase}-${wall.wallId}`}
+            >
+              <summary>
+                <strong>{wall.wallId}</strong>
+                <span>
+                  {wall.suggestedSourceRow === null
+                    ? aiSuggested ? "等待任务生成 AI 建议" : "无对应配筋行"
+                    : `配筋表第 ${wall.suggestedSourceRow} 行`}
+                </span>
+              </summary>
+              <div className={styles.directionGrid}>
+                {WALL_DIRECTIONS.map((direction) => (
+                  <DirectionEvidence
+                    direction={direction}
+                    evidence={wall.directions[direction]}
+                    key={direction}
+                  />
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AiWallEvidenceGrid({
+  walls,
+}: {
+  walls: CalculationBookPreflightResult["walls"];
+}) {
+  return (
+    <div className={styles.compactWallGrid}>
+      {walls.map((wall) => {
+        const completeDirectionCount = WALL_DIRECTIONS.filter(
+          (direction) => wall.directions[direction].smx !== null,
+        ).length;
+        return (
+          <details
+            className={`${styles.wallEvidence} ${styles.compactWallEvidence}`}
+            key={wall.wallId}
+          >
+            <summary>
+              <strong>{wall.wallId}</strong>
+              <span>
+                {completeDirectionCount === WALL_DIRECTIONS.length
+                  ? "3/3 方向完整"
+                  : `${completeDirectionCount}/3 方向 · 需复核`}
+              </span>
+            </summary>
+            <div className={styles.directionGrid}>
+              {WALL_DIRECTIONS.map((direction) => (
+                <DirectionEvidence
+                  direction={direction}
+                  evidence={wall.directions[direction]}
+                  imageOnly
+                  key={direction}
+                />
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+function SlabEvidenceCard({
+  evidence,
+  imageOnly = false,
+}: {
+  evidence: CalculationBookSlabEvidence;
+  imageOnly?: boolean;
+}) {
+  return (
+    <article className={styles.directionCard}>
+      <header>
+        <h4>{SLAB_GROUP_LABELS[evidence.key] ?? evidence.key}</h4>
+        {!imageOnly && evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
+      </header>
+      <p>{evidence.imageFilename}</p>
+      <dl>
+        <div>
+          <dt>计算范围</dt>
+          <dd>
+            {evidence.smx === null
+              ? "OCR 需复核"
+              : evidence.isZeroResult
+                ? "无 SMX，计算值按 0 处理"
+                : imageOnly
+                  ? `SMX ${evidence.smx} mm²/m`
+                  : `${evidence.smn ?? "OCR 需复核"} → ${evidence.smx} mm²/m`}
+          </dd>
+        </div>
+        {!imageOnly ? <div>
+          <dt>Excel 写法</dt>
+          <dd>{evidence.originalText}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>规范写法</dt>
+          <dd>{evidence.canonicalSpecification}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>计算书用语</dt>
+          <dd>{evidence.narrativeSpecification}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>实配面积</dt>
+          <dd>
+            {evidence.actualArea === null
+              ? "待补充"
+              : `${evidence.actualArea} mm²/m`}
+          </dd>
+        </div> : null}
+      </dl>
+    </article>
+  );
+}
+
+function DirectionEvidence({
+  direction,
+  evidence,
+  imageOnly = false,
+}: {
+  direction: "X" | "Y" | "Z";
+  evidence: CalculationBookDirectionEvidence;
+  imageOnly?: boolean;
+}) {
+  return (
+    <article className={styles.directionCard}>
+      <header>
+        <strong>{direction} · {DIRECTION_LABELS[direction]}</strong>
+        {!imageOnly && evidence.sourceCell ? <span>{evidence.sourceCell}</span> : null}
+      </header>
+      <p>{evidence.imageFilename}</p>
+      <dl>
+        <div>
+          <dt>计算范围</dt>
+          <dd>
+            {evidence.smx === null
+              ? "OCR 需复核"
+              : evidence.isZeroResult
+                ? "Z 向无 SMX，计算值按 0 处理"
+                : imageOnly
+                  ? `SMX ${evidence.smx} ${direction === "Z" ? "mm²/m²" : "mm²/m"}`
+                  : `${evidence.smn ?? "OCR 需复核"} → ${evidence.smx} mm²/m`}
+          </dd>
+        </div>
+        {!imageOnly ? <div>
+          <dt>原始写法</dt>
+          <dd>{evidence.originalText}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>成品表写法</dt>
+          <dd>{evidence.canonicalSpecification}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>计算书用语</dt>
+          <dd>{evidence.narrativeSpecification}</dd>
+        </div> : null}
+        {!imageOnly ? <div>
+          <dt>实配面积</dt>
+          <dd>
+            {evidence.actualArea === null
+              ? "待补充"
+              : `${evidence.actualArea} ${direction === "Z" ? "mm²/m²" : "mm²/m"}`}
+          </dd>
+        </div> : null}
+      </dl>
+    </article>
+  );
+}
+
+const ErrorPanel = ({
+  fieldErrorCount,
+  fieldLabels,
+  formErrors,
+  panelRef,
+}: {
+  fieldErrorCount: number;
+  fieldLabels: string[];
+  formErrors: string[];
+  panelRef: RefObject<HTMLDivElement>;
+}) => (
+  <div ref={panelRef} className={styles.errorPanel} role="alert" tabIndex={-1}>
+    {fieldErrorCount > 0 ? (
+      <strong>
+        请修正 {fieldErrorCount} 个参数。错误字段：{fieldLabels.join("、")}。
+      </strong>
+    ) : null}
+    {formErrors.map((message) => <p key={message}>{message}</p>)}
+  </div>
+);
+
+function FieldGroup({
+  fields,
+  values,
+  errors,
+  templateOptions,
+  projectOptions,
+  initialFocusRef,
+  title,
+  onChange,
+}: {
+  fields: readonly CalculationBookField[];
+  values: Record<string, string>;
+  errors: Record<string, string[]>;
+  templateOptions: readonly { value: string; label: string }[];
+  projectOptions: readonly { value: string; label: string }[];
+  initialFocusRef?: RefObject<HTMLSelectElement>;
+  title: string;
+  onChange: (field: CalculationBookField, value: string) => void;
+}) {
+  return (
+    <fieldset className={styles.fieldset}>
+      <legend>{title}</legend>
+      <div className={styles.fieldGrid}>
+        {fields.map((field) => {
+          const fieldId = `calculation-book-${field.key}`;
+          const errorId = `${fieldId}-error`;
+          const options =
+            field.key === "template_type"
+              ? templateOptions
+              : field.key === "project_no"
+                ? projectOptions
+                : (field.options ?? []).map((value) => ({ value, label: value }));
+          const readOnly = field.key === "project_name";
+          return (
+            <div className={`${styles.field} ${field.key === "document_name" ? styles.fieldWide : ""}`} key={field.key}>
+              <label htmlFor={fieldId}>
+                <span>
+                  {field.label}
+                  {field.required ? <em>必填</em> : null}
+                </span>
+                {field.unit ? <small>{field.unit}</small> : null}
+              </label>
+              {field.type === "select" ? (
+                <select
+                  ref={field.key === "template_type" ? initialFocusRef : undefined}
+                  aria-label={field.label}
+                  aria-describedby={errors[field.key]?.length ? errorId : undefined}
+                  aria-invalid={errors[field.key]?.length ? "true" : undefined}
+                  aria-required={field.required}
+                  id={fieldId}
+                  required={field.required}
+                  value={values[field.key] ?? ""}
+                  onChange={(event) => onChange(field, event.currentTarget.value)}
+                >
+                  <option value="">请选择</option>
+                  {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              ) : (
+                <input
+                  aria-label={field.label}
+                  aria-describedby={errors[field.key]?.length ? errorId : undefined}
+                  aria-invalid={errors[field.key]?.length ? "true" : undefined}
+                  aria-required={field.required}
+                  id={fieldId}
+                  placeholder={field.placeholder}
+                  maxLength={field.maxLength}
+                  pattern={field.pattern}
+                  readOnly={readOnly}
+                  required={field.required}
+                  step={field.type === "number" ? "any" : undefined}
+                  type={field.type === "number" ? "number" : "text"}
+                  value={values[field.key] ?? ""}
+                  onChange={(event) => onChange(field, event.currentTarget.value)}
+                />
+              )}
+              {errors[field.key]?.length ? (
+                <span className={styles.fieldError} id={errorId}>
+                  {errors[field.key].join("；")}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}

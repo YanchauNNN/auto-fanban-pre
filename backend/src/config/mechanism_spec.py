@@ -60,15 +60,9 @@ def _validate_windows_basename(value: str, *, label: str) -> str:
 
 
 class PermissionsConfig(BaseModel):
-    account_admin_roles: list[str] = Field(default_factory=lambda: ["管理员"])
-    workflow_admin_roles: list[str] = Field(default_factory=lambda: ["管理员"])
-    workload_scope_roles: dict[str, list[str]] = Field(
-        default_factory=lambda: {
-            "office": ["室主任", "所领导", "管理员"],
-            "institute": ["所领导", "管理员"],
-            "admin": ["管理员"],
-        },
-    )
+    account_admin_roles: list[str] = Field(default_factory=list)
+    workflow_admin_roles: list[str] = Field(default_factory=list)
+    workload_scope_roles: dict[str, list[str]] = Field(default_factory=dict)
 
     def roles_for_scope(self, scope: str) -> set[str]:
         return {str(role) for role in self.workload_scope_roles.get(scope, [])}
@@ -86,6 +80,105 @@ class WorkloadSettlementConfig(BaseModel):
     initiator_role_key: str = "initiator"
     include_approved_nodes: bool = True
     node_role_key_source: str = "node_key"
+
+
+class WorkflowRuntimeConfig(BaseModel):
+    approval_terminal_status: str = ""
+    archive_trigger_status: str = ""
+    active_conflict_statuses: list[str] = Field(default_factory=list)
+
+
+class TaskGroupSubmissionConditionConfig(BaseModel):
+    source: Literal["params", "options"] = "params"
+    field: str = Field(min_length=1)
+    equals: bool = True
+    default: bool = True
+
+
+class TaskGroupSubmissionArtifactRequirementConfig(BaseModel):
+    field: Literal["package_zip", "ied_xlsx"]
+    not_declared_error: str = Field(min_length=1)
+    not_found_error: str = Field(min_length=1)
+    required_when: TaskGroupSubmissionConditionConfig | None = None
+
+
+class TaskGroupSubmissionTaskRoleConfig(BaseModel):
+    task_role: str = Field(min_length=1)
+    missing_role_error: str = Field(min_length=1)
+    duplicate_role_error: str = Field(min_length=1)
+    artifacts: list[TaskGroupSubmissionArtifactRequirementConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_artifact_fields(self) -> TaskGroupSubmissionTaskRoleConfig:
+        fields = [artifact.field for artifact in self.artifacts]
+        duplicates = sorted({field for field in fields if fields.count(field) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate artifact field: {', '.join(duplicates)}")
+        return self
+
+
+class TaskGroupSubmissionSharedPrepConfig(BaseModel):
+    invalid_error: str = Field(default="shared_prep_invalid", min_length=1)
+    source_missing_error: str = Field(default="shared_prep_source_missing", min_length=1)
+    source_outside_error: str = Field(default="shared_prep_source_outside", min_length=1)
+
+
+class TaskGroupSubmissionConfig(BaseModel):
+    shared_prep: TaskGroupSubmissionSharedPrepConfig = Field(
+        default_factory=TaskGroupSubmissionSharedPrepConfig
+    )
+    required_task_roles: list[TaskGroupSubmissionTaskRoleConfig] = Field(
+        default_factory=lambda: [
+            TaskGroupSubmissionTaskRoleConfig(
+                task_role="deliverable_main",
+                missing_role_error="deliverable_main_missing",
+                duplicate_role_error="deliverable_main_duplicate",
+                artifacts=[
+                    TaskGroupSubmissionArtifactRequirementConfig(
+                        field="package_zip",
+                        not_declared_error="deliverable_package_not_declared",
+                        not_found_error="deliverable_package_not_found",
+                    ),
+                    TaskGroupSubmissionArtifactRequirementConfig(
+                        field="ied_xlsx",
+                        not_declared_error="deliverable_ied_not_declared",
+                        not_found_error="deliverable_ied_not_found",
+                        required_when=TaskGroupSubmissionConditionConfig(
+                            source="params",
+                            field="include_ied_plan",
+                            equals=True,
+                            default=True,
+                        ),
+                    ),
+                ],
+            )
+        ],
+        min_length=1,
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_task_roles(self) -> TaskGroupSubmissionConfig:
+        roles = [requirement.task_role for requirement in self.required_task_roles]
+        duplicates = sorted({role for role in roles if roles.count(role) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate task_role: {', '.join(duplicates)}")
+        return self
+
+
+class WorkloadStatusOptionConfig(BaseModel):
+    label: str
+    value: str
+
+
+class WorkloadRuntimeConfig(BaseModel):
+    status_options: list[WorkloadStatusOptionConfig] = Field(default_factory=list)
+
+
+class ManagementUiConfig(BaseModel):
+    workload_scope_labels: dict[str, str] = Field(default_factory=dict)
+    workflow_status_labels: dict[str, str] = Field(default_factory=dict)
+    archive_status_labels: dict[str, str] = Field(default_factory=dict)
+    empty_current_node_label: str = ""
 
 
 class AuditDisplayConfig(BaseModel):
@@ -116,8 +209,88 @@ class ProjectInferenceConfig(BaseModel):
 
 class AuditReplaceMechanismConfig(BaseModel):
     unit_factory_codes: list[str] = Field(default_factory=list)
-    batch_filename_identity_regex: str = (
-        r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
+    unit_factory_code_alias_groups: list[list[str]] = Field(default_factory=list)
+    batch_filename_identity_regex: str = r"(\d{4})([0-9])([A-Z0-9]{2,4})-?[A-Z]{3}\d{2}"
+
+
+class CalculationBookAiSuggestionDirectionConfig(BaseModel):
+    diameters: list[PositiveInt] = Field(min_length=1)
+    hard_priority: list[str] = Field(min_length=1)
+
+
+class CalculationBookZeroOrMissingSmxConfig(BaseModel):
+    fixed_spec: str = Field(default="1C14@400x400", min_length=1)
+
+
+class CalculationBookAiSuggestionMechanismConfig(BaseModel):
+    margin_ratio: float = Field(default=0.10, ge=0, le=1)
+    xy: CalculationBookAiSuggestionDirectionConfig = Field(
+        default_factory=lambda: CalculationBookAiSuggestionDirectionConfig(
+            diameters=[16, 18, 20, 25, 28, 32, 36, 40],
+            hard_priority=["1@200", "1@150", "2@200", "2@150"],
+        )
+    )
+    z: CalculationBookAiSuggestionDirectionConfig = Field(
+        default_factory=lambda: CalculationBookAiSuggestionDirectionConfig(
+            diameters=[6, 8, 10, 12, 14, 16],
+            hard_priority=[
+                "1@400x400",
+                "1@200x400",
+                "1@200x200",
+                "2@400x400",
+                "2@200x400",
+                "2@200x200",
+            ],
+        )
+    )
+    zero_or_missing_smx: CalculationBookZeroOrMissingSmxConfig = Field(
+        default_factory=CalculationBookZeroOrMissingSmxConfig
+    )
+    slab_direction_mapping: dict[str, str] = Field(
+        default_factory=lambda: {
+            "top_x": "X",
+            "middle_x": "X",
+            "bottom_x": "X",
+            "top_y": "Y",
+            "middle_y": "Y",
+            "bottom_y": "Y",
+            "z": "Z",
+        }
+    )
+    word_declaration: str = (
+        "以下配筋建议由人工智能根据结果云图 SMX 值并保留不低于 10% 的面积裕度生成，供设计人员复核。"
+    )
+
+
+class CalculationBookAiNormalizationMechanismConfig(BaseModel):
+    schema_correction_max_attempts: int = Field(default=2, ge=0, le=5)
+
+
+class CalculationBookMechanismConfig(BaseModel):
+    ocr_threshold: int = Field(default=160, ge=0, le=255)
+    ocr_legend_value_count: int = Field(default=10, ge=2)
+    ocr_min_confidence: float = Field(default=50.0, ge=0, le=100)
+    ocr_min_vertical_ratio: float = Field(default=0.35, ge=0, le=1)
+    ocr_endpoint_absolute_tolerance: float = Field(default=1.0, ge=0)
+    ocr_endpoint_relative_tolerance: float = Field(default=0.002, ge=0)
+    ocr_header_crop: list[float] = Field(
+        default_factory=lambda: [0.025, 0.02, 0.20, 0.24],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_legend_crop: list[float] = Field(
+        default_factory=lambda: [0.06, 0.84, 0.88, 1.0],
+        min_length=4,
+        max_length=4,
+    )
+    ocr_header_scale: int = Field(default=4, ge=1)
+    ocr_legend_scale: int = Field(default=3, ge=1)
+    chapter: str = "7.1"
+    ai_normalization: CalculationBookAiNormalizationMechanismConfig = Field(
+        default_factory=CalculationBookAiNormalizationMechanismConfig
+    )
+    ai_suggestion: CalculationBookAiSuggestionMechanismConfig = Field(
+        default_factory=CalculationBookAiSuggestionMechanismConfig
     )
 
 
@@ -150,10 +323,21 @@ class ApiRuntimeMechanismConfig(BaseModel):
     )
     job_completion_wait_timeout_sec: float = 3600.0
     job_summary_sync_interval_sec: float = 3.0
+    worker_heartbeat_interval_sec: float = Field(default=10.0, gt=0)
+    worker_claim_timeout_sec: float = Field(default=90.0, gt=0)
     jobs_activity_stream_poll_interval_sec: float = 2.0
     jobs_activity_stream_keepalive_sec: float = 15.0
     jobs_activity_stream_max_duration_sec: float = 60.0
     jobs_activity_stream_retry_ms: int = 5000
+
+    @model_validator(mode="after")
+    def validate_worker_claim_timing(self) -> ApiRuntimeMechanismConfig:
+        if self.worker_claim_timeout_sec < 3 * self.worker_heartbeat_interval_sec:
+            raise ValueError(
+                "worker_claim_timeout_sec must be at least three times "
+                "worker_heartbeat_interval_sec"
+            )
+        return self
 
 
 class CadRuntimeMechanismConfig(BaseModel):
@@ -253,7 +437,7 @@ class ArchiveRuntimeProbeConfig(BaseModel):
         )
 
     @model_validator(mode="after")
-    def validate_probe_paths(self) -> "ArchiveRuntimeProbeConfig":
+    def validate_probe_paths(self) -> ArchiveRuntimeProbeConfig:
         if Path(self.payload_source_relative_path).name != self.payload_filename:
             raise ValueError(
                 "archive runtime probe payload source basename must match payload_filename"
@@ -298,7 +482,7 @@ class ArchiveRuntimeMechanismConfig(BaseModel):
         )
 
     @model_validator(mode="after")
-    def validate_required_names(self) -> "ArchiveRuntimeMechanismConfig":
+    def validate_required_names(self) -> ArchiveRuntimeMechanismConfig:
         filenames = [item.filename for item in self.required_files]
         filename_keys = [_windows_filename_key(filename) for filename in filenames]
         if len(filename_keys) != len(set(filename_keys)):
@@ -315,6 +499,52 @@ class ArchiveRuntimeMechanismConfig(BaseModel):
         return self
 
 
+class BusinessProbeMechanismConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: str = Field(default="fanban-business-probe@1", min_length=1)
+    results_relative_dir: str = Field(default="probe-results", min_length=1)
+    request_timeout_sec: PositiveInt = 15
+    office_worker_timeout_sec: PositiveInt = 90
+    task_timeout_sec: PositiveInt = 3600
+    log_retention_days: PositiveInt = 14
+    max_event_context_bytes: PositiveInt = 131_072
+    required_health_fields: tuple[
+        Literal["ready", "storage_writable", "worker_alive", "worker_count"],
+        ...,
+    ] = (
+        "ready",
+        "storage_writable",
+        "worker_alive",
+        "worker_count",
+    )
+    sensitive_key_patterns: tuple[str, ...] = (
+        "password",
+        "authorization",
+        "token",
+        "api_key",
+        "apikey",
+        "secret",
+        "cookie",
+    )
+
+    @field_validator("results_relative_dir")
+    @classmethod
+    def validate_results_relative_dir(cls, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("results_relative_dir must be package-relative")
+        return path.as_posix()
+
+    @field_validator("required_health_fields", "sensitive_key_patterns")
+    @classmethod
+    def validate_unique_probe_values(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = [item.casefold() for item in value]
+        if not value or len(normalized) != len(set(normalized)):
+            raise ValueError("deployment business probe values must be non-empty and unique")
+        return value
+
+
 class DeploymentMechanismConfig(BaseModel):
     spec_name: str = "参数规范.yaml"
     runtime_spec_name: str = "参数规范_运行期.yaml"
@@ -323,6 +553,9 @@ class DeploymentMechanismConfig(BaseModel):
     managed_pdf2_pc3_name: str = "打印PDF2.pc3"
     managed_monochrome_ctb_name: str = "fanban_monochrome.ctb"
     archive_runtime: ArchiveRuntimeMechanismConfig | None = None
+    business_probes: BusinessProbeMechanismConfig = Field(
+        default_factory=BusinessProbeMechanismConfig
+    )
     installers: dict[str, InstallerConfig] = Field(
         default_factory=lambda: {
             "dotnet48": InstallerConfig(
@@ -356,12 +589,25 @@ class BackendMechanismConfig(BaseModel):
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
     archive_defaults: ArchiveDefaultsConfig = Field(default_factory=ArchiveDefaultsConfig)
     workload_settlement: WorkloadSettlementConfig = Field(default_factory=WorkloadSettlementConfig)
+    workflow_runtime: WorkflowRuntimeConfig = Field(default_factory=WorkflowRuntimeConfig)
+    task_group_submission: TaskGroupSubmissionConfig = Field(
+        default_factory=TaskGroupSubmissionConfig
+    )
+    workload_runtime: WorkloadRuntimeConfig = Field(default_factory=WorkloadRuntimeConfig)
+    management_ui: ManagementUiConfig = Field(default_factory=ManagementUiConfig)
     audit_display: AuditDisplayConfig = Field(default_factory=AuditDisplayConfig)
     audit_replace: AuditReplaceMechanismConfig = Field(default_factory=AuditReplaceMechanismConfig)
+    calculation_book: CalculationBookMechanismConfig = Field(
+        default_factory=CalculationBookMechanismConfig
+    )
     project_inference: ProjectInferenceConfig = Field(default_factory=ProjectInferenceConfig)
     api_runtime: ApiRuntimeMechanismConfig = Field(default_factory=ApiRuntimeMechanismConfig)
-    cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(default_factory=CadRuntimeMechanismConfig)
-    deployment_mechanism: DeploymentMechanismConfig = Field(default_factory=DeploymentMechanismConfig)
+    cad_runtime_mechanism: CadRuntimeMechanismConfig = Field(
+        default_factory=CadRuntimeMechanismConfig
+    )
+    deployment_mechanism: DeploymentMechanismConfig = Field(
+        default_factory=DeploymentMechanismConfig
+    )
 
 
 class MechanismSpec(BaseModel):
@@ -382,12 +628,32 @@ class MechanismSpec(BaseModel):
         return self.backend_mechanism.workload_settlement
 
     @property
+    def workflow_runtime(self) -> WorkflowRuntimeConfig:
+        return self.backend_mechanism.workflow_runtime
+
+    @property
+    def task_group_submission(self) -> TaskGroupSubmissionConfig:
+        return self.backend_mechanism.task_group_submission
+
+    @property
+    def workload_runtime(self) -> WorkloadRuntimeConfig:
+        return self.backend_mechanism.workload_runtime
+
+    @property
+    def management_ui(self) -> ManagementUiConfig:
+        return self.backend_mechanism.management_ui
+
+    @property
     def audit_display(self) -> AuditDisplayConfig:
         return self.backend_mechanism.audit_display
 
     @property
     def audit_replace(self) -> AuditReplaceMechanismConfig:
         return self.backend_mechanism.audit_replace
+
+    @property
+    def calculation_book(self) -> CalculationBookMechanismConfig:
+        return self.backend_mechanism.calculation_book
 
     @property
     def project_inference(self) -> ProjectInferenceConfig:
@@ -442,7 +708,9 @@ def load_mechanism_spec(spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH) -> 
     return MechanismSpecLoader.load(spec_path)
 
 
-def normalize_audit_replace_factory_codes(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+def normalize_audit_replace_factory_codes(
+    values: list[str] | tuple[str, ...] | set[str],
+) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for value in values:
@@ -454,13 +722,35 @@ def normalize_audit_replace_factory_codes(values: list[str] | tuple[str, ...] | 
     return normalized
 
 
+def expand_audit_replace_factory_codes(
+    values: list[str] | tuple[str, ...] | set[str],
+    alias_groups: list[list[str]] | tuple[tuple[str, ...], ...],
+) -> list[str]:
+    selected = normalize_audit_replace_factory_codes(values)
+    groups = [
+        normalize_audit_replace_factory_codes(group)
+        for group in alias_groups
+        if isinstance(group, (list, tuple, set))
+    ]
+    expanded: list[str] = []
+    for code in selected:
+        matching_groups = [group for group in groups if code in group]
+        candidates = [member for group in matching_groups for member in group] or [code]
+        for candidate in candidates:
+            if candidate not in expanded:
+                expanded.append(candidate)
+    return expanded
+
+
 def append_audit_replace_factory_codes(
     values: list[str] | tuple[str, ...] | set[str],
     *,
     spec_path: str | Path = DEFAULT_MECHANISM_SPEC_PATH,
 ) -> list[str]:
     path = _resolve_mechanism_spec_path(spec_path)
-    existing = normalize_audit_replace_factory_codes(load_mechanism_spec(path).audit_replace.unit_factory_codes)
+    existing = normalize_audit_replace_factory_codes(
+        load_mechanism_spec(path).audit_replace.unit_factory_codes
+    )
     updated = normalize_audit_replace_factory_codes([*existing, *values])
     if updated != existing:
         _write_audit_replace_factory_codes(path, updated)
@@ -494,8 +784,7 @@ def _write_audit_replace_factory_codes(path: Path, values: list[str]) -> None:
             "schema_version: '1.0'\n"
             "backend_mechanism:\n"
             "  audit_replace:\n"
-            "    unit_factory_codes:\n"
-            + "".join(f'      - "{value}"\n' for value in values),
+            "    unit_factory_codes:\n" + "".join(f'      - "{value}"\n' for value in values),
             encoding="utf-8",
         )
         return
@@ -518,7 +807,7 @@ def _write_audit_replace_factory_codes(path: Path, values: list[str]) -> None:
     codes_index = _find_yaml_key(lines, "unit_factory_codes", 4, audit_index + 1, audit_end)
     replacement = _factory_code_yaml_block(values, include_parent=False)
     if codes_index is None:
-        lines[audit_index + 1:audit_index + 1] = replacement
+        lines[audit_index + 1 : audit_index + 1] = replacement
     else:
         codes_end = _find_yaml_sequence_block_end(lines, codes_index, 4)
         lines[codes_index:codes_end] = replacement

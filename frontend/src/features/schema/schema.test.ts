@@ -236,6 +236,120 @@ describe("normalizeFormSchema", () => {
     });
   });
 
+  it("normalizes management schema from backend YAML metadata", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: {
+        sections: [],
+      },
+      management: {
+        account: {
+          fields: {
+            office_code: "科室编码",
+            office_name: "科室",
+            account_id: "账号",
+            display_name: "姓名",
+            role: "角色",
+            password: "密码",
+          },
+          valid_roles: ["designer", "admin"],
+          admin_roles: ["admin"],
+          admin_created_default_password_configured: true,
+          ...({
+            admin_created_default_password: "must-never-normalize",
+          } as Record<string, unknown>),
+        },
+        workflow: {
+          terminal_status: "archived",
+          nodes: [
+            {
+              key: "quality_gate",
+              label: "质量复核",
+              assignee_source: "ied_reviewed_by",
+              factor_key: "quality_gate_factor",
+            },
+            {
+              key: "chief_review",
+              label: "总师审定",
+              assignee_source: "ied_approved_by",
+              factor_key: "chief_review_factor",
+            },
+          ],
+          status_labels: {
+            archived: "Archived",
+          },
+          node_labels: {
+            custom_review: "Custom Review",
+          },
+          empty_current_node_label: "No active node",
+          factor: {
+            default: 1.05,
+            min: 0.5,
+            max: 1.3,
+            precision: 3,
+          },
+        },
+        workload: {
+          settlement_trigger: "approval_terminal",
+          scope_roles: {
+            admin: ["admin"],
+          },
+          scope_labels: {
+            me: "Mine",
+            admin: "Admin",
+          },
+          status_options: [
+            { label: "All", value: "" },
+            { label: "Settled", value: "settled" },
+          ],
+        },
+        archive: {
+          status_labels: {
+            succeeded: "Archived",
+          },
+        },
+      },
+    });
+
+    expect(normalized.management?.account.validRoles).toEqual(["designer", "admin"]);
+    expect(normalized.management?.account.fieldMap.accountId).toBe("账号");
+    expect(normalized.management?.account.adminRoles).toEqual(["admin"]);
+    expect(normalized.management?.account.adminCreatedDefaultPasswordConfigured).toBe(true);
+    expect(normalized.management?.account).not.toHaveProperty("adminCreatedDefaultPassword");
+    expect(JSON.stringify(normalized)).not.toContain("must-never-normalize");
+    expect(normalized.management?.workflow.factor.max).toBe(1.3);
+    expect(normalized.management?.workflow.terminalStatus).toBe("archived");
+    expect(normalized.management?.workflow.nodes).toEqual([
+      {
+        nodeKey: "quality_gate",
+        nodeLabel: "质量复核",
+        roleField: "ied_reviewed_by",
+        factorKey: "quality_gate_factor",
+      },
+      {
+        nodeKey: "chief_review",
+        nodeLabel: "总师审定",
+        roleField: "ied_approved_by",
+        factorKey: "chief_review_factor",
+      },
+    ]);
+    expect(normalized.management?.workflow.statusLabels.archived).toBe("Archived");
+    expect(normalized.management?.workflow.nodeLabels.custom_review).toBe("Custom Review");
+    expect(normalized.management?.workflow.emptyCurrentNodeLabel).toBe("No active node");
+    expect(normalized.management?.workload.scopeRoles.admin).toEqual(["admin"]);
+    expect(normalized.management?.workload.scopeLabels.admin).toBe("Admin");
+    expect(normalized.management?.workload.statusOptions[1]).toEqual({
+      label: "Settled",
+      value: "settled",
+    });
+    expect(normalized.management?.archive?.statusLabels.succeeded).toBe("Archived");
+  });
+
   it("preserves combobox fields from form-schema instead of downgrading them to plain select metadata", () => {
     const normalized = normalizeFormSchema({
       schema_version: "frontend-form@1",
@@ -409,6 +523,141 @@ describe("normalizeFormSchema", () => {
       "河北分公司-建筑结构所-结构一室",
       "河北分公司-建筑结构所-建筑总图室",
     ]);
+  });
+  it("preserves the calculation-book slab checkbox and its boolean default", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "include_slab_stress",
+            label: "包含楼板应力",
+            type: "checkbox",
+            required: false,
+            default: false,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields).toEqual([
+      expect.objectContaining({
+        key: "include_slab_stress",
+        type: "checkbox",
+        defaultValue: "false",
+      }),
+    ]);
+  });
+
+  it("preserves YAML-backed level-code input constraints", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "level_code",
+            label: "层位码",
+            type: "text",
+            required: true,
+            placeholder: "例如：R",
+            pattern: "^[A-Za-z]$",
+            max_length: 1,
+            uppercase: true,
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields[0]).toEqual(
+      expect.objectContaining({
+        key: "level_code",
+        pattern: "^[A-Za-z]$",
+        maxLength: 1,
+        uppercase: true,
+      }),
+    );
+  });
+
+  it("preserves the calculation-book reinforcement source enum and safe default", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [
+          {
+            key: "reinforcement_source",
+            label: "配筋来源",
+            type: "select",
+            required: false,
+            default: "provided",
+            options: ["provided", "ai_suggested"],
+          },
+        ],
+      },
+    });
+
+    expect(normalized.calculationBook?.fields).toEqual([
+      expect.objectContaining({
+        key: "reinforcement_source",
+        type: "select",
+        defaultValue: "provided",
+        options: ["provided", "ai_suggested"],
+      }),
+    ]);
+  });
+
+  it("preserves all calculation-book archive formats supplied by the business schema", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [],
+        archive: {
+          accept: [".zip", ".rar", ".7z"],
+        },
+      },
+    });
+
+    expect(normalized.calculationBook?.archive.accept).toEqual([".zip", ".rar", ".7z"]);
+  });
+
+  it("falls back to every supported calculation-book archive format", () => {
+    const normalized = normalizeFormSchema({
+      schema_version: "frontend-form@1",
+      upload_limits: {
+        max_files: 50,
+        allowed_exts: [".dwg"],
+        max_total_mb: 2048,
+      },
+      deliverable: { sections: [] },
+      calculation_book: {
+        fields: [],
+      },
+    });
+
+    expect(normalized.calculationBook?.archive.accept).toEqual([".zip", ".rar", ".7z"]);
   });
 });
 

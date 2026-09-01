@@ -6,7 +6,7 @@ from pathlib import Path
 from ..archive.admin_config_store import AdminConfigStore
 from ..archive.identity import build_archive_identity
 from ..archive.overwrite_service import ArchiveOverwriteService
-from ..config import BusinessSpec, load_spec
+from ..config import BusinessSpec, load_mechanism_spec, load_spec
 from ..doc_gen.derivation import DerivationEngine
 from ..models import DocContext, GlobalDocParams, TaskGroup, normalize_global_doc_params
 from ..pipeline.group_manager import GroupManager
@@ -33,14 +33,6 @@ class TaskGroupSubmitConflicts:
 
 
 class TaskGroupSubmitGuards:
-    _ACTIVE_WORKFLOW_STATUSES = {
-        WorkflowStatus.SUBMITTED,
-        WorkflowStatus.IN_REVIEW,
-        WorkflowStatus.THREE_REVIEW_APPROVED,
-        WorkflowStatus.ARCHIVING,
-        WorkflowStatus.ARCHIVE_FAILED,
-    }
-
     def __init__(
         self,
         *,
@@ -108,7 +100,7 @@ class TaskGroupSubmitGuards:
             if other.workflow.status == WorkflowStatus.ARCHIVED or str(other.archive.status.value) == "succeeded":
                 archived_group_id = archived_group_id or other.group_id
                 continue
-            if other.workflow.status in self._ACTIVE_WORKFLOW_STATUSES:
+            if other.workflow.status.value in _active_workflow_status_values():
                 in_progress_group_id = in_progress_group_id or other.group_id
 
         archive_target_exists = bool(identity.archive_target and identity.archive_target.exists())
@@ -148,3 +140,11 @@ class TaskGroupSubmitGuards:
             revision=identity.revision,
             archive_target=archive_target.resolve() if archive_target is not None else None,
         )
+
+
+def _active_workflow_status_values() -> set[str]:
+    return {
+        str(status).strip()
+        for status in load_mechanism_spec().workflow_runtime.active_conflict_statuses
+        if str(status).strip()
+    }

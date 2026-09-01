@@ -10,11 +10,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient as FastApiTestClient
 
+from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
 from src.config import SpecLoader, reload_config
 from src.models import Job, JobStatus, JobType
 from src.pipeline.sqlite_queue import SQLiteQueueStore
+
+
+class TestClient(FastApiTestClient):
+    """Use the default administrator for tests of protected job endpoints."""
+
+    def __enter__(self):
+        client = super().__enter__()
+        response = client.post(
+            "/api/auth/login",
+            json={"account_id": "hbjjswd", "password": "password"},
+        )
+        assert response.status_code == 200, response.text
+        client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+        return client
 
 
 class RecordingProcessor:
@@ -24,6 +39,56 @@ class RecordingProcessor:
     def __call__(self, job: Job) -> None:
         self.calls += 1
         raise AssertionError("API process must not execute queued work")
+
+
+def test_worker_processor_routes_calculation_job_through_injected_executor(
+    tmp_path: Path,
+) -> None:
+    from API.app.runtime import PipelineJobProcessor
+
+    calls: list[Job] = []
+    fake_executor = SimpleNamespace(execute=lambda job: calls.append(job))
+    processor = PipelineJobProcessor(
+        calculation_book_executor_factory=lambda: fake_executor,
+    )
+    job = Job(
+        job_id="calculation-worker-job",
+        job_type=JobType.CALCULATION_BOOK,
+        project_no="JQ",
+        work_dir=tmp_path,
+    )
+
+    processor(job)
+
+    assert calls == [job]
+
+
+def test_worker_processor_default_path_constructs_calculation_executor(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import API.app.runtime as runtime_module
+
+    calls: list[Job] = []
+    constructions: list[bool] = []
+
+    def build_executor():
+        constructions.append(True)
+        return SimpleNamespace(execute=lambda job: calls.append(job))
+
+    monkeypatch.setattr(runtime_module, "CalculationBookJobExecutor", build_executor)
+    processor = runtime_module.PipelineJobProcessor()
+    job = Job(
+        job_id="calculation-default-worker-job",
+        job_type=JobType.CALCULATION_BOOK,
+        project_no="JQ",
+        work_dir=tmp_path,
+    )
+
+    processor(job)
+
+    assert constructions == [True]
+    assert calls == [job]
 
 
 def _configure_api_env(monkeypatch: Any, tmp_path: Path) -> Path:
@@ -381,6 +446,7 @@ def test_api_mode_detail_and_download_reload_worker_written_job_json(
 ) -> None:
     _configure_api_env(monkeypatch, tmp_path)
     from API.app.main import create_app
+
     from src.pipeline.job_manager import JobManager
 
     app = create_app(job_processor=RecordingProcessor(), process_jobs_in_api=False)
@@ -416,3 +482,92 @@ def test_api_mode_detail_and_download_reload_worker_written_job_json(
     assert detail["artifacts"]["package_download_url"] == f"/api/jobs/{job_id}/download/package"
     assert download_response.status_code == 200
     assert download_response.content == b"zip-result"
+
+
+def test_api_mode_reload_restores_ai_calculation_source_summary_and_log(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    from API.app.main import create_app
+
+    from src.config import get_config
+    from src.pipeline.job_manager import JobManager
+
+    manager = JobManager()
+    job = manager.create_job(
+        job_type=JobType.CALCULATION_BOOK.value,
+        project_no="JQ",
+        options={
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+            "ai_rebar_suggestion": True,
+            "ai_reinforcement_normalization": False,
+        },
+        params={"reinforcement_source": "ai_suggested"},
+        source_filename="cloud-images.rar",
+    )
+    job.work_dir = get_config().get_job_dir(job.job_id)
+    log_path = (
+        job.work_dir
+        / "calculation-book"
+        / "logs"
+        / f"calculation-book-{job.job_id}.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with CalculationBookDiagnosticLog.create(
+        log_path,
+        job_id=job.job_id,
+        correlation_id=job.job_id,
+        max_bytes=8_192,
+    ) as diagnostic_log:
+        diagnostic_log.write(
+            "task_completed",
+            duration_ms=1,
+            figure_count=1,
+            warning_count=0,
+            output_filename="result.docx",
+        )
+    job.artifacts.calculation_log = log_path
+    job.progress.details["ai_rebar_suggestion"] = {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "b" * 64,
+        "model": "structured-test",
+        "call_count": 4,
+        "suggested_direction_count": 12,
+        "blank_direction_count": 1,
+        "repair_round_count": 1,
+        "validation": "passed_with_warnings",
+    }
+    job.mark_succeeded()
+    manager.update_job(job)
+
+    app = create_app(job_processor=RecordingProcessor(), process_jobs_in_api=False)
+    with TestClient(app) as client:
+        detail_response = client.get(f"/api/jobs/{job.job_id}")
+        log_response = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["calculation_book_output"]["reinforcement_source"] == (
+        "ai_suggested"
+    )
+    assert detail["calculation_book_output"]["ai_rebar_suggestion"] == {
+        "skill_id": "recommend-rebar-from-smx",
+        "skill_version": "1.0.0",
+        "skill_sha256": "b" * 64,
+        "model": "structured-test",
+        "call_count": 4,
+        "suggested_direction_count": 12,
+        "blank_direction_count": 1,
+        "repair_round_count": 1,
+        "validation": "passed_with_warnings",
+    }
+    assert detail["artifacts"]["calculation_log_available"] is True
+    assert log_response.status_code == 200
+    assert json.loads(log_response.content.splitlines()[-1])["event"] == (
+        "task_completed"
+    )

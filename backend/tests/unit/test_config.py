@@ -16,6 +16,9 @@ class TestSpecLoader:
     def test_load_spec(self, spec: BusinessSpec):
         """测试加载规范"""
         assert spec.schema_version == "2.0"
+        postprocess = spec.titleblock_extract["replace_postprocess"]
+        assert postprocess["target_status"] == "CFC"
+        assert postprocess["status_pattern"] == "^[A-Z]{2,6}$"
 
     def test_get_paper_variants(self, spec: BusinessSpec):
         """测试获取图幅配置"""
@@ -201,6 +204,7 @@ class TestRuntimeConfig:
         assert runtime_config.audit_check.generic_identifier_like.regex == r"^[A-Z]{3}\d{4}[A-Z]$"
         assert runtime_config.audit_check.generic_identifier_like.exempt_embed_patterns == [
             r"^[A-Z]{3}\d{4}[A-Z]$",
+            r"^(?:[0-9][A-Z]{2})[A-Z]{3}\d{4}[A-Z][,，]?$",
         ]
         assert runtime_config.audit_check.context_rules.date_like[0] == r"^\d{4}[-/.]\d{1,2}$"
         assert runtime_config.audit_check.matching_policy.suppress_project_no_in_dimension_like is True
@@ -694,6 +698,10 @@ runtime_options:
         assert unit_consistency.unit_no_pattern == "^[0-9]$"
         assert "external_code_pattern" in unit_consistency.model_fields_set
         assert "unit_no" in unit_consistency.external_code_pattern
+        assert unit_consistency.protected_unit_text_patterns["1907"]
+        assert unit_consistency.additional_unit_text_patterns == [
+            r"(?P<unit_no>[0-9])\s*反\s*应\s*堆",
+        ]
 
     def test_runtime_standard_review_reads_values_from_yaml(self):
         """规范审查的开关、规范库路径和 y 容差应由运行期 YAML 提供。"""
@@ -769,6 +777,28 @@ runtime_options:
         assert change_page.archive_extractor.fallback_executables == [
             (repo_root / "build" / "runtime-cache" / "7-Zip" / "7z.exe").resolve()
         ]
+
+    def test_change_page_extract_archive_path_env_override_keeps_path_type(
+        self,
+        monkeypatch,
+        tmp_path: Path,
+    ) -> None:
+        executable = tmp_path / "7-Zip" / "7z.exe"
+        monkeypatch.setenv(
+            "FANBAN_CHANGE_PAGE_EXTRACT__ARCHIVE_EXTRACTOR__EXECUTABLE",
+            str(executable),
+        )
+
+        repo_root = Path(__file__).resolve().parents[3]
+        config = RuntimeConfig.from_yaml(
+            repo_root / "documents" / "参数规范_运行期.yaml"
+        )
+
+        assert config.change_page_extract.archive_extractor.executable == executable
+        assert isinstance(
+            config.change_page_extract.archive_extractor.executable,
+            Path,
+        )
 
     def test_archive_extractor_prefers_existing_primary_then_development_fallback(self, tmp_path):
         from src.config.runtime_config import ArchiveExtractorRuntimeConfig

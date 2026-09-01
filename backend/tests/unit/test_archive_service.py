@@ -83,3 +83,6 @@ def test_archive_service_copies_outputs_to_archive_root(monkeypatch, tmp_path, s
     assert (target_dir / "package.zip").exists()
     assert (target_dir / "ied.xlsx").exists()
     assert group.archive.status.value == "succeeded"
+    persisted = group_manager.reload_group(group.group_id)
+    assert persisted is not None
+    assert persisted.archive.status.value == "pending"

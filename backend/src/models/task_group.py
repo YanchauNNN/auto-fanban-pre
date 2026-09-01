@@ -20,6 +20,7 @@ from .task_group_management import (
 
 class TaskGroup(BaseModel):
     group_id: str = Field(..., description="top-level task group id")
+    state_version: int = Field(default=0, ge=0)
     batch_id: str | None = None
     source_filenames: list[str] = Field(default_factory=list)
     project_no: str

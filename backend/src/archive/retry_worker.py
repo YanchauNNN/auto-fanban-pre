@@ -1,22 +1,24 @@
 from __future__ import annotations
 
+import logging
 import threading
 
 from ..config import RuntimeConfig, get_config
 from ..pipeline.group_manager import GroupManager
-from .models import ArchiveStatus
-from .service import ArchiveService
+from ..task_groups.archive_coordinator import TaskGroupArchiveCoordinator
+
+logger = logging.getLogger(__name__)
 
 
 class ArchiveRetryWorker:
     def __init__(
         self,
         *,
-        archive_service: ArchiveService,
+        archive_coordinator: TaskGroupArchiveCoordinator,
         group_manager: GroupManager,
         config: RuntimeConfig | None = None,
     ) -> None:
-        self.archive_service = archive_service
+        self.archive_coordinator = archive_coordinator
         self.group_manager = group_manager
         self.config = config or get_config()
         self._stop_event = threading.Event()
@@ -33,14 +35,28 @@ class ArchiveRetryWorker:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=2)
+            if self._thread.is_alive():
+                logger.warning("archive retry worker did not stop")
 
     def _loop(self) -> None:
         interval = max(int(self.config.management.archive_retry_interval_seconds), 1)
         while not self._stop_event.wait(interval):
-            for group in self.group_manager.load_all_groups():
-                if group.archive.status != ArchiveStatus.FAILED:
-                    continue
-                try:
-                    self.archive_service.archive_group(group)
-                except Exception as exc:  # noqa: BLE001
-                    self.archive_service.mark_failed(group, str(exc))
+            try:
+                self.run_once()
+            except Exception:  # noqa: BLE001
+                logger.exception("archive retry publication failed")
+
+    def run_once(self) -> int:
+        attempted = 0
+        for group in self.group_manager.load_all_groups():
+            if not self.archive_coordinator.needs_archive_reconciliation(group):
+                continue
+            attempted += 1
+            try:
+                self.archive_coordinator.complete(group)
+            except Exception:  # noqa: BLE001
+                logger.exception("archive reconciliation failed: %s", group.group_id)
+        return attempted
+
+    def retry_failed_once(self) -> int:
+        return self.run_once()

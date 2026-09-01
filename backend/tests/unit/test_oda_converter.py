@@ -40,6 +40,32 @@ def test_dxf_to_dwg_uses_requested_target_version(
     assert captured["cmd"][3] == "ACAD2013"
 
 
+def test_dxf_to_dwg_rejects_truncated_ascii_dxf_before_converter_runs(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    exe_path = tmp_path / "ODAFileConverter.exe"
+    exe_path.write_text("stub", encoding="utf-8")
+    dxf_path = tmp_path / "truncated.dxf"
+    dxf_path.write_text("0\nSECTION\n2\nENTITIES\n0\nTEXT\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+    converter_called = False
+
+    def _fake_run(cmd, **kwargs):
+        nonlocal converter_called
+        converter_called = True
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    converter = ODAConverter(exe_path=str(exe_path), timeout=1)
+    with pytest.raises(ConversionError, match="DXF.*EOF"):
+        converter.dxf_to_dwg(dxf_path, output_dir)
+
+    assert converter_called is False
+    assert not output_dir.exists()
+
+
 def test_dwg_to_dxf_subprocess_uses_safe_output_decoding(
     tmp_path: Path,
     monkeypatch,

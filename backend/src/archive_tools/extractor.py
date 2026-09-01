@@ -258,9 +258,13 @@ def _validate_limits(
         total += member.size
         if total > limits.max_total_bytes:
             raise InvalidArchive("压缩包解压后总大小超过限制")
-        if compressed_sizes is not None and member.size > 0:
-            if member.size / max(compressed_sizes[index], 1) > limits.max_compression_ratio:
-                raise InvalidArchive("压缩包压缩比异常")
+        if (
+            compressed_sizes is not None
+            and member.size > 0
+            and member.size / max(compressed_sizes[index], 1)
+            > limits.max_compression_ratio
+        ):
+            raise InvalidArchive("压缩包压缩比异常")
     if not any(not member.is_directory for member in members):
         raise InvalidArchive("压缩包中没有文件")
     _validate_member_topology(members)

@@ -291,6 +291,134 @@ def test_rewrite_target_unit_text_limits_short_factory_codes_to_whitelist() -> N
     )
 
 
+def test_rewrite_target_unit_text_expands_parallel_factory_code_groups() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "6RC 6RX",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "5RC 5RX"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "6NH 6NX",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["NH"],
+        )
+        == "5NH 5NX"
+    )
+
+
+def test_rewrite_target_unit_text_protects_plant_identity_but_rewrites_reactor() -> None:
+    assert (
+        rewrite_target_unit_text(
+            "三门核电厂5、6号机组的6反应堆厂房安全壳",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "三门核电厂5、6号机组的5反应堆厂房安全壳"
+    )
+    assert (
+        rewrite_target_unit_text(
+            "三门核电项目5、6号机组",
+            target_project_no="1907",
+            source_unit_no="6",
+            target_unit_no="5",
+            unit_factory_codes=["RC"],
+        )
+        == "三门核电项目5、6号机组"
+    )
+
+
+def test_rewrite_target_unit_text_preserves_mtext_formatting_in_protected_span() -> None:
+    source = (
+        r"三 门 核 电 项 目 {\fTimes New Roman|b0|i0|c0|p18;5}、"
+        r"{\fTimes New Roman|b0|i0|c0|p18;6\fTimes New Roman|b0|i0|c161|p18; }"
+        r"号 机 组的6反应堆"
+    )
+
+    assert rewrite_target_unit_text(
+        source,
+        target_project_no="1907",
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    ) == source.replace("的6反应堆", "的5反应堆")
+
+
+def test_audit_replace_applies_protected_plant_pair_and_reactor_unit_together(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_env(monkeypatch, tmp_path)
+    source_text = "1.本设计为三门核电厂5、6号机组的6反应堆厂房安全壳(RC)结构施工图。"
+    source_dxf = tmp_path / "protected-unit-source.dxf"
+    output_dxf = tmp_path / "protected-unit-output.dxf"
+    doc = ezdxf.new("R2018")
+    entity = doc.modelspace().add_text(source_text)
+    doc.saveas(source_dxf)
+
+    lexicon = AuditLexicon(
+        project_options=["1907"],
+        allowed_texts={"1907": set()},
+        foreign_texts={"1907": set()},
+        token_projects={},
+    )
+    findings = AuditMatchEngine(lexicon).evaluate(
+        project_no="1907",
+        unit_no="5",
+        items=[
+            ScanTextItem(
+                raw_text=source_text,
+                entity_type="DBText",
+                entity_handle=entity.dxf.handle,
+            ),
+        ],
+    )
+    mapping = ReplaceMapping(source_project_no="1907", target_project_no="1907")
+    executor = AuditReplaceExecutor()
+    entries = executor._build_replace_entries(
+        findings,
+        mapping,
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    )
+
+    executor._apply_replacements(
+        source_dxf=source_dxf,
+        output_dxf=output_dxf,
+        entries=entries,
+        target_project_no="1907",
+        source_unit_no="6",
+        target_unit_no="5",
+        unit_factory_codes=["RC"],
+    )
+
+    replaced = ezdxf.readfile(output_dxf).entitydb.get(entity.dxf.handle)
+    assert replaced is not None
+    assert replaced.dxf.text == source_text.replace("6反应堆", "5反应堆")
+    assert [(entry["matched_text"], entry["replacement_text"]) for entry in entries] == [
+        ("6反应堆", "5反应堆"),
+    ]
+
+
+def test_audit_replace_executor_expands_selected_factory_code_from_yaml() -> None:
+    assert AuditReplaceExecutor._unit_factory_codes(
+        {"unit_factory_codes": ["RC"]}
+    ) == ["RC", "RX"]
+    assert AuditReplaceExecutor._unit_factory_codes(
+        {"unit_factory_codes": ["NH"]}
+    ) == ["NH", "NX"]
+
+
 def test_audit_replace_executor_rewrites_target_units_after_factory_index_output(
     tmp_path: Path,
     monkeypatch,
@@ -975,6 +1103,253 @@ def test_audit_replace_executor_clears_date_on_non_target_revision_row() -> None
     assert by_handle["DATE_A"]["replacement_text"] == "2026.06"
     assert by_handle["DATE_B"]["replacement_text"] == ""
     assert by_handle["REV_B"]["replacement_text"] == ""
+
+
+def test_audit_replace_executor_forces_cfc_on_lowest_revision_row_and_clears_other_statuses() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="B",
+            entity_type="DBText",
+            entity_handle="REV_B",
+            field_context="titleblock_revision",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="IFI",
+            entity_type="DBText",
+            entity_handle="STATUS_A",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="CFC",
+            entity_type="DBText",
+            entity_handle="STATUS_B",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+        ScanTextItem(
+            raw_text="Qxxx",
+            entity_type="DBText",
+            entity_handle="STATUS_NOISE_CODE",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=90.0,
+        ),
+        ScanTextItem(
+            raw_text="并应用聚合物水泥砂浆抹平。",
+            entity_type="DBText",
+            entity_handle="STATUS_NOISE_TEXT",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=95.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.08",
+        target_revision="A",
+        target_status="CFC",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+
+    assert by_handle["STATUS_A"]["replacement_text"] == "CFC"
+    assert by_handle["STATUS_B"]["replacement_text"] == ""
+    assert "STATUS_NOISE_CODE" not in by_handle
+    assert "STATUS_NOISE_TEXT" not in by_handle
+
+
+def test_audit_replace_executor_does_not_rewrite_retained_cfc_status() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="CFC",
+            entity_type="DBText",
+            entity_handle="STATUS_A",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.08",
+        target_revision="A",
+        target_status="CFC",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+
+    assert all(entry["entity_handle"] != "STATUS_A" for entry in entries)
+
+
+def test_audit_replace_executor_normalizes_lowercase_target_status() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="A",
+            entity_type="DBText",
+            entity_handle="REV_A",
+            field_context="titleblock_revision",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="cfc",
+            entity_type="DBText",
+            entity_handle="STATUS_A",
+            field_context="titleblock_status",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.08",
+        target_revision="A",
+        target_status="CFC",
+        target_revision_description="首次出版",
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+    assert by_handle["STATUS_A"]["replacement_text"] == "CFC"
+
+
+def test_audit_replace_executor_keeps_initial_revision_description_row() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="初版",
+            entity_type="MText",
+            entity_handle="DESC_A",
+            field_context="titleblock_revision_description",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=100.0,
+        ),
+        ScanTextItem(
+            raw_text="根据三维资料单进行升版",
+            entity_type="MText",
+            entity_handle="DESC_B",
+            field_context="titleblock_revision_description",
+            internal_code="20169QF-JGS03-001",
+            layout_name="Model",
+            position_y=300.0,
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_titleblock_standardization_entries(
+        items=items,
+        existing_entries=[],
+        issue_month_text="2026.08",
+        target_revision="A",
+        target_status="CFC",
+        target_revision_description="首次出版",
+        revision_description_keywords=["初版", "出版", "升版"],
+        date_pattern=r"\d{4}\.\d{2}",
+    )
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+
+    assert by_handle["DESC_A"]["replacement_text"] == "首次出版"
+    assert by_handle["DESC_B"]["replacement_text"] == ""
+
+
+def test_audit_replace_executor_strips_revision_suffix_from_complete_internal_codes() -> None:
+    items = [
+        ScanTextItem(
+            raw_text="20169QF-JGS03-001(B)",
+            entity_type="DBText",
+            entity_handle="HALF-WIDTH",
+        ),
+        ScanTextItem(
+            raw_text="20161NH-JGS47（c版）",
+            entity_type="MText",
+            entity_handle="FULL-WIDTH",
+        ),
+        ScanTextItem(
+            raw_text="详见附图（B版）",
+            entity_type="DBText",
+            entity_handle="PROSE",
+        ),
+    ]
+
+    entries = AuditReplaceExecutor._build_internal_code_revision_suffix_entries(
+        items=items,
+        existing_entries=[],
+        pattern=(
+            r"^(?P<code>\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2})\s*"
+            r"(?:\(\s*[A-Z]\s*(?:版)?\s*\)|（\s*[A-Z]\s*(?:版)?\s*）)$"
+        ),
+    )
+    by_handle = {entry["entity_handle"]: entry for entry in entries}
+
+    assert by_handle["HALF-WIDTH"]["replacement_text"] == "20169QF-JGS03-001"
+    assert by_handle["FULL-WIDTH"]["replacement_text"] == "20161NH-JGS47"
+    assert "PROSE" not in by_handle
+
+
+def test_internal_code_revision_suffix_is_not_blocked_by_project_replacement_on_same_handle() -> None:
+    item = ScanTextItem(
+        raw_text="20169QF-JGS03-001(B)",
+        entity_type="DBText",
+        entity_handle="COMBINED",
+    )
+    existing_entries = [
+        {
+            "status": "pending",
+            "entity_handle": "COMBINED",
+            "matched_text": "2016",
+            "replacement_text": "1907",
+            "message": "",
+        }
+    ]
+
+    entries = AuditReplaceExecutor._build_internal_code_revision_suffix_entries(
+        items=[item],
+        existing_entries=existing_entries,
+        pattern=(
+            r"^(?P<code>\d{4}[A-Z0-9]+(?:-[A-Z0-9]+){1,2})\s*"
+            r"(?:\(\s*[A-Z]\s*(?:版)?\s*\)|（\s*[A-Z]\s*(?:版)?\s*）)$"
+        ),
+    )
+
+    assert len(entries) == 1
+    assert entries[0]["entity_handle"] == "COMBINED"
 
 
 def test_derive_replaced_dwg_filename_appends_target_project_when_source_project_absent() -> None:

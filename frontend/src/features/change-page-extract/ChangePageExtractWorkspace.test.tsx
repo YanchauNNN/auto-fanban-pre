@@ -155,4 +155,38 @@ describe("ChangePageExtractWorkspace", () => {
     expect(await screen.findByText("仅支持 ZIP、RAR、7z 压缩包。")).toBeInTheDocument();
     expect(createChangePageExtract).not.toHaveBeenCalled();
   });
+
+  it("rejects more than fifty archives before submitting", async () => {
+    const createChangePageExtract = vi.fn();
+    const adapter = { createChangePageExtract } as unknown as ApiAdapter;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const user = userEvent.setup();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ChangePageExtractWorkspace
+          adapter={adapter}
+          isOpen
+          onBatchCreated={() => {}}
+          onClose={() => {}}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("选择变更页码压缩包"), {
+      target: {
+        files: Array.from(
+          { length: 51 },
+          (_, index) => new File(["zip"], `第${index + 1}批.zip`, { type: "application/zip" }),
+        ),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "开始提取" }));
+
+    expect(await screen.findByText("一次最多选择 50 个压缩包。"))
+      .toBeInTheDocument();
+    expect(createChangePageExtract).not.toHaveBeenCalled();
+  });
 });

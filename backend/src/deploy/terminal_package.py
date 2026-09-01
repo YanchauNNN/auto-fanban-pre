@@ -4,24 +4,54 @@ import hashlib
 import json
 import os
 import shutil
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
+import yaml
+
+from ..ai.ansys_mapdl_skill import (
+    ANSYS_MAPDL_SKILL_ID,
+)
+from ..ai.ansys_mapdl_skill import (
+    install_skill_archive as install_ansys_mapdl_skill_archive,
+)
+from ..ai.building_standards_skill import (
+    BUILDING_STANDARDS_SKILL_DIR,
+    BUILDING_STANDARDS_SKILL_ID,
+)
+from ..ai.building_standards_skill import (
+    install_skill_archive as install_building_standards_skill_archive,
+)
+from ..ai.reinforcement_table_skill import (
+    REINFORCEMENT_TABLE_SKILL_DIR,
+    REINFORCEMENT_TABLE_SKILL_ID,
+)
+from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
+from ..cad.plot_resource_manager import PDF2_PMP_NAME
+from ..config.ai.ai_spec import AiSpecLoader
 from ..config.mechanism_spec import (
     DeploymentMechanismConfig,
     MechanismSpecLoader,
     load_mechanism_spec,
 )
-from ..cad.plot_asset_validation import is_valid_pc3_file, is_valid_pmp_file
-from ..cad.plot_resource_manager import PDF2_PMP_NAME
-from .archive_runtime import archive_runtime_copy_plan
+from .archive_runtime import archive_runtime_copy_plan, validate_deployed_archive_runtime
 
 _DEFAULT_DEPLOYMENT_MECHANISM = DeploymentMechanismConfig()
 SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.spec_name
 RUNTIME_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.runtime_spec_name
 MECHANISM_SPEC_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.mechanism_spec_name
 TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
+AI_SPEC_NAME = "参数规范_AI.yaml"
+AI_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB = "ansys-mapdl-18-2-private-offline-*.zip"
+ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
+BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB = (
+    "building-structure-standards-private-offline-*.zip"
+)
+BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 PYTHON_PACKAGES_DEST = Path("python-packages") / "Lib" / "site-packages"
@@ -37,8 +67,11 @@ DEPLOY_IGNORE_PATTERNS = (
     "*.lscache",
     ".build_packages",
     "~$*",
+    ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB,
+    BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB,
 )
 PACKAGE_MANIFEST = "package-manifest.json"
+DEFAULT_TERMINAL_DEPLOY_ARCHIVE_NAME = "AI测试终端部署包.zip"
 DELTA_DIR_NAME = "_delta"
 DELTA_MANIFEST = "delta-manifest.json"
 DELTA_OVERWRITE_LIST = "覆盖清单.txt"
@@ -47,6 +80,27 @@ DELTA_USAGE = "使用说明.txt"
 MANAGED_PDF2_PC3_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_pdf2_pc3_name
 MANAGED_MONOCHROME_CTB_NAME = _DEFAULT_DEPLOYMENT_MECHANISM.managed_monochrome_ctb_name
 DEFAULT_FRONTEND_API_PORT = _DEFAULT_DEPLOYMENT_MECHANISM.default_frontend_api_port
+REBAR_SUGGESTION_SKILL_ID = "recommend-rebar-from-smx"
+REBAR_SUGGESTION_SKILL_ROOT = Path("tools/ai/recommend-rebar-from-smx")
+REBAR_SUGGESTION_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("agents/openai.yaml"),
+    Path("references/io-schema.md"),
+    Path("references/ranking-rules.md"),
+    Path("scripts/validate_fixtures.py"),
+)
+BUSINESS_PROBE_ENTRYPOINTS = {
+    "account_workload": "scripts/probe_business_modules.ps1",
+    "all": "scripts/run_deployment_probes.ps1",
+    "calculation_book": "scripts/probe_calculation_book.ps1",
+    "environment": "scripts/check_health.ps1",
+}
+BUSINESS_PROBE_SOURCE_FILES = (
+    "probe_business_modules.ps1",
+    "probe_calculation_book.ps1",
+    "run_deployment_probes.ps1",
+    "smoke_calculation_book_ai_suggestion.py",
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +113,13 @@ class CopyPlanEntry:
 class DeployArtifacts:
     full_root: Path
     delta_root: Path
+
+
+@dataclass(frozen=True)
+class DeployZipArtifact:
+    archive_path: Path
+    sha256_path: Path
+    sha256: str
 
 
 def _deployment_mechanism(root: Path | None = None) -> DeploymentMechanismConfig:
@@ -124,13 +185,38 @@ def gather_copy_plan(repo_root: Path) -> list[CopyPlanEntry]:
             repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME,
             Path("documents") / TERMINAL_INSTALL_PLAN_NAME,
         ),
+        CopyPlanEntry(repo_root / "documents" / "AI", Path("documents") / "AI"),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_SPEC_NAME,
+            Path("documents") / "AI" / AI_SPEC_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "documents" / "AI" / AI_GATEWAY_CONFIG_NAME,
+            Path("documents") / "AI" / AI_GATEWAY_CONFIG_NAME,
+        ),
         CopyPlanEntry(repo_root / "documents_bin", Path("documents_bin")),
         CopyPlanEntry(repo_root / "tools" / "probe_target_env.ps1", Path("scripts") / "probe_target_env.ps1"),
+        *(
+            CopyPlanEntry(repo_root / "tools" / filename, Path("scripts") / filename)
+            for filename in BUSINESS_PROBE_SOURCE_FILES
+        ),
         CopyPlanEntry(repo_root / "tools" / "cad_env_fingerprint.ps1", Path("scripts") / "cad_env_fingerprint.ps1"),
         CopyPlanEntry(repo_root / "tools" / "cad_env_sync.ps1", Path("scripts") / "cad_env_sync.ps1"),
         CopyPlanEntry(
             repo_root / "tools" / "diagnose_iis_frontend_503.ps1",
             Path("tools") / "diagnose_iis_frontend_503.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1",
+            Path("scripts") / "test_ai_model_connectivity.ps1",
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+            Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        ),
+        CopyPlanEntry(
+            repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+            Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
         ),
     ]
     if deployment.archive_runtime is not None:
@@ -146,6 +232,25 @@ def _ensure_exists(copy_plan: list[CopyPlanEntry]) -> None:
     if missing:
         joined = "\n".join(missing)
         raise FileNotFoundError(f"离线部署包缺少必要源文件/目录:\n{joined}")
+
+
+def _validate_calculation_book_template_sync(repo_root: Path) -> None:
+    canonical = repo_root / "documents_bin" / "计算书模板文件.xlsx"
+    runtime_copy = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    if not canonical.is_file() or not runtime_copy.is_file():
+        return
+    if hashlib.sha256(canonical.read_bytes()).digest() != hashlib.sha256(
+        runtime_copy.read_bytes()
+    ).digest():
+        raise ValueError(
+            "计算书标准配筋模板内容不一致：请先同步 documents_bin/计算书模板文件.xlsx "
+            "与 documents_bin/calculation_book/计算书模板文件.xlsx"
+        )
 
 
 def _validate_frontend_preview_assets(repo_root: Path) -> None:
@@ -223,6 +328,206 @@ def _copy_entry(entry: CopyPlanEntry, output_root: Path) -> None:
     else:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(entry.source, target)
+
+
+def _materialize_ansys_mapdl_skill(repo_root: Path, output_root: Path) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == ANSYS_MAPDL_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError("ANSYS MAPDL Skill root must be a package-relative path")
+    target = output_root / relative_root
+    source = repo_root / relative_root
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target, ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS))
+        return
+
+    archives = sorted((repo_root / "documents" / "AI").glob(ANSYS_MAPDL_PRIVATE_ARCHIVE_GLOB))
+    if not archives:
+        raise FileNotFoundError(
+            "ANSYS MAPDL 18.2 Skill 已启用，但未找到 storage 语料或私人离线包。"
+            "请先运行 tools/ai/install_ansys_mapdl_skill.ps1。"
+        )
+    install_ansys_mapdl_skill_archive(archives[-1], target)
+
+
+def _materialize_building_standards_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == BUILDING_STANDARDS_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError(
+            "Building standards Skill root must be a package-relative path"
+        )
+    target = output_root / relative_root
+    candidates = (
+        repo_root / relative_root,
+        repo_root / "tools" / "ai" / BUILDING_STANDARDS_SKILL_DIR,
+    )
+    source = next((candidate for candidate in candidates if candidate.is_dir()), None)
+    if source is not None:
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(
+            source,
+            target,
+            ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+        )
+        return
+
+    archives = sorted(
+        [
+            *repo_root.glob(
+                f"build/{BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB}"
+            ),
+            *(repo_root / "documents" / "AI").glob(
+                BUILDING_STANDARDS_PRIVATE_ARCHIVE_GLOB
+            ),
+        ]
+    )
+    if not archives:
+        raise FileNotFoundError(
+            "建筑结构总图规范 Skill 已启用，但未找到 storage 语料、"
+            "tools/ai 源目录或私人离线包。"
+            "请先运行 tools/ai/package_building_standards_skill.py。"
+        )
+    install_building_standards_skill_archive(archives[-1], target)
+
+
+def _materialize_reinforcement_table_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    spec = AiSpecLoader.load(repo_root / "documents" / "AI" / AI_SPEC_NAME)
+    configured = next(
+        (
+            skill
+            for skill in spec.ai_layer.chat.skills
+            if skill.enabled and skill.handler == REINFORCEMENT_TABLE_SKILL_ID
+        ),
+        None,
+    )
+    if configured is None:
+        return
+
+    relative_root = Path(configured.root)
+    if not configured.root or relative_root.is_absolute() or ".." in relative_root.parts:
+        raise ValueError(
+            "Reinforcement table Skill root must be a package-relative path"
+        )
+    target = output_root / relative_root
+    candidates = (
+        repo_root / relative_root,
+        repo_root / "tools" / "ai" / REINFORCEMENT_TABLE_SKILL_DIR,
+    )
+    source = next((candidate for candidate in candidates if candidate.is_dir()), None)
+    required_files = (
+        Path("SKILL.md"),
+        Path("references") / "normalization-rules.md",
+    )
+    if source is None or not all(
+        (source / relative).is_file() for relative in required_files
+    ):
+        raise FileNotFoundError(
+            "墙体配筋表规范化 Skill 已启用，但本地规则包不完整。"
+            "请检查 tools/ai/reinforcement-table-normalizer。"
+        )
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+    )
+
+
+def _configured_rebar_suggestion_skill_root(repo_root: Path) -> Path:
+    runtime_path = repo_root / "documents" / RUNTIME_SPEC_NAME
+    payload = yaml.safe_load(runtime_path.read_text(encoding="utf-8")) or {}
+    try:
+        configured = payload["runtime_options"]["calculation_book"][
+            "ai_suggestion"
+        ]["skill_root"]["default"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} skill_root is missing from "
+            f"{runtime_path.name}"
+        ) from exc
+
+    configured_text = str(configured).strip()
+    relative_root = Path(configured_text)
+    if (
+        not configured_text
+        or relative_root.is_absolute()
+        or ".." in relative_root.parts
+    ):
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} skill_root must be a package-relative path"
+        )
+    if relative_root.as_posix() != REBAR_SUGGESTION_SKILL_ROOT.as_posix():
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} has one supported source root: "
+            f"{REBAR_SUGGESTION_SKILL_ROOT.as_posix()}"
+        )
+    return relative_root
+
+
+def _materialize_rebar_suggestion_skill(
+    repo_root: Path,
+    output_root: Path,
+) -> None:
+    relative_root = _configured_rebar_suggestion_skill_root(repo_root)
+    source = repo_root / relative_root
+    missing = [
+        relative.as_posix()
+        for relative in REBAR_SUGGESTION_REQUIRED_FILES
+        if not (source / relative).is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            f"{REBAR_SUGGESTION_SKILL_ID} payload is incomplete; missing: "
+            + ", ".join(missing)
+        )
+
+    skill_text = (source / "SKILL.md").read_text(encoding="utf-8")
+    if f"name: {REBAR_SUGGESTION_SKILL_ID}" not in skill_text:
+        raise ValueError(
+            f"{REBAR_SUGGESTION_SKILL_ID} SKILL.md frontmatter name is invalid"
+        )
+
+    target = output_root / relative_root
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(
+        source,
+        target,
+        ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+    )
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -364,10 +669,203 @@ def write_package_manifest(package_root: Path, *, package_kind: str) -> dict[str
         "generated_at_utc": _timestamp_utc(),
         "package_kind": package_kind,
         "file_count": len(file_map),
+        "business_probes": {
+            "schema_version": "fanban-deployment-probes@1",
+            "entrypoints": dict(BUSINESS_PROBE_ENTRYPOINTS),
+        },
         "files": [file_map[key] for key in sorted(file_map)],
     }
     _write_json(package_root / PACKAGE_MANIFEST, manifest)
     return manifest
+
+
+def _read_package_manifest(package_root: Path) -> dict[str, object]:
+    manifest_path = package_root / PACKAGE_MANIFEST
+    if not manifest_path.is_file():
+        raise ValueError(f"package manifest 不存在: {manifest_path}")
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"package manifest 无法读取: {manifest_path}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("files"), list):
+        raise ValueError("package manifest 缺少 files 列表")
+    return payload
+
+
+def _manifest_file_map(package_root: Path) -> dict[str, dict[str, object]]:
+    manifest = _read_package_manifest(package_root)
+    file_map: dict[str, dict[str, object]] = {}
+    for raw_entry in manifest["files"]:
+        if not isinstance(raw_entry, dict):
+            raise ValueError("package manifest files 条目格式无效")
+        path = raw_entry.get("path")
+        size = raw_entry.get("size")
+        sha256 = raw_entry.get("sha256")
+        if (
+            not isinstance(path, str)
+            or not path
+            or not isinstance(size, int)
+            or size < 0
+            or not isinstance(sha256, str)
+            or len(sha256) != 64
+        ):
+            raise ValueError("package manifest files 条目字段无效")
+        if path in file_map:
+            raise ValueError(f"package manifest 存在重复路径: {path}")
+        file_map[path] = raw_entry
+    if manifest.get("file_count") != len(file_map):
+        raise ValueError("package manifest file_count 与 files 列表不一致")
+    return file_map
+
+
+def _hash_archive_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
+    digest = hashlib.sha256()
+    with archive.open(info, "r") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_terminal_deploy_zip(package_root: Path, archive_path: Path) -> None:
+    manifest_files = _manifest_file_map(package_root)
+    source_files = {
+        path.relative_to(package_root).as_posix(): path
+        for path in _iter_package_files(package_root)
+    }
+    expected_source_files = set(manifest_files) | {PACKAGE_MANIFEST}
+    if set(source_files) != expected_source_files:
+        missing = sorted(expected_source_files - set(source_files))
+        extra = sorted(set(source_files) - expected_source_files)
+        raise ValueError(
+            f"package manifest 与部署目录不一致: missing={missing[:5]}, extra={extra[:5]}"
+        )
+
+    prefix = f"{package_root.name}/"
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        bad_member = archive.testzip()
+        if bad_member is not None:
+            raise ValueError(f"部署 ZIP CRC 校验失败: {bad_member}")
+
+        infos = archive.infolist()
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            raise ValueError("部署 ZIP 存在重复路径")
+        for info in infos:
+            if any(ord(character) > 127 for character in info.filename) and not (
+                info.flag_bits & 0x800
+            ):
+                raise ValueError(f"部署 ZIP 中文路径缺少 UTF-8 标志: {info.filename}")
+            if not info.filename.startswith(prefix):
+                raise ValueError(f"部署 ZIP 条目不在 {prefix} 下: {info.filename}")
+
+        archive_files = {
+            info.filename[len(prefix) :]: info for info in infos if not info.is_dir()
+        }
+        if set(archive_files) != expected_source_files:
+            missing = sorted(expected_source_files - set(archive_files))
+            extra = sorted(set(archive_files) - expected_source_files)
+            raise ValueError(
+                f"部署 ZIP 与 package manifest 文件集合不一致: "
+                f"missing={missing[:5]}, extra={extra[:5]}"
+            )
+
+        manifest_info = archive_files[PACKAGE_MANIFEST]
+        if archive.read(manifest_info) != source_files[PACKAGE_MANIFEST].read_bytes():
+            raise ValueError("部署 ZIP 内 package manifest 与部署目录不一致")
+
+        for relative_path, manifest_entry in manifest_files.items():
+            info = archive_files[relative_path]
+            if info.file_size != manifest_entry["size"]:
+                raise ValueError(f"package manifest 文件大小不一致: {relative_path}")
+            if _hash_archive_member(archive, info) != manifest_entry["sha256"]:
+                raise ValueError(f"package manifest SHA-256 不一致: {relative_path}")
+
+
+def publish_terminal_deploy_zip(
+    *,
+    package_root: Path,
+    archive_path: Path,
+) -> DeployZipArtifact:
+    package_root = package_root.resolve()
+    archive_path = archive_path.resolve()
+    if not package_root.is_dir():
+        raise ValueError(f"部署目录不存在: {package_root}")
+    _manifest_file_map(package_root)
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid4().hex
+    temporary_archive = archive_path.with_name(f".{archive_path.name}.{token}.tmp")
+    sha256_path = archive_path.with_name(f"{archive_path.name}.sha256")
+    temporary_sha256 = sha256_path.with_name(f".{sha256_path.name}.{token}.tmp")
+    backup_archive = archive_path.with_name(f".{archive_path.name}.{token}.bak")
+    backup_sha256 = sha256_path.with_name(f".{sha256_path.name}.{token}.bak")
+    archive_backed_up = False
+    sha256_backed_up = False
+    archive_published = False
+    sha256_published = False
+    try:
+        with zipfile.ZipFile(
+            temporary_archive,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+            strict_timestamps=False,
+        ) as archive:
+            archive.write(package_root, arcname=f"{package_root.name}/")
+            for path in sorted(
+                package_root.rglob("*"),
+                key=lambda item: item.relative_to(package_root).as_posix(),
+            ):
+                relative_path = path.relative_to(package_root).as_posix()
+                archive.write(path, arcname=f"{package_root.name}/{relative_path}")
+
+        _validate_terminal_deploy_zip(package_root, temporary_archive)
+        digest = _hash_file(temporary_archive)
+        temporary_sha256.write_text(
+            f"{digest}  {archive_path.name}\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        try:
+            if archive_path.exists():
+                os.replace(archive_path, backup_archive)
+                archive_backed_up = True
+            if sha256_path.exists():
+                os.replace(sha256_path, backup_sha256)
+                sha256_backed_up = True
+            os.replace(temporary_archive, archive_path)
+            archive_published = True
+            os.replace(temporary_sha256, sha256_path)
+            sha256_published = True
+        except BaseException:
+            if archive_published:
+                archive_path.unlink(missing_ok=True)
+            if sha256_published:
+                sha256_path.unlink(missing_ok=True)
+            if archive_backed_up:
+                os.replace(backup_archive, archive_path)
+                archive_backed_up = False
+            if sha256_backed_up:
+                os.replace(backup_sha256, sha256_path)
+                sha256_backed_up = False
+            raise
+        backup_archive.unlink(missing_ok=True)
+        archive_backed_up = False
+        backup_sha256.unlink(missing_ok=True)
+        sha256_backed_up = False
+        return DeployZipArtifact(
+            archive_path=archive_path,
+            sha256_path=sha256_path,
+            sha256=digest,
+        )
+    finally:
+        temporary_archive.unlink(missing_ok=True)
+        temporary_sha256.unlink(missing_ok=True)
+        if not archive_backed_up:
+            backup_archive.unlink(missing_ok=True)
+        if not sha256_backed_up:
+            backup_sha256.unlink(missing_ok=True)
 
 
 def _copy_relative_file(source_root: Path, destination_root: Path, rel_path: str) -> None:
@@ -502,7 +1000,7 @@ def _write_support_files(
 ) -> None:
     deployment = _deployment_mechanism(output_root)
     storage_root = output_root / "storage"
-    for rel in [Path("jobs"), Path("groups"), Path("runtime")]:
+    for rel in [Path("jobs"), Path("groups"), Path("runtime"), Path("ai") / "skills"]:
         (storage_root / rel).mkdir(parents=True, exist_ok=True)
 
     start_backend = r'''param(
@@ -618,9 +1116,12 @@ function Set-BackendRuntimeEnvironment {
         [string]$SpecPath,
         [string]$RuntimeSpecPath,
         [string]$MechanismSpecPath,
+        [string]$AiSpecPath,
+        [string]$AiGatewayConfigPath,
         [string]$CadScriptDir,
         [string]$DotNetBridgeDllPath,
-        [string]$CtbName
+        [string]$CtbName,
+        [string]$ArchiveExecutable
     )
 
     if ((-not $env:FANBAN_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_SPEC_PATH -PathType Leaf))) {
@@ -641,6 +1142,21 @@ function Set-BackendRuntimeEnvironment {
         }
     }
 
+    if ((-not $env:FANBAN_AI_SPEC_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_SPEC_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiSpecPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_SPEC_PATH" -Value $AiSpecPath
+        }
+    }
+
+    if ((-not $env:FANBAN_AI_GATEWAY_CONFIG_PATH) -or (-not (Test-Path -LiteralPath $env:FANBAN_AI_GATEWAY_CONFIG_PATH -PathType Leaf))) {
+        if (Test-Path -LiteralPath $AiGatewayConfigPath -PathType Leaf) {
+            Set-Item -Path "Env:FANBAN_AI_GATEWAY_CONFIG_PATH" -Value $AiGatewayConfigPath
+        }
+    }
+
+    Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE" -Value "terminal_cnpe_intranet_qwen_fast"
+    Set-Item -Path "Env:FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" -Value $ArchiveExecutable
+
     if ((-not $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) -or ($env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb")) {
         Set-Item -Path "Env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME" -Value $CtbName
     }
@@ -657,8 +1173,11 @@ function Set-BackendRuntimeEnvironment {
         @("FANBAN_SPEC_PATH", $env:FANBAN_SPEC_PATH),
         @("FANBAN_RUNTIME_SPEC_PATH", $env:FANBAN_RUNTIME_SPEC_PATH),
         @("FANBAN_MECHANISM_SPEC_PATH", $env:FANBAN_MECHANISM_SPEC_PATH),
+        @("FANBAN_AI_SPEC_PATH", $env:FANBAN_AI_SPEC_PATH),
+        @("FANBAN_AI_GATEWAY_CONFIG_PATH", $env:FANBAN_AI_GATEWAY_CONFIG_PATH),
         @("FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR", $env:FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR),
-        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH)
+        @("FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH", $env:FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH),
+        @("FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE", $env:FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE)
     )
     foreach ($entry in $requiredEnv) {
         $name = [string]$entry[0]
@@ -670,6 +1189,44 @@ function Set-BackendRuntimeEnvironment {
         ("backend-env: {0}={1}" -f $name, $value) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
     }
     ("backend-env: FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME={0}" -f $env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_CONFIG_PATH={0}" -f $env:FANBAN_AI_GATEWAY_CONFIG_PATH) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+    ("backend-env: FANBAN_AI_GATEWAY_PROFILE={0}" -f $env:FANBAN_AI_GATEWAY_PROFILE) |
+        Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+}
+
+function Invoke-ArchiveRuntimeProbe {
+    param(
+        [string]$PythonPath,
+        [string]$PackageRoot
+    )
+
+    $probeWorkingDirectory = Join-Path $PackageRoot "backend-runtime\backend"
+    $locationPushed = $false
+    try {
+        Push-Location $probeWorkingDirectory
+        $locationPushed = $true
+        $probeOutput = & $PythonPath -X utf8 -m src.deploy.archive_runtime_probe --package-root $PackageRoot 2>&1
+        $probeExitCode = $LASTEXITCODE
+        $probeText = (($probeOutput | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+    } finally {
+        if ($locationPushed) {
+            Pop-Location
+        }
+    }
+    $probePayload = $null
+    if (-not [string]::IsNullOrWhiteSpace($probeText)) {
+        try {
+            $probePayload = $probeText | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $probePayload = $null
+        }
+    }
+    if ($probeExitCode -ne 0 -or $null -eq $probePayload -or [string]$probePayload.status -ne "pass") {
+        throw "私有 7-Zip 运行时探针未通过，API/worker 未启动"
+    }
+    ("archive-runtime-probe: status={0} version={1}" -f $probePayload.status, $probePayload.version_marker) |
         Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
 }
 
@@ -688,13 +1245,34 @@ backend_runtime_root = str(Path.cwd())
 if backend_runtime_root not in sys.path:
     sys.path.insert(0, backend_runtime_root)
 
-required = ("FANBAN_SPEC_PATH", "FANBAN_RUNTIME_SPEC_PATH", "FANBAN_MECHANISM_SPEC_PATH")
+required = (
+    "FANBAN_SPEC_PATH",
+    "FANBAN_RUNTIME_SPEC_PATH",
+    "FANBAN_MECHANISM_SPEC_PATH",
+    "FANBAN_AI_SPEC_PATH",
+    "FANBAN_AI_GATEWAY_CONFIG_PATH",
+)
 for name in required:
     value = os.environ.get(name, "")
     if not value or not Path(value).is_file():
         raise SystemExit(f"{name} invalid: {value}")
 
 import API.app.main as main
+from src.config import load_ai_spec
+
+ai_spec = load_ai_spec(os.environ["FANBAN_AI_SPEC_PATH"])
+gateway = ai_spec.resolve_gateway()
+models = ai_spec.resolve_models()
+profile_name = ai_spec.resolve_gateway_profile_name()
+if profile_name != "terminal_cnpe_intranet_qwen_fast":
+    raise SystemExit(f"terminal AI gateway profile invalid: {profile_name}")
+ai_spec.validate_gateway_network_policy(required_network_mode="intranet_only")
+print(
+    "ai-config-preflight-ok",
+    f"profile={profile_name}",
+    f"model={models.chat.model}",
+    f"auth_required={bool(gateway.api_key_env_var)}",
+)
 print("backend-import-preflight-ok", main.create_app)
 '@
 
@@ -1133,17 +1711,23 @@ try {
     $managedSpecPath = Join-Path $root "documents\__SPEC_NAME__"
     $managedRuntimeSpecPath = Join-Path $root "documents\__RUNTIME_SPEC_NAME__"
     $managedMechanismSpecPath = Join-Path $root "documents\__MECHANISM_SPEC_NAME__"
+    $managedAiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+    $managedAiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
     $managedCadScriptDir = Join-Path $root "backend-runtime\backend\src\cad\scripts"
     $managedDotNetBridgeDllPath = Join-Path $root "backend-runtime\backend\src\cad\dotnet\Module5CadBridge\bin\Release\net48\Module5CadBridge.dll"
     $managedCtbName = "__MANAGED_MONOCHROME_CTB_NAME__"
+    $managedArchiveExecutable = Join-Path $root "bin\7-Zip\7z.exe"
 
     Set-BackendRuntimeEnvironment `
         -SpecPath $managedSpecPath `
         -RuntimeSpecPath $managedRuntimeSpecPath `
         -MechanismSpecPath $managedMechanismSpecPath `
+        -AiSpecPath $managedAiSpecPath `
+        -AiGatewayConfigPath $managedAiGatewayConfigPath `
         -CadScriptDir $managedCadScriptDir `
         -DotNetBridgeDllPath $managedDotNetBridgeDllPath `
-        -CtbName $managedCtbName
+        -CtbName $managedCtbName `
+        -ArchiveExecutable $managedArchiveExecutable
 
     $previousPythonNoUserSite = [Environment]::GetEnvironmentVariable("PYTHONNOUSERSITE", "Process")
     $previousPythonDontWriteBytecode = [Environment]::GetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "Process")
@@ -1157,6 +1741,7 @@ try {
         [Environment]::SetEnvironmentVariable("PYTHONPATH", $null, "Process")
         [Environment]::SetEnvironmentVariable("PYTHONHOME", $null, "Process")
         ("backend-start-cwd: " + (Get-Location).Path) | Out-File -LiteralPath $stderrLog -Encoding utf8 -Append
+        Invoke-ArchiveRuntimeProbe -PythonPath $python -PackageRoot $root
         Test-BackendImportPreflight -PythonPath $python -BackendRuntimeRoot (Get-Location).Path
         "Starting backend supervisor..." | Out-File -LiteralPath $stdoutLog -Encoding utf8 -Append
 
@@ -1170,7 +1755,12 @@ try {
             "--host",
             $ListenHost,
             "--port",
-            [string]$Port
+            [string]$Port,
+            "--workers",
+            "1",
+            "--proxy-headers",
+            "--forwarded-allow-ips",
+            "127.0.0.1"
         )
         $workerArgs = @(
             "-X",
@@ -1471,7 +2061,8 @@ $dirs = @(
     "jobs",
     "groups",
     "runtime",
-    "runtime\cad-slots"
+    "runtime\cad-slots",
+    "ai\skills"
 )
 
 foreach ($dir in $dirs) {
@@ -1517,9 +2108,21 @@ if ($probe.blocking_issues.Count -gt 0) {
     Write-Host ("探针结果文件: " + $probeJson)
     throw ("环境探测未通过，blocking issues = " + $probe.blocking_issues.Count)
 }
+if ($null -eq $probe.archive_runtime -or $probe.archive_runtime.status -ne "pass") {
+    throw "私有 7-Zip 运行时探针未通过，拒绝生成 runtime.env.ps1"
+}
 
 Write-Host "[4/4] 生成运行环境文件..."
 $envMap = $probe.recommended_runtime.recommended_env
+$expectedArchiveExecutable = [System.IO.Path]::GetFullPath((Join-Path $root "bin\7-Zip\7z.exe"))
+$recommendedArchiveExecutable = [string]$envMap.FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE
+if (
+    [string]::IsNullOrWhiteSpace($recommendedArchiveExecutable) -or
+    -not (Test-Path -LiteralPath $expectedArchiveExecutable -PathType Leaf) -or
+    [System.IO.Path]::GetFullPath($recommendedArchiveExecutable) -ne $expectedArchiveExecutable
+) {
+    throw "探针未返回固定的私有 7-Zip 绝对路径，拒绝生成 runtime.env.ps1"
+}
 $lines = @(
     '$ErrorActionPreference = "Stop"',
     ''
@@ -1532,6 +2135,27 @@ foreach ($prop in $envMap.PSObject.Properties) {
     }
     $escaped = $value.Replace("'", "''")
     $lines += ("Set-Item -Path 'Env:{0}' -Value '{1}'" -f $name, $escaped)
+}
+$aiSpecPath = Join-Path $root "documents\AI\参数规范_AI.yaml"
+if (Test-Path -LiteralPath $aiSpecPath -PathType Leaf) {
+    $escapedAiSpecPath = $aiSpecPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_SPEC_PATH' -Value '{0}'" -f $escapedAiSpecPath)
+}
+$aiGatewayConfigPath = Join-Path $root "documents\AI\ai_model_gateway.yaml"
+if (Test-Path -LiteralPath $aiGatewayConfigPath -PathType Leaf) {
+    $escapedAiGatewayConfigPath = $aiGatewayConfigPath.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_AI_GATEWAY_CONFIG_PATH' -Value '{0}'" -f $escapedAiGatewayConfigPath)
+    $lines += "Set-Item -Path 'Env:FANBAN_AI_GATEWAY_PROFILE' -Value 'terminal_cnpe_intranet_qwen_fast'"
+}
+$ansysSkillRoot = Join-Path $root "storage\ai\skills\ansys-mapdl-18-2"
+if (Test-Path -LiteralPath $ansysSkillRoot -PathType Container) {
+    $escapedAnsysSkillRoot = $ansysSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_ANSYS_MAPDL_SKILL_ROOT' -Value '{0}'" -f $escapedAnsysSkillRoot)
+}
+$buildingStandardsSkillRoot = Join-Path $root "storage\ai\skills\building-structure-standards"
+if (Test-Path -LiteralPath $buildingStandardsSkillRoot -PathType Container) {
+    $escapedBuildingStandardsSkillRoot = $buildingStandardsSkillRoot.Replace("'", "''")
+    $lines += ("Set-Item -Path 'Env:FANBAN_BUILDING_STANDARDS_SKILL_ROOT' -Value '{0}'" -f $escapedBuildingStandardsSkillRoot)
 }
 $lines -join [Environment]::NewLine | Out-File -LiteralPath $runtimeEnv -Encoding utf8
 Write-Host ("已生成运行环境文件: " + $runtimeEnv)
@@ -1556,6 +2180,13 @@ $probeArgs = @{
 
 Write-Host "开始执行深度环境检查..."
 & (Join-Path $PSScriptRoot "probe_target_env.ps1") @probeArgs
+$probe = Get-Content -LiteralPath $probeJson -Raw | ConvertFrom-Json
+if ($probe.blocking_issues.Count -gt 0) {
+    foreach ($issue in $probe.blocking_issues) {
+        Write-Host ("- [{0}/{1}] {2}" -f $issue.section, $issue.code, $issue.message)
+    }
+    throw ("deep 环境探测未通过，blocking issues = " + $probe.blocking_issues.Count)
+}
 Write-Host ("深度环境检查完成，输出文件: " + $probeJson)
 '''
     _write_text(output_root / "scripts" / "deep_check_terminal.ps1", deep_check_terminal)
@@ -1981,6 +2612,7 @@ $apiPingResponse = $null
 $apiHealthStatus = "fail"
 $apiHealthError = ""
 $apiHealthResponse = $null
+$apiHealthIssues = @()
 $taskStatus = "skip"
 $taskSettingsStatus = "skip"
 $taskEventStatus = "skip"
@@ -2130,10 +2762,51 @@ try {
 
 try {
     $apiHealthResponse = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec $HttpTimeoutSec
-    $apiHealthStatus = "pass"
+    $hasReady = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["ready"])
+    $hasStorageWritable = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["storage_writable"])
+    $hasWorkerAlive = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["worker_alive"])
+    $hasWorkerCount = ($null -ne $apiHealthResponse -and $null -ne $apiHealthResponse.PSObject.Properties["worker_count"])
+    $apiReady = ($hasReady -and $apiHealthResponse.ready -eq $true)
+    $storageWritable = ($hasStorageWritable -and $apiHealthResponse.storage_writable -eq $true)
+    $workerAlive = ($hasWorkerAlive -and $apiHealthResponse.worker_alive -eq $true)
+    $workerCountValid = ($hasWorkerCount -and [int]$apiHealthResponse.worker_count -gt 0)
+
+    if (-not $apiReady) {
+        $apiHealthIssues += [ordered]@{
+            code = "api_not_ready"
+            message = "health response did not report ready=true"
+        }
+    }
+    if (-not $storageWritable) {
+        $apiHealthIssues += [ordered]@{
+            code = "storage_not_writable"
+            message = "health response did not report storage_writable=true"
+        }
+    }
+    if (-not $workerAlive) {
+        $apiHealthIssues += [ordered]@{
+            code = "worker_not_alive"
+            message = "health response did not report worker_alive=true"
+        }
+    }
+    if (-not $workerCountValid) {
+        $apiHealthIssues += [ordered]@{
+            code = "worker_count_invalid"
+            message = "health response did not report worker_count greater than zero"
+        }
+    }
+
+    $apiHealthStatus = if ($apiHealthIssues.Count -eq 0) { "pass" } else { "fail" }
+    if ($apiHealthStatus -ne "pass") {
+        $apiHealthError = (@($apiHealthIssues | ForEach-Object { $_.message }) -join "; ")
+    }
 } catch {
     $apiHealthStatus = "fail"
     $apiHealthError = $_.Exception.Message
+    $apiHealthIssues += [ordered]@{
+        code = "api_health_request_failed"
+        message = $_.Exception.Message
+    }
 }
 
 $backendListener = Get-BackendListenerSnapshot -BackendPort $ApiPort
@@ -2191,6 +2864,7 @@ $summary = [ordered]@{
     api_ping_url = $PingUrl
     api_health_status = $apiHealthStatus
     api_health_url = $Url
+    api_health_issues = $apiHealthIssues
     task_status = $taskStatus
     task_settings_status = $taskSettingsStatus
     task_event_status = $taskEventStatus
@@ -2250,6 +2924,7 @@ $fullReport = [ordered]@{
             url = $Url
             error = $apiHealthError
             response = $apiHealthResponse
+            issues = $apiHealthIssues
         }
     }
     iis_proxy = [ordered]@{
@@ -3065,7 +3740,9 @@ Write-Host ("已移除登录任务/旧版服务: " + $TaskName)
 - `python-runtime/`: 目标机离线 Python 运行时
 - `python-packages/`: 随包分发的 Python site-packages
 - `bin/ODAFileConverter 25.12.0/`: ODA 运行目录
+- `bin/7-Zip/`: 私有便携压缩运行时，仅含 `7z.exe`、`7z.dll`、`License.txt`、`PROVENANCE.txt`
 - `documents/Resources/`: 受管打印和校准资源
+- `documents/AI/`: AI 模型接入配置
 - `documents_bin/`: 模板与词库资源
 - `scripts/`: 启动、探测、健康检查脚本
 - `install/`: 离线运行时安装脚本和安装器目录
@@ -3106,6 +3783,37 @@ if (-not $apiReady) { throw "FanBanBackend API 未在 5 分钟内就绪，请查
 - `Stop-ScheduledTask -TaskName FanBanBackend` 会停止登录触发任务；任务停止后脚本会通过 Job Object 结束本次托管的 API 和 worker 子进程。
 - `install\register_backend_task.ps1` 会在目标用户已登录时尝试立即启动 `FanBanBackend`；首次安装后不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`。
 - `install\configure_iis_site.ps1` 负责 IIS 站点和 ARR 反代配置。只覆盖 `frontend-dist` 静态文件通常不需要重新执行；如果 `check_health.ps1` 提示 ARR proxy timeout 低于 600 秒或无法解析，需要重新执行。
+
+## 私有 7-Zip 运行时
+
+- 计算书 ZIP、RAR、7z 解包固定使用 `bin/7-Zip/7z.exe`；部署不会安装 7-Zip，也不会加入 PATH，更不会回退到系统 `tar.exe` 或同名命令。
+- `7z.exe`、`7z.dll`、`License.txt` 按 `documents\参数规范-3.yaml` 中的 SHA-256 复验；`PROVENANCE.txt` 则按同一配置重新渲染后做精确内容比较。
+- `scripts\probe_target_env.ps1` 和 `scripts\start_backend.ps1` 都调用同一个 Python `archive_runtime_probe`：先验版本与 7z/zip/Rar/Rar5 handler，再执行 ZIP、7z、RAR5 的 list+x 微烟测；任一失败都会阻断准备或 API/worker 启动。
+- RAR5 冒烟样本仅含合成测试数据，来源和哈希记录在 `backend-runtime/backend/src/deploy/fixtures/PROVENANCE.md`；包内不分发 WinRAR 二进制或许可材料。
+
+## AI 模型接入检查
+
+- AI 接入参数集中在 `documents\AI\ai_model_gateway.yaml`。
+- 开发/测试环境默认使用 `development_minimax` profile，通过 MiniMax OpenAI-compatible API 验证。
+- 终端内网部署使用 `terminal_cnpe_intranet_qwen_fast` profile（为兼容既有部署保留该 profile 标识），对应 `http://models.ai.cnpe.cc/qwen_medium/v1/chat/completions`、模型 `Qwen3.8-27B`、流式输出、无鉴权头。
+- `prepare_terminal.ps1` 会把 `FANBAN_AI_GATEWAY_CONFIG_PATH` 和 `FANBAN_AI_GATEWAY_PROFILE=terminal_cnpe_intranet_qwen_fast` 写入 `scripts\runtime.env.ps1`，后端启动时会自动加载。
+- 部署机上可执行 `scripts\test_ai_model_connectivity.ps1` 生成连通性诊断 JSON；默认输出到 `storage\ai\diagnostics\ai-connectivity-*.json`。
+- 诊断 JSON 的 `script.sha256` 应与同包 `package-manifest.json` 中 `scripts/test_ai_model_connectivity.ps1` 的 SHA-256 一致，`environment.config_sha256` 用于确认实际读取的网关配置版本。
+- 流式检查会重组多个 SSE delta 后再校验标记；部分兼容网关在完整响应后直接关闭连接而不发送 `[DONE]`，因此 `done_received=false` 不能单独判定为失败，应结合 `status_code`、`response_contains_expected`、`invalid_data_line_count` 和总状态判断。
+
+开发/测试环境验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1
+```
+
+终端内网链路验证：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\FanBanServer\scripts\test_ai_model_connectivity.ps1 -Profile terminal_cnpe_intranet_qwen_fast
+```
+
+脚本会检查配置解析、DNS、TCP、模型列表、非流式对话和流式对话；不会把 API key 明文写入控制台或 JSON。
 
 ## 一致性边界
 
@@ -3208,8 +3916,15 @@ def build_terminal_deploy_package(
     url_rewrite_installer: Path | None = None,
     arr_installer: Path | None = None,
 ) -> Path:
+    deployment = _deployment_mechanism(repo_root)
+    archive_runtime_config = deployment.archive_runtime
+    if archive_runtime_config is None:
+        raise ValueError(
+            "参数规范-3.yaml 缺少 backend_mechanism.deployment_mechanism.archive_runtime"
+        )
     copy_plan = gather_copy_plan(repo_root)
     _ensure_exists(copy_plan)
+    _validate_calculation_book_template_sync(repo_root)
     _validate_frontend_preview_assets(repo_root)
 
     if output_root.exists():
@@ -3219,6 +3934,10 @@ def build_terminal_deploy_package(
     for entry in copy_plan:
         _copy_entry(entry, output_root)
 
+    _materialize_ansys_mapdl_skill(repo_root, output_root)
+    _materialize_building_standards_skill(repo_root, output_root)
+    _materialize_reinforcement_table_skill(repo_root, output_root)
+    _materialize_rebar_suggestion_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)
     _sanitize_python_packages(output_root)
     _prune_development_artifacts(output_root)
@@ -3231,6 +3950,13 @@ def build_terminal_deploy_package(
         python_installer=python_installer,
         url_rewrite_installer=url_rewrite_installer,
         arr_installer=arr_installer,
+    )
+    packaged_deployment = _deployment_mechanism(output_root)
+    if packaged_deployment.archive_runtime != archive_runtime_config:
+        raise ValueError("部署包内 archive_runtime 参数与构建输入不一致")
+    validate_deployed_archive_runtime(
+        output_root,
+        archive_runtime_config,
     )
     write_package_manifest(output_root, package_kind="full")
 

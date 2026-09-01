@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator
-
+from typing import Any
 
 UNFINISHED_QUEUE_STATUSES = ("queued", "claimed")
 ACTIVE_SUMMARY_STATUSES = {"queued", "running", "claimed", "processing", "pending"}
 DEFAULT_SQLITE_TIMEOUT_SECONDS = 30.0
 DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 30000
+WORKER_INTERRUPTED_ERROR = "worker_interrupted_before_completion"
 
 
 class SQLiteQueueStore:
@@ -101,6 +102,11 @@ class SQLiteQueueStore:
 
                 CREATE INDEX IF NOT EXISTS ix_job_summaries_status_updated
                 ON job_summaries(status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS summary_tombstones (
+                    item_id TEXT PRIMARY KEY,
+                    deleted_at TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS activity_state (
                     key TEXT PRIMARY KEY,
@@ -235,6 +241,179 @@ class SQLiteQueueStore:
             ).fetchall()
         return [_queue_row_to_dict(row) for row in rows]
 
+    def recover_stale_claims(
+        self,
+        *,
+        timeout_seconds: float,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Atomically fail expired claims without replaying non-idempotent work."""
+        timestamp = _format_timestamp(_coerce_now(now))
+        cutoff = _format_timestamp(
+            _coerce_now(now) - timedelta(seconds=max(0.0, float(timeout_seconds)))
+        )
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    """
+                    SELECT id
+                    FROM queue_items
+                    WHERE status = 'claimed'
+                      AND COALESCE(heartbeat_at, claimed_at, updated_at) <= ?
+                    ORDER BY COALESCE(heartbeat_at, claimed_at, updated_at) ASC, id ASC
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                row_ids = [int(row["id"]) for row in rows]
+                for row_id in row_ids:
+                    conn.execute(
+                        """
+                        UPDATE queue_items
+                        SET status = 'failed',
+                            last_error = ?,
+                            updated_at = ?
+                        WHERE id = ?
+                          AND status = 'claimed'
+                          AND COALESCE(heartbeat_at, claimed_at, updated_at) <= ?
+                        """,
+                        (WORKER_INTERRUPTED_ERROR, timestamp, row_id, cutoff),
+                    )
+                recovered_rows = [
+                    row
+                    for row_id in row_ids
+                    if (row := conn.execute(
+                        "SELECT * FROM queue_items WHERE id = ? AND status = 'failed' "
+                        "AND last_error = ?",
+                        (row_id, WORKER_INTERRUPTED_ERROR),
+                    ).fetchone())
+                    is not None
+                ]
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return [_queue_row_to_dict(row) for row in recovered_rows]
+
+    def list_interrupted_claims(self) -> list[dict[str, Any]]:
+        """Return interrupted claims that may still need JSON state reconciliation."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM queue_items
+                WHERE status = 'failed'
+                  AND last_error = ?
+                  AND claimed_by IS NOT NULL
+                ORDER BY id ASC
+                """,
+                (WORKER_INTERRUPTED_ERROR,),
+            ).fetchall()
+        return [_queue_row_to_dict(row) for row in rows]
+
+    def acknowledge_interrupted_claim(
+        self,
+        *,
+        queue_item_id: int,
+        claimed_by: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Persistently acknowledge that interrupted JSON state was reconciled."""
+        timestamp = _format_timestamp(_coerce_now(now))
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    UPDATE queue_items
+                    SET claimed_by = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND status = 'failed'
+                      AND last_error = ?
+                      AND claimed_by = ?
+                    """,
+                    (
+                        timestamp,
+                        int(queue_item_id),
+                        WORKER_INTERRUPTED_ERROR,
+                        claimed_by,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    conn.commit()
+                    return None
+                acknowledged = self._get_queue_item(conn, int(queue_item_id))
+                conn.commit()
+                return acknowledged
+            except Exception:
+                conn.rollback()
+                raise
+
+    def has_newer_queue_item(
+        self,
+        *,
+        item_type: str,
+        item_id: str,
+        after_queue_item_id: int,
+    ) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM queue_items
+                WHERE item_type = ?
+                  AND item_id = ?
+                  AND id > ?
+                LIMIT 1
+                """,
+                (item_type, item_id, int(after_queue_item_id)),
+            ).fetchone()
+        return row is not None
+
+    def get_queue_item(self, queue_item_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            return self._get_queue_item(conn, int(queue_item_id))
+
+    def complete_claim(
+        self,
+        *,
+        queue_item_id: int,
+        worker_id: str,
+        status: str,
+        last_error: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Complete only the exact claim owned by ``worker_id``.
+
+        Returning ``None`` fences a late worker whose claim was already recovered.
+        """
+        timestamp = _format_timestamp(_coerce_now(now))
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    UPDATE queue_items
+                    SET status = ?,
+                        last_error = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                      AND status = 'claimed'
+                      AND claimed_by = ?
+                    """,
+                    (status, last_error, timestamp, int(queue_item_id), worker_id),
+                )
+                if cursor.rowcount != 1:
+                    conn.commit()
+                    return None
+                completed = self._get_queue_item(conn, int(queue_item_id))
+                conn.commit()
+                return completed
+            except Exception:
+                conn.rollback()
+                raise
+
     def complete(
         self,
         item_type: str,
@@ -354,7 +533,7 @@ class SQLiteQueueStore:
             "last_seen_at": row["last_seen_at"],
         }
 
-    def upsert_summary(self, summary: dict[str, Any]) -> dict[str, Any]:
+    def upsert_summary(self, summary: dict[str, Any]) -> dict[str, Any] | None:
         now_value = _format_timestamp(_coerce_now(None))
         created_at = _format_timestamp(summary.get("created_at") or summary.get("updated_at") or now_value)
         updated_at = _format_timestamp(summary.get("updated_at") or created_at)
@@ -395,28 +574,67 @@ class SQLiteQueueStore:
         )
 
         with self._connect() as conn:
-            with conn:
-                conn.execute(
-                    f"""
-                    INSERT INTO job_summaries ({", ".join(columns)})
-                    VALUES ({placeholders})
-                    ON CONFLICT(item_id) DO UPDATE SET {update_assignments}
-                    """,
-                    tuple(values[column] for column in columns),
-                )
-            row = conn.execute(
-                "SELECT * FROM job_summaries WHERE item_id = ?", (summary["item_id"],)
-            ).fetchone()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                tombstone = conn.execute(
+                    "SELECT 1 FROM summary_tombstones WHERE item_id = ?",
+                    (summary["item_id"],),
+                ).fetchone()
+                if tombstone is not None:
+                    conn.commit()
+                    return None
+                existing = conn.execute(
+                    "SELECT * FROM job_summaries WHERE item_id = ?",
+                    (summary["item_id"],),
+                ).fetchone()
+                if not _is_stale_group_summary(existing, summary):
+                    conn.execute(
+                        f"""
+                        INSERT INTO job_summaries ({", ".join(columns)})
+                        VALUES ({placeholders})
+                        ON CONFLICT(item_id) DO UPDATE SET {update_assignments}
+                        """,
+                        tuple(values[column] for column in columns),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM job_summaries WHERE item_id = ?", (summary["item_id"],)
+                ).fetchone()
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         if row is None:
             raise RuntimeError("summary disappeared after upsert")
         return _summary_row_to_dict(row)
+
+    def delete_summary(self, item_id: str) -> bool:
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO summary_tombstones (item_id, deleted_at)
+                    VALUES (?, ?)
+                    ON CONFLICT(item_id) DO NOTHING
+                    """,
+                    (item_id, _format_timestamp(_coerce_now(None))),
+                )
+                cursor = conn.execute(
+                    "DELETE FROM job_summaries WHERE item_id = ?",
+                    (item_id,),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return cursor.rowcount > 0
 
     def list_summaries(
         self,
         *,
         status: str | None = None,
         offset: int = 0,
-        limit: int = 100,
+        limit: int | None = 100,
         sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         params: list[Any] = []
@@ -432,16 +650,27 @@ class SQLiteQueueStore:
                     "count"
                 ]
             )
-            rows = conn.execute(
-                f"""
-                SELECT *
-                FROM job_summaries
-                {where}
-                ORDER BY {sort_column} DESC, item_id DESC
-                LIMIT ? OFFSET ?
-                """,
-                (*params, limit, offset),
-            ).fetchall()
+            if limit is None:
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM job_summaries
+                    {where}
+                    ORDER BY {sort_column} DESC, item_id DESC
+                    """,
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM job_summaries
+                    {where}
+                    ORDER BY {sort_column} DESC, item_id DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*params, limit, offset),
+                ).fetchall()
         return {"total": total, "items": [_summary_row_to_dict(row) for row in rows]}
 
     def activity(self) -> dict[str, Any]:
@@ -521,6 +750,33 @@ def _summary_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         if "is_group" in item:
             item["is_group"] = bool(item["is_group"])
     return item
+
+
+def _is_stale_group_summary(
+    existing: sqlite3.Row | None,
+    incoming: dict[str, Any],
+) -> bool:
+    if existing is None or not bool(existing["is_group"]) or not bool(incoming.get("is_group")):
+        return False
+    incoming_version = _non_negative_int(incoming.get("state_version"))
+    if incoming_version is None:
+        return False
+    try:
+        existing_payload = json.loads(existing["summary_json"] or "{}")
+    except (TypeError, ValueError):
+        return False
+    existing_version = (
+        _non_negative_int(existing_payload.get("state_version"))
+        if isinstance(existing_payload, dict)
+        else None
+    )
+    return existing_version is not None and incoming_version < existing_version
+
+
+def _non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _json_dumps(value: Any) -> str:

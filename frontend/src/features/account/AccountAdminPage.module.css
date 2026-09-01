@@ -1,0 +1,464 @@
+.page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.6rem;
+  overflow: hidden;
+  padding: 0 0.2rem 0.2rem;
+  color: #17324f;
+  font-size: 0.8125rem;
+}
+
+.pageHeader {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3.9rem;
+  padding: 0.62rem 0.9rem;
+  border: 1px solid #d7e2ed;
+  border-radius: 12px;
+  background: rgba(250, 252, 254, 0.96);
+}
+
+.pageHeader h1,
+.pageHeader p,
+.archiveStrip h2,
+.panelHeader h2 {
+  margin: 0;
+}
+
+.pageHeader h1 {
+  color: #173f6b;
+  font-size: 1.25rem;
+}
+
+.pageHeader > div > p:last-child {
+  margin-top: 0.18rem;
+  color: #4c657d;
+}
+
+.eyebrow {
+  color: #4776a8;
+  font-family: "Rajdhani", "Noto Sans SC", sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.headerMetrics {
+  display: flex;
+  gap: 0;
+  margin: 0;
+  border: 1px solid #d7e2ed;
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.headerMetrics div {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.45rem;
+  align-items: baseline;
+  min-width: 7.1rem;
+  padding: 0.42rem 0.6rem;
+  background: #f5f8fb;
+}
+
+.headerMetrics div + div {
+  border-left: 1px solid #d7e2ed;
+}
+
+.headerMetrics div[data-tone="warning"] {
+  background: #fff6ed;
+}
+
+.headerMetrics dt {
+  color: #4c657d;
+}
+
+.headerMetrics dd {
+  margin: 0;
+  color: #174977;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.headerMetrics div[data-tone="warning"] dd {
+  color: #954b12;
+}
+
+.archiveStrip {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.48rem 0.7rem;
+  border: 1px solid #d7e2ed;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.stripTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.stripTitle span,
+.panelIndex {
+  color: #4c657d;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.archiveStrip h2,
+.panelHeader h2 {
+  color: #173f68;
+  font-size: 0.96rem;
+}
+
+.archiveForm {
+  display: grid;
+  grid-template-columns: auto minmax(12rem, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.archiveForm label,
+.searchField span,
+.formField span {
+  color: #496987;
+  font-weight: 700;
+}
+
+.archiveForm input,
+.searchField input,
+.formField input,
+.formField select {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0 0.68rem;
+  border: 1px solid #bdcede;
+  border-radius: 8px;
+  background: #fff;
+  color: #173d63;
+  font: inherit;
+}
+
+.archiveForm button,
+.primaryButton,
+.secondaryButton,
+.filters button {
+  min-height: 2.25rem;
+  padding: 0 0.72rem;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.archiveForm button,
+.primaryButton {
+  border: 1px solid #174f86;
+  background: #1e5f9e;
+  color: #fff;
+}
+
+.secondaryButton,
+.filters button {
+  border: 1px solid #c4d4e3;
+  background: #f8fafc;
+  color: #245887;
+}
+
+.managementWorkspace {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(23rem, 0.88fr) minmax(30rem, 1.12fr);
+  gap: 0.65rem;
+  min-height: 0;
+}
+
+.directoryPanel,
+.editorPanel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #d7e2ed;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.panelHeader {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  min-height: 3.15rem;
+  padding: 0.55rem 0.72rem;
+  border-bottom: 1px solid #e1e9f1;
+}
+
+.panelHeader > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.searchField {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.55rem 0.72rem;
+}
+
+.filters {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  padding: 0 0.72rem 0.55rem;
+}
+
+.filters button[aria-pressed="true"] {
+  border-color: #316c9f;
+  background: #e8f1f8;
+  color: #174a78;
+  box-shadow: inset 0 -2px #316c9f;
+}
+
+.filters button[data-tone="warning"] {
+  color: #9d541d;
+}
+
+.directoryList {
+  display: grid;
+  min-height: 0;
+  align-content: start;
+  overflow-y: auto;
+  border-top: 1px solid #e4ebf2;
+  scrollbar-gutter: stable;
+}
+
+.directoryItem {
+  display: grid;
+  grid-template-columns: 4.1rem minmax(7rem, 0.85fr) minmax(9rem, 1.15fr);
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 3.6rem;
+  padding: 0.48rem 0.7rem;
+  border: 0;
+  border-bottom: 1px solid #e4ebf2;
+  background: #fff;
+  color: #173b60;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.directoryItem:hover {
+  background: #f4f8fb;
+}
+
+.directoryItem[aria-pressed="true"] {
+  background: #eaf2f8;
+  box-shadow: inset 3px 0 #24639b;
+}
+
+.directoryStatus {
+  justify-self: start;
+  padding: 0.2rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.directoryStatus[data-tone="valid"] {
+  background: #e5f2eb;
+  color: #226847;
+}
+
+.directoryStatus[data-tone="invalid"] {
+  background: #fff0e4;
+  color: #a1511b;
+}
+
+.directoryIdentity,
+.directoryDetails {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.directoryIdentity strong,
+.directoryIdentity small,
+.directoryDetails small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directoryIdentity small,
+.directoryDetails small {
+  color: #4c657d;
+  font-size: 0.8125rem;
+}
+
+.editorActions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.accountForm {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.58rem 0.72rem;
+  align-content: start;
+  overflow-y: auto;
+  padding: 0.7rem;
+}
+
+.formField {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.formFooter {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-height: 3.5rem;
+  padding-top: 0.15rem;
+  border-top: 1px solid #e5ebf1;
+}
+
+.formGuidance {
+  color: #4c657d;
+  line-height: 1.4;
+}
+
+.formGuidance p {
+  margin: 0.18rem 0 0;
+}
+
+.validationError,
+.feedbackError {
+  color: #a44336;
+  font-weight: 700;
+}
+
+.feedbackSuccess,
+.feedbackError,
+.stateMessage {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.48rem 0.7rem;
+  border-left: 3px solid #4f8a6b;
+  border-radius: 6px;
+  background: #eef7f2;
+  line-height: 1.35;
+}
+
+.feedbackError {
+  border-left-color: #b55d53;
+  background: #fcf2f0;
+}
+
+.stateMessage {
+  border-left-color: #7a9ab8;
+  background: #f1f5f9;
+  color: #58728b;
+}
+
+.emptyState {
+  margin: 0;
+  padding: 1rem;
+  color: #4c657d;
+}
+
+.archiveForm button:disabled,
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  border-color: #c6d2df;
+  background: #dbe3eb;
+  color: #4c657d;
+  cursor: not-allowed;
+}
+
+.archiveForm input:focus-visible,
+.searchField input:focus-visible,
+.formField input:focus-visible,
+.formField select:focus-visible,
+.archiveForm button:focus-visible,
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.filters button:focus-visible {
+  outline: 3px solid #0b5fa5;
+  outline-offset: 2px;
+}
+
+.directoryItem:focus-visible {
+  outline: 3px solid #0b5fa5;
+  outline-offset: -3px;
+}
+
+@media (max-width: 1080px) {
+  .page {
+    overflow-y: auto;
+  }
+
+  .managementWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .directoryPanel,
+  .editorPanel {
+    min-height: 28rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .pageHeader,
+  .archiveStrip,
+  .archiveForm,
+  .accountForm {
+    grid-template-columns: 1fr;
+  }
+
+  .pageHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .headerMetrics {
+    align-self: stretch;
+  }
+
+  .formFooter {
+    grid-column: auto;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .directoryItem {
+    grid-template-columns: 4rem minmax(0, 1fr);
+  }
+
+  .directoryDetails {
+    grid-column: 2;
+  }
+}

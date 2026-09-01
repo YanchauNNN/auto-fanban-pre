@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from itertools import chain
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -31,33 +32,39 @@ class AuditLexiconLoader:
 
     def load(self, workbook_path: str | Path) -> AuditLexicon:
         workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-        worksheet = workbook[workbook.sheetnames[0]]
+        try:
+            worksheet = workbook[workbook.sheetnames[0]]
+            rows = worksheet.iter_rows(values_only=True)
+            header = tuple(next(rows, ()))
 
-        project_columns: list[tuple[int, str]] = []
-        for column in range(1, worksheet.max_column + 1):
-            raw = worksheet.cell(1, column).value
-            if raw is None:
-                continue
-            project_no = str(raw).strip()
-            if self._project_no_re.fullmatch(project_no):
-                project_columns.append((column, project_no))
-
-        project_options = [project_no for _, project_no in project_columns]
-        allowed: dict[str, set[str]] = {project_no: set() for project_no in project_options}
-        token_projects: dict[str, set[str]] = {}
-
-        for row in range(1, worksheet.max_row + 1):
-            if not self._should_include_row(row):
-                continue
-            for column, project_no in project_columns:
-                raw = worksheet.cell(row, column).value
+            project_columns: list[tuple[int, str]] = []
+            for column_index, raw in enumerate(header):
                 if raw is None:
                     continue
-                normalized = normalize_text(str(raw))
-                if not normalized:
+                project_no = str(raw).strip()
+                if self._project_no_re.fullmatch(project_no):
+                    project_columns.append((column_index, project_no))
+
+            project_options = [project_no for _, project_no in project_columns]
+            allowed: dict[str, set[str]] = {
+                project_no: set() for project_no in project_options
+            }
+            token_projects: dict[str, set[str]] = {}
+
+            for row_number, values in enumerate(chain((header,), rows), start=1):
+                if not self._should_include_row(row_number):
                     continue
-                allowed[project_no].add(normalized)
-                token_projects.setdefault(normalized, set()).add(project_no)
+                for column_index, project_no in project_columns:
+                    raw = values[column_index] if column_index < len(values) else None
+                    if raw is None:
+                        continue
+                    normalized = normalize_text(str(raw))
+                    if not normalized:
+                        continue
+                    allowed[project_no].add(normalized)
+                    token_projects.setdefault(normalized, set()).add(project_no)
+        finally:
+            workbook.close()
 
         foreign: dict[str, set[str]] = {}
         all_tokens = set(token_projects)

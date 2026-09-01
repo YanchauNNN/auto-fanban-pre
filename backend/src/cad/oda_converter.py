@@ -126,6 +126,7 @@ class ODAConverter(IODAConverter):
         if not dxf_path.exists():
             raise ConversionError(f"DXF文件不存在: {dxf_path}")
 
+        self._ensure_complete_ascii_dxf(dxf_path)
         self._ensure_exe()
         output_dir.mkdir(parents=True, exist_ok=True)
         output_version = (
@@ -163,6 +164,26 @@ class ODAConverter(IODAConverter):
             raise ConversionError(f"ODA转换失败: {detail}") from exc
 
         return self._resolve_output(output_dir, dxf_path.stem, ".dwg")
+
+    @staticmethod
+    def _ensure_complete_ascii_dxf(dxf_path: Path) -> None:
+        """Reject interrupted ASCII DXF writes before ODA creates a bad DWG."""
+        with dxf_path.open("rb") as stream:
+            header = stream.read(22)
+            if header.startswith(b"AutoCAD Binary DXF"):
+                return
+            stream.seek(0, 2)
+            size = stream.tell()
+            stream.seek(max(0, size - 8192))
+            tail = stream.read()
+
+        lines = [
+            line.strip()
+            for line in tail.decode("ascii", errors="ignore").splitlines()
+            if line.strip()
+        ]
+        if len(lines) < 2 or lines[-2:] != ["0", "EOF"]:
+            raise ConversionError(f"DXF文件不完整，末尾缺少 0/EOF 标记: {dxf_path}")
 
     @staticmethod
     def _resolve_output(output_dir: Path, stem: str, suffix: str) -> Path:

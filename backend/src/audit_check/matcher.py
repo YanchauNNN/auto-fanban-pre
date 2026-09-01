@@ -6,6 +6,11 @@ from ..config import get_config, load_mechanism_spec
 from ..models import BBox
 from .lexicon import normalize_text, normalize_text_without_spaces
 from .models import AuditFinding, AuditLexicon, ScanTextItem
+from .unit_text_rules import (
+    compile_protected_text_patterns,
+    compile_unit_text_patterns,
+    iter_unprotected_unit_text_matches,
+)
 
 
 class AuditMatchEngine:
@@ -56,9 +61,16 @@ class AuditMatchEngine:
         )
         self._unit_consistency = audit_cfg.unit_consistency
         self._unit_no_re = re.compile(self._unit_consistency.unit_no_pattern)
-        self._explicit_unit_text_pattern = re.compile(
-            self._unit_consistency.explicit_unit_text_pattern,
+        self._unit_text_patterns = compile_unit_text_patterns(
+            [
+                self._unit_consistency.explicit_unit_text_pattern,
+                *self._unit_consistency.additional_unit_text_patterns,
+            ],
         )
+        self._protected_unit_text_patterns = {
+            project_no: compile_protected_text_patterns(patterns)
+            for project_no, patterns in self._unit_consistency.protected_unit_text_patterns.items()
+        }
         self._short_factory_code_pattern = re.compile(
             self._unit_consistency.short_factory_code_pattern,
         )
@@ -203,7 +215,7 @@ class AuditMatchEngine:
 
         findings: list[AuditFinding] = []
         seen: set[tuple[str, str]] = set()
-        patterns = [unit_code_pattern, self._explicit_unit_text_pattern]
+        patterns = [unit_code_pattern]
         if self._should_check_external_code_unit_item(item):
             patterns.append(self._external_unit_code_pattern)
 
@@ -217,6 +229,20 @@ class AuditMatchEngine:
                     item=item,
                     match=match,
                 )
+
+        for match in iter_unprotected_unit_text_matches(
+            normalized_text,
+            unit_patterns=self._unit_text_patterns,
+            protected_patterns=self._protected_unit_text_patterns.get(project_no, []),
+        ):
+            self._append_unit_consistency_finding(
+                findings=findings,
+                seen=seen,
+                project_no=project_no,
+                selected_unit_no=unit_no,
+                item=item,
+                match=match,
+            )
 
         for match in self._short_factory_code_pattern.finditer(normalized_text):
             factory_code = str(match.group("factory_code") or "").strip().upper()

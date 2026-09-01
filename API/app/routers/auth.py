@@ -29,7 +29,7 @@ def login(payload: LoginPayload, request: Request) -> dict[str, object]:
     session = request.app.state.management.session_service.create_session(account.to_snapshot())
     return {
         "token": session.token,
-        "account": account.model_dump(mode="json"),
+        "account": account.to_public().model_dump(mode="json"),
     }
 
 
@@ -59,4 +59,4 @@ def change_password(
         account.account_id,
         payload.new_password,
     )
-    return updated.model_dump(mode="json")
+    return updated.to_public().model_dump(mode="json")

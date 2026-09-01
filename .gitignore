@@ -17,12 +17,21 @@ test/dist/src/*.pyc
 .codex-smoke/
 .codex_smoke/
 .codex_tmp*/
+/.pf/
+/.pt/
+/backend/.test-tmp-*/
+/backend/debug_artifacts/
 storage/
+documents/AI/ansys-mapdl-*-private-offline-*.zip
+documents/AI/ansys-mapdl-*-public-scaffold-*.zip
+/documents/规范下载/
 tmp/
+/.tmp/
 /build/
 /dist/
 /bin/7-Zip/
 output/
+outputs/
 /output.lnk
 /t/
 plot.log
@@ -30,13 +39,17 @@ plot.log
 .pytest_cache/
 .ruff_cache/
 .uv-cache/
+/.mypy_cache/
+/coverage/
+/htmlcov/
+/.coverage
+/.coverage.*
 
 # Local package dependencies (do not commit)
 node_modules/
 
 # Locally generated manual reports and visual QA artifacts.
 # Historical reports already tracked by Git remain available; new runs stay local.
-/outputs/
 /outputs/manual-*/
 /outputs/qa-form*/
 

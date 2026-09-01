@@ -1,12 +1,19 @@
 ﻿from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import subprocess
+import sys
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
+import yaml
 
+import src.deploy.terminal_package as terminal_package_mod
+from src.config.mechanism_spec import ArchiveRuntimeMechanismConfig
+from src.deploy.archive_runtime import ArchiveRuntimeError, render_archive_runtime_provenance
 from src.deploy.prereq_installers import ensure_prereq_installers
 from src.deploy.terminal_package import (
     DELTA_DELETE_LIST,
@@ -25,12 +32,47 @@ SPEC_NAME = "\u53c2\u6570\u89c4\u8303.yaml"
 RUNTIME_SPEC_NAME = "\u53c2\u6570\u89c4\u8303_\u8fd0\u884c\u671f.yaml"
 MECHANISM_SPEC_NAME = "\u53c2\u6570\u89c4\u8303-3.yaml"
 TERMINAL_INSTALL_PLAN_NAME = "\u7ec8\u7aef\u5b9e\u88c5\u5b89\u88c5\u8ba1\u5212.md"
+AI_MODEL_GATEWAY_CONFIG_NAME = "ai_model_gateway.yaml"
+AI_SPEC_NAME = "参数规范_AI.yaml"
+AI_CONNECTIVITY_SCRIPT_NAME = "test_ai_model_connectivity.ps1"
+BUSINESS_PROBE_SCRIPT_NAME = "probe_business_modules.ps1"
+CALCULATION_PROBE_SCRIPT_NAME = "probe_calculation_book.ps1"
+DEPLOYMENT_PROBE_SCRIPT_NAME = "run_deployment_probes.ps1"
+CALCULATION_SMOKE_SCRIPT_NAME = "smoke_calculation_book_ai_suggestion.py"
+REBAR_SUGGESTION_SKILL_ID = "recommend-rebar-from-smx"
+REBAR_SUGGESTION_SKILL_ROOT = Path("tools/ai/recommend-rebar-from-smx")
+REBAR_SUGGESTION_REQUIRED_FILES = (
+    Path("SKILL.md"),
+    Path("agents/openai.yaml"),
+    Path("references/io-schema.md"),
+    Path("references/ranking-rules.md"),
+    Path("scripts/validate_fixtures.py"),
+)
+ANSYS_MAPDL_INSTALL_SCRIPT_NAME = "install_ansys_mapdl_skill.ps1"
+BUILDING_STANDARDS_INSTALL_SCRIPT_NAME = "install_building_standards_skill.ps1"
 PC3_NAME = "\u6253\u5370PDF2.pc3"
 PMP_NAME = "tszdef-02fc5f1cb3db4a5b8afc9cce5dca6cd1.pmp"
 DEPLOY_README = "README_\u90e8\u7f72\u8bf4\u660e.md"
 MISSING_INSTALLER_README = "README_\u7f3a\u5931\u79bb\u7ebf\u5b89\u88c5\u5668.md"
 REGISTER_TASK_SCRIPT = "register_backend_task.ps1"
 UNREGISTER_TASK_SCRIPT = "unregister_backend_task.ps1"
+ARCHIVE_RUNTIME_FILES = {
+    "7z.exe": b"fake-portable-7z-exe",
+    "7z.dll": b"fake-portable-7z-dll",
+    "License.txt": b"fake-7zip-license",
+}
+ARCHIVE_PROBE_PAYLOAD = b"fanban archive runtime smoke payload v1\n"
+ARCHIVE_PROBE_RAR_B64 = (
+    b"UmFyIRoHAQAzkrXlCgEFBgAFAQGAgAD3WFxjNQIDC6gABKgAIAuotTmAAAAZ"
+    b"YXJjaGl2ZS1ydW50aW1lLXNtb2tlLnR4dAoDAnaBI2gpJ90BZmFuYmFuIGFy"
+    b"Y2hpdmUgcnVudGltZSBzbW9rZSBwYXlsb2FkIHYxCh13VlEDBQQA\n"
+)
+
+
+def _pick_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
 def _valid_pc3_text(label: str = "pc3") -> str:
@@ -62,11 +104,91 @@ def _relative_files(root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
 
 
+def _write_fake_archive_runtime(repo_root: Path) -> None:
+    fixture_dir = repo_root / "backend" / "src" / "deploy" / "fixtures"
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    (fixture_dir / "archive-runtime-smoke-rar5.rar.b64").write_bytes(
+        ARCHIVE_PROBE_RAR_B64
+    )
+    (fixture_dir / "archive-runtime-smoke.txt").write_bytes(ARCHIVE_PROBE_PAYLOAD)
+    _write_file(fixture_dir / "PROVENANCE.md", "synthetic RAR5 fixture provenance\n")
+    archive_runtime_payload = {
+        "version": "26.02-test",
+        "architecture": "x64",
+        "source": {
+            "filename": "7z-test-x64.exe",
+            "url": "https://example.invalid/7z-test-x64.exe",
+            "sha256": hashlib.sha256(b"fake-source").hexdigest(),
+            "size_bytes": len(b"fake-source"),
+        },
+        "bootstrap": {
+            "filename": "7zr.exe",
+            "url": "https://example.invalid/7zr.exe",
+            "sha256": hashlib.sha256(b"fake-bootstrap").hexdigest(),
+            "size_bytes": len(b"fake-bootstrap"),
+        },
+        "license_url": "https://example.invalid/license.txt",
+        "cache_dir": "build/runtime-cache/7-Zip",
+        "destination_dir": "bin/7-Zip",
+        "provenance_filename": "PROVENANCE.txt",
+        "required_files": [
+            {"filename": name, "sha256": hashlib.sha256(payload).hexdigest()}
+            for name, payload in ARCHIVE_RUNTIME_FILES.items()
+        ],
+        "required_handlers": ["7z", "zip", "Rar", "Rar5"],
+        "version_marker": "7-Zip 26.02-test (x64)",
+        "download_timeout_sec": 15,
+        "prepare_timeout_sec": 20,
+        "probe": {
+            "timeout_sec": 5,
+            "max_output_bytes": 131072,
+            "fixture_source_relative_path": "fixtures/archive-runtime-smoke-rar5.rar.b64",
+            "fixture_encoding": "base64",
+            "fixture_source_sha256": hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest(),
+            "fixture_source_size_bytes": len(ARCHIVE_PROBE_RAR_B64),
+            "fixture_decoded_sha256": "b0c3ccb16412f5215da3ae12f8bafd6fa4524ff44831283a7963b3afc792a886",
+            "fixture_decoded_size_bytes": 129,
+            "payload_source_relative_path": "fixtures/archive-runtime-smoke.txt",
+            "payload_filename": "archive-runtime-smoke.txt",
+            "payload_sha256": hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest(),
+            "payload_size_bytes": len(ARCHIVE_PROBE_PAYLOAD),
+        },
+    }
+    mechanism_payload = {
+        "schema_version": "1",
+        "backend_mechanism": {
+            "deployment_mechanism": {"archive_runtime": archive_runtime_payload}
+        },
+    }
+    _write_file(
+        repo_root / "documents" / MECHANISM_SPEC_NAME,
+        yaml.safe_dump(mechanism_payload, allow_unicode=True, sort_keys=False),
+    )
+    config = ArchiveRuntimeMechanismConfig(**archive_runtime_payload)
+    cache_dir = repo_root / config.cache_dir
+    for name, payload in ARCHIVE_RUNTIME_FILES.items():
+        target = cache_dir / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    _write_file(
+        cache_dir / config.provenance_filename,
+        render_archive_runtime_provenance(config),
+    )
+
+
 def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "frontend" / "dist" / "index.html", "<html></html>")
     _write_file(repo_root / "frontend" / "dist" / "assets" / "pdf.worker.min-test.mjs", "worker")
     _write_file(repo_root / "API" / "app" / "main.py", "app = None")
     _write_file(repo_root / "backend" / "pyproject.toml", "[project]\nname = 'demo'\n")
+    _write_file(
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "Tesseract-OCR"
+        / "tesseract.exe",
+        "portable tesseract",
+    )
     _write_file(repo_root / "backend" / "src" / "config" / "runtime_config.py", "CONFIG = 1")
     _write_file(
         repo_root / "backend" / "src" / "deploy" / "__pycache__" / "terminal_package.cpython-313.pyc",
@@ -169,15 +291,73 @@ def _make_fake_repo(repo_root: Path) -> None:
     _write_file(repo_root / "documents" / "Resources" / "通信打印样式.ctb")
     _write_file(repo_root / "documents" / "Resources" / "通信打印样式细线.ctb")
     _write_file(repo_root / "documents" / SPEC_NAME, "schema_version: '1'")
-    _write_file(repo_root / "documents" / RUNTIME_SPEC_NAME, "concurrency: {}")
-    _write_file(repo_root / "documents" / MECHANISM_SPEC_NAME, "schema_version: '1'\nbackend_mechanism: {}")
+    _write_file(
+        repo_root / "documents" / RUNTIME_SPEC_NAME,
+        """
+runtime_options:
+  calculation_book:
+    ai_suggestion:
+      skill_root:
+        type: str
+        default: "tools/ai/recommend-rebar-from-smx"
+        desc: "test Skill root"
+""".strip(),
+    )
+    _write_fake_archive_runtime(repo_root)
     _write_file(repo_root / "documents" / TERMINAL_INSTALL_PLAN_NAME, "terminal install plan")
+    _write_file(repo_root / "documents" / "AI" / AI_SPEC_NAME, "schema_version: '1'\nai_layer: {}")
+    _write_file(repo_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME, "schema_version: '1'")
     _write_file(repo_root / "documents_bin" / "responsible_unit.json", "{}")
     _write_file(repo_root / "documents_bin" / "~$规范库.xlsx", "office lock")
     _write_file(repo_root / "tools" / "probe_target_env.ps1", "Write-Host probe")
+    _write_file(
+        repo_root / "tools" / BUSINESS_PROBE_SCRIPT_NAME,
+        "Write-Host business-probe",
+    )
+    _write_file(
+        repo_root / "tools" / CALCULATION_PROBE_SCRIPT_NAME,
+        "Write-Host calculation-probe",
+    )
+    _write_file(
+        repo_root / "tools" / DEPLOYMENT_PROBE_SCRIPT_NAME,
+        "Write-Host deployment-probes",
+    )
+    _write_file(
+        repo_root / "tools" / CALCULATION_SMOKE_SCRIPT_NAME,
+        "print('{}')\n",
+    )
     _write_file(repo_root / "tools" / "cad_env_fingerprint.ps1", "Write-Host cad-env-fingerprint")
     _write_file(repo_root / "tools" / "cad_env_sync.ps1", "Write-Host cad-env-sync")
     _write_file(repo_root / "tools" / "diagnose_iis_frontend_503.ps1", "Write-Host diagnose-503")
+    _write_file(repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME, "Write-Host ai-connectivity")
+    _write_file(
+        repo_root / "tools" / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        "Write-Host install-ansys-mapdl",
+    )
+    _write_file(
+        repo_root / "tools" / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+        "Write-Host install-building-standards",
+    )
+    rebar_skill = repo_root / REBAR_SUGGESTION_SKILL_ROOT
+    _write_file(
+        rebar_skill / "SKILL.md",
+        """
+---
+name: recommend-rebar-from-smx
+description: test fixture
+---
+
+Read [references/io-schema.md](references/io-schema.md) and
+[references/ranking-rules.md](references/ranking-rules.md).
+""".strip(),
+    )
+    _write_file(rebar_skill / "agents" / "openai.yaml", "interface: {}")
+    _write_file(rebar_skill / "references" / "io-schema.md", "schema")
+    _write_file(rebar_skill / "references" / "ranking-rules.md", "ranking")
+    _write_file(
+        rebar_skill / "scripts" / "validate_fixtures.py",
+        "print('fixtures: ok')\n",
+    )
 
 
 def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> None:
@@ -192,9 +372,84 @@ def test_gather_copy_plan_includes_required_runtime_assets(tmp_path: Path) -> No
     assert (Path("documents/Resources"), Path("documents/Resources")) in rel_pairs
     assert (Path("documents") / MECHANISM_SPEC_NAME, Path("documents") / MECHANISM_SPEC_NAME) in rel_pairs
     assert (Path("documents") / TERMINAL_INSTALL_PLAN_NAME, Path("documents") / TERMINAL_INSTALL_PLAN_NAME) in rel_pairs
+    assert (Path("documents/AI"), Path("documents/AI")) in rel_pairs
+    assert (
+        Path("documents/AI") / AI_SPEC_NAME,
+        Path("documents/AI") / AI_SPEC_NAME,
+    ) in rel_pairs
+    assert (
+        Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
+        Path("documents/AI") / AI_MODEL_GATEWAY_CONFIG_NAME,
+    ) in rel_pairs
     assert (Path("documents_bin"), Path("documents_bin")) in rel_pairs
     assert (Path("bin/ODAFileConverter 25.12.0"), Path("bin/ODAFileConverter 25.12.0")) in rel_pairs
     assert (Path("tools/diagnose_iis_frontend_503.ps1"), Path("tools/diagnose_iis_frontend_503.ps1")) in rel_pairs
+    assert (
+        Path("tools") / "ai" / AI_CONNECTIVITY_SCRIPT_NAME,
+        Path("scripts") / AI_CONNECTIVITY_SCRIPT_NAME,
+    ) in rel_pairs
+    assert (
+        Path("tools") / "ai" / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+        Path("scripts") / ANSYS_MAPDL_INSTALL_SCRIPT_NAME,
+    ) in rel_pairs
+    assert (
+        Path("tools") / "ai" / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+        Path("scripts") / BUILDING_STANDARDS_INSTALL_SCRIPT_NAME,
+    ) in rel_pairs
+    for script_name in (
+        BUSINESS_PROBE_SCRIPT_NAME,
+        CALCULATION_PROBE_SCRIPT_NAME,
+        DEPLOYMENT_PROBE_SCRIPT_NAME,
+        CALCULATION_SMOKE_SCRIPT_NAME,
+    ):
+        assert (
+            Path("tools") / script_name,
+            Path("scripts") / script_name,
+        ) in rel_pairs
+    assert (
+        Path("build/runtime-cache/7-Zip/7z.exe"),
+        Path("bin/7-Zip/7z.exe"),
+    ) in rel_pairs
+    assert (
+        Path("build/runtime-cache/7-Zip/PROVENANCE.txt"),
+        Path("bin/7-Zip/PROVENANCE.txt"),
+    ) in rel_pairs
+
+
+def test_gather_copy_plan_rejects_missing_archive_runtime_cache(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    cache_dir = repo_root / "build" / "runtime-cache" / "7-Zip"
+    for path in cache_dir.iterdir():
+        path.unlink()
+    cache_dir.rmdir()
+
+    with pytest.raises(ArchiveRuntimeError, match="prepare_archive_runtime.py"):
+        gather_copy_plan(repo_root)
+
+
+def test_full_build_rejects_archive_runtime_source_changed_after_gather(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    original_gather = terminal_package_mod.gather_copy_plan
+
+    def gather_then_tamper(root: Path):
+        plan = original_gather(root)
+        (root / "build" / "runtime-cache" / "7-Zip" / "7z.exe").write_bytes(
+            b"tampered-after-gather"
+        )
+        return plan
+
+    monkeypatch.setattr(terminal_package_mod, "gather_copy_plan", gather_then_tamper)
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.exe"):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    assert not (output_root / PACKAGE_MANIFEST).exists()
 
 
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
@@ -226,6 +481,135 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
         / "__pycache__"
         / "terminal_package.cpython-313.pyc"
     ).exists()
+    archive_runtime = output_root / "bin" / "7-Zip"
+    assert {path.name for path in archive_runtime.iterdir()} == {
+        "7z.exe",
+        "7z.dll",
+        "License.txt",
+        "PROVENANCE.txt",
+    }
+    assert (archive_runtime / "7z.exe").read_bytes() == ARCHIVE_RUNTIME_FILES["7z.exe"]
+    assert not (archive_runtime / "7zr.exe").exists()
+    assert not (archive_runtime / "7z-test-x64.exe").exists()
+    manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["business_probes"] == {
+        "schema_version": "fanban-deployment-probes@1",
+        "entrypoints": {
+            "account_workload": f"scripts/{BUSINESS_PROBE_SCRIPT_NAME}",
+            "all": f"scripts/{DEPLOYMENT_PROBE_SCRIPT_NAME}",
+            "calculation_book": f"scripts/{CALCULATION_PROBE_SCRIPT_NAME}",
+            "environment": "scripts/check_health.ps1",
+        },
+    }
+    manifest_files = {item["path"]: item["sha256"] for item in manifest["files"]}
+    assert manifest_files["bin/7-Zip/7z.exe"] == hashlib.sha256(
+        ARCHIVE_RUNTIME_FILES["7z.exe"]
+    ).hexdigest()
+    assert manifest_files["bin/7-Zip/7z.dll"] == hashlib.sha256(
+        ARCHIVE_RUNTIME_FILES["7z.dll"]
+    ).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke-rar5.rar.b64"
+    ] == hashlib.sha256(ARCHIVE_PROBE_RAR_B64).hexdigest()
+    assert manifest_files[
+        "backend-runtime/backend/src/deploy/fixtures/archive-runtime-smoke.txt"
+    ] == hashlib.sha256(ARCHIVE_PROBE_PAYLOAD).hexdigest()
+    assert "backend-runtime/backend/src/deploy/fixtures/PROVENANCE.md" in manifest_files
+
+
+def test_build_terminal_deploy_package_copies_standard_reinforcement_template(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    template = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    expected = b"PK\x03\x04standard-reinforcement-template"
+    template.write_bytes(expected)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    packaged = (
+        output_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    assert packaged.read_bytes() == expected
+
+
+def test_build_terminal_deploy_package_rejects_standard_template_drift(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    canonical = repo_root / "documents_bin" / "计算书模板文件.xlsx"
+    runtime_copy = (
+        repo_root
+        / "documents_bin"
+        / "calculation_book"
+        / "计算书模板文件.xlsx"
+    )
+    canonical.write_bytes(b"PK\x03\x04canonical")
+    runtime_copy.write_bytes(b"PK\x03\x04stale")
+
+    with pytest.raises(ValueError, match="计算书标准配筋模板内容不一致"):
+        build_terminal_deploy_package(
+            repo_root=repo_root,
+            output_root=tmp_path / "build" / "fanban-terminal-deploy",
+        )
+
+
+def test_terminal_package_materializes_ansys_skill_without_copying_private_archive(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    (repo_root / "documents" / "AI" / AI_SPEC_NAME).write_text(
+        """
+schema_version: "0.1"
+ai_layer:
+  chat:
+    skills:
+      - skill_id: "ansys_mapdl_18_2"
+        name: "ANSYS MAPDL 18.2"
+        handler: "ansys_mapdl_18_2"
+        enabled: true
+        root: "storage/ai/skills/ansys-mapdl-18-2"
+""".strip(),
+        encoding="utf-8",
+    )
+    archive = (
+        repo_root
+        / "documents"
+        / "AI"
+        / "ansys-mapdl-18-2-private-offline-2026-07-16.zip"
+    )
+    with ZipFile(archive, "w") as bundle:
+        prefix = "private/ansys-mapdl-18-2"
+        bundle.writestr(f"{prefix}/SKILL.md", "skill")
+        bundle.writestr(f"{prefix}/scripts/mapdl_query.py", "print('{}')")
+        bundle.writestr(f"{prefix}/assets/data/mapdl_help.sqlite", "sqlite")
+        bundle.writestr(f"{prefix}/assets/data/mapdl_commands.jsonl", "{}\n")
+        bundle.writestr(f"{prefix}/assets/data/manifest.json", "{}\n")
+
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    installed = output_root / "storage" / "ai" / "skills" / "ansys-mapdl-18-2"
+    assert (installed / "SKILL.md").exists()
+    assert (installed / "scripts" / "mapdl_query.py").exists()
+    assert not (
+        output_root
+        / "documents"
+        / "AI"
+        / "ansys-mapdl-18-2-private-offline-2026-07-16.zip"
+    ).exists()
     assert not (output_root / "python-packages" / "Lib" / "site-packages" / "_auto_fanban.pth").exists()
     assert not (
         output_root / "python-packages" / "Lib" / "site-packages" / "_editable_impl_auto_fanban.pth"
@@ -250,6 +634,48 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "_editable_impl_auto_fanban.pth" not in record
     assert "direct_url.json" not in record
     assert "METADATA" in record
+
+
+def test_terminal_package_materializes_building_standards_skill(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    (repo_root / "documents" / "AI" / AI_SPEC_NAME).write_text(
+        """
+schema_version: "0.1"
+ai_layer:
+  chat:
+    skills:
+      - skill_id: "building_structure_standards"
+        name: "建筑结构总图规范"
+        handler: "building_structure_standards"
+        enabled: true
+        root: "storage/ai/skills/building-structure-standards"
+""".strip(),
+        encoding="utf-8",
+    )
+    source = repo_root / "tools" / "ai" / "building-structure-standards"
+    _write_file(source / "SKILL.md", "skill")
+    _write_file(source / "scripts" / "standards_query.py", "print('{}')")
+    _write_file(source / "assets" / "data" / "standards.sqlite", "sqlite")
+    _write_file(source / "assets" / "data" / "audit_catalog.json", "[]")
+    _write_file(source / "assets" / "data" / "manifest.json", "{}")
+    _write_file(source / "assets" / "data" / "validation_report.json", "{}")
+
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    installed = (
+        output_root
+        / "storage"
+        / "ai"
+        / "skills"
+        / "building-structure-standards"
+    )
+    assert (installed / "SKILL.md").is_file()
+    assert (installed / "scripts" / "standards_query.py").is_file()
+    assert (installed / "assets" / "data" / "standards.sqlite").is_file()
     assert not (
         output_root
         / "backend-runtime"
@@ -325,13 +751,30 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert (output_root / "documents" / "Resources" / "通信打印样式细线.ctb").exists()
     assert (output_root / "documents" / SPEC_NAME).exists()
     assert (output_root / "documents" / MECHANISM_SPEC_NAME).exists()
+    assert (output_root / "documents" / "AI" / AI_SPEC_NAME).exists()
+    assert (output_root / "documents" / "AI" / AI_MODEL_GATEWAY_CONFIG_NAME).exists()
     assert (output_root / "documents_bin" / "responsible_unit.json").exists()
+    assert (
+        output_root
+        / "documents_bin"
+        / "calculation_book"
+        / "Tesseract-OCR"
+        / "tesseract.exe"
+    ).exists()
     assert (output_root / "scripts" / "start_backend.ps1").exists()
     assert (output_root / "scripts" / "check_health.ps1").exists()
     assert (output_root / "scripts" / "deep_check_terminal.ps1").exists()
     assert (output_root / "scripts" / "probe_target_env.ps1").exists()
     assert (output_root / "scripts" / "cad_env_fingerprint.ps1").exists()
     assert (output_root / "scripts" / "cad_env_sync.ps1").exists()
+    assert (output_root / "scripts" / BUSINESS_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / CALCULATION_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / DEPLOYMENT_PROBE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / CALCULATION_SMOKE_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).exists()
+    assert (output_root / "scripts" / AI_CONNECTIVITY_SCRIPT_NAME).read_bytes() == (
+        repo_root / "tools" / "ai" / AI_CONNECTIVITY_SCRIPT_NAME
+    ).read_bytes()
     assert (output_root / DEPLOY_README).exists()
     deploy_readme = (output_root / DEPLOY_README).read_text(encoding="utf-8")
     assert "install\\check_iis_proxy_prereqs.ps1" in deploy_readme
@@ -342,6 +785,22 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert "api/system/ping" in deploy_readme
     assert "不要再额外执行 `Start-ScheduledTask -TaskName FanBanBackend`" in deploy_readme
     assert "ARR proxy timeout 低于 600 秒" in deploy_readme
+    assert "scripts\\test_ai_model_connectivity.ps1" in deploy_readme
+    assert "http://models.ai.cnpe.cc/qwen_medium/v1/chat/completions" in deploy_readme
+    assert "Qwen3.8-27B" in deploy_readme
+    assert "qwen_fast/v1/chat/completions" not in deploy_readme
+    assert "Qwen3.6-35A3" not in deploy_readme
+    assert "script.sha256" in deploy_readme
+    assert "package-manifest.json" in deploy_readme
+    assert "done_received=false" in deploy_readme
+    assert "不能单独判定为失败" in deploy_readme
+    assert "bin/7-Zip/7z.exe" in deploy_readme
+    assert "7z.dll" in deploy_readme
+    assert "License.txt" in deploy_readme
+    assert "PROVENANCE.txt" in deploy_readme
+    assert "不会安装 7-Zip，也不会加入 PATH" in deploy_readme
+    assert "RAR5 冒烟样本仅含合成测试数据" in deploy_readme
+    assert "archive_runtime_probe" in deploy_readme
     assert "*.lscache" in deploy_readme
     manifest = json.loads((output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8"))
     assert manifest["package_kind"] == "full"
@@ -353,6 +812,116 @@ def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes
     assert ".NET Framework 4.8" in text
     assert "VC++ 2015-2022 x64" in text
     assert "NSSM" not in text
+
+
+def test_terminal_package_materializes_reinforcement_table_skill(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+    ai_spec = repo_root / "documents" / "AI" / AI_SPEC_NAME
+    _write_file(
+        ai_spec,
+        """
+schema_version: "0.1"
+ai_layer:
+  enabled: true
+  chat:
+    skills:
+      - skill_id: "reinforcement_table_normalizer"
+        name: "墙体配筋表规范化"
+        enabled: true
+        handler: "reinforcement_table_normalizer"
+        root: "storage/ai/skills/reinforcement-table-normalizer"
+""".strip(),
+    )
+    source = repo_root / "tools" / "ai" / "reinforcement-table-normalizer"
+    _write_file(source / "SKILL.md", "skill")
+    _write_file(source / "references" / "normalization-rules.md", "rules")
+
+    build_terminal_deploy_package(
+        repo_root=repo_root,
+        output_root=output_root,
+    )
+
+    installed = (
+        output_root
+        / "storage"
+        / "ai"
+        / "skills"
+        / "reinforcement-table-normalizer"
+    )
+    assert (installed / "SKILL.md").is_file()
+    assert (installed / "references" / "normalization-rules.md").is_file()
+
+
+def test_terminal_package_materializes_rebar_suggestion_skill_from_runtime_root(
+    tmp_path: Path,
+) -> None:
+    from src.config.runtime_config import RuntimeConfig
+
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    source = repo_root / REBAR_SUGGESTION_SKILL_ROOT
+    installed = output_root / REBAR_SUGGESTION_SKILL_ROOT
+    assert _relative_files(installed) == {
+        path.as_posix() for path in REBAR_SUGGESTION_REQUIRED_FILES
+    }
+    manifest = json.loads(
+        (output_root / PACKAGE_MANIFEST).read_text(encoding="utf-8")
+    )
+    manifest_files = {item["path"]: item for item in manifest["files"]}
+    for relative in REBAR_SUGGESTION_REQUIRED_FILES:
+        source_file = source / relative
+        installed_file = installed / relative
+        expected_sha256 = hashlib.sha256(source_file.read_bytes()).hexdigest()
+        assert installed_file.read_bytes() == source_file.read_bytes()
+        assert manifest_files[
+            (REBAR_SUGGESTION_SKILL_ROOT / relative).as_posix()
+        ]["sha256"] == expected_sha256
+
+    runtime = RuntimeConfig.from_yaml(
+        output_root / "documents" / RUNTIME_SPEC_NAME
+    )
+    assert runtime.calculation_book.ai_suggestion.skill_root == installed.resolve()
+    assert f"name: {REBAR_SUGGESTION_SKILL_ID}" in (
+        installed / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / "validate_fixtures.py"),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout.strip() == "fixtures: ok"
+
+
+@pytest.mark.parametrize("missing", REBAR_SUGGESTION_REQUIRED_FILES)
+def test_terminal_package_rejects_incomplete_rebar_suggestion_skill(
+    tmp_path: Path,
+    missing: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    output_root = tmp_path / "output"
+    _make_fake_repo(repo_root)
+    (repo_root / REBAR_SUGGESTION_SKILL_ROOT / missing).unlink()
+
+    with pytest.raises(
+        FileNotFoundError,
+        match=rf"{REBAR_SUGGESTION_SKILL_ID}.*{missing.name}",
+    ):
+        build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
 
 def test_build_terminal_deploy_package_requires_pdf_preview_worker_asset(tmp_path: Path) -> None:
@@ -487,6 +1056,14 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "backend-start-cwd:" in start_backend
     assert "backend-command:" in start_backend
     assert "backend-env: {0}={1}" in start_backend
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in start_backend
+    assert 'Join-Path $root "bin\\7-Zip\\7z.exe"' in start_backend
+    assert "Invoke-ArchiveRuntimeProbe" in start_backend
+    assert "src.deploy.archive_runtime_probe" in start_backend
+    assert 'Join-Path $PackageRoot "backend-runtime\\backend"' in start_backend
+    probe_call = "Invoke-ArchiveRuntimeProbe -PythonPath $python -PackageRoot $root"
+    assert start_backend.count(probe_call) == 1
+    assert start_backend.index(probe_call) < start_backend.index('"API.app.main:create_app"')
     assert "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR" in start_backend
     assert "FANBAN_MODULE5_EXPORT__DOTNET_BRIDGE__DLL_PATH" in start_backend
     assert '$pathType = if ($name -eq "FANBAN_MODULE5_EXPORT__CAD_RUNNER__SCRIPT_DIR")' in start_backend
@@ -502,6 +1079,18 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert 'Set-Item -Path "Env:FANBAN_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_RUNTIME_SPEC_PATH"' in start_backend
     assert 'Set-Item -Path "Env:FANBAN_MECHANISM_SPEC_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_GATEWAY_CONFIG_PATH"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_GATEWAY_PROFILE"' in start_backend
+    assert 'Set-Item -Path "Env:FANBAN_AI_SPEC_PATH"' in start_backend
+    assert "terminal_cnpe_intranet_qwen_fast" in start_backend
+    assert "ai-config-preflight-ok" in start_backend
+    assert 'if ([string]::IsNullOrWhiteSpace($env:FANBAN_AI_GATEWAY_PROFILE))' not in start_backend
+    assert 'profile_name != "terminal_cnpe_intranet_qwen_fast"' in start_backend
+    assert 'validate_gateway_network_policy(required_network_mode="intranet_only")' in start_backend
+    assert '"--proxy-headers"' in start_backend
+    assert '"--forwarded-allow-ips"' in start_backend
+    assert '"127.0.0.1"' in start_backend
+    assert '"--workers",\n            "1"' in start_backend
     assert f'$managedCtbName = "{MANAGED_MONOCHROME_CTB_NAME}"' in start_backend
     assert '$env:FANBAN_MODULE5_EXPORT__PLOT__CTB_NAME -eq "monochrome.ctb"' in start_backend
     assert '[Environment]::SetEnvironmentVariable("PYTHONNOUSERSITE", "1", "Process")' in start_backend
@@ -563,11 +1152,20 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "probe_target_env.ps1" in prepare_terminal
     assert "runtime.env.ps1" in prepare_terminal
     assert "Set-Item -Path 'Env:{0}' -Value '{1}'" in prepare_terminal
+    assert "documents\\AI\\ai_model_gateway.yaml" in prepare_terminal
+    assert "documents\\AI\\参数规范_AI.yaml" in prepare_terminal
+    assert "FANBAN_AI_SPEC_PATH" in prepare_terminal
+    assert "FANBAN_AI_GATEWAY_CONFIG_PATH" in prepare_terminal
+    assert "FANBAN_AI_GATEWAY_PROFILE" in prepare_terminal
+    assert "terminal_cnpe_intranet_qwen_fast" in prepare_terminal
     assert "$env:{0}" not in prepare_terminal
     assert "OfficeProbeMode" in prepare_terminal
     assert "quick" in prepare_terminal
     assert "Blocking issues detail" in prepare_terminal
     assert "$probe.blocking_issues" in prepare_terminal
+    assert "$probe.archive_runtime.status -ne \"pass\"" in prepare_terminal
+    assert "FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE" in prepare_terminal
+    assert "$expectedArchiveExecutable" in prepare_terminal
     assert "[1/4]" in prepare_terminal
     assert "Invoke-RestMethod" in check_health
     assert "/api/system/ping" in check_health
@@ -610,6 +1208,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "ReuseQuickProbeJson" not in deep_check
     assert "probe_target_env.json" not in deep_check
     assert "$probeArgs = @{" in deep_check
+    assert "$probe.blocking_issues.Count -gt 0" in deep_check
+    assert "deep 环境探测未通过" in deep_check
     assert "Test-DotNet48OrAboveInstalled" in install_runtime
     assert "Get-VcRuntimeInfo" in install_runtime
     assert "Expand-PackagePythonRuntime" in install_runtime
@@ -720,6 +1320,76 @@ def test_publish_terminal_deploy_artifacts_writes_delta_for_added_modified_and_d
 
     delete_list = (delta_root / DELTA_DIR_NAME / DELTA_DELETE_LIST).read_text(encoding="utf-8")
     assert "documents/Resources/fanban_monochrome.ctb" in delete_list
+
+
+def test_publish_terminal_deploy_artifacts_tracks_archive_runtime_delta_changes(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    baseline_runtime = output_root / "bin" / "7-Zip"
+    (baseline_runtime / "7z.exe").unlink()
+    (baseline_runtime / "7z.dll").write_bytes(b"old-runtime-dll")
+    (baseline_runtime / "7zr.exe").write_bytes(b"must-be-deleted")
+
+    publish_terminal_deploy_artifacts(
+        repo_root=repo_root,
+        output_root=output_root,
+        delta_root=delta_root,
+    )
+
+    payload = json.loads(
+        (delta_root / DELTA_DIR_NAME / DELTA_MANIFEST).read_text(encoding="utf-8")
+    )
+    assert "bin/7-Zip/7z.exe" in payload["added_files"]
+    assert "bin/7-Zip/7z.dll" in payload["modified_files"]
+    assert "bin/7-Zip/7zr.exe" in payload["deleted_files"]
+    assert {path.name for path in (output_root / "bin" / "7-Zip").iterdir()} == {
+        "7z.exe",
+        "7z.dll",
+        "License.txt",
+        "PROVENANCE.txt",
+    }
+
+
+def test_publish_rejects_tampered_deployed_runtime_and_preserves_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    delta_root = tmp_path / "build" / "fanban-terminal-deploy-delta"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+    baseline_exe = (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes()
+    baseline_manifest = (output_root / PACKAGE_MANIFEST).read_bytes()
+    original_write_support_files = terminal_package_mod._write_support_files
+
+    def write_support_then_tamper(package_root: Path, **kwargs: object) -> None:
+        original_write_support_files(package_root, **kwargs)
+        (package_root / "bin" / "7-Zip" / "7z.dll").write_bytes(
+            b"tampered-in-staging"
+        )
+
+    monkeypatch.setattr(
+        terminal_package_mod,
+        "_write_support_files",
+        write_support_then_tamper,
+    )
+
+    with pytest.raises(ArchiveRuntimeError, match="7z.dll"):
+        publish_terminal_deploy_artifacts(
+            repo_root=repo_root,
+            output_root=output_root,
+            delta_root=delta_root,
+        )
+
+    assert (output_root / "bin" / "7-Zip" / "7z.exe").read_bytes() == baseline_exe
+    assert (output_root / PACKAGE_MANIFEST).read_bytes() == baseline_manifest
+    assert not (output_root.parent / "_stg").exists()
 
 
 def test_publish_terminal_deploy_artifacts_without_baseline_writes_metadata_only_delta(tmp_path: Path) -> None:
@@ -840,6 +1510,56 @@ if ($errors -and $errors.Count -gt 0) {
         assert completed.returncode == 0, f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
 
 
+def test_business_probe_launchers_use_packaged_runtime_without_cli_secrets() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    launcher_paths = [
+        repo_root / "tools" / BUSINESS_PROBE_SCRIPT_NAME,
+        repo_root / "tools" / CALCULATION_PROBE_SCRIPT_NAME,
+        repo_root / "tools" / DEPLOYMENT_PROBE_SCRIPT_NAME,
+    ]
+
+    for path in launcher_paths:
+        text = path.read_text(encoding="utf-8")
+        assert "--password" not in text.casefold()
+        assert "[string]$Password" not in text
+        assert "python-runtime\\python.exe" in text
+        assert "backend-runtime\\backend" in text
+
+        script = f'\n$target = "{str(path).replace("\\", "\\\\")}"\n' + """
+$tokens = $null
+$errors = $null
+[System.Management.Automation.Language.Parser]::ParseFile(
+    $target,
+    [ref]$tokens,
+    [ref]$errors
+) | Out-Null
+if ($errors -and $errors.Count -gt 0) {
+    $errors | ForEach-Object { Write-Output $_.Message }
+    exit 1
+}
+"""
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert completed.returncode == 0, (
+            f"{path} parse failed: {completed.stdout}\n{completed.stderr}"
+        )
+
+    business_text = launcher_paths[0].read_text(encoding="utf-8")
+    calculation_text = launcher_paths[1].read_text(encoding="utf-8")
+    combined_text = launcher_paths[2].read_text(encoding="utf-8")
+    assert "src.deploy.business_module_probe" in business_text
+    assert "src.deploy.calculation_book_probe" in calculation_text
+    assert CALCULATION_SMOKE_SCRIPT_NAME in calculation_text
+    assert "check_health.ps1" in combined_text
+    assert BUSINESS_PROBE_SCRIPT_NAME in combined_text
+    assert CALCULATION_PROBE_SCRIPT_NAME in combined_text
+    assert "summary.json" in combined_text
+
+
 def test_generated_configure_iis_site_keeps_frontend_app_pool_resident(
     tmp_path: Path,
 ) -> None:
@@ -883,6 +1603,31 @@ def test_generated_check_health_reports_frontend_iis_residency_and_http(
     assert "frontend_api_proxy_status" in check_health
     assert "Frontend HTTP:" in check_health
     assert "Frontend AppPool:" in check_health
+
+
+def test_generated_check_health_requires_ready_storage_and_live_worker(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    check_health = (output_root / "scripts" / "check_health.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert 'code = "api_not_ready"' in check_health
+    assert 'code = "storage_not_writable"' in check_health
+    assert 'code = "worker_not_alive"' in check_health
+    assert 'code = "worker_count_invalid"' in check_health
+    assert "$apiHealthResponse.ready -eq $true" in check_health
+    assert "$apiHealthResponse.storage_writable -eq $true" in check_health
+    assert "$apiHealthResponse.worker_alive -eq $true" in check_health
+    assert "[int]$apiHealthResponse.worker_count -gt 0" in check_health
+    assert "$apiHealthIssues.Count -eq 0" in check_health
+    assert "api_health_issues = $apiHealthIssues" in check_health
 
 
 def test_build_terminal_deploy_package_init_storage_does_not_hardcode_slot_count(
@@ -961,6 +1706,48 @@ $payload | ConvertTo-Json -Depth 4 | Out-File -LiteralPath $OutJson -Encoding ut
     assert deep_probe["storage_root"] == storage_root
     assert deep_probe["office_probe_mode"] == "deep"
     assert deep_probe["reuse_quick_probe_json"] == ""
+
+
+def test_generated_deep_check_terminal_fails_on_blocking_issues(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _make_fake_repo(repo_root)
+    output_root = tmp_path / "build" / "fanban-terminal-deploy"
+    build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
+
+    probe_stub = r'''param(
+    [string]$OutJson = "",
+    [string]$RepoRoot = "",
+    [int]$Port = 8000,
+    [string]$StorageRoot = "",
+    [string]$OfficeProbeMode = ""
+)
+$payload = [ordered]@{
+    blocking_issues = @([ordered]@{
+        section = "archive_runtime"
+        code = "archive_runtime_probe"
+        message = "private archive runtime probe failed"
+    })
+}
+$payload | ConvertTo-Json -Depth 6 | Out-File -LiteralPath $OutJson -Encoding utf8
+'''
+    (output_root / "scripts" / "probe_target_env.ps1").write_text(
+        probe_stub,
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(output_root / "scripts" / "deep_check_terminal.ps1"),
+        ],
+        capture_output=True,
+    )
+
+    assert completed.returncode != 0
 
 
 def test_generated_start_backend_does_not_use_powershell_reserved_host_variable(

@@ -59,12 +59,12 @@ from ..models import (
     normalize_discipline_label,
     normalize_global_doc_params,
 )
+from ..workload.calculator import WorkloadCalculator
 from .frame_filtering import split_anchor_valid_frames
 from .packager import Packager
 from .preview_pdf_service import PreviewPdfService
 from .shared_prep import SharedPrepService
 from .stages import DELIVERABLE_STAGES, StageEnum
-from ..workload.calculator import WorkloadCalculator
 
 if TYPE_CHECKING:
     from ..models import Job

@@ -1,7 +1,17 @@
+import { existsSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import legacy from "@vitejs/plugin-legacy";
 import react from "@vitejs/plugin-react";
 import { apiProxyConfig } from "./src/tooling/viteProxy";
+
+const configDir = fileURLToPath(new URL(".", import.meta.url));
+const nodeModulesDir = fileURLToPath(new URL("./node_modules", import.meta.url));
+const devServerFsAllow = [configDir];
+
+if (existsSync(nodeModulesDir)) {
+  devServerFsAllow.push(realpathSync(nodeModulesDir));
+}
 
 export default defineConfig({
   plugins: [
@@ -61,6 +71,9 @@ export default defineConfig({
     },
   },
   server: {
+    fs: {
+      allow: devServerFsAllow,
+    },
     proxy: apiProxyConfig,
   },
   preview: {

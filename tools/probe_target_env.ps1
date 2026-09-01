@@ -6,7 +6,7 @@
     [ValidateSet("quick", "deep")]
     [string]$OfficeProbeMode = "quick",
     [string]$ReuseQuickProbeJson = "",
-    [ValidateSet("", "word_export", "excel_export", "word_template", "excel_template")]
+    [ValidateSet("", "word_com", "excel_com", "word_export", "excel_export", "word_template", "excel_template")]
     [string]$OfficeWorkerTask = "",
     [string]$OfficeWorkerTemplatePath = "",
     [string]$OfficeWorkerTemplateLabel = "",
@@ -737,7 +737,7 @@ function Import-ProbeBaseline {
         $raw = Get-Content -LiteralPath $PathText -Raw -ErrorAction Stop
         $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
         $baseline = ConvertTo-PlainValue -Value $parsed
-        foreach ($key in @("host", "repo", "python", "sqlite", "storage", "network", "autocad")) {
+        foreach ($key in @("host", "repo", "python", "archive_runtime", "sqlite", "storage", "network", "autocad")) {
             if (-not $baseline.Contains($key)) {
                 Write-Warning ("quick 探针结果缺少必要字段，忽略复用: " + $key)
                 return $null
@@ -1030,6 +1030,76 @@ function Get-PythonFacts {
     }
 }
 
+function Get-ArchiveRuntimeFacts {
+    param(
+        [string]$ActualRepoRoot,
+        [object]$PythonFacts
+    )
+
+    $pythonExe = [string]$PythonFacts.selected.executable
+    if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+        return New-CheckResult -Status "fail" -Error "package Python is unavailable for the archive runtime probe"
+    }
+
+    $deployedBackendRoot = Join-Path $ActualRepoRoot "backend-runtime\backend"
+    $deployedProbe = Join-Path $deployedBackendRoot "src\deploy\archive_runtime_probe.py"
+    $developmentBackendRoot = Join-Path $ActualRepoRoot "backend"
+    $developmentProbe = Join-Path $developmentBackendRoot "src\deploy\archive_runtime_probe.py"
+    $workingDirectory = ""
+    $moduleName = ""
+    if (Test-Path -LiteralPath $deployedProbe -PathType Leaf) {
+        $workingDirectory = $deployedBackendRoot
+        $moduleName = "src.deploy.archive_runtime_probe"
+    } elseif (Test-Path -LiteralPath $developmentProbe -PathType Leaf) {
+        $workingDirectory = $developmentBackendRoot
+        $moduleName = "src.deploy.archive_runtime_probe"
+    } else {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe module is missing"
+    }
+
+    $locationPushed = $false
+    try {
+        Push-Location $workingDirectory
+        $locationPushed = $true
+        $invoke = Invoke-ExternalCommand -FilePath $pythonExe -Arguments @(
+            "-X",
+            "utf8",
+            "-m",
+            $moduleName,
+            "--package-root",
+            $ActualRepoRoot
+        )
+    } catch {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe could not start"
+    } finally {
+        if ($locationPushed) {
+            Pop-Location
+        }
+    }
+
+    $probePayload = $null
+    if (-not [string]::IsNullOrWhiteSpace([string]$invoke.stdout)) {
+        try {
+            $probePayload = ConvertTo-PlainValue -Value ([string]$invoke.stdout | ConvertFrom-Json -ErrorAction Stop)
+        } catch {
+            $probePayload = $null
+        }
+    }
+    if ($null -eq $probePayload) {
+        return New-CheckResult -Status "fail" -Error "archive runtime probe returned invalid JSON"
+    }
+    if (-not [bool]$invoke.success -or [string]$probePayload.status -ne "pass") {
+        return [ordered]@{
+            status = "fail"
+            ok = $false
+            code = if ($probePayload.Contains("code")) { [string]$probePayload.code } else { "archive_runtime_probe" }
+            error = if ($probePayload.Contains("error")) { [string]$probePayload.error } else { "archive runtime probe failed" }
+            details = @{}
+        }
+    }
+    return $probePayload
+}
+
 function Test-SqliteProbe {
     param([string]$PythonExe)
 
@@ -1169,6 +1239,88 @@ function Get-ProcessIdSnapshot {
     return $ids.ToArray()
 }
 
+function Get-OfficeErrorCode {
+    param(
+        [string]$Message,
+        [string]$HResult = ""
+    )
+
+    $normalized = if ($null -eq $Message) { "" } else { $Message.ToLowerInvariant() }
+    if ($HResult -eq "0x80010001" -or $normalized -like "*0x80010001*" -or $normalized -like "*rejected by callee*" -or $normalized -like "*被调用方拒绝接收调用*") {
+        return "office_call_rejected"
+    }
+    if ($HResult -eq "0x80070002" -or $normalized -like "*cannot find the file*" -or $normalized -like "*系统找不到指定的文件*") {
+        return "office_registration_or_executable_missing"
+    }
+    if ($normalized -like "*timed out*" -or $normalized -like "*timeout*") {
+        return "office_worker_timeout"
+    }
+    if ($normalized -like "*class not registered*" -or $normalized -like "*没有注册类*") {
+        return "office_com_not_registered"
+    }
+    if ([string]::IsNullOrWhiteSpace($normalized) -and [string]::IsNullOrWhiteSpace($HResult)) {
+        return ""
+    }
+    return "office_com_failure"
+}
+
+function Invoke-BoundedChildProcess {
+    param(
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [int]$TimeoutSec,
+        [string]$StdoutPath,
+        [string]$StderrPath
+    )
+
+    foreach ($logPath in @($StdoutPath, $StderrPath)) {
+        $parent = Split-Path -Parent $logPath
+        if (-not [string]::IsNullOrWhiteSpace($parent)) {
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        }
+    }
+
+    $pathValue = [Environment]::GetEnvironmentVariable("Path", "Process")
+    if ([string]::IsNullOrWhiteSpace($pathValue)) {
+        $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
+    }
+    [Environment]::SetEnvironmentVariable("PATH", $null, "Process")
+    [Environment]::SetEnvironmentVariable("Path", $pathValue, "Process")
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $process = $null
+    $timedOut = $false
+    $exitCode = $null
+    try {
+        $process = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
+            -RedirectStandardOutput $StdoutPath -RedirectStandardError $StderrPath `
+            -PassThru -WindowStyle Hidden
+        $finished = $process.WaitForExit($TimeoutSec * 1000)
+        if (-not $finished) {
+            $timedOut = $true
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+        }
+        try { $process.WaitForExit() } catch {}
+        if ($process.HasExited) {
+            $exitCode = [int]$process.ExitCode
+        }
+    } finally {
+        $stopwatch.Stop()
+        if ($null -ne $process -and -not $process.HasExited) {
+            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+        }
+    }
+
+    return [ordered]@{
+        process_id = if ($null -ne $process) { [int]$process.Id } else { 0 }
+        timed_out = $timedOut
+        exit_code = $exitCode
+        elapsed_ms = [int64]$stopwatch.ElapsedMilliseconds
+        stdout_path = $StdoutPath
+        stderr_path = $StderrPath
+    }
+}
+
 function Stop-NewOfficeProcesses {
     param(
         [int[]]$BaselineWordIds,
@@ -1214,20 +1366,25 @@ function Write-OfficeWorkerResultAndExit {
 
 function Invoke-OfficeWorkerWithTimeout {
     param(
-        [ValidateSet("word_export", "excel_export", "word_template", "excel_template")]
+        [ValidateSet("word_com", "excel_com", "word_export", "excel_export", "word_template", "excel_template")]
         [string]$TaskName,
         [string]$TemplatePath,
         [string]$TemplateLabel,
         [int]$TimeoutSec = 90
     )
 
-    $resultJson = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban_office_worker_" + [guid]::NewGuid().ToString("N") + ".json")
+    $workerDir = Join-Path ([System.IO.Path]::GetTempPath()) ("fanban_office_worker_" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $workerDir -Force | Out-Null
+    $resultJson = Join-Path $workerDir "result.json"
+    $stdoutPath = Join-Path $workerDir "worker.stdout.log"
+    $stderrPath = Join-Path $workerDir "worker.stderr.log"
     $baselineWordIds = Get-ProcessIdSnapshot -Names @("WINWORD")
     $baselineExcelIds = Get-ProcessIdSnapshot -Names @("EXCEL")
-    $process = $null
+    $processResult = $null
+    $keepEvidence = $false
 
     try {
-        $process = Start-Process -FilePath "powershell.exe" -ArgumentList @(
+        $processResult = Invoke-BoundedChildProcess -FilePath "powershell.exe" -ArgumentList @(
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
@@ -1243,49 +1400,113 @@ function Invoke-OfficeWorkerWithTimeout {
             $TemplateLabel,
             "-OfficeWorkerOutJson",
             $resultJson
-        ) -PassThru -WindowStyle Hidden
+        ) -TimeoutSec $TimeoutSec -StdoutPath $stdoutPath -StderrPath $stderrPath
 
-        $finished = $process.WaitForExit($TimeoutSec * 1000)
-        if (-not $finished) {
-            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+        $processesAfterWorker = [ordered]@{
+            word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+            excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+        }
+        if ($processResult.timed_out) {
             Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+            $keepEvidence = $true
             return New-CheckResult -Status "fail" -Details ([ordered]@{
                 task = $TaskName
                 template = $TemplateLabel
                 template_path = (Resolve-FullPathOrRaw $TemplatePath)
                 timeout_sec = $TimeoutSec
+                elapsed_ms = $processResult.elapsed_ms
+                error_code = "office_worker_timeout"
+                stdout_path = $stdoutPath
+                stderr_path = $stderrPath
+                office_processes_before = [ordered]@{ word = @($baselineWordIds); excel = @($baselineExcelIds) }
+                office_processes_after = $processesAfterWorker
+                office_processes_residual = [ordered]@{
+                    word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+                    excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+                }
             }) -Error ("office worker timed out after " + $TimeoutSec + "s")
         }
 
         if (-not (Test-Path -LiteralPath $resultJson -PathType Leaf)) {
+            Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+            $keepEvidence = $true
             return New-CheckResult -Status "fail" -Details ([ordered]@{
                 task = $TaskName
                 template = $TemplateLabel
                 template_path = (Resolve-FullPathOrRaw $TemplatePath)
                 timeout_sec = $TimeoutSec
+                elapsed_ms = $processResult.elapsed_ms
+                exit_code = $processResult.exit_code
+                error_code = "office_worker_result_missing"
+                stdout_path = $stdoutPath
+                stderr_path = $stderrPath
+                office_processes_before = [ordered]@{ word = @($baselineWordIds); excel = @($baselineExcelIds) }
+                office_processes_after = $processesAfterWorker
+                office_processes_residual = [ordered]@{
+                    word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+                    excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+                }
             }) -Error "office worker did not produce result json"
         }
 
         $result = Get-Content -LiteralPath $resultJson -Raw | ConvertFrom-Json
+        $details = [ordered]@{}
+        if ($null -ne $result.details) {
+            foreach ($property in $result.details.PSObject.Properties) {
+                $details[$property.Name] = $property.Value
+            }
+        }
+        $details.elapsed_ms = $processResult.elapsed_ms
+        $details.exit_code = $processResult.exit_code
+        $details.error_code = Get-OfficeErrorCode -Message ([string]$result.error)
+        $details.stdout_path = $stdoutPath
+        $details.stderr_path = $stderrPath
+        $details.office_processes_before = [ordered]@{ word = @($baselineWordIds); excel = @($baselineExcelIds) }
+        $details.office_processes_after = $processesAfterWorker
+        $details.office_processes_residual = [ordered]@{
+            word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+            excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+        }
+        if ([string]$result.status -ne "pass") {
+            Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+            $details.office_processes_residual = [ordered]@{
+                word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+                excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+            }
+            $keepEvidence = $true
+        }
         return [ordered]@{
             status = [string]$result.status
             ok = [bool]$result.ok
             error = [string]$result.error
-            details = $result.details
+            details = $details
         }
     } catch {
         Stop-NewOfficeProcesses -BaselineWordIds $baselineWordIds -BaselineExcelIds $baselineExcelIds
+        $keepEvidence = $true
         return New-CheckResult -Status "fail" -Details ([ordered]@{
             task = $TaskName
             template = $TemplateLabel
             template_path = (Resolve-FullPathOrRaw $TemplatePath)
             timeout_sec = $TimeoutSec
+            elapsed_ms = if ($null -ne $processResult) { $processResult.elapsed_ms } else { 0 }
+            error_code = Get-OfficeErrorCode -Message $_.Exception.Message -HResult (Format-HResultHex -HResult $_.Exception.HResult)
+            stdout_path = $stdoutPath
+            stderr_path = $stderrPath
+            office_processes_before = [ordered]@{ word = @($baselineWordIds); excel = @($baselineExcelIds) }
+            office_processes_after = [ordered]@{
+                word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+                excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+            }
+            office_processes_residual = [ordered]@{
+                word = @(Get-ProcessIdSnapshot -Names @("WINWORD"))
+                excel = @(Get-ProcessIdSnapshot -Names @("EXCEL"))
+            }
         }) -Error $_.Exception.Message
     } finally {
-        if ($process -and -not $process.HasExited) {
-            try { Stop-Process -Id $process.Id -Force -ErrorAction Stop } catch {}
+        if (-not $keepEvidence) {
+            Remove-ProbePath -PathText $workerDir
         }
-        Remove-ProbePath -PathText $resultJson
     }
 }
 
@@ -1406,6 +1627,111 @@ function Get-ExecutablePathFromCommandText {
     return ($expanded -split '\s+')[0]
 }
 
+function Get-ComRegistrationViewFacts {
+    param(
+        [string]$ProgId,
+        [Microsoft.Win32.RegistryView]$View
+    )
+
+    $facts = [ordered]@{
+        view = $View.ToString()
+        prog_id = $ProgId
+        progid_key = ("{0}:ClassesRoot\\{1}" -f $View, $ProgId)
+        progid_exists = $false
+        clsid = ""
+        clsid_key = ""
+        local_server32_key = ""
+        local_server32_raw = ""
+        local_server_path = ""
+        local_server_exists = $false
+        error = ""
+    }
+    $baseKey = $null
+    $progIdKey = $null
+    $clsidValueKey = $null
+    $serverKey = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::ClassesRoot, $View)
+        $progIdKey = $baseKey.OpenSubKey($ProgId)
+        if ($null -eq $progIdKey) {
+            return $facts
+        }
+        $facts.progid_exists = $true
+        $clsidValueKey = $progIdKey.OpenSubKey("CLSID")
+        if ($null -ne $clsidValueKey) {
+            $facts.clsid = [string]$clsidValueKey.GetValue("", "")
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$facts.clsid)) {
+            return $facts
+        }
+        $facts.clsid_key = ("{0}:ClassesRoot\\CLSID\\{1}" -f $View, $facts.clsid)
+        $facts.local_server32_key = ($facts.clsid_key + "\\LocalServer32")
+        $serverKey = $baseKey.OpenSubKey(("CLSID\\{0}\\LocalServer32" -f $facts.clsid))
+        if ($null -eq $serverKey) {
+            return $facts
+        }
+        $facts.local_server32_raw = [string]$serverKey.GetValue("", "")
+        $facts.local_server_path = Get-ExecutablePathFromCommandText -CommandText $facts.local_server32_raw
+        if (-not [string]::IsNullOrWhiteSpace([string]$facts.local_server_path)) {
+            $facts.local_server_exists = Test-Path -LiteralPath $facts.local_server_path -PathType Leaf
+        }
+        return $facts
+    } catch {
+        $facts.error = $_.Exception.Message
+        return $facts
+    } finally {
+        foreach ($key in @($serverKey, $clsidValueKey, $progIdKey, $baseKey)) {
+            if ($null -ne $key) {
+                try { $key.Dispose() } catch {}
+            }
+        }
+    }
+}
+
+function Get-OfficeAppPathFacts {
+    param([string]$ExecutableName)
+
+    $facts = @()
+    foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+        foreach ($hive in @([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryHive]::CurrentUser)) {
+            $baseKey = $null
+            $appKey = $null
+            try {
+                $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+                $subKey = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\$ExecutableName"
+                $appKey = $baseKey.OpenSubKey($subKey)
+                if ($null -eq $appKey) {
+                    continue
+                }
+                $raw = [string]$appKey.GetValue("", "")
+                $path = Get-ExecutablePathFromCommandText -CommandText $raw
+                $facts += [ordered]@{
+                    hive = $hive.ToString()
+                    view = $view.ToString()
+                    key = $subKey
+                    raw = $raw
+                    path = $path
+                    exists = (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf))
+                }
+            } catch {
+                $facts += [ordered]@{
+                    hive = $hive.ToString()
+                    view = $view.ToString()
+                    key = ""
+                    raw = ""
+                    path = ""
+                    exists = $false
+                    error = $_.Exception.Message
+                }
+            } finally {
+                if ($null -ne $appKey) { try { $appKey.Dispose() } catch {} }
+                if ($null -ne $baseKey) { try { $baseKey.Dispose() } catch {} }
+            }
+        }
+    }
+    return @($facts)
+}
+
 function Get-ComRegistrationFacts {
     param([string]$ProgId)
 
@@ -1419,10 +1745,32 @@ function Get-ComRegistrationFacts {
         local_server32_raw = ""
         local_server_path = ""
         local_server_exists = $false
+        registration_views = @()
+        app_paths = @()
     }
 
     if ([string]::IsNullOrWhiteSpace($ProgId)) {
         return $facts
+    }
+
+    $viewFacts = @(
+        Get-ComRegistrationViewFacts -ProgId $ProgId -View ([Microsoft.Win32.RegistryView]::Registry64)
+        Get-ComRegistrationViewFacts -ProgId $ProgId -View ([Microsoft.Win32.RegistryView]::Registry32)
+    )
+    $facts.registration_views = $viewFacts
+    $executableName = if ($ProgId -like "Word.*") { "WINWORD.EXE" } else { "EXCEL.EXE" }
+    $facts.app_paths = @(Get-OfficeAppPathFacts -ExecutableName $executableName)
+    $preferred = @($viewFacts | Where-Object { $_.local_server_exists }) | Select-Object -First 1
+    if ($null -eq $preferred) {
+        $preferred = @($viewFacts | Where-Object { $_.progid_exists }) | Select-Object -First 1
+    }
+    if ($null -ne $preferred) {
+        foreach ($name in @("progid_key", "progid_exists", "clsid", "clsid_key", "local_server32_key", "local_server32_raw", "local_server_path", "local_server_exists")) {
+            $facts[$name] = $preferred.$name
+        }
+        if ($preferred.local_server_exists) {
+            return $facts
+        }
     }
 
     $progIdKey = "Registry::HKEY_CLASSES_ROOT\$ProgId"
@@ -1683,6 +2031,8 @@ function Test-WordCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            registration_views = $comFacts.registration_views
+            app_paths = $comFacts.app_paths
         })
     } catch {
         return New-CheckResult -Status "fail" -Details ([ordered]@{
@@ -1691,6 +2041,8 @@ function Test-WordCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            registration_views = $comFacts.registration_views
+            app_paths = $comFacts.app_paths
         }) -Error $_.Exception.Message
     } finally {
         if ($null -ne $app) {
@@ -1718,6 +2070,8 @@ function Test-ExcelCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            registration_views = $comFacts.registration_views
+            app_paths = $comFacts.app_paths
             bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
             bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
         })
@@ -1728,6 +2082,8 @@ function Test-ExcelCom {
             local_server32_raw = $comFacts.local_server32_raw
             local_server_path = $comFacts.local_server_path
             local_server_exists = $comFacts.local_server_exists
+            registration_views = $comFacts.registration_views
+            app_paths = $comFacts.app_paths
             bootstrap_mode = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_mode } else { "" }
             bootstrap_candidate = if ($null -ne $bootstrap) { [string]$bootstrap.bootstrap_candidate } else { "" }
             bootstrap_candidates = @(Get-ExcelExecutableCandidates)
@@ -2303,10 +2659,10 @@ function Get-OfficeFacts {
     )
 
     Write-ProbeStage -Stage "office 1/4" -Message ("Word COM 快速检查（模式: " + $ProbeMode + "）")
-    $wordCom = Test-WordCom
+    $wordCom = Invoke-OfficeWorkerWithTimeout -TaskName "word_com" -TemplatePath "" -TemplateLabel "word_com" -TimeoutSec $OfficeWorkerTimeoutSec
 
     Write-ProbeStage -Stage "office 2/4" -Message ("Excel COM 快速检查（模式: " + $ProbeMode + "）")
-    $excelCom = Test-ExcelCom
+    $excelCom = Invoke-OfficeWorkerWithTimeout -TaskName "excel_com" -TemplatePath "" -TemplateLabel "excel_com" -TimeoutSec $OfficeWorkerTimeoutSec
 
     $wordExport = New-CheckResult -Status "skip" -Error "quick mode skipped"
     $excelExport = New-CheckResult -Status "skip" -Error "quick mode skipped"
@@ -2484,6 +2840,12 @@ function Get-ServiceHostingFacts {
 
 function Invoke-OfficeWorkerTask {
     switch ($OfficeWorkerTask) {
+        "word_com" {
+            return Test-WordCom
+        }
+        "excel_com" {
+            return Test-ExcelCom
+        }
         "word_export" {
             return Invoke-WordExportSmokeCore -TemplatePath $OfficeWorkerTemplatePath -TemplateLabel $OfficeWorkerTemplateLabel
         }
@@ -2534,67 +2896,75 @@ $reusedSections = @()
 if ($OfficeProbeMode -eq "deep" -and -not [string]::IsNullOrWhiteSpace($ReuseQuickProbeJson)) {
     $quickBaseline = Import-ProbeBaseline -PathText $ReuseQuickProbeJson
     if ($null -ne $quickBaseline) {
-        $reusedSections = @("host", "repo", "python", "sqlite", "storage", "network", "autocad")
+        $reusedSections = @("host", "repo", "python", "archive_runtime", "sqlite", "storage", "network", "autocad")
     }
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "1/8" -Message "复用 quick 探针结果：主机基础信息"
+    Write-ProbeStage -Stage "1/9" -Message "复用 quick 探针结果：主机基础信息"
     $hostFacts = $quickBaseline.host
 } else {
-    Write-ProbeStage -Stage "1/8" -Message "收集主机基础信息"
+    Write-ProbeStage -Stage "1/9" -Message "收集主机基础信息"
     $hostFacts = Get-HostFacts
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "2/8" -Message "复用 quick 探针结果：仓库和模板资源"
+    Write-ProbeStage -Stage "2/9" -Message "复用 quick 探针结果：仓库和模板资源"
     $repoFacts = $quickBaseline.repo
 } else {
-    Write-ProbeStage -Stage "2/8" -Message "检查仓库和模板资源"
+    Write-ProbeStage -Stage "2/9" -Message "检查仓库和模板资源"
     $repoFacts = Get-RepoFacts -ActualRepoRoot $actualRepoRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "3/8" -Message "复用 quick 探针结果：Python 运行环境"
+    Write-ProbeStage -Stage "3/9" -Message "复用 quick 探针结果：Python 运行环境"
     $pythonFacts = $quickBaseline.python
 } else {
-    Write-ProbeStage -Stage "3/8" -Message "检查 Python 运行环境"
+    Write-ProbeStage -Stage "3/9" -Message "检查 Python 运行环境"
     $pythonFacts = Get-PythonFacts -ActualRepoRoot $actualRepoRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "4/8" -Message "复用 quick 探针结果：SQLite 读写探针"
+    Write-ProbeStage -Stage "4/9" -Message "复用 quick 探针结果：私有压缩运行时"
+    $archiveRuntimeFacts = $quickBaseline.archive_runtime
+} else {
+    Write-ProbeStage -Stage "4/9" -Message "检查私有 7-Zip 压缩运行时"
+    $archiveRuntimeFacts = Get-ArchiveRuntimeFacts -ActualRepoRoot $actualRepoRoot -PythonFacts $pythonFacts
+}
+
+if ($null -ne $quickBaseline) {
+    Write-ProbeStage -Stage "5/9" -Message "复用 quick 探针结果：SQLite 读写探针"
     $sqliteFacts = $quickBaseline.sqlite
 } else {
-    Write-ProbeStage -Stage "4/8" -Message "执行 SQLite 读写探针"
+    Write-ProbeStage -Stage "5/9" -Message "执行 SQLite 读写探针"
     $sqliteFacts = Test-SqliteProbe -PythonExe ([string]$pythonFacts.selected.executable)
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "5/8" -Message "复用 quick 探针结果：storage 目录和磁盘空间"
+    Write-ProbeStage -Stage "6/9" -Message "复用 quick 探针结果：storage 目录和磁盘空间"
     $storageFacts = $quickBaseline.storage
 } else {
-    Write-ProbeStage -Stage "5/8" -Message "检查 storage 目录和磁盘空间"
+    Write-ProbeStage -Stage "6/9" -Message "检查 storage 目录和磁盘空间"
     $storageFacts = Get-StorageFacts -ActualStorageRoot $actualStorageRoot
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "6/8" -Message "复用 quick 探针结果：网络端口和防火墙状态"
+    Write-ProbeStage -Stage "7/9" -Message "复用 quick 探针结果：网络端口和防火墙状态"
     $networkFacts = $quickBaseline.network
 } else {
-    Write-ProbeStage -Stage "6/8" -Message "检查网络端口和防火墙状态"
+    Write-ProbeStage -Stage "7/9" -Message "检查网络端口和防火墙状态"
     $networkFacts = Get-NetworkFacts -TargetPort $Port
 }
 
 if ($null -ne $quickBaseline) {
-    Write-ProbeStage -Stage "7/8" -Message "复用 quick 探针结果：AutoCAD / 打印资源"
+    Write-ProbeStage -Stage "8/9" -Message "复用 quick 探针结果：AutoCAD / 打印资源"
     $autocadFacts = $quickBaseline.autocad
 } else {
-    Write-ProbeStage -Stage "7/8" -Message "检查 AutoCAD / 打印资源"
+    Write-ProbeStage -Stage "8/9" -Message "检查 AutoCAD / 打印资源"
 $autocadFacts = Get-AutoCADFacts -ActualRepoRoot $actualRepoRoot
 }
 
-Write-ProbeStage -Stage "8/8" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
+Write-ProbeStage -Stage "9/9" -Message ("检查 Office 环境（模式: " + $OfficeProbeMode + "）")
 $officeFacts = Get-OfficeFacts -RepoFacts $repoFacts -ProbeMode $OfficeProbeMode
 
 $serviceHostingFacts = Get-ServiceHostingFacts -ActualRepoRoot $actualRepoRoot
@@ -2626,6 +2996,14 @@ if ($pythonFacts.selected.status -ne "pass") {
         section = "python"
         code = "python_version"
         message = "python 3.13+ is unavailable"
+    }
+}
+
+if ($archiveRuntimeFacts.status -ne "pass") {
+    $blockingIssues += [ordered]@{
+        section = "archive_runtime"
+        code = "archive_runtime_probe"
+        message = if ([string]::IsNullOrWhiteSpace([string]$archiveRuntimeFacts.error)) { "private archive runtime probe failed" } else { [string]$archiveRuntimeFacts.error }
     }
 }
 foreach ($importEntry in $pythonFacts.import_checks.GetEnumerator()) {
@@ -2821,6 +3199,7 @@ if ($serviceHostingFacts.unregister_task_script.status -ne "pass") {
 $readyForWebService = (
     $repoFacts.status -eq "pass" -and
     $pythonFacts.status -eq "pass" -and
+    $archiveRuntimeFacts.status -eq "pass" -and
     $sqliteFacts.status -eq "pass" -and
     $storageFacts.status -eq "pass" -and
     $autocadFacts.status -eq "pass" -and
@@ -2866,6 +3245,7 @@ $recommendedRuntime = [ordered]@{
         FANBAN_CONCURRENCY__MAX_JOBS = [string]$recommendedMaxActiveJobs
         FANBAN_LIFECYCLE__RETENTION_HOURS = "168"
         FANBAN_UPLOAD_LIMITS__MIN_FREE_DISK_MB = "20480"
+        FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE = (Resolve-FullPathOrRaw (Join-Path $actualRepoRoot "bin\7-Zip\7z.exe"))
     }
 }
 
@@ -2903,6 +3283,7 @@ $result = [ordered]@{
     host = $hostFacts
     repo = $repoFacts
     python = $pythonFacts
+    archive_runtime = $archiveRuntimeFacts
     sqlite = $sqliteFacts
     storage = $storageFacts
     network = $networkFacts
@@ -2933,6 +3314,7 @@ Write-Host ("Script version: " + $script:ProbeVersion)
 Write-Host ("Output JSON: " + $actualOutJson)
 Write-Host ("Repo status: " + $repoFacts.status)
 Write-Host ("Python status: " + $pythonFacts.status)
+Write-Host ("Archive runtime status: " + $archiveRuntimeFacts.status)
 Write-Host ("AutoCAD status: " + $autocadFacts.status)
 Write-Host ("Office status: " + $officeFacts.status + " (mode: " + $officeFacts.probe_mode + ")")
 Write-Host ("Ready for web service: " + $readyForWebService)

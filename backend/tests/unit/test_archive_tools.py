@@ -12,14 +12,19 @@ from src.archive_tools import (
     detect_archive_format,
     extract_archive,
 )
-
-
-REAL_SAMPLE = Path("test/王景霞反馈/新功能开发/变更.zip")
+from tests.archive_test_helpers import build_legacy_gbk_zip
 
 
 def test_real_gbk_zip_extracts_readable_chinese_pdf_names(tmp_path: Path) -> None:
+    archive_path = tmp_path / "legacy-gbk.zip"
+    archive_path.write_bytes(
+        build_legacy_gbk_zip(
+            (f"附图{index} 钢衬里筒壁{index}.pdf", b"%PDF-1.4\n")
+            for index in range(1, 11)
+        )
+    )
     result = extract_archive(
-        REAL_SAMPLE,
+        archive_path,
         tmp_path / "extracted",
         limits=ArchiveLimits(max_files=50),
         zip_metadata_encodings=("utf-8", "gbk"),

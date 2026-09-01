@@ -1,0 +1,4 @@
+interface:
+  display_name: "墙体配筋表规范化"
+  short_description: "确定性读取墙体配筋表并统一 D/C 写法与精确实配面积"
+  default_prompt: "使用 $reinforcement-table-normalizer 确定性规范化附件中的墙体配筋表，并列出所有必须人工确认的行。"

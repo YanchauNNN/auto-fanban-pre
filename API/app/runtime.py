@@ -1,37 +1,58 @@
 ﻿from __future__ import annotations
 
-import importlib.util
 import hashlib
+import importlib.util
 import json
 import logging
 import queue
 import re
+import stat
 import threading
 import time
 import unicodedata
 import uuid
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, cast
+from tempfile import TemporaryDirectory
+from typing import Any, cast
 
 from fastapi import HTTPException, status
-
-from .metadata import FormMetadataService
 
 from src.audit_check.executor import AuditCheckExecutor
 from src.audit_replace.executor import AuditReplaceExecutor
 from src.change_page_extract import ChangePageExtractExecutor
 from src.cad import FrameDetector, ODAConverter
-from src.cad.slot_pool import CADSlotPool
 from src.cad.autocad_path_resolver import resolve_autocad_paths
 from src.cad.font_preflight import FontPreflightService
 from src.cad.font_replacement_plan import normalize_replacement_map
+from src.cad.slot_pool import CADSlotPool
+from src.calculation_book.archive import ArchiveFormat, ArchiveLimits
+from src.calculation_book.diagnostic_log import (
+    calculation_book_log_filename,
+    calculation_book_log_matches_terminal_state,
+)
+from src.calculation_book.executor import (
+    CalculationBookJobExecutor,
+    build_calculation_book_warning_reason,
+)
+from src.calculation_book.models import CalculationBookParams, ReinforcementSource
+from src.calculation_book.ocr import recognize_stress_legend
+from src.calculation_book.preflight import run_calculation_book_preflight
 from src.config import get_config, load_mechanism_spec
 from src.doc_gen.param_validator import DocParamValidator
 from src.job_diagnostics import build_job_diagnostics
-from src.models import AccountSnapshot, Job, JobArtifacts, JobStatus, JobType, TaskGroup
+from src.models import (
+    AccountSnapshot,
+    Job,
+    JobArtifacts,
+    JobStatus,
+    JobType,
+    TaskGroup,
+    TaskOwnerSnapshot,
+)
 from src.pipeline.executor import PipelineExecutor
 from src.pipeline.group_manager import GroupManager
 from src.pipeline.job_manager import JobManager
@@ -44,11 +65,119 @@ from src.pipeline.project_no_inference import (
 from src.pipeline.shared_prep import SharedPrepService
 from src.pipeline.sqlite_queue import SQLiteQueueStore
 from src.result_views import normalize_user_flags
+from src.task_groups.visibility import TaskGroupVisibility
 from src.workload.calculator import WorkloadCalculator
 from src.workload.models import WorkloadSummary
 
+from .metadata import FormMetadataService
 
 logger = logging.getLogger(__name__)
+_CALCULATION_PREFLIGHT_TTL_SECONDS = 1800
+_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT = (
+    "unsafe calculation preflight cache root"
+)
+STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE = "标准配筋模板不可用"
+_CALCULATION_ARCHIVE_MIME_BY_FORMAT = {
+    ArchiveFormat.ZIP: "application/zip",
+    ArchiveFormat.RAR: "application/vnd.rar",
+    ArchiveFormat.SEVEN_Z: "application/x-7z-compressed",
+}
+_CALCULATION_ARCHIVE_SUFFIXES = frozenset(
+    f".{archive_format.value}" for archive_format in ArchiveFormat
+)
+
+
+def _calculation_archive_content_type(suffix: str) -> str:
+    return _CALCULATION_ARCHIVE_MIME_BY_FORMAT[
+        ArchiveFormat(suffix.removeprefix("."))
+    ]
+
+
+def _validate_calculation_book_params(
+    raw_params: dict[str, Any],
+) -> tuple[CalculationBookParams | None, dict[str, list[str]]]:
+    try:
+        return CalculationBookParams.model_validate(raw_params), {}
+    except Exception as exc:  # noqa: BLE001
+        param_errors: dict[str, list[str]] = {}
+        errors_method = getattr(exc, "errors", None)
+        if callable(errors_method):
+            for error in errors_method():
+                location = error.get("loc") or ("params_json",)
+                field = str(location[-1])
+                message = str(error.get("msg") or "invalid")
+                param_errors.setdefault(field, []).append(
+                    message.removeprefix("Value error, ")
+                )
+        else:
+            param_errors.setdefault("params_json", []).append(str(exc))
+        return None, param_errors
+
+
+def _validate_calculation_preflight_cache_root(cache_root: Path) -> None:
+    root_stat = cache_root.lstat()
+    is_junction = getattr(cache_root, "is_junction", lambda: False)
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or cache_root.is_symlink()
+        or is_junction()
+    ):
+        raise RuntimeError(_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT)
+
+
+def _ensure_calculation_preflight_cache_root(cache_root: Path) -> None:
+    try:
+        cache_root.mkdir(parents=True, exist_ok=True)
+        _validate_calculation_preflight_cache_root(cache_root)
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError(
+            _UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT
+        ) from exc
+
+
+def _cleanup_calculation_preflight_cache(
+    cache_root: Path,
+    *,
+    now: float | None = None,
+) -> None:
+    """Delete only stale, regular preflight archives from the flat cache."""
+    reference_time = time.time() if now is None else now
+    try:
+        _validate_calculation_preflight_cache_root(cache_root)
+        candidates = tuple(cache_root.iterdir())
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+    for candidate in candidates:
+        if (
+            not candidate.name.startswith("calculation-preflight-")
+            or candidate.suffix.lower() not in _CALCULATION_ARCHIVE_SUFFIXES
+        ):
+            continue
+        try:
+            first_stat = candidate.lstat()
+        except OSError:
+            continue
+        if (
+            not stat.S_ISREG(first_stat.st_mode)
+            or reference_time - first_stat.st_mtime
+            <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+        ):
+            continue
+        try:
+            second_stat = candidate.lstat()
+            if (
+                not stat.S_ISREG(second_stat.st_mode)
+                or (second_stat.st_dev, second_stat.st_ino)
+                != (first_stat.st_dev, first_stat.st_ino)
+            ):
+                continue
+            candidate.unlink()
+        except OSError:
+            continue
 
 
 @dataclass(frozen=True)
@@ -72,9 +201,310 @@ def _summary_int(summary: dict[str, object], key: str) -> int:
     return 0
 
 
+def _strict_positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _safe_non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _serialize_calculation_book_warnings(details: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_warnings = details.get("calculation_book_warnings")
+    if not isinstance(raw_warnings, list):
+        return []
+    warnings: list[dict[str, Any]] = []
+    for raw in raw_warnings:
+        if not isinstance(raw, dict):
+            continue
+        code = str(raw.get("code") or "needs_review")
+        if code not in {
+            "needs_review",
+            "duplicate_reinforcement_rows",
+            "split_image_group",
+            "image_only_wall",
+            "workbook_only_wall",
+            "image_only_slab",
+            "workbook_only_slab",
+            "NO_ELIGIBLE_CANDIDATE",
+            "AI_NEEDS_REVIEW",
+            "AI_BASE_FAILURE_LIMIT",
+            "OCR_RECOGNITION_FAILED",
+            "UNKNOWN_IMAGE_NAME",
+        }:
+            code = "needs_review"
+        scope = str(raw.get("scope") or "reinforcement")
+        if scope not in {"wall", "slab"}:
+            scope = "reinforcement"
+        allowed_fields = (
+            {"wall_id", "wall", "X", "Y", "Z"}
+            if scope == "wall"
+            else {
+                "elevation",
+                "top_x",
+                "top_y",
+                "middle_x",
+                "middle_y",
+                "bottom_x",
+                "bottom_y",
+                "z",
+            }
+        )
+        raw_identity = raw.get("identity")
+        identity = (
+            str(raw_identity).strip()[:100]
+            if raw_identity is not None and str(raw_identity).strip()
+            else None
+        )
+        raw_direction = raw.get("direction")
+        allowed_directions = allowed_fields | {"X", "Y", "Z"}
+        direction = (
+            str(raw_direction)
+            if raw_direction is not None
+            and str(raw_direction) in allowed_directions
+            else None
+        )
+        source_row = _strict_positive_int(raw.get("source_row"))
+        source_sheet = str(raw.get("source_sheet") or "").strip()
+        if source_row is None or not source_sheet:
+            source_row = None
+            source_sheet_value: str | None = None
+            source_cells: dict[str, str] = {}
+        else:
+            source_sheet_value = source_sheet[:100]
+            raw_cells = raw.get("source_cells")
+            source_cells = {
+                str(field): str(address).upper()
+                for field, address in (
+                    raw_cells.items() if isinstance(raw_cells, dict) else ()
+                )
+                if str(field) in allowed_fields
+                and re.fullmatch(r"[A-Za-z]+[1-9]\d*", str(address)) is not None
+            }
+        raw_blank_fields = raw.get("blank_fields")
+        blank_fields = (
+            [
+                str(field)
+                for field in raw_blank_fields
+                if str(field) in allowed_fields
+            ]
+            if isinstance(raw_blank_fields, list)
+            else []
+        )
+        warnings.append(
+            {
+                "code": code,
+                "scope": scope,
+                "identity": identity,
+                "direction": direction,
+                "source_sheet": source_sheet_value,
+                "source_row": source_row,
+                "source_cells": source_cells,
+                "reason": build_calculation_book_warning_reason(
+                    code=code,
+                    scope=scope,
+                    identity=identity,
+                    direction=direction,
+                ),
+                "blank_fields": blank_fields,
+            }
+        )
+    return warnings
+
+
+def _serialize_calculation_ai_normalization(
+    job: Job,
+) -> tuple[bool, dict[str, Any] | None]:
+    if job.options.get("ai_reinforcement_normalization") is not True:
+        return False, None
+    raw = job.progress.details.get("ai_reinforcement_normalization")
+    if not isinstance(raw, dict) or raw.get("validation") != "passed":
+        return False, None
+    string_fields = ("skill_id", "model", "profile")
+    integer_fields = (
+        "call_count",
+        "source_row_count",
+        "normalized_wall_count",
+        "normalized_slab_count",
+        "review_warning_count",
+        "duration_ms",
+    )
+    summary: dict[str, Any] = {
+        field: str(raw.get(field) or "")[:160]
+        for field in string_fields
+    }
+    for field in integer_fields:
+        value = _safe_non_negative_int(raw.get(field))
+        summary[field] = value if value is not None else 0
+    summary["validation"] = "passed"
+    return True, summary
+
+
+def _serialize_calculation_ai_rebar_suggestion(
+    job: Job,
+) -> dict[str, Any] | None:
+    if job.options.get("ai_rebar_suggestion") is not True:
+        return None
+    raw = job.progress.details.get("ai_rebar_suggestion")
+    if not isinstance(raw, dict):
+        return None
+    validation = str(raw.get("validation") or "")
+    if validation not in {"passed", "passed_with_warnings"}:
+        return None
+    summary: dict[str, Any] = {}
+    for field in ("skill_id", "skill_version", "model"):
+        summary[field] = str(raw.get(field) or "")[:160]
+    raw_sha256 = str(raw.get("skill_sha256") or "")
+    summary["skill_sha256"] = (
+        raw_sha256.lower()
+        if re.fullmatch(r"[A-Fa-f0-9]{64}", raw_sha256) is not None
+        else ""
+    )
+    for field in (
+        "call_count",
+        "suggested_direction_count",
+        "blank_direction_count",
+        "repair_round_count",
+    ):
+        value = _safe_non_negative_int(raw.get(field))
+        summary[field] = value if value is not None else 0
+    summary["validation"] = validation
+    return summary
+
+
+def _calculation_reinforcement_source(job: Job) -> str:
+    try:
+        return ReinforcementSource(
+            str(job.options.get("reinforcement_source") or "provided")
+        ).value
+    except ValueError:
+        return ReinforcementSource.PROVIDED.value
+
+
+def _calculation_log_artifact_path(
+    job: Job,
+    *,
+    configured_log_dir: Path,
+    configured_log_max_bytes: int,
+) -> Path | None:
+    if (
+        job.status not in {JobStatus.SUCCEEDED, JobStatus.FAILED}
+        or job.artifacts.calculation_log is None
+    ):
+        return None
+    try:
+        filename = calculation_book_log_filename(job.job_id)
+    except ValueError:
+        return None
+    candidate = Path(job.artifacts.calculation_log)
+    central = _exact_calculation_log_path(
+        candidate,
+        root=Path(configured_log_dir),
+        filename=filename,
+    )
+    resolved = central
+    if resolved is None and job.work_dir is not None:
+        try:
+            work_root = Path(job.work_dir).resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        resolved = _exact_calculation_log_path(
+            candidate,
+            root=work_root / "calculation-book" / "logs",
+            filename=filename,
+            containment_root=work_root,
+        )
+    if resolved is None:
+        return None
+    expected_event = (
+        "task_completed"
+        if job.status == JobStatus.SUCCEEDED
+        else "task_failed"
+    )
+    if not calculation_book_log_matches_terminal_state(
+        resolved,
+        job_id=job.job_id,
+        expected_event=expected_event,
+        max_bytes=configured_log_max_bytes,
+    ):
+        return None
+    return resolved
+
+
+def _exact_calculation_log_path(
+    candidate: Path,
+    *,
+    root: Path,
+    filename: str,
+    containment_root: Path | None = None,
+) -> Path | None:
+    try:
+        root_stat = root.lstat()
+        root_is_junction = getattr(root, "is_junction", lambda: False)
+        if (
+            not stat.S_ISDIR(root_stat.st_mode)
+            or root.is_symlink()
+            or root_is_junction()
+        ):
+            return None
+        resolved_root = root.resolve(strict=True)
+        if containment_root is not None:
+            resolved_containment = containment_root.resolve(strict=True)
+            if not resolved_root.is_relative_to(resolved_containment):
+                return None
+        expected = resolved_root / filename
+        expected_is_junction = getattr(expected, "is_junction", lambda: False)
+        if expected.is_symlink() or expected_is_junction():
+            return None
+        resolved_expected = expected.resolve(strict=True)
+        if candidate.is_symlink():
+            return None
+        resolved_candidate = candidate.resolve(strict=True)
+        candidate_stat = resolved_candidate.lstat()
+    except (OSError, RuntimeError):
+        return None
+    if (
+        resolved_candidate != resolved_expected
+        or resolved_candidate.parent != resolved_root
+        or resolved_candidate.name != filename
+        or not stat.S_ISREG(candidate_stat.st_mode)
+    ):
+        return None
+    return resolved_candidate
+
+
+def _calculation_docx_artifact_path(job: Job) -> Path | None:
+    """Expose a generated Word file only after the job has succeeded."""
+
+    if (
+        job.status != JobStatus.SUCCEEDED
+        or job.artifacts.calculation_docx is None
+    ):
+        return None
+    try:
+        candidate = Path(job.artifacts.calculation_docx).resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    return candidate if candidate.is_file() else None
+
+
 class PipelineJobProcessor:
-    def __init__(self, *, font_preflight_service: FontPreflightService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        font_preflight_service: FontPreflightService | None = None,
+        calculation_book_executor_factory: (
+            Callable[[], CalculationBookJobExecutor] | None
+        ) = None,
+    ) -> None:
         self.font_preflight_service = font_preflight_service
+        self.calculation_book_executor_factory = (
+            calculation_book_executor_factory or CalculationBookJobExecutor
+        )
 
     def _deliverable_executor(self) -> PipelineExecutor:
         if self.font_preflight_service is None:
@@ -82,6 +512,9 @@ class PipelineJobProcessor:
         return PipelineExecutor(font_preflight_service=self.font_preflight_service)
 
     def __call__(self, job: Job) -> None:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            self.calculation_book_executor_factory().execute(job)
+            return
         if job.job_type == JobType.CHANGE_PAGE_EXTRACT:
             ChangePageExtractExecutor().execute(job)
             return
@@ -115,6 +548,14 @@ class DeliverableApiRuntime:
     ) -> None:
         self.config = get_config()
         self.config.ensure_dirs()
+        try:
+            _cleanup_calculation_preflight_cache(
+                self.config.storage_dir
+                / "runtime"
+                / "calculation-preflight"
+            )
+        except RuntimeError:
+            logger.error(_UNSAFE_CALCULATION_PREFLIGHT_CACHE_ROOT)
         self.process_jobs_in_api = process_jobs_in_api
         self.worker_process_mode = worker_process_mode
         self.queue_store = SQLiteQueueStore(
@@ -122,6 +563,7 @@ class DeliverableApiRuntime:
         )
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
+        self.task_visibility = TaskGroupVisibility()
         self.validator = DocParamValidator()
         self.metadata = FormMetadataService()
         self.font_preflight_service = font_preflight_service or FontPreflightService()
@@ -171,6 +613,28 @@ class DeliverableApiRuntime:
         self._future_lock = threading.Lock()
         self._job_completion_events: dict[str, threading.Event] = {}
         self._job_completion_lock = threading.Lock()
+        self._calculation_preflight_tokens: dict[str, dict[str, Any]] = {}
+        self._calculation_preflight_lock = threading.Lock()
+
+    def get_standard_reinforcement_template_path(self) -> Path:
+        """Resolve the single configured reinforcement template without path escape."""
+        try:
+            template_dir = self.config.calculation_book.template_dir.resolve(
+                strict=True
+            )
+            candidate = (
+                self.config.calculation_book.standard_reinforcement_template.resolve(
+                    strict=True
+                )
+            )
+            if not template_dir.is_dir() or not candidate.is_file():
+                raise FileNotFoundError
+            candidate.relative_to(template_dir)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+            raise FileNotFoundError(
+                STANDARD_REINFORCEMENT_TEMPLATE_UNAVAILABLE
+            ) from exc
+        return candidate
 
     def start(self) -> None:
         self.queue_store.initialize()
@@ -569,6 +1033,7 @@ class DeliverableApiRuntime:
                 batch_id=batch_id,
                 source_filename=source_filename,
                 task_role='仅拆图' if split_only else None,
+                creator_snapshot=creator_snapshot,
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
@@ -576,6 +1041,411 @@ class DeliverableApiRuntime:
             self._enqueue_job(job.job_id)
             jobs.append(summary)
         return {'batch_id': batch_id, 'jobs': jobs}
+
+    def create_calculation_book(
+        self,
+        *,
+        archive: UploadedFilePayload | None,
+        raw_params: dict[str, Any],
+        creator_snapshot: AccountSnapshot | None = None,
+    ) -> dict[str, Any]:
+        params, param_errors = _validate_calculation_book_params(raw_params)
+
+        if param_errors or params is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": {}, "param_errors": param_errors},
+            )
+
+        preflight_token = params.preflight_token.strip()
+        expired_archive_paths: list[Path] = []
+        requires_ai_confirmation = False
+        reinforcement_source_matches = False
+        include_slab_stress_matches = False
+        with self._calculation_preflight_lock:
+            now = time.monotonic()
+            for token, entry in list(self._calculation_preflight_tokens.items()):
+                if (
+                    now - float(entry["created_at"])
+                    <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+                ):
+                    continue
+                self._calculation_preflight_tokens.pop(token, None)
+                expired_archive_paths.append(Path(str(entry["archive_path"])))
+            preflight = self._calculation_preflight_tokens.get(
+                preflight_token,
+            )
+            reinforcement_source_matches = bool(
+                preflight is not None
+                and str(
+                    preflight.get(
+                        "reinforcement_source",
+                        ReinforcementSource.PROVIDED.value,
+                    )
+                )
+                == params.reinforcement_source.value
+            )
+            include_slab_stress_matches = bool(
+                preflight is not None
+                and bool(preflight.get("include_slab_stress", False))
+                == params.include_slab_stress
+            )
+            requires_ai_confirmation = bool(
+                preflight is not None
+                and reinforcement_source_matches
+                and include_slab_stress_matches
+                and params.reinforcement_source is ReinforcementSource.PROVIDED
+                and preflight.get("requires_ai_normalization", False)
+                and not params.confirm_ai_normalization
+            )
+            if not requires_ai_confirmation:
+                preflight = self._calculation_preflight_tokens.pop(
+                    preflight_token,
+                    None,
+                )
+        for path in expired_archive_paths:
+            path.unlink(missing_ok=True)
+        if preflight is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "preflight_token": ["请先完成计算书文件预检"]
+                    },
+                },
+            )
+        cached_archive_path = Path(str(preflight["archive_path"]))
+        if not reinforcement_source_matches:
+            cached_archive_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "reinforcement_source": [
+                            "配筋来源已变化，请重新预检"
+                        ]
+                    },
+                },
+            )
+        if not include_slab_stress_matches:
+            cached_archive_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "include_slab_stress": [
+                            "楼板应力选项已变化，请重新预检"
+                        ]
+                    },
+                },
+            )
+        if requires_ai_confirmation:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {},
+                    "param_errors": {
+                        "confirm_ai_normalization": [
+                            "请确认启动人工智能规范化非标准配筋表"
+                        ]
+                    },
+                },
+            )
+        try:
+            try:
+                cached_content = cached_archive_path.read_bytes()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {
+                            "archive": ["预检文件已失效，请重新选择压缩包并预检"]
+                        },
+                        "param_errors": {},
+                    },
+                ) from exc
+            archive_digest = hashlib.sha256(cached_content).hexdigest()
+            if preflight["archive_digest"] != archive_digest:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {
+                            "archive": ["预检暂存文件校验失败，请重新预检"]
+                        },
+                        "param_errors": {},
+                    },
+                )
+            if archive is not None:
+                provided_digest = hashlib.sha256(archive.content).hexdigest()
+                if preflight["archive_digest"] != provided_digest:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "upload_errors": {
+                                "archive": [
+                                    "当前压缩包与预检时的文件不一致，请重新预检"
+                                ]
+                            },
+                            "param_errors": {},
+                        },
+                    )
+
+            requires_ai_normalization = bool(
+                params.reinforcement_source is ReinforcementSource.PROVIDED
+                and preflight.get("requires_ai_normalization", False)
+            )
+            expected_source_row_count = _strict_positive_int(
+                preflight.get(
+                    "ai_reinforcement_expected_source_row_count"
+                )
+            )
+            if requires_ai_normalization and expected_source_row_count is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "upload_errors": {},
+                        "param_errors": {
+                            "preflight_token": [
+                                "非标准配筋表行数证据无效，请重新预检"
+                            ]
+                        },
+                    },
+                )
+            cached_archive = UploadedFilePayload(
+                filename=str(preflight["archive_filename"]),
+                content=cached_content,
+                content_type=str(preflight["content_type"]),
+            )
+            batch_id = self._new_batch_id()
+            source_filename = (
+                Path(cached_archive.filename).name or "calculation-images.zip"
+            )
+            job_options: dict[str, object] = {
+                "mode": "calculation_book",
+                "reinforcement_source": params.reinforcement_source.value,
+                "ai_reinforcement_normalization": requires_ai_normalization,
+            }
+            if params.reinforcement_source is ReinforcementSource.AI_SUGGESTED:
+                job_options["ai_rebar_suggestion"] = True
+            elif requires_ai_normalization:
+                assert expected_source_row_count is not None
+                job_options[
+                    "ai_reinforcement_expected_source_row_count"
+                ] = expected_source_row_count
+            job = self.job_manager.create_job(
+                job_type=JobType.CALCULATION_BOOK.value,
+                project_no=params.project_no,
+                options=job_options,
+                params=params.model_dump(
+                    mode="json",
+                    exclude_computed_fields=True,
+                ),
+                batch_id=batch_id,
+                source_filename=source_filename,
+                task_role="计算书",
+                creator_snapshot=creator_snapshot,
+            )
+            self._store_job_upload(job, cached_archive)
+            self.job_manager.update_job(job)
+            summary = self._index_job_summary(job)
+            self._enqueue_job(job.job_id)
+            return {"batch_id": batch_id, "jobs": [summary]}
+        finally:
+            cached_archive_path.unlink(missing_ok=True)
+
+    def preflight_calculation_book(
+        self,
+        *,
+        archive: UploadedFilePayload,
+        include_slab_stress: bool = False,
+        reinforcement_source: ReinforcementSource | str = ReinforcementSource.PROVIDED,
+        raw_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        params: CalculationBookParams | None = None
+        if raw_params is not None:
+            params, param_errors = _validate_calculation_book_params(raw_params)
+            if param_errors or params is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"upload_errors": {}, "param_errors": param_errors},
+                )
+        active_reinforcement_source = (
+            params.reinforcement_source
+            if params is not None
+            else ReinforcementSource(reinforcement_source)
+        )
+        if params is not None:
+            include_slab_stress = params.include_slab_stress
+        upload_errors: dict[str, list[str]] = {}
+        archive_suffix = Path(archive.filename).suffix.lower()
+        if archive_suffix not in _CALCULATION_ARCHIVE_SUFFIXES:
+            upload_errors.setdefault("archive", []).append(
+                "only .zip, .rar or .7z files are allowed"
+            )
+        if not archive.content:
+            upload_errors.setdefault("archive", []).append("archive is empty")
+        runtime = self.config.calculation_book
+        if len(archive.content) > runtime.max_archive_mb * 1024 * 1024:
+            upload_errors.setdefault("archive", []).append(
+                f"archive exceeds {runtime.max_archive_mb} MB"
+            )
+        if upload_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"upload_errors": upload_errors, "param_errors": {}},
+            )
+
+        mechanism = load_mechanism_spec().calculation_book
+        try:
+            cache_root = (
+                self.config.storage_dir
+                / "runtime"
+                / "calculation-preflight"
+            )
+            _ensure_calculation_preflight_cache_root(cache_root)
+            _cleanup_calculation_preflight_cache(cache_root)
+            with TemporaryDirectory(prefix="fanban-calculation-preflight-") as temp_dir:
+                work_dir = Path(temp_dir)
+                archive_path = work_dir / (
+                    Path(archive.filename).name or "calculation-images.zip"
+                )
+                archive_path.write_bytes(archive.content)
+                payload = run_calculation_book_preflight(
+                    archive_path=archive_path,
+                    extraction_root=work_dir / "extracted",
+                    include_slab_stress=include_slab_stress,
+                    reinforcement_source=active_reinforcement_source,
+                    archive_limits=ArchiveLimits(
+                        max_files=runtime.max_archive_files,
+                        max_total_bytes=runtime.max_archive_mb * 1024 * 1024,
+                        max_single_file_bytes=runtime.max_single_file_mb * 1024 * 1024,
+                        max_compression_ratio=runtime.max_compression_ratio,
+                    ),
+                    archive_extractor=runtime.archive_extractor,
+                    ocr_recognizer=lambda path, direction: recognize_stress_legend(
+                        path,
+                        direction=direction,
+                        tesseract_exe=runtime.tesseract_exe,
+                        tessdata_dir=runtime.tessdata_dir,
+                        threshold=mechanism.ocr_threshold,
+                        expected_count=mechanism.ocr_legend_value_count,
+                        min_confidence=mechanism.ocr_min_confidence,
+                        min_vertical_ratio=mechanism.ocr_min_vertical_ratio,
+                        endpoint_absolute_tolerance=(
+                            mechanism.ocr_endpoint_absolute_tolerance
+                        ),
+                        endpoint_relative_tolerance=(
+                            mechanism.ocr_endpoint_relative_tolerance
+                        ),
+                        header_crop=tuple(mechanism.ocr_header_crop),
+                        legend_crop=tuple(mechanism.ocr_legend_crop),
+                        header_scale=mechanism.ocr_header_scale,
+                        legend_scale=mechanism.ocr_legend_scale,
+                    ),
+                )
+                requires_ai_normalization = bool(
+                    active_reinforcement_source is ReinforcementSource.PROVIDED
+                    and payload.get("requires_ai_normalization", False)
+                )
+                expected_source_row_count = _strict_positive_int(
+                    payload.get(
+                        "ai_reinforcement_expected_source_row_count"
+                    )
+                )
+                if (
+                    requires_ai_normalization
+                    and expected_source_row_count is None
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "upload_errors": {
+                                "archive": [
+                                    "无法可靠统计非标准配筋表数据行"
+                                ]
+                            },
+                            "param_errors": {},
+                        },
+                    )
+                token = f"calculation-preflight-{uuid.uuid4().hex}"
+                confirmation_candidates = {
+                    str(item["wall_id"]): {
+                        int(candidate["source_row"])
+                        for candidate in item["candidates"]
+                    }
+                    for item in payload["confirmations"]
+                }
+                cached_archive_path = cache_root / f"{token}{archive_suffix}"
+                cached_archive_path.write_bytes(archive.content)
+                expired_archive_paths: list[Path] = []
+                with self._calculation_preflight_lock:
+                    now = time.monotonic()
+                    for old_token, entry in list(
+                        self._calculation_preflight_tokens.items()
+                    ):
+                        if (
+                            now - float(entry["created_at"])
+                            <= _CALCULATION_PREFLIGHT_TTL_SECONDS
+                        ):
+                            continue
+                        self._calculation_preflight_tokens.pop(old_token, None)
+                        expired_archive_paths.append(
+                            Path(str(entry["archive_path"]))
+                        )
+                    self._calculation_preflight_tokens[token] = {
+                        "created_at": now,
+                        "archive_digest": hashlib.sha256(archive.content).hexdigest(),
+                        "archive_path": str(cached_archive_path),
+                        "archive_filename": (
+                            Path(archive.filename).name
+                            or "calculation-images.zip"
+                        ),
+                        "content_type": _calculation_archive_content_type(
+                            archive_suffix
+                        ),
+                        "include_slab_stress": include_slab_stress,
+                        "reinforcement_source": active_reinforcement_source.value,
+                        "confirmation_candidates": confirmation_candidates,
+                        "requires_wall_count_confirmation": bool(
+                            payload.get(
+                                "requires_wall_count_confirmation",
+                                False,
+                            )
+                        ),
+                        "requires_ai_normalization": bool(
+                            requires_ai_normalization
+                        ),
+                        **(
+                            {
+                                "ai_reinforcement_expected_source_row_count": (
+                                    expected_source_row_count
+                                )
+                            }
+                            if requires_ai_normalization
+                            else {}
+                        ),
+                        "format_inspection": payload.get(
+                            "format_inspection",
+                            {},
+                        ),
+                    }
+                for path in expired_archive_paths:
+                    path.unlink(missing_ok=True)
+                payload["preflight_token"] = token
+                return payload
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "upload_errors": {"archive": [str(exc)]},
+                    "param_errors": {},
+                },
+            ) from exc
 
     def create_audit_batch(
         self,
@@ -654,6 +1524,7 @@ class DeliverableApiRuntime:
                     batch_id=batch_id,
                     source_filename=source_filename,
                     task_role='audit_replace',
+                    creator_snapshot=creator_snapshot,
                 )
                 self._store_job_upload(job, upload)
                 self.job_manager.update_job(job)
@@ -672,6 +1543,7 @@ class DeliverableApiRuntime:
                 batch_id=batch_id,
                 source_filename=source_filename,
                 task_role='audit_check',
+                creator_snapshot=creator_snapshot,
             )
             self._store_job_upload(job, upload)
             self.job_manager.update_job(job)
@@ -914,27 +1786,40 @@ class DeliverableApiRuntime:
     def list_jobs(
         self,
         *,
+        account: AccountSnapshot,
         status_filter: str | None = None,
         limit: int = 100,
         offset: int = 0,
         sort_by: str = "updated_at",
     ) -> dict[str, Any]:
         if not self.process_jobs_in_api:
-            return self.queue_store.list_summaries(
+            indexed = self.queue_store.list_summaries(
                 status=status_filter,
-                limit=max(limit, 0),
-                offset=max(offset, 0),
+                limit=None,
+                offset=0,
                 sort_by=sort_by,
             )
+            visible_items = [
+                item for item in indexed["items"] if self._can_view_summary(item, account)
+            ]
+            normalized_limit = max(limit, 0)
+            normalized_offset = max(offset, 0)
+            return {
+                "items": visible_items[normalized_offset:normalized_offset + normalized_limit],
+                "total": len(visible_items),
+            }
         groups = [
             self._serialize_group_summary(group)
             for group in self.group_manager.load_all_groups()
-            if status_filter is None or group.status.value == status_filter
+            if self.task_visibility.can_view(group, account)
+            and (status_filter is None or group.status.value == status_filter)
         ]
         standalone_jobs = [
             self._serialize_job_summary(job)
             for job in self.job_manager.load_all_jobs()
-            if job.group_id is None and (status_filter is None or job.status.value == status_filter)
+            if job.group_id is None
+            and self.task_visibility.can_view_job(job, account)
+            and (status_filter is None or job.status.value == status_filter)
         ]
         sort_key = 'created_at' if sort_by == 'created_at' else 'updated_at'
         all_items = sorted(
@@ -950,36 +1835,75 @@ class DeliverableApiRuntime:
     def jobs_activity(self) -> dict[str, Any]:
         return self.queue_store.activity()
 
-    def get_job_detail(self, job_id: str) -> dict[str, Any]:
+    def get_job_detail(self, job_id: str, *, account: AccountSnapshot) -> dict[str, Any]:
         group = self._get_group_for_read(job_id)
         if group is not None:
+            if not self.task_visibility.can_view(group, account):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
             return self._serialize_group_detail(group)
         job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
+        if not self.task_visibility.can_view_job(job, account):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
         return self._serialize_job_detail(job)
 
-    def get_artifact_path(self, job_id: str, artifact: str) -> Path:
+    def get_artifact_path(self, job_id: str, artifact: str, *, account: AccountSnapshot) -> Path:
         group = self._get_group_for_read(job_id)
         if group is not None:
+            if not self.task_visibility.can_view(group, account):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
             owner_job = self._resolve_group_artifact_owner(group, artifact)
             if owner_job is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
-            return self.get_artifact_path(owner_job.job_id, artifact)
+            return self._get_job_artifact_path(owner_job, artifact)
 
         job = self._get_job_for_read(job_id)
         if job is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='job not found')
+        if not self.task_visibility.can_view_job(job, account):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='job not visible')
+        return self._get_job_artifact_path(job, artifact)
+
+    def _get_job_artifact_path(self, job: Job, artifact: str) -> Path:
         path = {
             'package': job.artifacts.package_zip,
             'ied': job.artifacts.ied_xlsx,
             'preview': job.artifacts.preview_pdf,
             'report': job.artifacts.report_xlsx,
             'replaced': job.artifacts.replaced_dwg,
+            'calculation_book': _calculation_docx_artifact_path(job),
+            'calculation_book_log': _calculation_log_artifact_path(
+                job,
+                configured_log_dir=(
+                    self.config.calculation_book.ai_suggestion.log_dir
+                ),
+                configured_log_max_bytes=(
+                    self.config.calculation_book.ai_suggestion.log_max_bytes
+                ),
+            ),
         }.get(artifact)
         if path is None or not Path(path).exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'{artifact} artifact not found')
         return Path(path)
+
+    def _can_view_summary(self, summary: dict[str, Any], account: AccountSnapshot) -> bool:
+        owner_payload = summary.get('owner_snapshot')
+        owner_snapshot: TaskOwnerSnapshot | None = None
+        if isinstance(owner_payload, dict):
+            try:
+                owner_snapshot = TaskOwnerSnapshot.model_validate(owner_payload)
+            except Exception:  # noqa: BLE001
+                owner_snapshot = None
+        legacy_scope = None
+        legacy_visibility = summary.get('legacy_visibility')
+        if isinstance(legacy_visibility, dict):
+            legacy_scope = str(legacy_visibility.get('scope') or '') or None
+        return self.task_visibility.can_view_owner_snapshot(
+            owner_snapshot,
+            account,
+            legacy_scope=legacy_scope,
+        )
 
     def _get_job_for_read(self, job_id: str) -> Job | None:
         if self.process_jobs_in_api:
@@ -1021,6 +1945,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='deliverable_main',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         audit_job = self.job_manager.create_job(
             job_type=JobType.AUDIT_REPLACE.value,
@@ -1032,6 +1957,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='audit_check',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         for child in (deliverable_job, audit_job):
             child.input_files = [upload_path.resolve()]
@@ -1075,6 +2001,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='audit_replace',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         deliverable_job = self.job_manager.create_job(
             job_type=JobType.DELIVERABLE.value,
@@ -1086,6 +2013,7 @@ class DeliverableApiRuntime:
             group_id=group.group_id,
             task_role='deliverable_main',
             shared_run_id=group.shared_run_id,
+            creator_snapshot=creator_snapshot,
         )
         for child in (replace_job, deliverable_job):
             child.input_files = [upload_path.resolve()]
@@ -1099,14 +2027,39 @@ class DeliverableApiRuntime:
 
     def refresh_summary_index(self, item_type: str, item_id: str) -> None:
         if item_type == "group":
+            group = self.group_manager.reload_group(item_id)
+            if group is not None:
+                self._index_group_summary(group)
+            else:
+                self.queue_store.delete_summary(item_id)
+            return
+        if item_type == "job":
+            job = self.job_manager.reload_job(item_id)
+            if job is not None and job.group_id is None:
+                self._index_job_summary(job)
+            elif job is None:
+                self.queue_store.delete_summary(item_id)
+
+    def refresh_active_summary_index(self, item_type: str, item_id: str) -> None:
+        """Publish state owned by this worker before its next disk checkpoint."""
+        if item_type == "group":
             group = self.group_manager.get_group(item_id)
             if group is not None:
                 self._index_group_summary(group)
+            else:
+                self.queue_store.delete_summary(item_id)
             return
         if item_type == "job":
             job = self.job_manager.get_job(item_id)
             if job is not None and job.group_id is None:
                 self._index_job_summary(job)
+            elif job is None:
+                self.queue_store.delete_summary(item_id)
+
+    def remove_summary_index(self, item_type: str, item_id: str) -> None:
+        if item_type not in {"group", "job"}:
+            raise ValueError(f"unsupported summary item type: {item_type}")
+        self.queue_store.delete_summary(item_id)
 
     def _backfill_summary_index(self) -> None:
         for group in self.group_manager.load_all_groups():
@@ -1397,6 +2350,12 @@ class DeliverableApiRuntime:
         slot = None
         completion_deferred = False
         try:
+            if job.job_type == JobType.CALCULATION_BOOK:
+                job.work_dir = self.config.get_job_dir(job.job_id)
+                job.work_dir.mkdir(parents=True, exist_ok=True)
+                self._submit_doc_job(job.job_id, lambda: self.job_processor(job))
+                completion_deferred = True
+                return
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
             resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
             job.slot_id = slot.slot_id
@@ -1733,9 +2692,13 @@ class DeliverableApiRuntime:
         return workload.model_dump(mode="json"), round(effective, 2)
 
     def _serialize_job_summary(self, job: Job) -> dict[str, Any]:
+        owner = job.owner_snapshot.model_dump(mode='json') if job.owner_snapshot else None
         task_kind = 'deliverable'
         job_mode = 'deliverable'
-        if job.job_type == JobType.AUDIT_REPLACE:
+        if job.job_type == JobType.CALCULATION_BOOK:
+            task_kind = 'calculation_book'
+            job_mode = 'calculation_book'
+        elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
                 task_kind = 'audit_check'
@@ -1761,6 +2724,10 @@ class DeliverableApiRuntime:
             'group_id': job.group_id,
             'shared_run_id': job.shared_run_id,
             'task_role': job.task_role,
+            'owner_snapshot': owner,
+            'creator_name': job.owner_snapshot.creator_name if job.owner_snapshot else None,
+            'creator_account': job.owner_snapshot.creator_account if job.owner_snapshot else None,
+            'creator_office': job.owner_snapshot.creator_office if job.owner_snapshot else None,
             'plot_style_key': job.plot_style_key,
             'plot_resource_mode': job.plot_resource_mode,
             'slot_id': job.slot_id,
@@ -1826,6 +2793,24 @@ class DeliverableApiRuntime:
         })
         if job.job_type == JobType.DELIVERABLE:
             payload['deliverable_outputs'] = manifest_payload.get('deliverable_outputs', {})
+        elif job.job_type == JobType.CALCULATION_BOOK:
+            warnings = _serialize_calculation_book_warnings(job.progress.details)
+            ai_normalized, ai_normalization = (
+                _serialize_calculation_ai_normalization(job)
+            )
+            payload['calculation_book_output'] = {
+                'figure_count': int(job.progress.details.get('figure_count', 0) or 0),
+                'template_type': str(job.progress.details.get('template_type') or ''),
+                'output_filename': str(job.progress.details.get('output_filename') or ''),
+                'reinforcement_source': _calculation_reinforcement_source(job),
+                'ai_normalized': ai_normalized,
+                'warning_count': len(warnings),
+                'warnings': warnings,
+                'ai_normalization': ai_normalization,
+                'ai_rebar_suggestion': (
+                    _serialize_calculation_ai_rebar_suggestion(job)
+                ),
+            }
         elif job.job_type == JobType.AUDIT_REPLACE:
             mode = str(job.options.get('mode', '')).strip().lower()
             if mode == 'check':
@@ -1862,6 +2847,21 @@ class DeliverableApiRuntime:
         report_available = bool(job.artifacts.report_xlsx and Path(job.artifacts.report_xlsx).exists())
         replaced_dwg_available = bool(job.artifacts.replaced_dwg and Path(job.artifacts.replaced_dwg).exists())
         preview_available = bool(job.artifacts.preview_pdf and Path(job.artifacts.preview_pdf).exists())
+        calculation_docx_available = (
+            _calculation_docx_artifact_path(job) is not None
+        )
+        calculation_log_available = (
+            _calculation_log_artifact_path(
+                job,
+                configured_log_dir=(
+                    self.config.calculation_book.ai_suggestion.log_dir
+                ),
+                configured_log_max_bytes=(
+                    self.config.calculation_book.ai_suggestion.log_max_bytes
+                ),
+            )
+            is not None
+        )
         payload: dict[str, Any] = {
             'package_available': package_available,
             'ied_available': ied_available,
@@ -1869,6 +2869,8 @@ class DeliverableApiRuntime:
             'preview_mode': job.artifacts.preview_mode if preview_available else None,
             'report_available': report_available,
             'replaced_dwg_available': replaced_dwg_available,
+            'calculation_docx_available': calculation_docx_available,
+            'calculation_log_available': calculation_log_available,
         }
         if include_urls and job_id is not None:
             payload.update({
@@ -1877,9 +2879,20 @@ class DeliverableApiRuntime:
                 'preview_download_url': f'/api/jobs/{job_id}/download/preview' if preview_available else None,
                 'report_download_url': f'/api/jobs/{job_id}/download/report' if report_available else None,
                 'replaced_dwg_download_url': f'/api/jobs/{job_id}/download/replaced' if replaced_dwg_available else None,
+                'calculation_docx_download_url': (
+                    f'/api/jobs/{job_id}/download/calculation-book'
+                    if calculation_docx_available
+                    else None
+                ),
+                'calculation_log_download_url': (
+                    f'/api/jobs/{job_id}/download/calculation-book-log'
+                    if calculation_log_available
+                    else None
+                ),
             })
         return payload
     def _serialize_group_summary(self, group: TaskGroup) -> dict[str, Any]:
+        owner = group.owner_snapshot.model_dump(mode='json') if group.owner_snapshot else None
         source_filename = group.source_filenames[0] if group.source_filenames else None
         findings_count = 0
         affected_drawings_count = 0
@@ -1900,15 +2913,34 @@ class DeliverableApiRuntime:
             or group.workload.initial_workload_a1
             or 0.0
         )
+        current_node = next(
+            (
+                node
+                for node in group.workflow.nodes
+                if node.node_key == group.workflow.current_node_key
+            ),
+            None,
+        )
         return {
             'job_id': group.group_id,
             'group_id': group.group_id,
+            'state_version': group.state_version,
             'batch_id': group.batch_id,
             'is_group': True,
             'source_filename': source_filename,
             'source_filenames': list(group.source_filenames),
+            'owner_snapshot': owner,
+            'creator_name': group.owner_snapshot.creator_name if group.owner_snapshot else None,
+            'creator_account': group.owner_snapshot.creator_account if group.owner_snapshot else None,
+            'creator_office': group.owner_snapshot.creator_office if group.owner_snapshot else None,
+            'legacy_visibility': group.legacy_visibility.model_dump(mode='json'),
             'project_no': group.project_no,
             'status': group.status.value,
+            'workflow_status': group.workflow.status.value,
+            'current_node_key': group.workflow.current_node_key,
+            'current_assignee_account': current_node.assignee_account if current_node else None,
+            'current_assignee_name': current_node.assignee_name if current_node else None,
+            'archive_status': group.archive.status.value,
             'stage': group.progress.stage,
             'percent': group.progress.percent,
             'message': group.progress.message,

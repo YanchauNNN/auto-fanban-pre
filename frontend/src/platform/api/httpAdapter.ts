@@ -1,10 +1,32 @@
 import { normalizeFormSchema } from "../../features/schema/schema";
+import {
+  getSessionAccessToken,
+  notifySessionUnauthorized,
+} from "../../shared/session/sessionRuntime";
 import type {
+  AccountCreatePayload,
+  AccountListResponse,
+  AccountRecord,
+  AccountUpdatePayload,
+  AdminConfig,
+  AiAgent,
+  AiAttachment,
+  AiConversationDetail,
+  AiConversationSummary,
+  AiMcpServer,
+  AiMessage,
+  AiSendMessageResult,
+  AiSkill,
+  AiState,
   ApiAdapter,
   ApiError,
+  ArchiveState,
+  CalculationBookDirectionEvidence,
+  CalculationBookPreflightResult,
   ChangePageResult,
   CreateAuditReplaceParams,
   CreateBatchPayload,
+  CurrentAccount,
   DeliverableOutputs,
   FontReplacementMap,
   FontReplacementOption,
@@ -13,13 +35,36 @@ import type {
   FindingGroup,
   FormSchema,
   HealthStatus,
+  InvalidAccountRow,
+  InvalidAccountRowList,
   JobDetail,
   JobList,
   JobListSort,
   JobSummary,
   JobsActivity,
+  LegacyVisibilityState,
+  LoginRequest,
+  LoginResponse,
+  NormalizedPersonnel,
+  PersonnelCandidate,
+  PersonnelNormalizationResult,
+  PersonnelSnapshot,
   PingStatus,
+  ReplacementState,
+  ReinforcementSource,
   SubmissionParams,
+  TaskGroupDetail,
+  TaskGroupList,
+  TaskGroupSubmitPayload,
+  TaskGroupSummary,
+  TaskOwnerSnapshot,
+  WorkflowApprovePayload,
+  WorkflowMonitorList,
+  WorkflowRepairPayload,
+  WorkflowState,
+  WorkloadQueryParams,
+  WorkloadScopeResponse,
+  WorkloadSummary,
 } from "./types";
 
 type FetchPolicy = {
@@ -32,6 +77,7 @@ type FetchPolicy = {
 const DEFAULT_GET_RETRY_COUNT = 2;
 const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
 const DEFAULT_GET_TIMEOUT_MS = 8000;
+const AI_CONTROL_TIMEOUT_MS = 15000;
 
 type RawArtifacts = {
   package_available: boolean;
@@ -40,11 +86,15 @@ type RawArtifacts = {
   preview_mode?: "plain" | "annotated" | null;
   report_available: boolean;
   replaced_dwg_available: boolean;
+  calculation_docx_available?: boolean | null;
+  calculation_log_available?: boolean | null;
   package_download_url?: string | null;
   ied_download_url?: string | null;
   preview_download_url?: string | null;
   report_download_url?: string | null;
   replaced_dwg_download_url?: string | null;
+  calculation_docx_download_url?: string | null;
+  calculation_log_download_url?: string | null;
 };
 
 type RawJobSummary = {
@@ -56,7 +106,17 @@ type RawJobSummary = {
   is_group?: boolean;
   source_filename?: string | null;
   source_filenames?: string[] | null;
-  task_kind?: "deliverable" | "audit_check" | "audit_replace" | "change_page_extract" | null;
+  owner_snapshot?: RawTaskOwnerSnapshot | null;
+  creator_name?: string | null;
+  creator_account?: string | null;
+  creator_office?: string | null;
+  task_kind?:
+    | "deliverable"
+    | "audit_check"
+    | "audit_replace"
+    | "calculation_book"
+    | "change_page_extract"
+    | null;
   job_mode?: string | null;
   project_no: string | null;
   status: string;
@@ -93,15 +153,7 @@ type RawJobSummary = {
   replacement_font?: string | null;
   replacement_fonts?: Record<string, string | null> | null;
   replaced_style_count?: number | null;
-  workload?: {
-    initial_workload_a1?: number | null;
-    final_workload_a1?: number | null;
-    one_review_factor?: number | null;
-    two_review_factor?: number | null;
-    three_review_factor?: number | null;
-    settlement_status?: string | null;
-    settled_at?: string | null;
-  } | null;
+  workload?: RawWorkloadSummary | null;
   effective_workload?: number | null;
   artifacts: RawArtifacts;
   retry_available: boolean;
@@ -169,6 +221,48 @@ type RawJobDetail = RawJobSummary & {
     action_count?: number | null;
     report_json?: string | null;
     message?: string | null;
+  } | null;
+  calculation_book_output?: {
+    reinforcement_source?: ReinforcementSource | null;
+    figure_count?: number | null;
+    template_type?: string | null;
+    output_filename?: string | null;
+    ai_normalized?: boolean | null;
+    warning_count?: number | null;
+    warnings?: Array<{
+      code?: string | null;
+      scope?: "wall" | "slab" | "reinforcement" | null;
+      identity?: string | null;
+      direction?: string | null;
+      source_sheet?: string | null;
+      source_row?: number | null;
+      source_cells?: Record<string, string> | null;
+      reason?: string | null;
+      blank_fields?: string[] | null;
+    }> | null;
+    ai_normalization?: {
+      skill_id?: string | null;
+      model?: string | null;
+      profile?: string | null;
+      call_count?: number | null;
+      source_row_count?: number | null;
+      normalized_wall_count?: number | null;
+      normalized_slab_count?: number | null;
+      review_warning_count?: number | null;
+      duration_ms?: number | null;
+      validation?: string | null;
+    } | null;
+    ai_rebar_suggestion?: {
+      skill_id?: string | null;
+      skill_version?: string | null;
+      skill_sha256?: string | null;
+      model?: string | null;
+      call_count?: number | null;
+      suggested_direction_count?: number | null;
+      blank_direction_count?: number | null;
+      repair_round_count?: number | null;
+      validation?: string | null;
+    } | null;
   } | null;
   change_page_result?: {
     archive_name?: string | null;
@@ -293,13 +387,500 @@ type RawFormSchema = {
       target_variant_options?: Record<string, string[]>;
     };
   };
+  calculation_book?: {
+    templates?: Array<{ value?: string | null; label?: string | null }>;
+    project_options?: Array<{ value?: string | null; label?: string | null }>;
+    fields?: Array<{
+      key?: string | null;
+      label?: string | null;
+      type?: string | null;
+      required?: boolean | null;
+      default?: string | number | boolean | null;
+      unit?: string | null;
+      placeholder?: string | null;
+      options?: string[] | null;
+      options_from?: string | null;
+      derived_from?: string | null;
+    }>;
+    archive?: {
+      accept?: string[] | null;
+      required_root_directions?: string[] | null;
+      required_folders?: string[] | null;
+      root_figure_pattern?: string | null;
+      description?: string | null;
+    };
+  };
 };
+
+type RawAccount = {
+  account_id: string;
+  display_name: string;
+  role: string;
+  office_code?: string | null;
+  office_name?: string | null;
+  valid?: boolean | null;
+  pending_todo_count?: number | null;
+};
+
+type RawTaskOwnerSnapshot = {
+  creator_account?: string | null;
+  creator_name?: string | null;
+  creator_role?: string | null;
+  creator_office?: string | null;
+  created_by_scope?: string | null;
+  submitted_at?: string | null;
+};
+
+type RawWorkloadScopeEntry = {
+  role_key?: string | null;
+  account_id?: string | null;
+  display_name?: string | null;
+  workload_a1?: number | null;
+  settled_at?: string | null;
+  group_id?: string | null;
+  group_display_name?: string | null;
+  album_internal_code?: string | null;
+  settlement_status?: string | null;
+};
+
+type RawWorkloadScopeResponse = {
+  scope?: string | null;
+  filters?: {
+    start_date?: string | null;
+    end_date?: string | null;
+    status?: string | null;
+    valid_only?: boolean | null;
+  } | null;
+  office_name?: string | null;
+  total_workload_a1?: number | null;
+  totals_by_account?: Record<string, number | null> | null;
+  entries?: RawWorkloadScopeEntry[] | null;
+};
+
+type RawWorkloadSummary = {
+  initial_workload_a1?: number | null;
+  final_workload_a1?: number | null;
+  one_review_factor?: number | null;
+  two_review_factor?: number | null;
+  three_review_factor?: number | null;
+  node_factors?: Record<string, number | null> | null;
+  settlement_status?: string | null;
+  settled_at?: string | null;
+  contributor_entries?: Array<{
+    role_key?: string | null;
+    account_id?: string | null;
+    display_name?: string | null;
+    workload_a1?: number | null;
+    settled_at?: string | null;
+  }> | null;
+};
+
+type RawNormalizedPersonnel = {
+  field_name?: string | null;
+  raw_value?: string | null;
+  normalized_value?: string | null;
+  matched_account?: string | null;
+  matched_name?: string | null;
+  match_strategy?: string | null;
+  status?: string | null;
+  errors?: string[] | null;
+};
+
+type RawPersonnelCandidate = {
+  account_id?: string | null;
+  display_name?: string | null;
+  role?: string | null;
+  office_code?: string | null;
+  office_name?: string | null;
+  valid?: boolean | null;
+};
+
+type RawPersonnelNormalizationResult = {
+  normalized?: RawNormalizedPersonnel | null;
+  candidates?: RawPersonnelCandidate[] | null;
+};
+
+type RawAccountRecord = {
+  office_code?: string | null;
+  office_name?: string | null;
+  account_id: string;
+  display_name: string;
+  role: string;
+  valid?: boolean | null;
+  row_number?: number | null;
+  errors?: string[] | null;
+};
+
+type RawInvalidAccountRow = {
+  row_number: number;
+  raw?: Record<string, string> | null;
+  errors?: string[] | null;
+};
+
+const SENSITIVE_ACCOUNT_RAW_KEY_MARKERS = [
+  "password",
+  "passwd",
+  "pwd",
+  "secret",
+  "token",
+  "apikey",
+  "accesskey",
+  "密码",
+  "密碼",
+  "口令",
+] as const;
+
+function sanitizeInvalidAccountRaw(
+  payload: Record<string, string> | null | undefined,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(payload ?? {}).filter(([key]) => {
+      const normalizedKey = key.toLocaleLowerCase("en-US").replace(/[^\p{L}\p{N}]/gu, "");
+      return !SENSITIVE_ACCOUNT_RAW_KEY_MARKERS.some((marker) => normalizedKey.includes(marker));
+    }),
+  );
+}
+
+type RawAdminConfig = {
+  archive_root_path?: string | null;
+};
+
+type RawPersonnelSnapshot = {
+  members?: Record<string, RawNormalizedPersonnel> | null;
+};
+
+type RawWorkflowNodeState = {
+  node_key?: string | null;
+  node_label?: string | null;
+  assignee_account?: string | null;
+  assignee_name?: string | null;
+  status?: string | null;
+  factor?: number | null;
+  approved_at?: string | null;
+  acted_by_account?: string | null;
+  acted_by_name?: string | null;
+};
+
+type RawWorkflowState = {
+  status?: string | null;
+  initiated_at?: string | null;
+  initiated_by_account?: string | null;
+  initiated_by_name?: string | null;
+  duplicate_policy?: string | null;
+  overwrite_archive_target?: string | null;
+  current_node_key?: string | null;
+  nodes?: RawWorkflowNodeState[] | null;
+  archive_status?: string | null;
+  archive_retry_count?: number | null;
+  archive_last_error?: string | null;
+  archive_last_attempt_at?: string | null;
+};
+
+type RawArchiveState = {
+  archive_root_path?: string | null;
+  target_dir?: string | null;
+  status?: string | null;
+  overwrite_mode?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  last_error?: string | null;
+  retry_count?: number | null;
+  last_attempt_at?: string | null;
+  archived_files?: string[] | null;
+};
+
+type RawReplacementState = {
+  album_internal_code?: string | null;
+  revision?: string | null;
+  replaced_group_id?: string | null;
+  replaced_record_pending_delete?: boolean | null;
+};
+
+type RawLegacyVisibilityState = {
+  scope?: string | null;
+  reason?: string | null;
+};
+
+type RawTaskGroupSummary = {
+  group_id: string;
+  display_name?: string | null;
+  album_internal_code?: string | null;
+  batch_id?: string | null;
+  project_no?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  source_filenames?: string[] | null;
+  owner_snapshot?: RawTaskOwnerSnapshot | null;
+  creator_name?: string | null;
+  creator_account?: string | null;
+  creator_office?: string | null;
+  workflow_status?: string | null;
+  current_node_key?: string | null;
+  archive_status?: string | null;
+  workload?: RawWorkloadSummary | null;
+  effective_workload?: number | null;
+  can_view_detail?: boolean | null;
+  can_submit?: boolean | null;
+  submit_blockers?: string[] | null;
+  can_approve?: boolean | null;
+  is_related_to_current_user?: boolean | null;
+};
+
+type RawTaskGroupDetail = RawTaskGroupSummary & {
+  child_job_ids?: string[] | null;
+  personnel_snapshot?: RawPersonnelSnapshot | null;
+  workflow?: RawWorkflowState | null;
+  archive?: RawArchiveState | null;
+  replacement?: RawReplacementState | null;
+  legacy_visibility?: RawLegacyVisibilityState | null;
+};
+
+type HttpAdapterOptions = {
+  getAccessToken?: () => string | null;
+  onUnauthorized?: () => void;
+};
+
+type RawAiAgent = {
+  agent_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+};
+
+type RawAiSkill = {
+  skill_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  enabled?: boolean | null;
+  read_only?: boolean | null;
+};
+
+type RawAiMcpServer = {
+  server_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  enabled?: boolean | null;
+  read_only?: boolean | null;
+  transport?: string | null;
+};
+
+type RawAiState = {
+  enabled?: boolean | null;
+  profile?: string | null;
+  model?: string | null;
+  owner_key?: string | null;
+  default_agent?: string | null;
+  attachments?: {
+    enabled?: boolean | null;
+    allowed_extensions?: string[] | null;
+    max_files_per_message?: number | null;
+    max_image_size_mb?: number | null;
+    max_file_size_mb?: number | null;
+    max_total_size_mb_per_message?: number | null;
+  } | null;
+  agents?: RawAiAgent[] | null;
+  skills?: RawAiSkill[] | null;
+  mcp_servers?: RawAiMcpServer[] | null;
+};
+
+type RawAiConversationSummary = {
+  conversation_id?: string | null;
+  title?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  message_count?: number | null;
+};
+
+type RawAiMessage = {
+  message_id?: string | null;
+  role?: string | null;
+  content?: string | null;
+  created_at?: string | null;
+  model_profile?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+type RawAiConversationDetail = RawAiConversationSummary & {
+  messages?: RawAiMessage[] | null;
+};
+
+type RawAiAttachment = {
+  attachment_id?: string | null;
+  conversation_id?: string | null;
+  message_id?: string | null;
+  original_name?: string | null;
+  media_type?: string | null;
+  kind?: string | null;
+  size_bytes?: number | null;
+  sha256?: string | null;
+  status?: string | null;
+  metadata?: Record<string, unknown> | null;
+  error_code?: string | null;
+  created_at?: string | null;
+};
+
+type RawAiSendMessageResult = {
+  conversation_id?: string | null;
+  user_message?: RawAiMessage | null;
+  assistant_message?: RawAiMessage | null;
+  memory?: {
+    used_history_messages?: number | null;
+  } | null;
+};
+
+const CHAT_POST_TIMEOUT_MS = 90000;
 
 export class HttpAdapter implements ApiAdapter {
   private readonly normalizedBaseUrl: string;
+  private readonly getAccessToken?: () => string | null;
+  private readonly onUnauthorized?: () => void;
 
-  constructor(private readonly baseUrl = "") {
+  constructor(private readonly baseUrl = "", options: HttpAdapterOptions = {}) {
     this.normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+    this.getAccessToken = options.getAccessToken ?? getSessionAccessToken;
+    this.onUnauthorized = options.onUnauthorized ?? notifySessionUnauthorized;
+  }
+
+  async login(payload: LoginRequest): Promise<LoginResponse> {
+    const response = await this.fetchJson<{ token: string; account: RawAccount }>(
+      "/api/auth/login",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: payload.accountId, password: payload.password }),
+      },
+    );
+    return { token: response.token, account: this.normalizeAccount(response.account) };
+  }
+
+  async logout(): Promise<{ ok: boolean }> {
+    return this.fetchJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+  }
+
+  async getMe(): Promise<CurrentAccount> {
+    return this.normalizeAccount(await this.fetchJson<RawAccount>("/api/auth/me"));
+  }
+
+  async changePassword(newPassword: string): Promise<CurrentAccount> {
+    const payload = await this.fetchJson<RawAccount>("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ new_password: newPassword }),
+    });
+    return this.normalizeAccount(payload);
+  }
+
+  async normalizePersonnel(
+    fieldName: string,
+    rawValue: string | null,
+  ): Promise<PersonnelNormalizationResult> {
+    const payload = await this.fetchJson<RawPersonnelNormalizationResult>(
+      "/api/accounts/normalize-personnel",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ field_name: fieldName, raw_value: rawValue }),
+      },
+    );
+    return {
+      normalized: this.normalizeNormalizedPersonnel(payload.normalized, fieldName),
+      candidates: (payload.candidates ?? []).map((candidate) =>
+        this.normalizePersonnelCandidate(candidate),
+      ),
+    };
+  }
+
+  async getWorkloadMe(filters: WorkloadQueryParams = {}): Promise<WorkloadScopeResponse> {
+    return this.loadWorkloadScope("/api/workload/me", filters);
+  }
+
+  async getWorkloadOffice(filters: WorkloadQueryParams = {}): Promise<WorkloadScopeResponse> {
+    return this.loadWorkloadScope("/api/workload/office", filters);
+  }
+
+  async getWorkloadInstitute(filters: WorkloadQueryParams = {}): Promise<WorkloadScopeResponse> {
+    return this.loadWorkloadScope("/api/workload/institute", filters);
+  }
+
+  async getWorkloadAdmin(filters: WorkloadQueryParams = {}): Promise<WorkloadScopeResponse> {
+    return this.loadWorkloadScope("/api/workload/admin", filters);
+  }
+
+  async getWorkflowMonitor(): Promise<WorkflowMonitorList> {
+    const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
+      "/api/workflow/monitor",
+    );
+    return {
+      total: payload.total,
+      items: (payload.items ?? []).map((item) => this.normalizeTaskGroupSummary(item)),
+    };
+  }
+
+  async approveWorkflow(groupId: string, payload: WorkflowApprovePayload): Promise<void> {
+    await this.fetchJson(`/api/workflow/${groupId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ factor: payload.factor, ...(payload.nodeKey ? { node_key: payload.nodeKey } : {}) }),
+    });
+  }
+
+  async repairCurrentNode(groupId: string, payload: WorkflowRepairPayload): Promise<void> {
+    await this.fetchJson(`/api/workflow/${groupId}/repair-current-node`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(this.serializeWorkflowRepairPayload(payload)),
+    });
+  }
+
+  async listAccounts(): Promise<AccountListResponse> {
+    const payload = await this.fetchJson<{ items?: RawAccountRecord[] | null }>("/api/accounts");
+    return { items: (payload.items ?? []).map((item) => this.normalizeAccountRecord(item)) };
+  }
+
+  async listInvalidAccountRows(): Promise<InvalidAccountRowList> {
+    const payload = await this.fetchJson<{ items?: RawInvalidAccountRow[] | null }>(
+      "/api/accounts/invalid-rows",
+    );
+    return { items: (payload.items ?? []).map((item) => this.normalizeInvalidAccountRow(item)) };
+  }
+
+  async createAccount(payload: AccountCreatePayload): Promise<AccountRecord> {
+    const response = await this.fetchJson<RawAccountRecord>("/api/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(this.serializeAccountCreatePayload(payload)),
+    });
+    return this.normalizeAccountRecord(response);
+  }
+
+  async updateAccount(accountId: string, payload: AccountUpdatePayload): Promise<AccountRecord> {
+    const response = await this.fetchJson<RawAccountRecord>(`/api/accounts/${accountId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(this.serializeAccountUpdatePayload(payload)),
+    });
+    return this.normalizeAccountRecord(response);
+  }
+
+  async updateAccountRow(rowNumber: number, payload: AccountUpdatePayload): Promise<AccountRecord> {
+    const response = await this.fetchJson<RawAccountRecord>(`/api/accounts/rows/${rowNumber}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(this.serializeAccountUpdatePayload(payload)),
+    });
+    return this.normalizeAccountRecord(response);
+  }
+
+  async getAdminConfig(): Promise<AdminConfig> {
+    return this.normalizeAdminConfig(await this.fetchJson<RawAdminConfig>("/api/admin/config"));
+  }
+
+  async patchAdminConfig(payload: AdminConfig): Promise<AdminConfig> {
+    const response = await this.fetchJson<RawAdminConfig>("/api/admin/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archive_root_path: payload.archiveRootPath ?? "" }),
+    });
+    return this.normalizeAdminConfig(response);
   }
 
   async ping(): Promise<PingStatus> {
@@ -536,6 +1117,384 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async createCalculationBook(
+    params: SubmissionParams,
+  ): Promise<CreateBatchPayload> {
+    const formData = new FormData();
+    formData.append("params_json", JSON.stringify(params));
+    const payload = await this.fetchJson<{
+      batch_id: string;
+      jobs: RawJobSummary[];
+    }>("/api/jobs/calculation-books", {
+      method: "POST",
+      body: formData,
+    });
+    return {
+      batchId: payload.batch_id,
+      jobs: payload.jobs.map((job) => this.normalizeSummary(job)),
+    };
+  }
+
+  async preflightCalculationBook(
+    archive: File,
+    options: {
+      includeSlabStress: boolean;
+      reinforcementSource: ReinforcementSource;
+      params?: SubmissionParams;
+    },
+  ): Promise<CalculationBookPreflightResult> {
+    const formData = new FormData();
+    formData.append("archive", archive);
+    formData.append(
+      "include_slab_stress",
+      String(options.includeSlabStress),
+    );
+    formData.append("reinforcement_source", options.reinforcementSource);
+    if (options.params) {
+      formData.append("params_json", JSON.stringify(options.params));
+    }
+    const payload = await this.fetchJson<{
+      preflight_token: string;
+      reinforcement_source?: ReinforcementSource | null;
+      requires_ai_recommendation?: boolean | null;
+      figure_count: number;
+      wall_direction_figure_count?: number | null;
+      zero_figure_count: number;
+      z_zero_or_missing_smx_count?: number | null;
+      wall_count: number;
+      reinforcement_source_row_count?: number;
+      reinforcement_normalized_row_count?: number;
+      reinforcement_issue_row_count?: number;
+      reinforcement_unique_wall_count?: number;
+      normalization_triggered?: boolean;
+      normalization_skill_id?: string | null;
+      requires_ai_normalization?: boolean;
+      ai_reinforcement_expected_source_row_count?: number | null;
+      ai_confirmation_message?: string | null;
+      format_inspection?: {
+        wall_sheet?: string | null;
+        slab_sheet?: string | null;
+        reasons?: Array<{
+          scope?: string | null;
+          code?: string | null;
+          sheet?: string | null;
+          message?: string | null;
+        }> | null;
+      } | null;
+      normalization_issues?: Array<{
+        source_sheet: string;
+        source_row: number;
+        source_cells: Record<"wall" | "X" | "Y" | "Z", string>;
+        original_values?: Record<"wall" | "X" | "Y" | "Z", string>;
+        original_wall_text: string;
+        wall_id: string | null;
+        error: string;
+      }>;
+      image_wall_group_count?: number;
+      image_unique_wall_count?: number;
+      matched_unique_wall_count?: number;
+      image_only_wall_ids?: string[];
+      workbook_only_wall_ids?: string[];
+      requires_wall_count_confirmation?: boolean;
+      slab_figure_count: number;
+      slab_zero_figure_count?: number | null;
+      slab_elevation_count: number;
+      slab_actual_group_count?: number | null;
+      reinforcement_workbook: string | null;
+      requires_ocr_review?: boolean | null;
+      ignored_root_images?: string[] | null;
+      review_items?: Array<{
+        code?: string | null;
+        scope?: string | null;
+        identity?: string | null;
+        direction?: string | null;
+        image_filename?: string | null;
+        reason?: string | null;
+      }> | null;
+      requires_manual_confirmation: boolean;
+      confirmations: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        reasons: string[];
+        suggested_source_row: number;
+        candidates: Array<{
+          source_row: number;
+          source_sheet: string;
+          directions: Record<string, {
+            source_cell: string;
+            original_text: string;
+            canonical_specification: string;
+            narrative_specification: string;
+            actual_area: number;
+          }>;
+        }>;
+      }>;
+      walls: Array<{
+        wall_id: string;
+        base_wall_id: string;
+        group_index: number | null;
+        suggested_source_row: number | null;
+        directions: Record<string, {
+          image_filename: string;
+          smn: number | null;
+          smx: number | null;
+          legend_values: number[];
+          is_zero_result: boolean;
+          source_cell?: string | null;
+          original_text: string;
+          canonical_specification: string;
+          narrative_specification: string;
+          actual_area: number | string | null;
+        }>;
+      }>;
+      slabs: Array<{
+        elevation: string;
+        key: string;
+        position: "TOP" | "MIDDLE" | "BOTTOM" | null;
+        direction: "X" | "Y" | "Z";
+        image_filename: string;
+        smn: number | null;
+        smx: number | null;
+        legend_values: number[];
+        is_zero_result: boolean;
+        source_row: number | null;
+        source_cell?: string | null;
+        original_text: string;
+        canonical_specification: string;
+        narrative_specification: string;
+        actual_area: number | string | null;
+      }>;
+      warnings: Array<{ code: string; filenames?: string[] | null }>;
+    }>("/api/jobs/calculation-books/preflight", {
+      method: "POST",
+      body: formData,
+    }, {
+      timeoutMs: 10 * 60 * 1000,
+    });
+    const mapDirections = (
+      directions: Record<string, {
+        image_filename?: string;
+        smn?: number | null;
+        smx?: number | null;
+        legend_values?: number[];
+        is_zero_result?: boolean;
+        source_cell?: string | null;
+        original_text: string;
+        canonical_specification: string;
+        narrative_specification?: string;
+        actual_area: number | string | null;
+      }>,
+    ) => {
+      const finiteNumberOrNull = (value: unknown): number | null =>
+        typeof value === "number" && Number.isFinite(value) ? value : null;
+      const mapDirection = (
+        direction: "X" | "Y" | "Z",
+      ): CalculationBookDirectionEvidence => {
+        const item = directions[direction];
+        return {
+          imageFilename: item?.image_filename ?? "",
+          smn: finiteNumberOrNull(item?.smn),
+          smx: finiteNumberOrNull(item?.smx),
+          legendValues: item?.legend_values ?? [],
+          isZeroResult: item?.is_zero_result ?? false,
+          sourceCell: item?.source_cell ?? "",
+          originalText: item?.original_text ?? "",
+          canonicalSpecification: item?.canonical_specification ?? "",
+          narrativeSpecification: item?.narrative_specification ?? "",
+          actualArea: finiteNumberOrNull(item?.actual_area),
+        };
+      };
+      return {
+        X: mapDirection("X"),
+        Y: mapDirection("Y"),
+        Z: mapDirection("Z"),
+      };
+    };
+    return {
+      preflightToken: payload.preflight_token,
+      reinforcementSource:
+        payload.reinforcement_source ?? options.reinforcementSource,
+      requiresAiRecommendation:
+        payload.requires_ai_recommendation ?? false,
+      figureCount: payload.figure_count,
+      wallDirectionFigureCount:
+        payload.wall_direction_figure_count ?? payload.figure_count,
+      zeroFigureCount: payload.zero_figure_count,
+      zZeroOrMissingSmxCount:
+        payload.z_zero_or_missing_smx_count ?? 0,
+      wallCount: payload.wall_count,
+      reinforcementSourceRowCount:
+        payload.reinforcement_source_row_count ?? payload.wall_count,
+      reinforcementNormalizedRowCount:
+        payload.reinforcement_normalized_row_count ?? payload.wall_count,
+      reinforcementIssueRowCount:
+        payload.reinforcement_issue_row_count ?? 0,
+      reinforcementUniqueWallCount:
+        payload.reinforcement_unique_wall_count ?? payload.wall_count,
+      normalizationTriggered: payload.normalization_triggered ?? false,
+      normalizationSkillId: payload.normalization_skill_id ?? null,
+      requiresAiNormalization: payload.requires_ai_normalization ?? false,
+      aiReinforcementExpectedSourceRowCount:
+        payload.ai_reinforcement_expected_source_row_count ?? null,
+      aiConfirmationMessage: payload.ai_confirmation_message ?? null,
+      formatInspection: {
+        wallSheet: payload.format_inspection?.wall_sheet ?? null,
+        slabSheet: payload.format_inspection?.slab_sheet ?? null,
+        reasons: (payload.format_inspection?.reasons ?? []).map((reason) => ({
+          scope: reason.scope ?? "",
+          code: reason.code ?? "",
+          sheet: reason.sheet ?? null,
+          message: reason.message ?? "",
+        })),
+      },
+      normalizationIssues: (payload.normalization_issues ?? []).map((issue) => ({
+        sourceSheet: issue.source_sheet,
+        sourceRow: issue.source_row,
+        sourceCells: issue.source_cells,
+        originalValues: issue.original_values ?? {
+          wall: issue.original_wall_text,
+          X: "",
+          Y: "",
+          Z: "",
+        },
+        originalWallText: issue.original_wall_text,
+        wallId: issue.wall_id,
+        error: issue.error,
+      })),
+      imageWallGroupCount:
+        payload.image_wall_group_count ?? payload.wall_count,
+      imageUniqueWallCount:
+        payload.image_unique_wall_count ?? payload.wall_count,
+      matchedUniqueWallCount:
+        payload.matched_unique_wall_count ?? payload.wall_count,
+      imageOnlyWallIds: payload.image_only_wall_ids ?? [],
+      workbookOnlyWallIds: payload.workbook_only_wall_ids ?? [],
+      requiresWallCountConfirmation:
+        payload.requires_wall_count_confirmation ?? false,
+      slabFigureCount: payload.slab_figure_count ?? 0,
+      slabZeroFigureCount: payload.slab_zero_figure_count ?? 0,
+      slabElevationCount: payload.slab_elevation_count ?? 0,
+      slabActualGroupCount:
+        payload.slab_actual_group_count ?? payload.slab_elevation_count ?? 0,
+      reinforcementWorkbook: payload.reinforcement_workbook,
+      requiresOcrReview: payload.requires_ocr_review ?? false,
+      ignoredRootImages: payload.ignored_root_images ?? [],
+      reviewItems: (payload.review_items ?? []).map((item) => ({
+        code: item.code ?? "ocr_review_required",
+        scope: item.scope ?? "wall",
+        identity: item.identity ?? "",
+        direction: item.direction ?? null,
+        imageFilename: item.image_filename ?? "",
+        reason: item.reason ?? "需要人工复核",
+      })),
+      requiresManualConfirmation: payload.requires_manual_confirmation,
+      confirmations: payload.confirmations.map((confirmation) => ({
+        wallId: confirmation.wall_id,
+        baseWallId: confirmation.base_wall_id,
+        reasons: confirmation.reasons,
+        suggestedSourceRow: confirmation.suggested_source_row,
+        candidates: confirmation.candidates.map((candidate) => ({
+          sourceRow: candidate.source_row,
+          sourceSheet: candidate.source_sheet,
+          directions: mapDirections(candidate.directions),
+        })),
+      })),
+      walls: payload.walls.map((wall) => ({
+        wallId: wall.wall_id,
+        baseWallId: wall.base_wall_id,
+        groupIndex: wall.group_index,
+        suggestedSourceRow:
+          typeof wall.suggested_source_row === "number"
+          && Number.isFinite(wall.suggested_source_row)
+            ? wall.suggested_source_row
+            : null,
+        directions: mapDirections(wall.directions),
+      })),
+      slabs: (payload.slabs ?? []).map((item) => ({
+        elevation: item.elevation,
+        key: item.key,
+        position: item.position,
+        direction: item.direction,
+        imageFilename: item.image_filename,
+        smn:
+          typeof item.smn === "number" && Number.isFinite(item.smn)
+            ? item.smn
+            : null,
+        smx:
+          typeof item.smx === "number" && Number.isFinite(item.smx)
+            ? item.smx
+            : null,
+        legendValues: item.legend_values,
+        isZeroResult: item.is_zero_result,
+        sourceRow:
+          typeof item.source_row === "number" && Number.isFinite(item.source_row)
+            ? item.source_row
+            : null,
+        sourceCell: item.source_cell ?? "",
+        originalText: item.original_text,
+        canonicalSpecification: item.canonical_specification,
+        narrativeSpecification: item.narrative_specification,
+        actualArea:
+          typeof item.actual_area === "number" && Number.isFinite(item.actual_area)
+            ? item.actual_area
+            : null,
+      })),
+      warnings: payload.warnings.map((warning) => ({
+        code: warning.code,
+        filenames: warning.filenames ?? [],
+      })),
+    };
+  }
+
+  async listTaskGroups(): Promise<TaskGroupList> {
+    const payload = await this.fetchJson<{ total: number; items: RawTaskGroupSummary[] }>(
+      "/api/task-groups",
+    );
+    return {
+      total: payload.total,
+      items: (payload.items ?? []).map((item) => this.normalizeTaskGroupSummary(item)),
+    };
+  }
+
+  async getTaskGroupDetail(groupId: string): Promise<TaskGroupDetail> {
+    return this.normalizeTaskGroupDetail(
+      await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}`),
+    );
+  }
+
+  async submitTaskGroup(
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ): Promise<TaskGroupDetail> {
+    const response = await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}/submit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        overwrite_archive_existing: payload.overwriteArchiveExisting,
+        cancel_existing_in_progress: payload.cancelExistingInProgress,
+      }),
+    });
+    return this.normalizeTaskGroupDetail(response);
+  }
+
+  async restartSubmitTaskGroup(
+    groupId: string,
+    payload: TaskGroupSubmitPayload,
+  ): Promise<TaskGroupDetail> {
+    const response = await this.fetchJson<RawTaskGroupDetail>(
+      `/api/task-groups/${groupId}/restart-submit`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          overwrite_archive_existing: payload.overwriteArchiveExisting,
+          cancel_existing_in_progress: payload.cancelExistingInProgress,
+        }),
+      },
+    );
+    return this.normalizeTaskGroupDetail(response);
+  }
+
   async listJobs(status?: string, offset = 0, limit = 100, sort?: JobListSort): Promise<JobList> {
     const search = new URLSearchParams();
     if (status) {
@@ -650,6 +1609,88 @@ export class HttpAdapter implements ApiAdapter {
       findingGroups: this.normalizeFindingGroups(payload.finding_groups),
       replaceSummary: this.normalizeReplaceSummary(payload.replace_summary),
       factoryIndexMap: this.normalizeFactoryIndexMap(payload.factory_index_map),
+      calculationBookOutput: payload.calculation_book_output
+        ? {
+            reinforcementSource:
+              payload.calculation_book_output.reinforcement_source ?? "provided",
+            figureCount: Number(payload.calculation_book_output.figure_count ?? 0),
+            templateType: payload.calculation_book_output.template_type ?? "",
+            outputFilename: payload.calculation_book_output.output_filename ?? "",
+            aiNormalized: Boolean(payload.calculation_book_output.ai_normalized),
+            warningCount: Number(payload.calculation_book_output.warning_count ?? 0),
+            warnings: (payload.calculation_book_output.warnings ?? []).map((warning) => ({
+              code: warning.code ?? "needs_review",
+              scope:
+                warning.scope === "wall" || warning.scope === "slab"
+                  ? warning.scope
+                  : "reinforcement",
+              identity: warning.identity ?? null,
+              direction: warning.direction ?? null,
+              sourceSheet: warning.source_sheet ?? null,
+              sourceRow: warning.source_row ?? null,
+              sourceCells: warning.source_cells ?? {},
+              reason: warning.reason ?? "相关配筋字段需要人工补充",
+              blankFields: warning.blank_fields ?? [],
+            })),
+            aiNormalization: payload.calculation_book_output.ai_normalization
+              ? {
+                  skillId:
+                    payload.calculation_book_output.ai_normalization.skill_id ?? "",
+                  model: payload.calculation_book_output.ai_normalization.model ?? "",
+                  profile: payload.calculation_book_output.ai_normalization.profile ?? "",
+                  callCount: Number(
+                    payload.calculation_book_output.ai_normalization.call_count ?? 0,
+                  ),
+                  sourceRowCount: Number(
+                    payload.calculation_book_output.ai_normalization.source_row_count ?? 0,
+                  ),
+                  normalizedWallCount: Number(
+                    payload.calculation_book_output.ai_normalization.normalized_wall_count ?? 0,
+                  ),
+                  normalizedSlabCount: Number(
+                    payload.calculation_book_output.ai_normalization.normalized_slab_count ?? 0,
+                  ),
+                  reviewWarningCount: Number(
+                    payload.calculation_book_output.ai_normalization.review_warning_count ?? 0,
+                  ),
+                  durationMs: Number(
+                    payload.calculation_book_output.ai_normalization.duration_ms ?? 0,
+                  ),
+                  validation:
+                    payload.calculation_book_output.ai_normalization.validation ?? "",
+                }
+              : null,
+            aiRebarSuggestion: payload.calculation_book_output.ai_rebar_suggestion
+              ? {
+                  skillId:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_id ?? "",
+                  skillVersion:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_version ?? "",
+                  skillSha256:
+                    payload.calculation_book_output.ai_rebar_suggestion.skill_sha256 ?? "",
+                  model:
+                    payload.calculation_book_output.ai_rebar_suggestion.model ?? "",
+                  callCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion.call_count ?? 0,
+                  ),
+                  suggestedDirectionCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .suggested_direction_count ?? 0,
+                  ),
+                  blankDirectionCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .blank_direction_count ?? 0,
+                  ),
+                  repairRoundCount: Number(
+                    payload.calculation_book_output.ai_rebar_suggestion
+                      .repair_round_count ?? 0,
+                  ),
+                  validation:
+                    payload.calculation_book_output.ai_rebar_suggestion.validation ?? "",
+                }
+              : null,
+          }
+        : undefined,
       changePageResult: this.normalizeChangePageResult(payload.change_page_result),
     };
   }
@@ -675,6 +1716,174 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
+  async readArtifact(url: string): Promise<Blob> {
+    return (await this.fetchArtifact(url)).blob;
+  }
+
+  async downloadArtifact(url: string, fallbackFilename = "download"): Promise<void> {
+    const { blob, filename } = await this.fetchArtifact(url);
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename ?? this.inferFilenameFromUrl(url) ?? fallbackFilename;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  async getAiState(signal?: AbortSignal): Promise<AiState> {
+    const payload = await this.fetchJson<RawAiState>("/api/ai/state", { signal }, {
+      retry: true,
+    });
+    return this.normalizeAiState(payload);
+  }
+
+  async listAiConversations(signal?: AbortSignal): Promise<AiConversationSummary[]> {
+    const payload = await this.fetchJson<RawAiConversationSummary[]>(
+      "/api/ai/conversations",
+      { signal },
+      { retry: true },
+    );
+    return (payload ?? []).map((conversation) => this.normalizeAiConversationSummary(conversation));
+  }
+
+  async createAiConversation(title = "新会话"): Promise<AiConversationSummary> {
+    const payload = await this.fetchJson<RawAiConversationSummary>(
+      "/api/ai/conversations",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+    return this.normalizeAiConversationSummary(payload);
+  }
+
+  async renameAiConversation(
+    conversationId: string,
+    title: string,
+  ): Promise<AiConversationSummary> {
+    const payload = await this.fetchJson<RawAiConversationSummary>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+    return this.normalizeAiConversationSummary(payload);
+  }
+
+  async getAiConversation(
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<AiConversationDetail> {
+    const payload = await this.fetchJson<RawAiConversationDetail>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      { signal },
+      { retry: true },
+    );
+    return {
+      ...this.normalizeAiConversationSummary(payload),
+      messages: (payload.messages ?? []).map((message) => this.normalizeAiMessage(message)),
+    };
+  }
+
+  async sendAiMessage(
+    conversationId: string,
+    payload: {
+      content: string;
+      agentId?: string | null;
+      skillIds?: string[];
+      mcpServerIds?: string[];
+      attachmentIds?: string[];
+    },
+    signal?: AbortSignal,
+  ): Promise<AiSendMessageResult> {
+    const response = await this.fetchJson<RawAiSendMessageResult>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal,
+        body: JSON.stringify({
+          content: payload.content,
+          agent_id: payload.agentId ?? null,
+          skill_ids: payload.skillIds ?? [],
+          mcp_server_ids: payload.mcpServerIds ?? [],
+          attachment_ids: payload.attachmentIds ?? [],
+        }),
+      },
+      { timeoutMs: CHAT_POST_TIMEOUT_MS },
+    );
+    return {
+      conversationId: response.conversation_id ?? conversationId,
+      userMessage: this.normalizeAiMessage(response.user_message ?? {}),
+      assistantMessage: this.normalizeAiMessage(response.assistant_message ?? {}),
+      memory: {
+        usedHistoryMessages: response.memory?.used_history_messages ?? 0,
+      },
+    };
+  }
+
+  async clearAiConversation(conversationId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/clear`,
+      {
+        method: "POST",
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
+  async deleteAiConversation(conversationId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}`,
+      {
+        method: "DELETE",
+      },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
+  async uploadAiAttachment(conversationId: string, file: File): Promise<AiAttachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const payload = await this.fetchJson<RawAiAttachment>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments`,
+      {
+        method: "POST",
+        body: formData,
+      },
+      { timeoutMs: CHAT_POST_TIMEOUT_MS },
+    );
+    return this.normalizeAiAttachment(payload);
+  }
+
+  async listAiAttachments(
+    conversationId: string,
+    signal?: AbortSignal,
+  ): Promise<AiAttachment[]> {
+    const payload = await this.fetchJson<RawAiAttachment[]>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments`,
+      { signal },
+      { retry: true },
+    );
+    return (payload ?? []).map((attachment) => this.normalizeAiAttachment(attachment));
+  }
+
+  async deleteAiAttachment(conversationId: string, attachmentId: string): Promise<void> {
+    await this.fetchJson<{ ok: boolean }>(
+      `/api/ai/conversations/${encodeURIComponent(conversationId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "DELETE" },
+      { timeoutMs: AI_CONTROL_TIMEOUT_MS },
+    );
+  }
+
   private normalizeSummary(payload: RawJobSummary): JobSummary {
     const sourceFilename = payload.source_filename ?? payload.source_filenames?.[0] ?? payload.job_id;
     return {
@@ -684,6 +1893,10 @@ export class HttpAdapter implements ApiAdapter {
       groupId: payload.group_id ?? null,
       sourceFilename,
       sourceFilenames: payload.source_filenames ?? [sourceFilename],
+      ownerSnapshot: this.normalizeTaskOwnerSnapshot(payload.owner_snapshot),
+      creatorName: payload.creator_name ?? null,
+      creatorAccount: payload.creator_account ?? null,
+      creatorOffice: payload.creator_office ?? null,
       taskKind: payload.task_kind ?? null,
       jobMode: payload.job_mode ?? null,
       projectNo: payload.project_no,
@@ -706,11 +1919,19 @@ export class HttpAdapter implements ApiAdapter {
         previewMode: payload.artifacts.preview_mode ?? null,
         reportAvailable: payload.artifacts.report_available,
         replacedDwgAvailable: payload.artifacts.replaced_dwg_available,
+        calculationDocxAvailable: payload.artifacts.calculation_docx_available ?? false,
+        calculationLogAvailable: payload.artifacts.calculation_log_available ?? false,
         packageDownloadUrl: this.resolveUrl(payload.artifacts.package_download_url),
         iedDownloadUrl: this.resolveUrl(payload.artifacts.ied_download_url),
         previewDownloadUrl: this.resolveUrl(payload.artifacts.preview_download_url),
         reportDownloadUrl: this.resolveUrl(payload.artifacts.report_download_url),
         replacedDwgDownloadUrl: this.resolveUrl(payload.artifacts.replaced_dwg_download_url),
+        calculationDocxDownloadUrl: this.resolveUrl(
+          payload.artifacts.calculation_docx_download_url,
+        ),
+        calculationLogDownloadUrl: this.resolveUrl(
+          payload.artifacts.calculation_log_download_url,
+        ),
       },
       retryAvailable: payload.retry_available,
       taskRole: payload.task_role ?? null,
@@ -736,19 +1957,116 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  private normalizeWorkloadSummary(payload: RawJobSummary["workload"]): JobSummary["workload"] {
-    if (!payload) {
-      return null;
-    }
-
+  private normalizeAiState(payload: RawAiState): AiState {
     return {
-      initialWorkloadA1: payload.initial_workload_a1 ?? 0,
-      finalWorkloadA1: payload.final_workload_a1 ?? 0,
-      oneReviewFactor: payload.one_review_factor ?? 1,
-      twoReviewFactor: payload.two_review_factor ?? 1,
-      threeReviewFactor: payload.three_review_factor ?? 1,
-      settlementStatus: payload.settlement_status ?? "pending",
-      settledAt: payload.settled_at ?? null,
+      enabled: Boolean(payload.enabled),
+      profile: payload.profile ?? "",
+      model: payload.model ?? "",
+      ownerKey: payload.owner_key ?? "",
+      defaultAgent: payload.default_agent ?? "",
+      attachments: {
+        enabled: Boolean(payload.attachments?.enabled),
+        allowedExtensions: payload.attachments?.allowed_extensions ?? [],
+        maxFilesPerMessage: payload.attachments?.max_files_per_message ?? 0,
+        maxImageSizeMb: payload.attachments?.max_image_size_mb ?? 0,
+        maxFileSizeMb: payload.attachments?.max_file_size_mb ?? 0,
+        maxTotalSizeMbPerMessage:
+          payload.attachments?.max_total_size_mb_per_message ?? 0,
+      },
+      agents: (payload.agents ?? []).map((agent) => this.normalizeAiAgent(agent)),
+      skills: (payload.skills ?? []).map((skill) => this.normalizeAiSkill(skill)),
+      mcpServers: (payload.mcp_servers ?? []).map((server) => this.normalizeAiMcpServer(server)),
+    };
+  }
+
+  private normalizeAiAgent(payload: RawAiAgent): AiAgent {
+    return {
+      agentId: payload.agent_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+    };
+  }
+
+  private normalizeAiSkill(payload: RawAiSkill): AiSkill {
+    return {
+      skillId: payload.skill_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+      enabled: Boolean(payload.enabled),
+      readOnly: payload.read_only ?? true,
+    };
+  }
+
+  private normalizeAiMcpServer(payload: RawAiMcpServer): AiMcpServer {
+    return {
+      serverId: payload.server_id ?? "",
+      name: payload.name ?? "",
+      description: payload.description ?? "",
+      enabled: Boolean(payload.enabled),
+      readOnly: payload.read_only ?? true,
+      transport: payload.transport ?? undefined,
+    };
+  }
+
+  private normalizeAiConversationSummary(
+    payload: RawAiConversationSummary,
+  ): AiConversationSummary {
+    return {
+      conversationId: payload.conversation_id ?? "",
+      title: payload.title ?? "新会话",
+      createdAt: payload.created_at ?? "",
+      updatedAt: payload.updated_at ?? "",
+      messageCount: payload.message_count ?? 0,
+    };
+  }
+
+  private normalizeAiMessage(payload: RawAiMessage): AiMessage {
+    return {
+      messageId: payload.message_id ?? "",
+      role: payload.role ?? "assistant",
+      content: payload.content ?? "",
+      createdAt: payload.created_at ?? "",
+      modelProfile: payload.model_profile ?? null,
+      metadata: payload.metadata ?? {},
+    };
+  }
+
+  private normalizeAiAttachment(payload: RawAiAttachment): AiAttachment {
+    return {
+      attachmentId: payload.attachment_id ?? "",
+      conversationId: payload.conversation_id ?? "",
+      messageId: payload.message_id ?? null,
+      originalName: payload.original_name ?? "附件",
+      mediaType: payload.media_type ?? "application/octet-stream",
+      kind: payload.kind ?? "unknown",
+      sizeBytes: payload.size_bytes ?? 0,
+      sha256: payload.sha256 ?? "",
+      status: payload.status ?? "failed",
+      metadata: payload.metadata ?? {},
+      errorCode: payload.error_code ?? null,
+      createdAt: payload.created_at ?? "",
+    };
+  }
+
+  private normalizeWorkloadSummary(payload: RawWorkloadSummary | null | undefined): WorkloadSummary {
+    return {
+      initialWorkloadA1: payload?.initial_workload_a1 ?? 0,
+      finalWorkloadA1: payload?.final_workload_a1 ?? 0,
+      oneReviewFactor: payload?.one_review_factor ?? 1,
+      twoReviewFactor: payload?.two_review_factor ?? 1,
+      threeReviewFactor: payload?.three_review_factor ?? 1,
+      nodeFactors: Object.fromEntries(
+        Object.entries(payload?.node_factors ?? {}).map(([key, value]) => [key, value ?? 1]),
+      ),
+      settlementStatus: payload?.settlement_status ?? "pending",
+      settledAt: payload?.settled_at ?? null,
+      contributorEntries: (payload?.contributor_entries ?? []).map((entry) => ({
+        roleKey: entry.role_key ?? "",
+        accountId: entry.account_id ?? null,
+        displayName: entry.display_name ?? null,
+        workloadA1: entry.workload_a1 ?? 0,
+        settledAt: entry.settled_at ?? null,
+      })),
     };
   }
 
@@ -767,7 +2085,12 @@ export class HttpAdapter implements ApiAdapter {
         return await this.fetchJsonOnce<T>(path, init, policy);
       } catch (error) {
         lastError = error;
-        if (!shouldRetry || attempt >= maxAttempts - 1 || !this.isRetryableError(error)) {
+        if (
+          init?.signal?.aborted ||
+          !shouldRetry ||
+          attempt >= maxAttempts - 1 ||
+          !this.isRetryableError(error)
+        ) {
           throw error;
         }
         await this.delay(this.retryDelayMs(attempt, policy.retryBaseDelayMs));
@@ -784,11 +2107,22 @@ export class HttpAdapter implements ApiAdapter {
   ): Promise<T> {
     const timeoutMs = policy.timeoutMs ?? (policy.retry ? DEFAULT_GET_TIMEOUT_MS : undefined);
     const abortController = timeoutMs ? new AbortController() : null;
+    const externalSignal = init?.signal;
+    const handleExternalAbort = () => abortController?.abort();
+    if (abortController && externalSignal) {
+      if (externalSignal.aborted) {
+        abortController.abort();
+      } else {
+        externalSignal.addEventListener("abort", handleExternalAbort, { once: true });
+      }
+    }
     const timeoutId =
       abortController && timeoutMs
         ? window.setTimeout(() => abortController.abort(), timeoutMs)
         : null;
-    const requestInit = abortController ? { ...init, signal: abortController.signal } : init;
+    const requestSignal = abortController?.signal ?? externalSignal;
+    const initWithSignal = requestSignal ? { ...init, signal: requestSignal } : init;
+    const requestInit = this.withAuthorization(initWithSignal);
 
     try {
       const response = await fetch(this.buildUrl(path), requestInit);
@@ -796,6 +2130,9 @@ export class HttpAdapter implements ApiAdapter {
       const payload = text ? this.parseJsonOrText(text) : null;
 
       if (!response.ok) {
+        if (response.status === 401) {
+          this.onUnauthorized?.();
+        }
         const error: ApiError = {
           status: response.status,
           detail:
@@ -813,7 +2150,47 @@ export class HttpAdapter implements ApiAdapter {
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);
       }
+      externalSignal?.removeEventListener("abort", handleExternalAbort);
     }
+  }
+
+  private async fetchArtifact(path: string): Promise<{ blob: Blob; filename: string | null }> {
+    const response = await fetch(this.buildUrl(path), this.withAuthorization());
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.onUnauthorized?.();
+      }
+      const text = await response.text();
+      const payload = text ? this.parseJsonOrText(text) : null;
+      const error: ApiError = {
+        status: response.status,
+        detail:
+          payload && typeof payload === "object" && "detail" in payload
+            ? (payload as { detail: ApiError["detail"] }).detail
+            : typeof payload === "string"
+              ? payload
+              : null,
+      };
+      throw error;
+    }
+    return {
+      blob: await response.blob(),
+      filename: this.parseContentDispositionFilename(
+        response.headers.get("Content-Disposition"),
+      ),
+    };
+  }
+
+  private withAuthorization(init?: RequestInit): RequestInit | undefined {
+    const accessToken = this.getAccessToken?.();
+    if (!accessToken) {
+      return init;
+    }
+    const headers = new Headers(init?.headers);
+    if (!headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    }
+    return { ...init, headers };
   }
 
   private parseJsonOrText(text: string): unknown {
@@ -838,7 +2215,34 @@ export class HttpAdapter implements ApiAdapter {
     return this.buildUrl(path);
   }
 
+  private parseContentDispositionFilename(value: string | null) {
+    if (!value) {
+      return null;
+    }
+    const encodedMatch = value.match(/filename\*=UTF-8''([^;]+)/i);
+    if (encodedMatch?.[1]) {
+      try {
+        return decodeURIComponent(encodedMatch[1]);
+      } catch {
+        return encodedMatch[1];
+      }
+    }
+    const quotedMatch = value.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) {
+      return quotedMatch[1];
+    }
+    return value.match(/filename=([^;]+)/i)?.[1]?.trim() || null;
+  }
+
+  private inferFilenameFromUrl(url: string) {
+    const normalized = url.split("?")[0]?.split("#")[0] ?? "";
+    return normalized.split("/").filter(Boolean).pop() || null;
+  }
+
   private isRetryableError(error: unknown) {
+    if (error && typeof error === "object" && "name" in error && error.name === "AbortError") {
+      return false;
+    }
     if (this.isApiError(error)) {
       return [408, 429, 500, 502, 503, 504].includes(error.status);
     }
@@ -948,6 +2352,278 @@ export class HttpAdapter implements ApiAdapter {
       actionCount: payload.action_count ?? 0,
       reportJson: payload.report_json ?? null,
       message: payload.message ?? "",
+    };
+  }
+
+  private normalizeTaskGroupSummary(payload: RawTaskGroupSummary): TaskGroupSummary {
+    return {
+      groupId: payload.group_id,
+      displayName: payload.display_name ?? null,
+      albumInternalCode: payload.album_internal_code ?? null,
+      batchId: payload.batch_id ?? null,
+      projectNo: payload.project_no ?? null,
+      status: payload.status ?? "queued",
+      createdAt: payload.created_at ?? "",
+      sourceFilenames: payload.source_filenames ?? [],
+      ownerSnapshot: this.normalizeTaskOwnerSnapshot(payload.owner_snapshot),
+      creatorName: payload.creator_name ?? null,
+      creatorAccount: payload.creator_account ?? null,
+      creatorOffice: payload.creator_office ?? null,
+      workflowStatus: payload.workflow_status ?? "draft",
+      currentNodeKey: payload.current_node_key ?? null,
+      archiveStatus: payload.archive_status ?? "pending",
+      workload: this.normalizeWorkloadSummary(payload.workload),
+      effectiveWorkload: payload.effective_workload ?? 0,
+      canViewDetail: Boolean(payload.can_view_detail),
+      canSubmit: Boolean(payload.can_submit),
+      submitBlockers: payload.submit_blockers ?? [],
+      canApprove: Boolean(payload.can_approve),
+      isRelatedToCurrentUser: Boolean(payload.is_related_to_current_user),
+    };
+  }
+
+  private normalizeTaskGroupDetail(payload: RawTaskGroupDetail): TaskGroupDetail {
+    return {
+      ...this.normalizeTaskGroupSummary(payload),
+      childJobIds: payload.child_job_ids ?? [],
+      personnelSnapshot: this.normalizePersonnelSnapshot(payload.personnel_snapshot),
+      workflow: this.normalizeWorkflowState(payload.workflow),
+      archive: this.normalizeArchiveState(payload.archive),
+      replacement: this.normalizeReplacementState(payload.replacement),
+      legacyVisibility: this.normalizeLegacyVisibilityState(payload.legacy_visibility),
+    };
+  }
+
+  private normalizeTaskOwnerSnapshot(
+    payload: RawTaskOwnerSnapshot | null | undefined,
+  ): TaskOwnerSnapshot | null {
+    if (!payload?.creator_account || !payload.creator_name || !payload.creator_role) {
+      return null;
+    }
+    return {
+      creatorAccount: payload.creator_account,
+      creatorName: payload.creator_name,
+      creatorRole: payload.creator_role,
+      creatorOffice: payload.creator_office ?? null,
+      createdByScope: payload.created_by_scope ?? "",
+      submittedAt: payload.submitted_at ?? null,
+    };
+  }
+
+  private normalizePersonnelSnapshot(payload: RawPersonnelSnapshot | null | undefined): PersonnelSnapshot {
+    return {
+      members: Object.fromEntries(
+        Object.entries(payload?.members ?? {}).map(([fieldName, member]) => [
+          fieldName,
+          this.normalizeNormalizedPersonnel(member, fieldName),
+        ]),
+      ),
+    };
+  }
+
+  private normalizeNormalizedPersonnel(
+    payload: RawNormalizedPersonnel | null | undefined,
+    fallbackFieldName = "",
+  ): NormalizedPersonnel {
+    return {
+      fieldName: payload?.field_name ?? fallbackFieldName,
+      rawValue: payload?.raw_value ?? null,
+      normalizedValue: payload?.normalized_value ?? null,
+      matchedAccount: payload?.matched_account ?? null,
+      matchedName: payload?.matched_name ?? null,
+      matchStrategy: payload?.match_strategy ?? null,
+      status: payload?.status ?? "empty",
+      errors: payload?.errors ?? [],
+    };
+  }
+
+  private normalizePersonnelCandidate(
+    payload: RawPersonnelCandidate | null | undefined,
+  ): PersonnelCandidate {
+    return {
+      accountId: payload?.account_id ?? "",
+      displayName: payload?.display_name ?? "",
+      role: payload?.role ?? "",
+      officeCode: payload?.office_code ?? null,
+      officeName: payload?.office_name ?? null,
+      valid: payload?.valid ?? true,
+    };
+  }
+
+  private normalizeAccountRecord(payload: RawAccountRecord | null | undefined): AccountRecord {
+    return {
+      officeCode: payload?.office_code ?? null,
+      officeName: payload?.office_name ?? null,
+      accountId: payload?.account_id ?? "",
+      displayName: payload?.display_name ?? "",
+      role: payload?.role ?? "",
+      valid: payload?.valid ?? true,
+      rowNumber: payload?.row_number ?? null,
+      errors: payload?.errors ?? [],
+    };
+  }
+
+  private normalizeInvalidAccountRow(
+    payload: RawInvalidAccountRow | null | undefined,
+  ): InvalidAccountRow {
+    return {
+      rowNumber: payload?.row_number ?? 0,
+      raw: sanitizeInvalidAccountRaw(payload?.raw),
+      errors: payload?.errors ?? [],
+    };
+  }
+
+  private normalizeAdminConfig(payload: RawAdminConfig | null | undefined): AdminConfig {
+    return { archiveRootPath: payload?.archive_root_path ?? "" };
+  }
+
+  private normalizeWorkflowState(payload: RawWorkflowState | null | undefined): WorkflowState {
+    return {
+      status: payload?.status ?? "draft",
+      initiatedAt: payload?.initiated_at ?? null,
+      initiatedByAccount: payload?.initiated_by_account ?? null,
+      initiatedByName: payload?.initiated_by_name ?? null,
+      duplicatePolicy: payload?.duplicate_policy ?? null,
+      overwriteArchiveTarget: payload?.overwrite_archive_target ?? null,
+      currentNodeKey: payload?.current_node_key ?? null,
+      nodes: (payload?.nodes ?? []).map((node) => ({
+        nodeKey: node.node_key ?? "",
+        nodeLabel: node.node_label ?? "",
+        assigneeAccount: node.assignee_account ?? null,
+        assigneeName: node.assignee_name ?? null,
+        status: node.status ?? "pending",
+        factor: node.factor ?? 1,
+        approvedAt: node.approved_at ?? null,
+        actedByAccount: node.acted_by_account ?? null,
+        actedByName: node.acted_by_name ?? null,
+      })),
+      archiveStatus: payload?.archive_status ?? null,
+      archiveRetryCount: payload?.archive_retry_count ?? 0,
+      archiveLastError: payload?.archive_last_error ?? null,
+      archiveLastAttemptAt: payload?.archive_last_attempt_at ?? null,
+    };
+  }
+
+  private normalizeArchiveState(payload: RawArchiveState | null | undefined): ArchiveState {
+    return {
+      archiveRootPath: payload?.archive_root_path ?? null,
+      targetDir: payload?.target_dir ?? null,
+      status: payload?.status ?? "pending",
+      overwriteMode: payload?.overwrite_mode ?? null,
+      startedAt: payload?.started_at ?? null,
+      completedAt: payload?.completed_at ?? null,
+      lastError: payload?.last_error ?? null,
+      retryCount: payload?.retry_count ?? 0,
+      lastAttemptAt: payload?.last_attempt_at ?? null,
+      archivedFiles: payload?.archived_files ?? [],
+    };
+  }
+
+  private normalizeReplacementState(
+    payload: RawReplacementState | null | undefined,
+  ): ReplacementState {
+    return {
+      albumInternalCode: payload?.album_internal_code ?? null,
+      revision: payload?.revision ?? null,
+      replacedGroupId: payload?.replaced_group_id ?? null,
+      replacedRecordPendingDelete: Boolean(payload?.replaced_record_pending_delete),
+    };
+  }
+
+  private normalizeLegacyVisibilityState(
+    payload: RawLegacyVisibilityState | null | undefined,
+  ): LegacyVisibilityState {
+    return { scope: payload?.scope ?? "admin_only", reason: payload?.reason ?? null };
+  }
+
+  private normalizeAccount(payload: RawAccount): CurrentAccount {
+    return {
+      accountId: payload.account_id,
+      displayName: payload.display_name,
+      role: payload.role,
+      officeCode: payload.office_code ?? null,
+      officeName: payload.office_name ?? null,
+      valid: payload.valid ?? true,
+      pendingTodoCount: payload.pending_todo_count ?? 0,
+    };
+  }
+
+  private serializeAccountCreatePayload(payload: AccountCreatePayload) {
+    return {
+      office_code: payload.officeCode,
+      office_name: payload.officeName,
+      account_id: payload.accountId,
+      display_name: payload.displayName,
+      role: payload.role,
+      ...(payload.password ? { password: payload.password } : {}),
+    };
+  }
+
+  private serializeAccountUpdatePayload(payload: AccountUpdatePayload) {
+    return Object.fromEntries(
+      Object.entries({
+        office_code: payload.officeCode,
+        office_name: payload.officeName,
+        account_id: payload.accountId,
+        display_name: payload.displayName,
+        role: payload.role,
+        password: payload.password,
+      }).filter(([, value]) => value !== undefined),
+    );
+  }
+
+  private serializeWorkflowRepairPayload(payload: WorkflowRepairPayload) {
+    return {
+      ...(payload.replaceWithAccountId ? { replace_with_account_id: payload.replaceWithAccountId } : {}),
+      ...(payload.createAccountPayload
+        ? { create_account_payload: this.serializeAccountCreatePayload(payload.createAccountPayload) }
+        : {}),
+    };
+  }
+
+  private buildWorkloadQuery(filters: WorkloadQueryParams): URLSearchParams {
+    const search = new URLSearchParams();
+    if (filters.startDate) search.set("start_date", filters.startDate);
+    if (filters.endDate) search.set("end_date", filters.endDate);
+    if (filters.status) search.set("status", filters.status);
+    if (typeof filters.validOnly === "boolean") {
+      search.set("valid_only", filters.validOnly ? "true" : "false");
+    }
+    return search;
+  }
+
+  private async loadWorkloadScope(
+    path: string,
+    filters: WorkloadQueryParams,
+  ): Promise<WorkloadScopeResponse> {
+    const search = this.buildWorkloadQuery(filters).toString();
+    const payload = await this.fetchJson<RawWorkloadScopeResponse>(
+      `${path}${search ? `?${search}` : ""}`,
+    );
+    return {
+      scope: payload.scope ?? "me",
+      filters: {
+        startDate: payload.filters?.start_date ?? null,
+        endDate: payload.filters?.end_date ?? null,
+        status: payload.filters?.status ?? null,
+        validOnly: Boolean(payload.filters?.valid_only),
+      },
+      officeName: payload.office_name ?? null,
+      totalWorkloadA1: payload.total_workload_a1 ?? 0,
+      totalsByAccount: Object.fromEntries(
+        Object.entries(payload.totals_by_account ?? {}).map(([accountId, value]) => [accountId, value ?? 0]),
+      ),
+      entries: (payload.entries ?? []).map((entry) => ({
+        roleKey: entry.role_key ?? "",
+        accountId: entry.account_id ?? null,
+        displayName: entry.display_name ?? null,
+        workloadA1: entry.workload_a1 ?? 0,
+        settledAt: entry.settled_at ?? null,
+        groupId: entry.group_id ?? "",
+        groupDisplayName: entry.group_display_name ?? null,
+        albumInternalCode: entry.album_internal_code ?? null,
+        settlementStatus: entry.settlement_status ?? "pending",
+      })),
     };
   }
 

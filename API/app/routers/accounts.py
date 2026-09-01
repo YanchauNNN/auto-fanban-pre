@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from src.accounts.account_models import AccountCreatePayload, AccountUpdatePayload
+from src.accounts.account_models import AccountCreatePayload, AccountUpdatePayload, PublicAccount
 from src.config import load_mechanism_spec
 
 from ..auth_helpers import require_current_account
@@ -28,7 +28,7 @@ def require_admin(account=Depends(require_current_account)):
 def list_accounts(request: Request, _=Depends(require_admin)) -> dict[str, object]:
     accounts, invalid_rows = request.app.state.management.account_registry.list_accounts()
     return {
-        "items": [account.model_dump(mode="json") for account in accounts],
+        "items": [account.to_public().model_dump(mode="json") for account in accounts],
         "invalid_rows": [row.model_dump(mode="json") for row in invalid_rows],
     }
 
@@ -60,9 +60,28 @@ def create_account(
     payload: AccountCreatePayload,
     request: Request,
     _=Depends(require_admin),
-) -> dict[str, object]:
+) -> PublicAccount:
     account = request.app.state.management.account_registry.create_account(payload)
-    return account.model_dump(mode="json")
+    return account.to_public()
+
+
+@router.patch("/rows/{row_number}")
+def update_account_row(
+    row_number: int,
+    payload: AccountUpdatePayload,
+    request: Request,
+    _=Depends(require_admin),
+) -> PublicAccount:
+    old_account, updated = request.app.state.management.account_registry.update_account_row(
+        row_number,
+        payload,
+    )
+    if old_account is not None:
+        request.app.state.management.task_group_service.rebind_account_references(
+            old_account.account_id,
+            updated.to_snapshot(),
+        )
+    return updated.to_public()
 
 
 @router.patch("/{account_id}")
@@ -71,10 +90,10 @@ def update_account(
     payload: AccountUpdatePayload,
     request: Request,
     _=Depends(require_admin),
-) -> dict[str, object]:
+) -> PublicAccount:
     old_account, updated = request.app.state.management.account_registry.update_account(account_id, payload)
     request.app.state.management.task_group_service.rebind_account_references(
         old_account.account_id,
         updated.to_snapshot(),
     )
-    return updated.model_dump(mode="json")
+    return updated.to_public()

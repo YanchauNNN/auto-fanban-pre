@@ -35,6 +35,7 @@ def test_queue_initializes_required_tables(tmp_path: Path) -> None:
         "queue_items",
         "worker_heartbeats",
         "job_summaries",
+        "summary_tombstones",
         "activity_state",
     }
 
@@ -130,6 +131,74 @@ def test_heartbeat_and_stale_claim_detection_use_worker_timestamps(tmp_path: Pat
     stale = store.find_stale_claims(timeout_seconds=120, now=_dt(8))
     assert len(stale) == 1
     assert stale[0]["item_id"] == "job-1"
+
+
+def test_recover_stale_claims_atomically_fails_only_expired_owners(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.enqueue("job", "job-stale", priority=10, now=_dt())
+    stale_claim = store.claim_next(worker_id="worker-old", now=_dt())
+    store.enqueue("job", "job-fresh", priority=1, now=_dt(4))
+    fresh_claim = store.claim_next(worker_id="worker-live", now=_dt(4))
+
+    recovered = store.recover_stale_claims(timeout_seconds=120, now=_dt(5))
+
+    assert [item["id"] for item in recovered] == [stale_claim["id"]]
+    assert recovered[0]["status"] == "failed"
+    assert recovered[0]["last_error"] == "worker_interrupted_before_completion"
+    assert recovered[0]["attempt_count"] == 1
+    assert store.get_queue_item(fresh_claim["id"])["status"] == "claimed"
+    assert store.recover_stale_claims(timeout_seconds=120, now=_dt(5)) == []
+
+
+def test_active_claim_is_not_recovered_before_its_next_configured_heartbeat(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    claimed_at = _dt()
+    store.enqueue("job", "live-job", now=claimed_at)
+    claim = store.claim_next(worker_id="worker-live", now=claimed_at)
+
+    recovered = store.recover_stale_claims(
+        timeout_seconds=30,
+        now=claimed_at + timedelta(seconds=9),
+    )
+
+    assert recovered == []
+    assert store.get_queue_item(claim["id"])["status"] == "claimed"
+
+
+def test_late_worker_cannot_complete_a_recovered_or_retried_claim(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.enqueue("job", "job-1", now=_dt())
+    stale_claim = store.claim_next(worker_id="worker-old", now=_dt())
+    store.recover_stale_claims(timeout_seconds=120, now=_dt(5))
+    assert [item["id"] for item in store.list_interrupted_claims()] == [stale_claim["id"]]
+    acknowledged = store.acknowledge_interrupted_claim(
+        queue_item_id=stale_claim["id"],
+        claimed_by="worker-old",
+        now=_dt(5),
+    )
+    assert acknowledged is not None
+    assert acknowledged["claimed_by"] is None
+    assert store.list_interrupted_claims() == []
+    store.enqueue("job", "job-1", now=_dt(6))
+    retry_claim = store.claim_next(worker_id="worker-new", now=_dt(6))
+
+    late_completion = store.complete_claim(
+        queue_item_id=stale_claim["id"],
+        worker_id="worker-old",
+        status="done",
+        now=_dt(7),
+    )
+
+    assert late_completion is None
+    assert store.get_queue_item(stale_claim["id"])["status"] == "failed"
+    assert store.get_queue_item(retry_claim["id"])["status"] == "claimed"
+    assert store.has_newer_queue_item(
+        item_type="job",
+        item_id="job-1",
+        after_queue_item_id=stale_claim["id"],
+    ) is True
 
 
 def test_complete_closes_claim_and_allows_later_requeue(tmp_path: Path) -> None:
@@ -251,6 +320,92 @@ def test_summary_index_preserves_full_summary_payload(tmp_path: Path) -> None:
     assert item["artifacts"] == {"package_available": False}
     assert item["font_preflight_summary"] == {"status": "ok"}
     assert item["retry_available"] is False
+
+
+def test_group_summary_rejects_lower_state_version(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    common = {
+        "item_id": "group-1",
+        "is_group": True,
+        "created_at": _dt(),
+        "artifact_flags": {},
+    }
+    store.upsert_summary(
+        {
+            **common,
+            "state_version": 4,
+            "status": "running",
+            "current_node_key": "two_review",
+            "updated_at": _dt(4),
+        }
+    )
+
+    returned = store.upsert_summary(
+        {
+            **common,
+            "state_version": 2,
+            "status": "queued",
+            "current_node_key": "one_review",
+            "updated_at": _dt(5),
+        }
+    )
+
+    assert returned["state_version"] == 4
+    assert returned["status"] == "running"
+    assert returned["current_node_key"] == "two_review"
+    [stored] = store.list_summaries()["items"]
+    assert stored["state_version"] == 4
+    assert stored["current_node_key"] == "two_review"
+
+
+def test_summary_tombstone_rejects_late_upsert_after_delete(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    late_summary = {
+        "item_id": "group-old",
+        "is_group": True,
+        "state_version": 4,
+        "status": "succeeded",
+        "created_at": _dt(),
+        "updated_at": _dt(4),
+        "artifact_flags": {},
+    }
+    store.upsert_summary(late_summary)
+
+    assert store.delete_summary("group-old") is True
+    assert store.upsert_summary(late_summary) is None
+
+    page = store.list_summaries()
+    assert page["total"] == 0
+    assert store.upsert_summary(
+        {
+            **late_summary,
+            "item_id": "group-new",
+            "state_version": 1,
+        }
+    ) is not None
+    assert store.list_summaries()["total"] == 1
+
+
+def test_delete_summary_removes_only_requested_item(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    for item_id in ("group-old", "group-current"):
+        store.upsert_summary(
+            {
+                "item_id": item_id,
+                "is_group": True,
+                "status": "succeeded",
+                "updated_at": _dt(2),
+                "created_at": _dt(),
+                "artifact_flags": {},
+            }
+        )
+
+    assert store.delete_summary("group-old") is True
+    assert store.delete_summary("group-old") is False
+
+    page = store.list_summaries()
+    assert page["total"] == 1
+    assert page["items"][0]["item_id"] == "group-current"
 
 
 def test_activity_returns_lightweight_change_marker(tmp_path: Path) -> None:

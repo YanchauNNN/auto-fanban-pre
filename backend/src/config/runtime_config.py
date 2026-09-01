@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings
 
 
@@ -224,7 +224,10 @@ class AuditCheckGenericIdentifierConfig(BaseModel):
 
     regex: str = r"^[A-Z]{3}\d{4}[A-Z]$"
     exempt_embed_patterns: list[str] = Field(
-        default_factory=lambda: [r"^[A-Z]{3}\d{4}[A-Z]$"],
+        default_factory=lambda: [
+            r"^[A-Z]{3}\d{4}[A-Z]$",
+            r"^(?:[0-9][A-Z]{2})[A-Z]{3}\d{4}[A-Z][,，]?$",
+        ],
     )
 
 
@@ -279,6 +282,8 @@ class AuditCheckUnitConsistencyConfig(BaseModel):
     label_suffix: str = "号机组/岛"
     code_pattern: str = r"a^"
     explicit_unit_text_pattern: str = r"a^"
+    additional_unit_text_patterns: list[str] = Field(default_factory=list)
+    protected_unit_text_patterns: dict[str, list[str]] = Field(default_factory=dict)
     external_code_pattern: str = r"a^"
     external_code_requires_titleblock_roi_context: bool = True
     short_factory_code_pattern: str = r"a^"
@@ -401,6 +406,85 @@ class UploadLimitsConfig(BaseModel):
     max_total_mb: int = 2048
     allowed_exts: list[str] = Field(default_factory=lambda: [".dwg"])
     min_free_disk_mb: int = 10240
+
+
+class CalculationBookAiNormalizationRuntimeConfig(BaseModel):
+    """计算书非标准配筋表 Worker 模型调用限制。"""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    skill_root: Path = Path("tools/ai/reinforcement-table-normalizer")
+    max_non_empty_cells: int = Field(default=10_000, gt=0)
+    max_snapshot_chars: int = Field(default=500_000, gt=0)
+    max_skill_chars: int = Field(default=100_000, gt=0)
+    request_timeout_seconds: int = Field(default=600, gt=0)
+    max_output_tokens: int = Field(default=65_536, gt=0)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_retries: int = Field(default=0, ge=0)
+
+
+class CalculationBookAiSuggestionRuntimeConfig(BaseModel):
+    """计算书 AI 配筋建议 Skill、批处理和审计日志限制。"""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    enabled: bool = True
+    skill_root: Path = Path("tools/ai/recommend-rebar-from-smx")
+    skill_version: str = Field(default="1.0.0", min_length=1)
+    batch_size: int = Field(default=20, gt=0)
+    request_timeout_seconds: int = Field(default=600, gt=0)
+    max_output_tokens: int = Field(default=65_536, gt=0)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    max_skill_bytes: int = Field(default=131_072, gt=0)
+    max_reference_files: int = Field(default=8, gt=0)
+    max_request_bytes: int = Field(default=1_048_576, gt=0)
+    max_response_bytes: int = Field(default=1_048_576, gt=0)
+    max_identifier_chars: int = Field(default=200, gt=0)
+    max_consecutive_base_failures: int = Field(default=3, gt=0)
+    log_dir: Path = Path("storage/logs/calculation-book-ai-suggestion")
+    log_max_bytes: int = Field(default=10_485_760, ge=8_192)
+    log_retention_days: int = Field(default=30, gt=0)
+
+
+class ArchiveExtractorConfig(BaseModel):
+    """计算书 RAR/7z 私有解包器配置。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    executable: Path = Path("bin/7-Zip/7z.exe")
+    list_timeout_seconds: int = Field(default=120, gt=0)
+    extract_timeout_seconds: int = Field(default=300, gt=0)
+    max_list_output_bytes: int = Field(default=8_388_608, gt=0)
+
+
+class CalculationBookRuntimeConfig(BaseModel):
+    """计算书业务资产、OCR 运行时和 ZIP/RAR/7z 安全限制。"""
+
+    template_dir: Path = Path("documents_bin/calculation_book")
+    standard_reinforcement_template: Path = Path(
+        "documents_bin/calculation_book/计算书模板文件.xlsx"
+    )
+    rebar_table: Path = Path("documents_bin/calculation_book/钢筋的公称直径、公称面积表.xlsx")
+    tesseract_exe: Path = Path(
+        "documents_bin/calculation_book/Tesseract-OCR/tesseract.exe"
+    )
+    tessdata_dir: Path = Path(
+        "documents_bin/calculation_book/Tesseract-OCR/tessdata"
+    )
+    max_archive_mb: int = 1024
+    max_archive_files: int = 500
+    max_single_file_mb: int = 50
+    max_compression_ratio: float = 250.0
+    archive_extractor: ArchiveExtractorConfig = Field(
+        default_factory=ArchiveExtractorConfig
+    )
+    ai_normalization: CalculationBookAiNormalizationRuntimeConfig = Field(
+        default_factory=CalculationBookAiNormalizationRuntimeConfig
+    )
+    ai_suggestion: CalculationBookAiSuggestionRuntimeConfig = Field(
+        default_factory=CalculationBookAiSuggestionRuntimeConfig
+    )
 
 
 class LifecycleConfig(BaseModel):
@@ -526,6 +610,10 @@ class ManagementRuntimeConfig(BaseModel):
     session_store_path: Path = Path("storage/runtime/sessions.json")
     archive_retry_interval_seconds: int = 30
     archive_retry_max_interval_seconds: int = 300
+    task_group_reconciliation_interval_seconds: int = Field(default=30, gt=0)
+    task_group_lock_timeout_seconds: float = Field(default=5.0, gt=0)
+    task_group_lock_poll_interval_seconds: float = Field(default=0.05, gt=0)
+    replacement_cleanup_claim_ttl_seconds: float = Field(default=300.0, gt=0)
 
 
 class RuntimeConfig(BaseSettings):
@@ -537,6 +625,7 @@ class RuntimeConfig(BaseSettings):
     spec_path: Path = Path("documents/参数规范.yaml")
     runtime_spec_path: Path = Path("documents/参数规范_运行期.yaml")
     mechanism_spec_path: Path = Path("documents/参数规范-3.yaml")
+    ai_spec_path: Path = Path("documents/AI/参数规范_AI.yaml")
 
     # 各子配置
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
@@ -555,6 +644,9 @@ class RuntimeConfig(BaseSettings):
         default_factory=DeliverableConsistencyFixConfig,
     )
     upload_limits: UploadLimitsConfig = Field(default_factory=UploadLimitsConfig)
+    calculation_book: CalculationBookRuntimeConfig = Field(
+        default_factory=CalculationBookRuntimeConfig
+    )
     lifecycle: LifecycleConfig = Field(default_factory=LifecycleConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     multi_dwg_policy: MultiDwgPolicyConfig = Field(default_factory=MultiDwgPolicyConfig)
@@ -604,6 +696,9 @@ class RuntimeConfig(BaseSettings):
                 **cls._extract(runtime_opts, "deliverable_consistency_fix"),
             ),
             "upload_limits": UploadLimitsConfig(**cls._extract(runtime_opts, "upload_limits")),
+            "calculation_book": CalculationBookRuntimeConfig(
+                **cls._extract(runtime_opts, "calculation_book"),
+            ),
             "lifecycle": LifecycleConfig(**cls._extract(runtime_opts, "lifecycle")),
             "logging": LoggingConfig(**cls._extract(runtime_opts, "logging")),
             "multi_dwg_policy": MultiDwgPolicyConfig(
@@ -625,6 +720,7 @@ class RuntimeConfig(BaseSettings):
             "spec_path",
             "runtime_spec_path",
             "mechanism_spec_path",
+            "ai_spec_path",
         ):
             if path_key in path_values:
                 yaml_values[path_key] = path_values[path_key]
@@ -684,23 +780,46 @@ class RuntimeConfig(BaseSettings):
     def _set_nested_value(self, path_tokens: list[str], value: Any) -> None:
         """按路径 token 在配置对象内写值，忽略未知键。"""
         cursor: Any = self
+        trail: list[tuple[Any, str]] = []
         for token in path_tokens[:-1]:
             if isinstance(cursor, BaseModel):
                 if not hasattr(cursor, token):
                     return
+                trail.append((cursor, token))
                 cursor = getattr(cursor, token)
                 continue
             if isinstance(cursor, dict):
                 if token not in cursor:
                     return
+                trail.append((cursor, token))
                 cursor = cursor[token]
                 continue
             return
 
         leaf = path_tokens[-1]
         if isinstance(cursor, BaseModel):
-            if hasattr(cursor, leaf):
-                setattr(cursor, leaf, value)
+            if leaf not in cursor.__class__.model_fields:
+                return
+
+            values = cursor.model_dump()
+            values[leaf] = value
+            replacement: Any = cursor.__class__.model_validate(values)
+            if not trail:
+                setattr(cursor, leaf, getattr(replacement, leaf))
+                return
+
+            for parent, parent_token in reversed(trail):
+                if isinstance(parent, dict):
+                    parent[parent_token] = replacement
+                    return
+                if not isinstance(parent, BaseModel):
+                    return
+                if not parent.model_config.get("frozen"):
+                    setattr(parent, parent_token, replacement)
+                    return
+                parent_values = parent.model_dump()
+                parent_values[parent_token] = replacement
+                replacement = parent.__class__.model_validate(parent_values)
         elif isinstance(cursor, dict):
             cursor[leaf] = value
 
@@ -774,6 +893,48 @@ class RuntimeConfig(BaseSettings):
             path if path.is_absolute() else (self.base_dir / path).resolve()
             for path in self.font_preflight.font_library_dirs
         ]
+        self.calculation_book.template_dir = self._resolve_root_path(
+            self.calculation_book.template_dir,
+            self.base_dir,
+        )
+        self.calculation_book.standard_reinforcement_template = self._resolve_root_path(
+            self.calculation_book.standard_reinforcement_template,
+            self.base_dir,
+        )
+        self.calculation_book.rebar_table = self._resolve_root_path(
+            self.calculation_book.rebar_table,
+            self.base_dir,
+        )
+        self.calculation_book.tesseract_exe = self._resolve_root_path(
+            self.calculation_book.tesseract_exe,
+            self.base_dir,
+        )
+        self.calculation_book.tessdata_dir = self._resolve_root_path(
+            self.calculation_book.tessdata_dir,
+            self.base_dir,
+        )
+        archive_extractor = self.calculation_book.archive_extractor
+        self.calculation_book.archive_extractor = ArchiveExtractorConfig.model_validate(
+            {
+                **archive_extractor.model_dump(),
+                "executable": self._resolve_root_path(
+                    archive_extractor.executable,
+                    self.base_dir,
+                ),
+            }
+        )
+        self.calculation_book.ai_normalization.skill_root = self._resolve_root_path(
+            self.calculation_book.ai_normalization.skill_root,
+            self.base_dir,
+        )
+        self.calculation_book.ai_suggestion.skill_root = self._resolve_root_path(
+            self.calculation_book.ai_suggestion.skill_root,
+            self.base_dir,
+        )
+        self.calculation_book.ai_suggestion.log_dir = self._resolve_root_path(
+            self.calculation_book.ai_suggestion.log_dir,
+            self._resolve_runtime_root(base_dir),
+        )
         archive_executable = self.change_page_extract.archive_extractor.executable
         if not archive_executable.is_absolute():
             self.change_page_extract.archive_extractor.executable = (
@@ -793,6 +954,7 @@ class RuntimeConfig(BaseSettings):
         self.spec_path = self._resolve_root_path(self.spec_path, project_root)
         self.runtime_spec_path = self._resolve_root_path(self.runtime_spec_path, project_root)
         self.mechanism_spec_path = self._resolve_root_path(self.mechanism_spec_path, project_root)
+        self.ai_spec_path = self._resolve_root_path(self.ai_spec_path, project_root)
         self.management.admin_config_path = self._resolve_root_path(
             self.management.admin_config_path,
             runtime_root,

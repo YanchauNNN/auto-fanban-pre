@@ -1,23 +1,45 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
+import zipfile
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from urllib.parse import unquote
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi.testclient import TestClient
+import pytest
+from fastapi.testclient import TestClient as FastApiTestClient
 from openpyxl import Workbook, load_workbook
+from PIL import Image
 from pypdf import PdfWriter
 
+from src.calculation_book.diagnostic_log import CalculationBookDiagnosticLog
+from src.calculation_book.models import CalculationBookParams, ReinforcementSource
+from src.change_page_extract import ChangePageExtractExecutor
 from src.config import MechanismSpecLoader, SpecLoader, reload_config
 from src.models import BBox, FrameMeta, FrameRuntime, Job, JobStatus, JobType, PageInfo, SheetSet
 from src.pipeline.shared_prep import SharedPrepArtifacts, SharedPrepService
-from src.change_page_extract import ChangePageExtractExecutor
+from tests.archive_test_helpers import build_legacy_gbk_zip
+
+
+class TestClient(FastApiTestClient):
+    """Use the default administrator for tests of protected job endpoints."""
+
+    def __enter__(self):
+        client = super().__enter__()
+        response = client.post(
+            "/api/auth/login",
+            json={"account_id": "hbjjswd", "password": "password"},
+        )
+        assert response.status_code == 200, response.text
+        client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+        return client
 
 
 class FakeFontPreflightService:
@@ -2226,13 +2248,19 @@ def test_real_change_page_archive_runs_through_formal_api(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sample = repo_root / "test" / "王景霞反馈" / "新功能开发" / "变更.zip"
+    entries: list[tuple[str, bytes]] = []
+    for index in range(1, 11):
+        pdf = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.write(pdf)
+        entries.append((f"附图{index} 钢衬里筒壁{index}.pdf", pdf.getvalue()))
+    sample = build_legacy_gbk_zip(entries)
 
     with _create_client(monkeypatch, tmp_path, processor=ChangePageOnlyProcessor()) as client:
         response = client.post(
             "/api/jobs/change-page-extract",
-            files=[("files[]", (sample.name, sample.read_bytes(), "application/zip"))],
+            files=[("files[]", ("变更.zip", sample, "application/zip"))],
         )
 
         assert response.status_code == 201
@@ -2247,6 +2275,1360 @@ def test_real_change_page_archive_runs_through_formal_api(
     assert len(detail["change_page_result"]["text"].splitlines()) == 10
     assert "附图1" in detail["change_page_result"]["text"]
     assert "钢衬里筒壁" in detail["change_page_result"]["text"]
+
+
+def test_create_calculation_book_uses_job_flow_without_a_cad_slot(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    observed_ai_options: list[tuple[bool, int | None]] = []
+    observed_job_options: list[dict[str, object]] = []
+
+    class CalculationProcessor:
+        def __call__(self, job: Job) -> None:
+            assert job.job_type == JobType.CALCULATION_BOOK
+            assert job.slot_id is None
+            assert "project_number" not in job.params
+            validated = CalculationBookParams.model_validate(job.params)
+            assert validated.project_no == "JQ"
+            assert validated.include_slab_stress is True
+            raw_expected_count = job.options.get(
+                "ai_reinforcement_expected_source_row_count"
+            )
+            observed_ai_options.append(
+                (
+                    bool(job.options.get("ai_reinforcement_normalization")),
+                    (
+                        raw_expected_count
+                        if isinstance(raw_expected_count, int)
+                        else None
+                    ),
+                )
+            )
+            observed_job_options.append(dict(job.options))
+            job.mark_running(stage="VALIDATE_ARCHIVE")
+            job.progress.percent = 80
+            job.progress.details.update(
+                {
+                    "figure_count": 3,
+                    "template_type": "internal_structure",
+                    "output_filename": "JQ计算书.docx",
+                }
+            )
+            if job.options.get("ai_reinforcement_normalization") is True:
+                job.progress.details.update(
+                    {
+                        "ai_reinforcement_normalization": {
+                            "skill_id": "reinforcement_table_normalizer",
+                            "model": "structured-test",
+                            "profile": "intranet-test",
+                            "call_count": 1,
+                            "source_row_count": 40,
+                            "normalized_wall_count": 38,
+                            "normalized_slab_count": 2,
+                            "review_warning_count": 2,
+                            "duration_ms": 125,
+                            "validation": "passed",
+                            "prompt": "must-not-leak",
+                        },
+                        "calculation_book_warnings": [
+                            {
+                                "code": "duplicate_reinforcement_rows",
+                                "scope": "wall",
+                                "identity": "S7157",
+                                "direction": None,
+                                "source_sheet": "Sheet1",
+                                "source_row": 28,
+                                "source_cells": {
+                                    "wall": "A28",
+                                    "X": "B28",
+                                    "Y": "C28",
+                                    "Z": "D28",
+                                },
+                                "reason": "model supplied secret reason must-not-leak",
+                                "blank_fields": ["X", "Y", "Z"],
+                                "original_values": {"X": "must-not-leak"},
+                            },
+                            {
+                                "code": "image_only_wall",
+                                "scope": "wall",
+                                "identity": "N5012",
+                                "direction": None,
+                                "source_sheet": None,
+                                "source_row": None,
+                                "source_cells": {},
+                                "reason": "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+                                "blank_fields": ["X", "Y", "Z"],
+                            },
+                        ],
+                    }
+                )
+            if job.options.get("ai_rebar_suggestion") is True:
+                calculation_log = (
+                    cast(Path, job.work_dir)
+                    / "calculation-book"
+                    / "logs"
+                    / f"calculation-book-{job.job_id}.log"
+                )
+                calculation_log.parent.mkdir(parents=True, exist_ok=True)
+                with CalculationBookDiagnosticLog.create(
+                    calculation_log,
+                    job_id=job.job_id,
+                    correlation_id=job.job_id,
+                    max_bytes=8_192,
+                ) as diagnostic_log:
+                    diagnostic_log.write(
+                        "task_completed",
+                        duration_ms=1,
+                        figure_count=3,
+                        warning_count=1,
+                        output_filename="result.docx",
+                    )
+                job.artifacts.calculation_log = calculation_log
+                job.progress.details.update(
+                    {
+                        "ai_rebar_suggestion": {
+                            "skill_id": "recommend-rebar-from-smx",
+                            "skill_version": "1.0.0",
+                            "skill_sha256": "a" * 64,
+                            "model": "structured-test",
+                            "call_count": 6,
+                            "suggested_direction_count": 181,
+                            "blank_direction_count": 1,
+                            "repair_round_count": 2,
+                            "validation": "passed_with_warnings",
+                            "prompt": "must-not-leak",
+                            "candidates": ["must-not-leak"],
+                        },
+                        "calculation_book_warnings": [
+                            {
+                                "code": "AI_BASE_FAILURE_LIMIT",
+                                "scope": "wall",
+                                "identity": "N5012",
+                                "direction": "Z",
+                                "source_sheet": None,
+                                "source_row": None,
+                                "source_cells": {},
+                                "reason": "raw model failure must-not-leak",
+                                "blank_fields": ["Z"],
+                            }
+                        ],
+                    }
+                )
+            output_path = cast(Path, job.work_dir) / "JQ计算书.docx"
+            output_path.write_bytes(b"docx")
+            job.artifacts.calculation_docx = output_path
+            job.mark_succeeded()
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    def fake_calculation_book_preflight(**kwargs):
+        assert kwargs["include_slab_stress"] is True
+        reinforcement_source = kwargs["reinforcement_source"]
+        assert isinstance(reinforcement_source, ReinforcementSource)
+        assert kwargs["archive_path"].suffix == ".rar"
+        archive_name = kwargs["archive_path"].name
+        uncountable = archive_name.startswith("uncountable-")
+        manual_review = archive_name.startswith("manual-")
+        requires_ai = (
+            reinforcement_source is ReinforcementSource.PROVIDED
+            and (archive_name.startswith("nonstandard-") or uncountable)
+        )
+        requires_ai_recommendation = (
+            reinforcement_source is ReinforcementSource.AI_SUGGESTED
+        )
+        return {
+            "reinforcement_source": reinforcement_source.value,
+            "figure_count": 3,
+            "zero_figure_count": 1,
+            "wall_count": 1,
+            "reinforcement_workbook": (
+                None
+                if requires_ai_recommendation
+                else "计算书模板文件.xlsx"
+            ),
+            "reinforcement_issue_row_count": 1 if requires_ai else 0,
+            "requires_ai_normalization": requires_ai,
+            "requires_ai_recommendation": requires_ai_recommendation,
+            "ai_reinforcement_expected_source_row_count": (
+                40 if requires_ai and not uncountable else None
+            ),
+            "ai_confirmation_message": (
+                "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
+                if requires_ai
+                else None
+            ),
+            "format_inspection": {
+                "wall_sheet": "非标准墙表" if requires_ai else "Sheet1",
+                "slab_sheet": "楼板配筋",
+                "reasons": (
+                    [
+                        {
+                            "scope": "wall",
+                            "code": "wall_layout_nonstandard",
+                            "sheet": "非标准墙表",
+                            "message": "非标准墙表不是标准四列墙体配筋模板",
+                        }
+                    ]
+                    if requires_ai
+                    else []
+                ),
+            },
+            "requires_manual_confirmation": manual_review,
+            "requires_wall_count_confirmation": not requires_ai,
+            "confirmation_candidates": (
+                {"N5012": [2, 3]} if manual_review else {}
+            ),
+            "confirmations": (
+                [
+                    {
+                        "wall_id": "N5012",
+                        "base_wall_id": "N5012",
+                        "reasons": ["duplicate_reinforcement_rows"],
+                        "suggested_source_row": 2,
+                        "candidates": [
+                            {"source_row": 2},
+                            {"source_row": 3},
+                        ],
+                    }
+                ]
+                if manual_review
+                else []
+            ),
+            "walls": [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        fake_calculation_book_preflight,
+    )
+    params = {
+        "template_type": "internal_structure",
+        "project_no": "JQ",
+        "project_name": "浙江金七门核电厂1、2号机组",
+        "internal_code": "JQ00-NN-001",
+        "version": "A",
+        "subproject_code": "RX",
+        "level_code": "R",
+        "subproject_name": "内部结构",
+        "design_phase": "施工图设计",
+        "document_name": "0.000m~15.000m配筋计算书",
+        "workshop_length": 72.5,
+        "workshop_width": 48.0,
+        "raft_slab_top_elevation": -8.5,
+        "roof_top_elevation": 31.2,
+        "factory_extreme_min_temperature": -18.0,
+        "factory_extreme_max_temperature": 39.0,
+        "site_soil_temperature": 15.0,
+        "include_slab_stress": True,
+    }
+    with TestClient(
+        create_app(
+            job_processor=CalculationProcessor(),
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        archive_bytes = b"Rar!\x1a\x07\x01\x00test"
+        wrong_token_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {**params, "preflight_token": "forged-token"},
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert wrong_token_response.status_code == 422
+        assert wrong_token_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
+
+        expired_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        expired_token = expired_preflight.json()["preflight_token"]
+        runtime = client.app.state.runtime
+        expired_entry = runtime._calculation_preflight_tokens[expired_token]
+        expired_archive = Path(expired_entry["archive_path"])
+        expired_entry["created_at"] -= 1801
+        expired_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": expired_token,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert expired_response.status_code == 422
+        assert expired_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
+        assert not expired_archive.exists()
+
+        uncountable_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "uncountable-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert uncountable_preflight.status_code == 422
+        assert uncountable_preflight.json()["detail"]["upload_errors"] == {
+            "archive": ["无法可靠统计非标准配筋表数据行"]
+        }
+        assert runtime._calculation_preflight_tokens == {}
+
+        slab_mismatch_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "nonstandard-slab-mismatch.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        slab_mismatch_token = slab_mismatch_preflight.json()["preflight_token"]
+        slab_mismatch_archive = Path(
+            runtime._calculation_preflight_tokens[slab_mismatch_token][
+                "archive_path"
+            ]
+        )
+        slab_mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "include_slab_stress": False,
+                        "preflight_token": slab_mismatch_token,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert slab_mismatch_response.status_code == 422
+        assert slab_mismatch_response.json()["detail"]["param_errors"][
+            "include_slab_stress"
+        ] == ["楼板应力选项已变化，请重新预检"]
+        assert slab_mismatch_token not in runtime._calculation_preflight_tokens
+        assert not slab_mismatch_archive.exists()
+
+        nonstandard_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "nonstandard-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert nonstandard_preflight.status_code == 200, nonstandard_preflight.text
+        assert nonstandard_preflight.json()["requires_ai_normalization"] is True
+        assert (
+            nonstandard_preflight.json()[
+                "ai_reinforcement_expected_source_row_count"
+            ]
+            == 40
+        )
+        assert nonstandard_preflight.json()["ai_confirmation_message"] == (
+            "您上传的墙体配筋表非标准格式，程序将启动人工智能。"
+        )
+        nonstandard_params = {
+            **params,
+            "preflight_token": nonstandard_preflight.json()["preflight_token"],
+        }
+        nonstandard_token = nonstandard_params["preflight_token"]
+        nonstandard_archive = Path(
+            runtime._calculation_preflight_tokens[nonstandard_token][
+                "archive_path"
+            ]
+        )
+        forged_count_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **nonstandard_params,
+                        "ai_reinforcement_expected_source_row_count": 999,
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert forged_count_response.status_code == 422
+        assert "ai_reinforcement_expected_source_row_count" in (
+            forged_count_response.json()["detail"]["param_errors"]
+        )
+        assert nonstandard_token in runtime._calculation_preflight_tokens
+        unconfirmed_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    nonstandard_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert unconfirmed_ai_response.status_code == 422
+        assert unconfirmed_ai_response.json()["detail"]["param_errors"][
+            "confirm_ai_normalization"
+        ] == ["请确认启动人工智能规范化非标准配筋表"]
+        assert nonstandard_token in runtime._calculation_preflight_tokens
+        assert nonstandard_archive.is_file()
+
+        confirmed_ai_params = {
+            **nonstandard_params,
+            "confirm_ai_normalization": True,
+        }
+        confirmed_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    confirmed_ai_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert confirmed_ai_response.status_code == 201, confirmed_ai_response.text
+        confirmed_ai_detail = _poll_job(
+            client,
+            confirmed_ai_response.json()["jobs"][0]["job_id"],
+        )
+        assert confirmed_ai_detail["status"] == "succeeded"
+        assert confirmed_ai_detail["calculation_book_output"] == {
+            "figure_count": 3,
+            "template_type": "internal_structure",
+            "output_filename": "JQ计算书.docx",
+            "reinforcement_source": "provided",
+            "ai_normalized": True,
+            "warning_count": 2,
+            "warnings": [
+                {
+                    "code": "duplicate_reinforcement_rows",
+                    "scope": "wall",
+                    "identity": "S7157",
+                    "direction": None,
+                    "source_sheet": "Sheet1",
+                    "source_row": 28,
+                    "source_cells": {
+                        "wall": "A28",
+                        "X": "B28",
+                        "Y": "C28",
+                        "Z": "D28",
+                    },
+                    "reason": "同一墙体存在重复配筋行，相关配筋字段已留空",
+                    "blank_fields": ["X", "Y", "Z"],
+                },
+                {
+                    "code": "image_only_wall",
+                    "scope": "wall",
+                    "identity": "N5012",
+                    "direction": None,
+                    "source_sheet": None,
+                    "source_row": None,
+                    "source_cells": {},
+                    "reason": "应力图中存在该墙体，但配筋表没有对应数据，相关配筋字段已留空",
+                    "blank_fields": ["X", "Y", "Z"],
+                },
+            ],
+            "ai_normalization": {
+                "skill_id": "reinforcement_table_normalizer",
+                "model": "structured-test",
+                "profile": "intranet-test",
+                "call_count": 1,
+                "source_row_count": 40,
+                "normalized_wall_count": 38,
+                "normalized_slab_count": 2,
+                "review_warning_count": 2,
+                "duration_ms": 125,
+                "validation": "passed",
+            },
+            "ai_rebar_suggestion": None,
+        }
+        assert observed_ai_options == [(True, 40)]
+        assert nonstandard_token not in runtime._calculation_preflight_tokens
+        assert not nonstandard_archive.exists()
+
+        replay_ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    confirmed_ai_params,
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert replay_ai_response.status_code == 422
+        assert replay_ai_response.json()["detail"]["param_errors"][
+            "preflight_token"
+        ] == ["请先完成计算书文件预检"]
+
+        manual_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "manual-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert manual_preflight.status_code == 200, manual_preflight.text
+        assert manual_preflight.json()["requires_manual_confirmation"] is True
+        no_row_confirmation = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": manual_preflight.json()[
+                            "preflight_token"
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert no_row_confirmation.status_code == 201, no_row_confirmation.text
+
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        assert runtime._calculation_preflight_tokens[params["preflight_token"]][
+            "include_slab_stress"
+        ] is True
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+        assert cached_archive.is_file()
+        assert cached_archive.suffix == ".rar"
+
+        mismatch_params = {
+            **params,
+            "include_slab_stress": False,
+        }
+        mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(mismatch_params, ensure_ascii=False)},
+        )
+        assert mismatch_response.status_code == 422
+        assert mismatch_response.json()["detail"]["param_errors"][
+            "include_slab_stress"
+        ] == ["楼板应力选项已变化，请重新预检"]
+        assert not cached_archive.exists()
+
+        preflight_response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={"include_slab_stress": "true"},
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert preflight_response.status_code == 200, preflight_response.text
+        assert preflight_response.json()["requires_ai_normalization"] is False
+        assert preflight_response.json()["requires_wall_count_confirmation"] is True
+        params["preflight_token"] = preflight_response.json()["preflight_token"]
+        params["confirm_ai_normalization"] = True
+        cached_archive = Path(
+            runtime._calculation_preflight_tokens[params["preflight_token"]][
+                "archive_path"
+            ]
+        )
+
+        response = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+
+        assert response.status_code == 201, response.text
+        assert not cached_archive.exists()
+        job_id = response.json()["jobs"][0]["job_id"]
+        detail = _poll_job(client, job_id)
+        assert observed_ai_options[-1] == (False, None)
+        assert detail["status"] == "succeeded"
+        assert detail["task_kind"] == "calculation_book"
+        assert detail["slot_id"] is None
+        assert detail["calculation_book_output"]["figure_count"] == 3
+        assert detail["calculation_book_output"]["ai_normalized"] is False
+        assert detail["calculation_book_output"]["warning_count"] == 0
+        assert detail["calculation_book_output"]["warnings"] == []
+        assert detail["calculation_book_output"]["ai_normalization"] is None
+        assert detail["artifacts"]["calculation_docx_available"] is True
+        assert detail["artifacts"]["calculation_docx_download_url"] == (
+            f"/api/jobs/{job_id}/download/calculation-book"
+        )
+
+        download = client.get(f"/api/jobs/{job_id}/download/calculation-book")
+        assert download.status_code == 200
+        assert download.content == b"docx"
+
+        replay = client.post(
+            "/api/jobs/calculation-books",
+            data={"params_json": json.dumps(params, ensure_ascii=False)},
+        )
+        assert replay.status_code == 422
+        assert replay.json()["detail"]["param_errors"]["preflight_token"] == [
+            "请先完成计算书文件预检"
+        ]
+
+        ai_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+            },
+            files={
+                "archive": (
+                    "ai-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        assert ai_preflight.status_code == 200, ai_preflight.text
+        assert ai_preflight.json()["requires_ai_recommendation"] is True
+        ai_token = ai_preflight.json()["preflight_token"]
+        assert runtime._calculation_preflight_tokens[ai_token][
+            "reinforcement_source"
+        ] == "ai_suggested"
+
+        source_mismatch_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "provided",
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert source_mismatch_response.status_code == 422
+        assert source_mismatch_response.json()["detail"]["param_errors"][
+            "reinforcement_source"
+        ] == ["配筋来源已变化，请重新预检"]
+
+        ai_preflight = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+            },
+            files={
+                "archive": (
+                    "ai-calculation-images.rar",
+                    archive_bytes,
+                    "application/vnd.rar",
+                )
+            },
+        )
+        ai_token = ai_preflight.json()["preflight_token"]
+        forged_options_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "ai_suggested",
+                        "options": {
+                            "candidates": ["client-forged"],
+                            "skill_id": "client-forged",
+                            "failure_count": 999,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert forged_options_response.status_code == 422
+        assert "options" in forged_options_response.json()["detail"][
+            "param_errors"
+        ]
+        assert ai_token in runtime._calculation_preflight_tokens
+
+        ai_response = client.post(
+            "/api/jobs/calculation-books",
+            data={
+                "params_json": json.dumps(
+                    {
+                        **params,
+                        "preflight_token": ai_token,
+                        "confirm_ai_normalization": False,
+                        "reinforcement_source": "ai_suggested",
+                    },
+                    ensure_ascii=False,
+                )
+            },
+        )
+        assert ai_response.status_code == 201, ai_response.text
+        ai_detail = _poll_job(
+            client,
+            ai_response.json()["jobs"][0]["job_id"],
+        )
+        assert ai_detail["status"] == "succeeded"
+        ai_job_id = ai_response.json()["jobs"][0]["job_id"]
+        assert ai_detail["calculation_book_output"] == {
+            "figure_count": 3,
+            "template_type": "internal_structure",
+            "output_filename": "JQ计算书.docx",
+            "reinforcement_source": "ai_suggested",
+            "ai_normalized": False,
+            "warning_count": 1,
+            "warnings": [
+                {
+                    "code": "AI_BASE_FAILURE_LIMIT",
+                    "scope": "wall",
+                    "identity": "N5012",
+                    "direction": "Z",
+                    "source_sheet": None,
+                    "source_row": None,
+                    "source_cells": {},
+                    "reason": "人工智能连续三次调用或协议失败，当前方向已留空，请人工复核",
+                    "blank_fields": ["Z"],
+                }
+            ],
+            "ai_normalization": None,
+            "ai_rebar_suggestion": {
+                "skill_id": "recommend-rebar-from-smx",
+                "skill_version": "1.0.0",
+                "skill_sha256": "a" * 64,
+                "model": "structured-test",
+                "call_count": 6,
+                "suggested_direction_count": 181,
+                "blank_direction_count": 1,
+                "repair_round_count": 2,
+                "validation": "passed_with_warnings",
+            },
+        }
+        assert ai_detail["artifacts"]["calculation_log_available"] is True
+        assert ai_detail["artifacts"]["calculation_log_download_url"] == (
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        log_download = client.get(
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        assert log_download.status_code == 200
+        assert json.loads(log_download.content.splitlines()[-1])["event"] == (
+            "task_completed"
+        )
+        assert log_download.headers["content-type"] == (
+            "text/plain; charset=utf-8"
+        )
+        assert log_download.headers["cache-control"] == "no-store"
+        assert log_download.headers["x-content-type-options"] == "nosniff"
+        authorization = client.headers.pop("Authorization")
+        unauthenticated_log = client.get(
+            f"/api/jobs/{ai_job_id}/download/calculation-book-log"
+        )
+        assert unauthenticated_log.status_code == 401
+        client.headers["Authorization"] = authorization
+
+        ai_options = next(
+            item
+            for item in observed_job_options
+            if item.get("reinforcement_source") == "ai_suggested"
+        )
+        assert ai_options == {
+            "mode": "calculation_book",
+            "reinforcement_source": "ai_suggested",
+            "ai_reinforcement_normalization": False,
+            "ai_rebar_suggestion": True,
+        }
+        provided_options = [
+            item
+            for item in observed_job_options
+            if item.get("reinforcement_source") == "provided"
+        ]
+        assert any(
+            item.get("ai_reinforcement_normalization") is True
+            and "ai_rebar_suggestion" not in item
+            for item in provided_options
+        )
+        assert any(
+            item["ai_reinforcement_normalization"] is False
+            and "ai_rebar_suggestion" not in item
+            for item in provided_options
+        )
+
+
+def test_download_standard_reinforcement_template_is_authenticated_and_fixed(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    template_dir = tmp_path / "calculation-book-templates"
+    template_dir.mkdir()
+    template = template_dir / "计算书模板文件.xlsx"
+    expected = b"PK\x03\x04standard-reinforcement-template"
+    template.write_bytes(expected)
+    (template_dir / "other.xlsx").write_bytes(b"must-not-be-downloaded")
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        runtime.config.calculation_book.template_dir = template_dir
+        runtime.config.calculation_book.standard_reinforcement_template = template
+
+        response = client.get(
+            "/api/jobs/calculation-books/reinforcement-template",
+            params={"filename": "other.xlsx"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == expected
+        assert response.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "标准配筋模板.xlsx" in unquote(
+            response.headers["content-disposition"]
+        )
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+        client.headers.pop("Authorization")
+        unauthenticated = client.get(
+            "/api/jobs/calculation-books/reinforcement-template"
+        )
+
+    assert unauthenticated.status_code == 401
+
+
+def test_failed_ai_calculation_hides_word_but_keeps_terminal_log_download(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        job = runtime.job_manager.create_job(
+            job_type=JobType.CALCULATION_BOOK.value,
+            project_no="JQ",
+            options={
+                "reinforcement_source": "ai_suggested",
+                "ai_rebar_suggestion": True,
+            },
+        )
+        work_dir = tmp_path / "failed-ai-calculation"
+        runtime.config.calculation_book.ai_suggestion.log_dir = (
+            tmp_path / "central-ai-audit"
+        )
+        log_path = (
+            runtime.config.calculation_book.ai_suggestion.log_dir
+            / f"calculation-book-{job.job_id}.log"
+        )
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with CalculationBookDiagnosticLog.create(
+            log_path,
+            job_id=job.job_id,
+            correlation_id=job.job_id,
+            max_bytes=8_192,
+        ) as diagnostic_log:
+            diagnostic_log.write(
+                "task_failed",
+                stage="render_document",
+                duration_ms=1,
+                error_code="RuntimeError",
+            )
+        docx_path = work_dir / "calculation-book" / "failed.docx"
+        docx_path.parent.mkdir(parents=True, exist_ok=True)
+        docx_path.write_bytes(b"PK\x03\x04failed-word")
+        job.work_dir = work_dir
+        job.artifacts.calculation_log = log_path
+        job.artifacts.calculation_docx = docx_path
+        job.status = JobStatus.FAILED
+        runtime.job_manager.update_job(job)
+
+        detail = client.get(f"/api/jobs/{job.job_id}")
+        assert detail.status_code == 200
+        artifacts = detail.json()["artifacts"]
+        assert artifacts["calculation_docx_available"] is False
+        assert artifacts["calculation_docx_download_url"] is None
+        assert artifacts["calculation_log_available"] is True
+        assert artifacts["calculation_log_download_url"] == (
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+
+        word = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book"
+        )
+        assert word.status_code == 404
+        log = client.get(
+            f"/api/jobs/{job.job_id}/download/calculation-book-log"
+        )
+        assert log.status_code == 200
+        assert json.loads(log.content.splitlines()[-1])["event"] == (
+            "task_failed"
+        )
+
+
+@pytest.mark.parametrize("invalid_kind", ["missing", "directory", "escape"])
+def test_download_standard_reinforcement_template_hides_invalid_paths(
+    monkeypatch,
+    tmp_path: Path,
+    invalid_kind: str,
+) -> None:
+    template_dir = tmp_path / "calculation-book-templates"
+    template_dir.mkdir()
+    outside = tmp_path / "outside.xlsx"
+    outside.write_bytes(b"outside")
+    if invalid_kind == "missing":
+        configured = template_dir / "missing.xlsx"
+    elif invalid_kind == "directory":
+        configured = template_dir / "nested"
+        configured.mkdir()
+    else:
+        configured = outside
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        runtime.config.calculation_book.template_dir = template_dir
+        runtime.config.calculation_book.standard_reinforcement_template = configured
+
+        response = client.get(
+            "/api/jobs/calculation-books/reinforcement-template"
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "标准配筋模板不可用"}
+    assert str(configured) not in response.text
+
+
+def test_calculation_preflight_cache_cleanup_is_scoped_and_age_limited(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from API.app.runtime import _cleanup_calculation_preflight_cache
+
+    cache_root = tmp_path / "calculation-preflight"
+    cache_root.mkdir()
+    now = time.time()
+    old_zip = cache_root / "calculation-preflight-old.zip"
+    old_rar = cache_root / "calculation-preflight-old.rar"
+    old_7z = cache_root / "calculation-preflight-old.7z"
+    fresh_zip = cache_root / "calculation-preflight-fresh.zip"
+    unrelated = cache_root / "user-upload.zip"
+    wrong_suffix = cache_root / "calculation-preflight-old.txt"
+    matching_directory = cache_root / "calculation-preflight-folder.zip"
+    for path in (old_zip, old_rar, old_7z, fresh_zip, unrelated, wrong_suffix):
+        path.write_bytes(b"payload")
+    matching_directory.mkdir()
+    old_mtime = now - 1801
+    for path in (old_zip, old_rar, old_7z, unrelated, wrong_suffix):
+        os.utime(path, (old_mtime, old_mtime))
+    os.utime(matching_directory, (old_mtime, old_mtime))
+
+    symlink_path = cache_root / "calculation-preflight-link.zip"
+    symlink_target = tmp_path / "outside.zip"
+    symlink_target.write_bytes(b"outside")
+    symlink_created = False
+    try:
+        symlink_path.symlink_to(symlink_target)
+        symlink_created = True
+    except OSError:
+        pass
+
+    _cleanup_calculation_preflight_cache(cache_root, now=now)
+
+    assert not old_zip.exists()
+    assert not old_rar.exists()
+    assert not old_7z.exists()
+    assert fresh_zip.is_file()
+    assert unrelated.is_file()
+    assert wrong_suffix.is_file()
+    assert matching_directory.is_dir()
+    assert symlink_target.is_file()
+    if symlink_created:
+        assert symlink_path.is_symlink()
+
+    outside_root = tmp_path / "outside-cache"
+    outside_root.mkdir()
+    outside_old = outside_root / "calculation-preflight-outside.zip"
+    outside_old.write_bytes(b"outside")
+    os.utime(outside_old, (old_mtime, old_mtime))
+    linked_root = tmp_path / "linked-cache"
+    try:
+        linked_root.symlink_to(outside_root, target_is_directory=True)
+    except OSError:
+        linked_root.mkdir()
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda self: (
+                True
+                if self == linked_root
+                else original_is_symlink(self)
+            ),
+        )
+    with pytest.raises(
+        RuntimeError,
+        match="unsafe calculation preflight cache root",
+    ):
+        _cleanup_calculation_preflight_cache(linked_root, now=now)
+    assert outside_old.is_file()
+
+
+def test_calculation_preflight_accepts_7z_forwards_config_and_fixes_mime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: dict[str, object] = {}
+
+    def fake_preflight(**kwargs):
+        observed.update(kwargs)
+        return {
+            "confirmations": [],
+            "requires_ai_normalization": False,
+            "requires_wall_count_confirmation": False,
+            "format_inspection": {},
+        }
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        fake_preflight,
+    )
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "calculation-images.7z",
+                    b"7z\xbc\xaf'\x1cpayload",
+                    "text/plain",
+                )
+            },
+        )
+        assert response.status_code == 200, response.text
+        runtime = client.app.state.runtime
+        token = response.json()["preflight_token"]
+        cached = runtime._calculation_preflight_tokens[token]
+
+        assert (
+            observed["archive_extractor"]
+            is runtime.config.calculation_book.archive_extractor
+        )
+        assert cached["content_type"] == "application/x-7z-compressed"
+        assert Path(str(cached["archive_path"])).suffix == ".7z"
+
+
+def test_calculation_preflight_rejects_all_invalid_editable_params_before_archive_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def unexpected_preflight(**_kwargs):
+        raise AssertionError("archive preflight must not run for invalid params")
+
+    monkeypatch.setattr(
+        "API.app.runtime.run_calculation_book_preflight",
+        unexpected_preflight,
+    )
+    params = {
+        "template_type": "internal_structure",
+        "project_no": "JQ",
+        "project_name": "测试项目",
+        "internal_code": "JQ00-NN-001",
+        "version": "A",
+        "subproject_code": "RX",
+        "level_code": "R",
+        "subproject_name": "内部结构",
+        "design_phase": "施工图设计",
+        "document_name": "11111",
+        "workshop_length": 15,
+        "workshop_width": 15,
+        "raft_slab_top_elevation": 15,
+        "roof_top_elevation": 15,
+        "factory_extreme_min_temperature": 15,
+        "factory_extreme_max_temperature": 15,
+        "site_soil_temperature": 15,
+        "include_slab_stress": True,
+        "reinforcement_source": "ai_suggested",
+    }
+
+    with _create_client(monkeypatch, tmp_path) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            data={
+                "include_slab_stress": "true",
+                "reinforcement_source": "ai_suggested",
+                "params_json": json.dumps(params, ensure_ascii=False),
+            },
+            files={
+                "archive": (
+                    "calculation-images.rar",
+                    b"Rar!\x1a\x07\x01\x00payload",
+                    "application/vnd.rar",
+                )
+            },
+        )
+
+    assert response.status_code == 422
+    errors = response.json()["detail"]["param_errors"]
+    assert set(errors) >= {
+        "document_name",
+        "roof_top_elevation",
+        "factory_extreme_max_temperature",
+    }
+    assert "标高范围" in errors["document_name"][0]
+    assert "筏板顶标高 15m" in errors["roof_top_elevation"][0]
+    assert "历史最低温度 15℃" in errors["factory_extreme_max_temperature"][0]
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload", "content_type"),
+    [
+        ("input.rar", b"Rar!\x1a\x07\x01\x00payload", "application/vnd.rar"),
+        ("input.7z", b"7z\xbc\xaf'\x1cpayload", "application/x-7z-compressed"),
+    ],
+)
+def test_calculation_preflight_missing_private_extractor_is_stable_and_uncached(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    filename: str,
+    payload: bytes,
+    content_type: str,
+) -> None:
+    with _create_client(monkeypatch, tmp_path) as client:
+        runtime = client.app.state.runtime
+        extractor = runtime.config.calculation_book.archive_extractor
+        runtime.config.calculation_book.archive_extractor = extractor.model_copy(
+            update={"executable": (tmp_path / "missing-7z.exe").resolve()}
+        )
+
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={"archive": (filename, payload, content_type)},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"]["upload_errors"] == {
+            "archive": ["RAR/7z 私有解包器不存在"]
+        }
+        assert runtime._calculation_preflight_tokens == {}
+        cache_root = (
+            runtime.config.storage_dir
+            / "runtime"
+            / "calculation-preflight"
+        )
+        assert not tuple(cache_root.glob("calculation-preflight-*"))
+
+
+def _calculation_archive_bytes(
+    tmp_path: Path,
+    *,
+    malicious_workbook: bool,
+) -> bytes:
+    source = tmp_path / "malicious-calculation-source"
+    source.mkdir()
+    for direction in ("X", "Y", "Z"):
+        Image.new("RGB", (32, 32), "white").save(
+            source / f"S7159-{direction}.png"
+        )
+    for folder_name in ("01", "02"):
+        folder = source / folder_name
+        folder.mkdir()
+        Image.new("RGB", (32, 32), "white").save(folder / "figure.png")
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "构件编号\n及位置",
+            "单侧水平钢筋\n(对称配筋)",
+            "单侧竖向钢筋\n(对称配筋)",
+            "拉筋",
+        ]
+    )
+    sheet.append(
+        ["S7159墙", "1D28间距200", "1D28间距200", "1C12间距200*400"]
+    )
+    workbook_path = source / "计算书模板文件.xlsx"
+    if malicious_workbook:
+        safe_workbook = source / "safe.xlsx"
+        workbook.save(safe_workbook)
+        with zipfile.ZipFile(safe_workbook) as source_archive, zipfile.ZipFile(
+            workbook_path,
+            "w",
+            zipfile.ZIP_DEFLATED,
+        ) as target_archive:
+            for info in source_archive.infolist():
+                target_archive.writestr(info, source_archive.read(info.filename))
+            target_archive.writestr(
+                "xl/sharedStrings.xml",
+                b"<sst><si><t>"
+                + (b"A" * (8 * 1024 * 1024))
+                + b"</t></si></sst>",
+            )
+        safe_workbook.unlink()
+    else:
+        workbook.save(workbook_path)
+
+    archive_buffer = BytesIO()
+    with zipfile.ZipFile(
+        archive_buffer,
+        "w",
+        zipfile.ZIP_DEFLATED,
+    ) as archive:
+        for path in source.rglob("*"):
+            if path.is_file():
+                archive.write(path, path.relative_to(source).as_posix())
+    return archive_buffer.getvalue()
+
+
+def test_calculation_preflight_rejects_embedded_xlsx_bomb_before_ocr_ai_and_cache(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizer
+
+    _configure_api_env(monkeypatch, tmp_path)
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe workbook must fail before OCR or AI")
+
+    monkeypatch.setattr(
+        "API.app.runtime.recognize_stress_legend",
+        fail_if_called,
+    )
+    monkeypatch.setattr(
+        ReinforcementTaskNormalizer,
+        "normalize",
+        fail_if_called,
+    )
+    with TestClient(
+        create_app(
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "malicious.zip",
+                    _calculation_archive_bytes(
+                        tmp_path,
+                        malicious_workbook=True,
+                    ),
+                    "application/zip",
+                )
+            },
+        )
+
+        assert response.status_code == 422
+        assert "XLSX internal resource limit" in response.text
+        assert client.app.state.runtime._calculation_preflight_tokens == {}
+
+
+def test_calculation_preflight_rejects_linked_cache_root_before_ocr_or_write(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _configure_api_env(monkeypatch, tmp_path)
+    cache_parent = tmp_path / "storage" / "runtime"
+    cache_parent.mkdir(parents=True)
+    outside_root = tmp_path / "outside-preflight-cache"
+    outside_root.mkdir()
+    cache_root = cache_parent / "calculation-preflight"
+    try:
+        cache_root.symlink_to(outside_root, target_is_directory=True)
+    except OSError:
+        cache_root.mkdir()
+        original_is_symlink = Path.is_symlink
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda self: (
+                True
+                if self == cache_root
+                else original_is_symlink(self)
+            ),
+        )
+
+    repo_root = Path(__file__).resolve().parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from API.app.main import create_app
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("unsafe cache root must fail before OCR")
+
+    monkeypatch.setattr(
+        "API.app.runtime.recognize_stress_legend",
+        fail_if_called,
+    )
+    with TestClient(
+        create_app(
+            shared_prep_service=FakeSharedPrepService(),
+            font_preflight_service=FakeFontPreflightService(),
+        )
+    ) as client:
+        response = client.post(
+            "/api/jobs/calculation-books/preflight",
+            files={
+                "archive": (
+                    "safe.zip",
+                    _calculation_archive_bytes(
+                        tmp_path,
+                        malicious_workbook=False,
+                    ),
+                    "application/zip",
+                )
+            },
+        )
+
+        assert response.status_code == 422
+        assert "unsafe calculation preflight cache root" in response.text
+        assert list(outside_root.iterdir()) == []
+        assert client.app.state.runtime._calculation_preflight_tokens == {}
 
 
 def test_create_batch_without_ied_plan_hides_ied_artifact_and_download(

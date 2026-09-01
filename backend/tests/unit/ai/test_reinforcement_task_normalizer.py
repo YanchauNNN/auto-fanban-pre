@@ -1,0 +1,814 @@
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+import yaml
+from openpyxl import Workbook
+
+
+class FakeClient:
+    def __init__(self, content: str | list[str], *, error: Exception | None = None) -> None:
+        self.contents = [content] if isinstance(content, str) else content
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+        self.api_key = "unit-test-secret-api-key"
+
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> SimpleNamespace:
+        self.calls.append({"messages": messages, "tools": tools})
+        if self.error is not None:
+            raise self.error
+        content = self.contents[min(len(self.calls) - 1, len(self.contents) - 1)]
+        return SimpleNamespace(content=content, usage={})
+
+    def __repr__(self) -> str:
+        return f"FakeClient(api_key={self.api_key!r})"
+
+
+def _skill_root(tmp_path: Path) -> Path:
+    root = tmp_path / "reinforcement-table-normalizer"
+    (root / "references").mkdir(parents=True)
+    (root / "SKILL.md").write_text(
+        "---\n"
+        "name: reinforcement-table-normalizer\n"
+        "description: Use when a confirmed calculation-book task contains a non-standard reinforcement table.\n"
+        "---\n"
+        "# 完整 Skill 规则\n"
+        "只返回 schema v1 JSON 对象。\n",
+        encoding="utf-8",
+    )
+    (root / "references" / "normalization-rules.md").write_text(
+        "# 完整规范规则\n不得返回/计算实际配筋面积。\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def _workbook_path(tmp_path: Path, *, extra_cells: int = 0) -> Path:
+    path = tmp_path / "非标准配筋表.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    wall.append(["S7157", "原表水平筋", "原表竖向筋", "原表拉筋"])
+    for offset in range(extra_cells):
+        wall.cell(row=3, column=offset + 1, value=f"extra-{offset}")
+
+    slab = workbook.create_sheet("楼板配筋")
+    slab.append(["标高", "顶层X", "顶层Y", "底层X", "底层Y", "拉筋"])
+    slab.append(
+        ["11.20m", "顶层水平原文", "顶层竖向原文", "底层水平原文", "底层竖向原文", "纵向拉筋原文"]
+    )
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+def _wall_row(*, source_x: str = "B2") -> dict[str, Any]:
+    return {
+        "kind": "wall",
+        "status": "normalized",
+        "wall_id": "S7157",
+        "X": "1D36间距200",
+        "Y": "1D32间距200",
+        "Z": "1C14间距400*400",
+        "source_sheet": "墙体配筋",
+        "source_row": 2,
+        "source_cells": {
+            "wall": "A2",
+            "X": source_x,
+            "Y": "C2",
+            "Z": "D2",
+        },
+    }
+
+
+def _slab_row() -> dict[str, Any]:
+    return {
+        "kind": "slab",
+        "status": "normalized",
+        "elevation": "11.2",
+        "top_x": "1D36间距200",
+        "top_y": "1D40间距200",
+        "middle_x": None,
+        "middle_y": None,
+        "bottom_x": "1D30间距200",
+        "bottom_y": "1D28间距200",
+        "z": "1D16间距200",
+        "source_sheet": "楼板配筋",
+        "source_row": 2,
+        "source_cells": {
+            "elevation": "A2",
+            "top_x": "B2",
+            "top_y": "C2",
+            "middle_x": None,
+            "middle_y": None,
+            "bottom_x": "D2",
+            "bottom_y": "E2",
+            "z": "F2",
+        },
+    }
+
+
+def _payload(*, include_slab: bool = True, source_x: str = "B2") -> dict[str, Any]:
+    rows = [_wall_row(source_x=source_x)]
+    if include_slab:
+        rows.append(_slab_row())
+    return {"schema_version": "1", "source_row_count": len(rows), "rows": rows}
+
+
+def _forty_row_workbook_and_payload(
+    tmp_path: Path,
+    *,
+    returned_row_count: int,
+) -> tuple[Path, dict[str, Any]]:
+    path = tmp_path / "forty-wall-rows.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    rows: list[dict[str, Any]] = []
+    for index in range(40):
+        source_row = index + 2
+        wall_id = f"S{7000 + index}"
+        wall.append([wall_id, "原表水平筋", "原表竖向筋", "原表拉筋"])
+        if index >= returned_row_count:
+            continue
+        row = _wall_row(source_x=f"B{source_row}")
+        row["wall_id"] = wall_id
+        row["source_row"] = source_row
+        row["source_cells"] = {
+            "wall": f"A{source_row}",
+            "X": f"B{source_row}",
+            "Y": f"C{source_row}",
+            "Z": f"D{source_row}",
+        }
+        rows.append(row)
+    workbook.save(path)
+    workbook.close()
+    return path, {
+        "schema_version": "1",
+        "source_row_count": len(rows),
+        "rows": rows,
+    }
+
+
+def _mixed_issue_workbook(tmp_path: Path) -> Path:
+    path = tmp_path / "mixed-issue.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    wall.append(["N5007", "1D40间距200", "1D36间距200", "1C14间距400*400"])
+    wall.append(["N5008", "未知写法", "1D28间距200", "1C12间距400*400"])
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+def _standard_wall_and_slab_workbook(tmp_path: Path) -> Path:
+    path = tmp_path / "standard-wall-slab.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.append(
+        [
+            "构件编号及位置",
+            "单侧水平钢筋(对称配筋)",
+            "单侧竖向钢筋(对称配筋)",
+            "拉筋",
+        ]
+    )
+    wall.append(["N5007 墙", "1D40间距200", "1D36间距200", "1C14间距400*400"])
+    slab = workbook.create_sheet("楼板配筋")
+    slab.append(
+        [
+            "标高",
+            "顶层水平",
+            "顶层竖向",
+            "中层水平",
+            "中层竖向",
+            "底层水平",
+            "底层竖向",
+            "纵向拉筋",
+        ]
+    )
+    slab.append(
+        [
+            11.45,
+            "1D36间距200",
+            "1D40间距200",
+            None,
+            None,
+            "1D30间距200",
+            "1D28间距200",
+            "1D16间距200",
+        ]
+    )
+    workbook.save(path)
+    workbook.close()
+    return path
+
+
+def _normalizer(
+    tmp_path: Path,
+    client: FakeClient,
+    **limit_overrides: int,
+) -> Any:
+    from src.ai.reinforcement_task_normalizer import (
+        ReinforcementTaskNormalizer,
+        ReinforcementTaskNormalizerLimits,
+    )
+
+    defaults = {
+        "max_non_empty_cells": 100,
+        "max_snapshot_chars": 100_000,
+        "max_skill_chars": 10_000,
+    }
+    defaults.update(limit_overrides)
+    return ReinforcementTaskNormalizer(
+        client=client,
+        skill_root=_skill_root(tmp_path),
+        limits=ReinforcementTaskNormalizerLimits(**defaults),
+        max_correction_attempts=2,
+    )
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_normalizes_plain_or_fenced_json_once_with_complete_skill_and_snapshot(
+    tmp_path: Path,
+    fenced: bool,
+) -> None:
+    payload = json.dumps(_payload(), ensure_ascii=False)
+    content = f"```json\n{payload}\n```" if fenced else payload
+    client = FakeClient(content)
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _workbook_path(tmp_path),
+        include_slab=True,
+        expected_source_row_count=2,
+    )
+
+    assert len(client.calls) == 1
+    assert client.calls[0]["tools"] is None
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert "skill_id=reinforcement_table_normalizer" in prompt
+    assert "完整 Skill 规则" in prompt
+    assert "完整规范规则" in prompt
+    assert "不得返回/计算实际配筋面积" in prompt
+    assert "无缩进、无换行的紧凑 JSON" in prompt
+    assert '"sheet":"墙体配筋"' in prompt
+    assert '"address":"B2"' in prompt
+    assert "同时识别 wall 与 slab" in prompt
+    assert result.wall_schedule.rows[0].wall_id == "S7157"
+    assert result.wall_schedule.rows[0].x.selected.actual_area == pytest.approx(math.pi * 18**2 * 5)
+    assert result.slab_schedule is not None
+    assert result.slab_schedule.rows[0].elevation == "11.2"
+
+
+def test_include_slab_false_requests_and_accepts_wall_only_payload(tmp_path: Path) -> None:
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 1,
+                "patch_rows": [_wall_row()],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _workbook_path(tmp_path),
+        include_slab=False,
+        expected_source_row_count=1,
+    )
+
+    assert result.slab_schedule is None
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert "include_slab=false" in prompt
+    assert "deterministic-audit" in prompt
+    assert "禁止回显其他已确定行" in prompt
+    assert "不得回显已确定行的配筋字段" in prompt
+    assert "patch_rows 仅可返回 issue 行的规范字段" in prompt
+    assert "仍禁止返回 actual_area" in prompt
+
+
+def test_include_slab_false_rejects_model_invented_slab(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=False)
+
+    assert exc_info.value.code == "model_schema_invalid"
+
+
+def test_expected_source_row_count_is_enforced_by_deterministic_validator(
+    tmp_path: Path,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(
+            _workbook_path(tmp_path),
+            include_slab=True,
+            expected_source_row_count=40,
+        )
+
+    assert exc_info.value.code == "model_schema_invalid"
+    assert "40" not in str(exc_info.value)
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert "source_row_count 与 rows 数量都必须等于 40" in prompt
+
+
+@pytest.mark.parametrize(
+    ("returned_row_count", "is_valid"),
+    [(39, False), (40, True)],
+)
+def test_trusted_count_accepts_exactly_forty_physical_rows(
+    tmp_path: Path,
+    returned_row_count: int,
+    is_valid: bool,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import (
+        ReinforcementTaskNormalizationError,
+    )
+
+    workbook_path, payload = _forty_row_workbook_and_payload(
+        tmp_path,
+        returned_row_count=returned_row_count,
+    )
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": len(payload["rows"]),
+                "patch_rows": payload["rows"],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(
+        tmp_path,
+        client,
+        max_non_empty_cells=200,
+    )
+
+    if not is_valid:
+        with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+            normalizer.normalize(
+                workbook_path,
+                include_slab=False,
+                expected_source_row_count=40,
+            )
+        assert exc_info.value.code == "model_schema_invalid"
+        return
+
+    result = normalizer.normalize(
+        workbook_path,
+        include_slab=False,
+        expected_source_row_count=40,
+    )
+    assert result.source_row_count == 40
+    assert len(result.wall_schedule.rows) == 40
+
+
+def test_hybrid_audit_only_patches_issue_rows_and_keeps_normalized_baseline(
+    tmp_path: Path,
+) -> None:
+    patch = {
+        "kind": "wall",
+        "status": "needs_review",
+        "wall_id": "N5008",
+        "X": None,
+        "Y": "1D28间距200",
+        "Z": "1C12间距400*400",
+        "reason": "水平筋无法唯一确定",
+        "blank_fields": ["X"],
+        "source_sheet": "墙体配筋",
+        "source_row": 3,
+        "source_cells": {"wall": "A3", "X": "B3", "Y": "C3", "Z": "D3"},
+    }
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [patch],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _mixed_issue_workbook(tmp_path),
+        include_slab=False,
+        expected_source_row_count=2,
+    )
+
+    assert result.source_row_count == 2
+    assert [row.wall_id for row in result.wall_schedule.rows] == ["N5007"]
+    assert [issue.wall_id for issue in result.wall_schedule.issues] == ["N5008"]
+    assert result.warnings[0].blank_fields == ("X",)
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert '"issue_row_count":1' in prompt
+    assert '"source_row":3' in prompt
+    assert "N5007" not in prompt
+
+
+def test_hybrid_audit_preserves_wall_and_slab_counts_without_replaying_rows(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [],
+                "review_sources": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    normalizer = _normalizer(tmp_path, client)
+
+    result = normalizer.normalize(
+        _standard_wall_and_slab_workbook(tmp_path),
+        include_slab=True,
+        expected_source_row_count=2,
+    )
+
+    assert result.source_row_count == 2
+    assert result.wall_schedule.source_row_count == 1
+    assert result.slab_schedule is not None
+    assert len(result.slab_schedule.rows) == 1
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert '"wall_source_row_count":1' in prompt
+    assert '"issue_row_count":0' in prompt
+    assert '"duplicate_rows":[]' in prompt
+
+
+def test_hybrid_audit_accepts_embedded_json_and_ignores_harmless_extra_fields(
+    tmp_path: Path,
+) -> None:
+    workbook_path = _mixed_issue_workbook(tmp_path)
+    client = FakeClient(
+        "已按规范处理，结果如下：\n```json\n"
+        + json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [
+                    {
+                        "kind": "wall",
+                        "status": "needs_review",
+                        "wall_id": "N5008",
+                        "X": None,
+                        "Y": "1D28间距200",
+                        "Z": "1C12间距400*400",
+                        "reason": "水平筋无法唯一确定",
+                        "blank_fields": ["X"],
+                        "source_sheet": "墙体配筋",
+                        "source_row": 3,
+                        "source_cells": {
+                            "wall": "A3",
+                            "X": "B3",
+                            "Y": "C3",
+                            "Z": "D3",
+                        },
+                        "actual_area": 999999,
+                    }
+                ],
+                "review_sources": [],
+                "explanation": "额外说明应被读取层忽略",
+            },
+            ensure_ascii=False,
+        )
+        + "\n```\n处理完成。"
+    )
+
+    result = _normalizer(tmp_path, client).normalize(
+        workbook_path,
+        include_slab=False,
+        expected_source_row_count=2,
+    )
+
+    assert len(client.calls) == 1
+    assert [issue.wall_id for issue in result.wall_schedule.issues] == ["N5008"]
+
+
+def test_hybrid_audit_strips_extra_review_source_fields_from_real_model_shape(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "duplicate.xlsx"
+    workbook = Workbook()
+    wall = workbook.active
+    wall.title = "2016墙体配筋"
+    wall.append(["墙号", "水平筋", "竖向筋", "拉筋"])
+    wall.append(["N7004A", "1D25间距200", "1D25间距200", "1C12间距400*400"])
+    wall.append(["N7004A", "1D28间距200", "1D28间距200", "1C14间距400*400"])
+    workbook.save(path)
+    workbook.close()
+    client = FakeClient(
+        json.dumps(
+            {
+                "schema_version": "hybrid-1",
+                "source_row_count": 2,
+                "patch_rows": [],
+                "review_sources": [
+                    {
+                        "source_sheet": "2016墙体配筋",
+                        "source_row": 2,
+                        "wall_id": "N7004A",
+                        "source_cells": {},
+                    },
+                    {
+                        "source_sheet": "2016墙体配筋",
+                        "source_row": 3,
+                        "wall_id": "N7004A",
+                        "source_cells": {},
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+    result = _normalizer(tmp_path, client).normalize(
+        path,
+        include_slab=False,
+        expected_source_row_count=2,
+    )
+
+    assert len(client.calls) == 1
+    assert result.source_row_count == 2
+
+
+def test_invalid_first_response_is_corrected_with_minimal_schema_prompt(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(
+        [
+            "我无法按要求返回",
+            json.dumps(
+                {
+                    "schema_version": "hybrid-1",
+                    "source_row_count": 2,
+                    "patch_rows": [],
+                    "review_sources": [],
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    )
+
+    result = _normalizer(tmp_path, client).normalize(
+        _standard_wall_and_slab_workbook(tmp_path),
+        include_slab=True,
+        expected_source_row_count=2,
+    )
+
+    assert result.source_row_count == 2
+    assert len(client.calls) == 2
+    correction_prompt = "\n".join(
+        str(message["content"]) for message in client.calls[1]["messages"]
+    )
+    assert "只返回一个紧凑 JSON 对象" in correction_prompt
+    assert "不要解释" in correction_prompt
+
+
+def test_prompt_without_expected_source_count_forbids_inventing_fixed_count(
+    tmp_path: Path,
+) -> None:
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client)
+
+    normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    prompt = "\n".join(str(message["content"]) for message in client.calls[0]["messages"])
+    assert "expected_source_row_count 未提供" in prompt
+    assert "不得杜撰固定源行数" in prompt
+    assert "必须等于 40" not in prompt
+
+
+@pytest.mark.parametrize(
+    "content, expected_code",
+    [
+        ("not json", "model_output_invalid"),
+        ('说明文字\n{"schema_version":"1"}', "model_schema_invalid"),
+        ('[{"schema_version":"1"}]', "model_schema_invalid"),
+        ("```json\n{}\n```\n```json\n{}\n```", "model_schema_invalid"),
+        ('{"schema_version":"1","source_row_count":1,"rows":[]}', "model_schema_invalid"),
+    ],
+)
+def test_rejects_invalid_model_output_without_echoing_it(
+    tmp_path: Path,
+    content: str,
+    expected_code: str,
+) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    secret = "unit-test-secret-api-key"
+    client = FakeClient(content + secret if content == "not json" else content)
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == expected_code
+    assert secret not in str(exc_info.value)
+
+
+def test_rejects_invalid_source_evidence_as_model_schema_error(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(source_x="Z99"), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == "model_schema_invalid"
+    assert "Z99" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("error_type", ["client", "timeout", "gateway"])
+def test_wraps_gateway_errors_without_leaking_sensitive_context(
+    tmp_path: Path,
+    error_type: str,
+) -> None:
+    from src.ai.chat_client import ChatClientError, ChatClientTimeout, ChatGatewayError
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    sensitive = "gateway body: unit-test-secret-api-key / 单元格原文S7157 / snapshot"
+    if error_type == "timeout":
+        error = ChatClientTimeout(sensitive)
+    elif error_type == "gateway":
+        error = ChatGatewayError(sensitive, status_code=503)
+    else:
+        error = ChatClientError(sensitive)
+    client = FakeClient("", error=error)
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == "model_gateway_failed"
+    assert str(exc_info.value) == "reinforcement model gateway request failed"
+    assert "unit-test-secret-api-key" not in repr(exc_info.value)
+    assert "单元格原文S7157" not in repr(exc_info.value)
+    assert "snapshot" not in repr(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert len(client.calls) == 1
+
+
+def test_missing_skill_fails_before_model_call(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import (
+        ReinforcementTaskNormalizationError,
+        ReinforcementTaskNormalizer,
+        ReinforcementTaskNormalizerLimits,
+    )
+
+    root = _skill_root(tmp_path)
+    (root / "references" / "normalization-rules.md").unlink()
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = ReinforcementTaskNormalizer(
+        client=client,
+        skill_root=root,
+        limits=ReinforcementTaskNormalizerLimits(),
+    )
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == "skill_missing"
+    assert client.calls == []
+
+
+def test_snapshot_cell_limit_fails_before_model_call(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client, max_non_empty_cells=3)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(
+            _workbook_path(tmp_path, extra_cells=4),
+            include_slab=True,
+        )
+
+    assert exc_info.value.code == "snapshot_too_large"
+    assert client.calls == []
+
+
+def test_snapshot_character_limit_fails_before_model_call(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client, max_snapshot_chars=50)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == "snapshot_too_large"
+    assert client.calls == []
+
+
+def test_skill_size_limit_fails_without_reading_unbounded_content(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient(json.dumps(_payload(), ensure_ascii=False))
+    normalizer = _normalizer(tmp_path, client, max_skill_chars=20)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    assert exc_info.value.code == "skill_missing"
+    assert client.calls == []
+
+
+def test_prompt_exception_and_normalizer_repr_do_not_expose_api_key(tmp_path: Path) -> None:
+    from src.ai.reinforcement_task_normalizer import ReinforcementTaskNormalizationError
+
+    client = FakeClient("invalid unit-test-secret-api-key")
+    normalizer = _normalizer(tmp_path, client)
+
+    with pytest.raises(ReinforcementTaskNormalizationError) as exc_info:
+        normalizer.normalize(_workbook_path(tmp_path), include_slab=True)
+
+    prompt = json.dumps(client.calls[0]["messages"], ensure_ascii=False)
+    assert client.api_key not in prompt
+    assert client.api_key not in str(exc_info.value)
+    assert client.api_key not in repr(normalizer)
+
+
+def test_repository_skill_documents_define_worker_model_schema_and_nonblocking_reviews() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    skill_path = repo_root / "tools" / "ai" / "reinforcement-table-normalizer" / "SKILL.md"
+    rules_path = skill_path.parent / "references" / "normalization-rules.md"
+    skill_text = skill_path.read_text(encoding="utf-8")
+    rules_text = rules_path.read_text(encoding="utf-8")
+
+    _, frontmatter_text, _ = skill_text.split("---", 2)
+    frontmatter = yaml.safe_load(frontmatter_text)
+    assert set(frontmatter) == {"name", "description"}
+    assert frontmatter["description"].startswith("Use when")
+
+    combined = f"{skill_text}\n{rules_text}"
+    for required in (
+        "预检判定为非标准",
+        "用户确认",
+        "Worker",
+        "标准表不调用",
+        "schema_version",
+        "source_row_count",
+        "wall",
+        "slab",
+        "normalized",
+        "needs_review",
+        "source_sheet",
+        "source_row",
+        "source_cells",
+        "blank_fields",
+        "reason",
+        "5 组",
+        "7 组",
+        "40",
+        "物理来源",
+        "duplicate",
+        "-1/-2",
+        "图片墙号数量不一致",
+        "A→C",
+        "D/C",
+        "括号内值",
+        "S7157A",
+    ):
+        assert required in combined
+    assert "actual_area" in combined
+    assert "模型禁止返回" in combined
+    assert "后端" in combined and "精确公式" in combined
+    assert "模型不生成 Excel" in combined
+    assert "不得让语言模型自行识别" not in combined
+    assert "正式计算书生成必须等待" not in combined
+    assert "修正 Excel 后重新预检" not in combined

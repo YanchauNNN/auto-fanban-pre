@@ -68,6 +68,7 @@ storage/
 # 日志
 *.log
 logs/
+/acad.err
 
 # 临时文件
 *.tmp

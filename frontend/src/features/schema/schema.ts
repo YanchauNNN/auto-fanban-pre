@@ -1,4 +1,9 @@
-import type { FormField, FormFieldType, FormSchema } from "../../platform/api/types";
+import type {
+  CalculationBookField,
+  FormField,
+  FormFieldType,
+  FormSchema,
+} from "../../platform/api/types";
 
 type RawField = {
   key: string;
@@ -47,6 +52,75 @@ type RawFormSchema = {
     factory_index_maps?: {
       source_variant_options?: Record<string, readonly string[]>;
       target_variant_options?: Record<string, readonly string[]>;
+    };
+  };
+  calculation_book?: {
+    templates?: readonly { value?: string | null; label?: string | null }[];
+    project_options?: readonly { value?: string | null; label?: string | null }[];
+    fields?: readonly {
+      key?: string | null;
+      label?: string | null;
+      type?: string | null;
+      required?: boolean | null;
+      default?: string | number | boolean | null;
+      unit?: string | null;
+      placeholder?: string | null;
+      pattern?: string | null;
+      max_length?: number | null;
+      uppercase?: boolean | null;
+      options?: readonly string[] | null;
+      options_from?: string | null;
+      derived_from?: string | null;
+    }[];
+    archive?: {
+      accept?: readonly string[] | null;
+      required_root_directions?: readonly string[] | null;
+      required_folders?: readonly string[] | null;
+      root_figure_pattern?: string | null;
+      description?: string | null;
+    };
+  };
+  management?: {
+    account?: {
+      fields?: {
+        office_code?: string | null;
+        office_name?: string | null;
+        account_id?: string | null;
+        display_name?: string | null;
+        role?: string | null;
+        password?: string | null;
+      };
+      valid_roles?: readonly string[];
+      admin_roles?: readonly string[];
+      admin_created_default_password_configured?: boolean | null;
+    };
+    workflow?: {
+      terminal_status?: string | null;
+      archive_trigger_status?: string | null;
+      nodes?: readonly {
+        key?: string | null;
+        label?: string | null;
+        assignee_source?: string | null;
+        factor_key?: string | null;
+      }[];
+      status_labels?: Record<string, string>;
+      node_labels?: Record<string, string>;
+      empty_current_node_label?: string | null;
+      factor?: {
+        default?: number | null;
+        min?: number | null;
+        max?: number | null;
+        precision?: number | null;
+      };
+    };
+    workload?: {
+      settlement_trigger?: string | null;
+      scope_roles?: Record<string, readonly string[]>;
+      scope_labels?: Record<string, string>;
+      status_options?: readonly { label?: string | null; value?: string | null }[];
+    };
+    archive?: {
+      status_labels?: Record<string, string>;
     };
   };
 };
@@ -233,6 +307,55 @@ export function normalizeFormSchema(payload: RawFormSchema): FormSchema {
     auditCheckUnitConsistency: normalizeAuditCheckUnitConsistency(
       payload.audit_check?.unit_consistency,
     ),
+    calculationBook: payload.calculation_book
+      ? {
+          templates: (payload.calculation_book.templates ?? [])
+            .map((item) => ({
+              value: String(item.value ?? ""),
+              label: String(item.label ?? ""),
+            }))
+            .filter((item) => item.value && item.label),
+          projectOptions: (payload.calculation_book.project_options ?? [])
+            .map((item) => ({
+              value: String(item.value ?? ""),
+              label: String(item.label ?? ""),
+            }))
+            .filter((item) => item.value && item.label),
+          fields: (payload.calculation_book.fields ?? [])
+            .map((field) => ({
+              key: String(field.key ?? ""),
+              label: String(field.label ?? ""),
+              type: (
+                field.type === "number" ||
+                field.type === "select" ||
+                field.type === "checkbox"
+                  ? field.type
+                  : "text"
+              ) as CalculationBookField["type"],
+              required: Boolean(field.required),
+              defaultValue: field.default == null ? undefined : String(field.default),
+              unit: field.unit ?? undefined,
+              placeholder: field.placeholder ?? undefined,
+              pattern: field.pattern ?? undefined,
+              maxLength: field.max_length ?? undefined,
+              uppercase: field.uppercase ?? undefined,
+              options: field.options ?? undefined,
+              optionsFrom: field.options_from ?? undefined,
+              derivedFrom: field.derived_from ?? undefined,
+            }))
+            .filter((field) => field.key && field.label),
+          archive: {
+            accept: payload.calculation_book.archive?.accept ?? [".zip", ".rar", ".7z"],
+            requiredRootDirections:
+              payload.calculation_book.archive?.required_root_directions ?? ["X", "Y", "Z"],
+            requiredFolders: payload.calculation_book.archive?.required_folders ?? ["01", "02"],
+            rootFigurePattern:
+              payload.calculation_book.archive?.root_figure_pattern ?? "<墙号>-X|Y|Z.png",
+            description: payload.calculation_book.archive?.description ?? "",
+          },
+        }
+      : undefined,
+    management: normalizeManagementSchema(payload.management),
   };
 }
 
@@ -342,6 +465,79 @@ function normalizeAuditReplaceFactoryIndexMaps(
   };
 }
 
+function normalizeManagementSchema(
+  value: RawFormSchema["management"],
+): FormSchema["management"] {
+  if (!value) {
+    return undefined;
+  }
+  return {
+    account: {
+      fieldMap: {
+        officeCode: String(value.account?.fields?.office_code ?? "科室编码"),
+        officeName: String(value.account?.fields?.office_name ?? "科室"),
+        accountId: String(value.account?.fields?.account_id ?? "账号"),
+        displayName: String(value.account?.fields?.display_name ?? "姓名"),
+        role: String(value.account?.fields?.role ?? "角色"),
+        password: String(value.account?.fields?.password ?? "密码"),
+      },
+      validRoles: normalizeStringList(value.account?.valid_roles),
+      adminRoles: normalizeStringList(value.account?.admin_roles),
+      adminCreatedDefaultPasswordConfigured: Boolean(
+        value.account?.admin_created_default_password_configured,
+      ),
+    },
+    workflow: {
+      terminalStatus: String(value.workflow?.terminal_status ?? ""),
+      archiveTriggerStatus:
+        value.workflow?.archive_trigger_status == null
+          ? undefined
+          : String(value.workflow.archive_trigger_status),
+      nodes: (value.workflow?.nodes ?? [])
+        .map((node) => ({
+          nodeKey: String(node.key ?? "").trim(),
+          nodeLabel: String(node.label ?? "").trim(),
+          roleField: String(node.assignee_source ?? "").trim(),
+          factorKey: String(node.factor_key ?? "").trim(),
+        }))
+        .filter((node) => node.nodeKey && node.nodeLabel),
+      factor: {
+        default: requiredNumber(value.workflow?.factor?.default, "workflow.factor.default"),
+        min: requiredNumber(value.workflow?.factor?.min, "workflow.factor.min"),
+        max: requiredNumber(value.workflow?.factor?.max, "workflow.factor.max"),
+        precision: requiredNumber(value.workflow?.factor?.precision, "workflow.factor.precision"),
+      },
+      statusLabels: normalizeStringMap(value.workflow?.status_labels),
+      nodeLabels: normalizeStringMap(value.workflow?.node_labels),
+      emptyCurrentNodeLabel: String(value.workflow?.empty_current_node_label ?? ""),
+    },
+    workload: {
+      settlementTrigger: String(value.workload?.settlement_trigger ?? ""),
+      scopeRoles: Object.fromEntries(
+        Object.entries(value.workload?.scope_roles ?? {}).map(([scope, roles]) => [
+          scope,
+          normalizeStringList(roles),
+        ]),
+      ),
+      scopeLabels: Object.fromEntries(
+        Object.entries(value.workload?.scope_labels ?? {}).map(([scope, label]) => [
+          scope,
+          String(label),
+        ]),
+      ),
+      statusOptions: (value.workload?.status_options ?? [])
+        .map((option) => ({
+          label: String(option.label ?? "").trim(),
+          value: String(option.value ?? "").trim(),
+        }))
+        .filter((option) => option.label),
+    },
+    archive: {
+      statusLabels: normalizeStringMap(value.archive?.status_labels),
+    },
+  };
+}
+
 function normalizeVariantOptions(value: Record<string, readonly string[]> | undefined) {
   return Object.fromEntries(
     Object.entries(value ?? {}).map(([projectNo, variants]) => [
@@ -349,6 +545,25 @@ function normalizeVariantOptions(value: Record<string, readonly string[]> | unde
       variants.map((variant) => variant.trim()).filter(Boolean),
     ]),
   );
+}
+
+function normalizeStringList(value: readonly string[] | undefined) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
+function normalizeStringMap(value: Record<string, string> | undefined) {
+  return Object.fromEntries(
+    Object.entries(value ?? {})
+      .map(([key, label]) => [key.trim(), String(label).trim()])
+      .filter(([key, label]) => key && label),
+  );
+}
+
+function requiredNumber(value: number | null | undefined, fieldKey: string) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  throw new Error(`management.${fieldKey} is required`);
 }
 
 function normalizeCodeOptions(value: readonly string[] | undefined) {

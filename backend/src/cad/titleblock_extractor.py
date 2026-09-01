@@ -1673,9 +1673,7 @@ class TitleblockExtractor(ITitleblockExtractor):
         fields: TitleblockFields,
     ) -> bool:
         code = (fields.internal_code or frame.titleblock.internal_code or "").strip().upper()
-        if not code.endswith("-001"):
-            return False
-        return True
+        return code.endswith("-001")
 
     def _parse_labeled_page_info_from_lines(
         self,

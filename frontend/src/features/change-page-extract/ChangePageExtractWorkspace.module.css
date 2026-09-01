@@ -52,8 +52,11 @@
 .fileList {
   display: grid;
   gap: 0.45rem;
+  max-height: min(18rem, 32vh);
   margin: 0;
   padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
 }
 
@@ -99,6 +102,13 @@
   background: #1c61a9;
 }
 
+.fileButton:focus-within,
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible {
+  outline: 3px solid #0b5fa5;
+  outline-offset: 3px;
+}
+
 .secondaryButton {
   border: 1px solid rgba(20, 70, 128, 0.18);
   color: #174781;
@@ -116,7 +126,6 @@
   width: 1px;
   height: 1px;
   opacity: 0;
-  pointer-events: none;
 }
 
 .errorPanel {

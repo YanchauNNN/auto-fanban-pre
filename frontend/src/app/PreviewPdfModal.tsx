@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-import { TaskConfigModal } from "../features/deliverable/TaskConfigModal";
+import { TaskConfigModal } from "../shared/ui/TaskConfigModal";
 import { ensurePromiseWithResolvers } from "../shared/pdfPreviewCompat";
 import styles from "./App.module.css";
 
@@ -21,6 +21,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = `${pdfPreviewWorkerUrl}?react-pdf-compat=5
 type PreviewPdfModalProps = {
   title: string;
   url: string;
+  readArtifact?: (url: string) => Promise<Blob>;
+  onDownload?: (url: string, label: string) => void;
   onClose: () => void;
 };
 
@@ -37,7 +39,13 @@ function clampPreviewZoom(value: number) {
   return Math.min(MAX_PREVIEW_ZOOM, Math.max(MIN_PREVIEW_ZOOM, Number(value.toFixed(2))));
 }
 
-export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
+export function PreviewPdfModal({
+  title,
+  url,
+  readArtifact,
+  onDownload,
+  onClose,
+}: PreviewPdfModalProps) {
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -68,15 +76,19 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
     setIsLoading(true);
     setLoadError(null);
 
-    void fetch(url, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`preview request failed with status ${response.status}`);
+    const loadArtifact =
+      readArtifact ?? ((targetUrl: string) => readArtifactWithFetch(targetUrl, controller.signal));
+
+    void loadArtifact(url)
+      .then(async (blob) => {
+        if (controller.signal.aborted) {
+          return;
         }
 
-        const buffer = await response.arrayBuffer();
+        const buffer = await blob.arrayBuffer();
+        if (controller.signal.aborted) {
+          return;
+        }
         setPdfData(new Uint8Array(buffer));
         setIsLoading(false);
       })
@@ -92,7 +104,7 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
     return () => {
       controller.abort();
     };
-  }, [url]);
+  }, [readArtifact, url]);
 
   useLayoutEffect(() => {
     const node = previewPagesRef.current;
@@ -205,6 +217,27 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
     }));
   };
 
+  const handleDownloadPreview = () => {
+    if (onDownload) {
+      onDownload(url, "下载预览 PDF");
+      return;
+    }
+
+    window.location.href = url;
+  };
+
+  const handleOpenInNewWindow = () => {
+    if (!pdfData) {
+      return;
+    }
+
+    const buffer = new ArrayBuffer(pdfData.byteLength);
+    new Uint8Array(buffer).set(pdfData);
+    const objectUrl = URL.createObjectURL(new Blob([buffer], { type: "application/pdf" }));
+    window.open(objectUrl, "_blank", "noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
+  };
+
   return (
     <TaskConfigModal dialogClassName={styles.previewDialog} title={title} onRequestClose={onClose}>
       <div className={styles.previewModalContent}>
@@ -214,17 +247,17 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
             <h2>{title}</h2>
           </div>
           <div className={styles.previewModalActions}>
-            <a className={styles.downloadButton} download href={url}>
+            <button className={styles.downloadButton} onClick={handleDownloadPreview} type="button">
               下载预览 PDF
-            </a>
-            <a
+            </button>
+            <button
               className={styles.downloadButton}
-              href={url}
-              rel="noreferrer"
-              target="_blank"
+              disabled={!pdfData}
+              onClick={handleOpenInNewWindow}
+              type="button"
             >
               新窗口打开
-            </a>
+            </button>
             <button className={styles.secondaryActionButton} onClick={onClose} type="button">
               关闭
             </button>
@@ -328,4 +361,12 @@ export function PreviewPdfModal({ title, url, onClose }: PreviewPdfModalProps) {
       </div>
     </TaskConfigModal>
   );
+}
+
+async function readArtifactWithFetch(url: string, signal: AbortSignal) {
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Error(`preview request failed with status ${response.status}`);
+  }
+  return response.blob();
 }

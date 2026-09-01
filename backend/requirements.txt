@@ -21,6 +21,8 @@ matplotlib>=3.8.0
 # --- Office 文档处理 ---
 openpyxl>=3.1.5
 python-docx>=1.1.2
+docxtpl>=0.20.2
+pytesseract>=0.3.13
 
 # --- PDF 处理 ---
 pypdf>=5.0.0
