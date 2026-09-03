@@ -13,6 +13,7 @@ from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
 from ..workflow.models import WorkflowStatus
+from .job_submission_source import is_job_submission, read_job_submission
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,15 @@ class TaskGroupSubmitGuards:
         primary_job = self.job_manager.get_job(group.child_job_ids[0])
         if primary_job is None:
             raise ValueError("primary child job not found")
+
+        if is_job_submission(group):
+            _, identity = read_job_submission(primary_job)
+            archive_root = self.admin_config_store.get_archive_root_path()
+            return TaskGroupAlbumIdentity(
+                engineering_no=identity.engineering_no, subitem_no=identity.subitem_no,
+                album_internal_code=identity.album_internal_code, revision=identity.revision,
+                archive_target=identity.target_dir(archive_root).resolve() if archive_root else None,
+            )
 
         shared_dir = group.shared_dir or self.group_manager.config.get_group_dir(group.group_id) / "shared"
         prep = self.shared_prep_service.load(shared_dir)

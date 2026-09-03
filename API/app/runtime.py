@@ -561,6 +561,7 @@ class DeliverableApiRuntime:
         self.queue_store = SQLiteQueueStore(
             self.config.storage_dir / "runtime" / "fanban_queue.sqlite3"
         )
+        self.queue_store.initialize()
         self.job_manager = JobManager()
         self.group_manager = GroupManager()
         self.task_visibility = TaskGroupVisibility()
@@ -2138,13 +2139,19 @@ class DeliverableApiRuntime:
     def _recover_groups_and_jobs(self) -> None:
         for job in self.job_manager.load_all_jobs():
             if job.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+                self.queue_store.finish_execution("job", job.job_id)
                 if 'service_restarted_before_completion' not in job.errors:
                     job.mark_failed('service_restarted_before_completion')
                 self.job_manager.update_job(job)
         for group in self.group_manager.load_all_groups():
             if group.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+                cancelled = self.queue_store.finish_execution("group", group.group_id)
                 if 'service_restarted_before_completion' not in group.errors:
                     group.mark_failed('service_restarted_before_completion')
+                if cancelled:
+                    group.status = JobStatus.CANCELLED
+                    group.finished_at = datetime.now()
+                    group.progress.message = '任务包已取消（服务重启后恢复）'
                 self.group_manager.update_group(group)
 
     def _group_dispatch_loop(self) -> None:
@@ -2181,8 +2188,10 @@ class DeliverableApiRuntime:
             self._job_queue.task_done()
 
     def _process_group(self, group_id: str) -> None:
-        group = self.group_manager.get_group(group_id)
+        group = self.group_manager.reload_group(group_id)
         if group is None or group.status != JobStatus.QUEUED:
+            return
+        if not self.queue_store.begin_execution("group", group_id):
             return
         try:
             group.mark_running('PREP_SOURCE')
@@ -2215,6 +2224,8 @@ class DeliverableApiRuntime:
                 font_replacement_fonts=normalize_replacement_map(font_params.get("font_replacement_fonts")),
                 font_compatibility_mode=self._coerce_bool(font_params.get("font_compatibility_mode")),
             )
+            if self._execution_cancel_requested("group", group_id):
+                return
             group.shared_dir = prep.shared_dir
             group.workload = self.workload_calculator.build_from_shared_prep(prep)
             group.progress.percent = 35
@@ -2253,6 +2264,9 @@ class DeliverableApiRuntime:
                 for child in child_jobs:
                     self._wait_for_job_completion(child.job_id)
 
+            if self._execution_cancel_requested("group", group_id):
+                return
+
             children = [child for child in (self.job_manager.get_job(job_id) for job_id in group.child_job_ids) if child is not None]
             group.flags = self._merge_unique(*(child.flags for child in children))
             group.errors = self._merge_unique(*(child.errors for child in children))
@@ -2264,11 +2278,16 @@ class DeliverableApiRuntime:
                 group.mark_failed('child_job_failed')
             else:
                 group.mark_succeeded()
-            self.group_manager.update_group(group)
         except Exception as exc:  # noqa: BLE001
             group.mark_failed(str(exc))
             group.progress.message = f'任务组失败: {exc}'
+        finally:
+            if self.queue_store.finish_execution("group", group_id):
+                group.status = JobStatus.CANCELLED
+                group.finished_at = datetime.now()
+                group.progress.message = '任务包已安全取消'
             self.group_manager.update_group(group)
+            self.refresh_summary_index("group", group_id)
 
     def _run_replace_then_deliverable_group(self, group: TaskGroup, children: list[Job]) -> None:
         replace_job = next((child for child in children if child.task_role == 'audit_replace'), None)
@@ -2278,6 +2297,8 @@ class DeliverableApiRuntime:
 
         self._enqueue_job(replace_job.job_id)
         replace_job = self._wait_for_job_completion(replace_job.job_id)
+        if self._execution_cancel_requested("group", group.group_id):
+            return
         if replace_job is None or replace_job.status != JobStatus.SUCCEEDED or replace_job.artifacts.replaced_dwg is None:
             if deliverable_job.status == JobStatus.QUEUED:
                 deliverable_job.mark_failed('replace_job_failed')
@@ -2305,6 +2326,8 @@ class DeliverableApiRuntime:
                 deliverable_job.params.get("font_compatibility_mode")
             ),
         )
+        if self._execution_cancel_requested("group", group.group_id):
+            return
 
         group.workload = self.workload_calculator.build_from_shared_prep(deliverable_prep)
         self.group_manager.update_group(group)
@@ -2341,8 +2364,12 @@ class DeliverableApiRuntime:
         self._wait_for_job_completion(deliverable_job.job_id)
 
     def _run_job(self, job_id: str) -> None:
-        job = self.job_manager.get_job(job_id)
+        job = self.job_manager.reload_job(job_id)
         if job is None or job.status != JobStatus.QUEUED:
+            self._signal_job_completion(job_id)
+            return
+        if not self.queue_store.begin_execution("job", job_id):
+            self._signal_job_completion(job_id)
             return
         if job.job_type == JobType.CHANGE_PAGE_EXTRACT:
             self._run_non_cad_job(job)
@@ -2357,6 +2384,8 @@ class DeliverableApiRuntime:
                 completion_deferred = True
                 return
             slot = self.cad_slot_pool.acquire(job.job_id, timeout=300)
+            if self._execution_cancel_requested("job", job_id):
+                return
             resolved_plot_style_key, resolved_ctb_name = self._resolve_job_plot_style(job)
             job.slot_id = slot.slot_id
             job.cad_version = str(slot.cad_version) if slot.cad_version is not None else None
@@ -2391,6 +2420,8 @@ class DeliverableApiRuntime:
             if callable(staged_processor):
                 post_slot_work = staged_processor(job)
                 self.job_manager.update_job(job)
+                if self._execution_cancel_requested("job", job_id):
+                    return
                 if post_slot_work is not None:
                     self.cad_slot_pool.release(slot.slot_id)
                     slot = None
@@ -2404,7 +2435,7 @@ class DeliverableApiRuntime:
                 job.mark_failed(str(exc))
         finally:
             if not completion_deferred:
-                self.job_manager.update_job(job)
+                self._finish_job_execution(job)
             if slot is not None:
                 self.cad_slot_pool.release(slot.slot_id)
             if not completion_deferred:
@@ -2414,13 +2445,22 @@ class DeliverableApiRuntime:
         try:
             job.work_dir = self.config.get_job_dir(job.job_id)
             job.work_dir.mkdir(parents=True, exist_ok=True)
-            self.job_processor(job)
+            if not self._execution_cancel_requested("job", job.job_id):
+                self.job_processor(job)
         except Exception as exc:  # noqa: BLE001
             if job.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
                 job.mark_failed(str(exc))
         finally:
-            self.job_manager.update_job(job)
+            self._finish_job_execution(job)
             self._signal_job_completion(job.job_id)
+
+    def _execution_cancel_requested(self, item_type: str, item_id: str) -> bool:
+        control = self.queue_store.execution_control(item_type, item_id)
+        return bool(control and control["cancel_requested"])
+
+    def _finish_job_execution(self, job: Job) -> None:
+        self.job_manager.finish_execution(job, self.queue_store)
+        self.refresh_summary_index("job", job.job_id)
 
     def _enqueue_group(self, group_id: str) -> None:
         if not self.process_jobs_in_api:
@@ -2470,7 +2510,8 @@ class DeliverableApiRuntime:
         with self._future_lock:
             self._running_doc_job_ids.add(job_id)
         try:
-            post_slot_work()
+            if not self._execution_cancel_requested("job", job_id):
+                post_slot_work()
         except Exception as exc:  # noqa: BLE001
             latest = self._latest_doc_phase_job(job_id, fallback=job)
             if latest is not None and latest.status not in {JobStatus.FAILED, JobStatus.CANCELLED}:
@@ -2481,7 +2522,7 @@ class DeliverableApiRuntime:
                 self._running_doc_job_ids.discard(job_id)
             latest = self._latest_doc_phase_job(job_id, fallback=job)
             if latest is not None:
-                self.job_manager.update_job(latest)
+                self._finish_job_execution(latest)
             self._signal_job_completion(job_id)
 
     def _latest_doc_phase_job(self, job_id: str, *, fallback: Job | None) -> Job | None:
@@ -2499,13 +2540,18 @@ class DeliverableApiRuntime:
         )
         deadline = time.monotonic() + wait_timeout
         while not self._stop_event.is_set():
+            latest = self.job_manager.reload_job(job_id)
+            control = self.queue_store.execution_control("job", job_id)
+            still_executing = bool(control and control["state"] == "running")
+            if latest is not None and not still_executing and latest.status in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
+                return latest
             with self._job_completion_lock:
                 event = self._job_completion_events.setdefault(job_id, threading.Event())
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f'job did not finish within {wait_timeout}s: {job_id}')
             if event.wait(timeout=min(0.2, remaining)):
-                return self.job_manager.get_job(job_id)
+                event.clear()
         raise RuntimeError(f'service stopping before job completion: {job_id}')
 
     def _signal_job_completion(self, job_id: str) -> None:

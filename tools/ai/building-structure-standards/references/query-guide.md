@@ -29,6 +29,9 @@ python scripts/standards_query.py clause "HAF 101-2023" 4.1.2
 - `results[].content_role`：正文 `normative`、目录 `toc`、公告 `announcement`、条文说明 `commentary` 或未确认 `unknown`。
 - `results[].page_quality`：覆盖全部物理页的质量记录，而非只看起始页。
 - `results[].quality_flags` / `design_advice_allowed`：存在待复核、缺失质量字段或非正文证据时不得放行。
+- `results[].quality_status` / `content_quality_flags`：当前记录内容质量，与标准是否现行、是否有设计适用性分开判断。
+- `results[].record_review`：经过完整原页转录复核的当前记录及全部续页、复核者和来源哈希；不适用于相邻记录。
+- `results[].unreviewed_page_quality_flags`：复核前的页面风险，原始 `page_quality` 不会被批量改成合格。
 - `results[].links.page`：后端生成的精确原页 PNG；
 - `results[].links.document`：浏览器内打开 PDF，并附带页码片段；
 - `results[].links.download`：由后端发送原 PDF；
@@ -84,6 +87,8 @@ python scripts/standards_query.py advice "设计基准地震动" `
 `partial` 和 `none` 都不得输出完整跨规范结论。
 
 可以解释并明确标注待复核的检索结果，给出 `[查看原页]`；不能把“拒绝最终设计结论”误解成禁止提供任何规范帮助。缺失印刷页码时只引用已确认的PDF物理页，不按页序差自行猜测。
+
+如果 `quality_status=usable` 但 `design_advice_allowed=false`，可引用这一版本中已核对的文字/表格，并说明 `quality_flags` 中的标准状态、授权或适用性问题。不得将内容复核结果视为对标准现行性或工程设计的确认。
 
 ## 失败处理
 

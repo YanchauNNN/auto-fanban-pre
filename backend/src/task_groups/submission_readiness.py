@@ -10,6 +10,7 @@ from ..pipeline.group_manager import GroupManager
 from ..pipeline.job_manager import JobManager
 from ..pipeline.shared_prep import SharedPrepService
 from ..workflow.models import WorkflowStatus
+from .job_submission_source import SOURCE_JOB_KEY, is_job_submission, job_source_files, read_job_submission
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,18 @@ class TaskGroupSubmissionReadinessPolicy:
             if child.status is not JobStatus.SUCCEEDED:
                 errors.append("task_group_child_not_succeeded")
 
-        errors.extend(self._inspect_shared_prep(group))
+        if is_job_submission(group):
+            source = next((child for child in children if child.job_id == group.metadata[SOURCE_JOB_KEY]), None)
+            if source is None or len(children) != 1:
+                errors.append("workload_source_invalid")
+            else:
+                try:
+                    read_job_submission(source)
+                    job_source_files(source)
+                except ValueError as exc:
+                    errors.append(str(exc))
+        else:
+            errors.extend(self._inspect_shared_prep(group))
 
         for role_requirement in self.config.required_task_roles:
             matching_children = [

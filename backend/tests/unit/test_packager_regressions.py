@@ -183,3 +183,45 @@ def test_generate_manifest_includes_deliverable_outputs_and_filtered_flags(tmp_p
             },
         ],
     }
+
+
+def test_manifest_records_drawing_document_revision_independently_of_cover(tmp_path, sample_frame):
+    import json
+
+    first = sample_frame.model_copy(deep=True)
+    first.titleblock.revision = "B"
+    master = sample_frame.model_copy(deep=True)
+    master.titleblock.internal_code = "1234567-JG001-002"
+    master.titleblock.revision = "C"
+    page = PageInfo(page_index=1, outer_bbox=master.runtime.outer_bbox, has_titleblock=True, frame_meta=master)
+    sheet_set = SheetSet(cluster_id="revision-sheet-set", page_total=1, pages=[page], master_page=page)
+    job = Job(job_id="manifest-revisions", job_type=JobType.DELIVERABLE, project_no="2016", work_dir=tmp_path, params={"project_no": "2016", "cover_revision": "A", "revision": "A"})
+    path = Packager().generate_manifest(job, context={"frames": [first], "sheet_sets": [sheet_set]})
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert manifest["derived"]["document_revision"] == "C"
+    assert manifest["derived"]["album_internal_code"] == "1234567-JG001"
+    assert [drawing["revision"] for drawing in manifest["drawings"]] == ["B", "C"]
+    assert job.params["cover_revision"] == "A"
+
+
+@pytest.mark.parametrize("params", [{}, {"cover_revision": None, "include_ied_plan": "unused-in-split-only"}])
+def test_split_only_manifest_does_not_validate_unneeded_document_inputs(tmp_path, sample_frame, params):
+    import json
+
+    sample_frame.titleblock.revision = "C"
+    job = Job(job_id="split-only-manifest", job_type=JobType.DELIVERABLE, project_no="2016", work_dir=tmp_path, params=params, options={"split_only": True})
+    manifest_path = Packager().generate_manifest(job, context={"frames": [sample_frame], "sheet_sets": []})
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["derived"]["document_revision"] == "C"
+    assert manifest["inputs"]["params"] == params
+
+
+def test_multialbum_split_only_keeps_all_manifest_drawings(tmp_path, sample_frame):
+    import json
+
+    other = sample_frame.model_copy(deep=True)
+    other.titleblock.internal_code = "1234567-JG002-001"
+    job = Job(job_id="split-multialbum", job_type=JobType.DELIVERABLE, project_no="2016", work_dir=tmp_path, options={"split_only": True})
+    manifest_path = Packager().generate_manifest(job, context={"frames": [sample_frame, other], "sheet_sets": []})
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert len(manifest["drawings"]) == 2

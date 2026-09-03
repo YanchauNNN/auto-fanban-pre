@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +14,8 @@ from ..config import get_config
 from ..interfaces import IJobManager
 from ..models import Job, JobStatus, JobType
 from ..models.task_group_management import AccountSnapshot, TaskOwnerSnapshot
+from .cross_process_lock import exclusive_file_lock
+from .sqlite_queue import SQLiteQueueStore
 
 
 class JobManager(IJobManager):
@@ -150,6 +155,33 @@ class JobManager(IJobManager):
 
     def _persist_job(self, job: Job) -> None:
         """Persist job metadata to disk."""
+        with self._job_file_lock(job.job_id):
+            self._persist_job_unlocked(job)
+
+    def finish_execution(self, job: Job, queue_store: SQLiteQueueStore) -> None:
+        """Publish completion and the final JSON while excluding subsequent writers."""
+        with self._job_file_lock(job.job_id):
+            if queue_store.finish_execution("job", job.job_id):
+                job.mark_cancelled()
+            self._persist_job_unlocked(job)
+            self._jobs[job.job_id] = job
+
+    @contextmanager
+    def _job_file_lock(self, job_id: str) -> Iterator[None]:
+        digest = hashlib.sha256(job_id.encode()).hexdigest()
+        with exclusive_file_lock(
+            self.config.storage_dir / "locks" / "jobs" / f"{digest}.lock",
+            timeout_seconds=float(self.config.management.task_group_lock_timeout_seconds),
+            poll_interval_seconds=float(self.config.management.task_group_lock_poll_interval_seconds),
+        ):
+            yield
+
+    def _persist_job_unlocked(self, job: Job) -> None:
+        control = SQLiteQueueStore(
+            self.config.storage_dir / "runtime" / "fanban_queue.sqlite3"
+        ).execution_control("job", job.job_id)
+        if control is not None and control["state"] == "cancelled":
+            job.mark_cancelled()
         job_dir = self.config.get_job_dir(job.job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 

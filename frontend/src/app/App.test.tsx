@@ -23,6 +23,9 @@ const mockGetJobsActivity = vi.fn();
 const mockSubscribeJobsActivity = vi.fn();
 const mockGetJobDetail = vi.fn();
 const mockGetTaskGroupDetail = vi.fn();
+const mockGetJobWorkloadSubmission = vi.fn();
+const mockSubmitJobWorkload = vi.fn();
+const mockGetJobExecutionActions = vi.fn();
 const mockSubmitTaskGroup = vi.fn();
 const mockRestartSubmitTaskGroup = vi.fn();
 const mockGetMe = vi.fn();
@@ -95,6 +98,9 @@ vi.mock("../platform/api/useApiAdapter", () => ({
     subscribeJobsActivity: mockSubscribeJobsActivity,
     getJobDetail: mockGetJobDetail,
     getTaskGroupDetail: mockGetTaskGroupDetail,
+    getJobWorkloadSubmission: mockGetJobWorkloadSubmission,
+    submitJobWorkload: mockSubmitJobWorkload,
+    getJobExecutionActions: mockGetJobExecutionActions,
     submitTaskGroup: mockSubmitTaskGroup,
     restartSubmitTaskGroup: mockRestartSubmitTaskGroup,
     getAiState: mockGetAiState,
@@ -178,6 +184,14 @@ beforeEach(() => {
     pendingTodoCount: 0,
   });
   mockGetTaskGroupDetail.mockResolvedValue(makeTaskGroupManagementDetail());
+  mockGetJobWorkloadSubmission.mockResolvedValue({
+    supported: true, canSubmit: true, blockers: [], groupId: null,
+    workflowStatus: "draft", initialWorkloadA1: 2.5, personnelFields: [], group: null,
+  });
+  mockGetJobExecutionActions.mockResolvedValue({
+    canCancel: false, canRetry: false, cancelRequested: false,
+    cancelReason: "任务已完成", retryReason: "仅失败或已取消任务可重试",
+  });
   mockSubmitTaskGroup.mockResolvedValue(
     makeTaskGroupManagementDetail({ canSubmit: false, workflowStatus: "in_review" }),
   );
@@ -1921,7 +1935,7 @@ describe("job cards", () => {
 });
 
 describe("job detail pages", () => {
-  it("loads runtime and management details together on task-group routes", async () => {
+  it("uses the same explicit workload submission entry on task-group routes", async () => {
     window.history.pushState({}, "", "/task-groups/group-parallel");
     mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-parallel"));
     mockGetTaskGroupDetail.mockResolvedValue(
@@ -1930,13 +1944,23 @@ describe("job detail pages", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "审批与归档" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "提交工作量填报" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "任务包概览" })).toBeInTheDocument();
     expect(mockGetJobDetail).toHaveBeenCalledWith("group-parallel");
-    expect(mockGetTaskGroupDetail).toHaveBeenCalledWith("group-parallel");
+    expect(mockGetJobWorkloadSubmission).toHaveBeenCalledWith("group-parallel");
+    expect(mockSubmitJobWorkload).not.toHaveBeenCalled();
   });
 
-  it("keeps ordinary job routes on the runtime detail API only", async () => {
+  it("opens the existing workload module from a job follow-up link", async () => {
+    window.history.pushState({}, "", "/?module=workload");
+    render(<App />);
+    expect(await screen.findByTestId("module-workload-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("module-business-panel")).not.toBeInTheDocument();
+    const toolbar = screen.getByTestId("module-toolbar");
+    expect(within(toolbar).getAllByRole("button", { name: "工作量模块" })).toHaveLength(1);
+  });
+
+  it("opens workload confirmation directly on ordinary details without submitting automatically", async () => {
     window.history.pushState({}, "", "/jobs/group-runtime-only");
     mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-runtime-only"));
 
@@ -1946,17 +1970,24 @@ describe("job detail pages", () => {
     expect(mockGetJobDetail).toHaveBeenCalledWith("group-runtime-only");
     expect(mockGetTaskGroupDetail).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("审批与归档")).not.toBeInTheDocument();
+    expect(mockSubmitJobWorkload).not.toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole("button", { name: "提交工作量填报" }));
+    expect(screen.getByRole("dialog", { name: "提交工作量填报" })).toBeInTheDocument();
+    expect(screen.getByText("2.5 A1")).toBeInTheDocument();
+    expect(mockSubmitJobWorkload).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/jobs/group-runtime-only");
+    expect(screen.queryByText(/接口未开放/)).not.toBeInTheDocument();
   });
 
   it("keeps task artifacts visible when management detail is unavailable", async () => {
     window.history.pushState({}, "", "/task-groups/group-management-offline");
     mockGetJobDetail.mockResolvedValue(makeGroupJobDetail("group-management-offline"));
-    mockGetTaskGroupDetail.mockRejectedValue(new Error("management offline"));
+    mockGetJobWorkloadSubmission.mockRejectedValue(new Error("management offline"));
 
     render(<App />);
 
     expect(
-      await screen.findByText("审批信息暂时无法加载，任务产物仍可正常查看。"),
+      await screen.findByText("工作量信息暂时无法加载，任务产物仍可正常查看和下载。"),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "任务包概览" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "下载任务包" })).toBeInTheDocument();

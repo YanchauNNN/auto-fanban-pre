@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .job_submission_source import is_job_submission, read_job_submission
+
 from ..accounts.account_registry import AccountRegistry
 from ..accounts.personnel_normalizer import PersonnelNormalizer
 from ..config import load_mechanism_spec, load_spec
@@ -76,22 +78,31 @@ class TaskGroupService:
         *,
         overwrite_archive_existing: bool = False,
         cancel_existing_in_progress: bool = False,
+        personnel_overrides: dict[str, str] | None = None,
     ) -> dict[str, object]:
         group = self._require_group(group_id)
         if group.owner_snapshot and group.owner_snapshot.creator_account != initiator.account_id:
             raise ValueError("submitter_must_match_creator")
         self.submission_readiness.ensure_ready(group)
+        group.personnel_snapshot = self._build_personnel_snapshot(group, personnel_overrides)
+        errors = (
+            self.workflow_validator.validate_for_initiator(group.personnel_snapshot, initiator)
+            if personnel_overrides is not None
+            else self.workflow_validator.validate_submit(group.personnel_snapshot)
+        )
+        if errors:
+            raise ValueError(";".join(errors))
         self.submit_guards.ensure_submit_allowed(
             group,
             overwrite_archive_existing=overwrite_archive_existing,
             cancel_existing_in_progress=cancel_existing_in_progress,
         )
-        group.personnel_snapshot = self._build_personnel_snapshot(group)
-        errors = self.workflow_validator.validate_submit(group.personnel_snapshot)
-        if errors:
-            raise ValueError(";".join(errors))
-        prep = self.shared_prep_service.load(group.shared_dir or self.group_manager.config.get_group_dir(group.group_id) / "shared")
-        group.workload = self.workload_calculator.build_from_shared_prep(prep)
+        if is_job_submission(group):
+            source = self.job_manager.reload_job(group.child_job_ids[0])
+            group.workload, _ = read_job_submission(source)
+        else:
+            prep = self.shared_prep_service.load(group.shared_dir or self.group_manager.config.get_group_dir(group.group_id) / "shared")
+            group.workload = self.workload_calculator.build_from_shared_prep(prep)
         group = self.workflow_service.start(group, initiator)
         group.mark_running("WORKFLOW_SUBMITTED")
         self.state_writer.write(group)
@@ -175,7 +186,7 @@ class TaskGroupService:
                 count += 1
         return count
 
-    def _build_personnel_snapshot(self, group: TaskGroup):
+    def _build_personnel_snapshot(self, group: TaskGroup, overrides: dict[str, str] | None = None):
         primary_job = self.job_manager.get_job(group.child_job_ids[0]) if group.child_job_ids else None
         if primary_job is None:
             raise ValueError("group has no child jobs")
@@ -197,6 +208,10 @@ class TaskGroupService:
             if field_text:
                 field_names.add(field_text)
         values = {field_name: primary_job.params.get(field_name) for field_name in sorted(field_names)}
+        if overrides:
+            if set(overrides) - field_names:
+                raise ValueError("unknown_workflow_personnel_field")
+            values.update(overrides)
         return self.personnel_normalizer.normalize_fields(values)
 
     def _apply_factors(self, group: TaskGroup) -> None:

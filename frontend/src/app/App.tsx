@@ -45,7 +45,7 @@ import nuclearPlantHeroUrl from "../assets/nuclear-plant-hero.jpg";
 import structureLogoWatermarkUrl from "../assets/structure-logo-watermark.jpg";
 import { AiChatDrawer } from "../features/ai-chat/AiChatDrawer";
 import { CalculationBookTaskWarnings } from "../features/calculation-book/CalculationBookTaskWarnings";
-import { TaskGroupWorkflowPanel } from "../features/task-groups/TaskGroupWorkflowPanel";
+import { JobFollowupActions } from "../features/task-groups/JobFollowupActions";
 import type {
   ApiAdapter,
   CalculationBookOutput,
@@ -604,7 +604,7 @@ export function App() {
               path="/jobs/:jobId"
             />
             <Route
-              element={<RequireSession><JobDetailPage taskGroupMode /></RequireSession>}
+              element={<RequireSession><JobDetailPage /></RequireSession>}
               path="/task-groups/:jobId"
             />
           </Routes>
@@ -733,7 +733,9 @@ function WorkspacePage() {
   const [highlightedBatchId, setHighlightedBatchId] = useState<string | null>(null);
   const [recentJobsSearch, setRecentJobsSearch] = useState("");
   const [allJobsModalOpen, setAllJobsModalOpen] = useState(false);
-  const [activeModule, setActiveModule] = useState<HomeModule>("business");
+  const [activeModule, setActiveModule] = useState<HomeModule>(() =>
+    new URLSearchParams(window.location.search).get("module") === "workload" ? "workload" : "business",
+  );
   const [accountPanelMode, setAccountPanelMode] = useState<AccountPanelMode>("self");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
@@ -1980,7 +1982,7 @@ function DeliverableTutorialOverlay({
   );
 }
 
-function JobDetailPage({ taskGroupMode = false }: { taskGroupMode?: boolean }) {
+function JobDetailPage() {
   const adapter = useApiAdapter();
   const navigate = useNavigate();
   const params = useParams();
@@ -2024,10 +2026,6 @@ function JobDetailPage({ taskGroupMode = false }: { taskGroupMode?: boolean }) {
         返回工作台
       </button>
 
-      {taskGroupMode && params.jobId ? (
-        <TaskGroupWorkflowPanel adapter={adapter} groupId={params.jobId} />
-      ) : null}
-
       {detail ? (
         detail.isGroup ? (
           <GroupDetailPanel adapter={adapter} detail={detail} />
@@ -2039,6 +2037,15 @@ function JobDetailPage({ taskGroupMode = false }: { taskGroupMode?: boolean }) {
           <p className={styles.muted}>正在加载任务详情…</p>
         </section>
       )}
+      {params.jobId ? (
+        <JobFollowupActions
+          key={params.jobId}
+          adapter={adapter}
+          jobId={params.jobId}
+          onOpenWorkload={() => navigate("/?module=workload")}
+          onOpenJob={(jobId) => navigate(`/jobs/${encodeURIComponent(jobId)}`)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2175,18 +2182,6 @@ function SingleJobDetailPanel({
       ) : null}
 
       {detail.status !== "failed" ? <JobDiagnosticsSection detail={detail} /> : null}
-
-      <section className={styles.detailSection}>
-        <h2>后续动作</h2>
-        <div className={styles.downloadGrid}>
-          <button className={styles.disabledAction} disabled type="button">
-            取消任务（接口未开放）
-          </button>
-          <button className={styles.disabledAction} disabled type="button">
-            重试任务（接口未开放）
-          </button>
-        </div>
-      </section>
 
       {previewRequest ? (
         <Suspense fallback={null}>

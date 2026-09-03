@@ -4,8 +4,13 @@ import argparse
 import json
 import re
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 DEFAULT_DATABASE = (
     Path(__file__).resolve().parents[1] / "assets" / "data" / "standards.sqlite"
@@ -171,6 +176,7 @@ def get_table(
             result["content_role"] = (
                 result["page_quality"][0]["content_role"] if result["page_quality"] else "unknown"
             )
+            _attach_record_review(connection, result, "table")
             _finish_quality(result, flags)
             if table_status == "visual_required":
                 result["quality_status"] = "visual_required"
@@ -410,6 +416,7 @@ def _fetch_clauses(
         for row in rows:
             row["table_ids"] = json.loads(row.pop("table_ids_json"))
             _attach_page_quality(connection, row, row["page_start"], row["page_end"])
+            _attach_record_review(connection, row, "clause")
             flags = [] if str(row.get("text") or "").strip() else ["empty_clause_text"]
             for table_id in row["table_ids"]:
                 table = get_table(
@@ -489,16 +496,24 @@ def _attach_page_quality(
     result["quality_flags"] = list(dict.fromkeys(flags))
 
 
+def _attach_record_review(connection: sqlite3.Connection, result: dict[str, Any], kind: str) -> None:
+    if connection.execute("SELECT 1 FROM sqlite_master WHERE name='evidence_reviews'").fetchone():
+        from standards_reviews import attach_record_review
+
+        attach_record_review(connection, result, kind)
+
+
 def _finish_quality(result: dict[str, Any], extra_flags: list[str]) -> None:
     flags = [*result.get("quality_flags", []), *extra_flags]
     if result.get("content_role") != "normative":
         flags.append("non_normative_content")
+    result["content_quality_flags"] = list(dict.fromkeys(flags))
+    result["quality_status"] = "review_required" if flags else "usable"
     if result.get("official_status") != "现行":
         flags.append("standard_status_requires_review")
     if "已授权" not in str(result.get("authorization") or ""):
         flags.append("authorization_requires_review")
     result["quality_flags"] = list(dict.fromkeys(flags))
-    result["quality_status"] = "review_required" if flags else "usable"
     result["evidence_insufficient"] = bool(flags)
     result["design_advice_allowed"] = not flags
 

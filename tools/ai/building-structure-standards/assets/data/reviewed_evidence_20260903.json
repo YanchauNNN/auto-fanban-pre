@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "scope_note": "Six original PDF pages visually inspected by Codex. Complete target clauses and one table only; not whole-page, whole-book, legal-status or engineering approval. Independent reference expectations are not modified.",
+  "rendering": {"engine": "PyMuPDF", "dpi": 160, "evidence_directory": "storage/ai/standards-reviewed-20260903/evidence"},
+  "reviews": [
+    {
+      "review_id": "GB50223-1.0.1-20260903",
+      "kind": "clause",
+      "standard_code": "GB 50223-2008",
+      "source_sha256": "f9907b728d8a34f2792c3467e313c93c189c3deb81a607a9afab16084def85f9",
+      "record_id": "1.0.1",
+      "page_start": 7,
+      "page_end": 7,
+      "base_record_sha256": "bb4a9ab77fe605668bc3a602be6031a5da6010c41277e74553fb3b57aaaf9749",
+      "scope": "complete_record",
+      "reviewer": "Codex original PDF visual inspection",
+      "method": "visual_transcription",
+      "reviewed_at": "2026-09-03T14:45:34+08:00",
+      "pages": [{"page_number": 7, "printed_page": "1", "image_sha256": "cc006039df8b1b80e26146a1ff4bfe7967423b8cc707e594667d9b549185cd8b"}],
+      "replacement": {"text": "1.0.1 为明确建筑工程抗震设计的设防类别和相应的抗震设防标准，以有效地减轻地震灾害，制定本标准。"}
+    },
+    {
+      "review_id": "GB50367-3.1.7-20260903",
+      "kind": "clause",
+      "standard_code": "GB 50367-2013",
+      "source_sha256": "7a275eff063610b010b088602b8673db34f327c0eb1f72f2ac24b440ade618e3",
+      "record_id": "3.1.7",
+      "page_start": 22,
+      "page_end": 23,
+      "base_record_sha256": "4d038bab951cebcce64ca4dc35b10f3c4ee64c87ef36a0e94b6bb61f362bbbfb",
+      "scope": "complete_record",
+      "reviewer": "Codex original PDF visual inspection",
+      "method": "visual_transcription",
+      "reviewed_at": "2026-09-03T14:45:34+08:00",
+      "pages": [
+        {"page_number": 22, "printed_page": "7", "image_sha256": "971b2333251982b70622e568c1c15c620458902c51e29644d8f7e67920931a63"},
+        {"page_number": 23, "printed_page": "8", "image_sha256": "3f8437e0d6c72dc93287dbed8e01aa4a193716ff3e282c31873754918b9073f0"}
+      ],
+      "replacement": {"text": "3.1.7 混凝土结构的加固设计使用年限，应按下列原则确定：\n1 结构加固后的使用年限，应由业主和设计单位共同商定；\n2 当结构的加固材料中含有合成树脂或其他聚合物成分时，其结构加固后的使用年限宜按30年考虑；当业主要求结构加固后的使用年限为50年时，其所使用的胶和聚合物的粘结性能，应通过耐长期应力作用能力的检验；\n3 使用年限到期后，当重新进行的可靠性鉴定认为该结构工作正常，仍可继续延长其使用年限；\n4 对使用胶粘方法或掺有聚合物材料加固的结构、构件，尚应定期检查其工作状态；检查的时间间隔可由设计单位确定，但第一次检查时间不应迟于10年；\n5 当为局部加固时，应考虑原建筑物剩余设计使用年限对结构加固后设计使用年限的影响。"}
+    },
+    {
+      "review_id": "GB50098-table-3.2.2-20260903",
+      "kind": "table",
+      "standard_code": "GB 50098-2009",
+      "source_sha256": "1a2fd250f800a70bed962d710c88b0e5a290c070811658aeb2ad5fd9703f8c40",
+      "record_id": "p15-visual-3.2.2",
+      "page_start": 15,
+      "page_end": 15,
+      "base_record_sha256": "c22caf0c4c7d482644ae370a295c3192da83eced6a86d7f9efa8c31f86ed6f12",
+      "scope": "complete_record",
+      "reviewer": "Codex original PDF visual inspection",
+      "method": "visual_transcription",
+      "reviewed_at": "2026-09-03T14:45:34+08:00",
+      "pages": [{"page_number": 15, "printed_page": "7", "image_sha256": "ded7609b00eaf1ccb628a2f5854aaa4ec2f0c6b94ce196ad53c89dd367c8bafd"}],
+      "replacement": {
+        "title": "表3.2.2 采光窗井与相邻地面建筑的最小防火间距(m)",
+        "rows": [
+          ["人防工程类别", "民用建筑/一、二级", "民用建筑/三级", "民用建筑/四级", "丙、丁、戊类厂房、库房/一、二级", "丙、丁、戊类厂房、库房/三级", "丙、丁、戊类厂房、库房/四级", "高层民用建筑/主体", "高层民用建筑/附属", "甲、乙类厂房、库房"],
+          ["丙、丁、戊类生产车间、物品库房", "10", "12", "14", "10", "12", "14", "13", "6", "25"],
+          ["其他人防工程", "6", "7", "9", "10", "12", "14", "13", "6", "25"]
+        ],
+        "notes": [
+          "注：1 防火间距按人防工程有窗外墙与相邻地面建筑外墙的最近距离计算；",
+          "2 当相邻的地面建筑物外墙为防火墙时，其防火间距不限。"
+        ]
+      }
+    },
+    {
+      "review_id": "GB50098-4.1.3-20260903",
+      "kind": "clause",
+      "standard_code": "GB 50098-2009",
+      "source_sha256": "1a2fd250f800a70bed962d710c88b0e5a290c070811658aeb2ad5fd9703f8c40",
+      "record_id": "4.1.3",
+      "page_start": 16,
+      "page_end": 17,
+      "base_record_sha256": "817f88f594a2c3aea6d066aa212819b5d843475fefce310426e5833731c2f5e3",
+      "scope": "complete_record",
+      "reviewer": "Codex original PDF visual inspection",
+      "method": "visual_transcription",
+      "reviewed_at": "2026-09-03T14:45:34+08:00",
+      "pages": [
+        {"page_number": 16, "printed_page": "8", "image_sha256": "089ee594db617e943bd32bc3c5e2c84abcebc44abffc38a7953bffd34da72fbf"},
+        {"page_number": 17, "printed_page": "9", "image_sha256": "22123f3bb70daedb9fc41717fec5e8accd5e6a42f09227779915587b1140b002"}
+      ],
+      "replacement": {"text": "4.1.3 商业营业厅、展览厅、电影院和礼堂的观众厅、溜冰馆、游泳馆、射击馆、保龄球馆等防火分区划分应符合下列规定：\n1 商业营业厅、展览厅等，当设置有火灾自动报警系统和自动灭火系统，且采用A级装修材料装修时，防火分区允许最大建筑面积不应大于2000m²；\n2 电影院、礼堂的观众厅，防火分区允许最大建筑面积不应大于1000m²。当设置有火灾自动报警系统和自动灭火系统时，其允许最大建筑面积也不得增加；\n3 溜冰馆的冰场、游泳馆的游泳池、射击馆的靶道区、保龄球馆的球道区等，其面积可不计入溜冰馆、游泳馆、射击馆、保龄球馆的防火分区面积内。溜冰馆的冰场、游泳馆的游泳池、射击馆的靶道区等，其装修材料应采用A级。"}
+    }
+  ]
+}

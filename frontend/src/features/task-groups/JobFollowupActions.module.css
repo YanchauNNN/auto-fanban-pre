@@ -1,0 +1,32 @@
+.panel {
+  padding: 24px;
+  border: 1px solid #d8e5f4;
+  border-radius: 22px;
+  background: #fff;
+  color: #173f6c;
+}
+.panel h2, .dialog h2 { margin: 0; font-size: 1.3rem; }
+.panel p, .dialog p { margin: 8px 0; line-height: 1.6; color: #59728f; }
+.header { margin-bottom: 16px; }
+.workloadAction { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 18px; border: 1px solid #c8def5; border-radius: 16px; background: #f2f8ff; }
+.workloadAction ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.65; color: #8e551c; }
+.panel button, .dialog button { border: 1px solid #c9dbee; border-radius: 12px; padding: 11px 20px; background: #fff; color: #1f5487; cursor: pointer; font: inherit; font-weight: 600; }
+.panel button.primary, .dialog button.primary { background: #1d5e9f; border-color: #1d5e9f; color: #fff; }
+.panel button:disabled, .dialog button:disabled { cursor: not-allowed; opacity: .5; }
+.panel button:focus-visible, .dialog button:focus-visible, .dialog input:focus-visible { outline: 3px solid #74b9f2; outline-offset: 3px; }
+.actions { display: flex; align-items: start; flex-wrap: wrap; gap: 14px; margin-top: 18px; }
+.actionItem { display: grid; gap: 6px; flex: 1 1 220px; }
+.actionItem small { color: #687f99; font-size: .82rem; line-height: 1.45; }
+.panel .error, .dialog .error { color: #b32929; }
+.panel .success { color: #18714f; }
+.dialog.dialog { width: min(680px, calc(100vw - 32px)); padding: 24px; border-radius: 20px; max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overflow: auto; color: #173f6c; }
+.amount { display: flex; justify-content: space-between; align-items: center; gap: 16px; background: #eef6ff; border-radius: 12px; padding: 14px 16px; margin: 18px 0 12px; }
+.amount strong { color: #17548d; font-size: 1.4rem; }
+.fields { display: grid; gap: 14px; margin-top: 18px; }
+.fields label { display: grid; gap: 7px; }
+.fields label span { font-weight: 600; }
+.fields em { font-style: normal; color: #b32929; margin-left: 8px; font-size: .78rem; }
+.fields input { min-width: 0; width: 100%; padding: 10px 12px; background: #fff; color: #173f6c; font: inherit; border: 1px solid #cbdcec; border-radius: 10px; }
+.fields input[aria-invalid="true"] { border-color: #c83232; box-shadow: 0 0 0 2px #fbe0e0; }
+.dialogFooter { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+@media (max-width: 600px) { .panel { padding: 16px; } .workloadAction { align-items: stretch; flex-direction: column; padding: 14px; gap: 10px; } .dialog.dialog { padding: 20px; } .actions { gap: 12px; } }

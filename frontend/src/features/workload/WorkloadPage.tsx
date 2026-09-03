@@ -135,10 +135,39 @@ function getMonitorPriority(item: TaskGroupSummary) {
   return 3;
 }
 
-function getMonitorHint(item: TaskGroupSummary) {
+function getMonitorPhase(
+  item: TaskGroupSummary,
+  terminalStatus: string,
+  labels: TaskGroupPresentationLabels,
+): { nodeLabel: string; hint: string } | null {
   if (hasArchiveFailure(item)) {
-    return "归档失败，请优先检查异常。";
+    return { nodeLabel: "归档待重试", hint: "归档失败，请检查异常并等待重试。" };
   }
+  if (item.archiveStatus === "succeeded" || item.workflowStatus === "archived") {
+    return { nodeLabel: "流程已完成", hint: "流程已完成，产物已归档。" };
+  }
+  if (item.workflowStatus === "cancelled") {
+    return { nodeLabel: "流程已取消", hint: "流程已取消，无需继续审批。" };
+  }
+  if (item.archiveStatus === "running" || item.workflowStatus === "archiving") {
+    return { nodeLabel: "归档中", hint: "审批已通过，正在归档。" };
+  }
+  if (item.workflowStatus === terminalStatus) {
+    return { nodeLabel: "等待归档", hint: "审批已通过，等待归档。" };
+  }
+  if (item.workflowStatus === "draft") {
+    return {
+      nodeLabel: labels.emptyCurrentNodeLabel ?? "未进入审批",
+      hint: "尚未提交工作量填报。",
+    };
+  }
+  if (item.workflowStatus === "submitted" && !item.currentNodeKey) {
+    return { nodeLabel: "待分配审批节点", hint: "已提交工作量填报，等待进入审批。" };
+  }
+  return null;
+}
+
+function getMonitorHint(item: TaskGroupSummary) {
   if (item.canApprove) {
     return "当前已轮到你审批。";
   }
@@ -537,6 +566,11 @@ export function WorkloadPage() {
             >
               {monitorItems.map((item) => {
                 const tone = getMonitorTone(item);
+                const phase = getMonitorPhase(
+                  item,
+                  managementSchema.workflow.terminalStatus,
+                  taskGroupPresentationLabels,
+                );
                 return (
                   <article
                     className={styles[`monitorCard${capitalize(tone)}`]}
@@ -546,7 +580,7 @@ export function WorkloadPage() {
                     <div className={styles.monitorHeader}>
                       <div>
                         <strong>{getTaskGroupDisplayTitle(item)}</strong>
-                        <p className={styles.monitorHint}>{getMonitorHint(item)}</p>
+                        <p className={styles.monitorHint}>{phase?.hint ?? getMonitorHint(item)}</p>
                       </div>
                       <span className={styles.monitorBadge}>
                         {hasArchiveFailure(item)
@@ -568,7 +602,9 @@ export function WorkloadPage() {
                       </div>
                       <div>
                         <dt>当前节点</dt>
-                        <dd>{getCurrentNodeLabel(item.currentNodeKey, taskGroupPresentationLabels)}</dd>
+                        <dd>{phase?.nodeLabel ?? (item.currentNodeKey
+                          ? getCurrentNodeLabel(item.currentNodeKey, taskGroupPresentationLabels)
+                          : "待分配审批节点")}</dd>
                       </div>
                       <div>
                         <dt>有效工作量</dt>

@@ -1,13 +1,25 @@
 ﻿from __future__ import annotations
 
 from ..config import BusinessSpec, load_spec
-from ..models import PersonnelSnapshot
+from ..models import AccountSnapshot, PersonnelSnapshot
 
 
 class WorkflowInputValidator:
     def __init__(self, spec: BusinessSpec | None = None) -> None:
         self.spec = spec or load_spec()
         self.workflow_cfg = dict(self.spec.get_management_features().get("workflow") or {})
+
+    def validate_for_initiator(self, personnel_snapshot: PersonnelSnapshot, initiator: AccountSnapshot) -> list[str]:
+        """Validate active workflow participants, preserving historical IED metadata."""
+        active_fields = {str(node["assignee_source"]) for node in self.workflow_cfg["nodes"]}
+        active = PersonnelSnapshot(members={
+            key: member for key, member in personnel_snapshot.members.items() if key in active_fields
+        })
+        errors = self.validate_submit(active)
+        for key, member in active.members.items():
+            if member.matched_account == initiator.account_id:
+                errors.append(f"workflow_role_duplicate:initiator:{key}")
+        return errors
 
     def validate_submit(self, personnel_snapshot: PersonnelSnapshot) -> list[str]:
         errors: list[str] = []

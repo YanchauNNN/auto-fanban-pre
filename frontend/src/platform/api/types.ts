@@ -538,6 +538,31 @@ export type TaskGroupSubmitPayload = {
   cancelExistingInProgress: boolean;
 };
 
+export type JobWorkloadSubmission = {
+  supported: boolean;
+  canSubmit: boolean;
+  blockers: Array<{ code: string; message: string }>;
+  groupId: string | null;
+  workflowStatus: string;
+  initialWorkloadA1: number | null;
+  personnelFields: Array<{ key: string; label: string; value: string; required: boolean }>;
+  group: TaskGroupDetail | null;
+};
+
+export type JobWorkloadSubmitPayload = TaskGroupSubmitPayload & {
+  personnel: Record<string, string>;
+};
+
+export type JobExecutionActions = {
+  canCancel: boolean;
+  canRetry: boolean;
+  cancelRequested: boolean;
+  cancelReason: string | null;
+  retryReason: string | null;
+};
+
+export type JobRetryResult = { jobId: string; groupId: string | null };
+
 export type WorkflowMonitorItem = TaskGroupSummary;
 
 export type WorkflowMonitorList = {
@@ -1020,6 +1045,8 @@ export type TaskConfigDraft = {
 export type ApiValidationError = {
   upload_errors?: Record<string, string[]>;
   param_errors?: Record<string, string[]>;
+  field_errors?: Record<string, string>;
+  message?: string;
 };
 
 export type ApiError = {
@@ -1102,6 +1129,11 @@ export type ApiAdapter = {
     onError?: (event: Event) => void,
   ) => () => void;
   getJobDetail: (jobId: string) => Promise<JobDetail>;
+  getJobWorkloadSubmission?: (jobId: string) => Promise<JobWorkloadSubmission>;
+  submitJobWorkload?: (jobId: string, payload: JobWorkloadSubmitPayload) => Promise<TaskGroupDetail>;
+  getJobExecutionActions?: (jobId: string) => Promise<JobExecutionActions>;
+  cancelJob?: (jobId: string) => Promise<JobExecutionActions>;
+  retryJob?: (jobId: string) => Promise<JobRetryResult>;
   readArtifact?: (url: string) => Promise<Blob>;
   downloadArtifact?: (url: string, fallbackFilename?: string) => Promise<void>;
   getAiState: (signal?: AbortSignal) => Promise<AiState>;

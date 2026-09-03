@@ -132,6 +132,11 @@ class Job(BaseModel):
         self.finished_at = datetime.now()
         self.errors.append(error)
 
+    def mark_cancelled(self) -> None:
+        self.status = JobStatus.CANCELLED
+        self.finished_at = datetime.now()
+        self.progress.message = "任务已安全取消"
+
     def add_flag(self, flag: str) -> None:
         """添加告警标记（不中断）"""
         if flag not in self.flags:

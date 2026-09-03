@@ -42,6 +42,8 @@ backend_mechanism:
       - "archive_failed"
 
   task_group_submission:
+    # 普通任务详情显式提交后才建立管理关联；未定义计量口径的计算书不纳入。
+    standalone_job_types: ["deliverable"]
     shared_prep:
       invalid_error: "shared_prep_invalid"
       source_missing_error: "shared_prep_source_missing"

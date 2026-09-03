@@ -150,4 +150,21 @@ python "<skill-root>/scripts/build_full_corpus.py" `
 
 `--require-cached` 在缺少同SHA候选时报告失败，禁止退回重新解析；此构建入口不执行OCR。`published=true` 只表示已原子写入指定的候选输出，不表示通过内容验收或已替换运行库。保留原库，分别执行结构验证、旧功能冒烟和独立原页验证后决定是否部署。不得把新的数据库内容自动生成成“独立标准答案”。
 
+### 定向原页复核
+
+`record_review` 是通过PDF SHA256、原记录指纹和全部续页绑定的条款/表格转录复核。它只核验当前完整记录，不证明整页、整本规范、官方状态或工程适用性。`page_quality` 保留旧页面风险；`quality_status` 和 `content_quality_flags` 表示当前记录内容质量；最终设计建议仍必须服从 `design_advice_allowed` 和全部 `quality_flags`，不能只看文字是否准确。
+
+复核文件与独立验收集分开保存。以下离线步骤只向不同路径输出候选库，保留原生/OCR页面及更正前记录；新索引构建后须重新显式应用，原记录指纹变化则重新复核，不自动沿用旧更正。
+
+```powershell
+python "<skill-root>/scripts/apply_evidence_reviews.py" `
+  --database "<server-root>/storage/ai/standards-candidate/standards.sqlite" `
+  --reviews "<skill-root>/assets/data/reviewed_evidence_20260903.json" `
+  --source-root "<server-root>/documents/规范下载" `
+  --output "<server-root>/storage/ai/standards-reviewed/standards.sqlite" `
+  --report "<server-root>/storage/ai/standards-reviewed/replay_report.json"
+```
+
+查询更正后的数据库必须同时携带 `scripts/standards_reviews.py`；没有复核记录的旧数据库保持原查询方式，不新增OCR依赖。复核样例通过不等于全量语料验收，候选库仍不能未经发布审查直接替换运行库。
+
 授权和保密处理见 [references/authorization-boundary.md](references/authorization-boundary.md)。

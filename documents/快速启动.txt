@@ -1,60 +1,125 @@
-主空间 main（默认端口）
+开发环境快速启动（PowerShell）
 
-API：
-cd E:\project\auto-fanban-pre
-uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 8000
+测试本轮最新功能请使用第 3 组：http://127.0.0.1:5175/。
+端口固定：main 8010 / 5173；旧统一空间 18182 / 5186；当前开发空间 18183 / 5175（API / 前端）。
+8000 保留给部署环境，本文件中的开发命令不使用该端口。
+同一组的 API、Worker、前端分别在三个新的 PowerShell 窗口运行；不要混用不同组，也不要为同一组重复启动 Worker。
+更新代码后请在原窗口按 Ctrl+C 停止对应服务，再按同组命令启动；前端端口占用时直接报错，不自动换端口。
+各组使用自己的配置、账号和 storage；main 中已有任务不会自动出现在当前开发空间，本次不迁移任务数据。
 
-Worker：
-cd E:\project\auto-fanban-pre
+1. 主空间 main
+
+API（PowerShell 窗口 1）：
+Set-Location 'E:\project\auto-fanban-pre'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
+uv run --project backend python -X utf8 -m uvicorn API.app.main:app --host 127.0.0.1 --port 8010
+
+Worker（PowerShell 窗口 2）：
+Set-Location 'E:\project\auto-fanban-pre'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
 uv run --project backend python -X utf8 -m API.app.worker
 
-前端：
-cd E:\project\auto-fanban-pre\frontend
-npm run dev -- --host 127.0.0.1 --port 5173
+前端（PowerShell 窗口 3）：
+Set-Location 'E:\project\auto-fanban-pre\frontend'
+$env:VITE_API_BASE_URL='/'
+$env:VITE_API_PROXY_TARGET='http://127.0.0.1:8010'
+npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 
-
-统一集成测试空间 codex/unified-workspace（当前推荐：AI、账号、工作量模块；独立端口，避免和 main 的 8000/5173 冲突）
-
-后端：
-cd E:\project\auto-fanban-pre\.worktrees\codex-unified-workspace
-$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
-uv run --project backend python -m uvicorn API.app.main:app --host 127.0.0.1 --port 18182
-
-前端：
-cd E:\project\auto-fanban-pre\.worktrees\codex-unified-workspace\frontend
-$env:VITE_API_BASE_URL='http://127.0.0.1:18182'
-$env:VITE_API_PROXY_TARGET='http://127.0.0.1:18182'
-npm run dev -- --host 127.0.0.1 --port 5186 --strictPort
-
-访问地址：
-http://127.0.0.1:5186/
-
-后端健康检查：
-http://127.0.0.1:18182/api/system/ping
-
-AI 状态检查：
-http://127.0.0.1:18182/api/ai/state
-
-
-计算书 AI 测试空间 codex-calculation-ai-unified（API、Worker、前端分别在三个 PowerShell 窗口执行）
-
-API：
-Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'; $env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'; uv run --project backend python -X utf8 -m uvicorn API.app.main:app --host 127.0.0.1 --port 8010
-
-Worker：
-Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'; $env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'; uv run --project backend python -X utf8 -m API.app.worker
-
-前端：
-Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified\frontend'; $env:VITE_API_PROXY_TARGET='http://127.0.0.1:8010'; npm.cmd run dev -- --host 127.0.0.1 --port 5175 --strictPort
-
-前端访问地址：
-http://127.0.0.1:5175/
+访问地址：http://127.0.0.1:5173/
 
 API 连通检查：
-http://127.0.0.1:8010/api/system/ping
+Invoke-RestMethod 'http://127.0.0.1:8010/api/system/ping'
 
-系统与 Worker 健康检查：
-http://127.0.0.1:8010/api/system/health
+系统与 Worker 健康检查（ready、worker_alive 应为 True）：
+Invoke-RestMethod 'http://127.0.0.1:8010/api/system/health'
+
+
+2. 旧统一集成空间 codex/unified-workspace（历史环境，不含本轮最新修改）
+
+API（PowerShell 窗口 1）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-unified-workspace'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
+$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
+uv run --project backend python -X utf8 -m uvicorn API.app.main:app --host 127.0.0.1 --port 18182
+
+Worker（PowerShell 窗口 2）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-unified-workspace'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
+$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
+uv run --project backend python -X utf8 -m API.app.worker
+
+前端（PowerShell 窗口 3）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-unified-workspace\frontend'
+$env:VITE_API_BASE_URL='/'
+$env:VITE_API_PROXY_TARGET='http://127.0.0.1:18182'
+npm.cmd run dev -- --host 127.0.0.1 --port 5186 --strictPort
+
+访问地址：http://127.0.0.1:5186/
+
+API 连通检查：
+Invoke-RestMethod 'http://127.0.0.1:18182/api/system/ping'
+
+系统与 Worker 健康检查（ready、worker_alive 应为 True）：
+Invoke-RestMethod 'http://127.0.0.1:18182/api/system/health'
 
 AI 状态检查：
-http://127.0.0.1:8010/api/ai/state
+Invoke-RestMethod 'http://127.0.0.1:18182/api/ai/state'
+
+
+3. 当前开发空间 codex/calculation-ai-unified（计算书、AI、账号、工作量最新修改）
+
+API（PowerShell 窗口 1）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
+$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
+uv run --project backend python -X utf8 -m uvicorn API.app.main:app --host 127.0.0.1 --port 18183
+
+Worker（PowerShell 窗口 2）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified'
+$env:FANBAN_STORAGE_DIR = Join-Path $PWD.Path 'storage'
+$env:FANBAN_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范.yaml'
+$env:FANBAN_RUNTIME_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范_运行期.yaml'
+$env:FANBAN_MECHANISM_SPEC_PATH = Join-Path $PWD.Path 'documents\参数规范-3.yaml'
+$env:FANBAN_AI_SPEC_PATH = Join-Path $PWD.Path 'documents\AI\参数规范_AI.yaml'
+$env:FANBAN_AI_GATEWAY_PROFILE='development_minimax'
+uv run --project backend python -X utf8 -m API.app.worker
+
+前端（PowerShell 窗口 3）：
+Set-Location 'E:\project\auto-fanban-pre\.worktrees\codex-calculation-ai-unified\frontend'
+$env:VITE_API_BASE_URL='/'
+$env:VITE_API_PROXY_TARGET='http://127.0.0.1:18183'
+npm.cmd run dev -- --host 127.0.0.1 --port 5175 --strictPort
+
+访问地址：http://127.0.0.1:5175/
+
+API 连通检查：
+Invoke-RestMethod 'http://127.0.0.1:18183/api/system/ping'
+
+系统与 Worker 健康检查（ready、worker_alive 应为 True）：
+Invoke-RestMethod 'http://127.0.0.1:18183/api/system/health'
+
+AI 状态检查：
+Invoke-RestMethod 'http://127.0.0.1:18183/api/ai/state'
+
+新版工作量提交接口检查（应返回 True）：
+(Invoke-RestMethod 'http://127.0.0.1:18183/openapi.json').paths.PSObject.Properties.Name -contains '/api/jobs/{item_id}/workload-submission'
