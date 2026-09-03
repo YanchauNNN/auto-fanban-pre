@@ -7,12 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 WORKTREE_ROOT = Path(__file__).resolve().parents[4]
-SKILL_ROOT = (
-    WORKTREE_ROOT
-    / "tools"
-    / "ai"
-    / "building-structure-standards"
-)
+SKILL_ROOT = WORKTREE_ROOT / "tools" / "ai" / "building-structure-standards"
 SCRIPTS = SKILL_ROOT / "scripts"
 GOLD_CASES = SKILL_ROOT / "references" / "gold_cases.json"
 DATABASE = SKILL_ROOT / "assets" / "data" / "standards.sqlite"
@@ -47,7 +42,7 @@ def test_gold_case_count_and_categories_meet_acceptance_range() -> None:
     }
 
 
-def test_all_gold_cases_pass_against_bundled_corpus() -> None:
+def test_legacy_gold_content_passes_but_unqualified_advice_is_rejected() -> None:
     validator = load_validator()
 
     report = validator.validate(
@@ -57,6 +52,25 @@ def test_all_gold_cases_pass_against_bundled_corpus() -> None:
     )
 
     assert report["case_count"] == 72
-    assert report["passed_count"] == 72
-    assert report["failed_count"] == 0
-    assert report["pass_rate"] == 1.0
+    # Keep historical expectations intact, including their now-unsafe approvals.
+    rejected = {row["id"] for row in report["results"] if not row["passed"]}
+    assert rejected == {"advice-001", "advice-004"}
+    assert report["passed_count"] == 70
+    assert report["failed_count"] == 2
+    for case in json.loads(GOLD_CASES.read_text(encoding="utf-8"))["cases"]:
+        if case["id"] not in rejected:
+            continue
+        result = validator.collect_advice_evidence(
+            DATABASE,
+            CATALOG,
+            case["query"],
+            requested_codes=case["requested_codes"],
+        )
+        assert result["design_advice_allowed"] is False
+        if case["id"] == "advice-001":
+            assert result["evidence_level"] == "partial"
+            assert "page_quality_schema_missing" in result["evidence"][0]["quality_flags"]
+        else:
+            assert result["evidence_level"] == "none"
+            assert result["evidence"] == []
+            assert set(result["missing_content_codes"]) == set(case["requested_codes"])

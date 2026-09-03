@@ -7,15 +7,11 @@ import sys
 from pathlib import Path
 
 import fitz
+import pytest
 
 WORKTREE_ROOT = Path(__file__).resolve().parents[4]
 SCRIPT = (
-    WORKTREE_ROOT
-    / "tools"
-    / "ai"
-    / "building-structure-standards"
-    / "scripts"
-    / "build_corpus.py"
+    WORKTREE_ROOT / "tools" / "ai" / "building-structure-standards" / "scripts" / "build_corpus.py"
 )
 
 
@@ -217,9 +213,140 @@ def test_manifest_build_uses_external_source_root_and_stores_relative_path(
     assert report["source_count"] == 1
     connection = sqlite3.connect(database)
     try:
-        stored_path = connection.execute(
-            "SELECT source_path FROM sources"
-        ).fetchone()[0]
+        stored_path = connection.execute("SELECT source_path FROM sources").fetchone()[0]
     finally:
         connection.close()
     assert stored_path == "001-010/GB T TEST-2026 测试标准.pdf"
+
+
+def test_standalone_clause_number_and_subitems_keep_correct_boundaries():
+    parser = load_parser_module()
+    pages = [
+        parser.PageRecord(
+            22,
+            "12",
+            "3.1.6 前条。\n3.1.7\n本条正文。\n1 子项甲。\n2 子项乙。\nA.1.1 附录正文。",
+            "test.pdf#page=22",
+        )
+    ]
+    clauses = parser._split_clauses(pages, [])
+    by_id = {row.clause_id: row for row in clauses}
+    assert "3.1.7" in by_id
+    assert "本条正文" not in by_id["3.1.6"].text
+    assert "1 子项甲" in by_id["3.1.7"].text
+    assert "2" not in by_id
+    assert "A.1.1" in by_id
+
+
+def test_clause_roles_and_page_ranges_do_not_absorb_commentary_or_blank_pages():
+    parser = load_parser_module()
+    pages = [
+        parser.PageRecord(1, "", "目录\n1.0.1 总则 .... 2", "test.pdf#page=1"),
+        parser.PageRecord(2, "", "1 总则\n1.0.1 正文依据。", "test.pdf#page=2"),
+        parser.PageRecord(3, "", "", "test.pdf#page=3"),
+        parser.PageRecord(4, "", "条文说明\n1.0.1 说明文字。", "test.pdf#page=4"),
+    ]
+    clauses = parser._split_clauses(pages, [])
+    normative = next(
+        row for row in clauses if row.clause_id == "1.0.1" and row.content_role == "normative"
+    )
+    assert normative.page_end == 2
+    assert "说明文字" not in normative.text
+    assert any(row.content_role == "commentary" for row in clauses)
+    assert pages[0].content_role == "toc"
+
+
+def test_failed_build_preserves_existing_database(tmp_path):
+    parser = load_parser_module()
+    database = tmp_path / "existing.sqlite"
+    database.write_bytes(b"existing-database")
+
+    def failing_input():
+        raise RuntimeError("injected source failure")
+        yield
+
+    with pytest.raises(RuntimeError, match="injected"):
+        parser.build_sqlite(failing_input(), database)
+    assert database.read_bytes() == b"existing-database"
+
+
+def test_pdf_blank_page_is_recorded_without_aborting_source(tmp_path):
+    parser = load_parser_module()
+    path = tmp_path / "blank.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "1.1.1 Evidence")
+    doc.new_page()
+    doc.save(path)
+    doc.close()
+    source = parser.SourceSpec("TEST", "test", "2026", str(path), "", "已授权", "内部")
+    parsed = parser.parse_source(source)
+    assert parsed.pages[1].quality_status == "blank"
+    assert parsed.clauses[0].page_end == 1
+
+
+def test_ocr_split_role_headings_exit_toc_and_enter_commentary():
+    parser = load_parser_module()
+    pages = [
+        parser.PageRecord(6, "", "目录\n1 总则 .... 1", "test.pdf#page=6"),
+        parser.PageRecord(7, "", "1总\n则\n1.0.1为明确设防类别，制定本标准。", "test.pdf#page=7"),
+        parser.PageRecord(24, "", "条文\n说明", "test.pdf#page=24"),
+        parser.PageRecord(25, "", "1总\n则\n1.0.1 说明依据。", "test.pdf#page=25"),
+    ]
+    clauses = parser._split_clauses(pages, [])
+    assert (
+        next(
+            row for row in clauses if row.page_start == 7 and row.clause_id == "1.0.1"
+        ).content_role
+        == "normative"
+    )
+    assert (
+        next(
+            row for row in clauses if row.page_start == 25 and row.clause_id == "1.0.1"
+        ).content_role
+        == "commentary"
+    )
+
+
+def test_spaced_native_clause_numbers_are_indexed_without_rewriting_raw_text():
+    parser = load_parser_module()
+    text = "3. 2. 1 作用和作用效应\n说明内容。\n10. 10. 10 预埋件应考虑高温。\nA．1．1 附录条款。"
+    page = parser.PageRecord(31, "28", text, "test.pdf#page=31", native_text=text)
+    clauses = parser._split_clauses([page], [])
+    assert {row.clause_id for row in clauses} == {"3.2.1", "10.10.10", "A.1.1"}
+    assert page.native_text == text
+
+
+def test_reindex_preserves_review_flags_and_checks_individual_ocr_lines():
+    parser = load_parser_module()
+    text = "1.0.1 " + "应按检测结果核对设计条件。" * 6
+    page = parser.PageRecord(
+        1,
+        "1",
+        text,
+        "test.pdf#page=1",
+        ocr_text=text,
+        text_source="ocr",
+        ocr_confidence=0.99,
+        quality_status="review_required",
+        quality_flags=["manual_review_pending"],
+        ocr_provenance={
+            "lines": [{"text": text, "score": 0.2, "box": [[0, 0], [10, 0], [10, 10], [0, 10]]}]
+        },
+    )
+    source = parser.SourceSpec("TEST", "test", "2026", "test.pdf", "", "已授权", "内部")
+    parsed = parser.reindex_parsed_source(parser.ParsedSource(source, "a" * 64, [page], [], []))
+    assert parsed.pages[0].quality_status == "review_required"
+    assert "low_confidence_line" in parsed.pages[0].quality_flags
+    assert "manual_review_pending" in parsed.pages[0].quality_flags
+
+
+def test_toc_continuation_does_not_become_normative_at_chapter_title():
+    parser = load_parser_module()
+    pages = [
+        parser.PageRecord(1, "", "目录", "test.pdf#page=1"),
+        parser.PageRecord(2, "", "1 总则\n2 术语 ...... 1\n3 结构 ...... 2", "test.pdf#page=2"),
+        parser.PageRecord(3, "", "1 总则\n1.0.1 本规范用于确定项目的设计条件。", "test.pdf#page=3"),
+    ]
+    clauses = parser._split_clauses(pages, [])
+    assert pages[1].content_role == "toc"
+    assert next(row for row in clauses if row.clause_id == "1.0.1").content_role == "normative"

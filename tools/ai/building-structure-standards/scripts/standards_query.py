@@ -7,7 +7,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_DATABASE = (
     Path(__file__).resolve().parents[1] / "assets" / "data" / "standards.sqlite"
 )
@@ -43,17 +42,15 @@ def search(
     limit: int = 10,
 ) -> dict[str, Any]:
     normalized_query = re.sub(r"\s+", "", query)
-    wildcard = f"%{normalized_query}%"
+    if not normalized_query:
+        return _result_envelope([], missing_message="证据不足：查询词不能为空。")
     where = """
         (
-            REPLACE(REPLACE(REPLACE(c.text, char(10), ''), char(13), ''), ' ', '')
-                LIKE ?
-            OR REPLACE(REPLACE(REPLACE(c.heading, char(10), ''), char(13), ''), ' ', '')
-                LIKE ?
-            OR REPLACE(s.standard_name, ' ', '') LIKE ?
+            instr(normalize_text(c.text), ?) > 0
+            OR instr(normalize_text(c.heading), ?) > 0
         )
     """
-    params: list[Any] = [wildcard, wildcard, wildcard]
+    params: list[Any] = [normalized_query.casefold(), normalized_query.casefold()]
     if standard_code:
         where = f"s.standard_code = ? AND {where}"
         params.insert(0, standard_code)
@@ -93,15 +90,17 @@ def get_standard(
         return {
             "found": False,
             "evidence_insufficient": True,
+            "design_advice_allowed": False,
             "standard": None,
             "warnings": [f"证据不足：离线语料中没有 {standard_code}。"],
         }
     standard = dict(row)
     return {
         "found": True,
-        "evidence_insufficient": False,
+        "evidence_insufficient": True,
+        "design_advice_allowed": False,
         "standard": standard,
-        "warnings": _source_warnings(standard),
+        "warnings": [*_source_warnings(standard), "标准元数据不代表相关正文证据。"],
     }
 
 
@@ -109,47 +108,97 @@ def get_table(
     database: Path | str,
     standard_code: str,
     table_id: str,
+    *,
+    source_id: int | None = None,
 ) -> dict[str, Any]:
     connection = _connect(database)
     try:
-        row = connection.execute(
-            """
+        columns = _columns(connection, "standard_tables")
+        source_sha = "s.source_sha256" if "source_sha256" in _columns(connection, "sources") else "NULL"
+        label_match = (
+            " OR normalize_table_label(t.table_label)=?"
+            if "table_label" in columns and _normalize_table_label(table_id)
+            else ""
+        )
+        source_filter = " AND t.source_id=?" if source_id is not None else ""
+        params: list[Any] = [standard_code, table_id]
+        if label_match:
+            params.append(_normalize_table_label(table_id))
+        if source_id is not None:
+            params.append(source_id)
+        rows = connection.execute(
+            f"""
             SELECT
-                s.standard_code, s.standard_name, s.version,
+                s.standard_code, s.standard_name, s.version, s.replacement_standard,
                 s.official_status, s.authorization, s.confidentiality,
-                t.table_id, t.page_number, p.printed_page,
-                t.rows_json, t.markdown, t.anchor
+                {source_sha} AS source_sha256,
+                t.*, p.printed_page
             FROM standard_tables t
             JOIN sources s ON s.source_id=t.source_id
             LEFT JOIN pages p
                 ON p.source_id=t.source_id AND p.page_number=t.page_number
-            WHERE s.standard_code=? AND t.table_id=?
+            WHERE s.standard_code=? AND (t.table_id=?{label_match}){source_filter}
+            ORDER BY t.page_number, t.table_id
             """,
-            (standard_code, table_id),
-        ).fetchone()
+            params,
+        ).fetchall()
+        results = []
+        for row in rows:
+            result = dict(row)
+            flags = _quality_flags(result.get("quality_flags_json"))
+            table_status = result.get("quality_status") or "unknown"
+            result["table_quality_status"] = table_status
+            result["table_label"] = result.get("table_label") or result["table_id"]
+            if not {"quality_status", "quality_flags_json"} <= columns:
+                flags.append("table_quality_schema_missing")
+            if table_status != "usable":
+                flags.append(f"table_{table_status}")
+            try:
+                cells = json.loads(result.pop("rows_json"))
+            except (ValueError, TypeError):
+                cells = []
+            if (
+                not isinstance(cells, list) or not cells
+                or not all(isinstance(row, list) and row for row in cells)
+                or len({len(row) for row in cells}) != 1
+            ):
+                flags.append("table_rows_unverified")
+                cells = []
+            result["rows"] = [] if table_status == "visual_required" else cells
+            if table_status == "visual_required":
+                result["markdown"] = ""
+            _attach_page_quality(connection, result, result["page_number"], result["page_number"])
+            result["content_role"] = (
+                result["page_quality"][0]["content_role"] if result["page_quality"] else "unknown"
+            )
+            _finish_quality(result, flags)
+            if table_status == "visual_required":
+                result["quality_status"] = "visual_required"
+            result["links"] = _source_links(result["source_id"], result["page_number"])
+            result["citation"] = (
+                f"{result['standard_code']}（{result['version']}），"
+                f"表 {_normalize_table_label(result['table_label'])}，"
+                f"{_page_label(result['page_number'], result['printed_page'])}（{result['anchor']}）"
+            )
+            results.append(result)
     finally:
         connection.close()
-    if row is None:
+    if not results:
         return {
             "found": False,
             "evidence_insufficient": True,
+            "design_advice_allowed": False,
             "table": None,
             "warnings": [
                 f"证据不足：离线语料中未找到 {standard_code} 表 {table_id}。"
             ],
         }
-    result = dict(row)
-    result["rows"] = json.loads(result.pop("rows_json"))
-    result["citation"] = (
-        f"{result['standard_code']}（{result['version']}），"
-        f"表 {result['table_id']}，{_page_label(result['page_number'], result['printed_page'])}"
-        f"（{result['anchor']}）"
-    )
+    results.sort(key=lambda item: (not item["design_advice_allowed"], item["content_role"] != "normative"))
+    result = results[0]
+    envelope = _result_envelope([result], missing_message="")
     return {
-        "found": True,
-        "evidence_insufficient": False,
+        **{key: value for key, value in envelope.items() if key != "results"},
         "table": result,
-        "warnings": _source_warnings(result),
     }
 
 
@@ -281,44 +330,41 @@ def collect_advice_evidence(
     limit: int = 20,
 ) -> dict[str, Any]:
     requested = list(dict.fromkeys(requested_codes or []))
-    search_result = search(database, query, limit=limit)
+    searches = [
+        search(database, query, standard_code=code, limit=limit)
+        for code in (requested or [""])
+    ]
+    evidence = [row for result in searches for row in result["results"]]
     available_codes: list[str] = []
     missing_codes: list[str] = []
-    warnings = list(search_result["warnings"])
-
-    if requested:
-        for code in requested:
-            standard = get_standard(database, code)
-            if standard["found"]:
-                available_codes.append(code)
-                continue
-            catalog = get_catalog_entry(catalog_path, code)
-            if catalog["found"] and catalog["content_evidence_available"]:
-                available_codes.append(code)
-            else:
-                missing_codes.append(code)
-                warnings.extend(catalog["warnings"])
-    else:
-        available_codes = list(
-            dict.fromkeys(
-                item["standard_code"] for item in search_result["results"]
-            )
-        )
-
-    evidence_level = "none"
-    if search_result["found"]:
-        evidence_level = "partial" if missing_codes else "sufficient"
-    if missing_codes:
+    insufficient_codes: list[str] = []
+    warnings = [warning for result in searches for warning in result["warnings"]]
+    for code in requested or list(dict.fromkeys(row["standard_code"] for row in evidence)):
+        matches = [row for row in evidence if row["standard_code"] == code]
+        if any(row["design_advice_allowed"] for row in matches):
+            available_codes.append(code)
+        elif matches:
+            insufficient_codes.append(code)
+        else:
+            missing_codes.append(code)
+            # Catalog metadata is diagnostic only; it can never supply body evidence.
+            if Path(catalog_path).is_file():
+                warnings.extend(get_catalog_entry(catalog_path, code)["warnings"])
+    allowed = bool(available_codes) and not missing_codes and not insufficient_codes
+    evidence_level = "sufficient" if allowed else ("partial" if evidence else "none")
+    if missing_codes or insufficient_codes:
         warnings.append(
-            "部分指定规范没有已授权全文，不能形成完整的跨规范结论或最终设计依据。"
+            "部分指定规范缺少相关合格正文证据，不能形成完整的跨规范结论或最终设计依据。"
         )
     return {
         "query": query,
         "evidence_level": evidence_level,
-        "design_advice_allowed": evidence_level == "sufficient",
+        "evidence_insufficient": not allowed,
+        "design_advice_allowed": allowed,
         "available_codes": available_codes,
         "missing_content_codes": missing_codes,
-        "evidence": search_result["results"],
+        "insufficient_quality_codes": insufficient_codes,
+        "evidence": evidence,
         "warnings": list(dict.fromkeys(warnings)),
     }
 
@@ -332,6 +378,8 @@ def _fetch_clauses(
 ) -> list[dict[str, Any]]:
     connection = _connect(database)
     try:
+        role = "c.content_role" if "content_role" in _columns(connection, "clauses") else "'unknown'"
+        source_sha = "s.source_sha256" if "source_sha256" in _columns(connection, "sources") else "NULL"
         rows = [
             dict(row)
             for row in connection.execute(
@@ -340,8 +388,10 @@ def _fetch_clauses(
                     s.source_id, s.standard_code, s.standard_name, s.version, s.major,
                     s.official_status, s.replacement_standard,
                     s.official_source_url, s.authorization, s.confidentiality,
+                    {source_sha} AS source_sha256,
                     c.clause_id, c.heading, c.text, c.page_start,
                     c.page_end, c.anchor, c.table_ids_json,
+                    {role} AS content_role,
                     p.printed_page AS printed_page_start
                 FROM clauses c
                 JOIN sources s ON s.source_id=c.source_id
@@ -349,17 +399,28 @@ def _fetch_clauses(
                     ON p.source_id=c.source_id AND p.page_number=c.page_start
                 WHERE {where}
                 ORDER BY
+                    CASE WHEN {role}='normative' THEN 0 ELSE 1 END,
                     CASE WHEN s.official_status='现行' THEN 0 ELSE 1 END,
                     s.standard_code, c.page_start, c.clause_id
                 LIMIT ?
                 """,
-                [*params, max(1, limit)],
+                [*params, max(0, limit)],
             )
         ]
+        for row in rows:
+            row["table_ids"] = json.loads(row.pop("table_ids_json"))
+            _attach_page_quality(connection, row, row["page_start"], row["page_end"])
+            flags = [] if str(row.get("text") or "").strip() else ["empty_clause_text"]
+            for table_id in row["table_ids"]:
+                table = get_table(
+                    database, row["standard_code"], table_id, source_id=row["source_id"],
+                )
+                if table["evidence_insufficient"]:
+                    flags.append(f"table_evidence_insufficient:{table_id}")
+            _finish_quality(row, flags)
     finally:
         connection.close()
     for row in rows:
-        row["table_ids"] = json.loads(row.pop("table_ids_json"))
         page = (
             str(row["page_start"])
             if row["page_start"] == row["page_end"]
@@ -370,16 +431,88 @@ def _fetch_clauses(
             f"第{row['clause_id']}条，"
             f"{_page_label(page, row['printed_page_start'])}（{row['anchor']}）"
         )
-        source_id = row["source_id"]
-        page_number = row["page_start"]
-        row["links"] = {
-            "page": f"/api/ai/standards/{source_id}/page/{page_number}",
-            "document": (
-                f"/api/ai/standards/{source_id}/document#page={page_number}"
-            ),
-            "download": f"/api/ai/standards/{source_id}/download",
-        }
+        row["links"] = _source_links(row["source_id"], row["page_start"])
     return rows
+
+
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
+def _quality_flags(raw: Any) -> list[str]:
+    try:
+        flags = json.loads(raw)
+    except (TypeError, ValueError):
+        return ["quality_flags_missing_or_invalid"]
+    if not isinstance(flags, list) or any(not isinstance(flag, str) or not flag for flag in flags):
+        return ["quality_flags_missing_or_invalid"]
+    return flags
+
+
+def _attach_page_quality(
+    connection: sqlite3.Connection, result: dict[str, Any], start: int, end: int,
+) -> None:
+    columns = _columns(connection, "pages")
+    required = {"quality_status", "quality_flags_json", "content_role", "text_source"}
+    flags = [] if required <= columns else ["page_quality_schema_missing"]
+    pages = [dict(row) for row in connection.execute(
+        "SELECT * FROM pages WHERE source_id=? AND page_number BETWEEN ? AND ? ORDER BY page_number",
+        (result["source_id"], start, end),
+    )]
+    numbers = [page["page_number"] for page in pages]
+    if start < 1 or end < start or len(set(numbers)) != end - start + 1 or len(set(numbers)) != len(numbers):
+        flags.append("page_quality_missing_or_ambiguous")
+    quality = []
+    for page in pages:
+        status = page.get("quality_status") or page.get("quality") or "unknown"
+        legacy_status = page.get("quality")
+        page_flags = _quality_flags(page.get("quality_flags_json"))
+        if legacy_status and legacy_status != "usable":
+            status = legacy_status
+        role = page.get("content_role") or "unknown"
+        if status != "usable":
+            flags.append(f"page_{page['page_number']}:{status}")
+        if role != "normative":
+            flags.append(f"page_{page['page_number']}:non_normative:{role}")
+        flags.extend(page_flags)
+        quality.append({
+            "page_number": page["page_number"],
+            "printed_page": page.get("printed_page"),
+            "quality_status": status,
+            "quality_flags": page_flags,
+            "content_role": role,
+            "text_source": page.get("text_source") or "unknown",
+            "ocr_confidence": page.get("ocr_confidence"),
+            "ocr_provenance_json": page.get("ocr_provenance_json"),
+        })
+    result["page_quality"] = quality
+    result["quality_flags"] = list(dict.fromkeys(flags))
+
+
+def _finish_quality(result: dict[str, Any], extra_flags: list[str]) -> None:
+    flags = [*result.get("quality_flags", []), *extra_flags]
+    if result.get("content_role") != "normative":
+        flags.append("non_normative_content")
+    if result.get("official_status") != "现行":
+        flags.append("standard_status_requires_review")
+    if "已授权" not in str(result.get("authorization") or ""):
+        flags.append("authorization_requires_review")
+    result["quality_flags"] = list(dict.fromkeys(flags))
+    result["quality_status"] = "review_required" if flags else "usable"
+    result["evidence_insufficient"] = bool(flags)
+    result["design_advice_allowed"] = not flags
+
+
+def _source_links(source_id: int, page: int) -> dict[str, str]:
+    return {
+        "page": f"/api/ai/standards/{source_id}/page/{page}",
+        "document": f"/api/ai/standards/{source_id}/document#page={page}",
+        "download": f"/api/ai/standards/{source_id}/download",
+    }
+
+
+def _normalize_table_label(value: str) -> str:
+    return re.sub(r"^(?:表|table)", "", re.sub(r"\s+", "", value).casefold())
 
 
 def _result_envelope(
@@ -390,12 +523,18 @@ def _result_envelope(
     warnings: list[str] = []
     for row in rows:
         warnings.extend(_source_warnings(row))
+        if row.get("evidence_insufficient", True):
+            warnings.append(
+                f"证据不足：{row['standard_code']} 的命中内容仅供检索定位，不能作为最终设计依据："
+                + ", ".join(row.get("quality_flags", []))
+            )
     warnings = list(dict.fromkeys(warnings))
     if not rows:
         warnings.append(missing_message)
     return {
         "found": bool(rows),
-        "evidence_insufficient": not rows,
+        "evidence_insufficient": not any(row.get("design_advice_allowed") is True for row in rows),
+        "design_advice_allowed": any(row.get("design_advice_allowed") is True for row in rows),
         "results": rows,
         "warnings": warnings,
     }
@@ -422,8 +561,10 @@ def _connect(database: Path | str) -> sqlite3.Connection:
     path = Path(database)
     if not path.is_file():
         raise FileNotFoundError(f"standards database does not exist: {path}")
-    connection = sqlite3.connect(path)
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
+    connection.create_function("normalize_text", 1, lambda value: re.sub(r"\s+", "", value or "").casefold())
+    connection.create_function("normalize_table_label", 1, lambda value: _normalize_table_label(value or ""))
     return connection
 
 

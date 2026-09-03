@@ -7,6 +7,8 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 
 本 skill 以批准目录中的 504 份本地 PDF 和 509 条审计目录为边界，提供标准状态查询、精确条款检索、版本冲突检查、页码证据和保守的设计建议。`full_source_manifest.json` 是全量文件清单；`standards.sqlite` 只包含已经成功解析并通过发布门禁的内容。
 
+解析覆盖和结构验证不等于逐页原文校验，也不是模型训练。`found=true` 仅表示命中；必须检查每项 `quality_status`、`quality_flags`、`content_role` 和 `design_advice_allowed`。旧库缺少质量字段时仍可定位原页，但不能作为已核验的设计依据。
+
 ## 运行环境与可搬迁性
 
 将 `<skill-root>` 解析为本 `SKILL.md` 所在目录，不依赖当前工作目录或固定安装盘符。
@@ -17,6 +19,8 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 - Python 自带 SQLite 必须支持 FTS5；
 - 解析新 PDF 时需要 PyMuPDF；仅查询已生成的 SQLite 不需要 PyMuPDF；
 - 正常查询不需要网络。
+- 复用已有文本/OCR无需安装或启动OCR引擎；新OCR才需要额外识别依赖。质量阈值和风险模式位于 `assets/ocr_quality.yaml`，不允许用高平均置信度覆盖单位、公式或表格风险。
+- Windows文件锁的有界原子替换重试参数位于 `assets/corpus_build.yaml`；重试耗尽仍报告失败，不使用非原子覆盖。
 - 原始 PDF 不进入 Skill 包或程序部署包。运行时按单文件先查 `<server-root>/documents/规范下载`，未命中时再查 `FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS` 配置的公共盘；
 - 默认公共盘为 `\\10.102.2.7\文件服务器\建筑结构所\14-自开发软件\规范下载`；
 - 前端不得接收磁盘路径或 UNC 路径，只能使用后端 `/api/ai/standards/...` 受控路由。
@@ -53,7 +57,7 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
    python "<skill-root>/scripts/standards_query.py" catalog-versions "GB/T 18314-2009"
    ```
 
-5. 跨规范设计建议必须同时检查各指定规范是否有已授权全文：
+5. 跨规范设计建议必须逐个检查指定规范是否命中相关正文，并检查条款覆盖的全部页质量；只有元数据、目录、公告或条文说明不算合格正文：
 
    ```powershell
    python "<skill-root>/scripts/standards_query.py" advice "设计基准地震动" `
@@ -127,5 +131,23 @@ python "<skill-root>/scripts/validate_skill.py"
 ```
 
 构建器逐本缓存解析结果。未修改的 PDF 在后续运行中直接命中缓存；任一文件失败时默认不替换现有 `standards.sqlite`。`low_text_page_count` 大于零表示仍需 OCR 或原页图像复核，不能把空文本页视为已掌握。
+
+### 已有语料修复与复用
+
+以实际PDF SHA256核验候选，不以文件名、大小或修改时间代替内容哈希。切分版本变化时重新处理已存文本；优先保留当前缓存的原生文本和表格，再补入同SHA基线的OCR。两个文本通道分别保留，不拼成伪原文；OCR漏条时保留原生文本并记录冲突。没有引擎/模型/预处理身份和逐行证据的旧OCR只作为待复核候选，重建不得清除已有复核风险。
+
+```powershell
+python "<skill-root>/scripts/build_full_corpus.py" `
+  --manifest "<skill-root>/assets/data/full_source_manifest.json" `
+  --source-root "<server-root>/documents/规范下载" `
+  --output "<server-root>/storage/ai/standards-candidate/standards.sqlite" `
+  --cache-dir "<server-root>/storage/ai/standards-candidate/cache" `
+  --reuse-cache-dir "<server-root>/storage/ai/standards-full-build/cache" `
+  --reuse-database "<prior-skill-root>/assets/data/standards.sqlite" `
+  --require-cached `
+  --report "<server-root>/storage/ai/standards-candidate/parse_report.json"
+```
+
+`--require-cached` 在缺少同SHA候选时报告失败，禁止退回重新解析；此构建入口不执行OCR。`published=true` 只表示已原子写入指定的候选输出，不表示通过内容验收或已替换运行库。保留原库，分别执行结构验证、旧功能冒烟和独立原页验证后决定是否部署。不得把新的数据库内容自动生成成“独立标准答案”。
 
 授权和保密处理见 [references/authorization-boundary.md](references/authorization-boundary.md)。

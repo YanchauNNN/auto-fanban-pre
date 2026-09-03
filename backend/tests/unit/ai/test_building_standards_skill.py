@@ -102,6 +102,10 @@ def test_skill_retrieves_exact_clause_and_citable_context(tmp_path: Path) -> Non
     assert payload["policy"]["catalog_is_not_fulltext"] is True
     assert payload["evidence"][0]["results"][0]["clause_id"] == "3.1.1"
     assert context.metadata["evidence_count"] == 1
+    assert payload["design_advice_allowed"] is False
+    assert payload["evidence_insufficient"] is True
+    assert payload["evidence"][0]["design_advice_allowed"] is False
+    assert context.metadata["design_advice_allowed"] is False
 
 
 def test_skill_reports_incomplete_payload_without_guessing(tmp_path: Path) -> None:

@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "kind": "repair_regression",
+  "scope": "Tests repaired clause boundaries and rejection of unreviewed evidence, not full content accuracy. Missing printed pages and the original erroneous unit are deliberately NOT approved.",
+  "cases": [
+    {
+      "id": "repaired-native-boundary",
+      "category": "clause_boundary",
+      "operation": "clause",
+      "standard_code": "GB 50223-2008",
+      "clause_id": "1.0.1",
+      "expected": {
+        "found": true,
+        "contains": "为明确建筑工程抗震设计的设防类别和相应的抗震设防标准，以有效地减轻地震灾害，制定本标准。",
+        "not_contains": ["1.0.2", "1.0.3", "1.0.4", "本标准适用于"],
+        "pdf_page": 7,
+        "page_end": 7,
+        "anchor_page": 7,
+        "content_role": "normative",
+        "quality_status": "review_required"
+      }
+    },
+    {
+      "id": "repaired-standalone-clause",
+      "category": "clause_boundary",
+      "operation": "clause",
+      "standard_code": "GB 50367-2013",
+      "clause_id": "3.1.7",
+      "expected": {
+        "found": true,
+        "contains": "混凝土结构的加固设计使用年限，应按下列原则确定",
+        "not_contains": ["3.1.6", "3.1.8", "对加固过程中可能出现倾斜"],
+        "pdf_page": 22,
+        "anchor_page": 22,
+        "content_role": "normative",
+        "quality_status": "review_required"
+      }
+    },
+    {
+      "id": "unstructured-table-locator-only",
+      "category": "visual_guard",
+      "operation": "table",
+      "standard_code": "GB 50098-2009",
+      "table_id": "3.2.2",
+      "expected": {
+        "found": true,
+        "evidence_insufficient": true,
+        "design_advice_allowed": false,
+        "table_label": "3.2.2",
+        "pdf_page": 15,
+        "anchor_page": 15,
+        "quality_status": "visual_required",
+        "visual_required": true
+      }
+    },
+    {
+      "id": "wrong-unit-retained-but-blocked",
+      "category": "critical_value_guard",
+      "operation": "clause",
+      "standard_code": "GB 50098-2009",
+      "clause_id": "4.1.3",
+      "expected": {
+        "found": true,
+        "evidence_insufficient": true,
+        "design_advice_allowed": false,
+        "contains": "1000m°",
+        "pdf_page": 16,
+        "anchor_page": 16,
+        "quality_status": "review_required",
+        "quality_flags_contains": ["suspicious_unit", "legacy_ocr_candidate"]
+      }
+    },
+    {
+      "id": "unrelated-standard-cannot-supply-advice",
+      "category": "scope_guard",
+      "operation": "advice",
+      "query": "防火分区",
+      "requested_codes": ["GB/T 50001-2017"],
+      "expected": {"design_advice_allowed": false, "evidence_insufficient": true}
+    },
+    {
+      "id": "blank-query-is-not-full-corpus",
+      "category": "scope_guard",
+      "operation": "search",
+      "query": "  ",
+      "expected": {"found": false, "evidence_insufficient": true}
+    }
+  ]
+}

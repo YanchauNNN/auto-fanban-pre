@@ -53,7 +53,13 @@ def build_versioned_database(tmp_path: Path) -> tuple[object, Path]:
             replacement_standard=replacement,
             major="结构",
         )
-        sources.append(builder.parse_source(spec))
+        parsed = builder.parse_source(spec)
+        # This fixture represents reviewed HTML body evidence, not parser quality acceptance.
+        for page in parsed.pages:
+            page.content_role = "normative"
+            page.quality_status = "usable"
+            page.quality_flags = []
+        sources.append(parsed)
     database = tmp_path / "standards.sqlite"
     builder.build_sqlite(sources, database)
     return load_module("standards_query.py", "standards_query_for_test"), database
