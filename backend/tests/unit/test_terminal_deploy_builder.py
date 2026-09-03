@@ -662,6 +662,7 @@ ai_layer:
     _write_file(source / "assets" / "data" / "audit_catalog.json", "[]")
     _write_file(source / "assets" / "data" / "manifest.json", "{}")
     _write_file(source / "assets" / "data" / "validation_report.json", "{}")
+    _write_file(source / "assets" / "data" / "sources" / "must-not-package.pdf", "%PDF-test")
 
     output_root = tmp_path / "build" / "fanban-terminal-deploy"
     build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
@@ -676,6 +677,8 @@ ai_layer:
     assert (installed / "SKILL.md").is_file()
     assert (installed / "scripts" / "standards_query.py").is_file()
     assert (installed / "assets" / "data" / "standards.sqlite").is_file()
+    assert not (installed / "assets" / "data" / "sources" / "must-not-package.pdf").exists()
+    assert (output_root / "documents" / "规范下载" / "README.txt").is_file()
     assert not (
         output_root
         / "backend-runtime"
@@ -1157,6 +1160,8 @@ def test_build_terminal_deploy_package_copies_offline_installers_and_writes_prep
     assert "FANBAN_AI_SPEC_PATH" in prepare_terminal
     assert "FANBAN_AI_GATEWAY_CONFIG_PATH" in prepare_terminal
     assert "FANBAN_AI_GATEWAY_PROFILE" in prepare_terminal
+    assert "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT" in prepare_terminal
+    assert "FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS" in prepare_terminal
     assert "terminal_cnpe_intranet_qwen_fast" in prepare_terminal
     assert "$env:{0}" not in prepare_terminal
     assert "OfficeProbeMode" in prepare_terminal

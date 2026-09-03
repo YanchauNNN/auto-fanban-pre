@@ -23,6 +23,7 @@ DEFAULT_DATABASE = SKILL_ROOT / "assets" / "data" / "standards.sqlite"
 DEFAULT_CATALOG = SKILL_ROOT / "assets" / "data" / "audit_catalog.json"
 DEFAULT_CASES = SKILL_ROOT / "references" / "gold_cases.json"
 DEFAULT_REPORT = SKILL_ROOT / "assets" / "data" / "validation_report.json"
+DEFAULT_SOURCE_MANIFEST = SKILL_ROOT / "assets" / "data" / "source_manifest.json"
 
 
 def run_case(
@@ -86,9 +87,7 @@ def run_case(
     if expected.get("clause_id"):
         ids = [item.get("clause_id") for item in actual.get("results") or []]
         if expected["clause_id"] not in ids:
-            failures.append(
-                f"expected clause {expected['clause_id']}, got {ids}"
-            )
+            failures.append(f"expected clause {expected['clause_id']}, got {ids}")
     if expected.get("citation_required"):
         citations = [
             item.get("citation")
@@ -135,9 +134,7 @@ def validate(
     passed_count = sum(result["passed"] for result in results)
     return {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat(),
+        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "case_count": len(cases),
         "passed_count": passed_count,
         "failed_count": len(cases) - passed_count,
@@ -161,17 +158,30 @@ def _sha256(path: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the offline standards skill.")
+    parser = argparse.ArgumentParser(
+        description="Validate the offline standards skill."
+    )
     parser.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument("--source-manifest", type=Path, default=DEFAULT_SOURCE_MANIFEST)
     args = parser.parse_args(argv)
-    report = validate(
-        database=args.database,
-        catalog=args.catalog,
-        cases_path=args.cases,
-    )
+    source_manifest = json.loads(args.source_manifest.read_text(encoding="utf-8"))
+    source_count = len(source_manifest.get("sources", []))
+    if source_count > 1:
+        from validate_full_corpus import validate_full_corpus
+
+        report = validate_full_corpus(
+            database=args.database,
+            source_manifest=args.source_manifest,
+        )
+    else:
+        report = validate(
+            database=args.database,
+            catalog=args.catalog,
+            cases_path=args.cases,
+        )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
         json.dumps(report, ensure_ascii=False, indent=2),
@@ -179,11 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(
         json.dumps(
-            {
-                key: value
-                for key, value in report.items()
-                if key != "results"
-            },
+            {key: value for key, value in report.items() if key != "results"},
             ensure_ascii=False,
             indent=2,
         )

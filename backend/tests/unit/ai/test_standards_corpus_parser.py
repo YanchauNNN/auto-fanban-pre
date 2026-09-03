@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -171,3 +173,53 @@ def test_sqlite_index_supports_exact_clause_and_full_text_search(tmp_path: Path)
     assert exact[0]["page_start"] == 2
     assert search[0]["clause_id"] == "4.1.2"
     assert search[0]["anchor"].endswith("#page=3")
+
+
+def test_manifest_build_uses_external_source_root_and_stores_relative_path(
+    tmp_path: Path,
+) -> None:
+    parser = load_parser_module()
+    source_root = tmp_path / "规范下载"
+    pdf_path = source_root / "001-010" / "GB T TEST-2026 测试标准.pdf"
+    pdf_path.parent.mkdir(parents=True)
+    make_pdf(pdf_path)
+    manifest = tmp_path / "source_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "standard_code": "GB/T TEST-2026",
+                        "standard_name": "测试标准",
+                        "version": "2026",
+                        "source_path": "001-010/GB T TEST-2026 测试标准.pdf",
+                        "official_source_url": "",
+                        "authorization": "内部离线检索已授权",
+                        "confidentiality": "内部",
+                        "official_status": "待核验",
+                        "replacement_standard": "",
+                        "major": "建筑结构总图",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    database = tmp_path / "standards.sqlite"
+
+    report = parser.build_from_manifest(
+        manifest,
+        database,
+        source_root=source_root,
+    )
+
+    assert report["source_count"] == 1
+    connection = sqlite3.connect(database)
+    try:
+        stored_path = connection.execute(
+            "SELECT source_path FROM sources"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+    assert stored_path == "001-010/GB T TEST-2026 测试标准.pdf"

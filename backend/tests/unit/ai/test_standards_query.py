@@ -74,6 +74,12 @@ def test_exact_clause_returns_version_page_anchor_and_citation(tmp_path: Path) -
     assert "GB/T DEMO-2026" in result["results"][0]["citation"]
     assert "第3.1.1条" in result["results"][0]["citation"]
     assert "第12页" in result["results"][0]["citation"]
+    assert result["results"][0]["links"] == {
+        "page": "/api/ai/standards/2/page/12",
+        "document": "/api/ai/standards/2/document#page=12",
+        "download": "/api/ai/standards/2/download",
+    }
+    assert "source_path" not in result["results"][0]
 
 
 def test_deprecated_standard_returns_replacement_warning(tmp_path: Path) -> None:

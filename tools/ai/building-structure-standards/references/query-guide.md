@@ -25,6 +25,9 @@ python scripts/standards_query.py clause "HAF 101-2023" 4.1.2
 - `results[].printed_page_start`
 - `results[].anchor`
 - `results[].citation`
+- `results[].links.page`：后端生成的精确原页 PNG；
+- `results[].links.document`：浏览器内打开 PDF，并附带页码片段；
+- `results[].links.download`：由后端发送原 PDF；
 - `warnings`
 
 ### 正文检索
@@ -80,4 +83,6 @@ python scripts/standards_query.py advice "设计基准地震动" `
 - `核验失败`：表示官方站点访问失败，需要重试，不代表标准不存在。
 - 解析条款跨页异常：用锚点打开原 PDF 页视觉复核。
 - 扫描 PDF 无文本：先按保密要求进行 OCR，再重新入库。
+- 页面含图表或公式：优先打开 `links.page` 视觉复核；模型支持图片时后端仅附带少量命中页，失败自动退回文本。
+- 原 PDF 不在本地目录：后端按相同相对路径逐文件查找公共盘；两处都不存在时报告 `standard_source_not_found`。
 - 版本冲突：保留旧版本证据用于历史项目，但当前设计优先核对官方现行版本。

@@ -27,15 +27,11 @@ def _rebar_skill_bundle_sha256(skill_root: Path) -> str:
         ("SKILL.md", (skill_root / "SKILL.md").read_text(encoding="utf-8")),
         (
             "references/io-schema.md",
-            (skill_root / "references" / "io-schema.md").read_text(
-                encoding="utf-8"
-            ),
+            (skill_root / "references" / "io-schema.md").read_text(encoding="utf-8"),
         ),
         (
             "references/ranking-rules.md",
-            (skill_root / "references" / "ranking-rules.md").read_text(
-                encoding="utf-8"
-            ),
+            (skill_root / "references" / "ranking-rules.md").read_text(encoding="utf-8"),
         ),
     ]
     content = "\n\n".join(f"## {name}\n{text}" for name, text in parts)
@@ -102,9 +98,15 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
             type(self).application_conversations[conversation_id] = conversation
             self._send_json(self._application_conversation_payload(conversation), status_code=201)
             return
-        if application_path.startswith("/api/ai/conversations/") and application_path.endswith("/messages"):
+        if application_path.startswith("/api/ai/conversations/") and application_path.endswith(
+            "/messages"
+        ):
             self._read_json_body()
-            conversation_id = application_path.removeprefix("/api/ai/conversations/").removesuffix("/messages").rstrip("/")
+            conversation_id = (
+                application_path.removeprefix("/api/ai/conversations/")
+                .removesuffix("/messages")
+                .rstrip("/")
+            )
             conversation = type(self).application_conversations.get(conversation_id)
             if conversation is None or conversation["owner_key"] != self._application_owner_key():
                 self._send_json({"detail": "conversation_not_found"}, status_code=404)
@@ -148,9 +150,7 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
                     "object": "response",
                     "model": payload.get("model"),
                     "output_text": (
-                        "RESPONSES_FILE_OK_7319"
-                        if has_input_file
-                        else "RESPONSES_API_OK_7319"
+                        "RESPONSES_FILE_OK_7319" if has_input_file else "RESPONSES_API_OK_7319"
                     ),
                     "output": [],
                 }
@@ -246,9 +246,7 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
             return
 
         if isinstance(last_content, list):
-            content_types = {
-                item.get("type") for item in last_content if isinstance(item, dict)
-            }
+            content_types = {item.get("type") for item in last_content if isinstance(item, dict)}
             if "image_url" in content_types:
                 marker = (
                     "vision_marker_7319"
@@ -318,7 +316,13 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
             return
         if "ROUTING_BUSINESS_7319" in prompt:
             self._send_tool_calls(
-                [("route-drawing", "transfer_to_drawing_agent", {"reason": "explicit_business_request"})]
+                [
+                    (
+                        "route-drawing",
+                        "transfer_to_drawing_agent",
+                        {"reason": "explicit_business_request"},
+                    )
+                ]
             )
             return
         if "PARALLEL_TOOL_PROBE_7319" in prompt:
@@ -456,9 +460,7 @@ class _OpenAiCompatibleHandler(BaseHTTPRequestHandler):
                     "choices": [
                         {
                             "delta": {
-                                "tool_calls": [
-                                    {"index": 0, "function": {"arguments": '"b":12}'}}
-                                ]
+                                "tool_calls": [{"index": 0, "function": {"arguments": '"b":12}'}}]
                             },
                             "finish_reason": "tool_calls",
                         }
@@ -587,8 +589,14 @@ profiles:
     assert application["profile_matches_selected"] is True
     assert application["sensitive_response_fields"] == []
     assert result["readiness"]["application_api_proxy"]["status"] == "passed"
-    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["Host"] == "fanban-terminal.local"
-    assert _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"] == "198.18.0.73:49100"
+    assert (
+        _OpenAiCompatibleHandler.received_application_state_headers[-1]["Host"]
+        == "fanban-terminal.local"
+    )
+    assert (
+        _OpenAiCompatibleHandler.received_application_state_headers[-1]["X-Forwarded-For"]
+        == "198.18.0.73:49100"
+    )
 
 
 def test_ai_connectivity_script_reports_application_api_failure_without_strict_mode_crash(
@@ -740,10 +748,17 @@ profiles:
     assert result["schema_version"] == "0.6"
     assert result["status"] == "passed"
     assert result["script"]["version"] == "fanban-ai-connectivity@0.7"
-    assert result["script"]["sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest().upper()
-    assert result["environment"]["config_sha256"] == hashlib.sha256(
-        config_path.read_bytes(),
-    ).hexdigest().upper()
+    assert (
+        result["script"]["sha256"] == hashlib.sha256(script_path.read_bytes()).hexdigest().upper()
+    )
+    assert (
+        result["environment"]["config_sha256"]
+        == hashlib.sha256(
+            config_path.read_bytes(),
+        )
+        .hexdigest()
+        .upper()
+    )
     assert result["checks"]["chat"]["content_type"] == "application/json"
     assert result["checks"]["ansys_mapdl_skill"]["skill_id"] == "ansys_mapdl_18_2"
     assert result["checks"]["ansys_mapdl_skill"]["local_status"] in {
@@ -1063,12 +1078,13 @@ profiles:
         timeout=90,
     )
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 1, completed.stdout + completed.stderr
     result = json.loads(output_path.read_text(encoding="utf-8-sig"))
     runtime = result["checks"]["runtime"]
     assert runtime["python_version"] is None
     assert "MissingOpenParenthesisAfterKeyword" in runtime["error"]
     assert "\n" in runtime["error"]
+    assert result["readiness"]["building_standards_skill"]["status"] != "passed"
 
 
 def test_optional_agent_and_multimodal_rejections_do_not_fail_core_connectivity(
@@ -1237,6 +1253,27 @@ def test_ai_connectivity_script_reports_ansys_mapdl_skill_readiness() -> None:
         assert marker in script_text
 
 
+def test_ai_connectivity_script_reports_building_standards_sources() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    script_text = (repo_root / "tools" / "ai" / "test_ai_model_connectivity.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    required_probe_markers = (
+        "Get-BuildingStandardsSkillProbe",
+        "FANBAN_BUILDING_STANDARDS_SKILL_ROOT",
+        "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT",
+        "FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS",
+        "building_structure_standards",
+        "effective_pdf_count",
+        "database_sha256_matches",
+        "standards_query.py",
+        "building_standards_skill",
+    )
+    for marker in required_probe_markers:
+        assert marker in script_text
+
+
 def test_terminal_profile_probes_packaged_rebar_skill_with_structured_model(
     tmp_path: Path,
     openai_compatible_server: str,
@@ -1336,13 +1373,9 @@ profiles:
     assert skill["validation"]["status"] == "passed"
     assert skill["structured_selection"]["status"] == "passed"
     assert skill["structured_selection"]["model"] == "Qwen3.6-35A3-structured"
-    assert skill["structured_selection"]["selected_candidate_id"] == (
-        "linear-l1-d16-s200"
-    )
+    assert skill["structured_selection"]["selected_candidate_id"] == ("linear-l1-d16-s200")
     assert result["readiness"]["structured_model"]["status"] == "passed"
-    assert result["readiness"]["calculation_book_rebar_skill"]["status"] == (
-        "passed"
-    )
+    assert result["readiness"]["calculation_book_rebar_skill"]["status"] == ("passed")
     structured_payloads = [
         payload
         for payload in _OpenAiCompatibleHandler.received_payloads
@@ -1372,8 +1405,7 @@ def test_ai_connectivity_script_records_empty_ansys_query_without_crashing(
     required_files = {
         "SKILL.md": "# Test ANSYS Skill\n",
         "scripts/validate_mapdl_skill.py": (
-            "import json\n"
-            "print(json.dumps({'passed': True, 'integrity': {}, 'regression': {}}))\n"
+            "import json\nprint(json.dumps({'passed': True, 'integrity': {}, 'regression': {}}))\n"
         ),
         "scripts/mapdl_query.py": (
             "import json\n"

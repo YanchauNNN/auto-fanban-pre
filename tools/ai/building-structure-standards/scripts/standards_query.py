@@ -337,7 +337,7 @@ def _fetch_clauses(
             for row in connection.execute(
                 f"""
                 SELECT
-                    s.standard_code, s.standard_name, s.version, s.major,
+                    s.source_id, s.standard_code, s.standard_name, s.version, s.major,
                     s.official_status, s.replacement_standard,
                     s.official_source_url, s.authorization, s.confidentiality,
                     c.clause_id, c.heading, c.text, c.page_start,
@@ -370,6 +370,15 @@ def _fetch_clauses(
             f"第{row['clause_id']}条，"
             f"{_page_label(page, row['printed_page_start'])}（{row['anchor']}）"
         )
+        source_id = row["source_id"]
+        page_number = row["page_start"]
+        row["links"] = {
+            "page": f"/api/ai/standards/{source_id}/page/{page_number}",
+            "document": (
+                f"/api/ai/standards/{source_id}/document#page={page_number}"
+            ),
+            "download": f"/api/ai/standards/{source_id}/download",
+        }
     return rows
 
 

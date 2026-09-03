@@ -5,7 +5,7 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 
 # 建筑结构总图规范离线库
 
-本 skill 以已授权的本地语料和 509 条审计目录为边界，提供标准状态查询、精确条款检索、版本冲突检查、页码证据和保守的设计建议。目录中存在但没有合法全文的标准只能回答元数据，不能回答条款、数值或表格。
+本 skill 以批准目录中的 504 份本地 PDF 和 509 条审计目录为边界，提供标准状态查询、精确条款检索、版本冲突检查、页码证据和保守的设计建议。`full_source_manifest.json` 是全量文件清单；`standards.sqlite` 只包含已经成功解析并通过发布门禁的内容。
 
 ## 运行环境与可搬迁性
 
@@ -17,14 +17,18 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 - Python 自带 SQLite 必须支持 FTS5；
 - 解析新 PDF 时需要 PyMuPDF；仅查询已生成的 SQLite 不需要 PyMuPDF；
 - 正常查询不需要网络。
+- 原始 PDF 不进入 Skill 包或程序部署包。运行时按单文件先查 `<server-root>/documents/规范下载`，未命中时再查 `FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS` 配置的公共盘；
+- 默认公共盘为 `\\10.102.2.7\文件服务器\建筑结构所\14-自开发软件\规范下载`；
+- 前端不得接收磁盘路径或 UNC 路径，只能使用后端 `/api/ai/standards/...` 受控路由。
 
 默认数据：
 
 - `assets/data/standards.sqlite`：已授权全文条款、页码和表格索引；
 - `assets/data/audit_catalog.json`：509 条语料获取审计目录；
 - `assets/data/source_manifest.json`：实际入库源文件及授权声明；
+- `assets/data/full_source_manifest.json`：批准目录中全部 PDF 的可搬迁相对路径清单；
 - `assets/data/manifest.json`：包内文件 SHA256；
-- `assets/data/validation_report.json`：标准答案验证报告。
+- `assets/data/validation_report.json`：单文档样例使用标准答案验证，全量语料使用数据库结构、来源映射和 SHA256 一致性验证。
 
 ## 核心工作流
 
@@ -58,6 +62,8 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 
 6. 仅当 `evidence_level` 为 `sufficient` 时，才可把结果整理为有依据的设计建议。`partial` 只能给出初步检查项并列明缺件；`none` 必须停止确定性结论。
 7. 用中文回答，逐项给出标准号、版本、条款号、PDF 物理页、印刷页和锚点。
+8. 命中记录存在 `links` 时，可输出 `[查看原页](...)`、`[打开规范](...)` 和 `[下载规范](...)`；不得输出本地盘符或公共盘路径。
+9. 后端最多向模型附带 2 张命中页 PNG。模型不支持图片时自动退回纯文本证据，不能因此中断回答。
 
 详细命令和结果字段见 [references/query-guide.md](references/query-guide.md)。
 
@@ -101,15 +107,25 @@ description: Search, quote, compare, and explain the locally authorized Chinese 
 5. PDF/HTML 解析成功并通过页码抽查；
 6. 标准答案验证无回归。
 
-构建命令：
+全量清单与可断点续建命令：
 
 ```powershell
-python "<skill-root>/scripts/build_corpus.py" `
-  --manifest "<skill-root>/assets/data/source_manifest.json" `
+python "<skill-root>/scripts/inventory_sources.py" `
+  --source-root "<server-root>/documents/规范下载" `
+  --audit-catalog "<skill-root>/assets/data/audit_catalog.json" `
+  --output "<skill-root>/assets/data/full_source_manifest.json"
+
+python "<skill-root>/scripts/build_full_corpus.py" `
+  --manifest "<skill-root>/assets/data/full_source_manifest.json" `
+  --source-root "<server-root>/documents/规范下载" `
   --output "<skill-root>/assets/data/standards.sqlite" `
-  --report "<skill-root>/assets/data/parse_report.json"
+  --cache-dir "<server-root>/storage/ai/standards-full-build/cache" `
+  --report "<skill-root>/assets/data/parse_report.json" `
+  --validation-report "<skill-root>/assets/data/validation_report.json"
 
 python "<skill-root>/scripts/validate_skill.py"
 ```
+
+构建器逐本缓存解析结果。未修改的 PDF 在后续运行中直接命中缓存；任一文件失败时默认不替换现有 `standards.sqlite`。`low_text_page_count` 大于零表示仍需 OCR 或原页图像复核，不能把空文本页视为已掌握。
 
 授权和保密处理见 [references/authorization-boundary.md](references/authorization-boundary.md)。

@@ -442,6 +442,19 @@ ai_layer:
         max_context_chars: 20000
         query_timeout_seconds: 20
         history_followup_messages: 6
+        source_access:
+          primary_root: "documents/规范下载"
+          primary_root_env_var: "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT"
+          fallback_roots:
+            - '\\10.102.2.7\文件服务器\建筑结构所\14-自开发软件\规范下载'
+          fallback_roots_env_var: "FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS"
+          per_file_fallback: true
+          preview_enabled: true
+          download_enabled: true
+          model_page_images_enabled: true
+          page_render_dpi: 144
+          max_model_page_images: 2
+          verify_sha256: false
       - skill_id: "reinforcement_table_normalizer"
         name: "墙体与楼板配筋表规范化"
         description: "用于计算书预检判定非标准且用户确认后的 Worker 结构化模型调用；标准表和 HTTP 预检不调用模型。"

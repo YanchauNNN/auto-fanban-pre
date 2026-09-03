@@ -70,6 +70,16 @@ def test_ai_chat_defaults_to_two_single_agent_modes_with_read_only_host_access()
     assert chat.skills[1].root_env_var == (
         "FANBAN_BUILDING_STANDARDS_SKILL_ROOT"
     )
+    assert chat.skills[1].source_access.primary_root == "documents/规范下载"
+    assert chat.skills[1].source_access.primary_root_env_var == (
+        "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT"
+    )
+    assert chat.skills[1].source_access.fallback_roots == [
+        r"\\10.102.2.7\文件服务器\建筑结构所\14-自开发软件\规范下载"
+    ]
+    assert chat.skills[1].source_access.per_file_fallback is True
+    assert chat.skills[1].source_access.preview_enabled is True
+    assert chat.skills[1].source_access.download_enabled is True
     assert chat.skills[2].root == "tools/ai/reinforcement-table-normalizer"
     assert chat.skills[2].root_env_var == ""
     assert chat.mcp_servers == []

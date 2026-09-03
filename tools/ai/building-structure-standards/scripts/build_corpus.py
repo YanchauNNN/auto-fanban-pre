@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import sqlite3
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, fields
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
@@ -35,6 +35,7 @@ class SourceSpec:
     official_status: str = ""
     replacement_standard: str = ""
     major: str = ""
+    relative_source_path: str = ""
 
 
 @dataclass
@@ -161,9 +162,7 @@ def _parse_html(source: SourceSpec, path: Path) -> ParsedSource:
         declared_page = int(event["page"])
         page_text.setdefault(declared_page, []).append(text)
         match = (
-            CLAUSE_HEADING_RE.match(text)
-            if str(event["tag"]).startswith("h")
-            else None
+            CLAUSE_HEADING_RE.match(text) if str(event["tag"]).startswith("h") else None
         )
         if match:
             if current is not None:
@@ -239,9 +238,7 @@ def _split_clauses(
                 if current is not None:
                     clauses.append(current)
                 clause_id = (
-                    match.group(1)
-                    if match
-                    else re.sub(r"\s+", "", special.group(1))
+                    match.group(1) if match else re.sub(r"\s+", "", special.group(1))
                 )
                 current = ClauseRecord(
                     clause_id=clause_id,
@@ -280,7 +277,6 @@ def build_sqlite(
     parsed_sources: Iterable[ParsedSource],
     database_path: Path | str,
 ) -> dict[str, Any]:
-    sources = list(parsed_sources)
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -344,8 +340,24 @@ def build_sqlite(
             CREATE INDEX idx_clauses_source_clause ON clauses(source_id, clause_id);
             """
         )
-        for source_index, parsed in enumerate(sources, start=1):
+        source_count = 0
+        page_count = 0
+        clause_count = 0
+        table_count = 0
+        warning_items: list[dict[str, Any]] = []
+        for source_index, parsed in enumerate(parsed_sources, start=1):
             spec = parsed.source
+            source_count += 1
+            page_count += len(parsed.pages)
+            clause_count += len(parsed.clauses)
+            table_count += len(parsed.tables)
+            if parsed.warnings:
+                warning_items.append(
+                    {
+                        "standard_code": spec.standard_code,
+                        "warnings": parsed.warnings,
+                    }
+                )
             connection.execute(
                 """
                 INSERT INTO sources(
@@ -363,7 +375,7 @@ def build_sqlite(
                     spec.major,
                     spec.official_status,
                     spec.replacement_standard,
-                    Path(spec.source_path).name,
+                    spec.relative_source_path or Path(spec.source_path).name,
                     parsed.source_sha256,
                     spec.official_source_url,
                     spec.authorization,
@@ -442,15 +454,11 @@ def build_sqlite(
         connection.close()
 
     return {
-        "source_count": len(sources),
-        "page_count": sum(len(item.pages) for item in sources),
-        "clause_count": sum(len(item.clauses) for item in sources),
-        "table_count": sum(len(item.tables) for item in sources),
-        "warnings": [
-            {"standard_code": item.source.standard_code, "warnings": item.warnings}
-            for item in sources
-            if item.warnings
-        ],
+        "source_count": source_count,
+        "page_count": page_count,
+        "clause_count": clause_count,
+        "table_count": table_count,
+        "warnings": warning_items,
         "database_sha256": _sha256(path),
     }
 
@@ -502,28 +510,46 @@ def query_index(
 def build_from_manifest(
     manifest_path: Path | str,
     database_path: Path | str,
+    *,
+    source_root: Path | str | None = None,
 ) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     payload = json.loads(manifest_file.read_text(encoding="utf-8"))
-    parsed: list[ParsedSource] = []
     skipped: list[dict[str, str]] = []
-    for item in payload.get("sources", []):
-        source_data = dict(item)
-        source_path = Path(source_data["source_path"])
-        if not source_path.is_absolute():
-            source_path = (manifest_file.parent / source_path).resolve()
-        source_data["source_path"] = str(source_path)
-        authorization = str(source_data.get("authorization") or "")
-        if "已授权" not in authorization:
-            skipped.append(
-                {
-                    "standard_code": str(source_data.get("standard_code") or ""),
-                    "reason": "authorization gate",
-                }
+    source_base = (
+        Path(source_root).resolve()
+        if source_root is not None
+        else manifest_file.parent.resolve()
+    )
+    source_fields = {item.name for item in fields(SourceSpec)}
+
+    def iter_parsed_sources() -> Iterable[ParsedSource]:
+        for item in payload.get("sources", []):
+            source_data = {
+                key: value for key, value in dict(item).items() if key in source_fields
+            }
+            source_path = Path(source_data["source_path"])
+            relative_source_path = (
+                source_path.as_posix()
+                if not source_path.is_absolute()
+                else source_path.name
             )
-            continue
-        parsed.append(parse_source(SourceSpec(**source_data)))
-    report = build_sqlite(parsed, database_path)
+            if not source_path.is_absolute():
+                source_path = (source_base / source_path).resolve()
+            source_data["source_path"] = str(source_path)
+            source_data["relative_source_path"] = relative_source_path
+            authorization = str(source_data.get("authorization") or "")
+            if "已授权" not in authorization:
+                skipped.append(
+                    {
+                        "standard_code": str(source_data.get("standard_code") or ""),
+                        "reason": "authorization gate",
+                    }
+                )
+                continue
+            yield parse_source(SourceSpec(**source_data))
+
+    report = build_sqlite(iter_parsed_sources(), database_path)
     report["skipped_sources"] = skipped
     report["manifest_sha256"] = _sha256(manifest_file)
     return report
@@ -645,14 +671,9 @@ class _StandardsHtmlParser(HTMLParser):
             self._cell_tag = ""
             self._cell_text = []
         elif tag == "tr" and self._table is not None and self._row is not None:
-            self._table["rows"].append(
-                [cell[0] if cell else "" for cell in self._row]
-            )
+            self._table["rows"].append([cell[0] if cell else "" for cell in self._row])
             self._row = None
-        if (
-            tag == self._block_tag
-            and len(self.stack) == self._block_depth
-        ):
+        if tag == self._block_tag and len(self.stack) == self._block_depth:
             self.text_events.append(
                 {
                     "tag": self._block_tag,
@@ -694,8 +715,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--source-root", type=Path)
     args = parser.parse_args(argv)
-    report = build_from_manifest(args.manifest, args.output)
+    report = build_from_manifest(
+        args.manifest,
+        args.output,
+        source_root=args.source_root,
+    )
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)

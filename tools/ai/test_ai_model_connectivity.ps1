@@ -35,7 +35,17 @@ function Get-FileSha256 {
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return $null
     }
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+    $stream = $null
+    $sha = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hash = $sha.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hash)).Replace("-", "")
+    } finally {
+        if ($null -ne $sha) { $sha.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
 }
 
 function ConvertTo-StringArray {
@@ -2750,6 +2760,249 @@ function Get-AnsysMapdlSkillProbe {
     return $result
 }
 
+function Get-StandardsPdfRootProbe {
+    param(
+        [string]$PathText,
+        [string]$Kind
+    )
+
+    $resolved = Resolve-FullPathOrRaw $PathText
+    $files = @()
+    $validCount = 0
+    $invalidFiles = [System.Collections.Generic.List[object]]::new()
+    try {
+        if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
+            return [PSCustomObject]@{
+                status = "not_found"
+                kind = $Kind
+                path = $resolved
+                pdf_count = 0
+                valid_pdf_count = 0
+                invalid_pdf_count = 0
+                sample_files = @()
+                invalid_files = @()
+                error = "standards source directory does not exist"
+            }
+        }
+        $files = @(Get-ChildItem -LiteralPath $resolved -Recurse -File -Filter "*.pdf" -ErrorAction Stop)
+        foreach ($file in @($files)) {
+            $stream = $null
+            try {
+                $stream = [System.IO.File]::Open(
+                    $file.FullName,
+                    [System.IO.FileMode]::Open,
+                    [System.IO.FileAccess]::Read,
+                    [System.IO.FileShare]::ReadWrite
+                )
+                $bytes = New-Object byte[] 5
+                $readCount = $stream.Read($bytes, 0, 5)
+                if ([System.Text.Encoding]::ASCII.GetString($bytes, 0, $readCount) -ne "%PDF-") {
+                    throw "invalid PDF signature"
+                }
+                $validCount += 1
+            } catch {
+                $invalidFiles.Add([PSCustomObject]@{
+                    path = $file.FullName
+                    error = $_.Exception.Message
+                })
+            } finally {
+                if ($null -ne $stream) { $stream.Dispose() }
+            }
+        }
+        return [PSCustomObject]@{
+            status = if ($validCount -gt 0) { "passed" } else { "failed" }
+            kind = $Kind
+            path = $resolved
+            pdf_count = @($files).Count
+            valid_pdf_count = $validCount
+            invalid_pdf_count = @($invalidFiles).Count
+            sample_files = @($files | Select-Object -First 10 | ForEach-Object { $_.FullName })
+            invalid_files = @($invalidFiles)
+            error = if ($validCount -gt 0) { $null } else { "no readable PDF with a valid signature" }
+        }
+    } catch {
+        return [PSCustomObject]@{
+            status = "failed"
+            kind = $Kind
+            path = $resolved
+            pdf_count = @($files).Count
+            valid_pdf_count = $validCount
+            invalid_pdf_count = @($invalidFiles).Count
+            sample_files = @()
+            invalid_files = @($invalidFiles)
+            error = $_.Exception.Message
+        }
+    }
+}
+
+function Get-BuildingStandardsSkillProbe {
+    param(
+        [string]$Root,
+        [string]$PythonPath
+    )
+
+    $configuredSkillRoot = [Environment]::GetEnvironmentVariable("FANBAN_BUILDING_STANDARDS_SKILL_ROOT")
+    $rootSource = "package_default"
+    if ([string]::IsNullOrWhiteSpace($configuredSkillRoot)) {
+        $skillCandidates = @(
+            (Join-Path $Root "storage\ai\skills\building-structure-standards"),
+            (Join-Path $Root "tools\ai\building-structure-standards")
+        )
+        $configuredSkillRoot = @($skillCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1)
+        if (@($configuredSkillRoot).Count -gt 0) {
+            $configuredSkillRoot = [string]$configuredSkillRoot[0]
+        } else {
+            $configuredSkillRoot = [string]$skillCandidates[0]
+        }
+    } else {
+        $rootSource = "environment"
+    }
+    $skillRoot = Resolve-FullPathOrRaw $configuredSkillRoot
+    $requiredRelativePaths = @(
+        "SKILL.md",
+        "scripts\standards_query.py",
+        "scripts\validate_full_corpus.py",
+        "assets\data\standards.sqlite",
+        "assets\data\audit_catalog.json",
+        "assets\data\manifest.json",
+        "assets\data\validation_report.json"
+    )
+    $files = @(
+        foreach ($relativePath in $requiredRelativePaths) {
+            $path = Join-Path $skillRoot $relativePath
+            [PSCustomObject]@{
+                relative_path = $relativePath.Replace("\", "/")
+                exists = Test-Path -LiteralPath $path -PathType Leaf
+                bytes = if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Item -LiteralPath $path).Length } else { $null }
+            }
+        }
+    )
+    $missingFiles = @($files | Where-Object { -not $_.exists } | ForEach-Object { $_.relative_path })
+
+    $primaryRoot = [Environment]::GetEnvironmentVariable("FANBAN_BUILDING_STANDARDS_SOURCE_ROOT")
+    if ([string]::IsNullOrWhiteSpace($primaryRoot)) {
+        $standardsFolderName = [System.Text.RegularExpressions.Regex]::Unescape('\u89c4\u8303\u4e0b\u8f7d')
+        $primaryRoot = Join-Path $Root ("documents\" + $standardsFolderName)
+    }
+    $fallbackText = [Environment]::GetEnvironmentVariable("FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS")
+    if ([string]::IsNullOrWhiteSpace($fallbackText)) {
+        $fallbackSegments = @(
+            [System.Text.RegularExpressions.Regex]::Unescape('\u6587\u4ef6\u670d\u52a1\u5668'),
+            [System.Text.RegularExpressions.Regex]::Unescape('\u5efa\u7b51\u7ed3\u6784\u6240'),
+            ("14-" + [System.Text.RegularExpressions.Regex]::Unescape('\u81ea\u5f00\u53d1\u8f6f\u4ef6')),
+            [System.Text.RegularExpressions.Regex]::Unescape('\u89c4\u8303\u4e0b\u8f7d')
+        )
+        $fallbackText = "\\10.102.2.7\" + ($fallbackSegments -join "\")
+    }
+    $primary = Get-StandardsPdfRootProbe -PathText $primaryRoot -Kind "primary"
+    $fallbacks = [System.Collections.Generic.List[object]]::new()
+    if ($primary.valid_pdf_count -eq 0) {
+        foreach ($fallbackRoot in @($fallbackText -split ';')) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$fallbackRoot)) {
+                $fallbacks.Add((Get-StandardsPdfRootProbe -PathText ([string]$fallbackRoot).Trim() -Kind "fallback"))
+            }
+        }
+    }
+    $effectivePdfCount = [int]$primary.valid_pdf_count
+    foreach ($fallback in @($fallbacks)) {
+        $effectivePdfCount += [int]$fallback.valid_pdf_count
+    }
+
+    $result = [PSCustomObject]@{
+        skill_id = "building_structure_standards"
+        status = "not_installed"
+        local_status = "not_installed"
+        root = $skillRoot
+        root_source = $rootSource
+        required_files = $files
+        missing_files = $missingFiles
+        sources = [PSCustomObject]@{
+            per_file_fallback = $true
+            primary = $primary
+            fallbacks = @($fallbacks)
+            effective_pdf_count = $effectivePdfCount
+        }
+        query = [PSCustomObject]@{
+            attempted = $false
+            status = "not_attempted"
+            operation = "catalog"
+            input = "GB 50010-2010"
+            found = $null
+            elapsed_ms = $null
+            error = $null
+        }
+        validation = [PSCustomObject]@{
+            status = "not_attempted"
+            expected_database_sha256 = $null
+            actual_database_sha256 = $null
+            database_sha256_matches = $null
+            error = $null
+        }
+        application_registration = [PSCustomObject]@{
+            status = "not_checked"
+            registered = $null
+            enabled = $null
+            auto_trigger = $null
+            available = $null
+            error = $null
+        }
+        error = $null
+    }
+    if (@($missingFiles).Count -gt 0) {
+        $result.error = "Building standards Skill payload is incomplete."
+        return $result
+    }
+    if ([string]::IsNullOrWhiteSpace($PythonPath)) {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "No Python runtime was available for the building standards Skill probe."
+        return $result
+    }
+
+    $databasePath = Join-Path $skillRoot "assets\data\standards.sqlite"
+    $validationPath = Join-Path $skillRoot "assets\data\validation_report.json"
+    try {
+        $validationJson = Get-Content -LiteralPath $validationPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $expectedDatabaseSha256 = [string](Get-JsonPropertyValue $validationJson "database_sha256")
+        $actualDatabaseSha256 = [string](Get-FileSha256 $databasePath)
+        $result.validation.expected_database_sha256 = $expectedDatabaseSha256
+        $result.validation.actual_database_sha256 = $actualDatabaseSha256
+        $result.validation.database_sha256_matches = (
+            -not [string]::IsNullOrWhiteSpace($expectedDatabaseSha256) -and
+            $expectedDatabaseSha256.Equals($actualDatabaseSha256, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+        $result.validation.status = if ($result.validation.database_sha256_matches) { "passed" } else { "failed" }
+        if ($result.validation.status -ne "passed") {
+            $result.validation.error = "Validation report does not match the packaged standards database."
+        }
+    } catch {
+        $result.validation.status = "failed"
+        $result.validation.error = $_.Exception.Message
+    }
+
+    $queryProcess = Invoke-LocalJsonProcess -FileName $PythonPath `
+        -Arguments @((Join-Path $skillRoot "scripts\standards_query.py"), "catalog", "GB 50010-2010") -TimeoutSec 60
+    $result.query.attempted = $queryProcess.attempted
+    $result.query.elapsed_ms = $queryProcess.elapsed_ms
+    $result.query.error = $queryProcess.error
+    $result.query.found = if ($null -ne $queryProcess.json) { Get-JsonPropertyValue $queryProcess.json "found" } else { $null }
+    $result.query.status = if ($queryProcess.exit_code -eq 0 -and $null -ne $queryProcess.json) { "passed" } else { "failed" }
+
+    if (
+        $result.query.status -eq "passed" -and
+        $result.validation.status -eq "passed" -and
+        $effectivePdfCount -gt 0
+    ) {
+        $result.status = "passed"
+        $result.local_status = "passed"
+    } else {
+        $result.status = "failed"
+        $result.local_status = "failed"
+        $result.error = "Building standards Skill validation, query, or PDF source probe failed."
+    }
+    return $result
+}
+
 function Set-AnsysMapdlApplicationRegistration {
     param(
         [object]$SkillProbe,
@@ -2789,6 +3042,7 @@ function Set-AnsysMapdlApplicationRegistration {
 }
 
 $ansysMapdlSkillResult = Get-AnsysMapdlSkillProbe -Root $root -PythonPath $runtimeResult.selected_python
+$buildingStandardsSkillResult = Get-BuildingStandardsSkillProbe -Root $root -PythonPath $runtimeResult.selected_python
 $rebarSuggestionSkillResult = Get-CalculationBookRebarSkillProbe `
     -Root $root -PythonPath $runtimeResult.selected_python `
     -SelectedProfile $selectedProfile -StructuredModel $structuredModel `
@@ -2801,11 +3055,58 @@ if (
 ) {
     Add-DiagnosticError $errors "calculation_book_rebar_skill" $rebarSuggestionSkillResult.error
 }
+
+function Set-BuildingStandardsApplicationRegistration {
+    param(
+        [object]$SkillProbe,
+        [object]$ApplicationApiProbe
+    )
+
+    if (-not $ApplicationApiProbe.configured) {
+        $SkillProbe.application_registration.status = "not_configured"
+        return
+    }
+    if ($ApplicationApiProbe.direct.status -ne "passed") {
+        $SkillProbe.application_registration.status = "inconclusive"
+        $SkillProbe.application_registration.error = "Application API state probe did not pass."
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "inconclusive" }
+        return
+    }
+    $registration = @(
+        $ApplicationApiProbe.direct.skills |
+            Where-Object { $_.skill_id -eq "building_structure_standards" }
+    ) | Select-Object -First 1
+    if ($null -eq $registration) {
+        $SkillProbe.application_registration.status = "not_registered"
+        $SkillProbe.application_registration.registered = $false
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "failed" }
+        return
+    }
+    $SkillProbe.application_registration.registered = $true
+    $SkillProbe.application_registration.enabled = $registration.enabled
+    $SkillProbe.application_registration.auto_trigger = $registration.auto_trigger
+    $SkillProbe.application_registration.available = $registration.available
+    if (
+        $registration.enabled -eq $true -and
+        $registration.auto_trigger -eq $true -and
+        $registration.available -eq $true
+    ) {
+        $SkillProbe.application_registration.status = "passed"
+    } else {
+        $SkillProbe.application_registration.status = "failed"
+        $SkillProbe.application_registration.error = "Skill is registered but is not enabled, auto-triggered, and available."
+        if ($SkillProbe.local_status -eq "passed") { $SkillProbe.status = "failed" }
+    }
+}
+if ($buildingStandardsSkillResult.status -ne "passed") {
+    Add-DiagnosticError $errors "building_standards_skill" $buildingStandardsSkillResult.error
+}
 $applicationApiResult = Invoke-ApplicationApiProxyProbe `
     -BaseUrl $applicationApiBaseUrl -StatePath $applicationApiStatePath `
     -HostHeader $applicationApiHostHeader -ForwardedFor $applicationApiForwardedFor `
     -ExpectedProfile $selectedProfile -TimeoutSec $timeoutSec
 Set-AnsysMapdlApplicationRegistration -SkillProbe $ansysMapdlSkillResult -ApplicationApiProbe $applicationApiResult
+Set-BuildingStandardsApplicationRegistration -SkillProbe $buildingStandardsSkillResult -ApplicationApiProbe $applicationApiResult
 if ($applicationApiResult.configured -and $applicationApiResult.status -eq "failed") {
     Add-DiagnosticError $errors "application_api" "Application AI API probe failed."
 }
@@ -2900,6 +3201,7 @@ $result = [PSCustomObject]@{
         concurrency = $concurrencyResult
         runtime = $runtimeResult
         ansys_mapdl_skill = $ansysMapdlSkillResult
+        building_standards_skill = $buildingStandardsSkillResult
         calculation_book_rebar_skill = $rebarSuggestionSkillResult
         application_api = $applicationApiResult
         mcp = [PSCustomObject]@{
@@ -2929,6 +3231,10 @@ $result = [PSCustomObject]@{
             -Status $ansysMapdlSkillResult.status `
             -Summary "ANSYS MAPDL Skill readiness covers packaged files, full corpus validation, an ANTYPE retrieval query, and application auto-trigger registration when the application API is configured." `
             -Checks @("required_files", "integrity", "regression", "query", "application_registration")
+        building_standards_skill = New-ReadinessResult `
+            -Status $buildingStandardsSkillResult.status `
+            -Summary "Building standards readiness covers packaged index files, database validation integrity, SQLite query execution, and readable local or fallback PDF roots." `
+            -Checks @("required_files", "validation", "query", "primary_source", "fallback_sources", "application_registration")
         structured_model = New-ReadinessResult `
             -Status $rebarSuggestionSkillResult.structured_selection.status `
             -Summary "The terminal structured model must return one strict rebar candidate selection that passes the packaged Skill validator." `

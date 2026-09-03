@@ -104,9 +104,7 @@ class AiChatRuntimeConfig(BaseModel):
     max_per_owner_requests: int = 1
     max_tool_rounds: int = 3
     response_format_prompt: str = ""
-    attachments: AiAttachmentRuntimeConfig = Field(
-        default_factory=AiAttachmentRuntimeConfig
-    )
+    attachments: AiAttachmentRuntimeConfig = Field(default_factory=AiAttachmentRuntimeConfig)
     agents: list[AiAgentConfig] = Field(default_factory=list)
     skills: list[AiSkillConfig] = Field(default_factory=list)
     mcp_servers: list[AiMcpServerConfig] = Field(default_factory=list)
@@ -129,9 +127,7 @@ class AiChatState:
     model: str
     owner_key: str
     default_agent: str
-    attachments: AiAttachmentRuntimeConfig = field(
-        default_factory=AiAttachmentRuntimeConfig
-    )
+    attachments: AiAttachmentRuntimeConfig = field(default_factory=AiAttachmentRuntimeConfig)
     agents: list[AiAgentConfig] = field(default_factory=list)
     skills: list[AiSkillConfig] = field(default_factory=list)
     mcp_servers: list[AiMcpServerConfig] = field(default_factory=list)
@@ -157,7 +153,9 @@ class AiChatService:
         self._global_gate = threading.BoundedSemaphore(max(int(runtime.max_global_requests), 1))
         self._conversation_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
         self._locks_guard = threading.Lock()
-        self._owner_gates: WeakValueDictionary[str, threading.BoundedSemaphore] = WeakValueDictionary()
+        self._owner_gates: WeakValueDictionary[str, threading.BoundedSemaphore] = (
+            WeakValueDictionary()
+        )
         self._owner_gates_guard = threading.Lock()
         self.store.purge_expired(retention_days=self.runtime.retention_days)
         self.attachment_store.purge_expired_unbound(
@@ -185,7 +183,9 @@ class AiChatService:
         account_id: str | None = None,
     ) -> AiConversation:
         self._ensure_enabled()
-        return self.store.create_conversation(owner_key=owner_key, title=title, account_id=account_id)
+        return self.store.create_conversation(
+            owner_key=owner_key, title=title, account_id=account_id
+        )
 
     def list_conversations(self, owner_key: str) -> list[AiConversation]:
         self._ensure_enabled()
@@ -406,9 +406,7 @@ class AiChatService:
                 "skill_contexts": skill_context_metadata,
                 "mcp_server_ids": mcp_server_ids or [],
                 "account_id": account_id,
-                "attachments": [
-                    _attachment_metadata(attachment) for attachment in attachments
-                ],
+                "attachments": [_attachment_metadata(attachment) for attachment in attachments],
                 "status": "pending",
             }
             user_message = self.store.add_message(
@@ -430,14 +428,34 @@ class AiChatService:
                 skill_contexts=skill_contexts,
             )
             started_at = perf_counter()
+            page_images_downgraded = False
             try:
-                result, tool_call_summaries = self._complete_with_tools(model_messages)
+                try:
+                    result, tool_call_summaries = self._complete_with_tools(model_messages)
+                except ChatGatewayError:
+                    if not any(context.images for context in skill_contexts):
+                        raise
+                    page_images_downgraded = True
+                    model_messages = self._build_model_messages(
+                        history,
+                        normalized_content,
+                        owner_key=owner_key,
+                        conversation_id=conversation_id,
+                        current_attachments=attachments,
+                        agent_id=agent_id,
+                        skill_ids=effective_skill_ids,
+                        mcp_server_ids=mcp_server_ids or [],
+                        skill_contexts=skill_contexts,
+                        include_skill_images=False,
+                    )
+                    result, tool_call_summaries = self._complete_with_tools(model_messages)
             except Exception as exc:
                 failed_metadata = {
                     **user_metadata,
                     "status": "failed",
                     "error_code": _chat_failure_code(exc),
                     "duration_ms": round((perf_counter() - started_at) * 1000),
+                    "page_images_downgraded": page_images_downgraded,
                 }
                 self.store.update_message_metadata(user_message.message_id, failed_metadata)
                 raise
@@ -462,6 +480,7 @@ class AiChatService:
                     "tool_calls": tool_call_summaries,
                     "status": "succeeded",
                     "duration_ms": duration_ms,
+                    "page_images_downgraded": page_images_downgraded,
                 },
             )
             for attachment in attachments:
@@ -611,6 +630,7 @@ class AiChatService:
         skill_ids: list[str],
         mcp_server_ids: list[str],
         skill_contexts: list[SkillContext] | None = None,
+        include_skill_images: bool = True,
     ) -> list[dict[str, Any]]:
         messages = [
             {
@@ -645,6 +665,7 @@ class AiChatService:
                 "content": self._current_user_model_content(
                     current_content,
                     current_attachments,
+                    skill_contexts if include_skill_images else [],
                 ),
             }
         )
@@ -654,15 +675,17 @@ class AiChatService:
         self,
         content: str,
         attachments: list[AiAttachment],
+        skill_contexts: list[SkillContext] | None = None,
     ) -> str | list[dict[str, Any]]:
         images = [attachment for attachment in attachments if attachment.kind == "image"]
+        skill_images = [image for context in (skill_contexts or []) for image in context.images]
         documents = [attachment for attachment in attachments if attachment.kind != "image"]
         text_content = self._attachment_text_content(
             content,
             documents,
             include_image_labels=False,
         )
-        if not images:
+        if not images and not skill_images:
             return text_content
         blocks: list[dict[str, Any]] = [
             {
@@ -671,15 +694,25 @@ class AiChatService:
             }
         ]
         for attachment in images:
-            encoded = base64.b64encode(
-                self.attachment_store.read_bytes(attachment)
-            ).decode("ascii")
+            encoded = base64.b64encode(self.attachment_store.read_bytes(attachment)).decode("ascii")
             blocks.append(
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{attachment.media_type};base64,{encoded}"
-                    },
+                    "image_url": {"url": f"data:{attachment.media_type};base64,{encoded}"},
+                }
+            )
+        for image in skill_images:
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": f"规范原页图像证据：{image.label}",
+                }
+            )
+            encoded = base64.b64encode(image.content).decode("ascii")
+            blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{image.media_type};base64,{encoded}"},
                 }
             )
         return blocks
@@ -699,9 +732,7 @@ class AiChatService:
         for attachment in attachments:
             if attachment.kind == "image":
                 if include_image_labels:
-                    evidence_sections.append(
-                        f"[历史图片附件: {attachment.original_name}]"
-                    )
+                    evidence_sections.append(f"[历史图片附件: {attachment.original_name}]")
                 continue
             if remaining <= 0:
                 break
@@ -754,7 +785,7 @@ class AiChatService:
         if not contexts:
             return base_prompt
         evidence = "\n\n".join(
-            f"<local_skill id=\"{context.skill_id}\">\n{context.content}\n</local_skill>"
+            f'<local_skill id="{context.skill_id}">\n{context.content}\n</local_skill>'
             for context in contexts
         )
         return (
@@ -806,7 +837,9 @@ class AiChatService:
 
     def _resolve_skills(self, skill_ids: list[str]) -> list[AiSkillConfig]:
         selected = set(skill_ids)
-        skills = [skill for skill in self.runtime.skills if skill.enabled and skill.skill_id in selected]
+        skills = [
+            skill for skill in self.runtime.skills if skill.enabled and skill.skill_id in selected
+        ]
         if skills:
             return skills
         return [skill for skill in self.runtime.skills if skill.enabled and skill.read_only][:1]

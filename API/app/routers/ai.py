@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile, status
+import fitz
+from fastapi import (
+    APIRouter,
+    File,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import FileResponse
 
 from src.ai.ansys_mapdl_skill import (
     ANSYS_MAPDL_SKILL_ID,
@@ -18,6 +31,7 @@ from src.ai.building_standards_skill import (
     BUILDING_STANDARDS_SKILL_ID,
     BuildingStandardsSkill,
     BuildingStandardsSkillConfig,
+    BuildingStandardsSkillError,
 )
 from src.ai.chat_client import (
     ChatClientTimeout,
@@ -45,6 +59,10 @@ from src.ai.reinforcement_table_skill import (
     REINFORCEMENT_TABLE_SKILL_ID,
     ReinforcementTableSkill,
     ReinforcementTableSkillConfig,
+)
+from src.ai.standards_source_resolver import (
+    StandardsSourceInvalid,
+    StandardsSourceNotFound,
 )
 from src.config import get_config, load_ai_spec
 from src.config.ai.ai_spec import AiSpec
@@ -80,7 +98,10 @@ def state(request: Request) -> dict[str, Any]:
 @router.get("/conversations")
 def list_conversations(request: Request) -> list[dict[str, Any]]:
     service = _service(request)
-    return [_conversation_payload(item) for item in service.list_conversations(_owner_key(request))]
+    return [
+        _conversation_payload(item)
+        for item in service.list_conversations(_owner_key(request))
+    ]
 
 
 @router.post("/conversations", status_code=status.HTTP_201_CREATED)
@@ -104,10 +125,15 @@ def get_conversation(conversation_id: str, request: Request) -> dict[str, Any]:
     owner_key = _owner_key(request)
     conversation = service.get_conversation(owner_key, conversation_id)
     if conversation is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="conversation_not_found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="conversation_not_found"
+        )
     return {
         **_conversation_payload(conversation),
-        "messages": [_message_payload(message) for message in service.list_messages(owner_key, conversation_id)],
+        "messages": [
+            _message_payload(message)
+            for message in service.list_messages(owner_key, conversation_id)
+        ],
     }
 
 
@@ -146,16 +172,23 @@ async def upload_attachment(
     file: UploadFile = File(...),  # noqa: B008 - FastAPI dependency declaration
 ) -> dict[str, Any]:
     service = _service(request)
-    max_upload_bytes = max(
-        service.runtime.attachments.max_image_size_mb,
-        service.runtime.attachments.max_file_size_mb,
-    ) * 1024 * 1024
+    max_upload_bytes = (
+        max(
+            service.runtime.attachments.max_image_size_mb,
+            service.runtime.attachments.max_file_size_mb,
+        )
+        * 1024
+        * 1024
+    )
     content = await file.read(max_upload_bytes + 1)
     await file.close()
     if len(content) > max_upload_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"code": "attachment_too_large", "message": "attachment is too large"},
+            detail={
+                "code": "attachment_too_large",
+                "message": "attachment is too large",
+            },
         )
     try:
         attachment = await run_in_threadpool(
@@ -194,9 +227,7 @@ def list_attachments(conversation_id: str, request: Request) -> list[dict[str, A
     return [_attachment_payload(attachment) for attachment in attachments]
 
 
-@router.delete(
-    "/conversations/{conversation_id}/attachments/{attachment_id}"
-)
+@router.delete("/conversations/{conversation_id}/attachments/{attachment_id}")
 def delete_attachment(
     conversation_id: str,
     attachment_id: str,
@@ -275,7 +306,10 @@ def send_message(
         logger.warning("AI model gateway request failed (status=%s)", exc.status_code)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "ai_gateway_error", "message": "model gateway request failed"},
+            detail={
+                "code": "ai_gateway_error",
+                "message": "model gateway request failed",
+            },
         ) from exc
 
     return {
@@ -318,6 +352,85 @@ def delete_conversation(conversation_id: str, request: Request) -> dict[str, boo
             detail={"code": exc.code, "message": str(exc)},
         ) from exc
     return {"ok": True}
+
+
+@router.get("/standards/{source_id}/page/{page_number}")
+def get_standard_page(
+    source_id: int,
+    page_number: int,
+    request: Request,
+) -> Response:
+    skill = _building_standards_skill(request)
+    if not skill.config.preview_enabled:
+        raise _standards_http_error(
+            status.HTTP_403_FORBIDDEN,
+            "standard_preview_disabled",
+            "standard preview is disabled",
+        )
+    resolved = _resolve_standard_source(skill, source_id)
+    try:
+        with fitz.open(resolved.path) as document:
+            if page_number < 1 or page_number > document.page_count:
+                raise _standards_http_error(
+                    status.HTTP_404_NOT_FOUND,
+                    "standard_page_not_found",
+                    "standard page was not found",
+                )
+            page = document.load_page(page_number - 1)
+            scale = skill.config.page_render_dpi / 72.0
+            pixel_count = page.rect.width * scale * page.rect.height * scale
+            if pixel_count > 40_000_000:
+                raise _standards_http_error(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "standard_page_too_large",
+                    "standard page is too large to render",
+                )
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            content = pixmap.tobytes("png")
+    except HTTPException:
+        raise
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Unable to render standard page source_id=%s", source_id)
+        raise _standards_http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "standard_page_render_failed",
+            "standard page could not be rendered",
+        ) from exc
+    return Response(
+        content=content,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "X-Standard-Source-Root": resolved.root_kind,
+        },
+    )
+
+
+@router.get("/standards/{source_id}/document")
+def get_standard_document(source_id: int, request: Request) -> FileResponse:
+    skill = _building_standards_skill(request)
+    if not skill.config.preview_enabled:
+        raise _standards_http_error(
+            status.HTTP_403_FORBIDDEN,
+            "standard_preview_disabled",
+            "standard preview is disabled",
+        )
+    resolved = _resolve_standard_source(skill, source_id)
+    return _standard_file_response(resolved.path, disposition="inline")
+
+
+@router.get("/standards/{source_id}/download")
+def download_standard_document(source_id: int, request: Request) -> FileResponse:
+    skill = _building_standards_skill(request)
+    if not skill.config.download_enabled:
+        raise _standards_http_error(
+            status.HTTP_403_FORBIDDEN,
+            "standard_download_disabled",
+            "standard download is disabled",
+        )
+    resolved = _resolve_standard_source(skill, source_id)
+    return _standard_file_response(resolved.path, disposition="attachment")
 
 
 def build_runtime(
@@ -405,8 +518,7 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
                         skill_id=skill.skill_id,
                         auto_trigger=skill.auto_trigger,
                         trigger_terms=(
-                            tuple(skill.trigger_terms)
-                            or ansys_defaults.trigger_terms
+                            tuple(skill.trigger_terms) or ansys_defaults.trigger_terms
                         ),
                         max_results=skill.max_results,
                         max_context_chars=skill.max_context_chars,
@@ -416,6 +528,23 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
                 )
             )
         elif skill.handler == BUILDING_STANDARDS_SKILL_ID:
+            if not root.is_dir() and not os.environ.get(skill.root_env_var, "").strip():
+                development_root = (
+                    server_root / "tools" / "ai" / "building-structure-standards"
+                )
+                if development_root.is_dir():
+                    root = development_root.resolve()
+            source_access = skill.source_access
+            source_root = _resolve_configured_path(
+                server_root,
+                source_access.primary_root,
+                source_access.primary_root_env_var,
+            )
+            fallback_roots = _resolve_configured_paths(
+                server_root,
+                source_access.fallback_roots,
+                source_access.fallback_roots_env_var,
+            )
             result.append(
                 BuildingStandardsSkill(
                     root=root,
@@ -430,6 +559,17 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
                         max_context_chars=skill.max_context_chars,
                         query_timeout_seconds=skill.query_timeout_seconds,
                         history_followup_messages=skill.history_followup_messages,
+                        source_root=source_root,
+                        fallback_source_roots=fallback_roots,
+                        per_file_fallback=source_access.per_file_fallback,
+                        preview_enabled=source_access.preview_enabled,
+                        download_enabled=source_access.download_enabled,
+                        model_page_images_enabled=(
+                            source_access.model_page_images_enabled
+                        ),
+                        page_render_dpi=source_access.page_render_dpi,
+                        max_model_page_images=source_access.max_model_page_images,
+                        verify_source_sha256=source_access.verify_sha256,
                     ),
                 )
             )
@@ -453,14 +593,107 @@ def build_context_skills(spec: AiSpec) -> list[ContextSkill]:
     return result
 
 
+def _resolve_configured_path(
+    server_root: Path,
+    configured: str,
+    env_var: str,
+) -> Path | None:
+    override = os.environ.get(env_var, "").strip() if env_var else ""
+    value = override or str(configured or "").strip()
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = server_root / path
+    return path.resolve(strict=False)
+
+
+def _resolve_configured_paths(
+    server_root: Path,
+    configured: list[str],
+    env_var: str,
+) -> tuple[Path, ...]:
+    override = os.environ.get(env_var, "").strip() if env_var else ""
+    values = [item.strip() for item in override.split(os.pathsep) if item.strip()]
+    if not values:
+        values = [str(item).strip() for item in configured if str(item).strip()]
+    return tuple(
+        path
+        for value in values
+        if (path := _resolve_configured_path(server_root, value, "")) is not None
+    )
+
+
 def build_read_only_tools(spec: AiSpec) -> ReadOnlyHostTools | None:
     source_path = spec.source_path
     access = spec.ai_layer.chat.read_only_host_access
-    if not access.enabled or source_path is None or len(source_path.resolve().parents) < 3:
+    if (
+        not access.enabled
+        or source_path is None
+        or len(source_path.resolve().parents) < 3
+    ):
         return None
     server_root = source_path.resolve().parents[2]
     tools = ReadOnlyHostTools(server_root=server_root, config=access)
     return tools if tools.definitions() else None
+
+
+def _building_standards_skill(request: Request) -> BuildingStandardsSkill:
+    for context_skill in _service(request).context_skills:
+        if isinstance(context_skill, BuildingStandardsSkill):
+            return context_skill
+    raise _standards_http_error(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "standards_skill_unavailable",
+        "building standards skill is unavailable",
+    )
+
+
+def _resolve_standard_source(
+    skill: BuildingStandardsSkill,
+    source_id: int,
+):
+    try:
+        resolved = skill.resolve_source(source_id)
+    except StandardsSourceNotFound as exc:
+        raise _standards_http_error(
+            status.HTTP_404_NOT_FOUND,
+            "standard_source_not_found",
+            "standard source file was not found",
+        ) from exc
+    except (StandardsSourceInvalid, BuildingStandardsSkillError) as exc:
+        raise _standards_http_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "standard_source_invalid",
+            "standard source file is invalid or unavailable",
+        ) from exc
+    if resolved is None:
+        raise _standards_http_error(
+            status.HTTP_404_NOT_FOUND,
+            "standard_source_not_found",
+            "standard source record was not found",
+        )
+    return resolved
+
+
+def _standard_file_response(path: Path, *, disposition: str) -> FileResponse:
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=path.name,
+        content_disposition_type=disposition,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
+def _standards_http_error(status_code: int, code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message},
+    )
 
 
 def _service(request: Request) -> AiChatService:
@@ -475,7 +708,9 @@ def _service(request: Request) -> AiChatService:
 
         runtime_config = get_config()
         spec = load_ai_spec(runtime_config.ai_spec_path)
-        store = AiChatStore(runtime_config.storage_dir / "ai" / "chat" / "fanban_ai_chat.sqlite3")
+        store = AiChatStore(
+            runtime_config.storage_dir / "ai" / "chat" / "fanban_ai_chat.sqlite3"
+        )
         store.initialize()
         context_skills = build_context_skills(spec)
         service = AiChatService(
