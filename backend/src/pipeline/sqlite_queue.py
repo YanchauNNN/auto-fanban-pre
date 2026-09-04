@@ -113,6 +113,16 @@ class SQLiteQueueStore:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS execution_controls (
+                    item_type TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    cancel_requested INTEGER NOT NULL DEFAULT 0,
+                    requested_by TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (item_type, item_id)
+                );
                 """
             )
 
@@ -122,6 +132,74 @@ class SQLiteQueueStore:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
         return {str(row["name"]) for row in rows}
+
+    def execution_control(self, item_type: str, item_id: str) -> dict[str, Any] | None:
+        if not self.db_path.exists():
+            return None
+        with self._connect() as conn:
+            # Historical JobManager-only callers may not have initialized the queue.
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='execution_controls'").fetchone() is None:
+                return None
+            row = conn.execute(
+                "SELECT * FROM execution_controls WHERE item_type=? AND item_id=?",
+                (item_type, item_id),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def begin_execution(self, item_type: str, item_id: str) -> bool:
+        """Atomically fence cancellation and duplicate worker entry before any work."""
+        with self._connect() as conn, conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO execution_controls "
+                "(item_type,item_id,state,updated_at) VALUES (?,?,'running',?)",
+                (item_type, item_id, _format_timestamp(_coerce_now(None))),
+            )
+        return cursor.rowcount == 1
+
+    def request_execution_cancel(self, item_type: str, item_id: str, *, requested_by: str) -> dict[str, Any]:
+        """Cancel unstarted work or request cooperative stop of an active execution."""
+        timestamp = _format_timestamp(_coerce_now(None))
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT INTO execution_controls "
+                    "(item_type,item_id,state,cancel_requested,requested_by,updated_at) "
+                    "VALUES (?,?,'cancelled',1,?,?) ON CONFLICT(item_type,item_id) DO UPDATE SET "
+                    "cancel_requested=CASE WHEN state='completed' THEN cancel_requested ELSE 1 END, "
+                    "requested_by=excluded.requested_by,updated_at=excluded.updated_at",
+                    (item_type, item_id, requested_by, timestamp),
+                )
+                control = conn.execute(
+                    "SELECT * FROM execution_controls WHERE item_type=? AND item_id=?",
+                    (item_type, item_id),
+                ).fetchone()
+                if control["state"] == "cancelled":
+                    conn.execute(
+                        "UPDATE queue_items SET status='cancelled',updated_at=? "
+                        "WHERE item_type=? AND item_id=? AND status IN ('queued','claimed')",
+                        (timestamp, item_type, item_id),
+                    )
+                conn.commit()
+                return dict(control)
+            except Exception:
+                conn.rollback()
+                raise
+
+    def finish_execution(self, item_type: str, item_id: str) -> bool:
+        """Acknowledge cancellation only at a safe boundary; return final cancel state."""
+        with self._connect() as conn, conn:
+            conn.execute(
+                "UPDATE execution_controls SET state=CASE WHEN cancel_requested=1 "
+                "THEN 'cancelled' ELSE 'completed' END,updated_at=? "
+                "WHERE item_type=? AND item_id=?",
+                (_format_timestamp(_coerce_now(None)), item_type, item_id),
+            )
+            row = conn.execute(
+                "SELECT state FROM execution_controls WHERE item_type=? AND item_id=?",
+                (item_type, item_id),
+            ).fetchone()
+        return row is not None and row["state"] == "cancelled"
 
     def enqueue(
         self,
@@ -143,9 +221,12 @@ class SQLiteQueueStore:
                             item_type, item_id, status, priority, run_after,
                             created_at, updated_at
                         )
-                        VALUES (?, ?, 'queued', ?, ?, ?, ?)
+                        VALUES (?, ?, CASE WHEN EXISTS (
+                            SELECT 1 FROM execution_controls
+                            WHERE item_type=? AND item_id=? AND cancel_requested=1
+                        ) THEN 'cancelled' ELSE 'queued' END, ?, ?, ?, ?)
                         """,
-                        (item_type, item_id, priority, run_after_value, timestamp, timestamp),
+                        (item_type, item_id, item_type, item_id, priority, run_after_value, timestamp, timestamp),
                     )
                     row_id = int(cursor.lastrowid)
             except sqlite3.IntegrityError:

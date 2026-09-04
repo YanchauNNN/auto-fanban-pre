@@ -66,9 +66,13 @@ const NODE_STATUS_LABELS: Record<string, string> = {
 export function TaskGroupWorkflowPanel({
   adapter,
   groupId,
+  detail: suppliedDetail,
+  allowSubmission = true,
 }: {
   adapter: ApiAdapter;
   groupId: string;
+  detail?: TaskGroupDetail;
+  allowSubmission?: boolean;
 }) {
   const queryClient = useQueryClient();
   const { currentAccount, refreshCurrentAccount } = useSession();
@@ -109,7 +113,7 @@ export function TaskGroupWorkflowPanel({
       }
       return adapter.getTaskGroupDetail(groupId);
     },
-    enabled: Boolean(groupId),
+    enabled: Boolean(groupId) && !suppliedDetail,
     retry: false,
   });
 
@@ -218,7 +222,7 @@ export function TaskGroupWorkflowPanel({
     void executeSubmission(nextFlags, true);
   }
 
-  if (detailQuery.isLoading) {
+  if (detailQuery.isLoading && !suppliedDetail) {
     return (
       <section aria-label="审批与归档" className={styles.panel}>
         <p className={styles.loading} role="status">正在读取审批状态…</p>
@@ -226,7 +230,7 @@ export function TaskGroupWorkflowPanel({
     );
   }
 
-  if (detailQuery.isError || !detailQuery.data) {
+  if (!suppliedDetail && (detailQuery.isError || !detailQuery.data)) {
     return (
       <section
         aria-label="审批与归档"
@@ -239,7 +243,7 @@ export function TaskGroupWorkflowPanel({
     );
   }
 
-  const detail = detailQuery.data;
+  const detail = suppliedDetail ?? detailQuery.data!;
   const isCreator =
     !detail.creatorAccount || detail.creatorAccount === currentAccount?.accountId;
   const blockers = detail.submitBlockers ?? [];
@@ -289,7 +293,7 @@ export function TaskGroupWorkflowPanel({
         </ol>
       ) : null}
 
-      <div className={styles.actionRow}>
+      {allowSubmission ? <div className={styles.actionRow}>
         <div className={styles.guidance} aria-live="polite">
           {!isCreator ? (
             <p>
@@ -326,7 +330,7 @@ export function TaskGroupWorkflowPanel({
             {isSubmitting ? "正在提交…" : "提交审批"}
           </button>
         ) : null}
-      </div>
+      </div> : null}
 
       {conflict ? (
         <TaskGroupConflictDialog

@@ -1,0 +1,5 @@
+schema_version: 1
+atomic_replace:
+  attempts: 6
+  initial_delay_seconds: 0.1
+  max_delay_seconds: 1.0

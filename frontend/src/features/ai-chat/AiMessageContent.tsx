@@ -26,6 +26,9 @@ type CopyStatus = "idle" | "copied" | "manual";
 const APDL_LANGUAGE_ALIASES = new Set(["apdl", "ansys", "ansys-apdl", "mapdl"]);
 const LANGUAGE_CLASS_PATTERN = /^language-([a-z0-9_+-]+)$/i;
 const EXPLICIT_HTTP_URL_PATTERN = /^https?:\/\//i;
+const MAILTO_URL_PATTERN = /^mailto:/i;
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const ALLOWED_ELEMENTS = [
   "a",
   "blockquote",
@@ -40,6 +43,7 @@ const ALLOWED_ELEMENTS = [
   "h5",
   "h6",
   "hr",
+  "img",
   "input",
   "li",
   "ol",
@@ -61,6 +65,7 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
   attributes: {
     a: ["href"],
     code: [["className", LANGUAGE_CLASS_PATTERN]],
+    img: ["src", "alt", "title"],
     input: [
       ["type", "checkbox"],
       "checked",
@@ -70,7 +75,8 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
     th: ["align"],
   },
   protocols: {
-    href: ["http", "https"],
+    href: ["http", "https", "mailto"],
+    src: ["http", "https"],
   },
   required: {
     input: {
@@ -81,17 +87,30 @@ const SANITIZE_SCHEMA: SanitizeSchema = {
   strip: ["script", "style"],
 };
 
-const safeUrlTransform: UrlTransform = (url) => {
-  if (!EXPLICIT_HTTP_URL_PATTERN.test(url)) {
+const safeUrlTransform: UrlTransform = (url, key) => {
+  const normalized = url.trim();
+  if (!normalized || CONTROL_CHARACTER_PATTERN.test(normalized) || normalized.includes("\\")) {
     return "";
   }
 
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : "";
-  } catch {
+  if (EXPLICIT_HTTP_URL_PATTERN.test(normalized)) {
+    try {
+      const parsed = new URL(normalized);
+      return parsed.protocol === "http:" || parsed.protocol === "https:" ? normalized : "";
+    } catch {
+      return "";
+    }
+  }
+
+  if (key === "href" && MAILTO_URL_PATTERN.test(normalized)) {
+    return normalized;
+  }
+
+  if (URL_SCHEME_PATTERN.test(normalized) || normalized.startsWith("//")) {
     return "";
   }
+
+  return normalized;
 };
 
 const markdownComponents: Components = {
@@ -108,6 +127,22 @@ const markdownComponents: Components = {
       >
         {children}
       </a>
+    );
+  },
+  img({ alt, node: _node, src, ...props }) {
+    if (!src) {
+      return <span>{alt ?? "图片地址不可用"}</span>;
+    }
+    return (
+      <img
+        {...props}
+        alt={alt ?? ""}
+        className={styles.markdownImage}
+        decoding="async"
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        src={src}
+      />
     );
   },
   pre({ children }) {

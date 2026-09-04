@@ -53,7 +53,13 @@ def build_versioned_database(tmp_path: Path) -> tuple[object, Path]:
             replacement_standard=replacement,
             major="结构",
         )
-        sources.append(builder.parse_source(spec))
+        parsed = builder.parse_source(spec)
+        # This fixture represents reviewed HTML body evidence, not parser quality acceptance.
+        for page in parsed.pages:
+            page.content_role = "normative"
+            page.quality_status = "usable"
+            page.quality_flags = []
+        sources.append(parsed)
     database = tmp_path / "standards.sqlite"
     builder.build_sqlite(sources, database)
     return load_module("standards_query.py", "standards_query_for_test"), database
@@ -74,6 +80,12 @@ def test_exact_clause_returns_version_page_anchor_and_citation(tmp_path: Path) -
     assert "GB/T DEMO-2026" in result["results"][0]["citation"]
     assert "第3.1.1条" in result["results"][0]["citation"]
     assert "第12页" in result["results"][0]["citation"]
+    assert result["results"][0]["links"] == {
+        "page": "/api/ai/standards/2/page/12",
+        "document": "/api/ai/standards/2/document#page=12",
+        "download": "/api/ai/standards/2/download",
+    }
+    assert "source_path" not in result["results"][0]
 
 
 def test_deprecated_standard_returns_replacement_warning(tmp_path: Path) -> None:

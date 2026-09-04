@@ -27,6 +27,7 @@ def test_archive_service_copies_outputs_to_archive_root(monkeypatch, tmp_path, s
         job_type=JobType.DELIVERABLE,
         project_no="2016",
         group_id=group.group_id,
+        task_role="deliverable_main",
         params={
             "project_no": "2016",
             "engineering_no": "2016",

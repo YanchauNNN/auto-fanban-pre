@@ -396,7 +396,7 @@ def _materialize_building_standards_skill(
         shutil.copytree(
             source,
             target,
-            ignore=shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS),
+            ignore=_ignore_building_standards_sources,
         )
         return
 
@@ -417,6 +417,28 @@ def _materialize_building_standards_skill(
             "请先运行 tools/ai/package_building_standards_skill.py。"
         )
     install_building_standards_skill_archive(archives[-1], target)
+    for source_pdf in target.rglob("*.pdf"):
+        source_pdf.unlink()
+
+
+def _ignore_building_standards_sources(
+    directory: str,
+    names: list[str],
+) -> set[str]:
+    ignored = set(shutil.ignore_patterns(*DEPLOY_IGNORE_PATTERNS)(directory, names))
+    ignored.update(name for name in names if name.casefold().endswith(".pdf"))
+    return ignored
+
+
+def _write_building_standards_source_placeholder(output_root: Path) -> None:
+    source_root = output_root / "documents" / "规范下载"
+    source_root.mkdir(parents=True, exist_ok=True)
+    _write_text(
+        source_root / "README.txt",
+        "此目录不随部署包携带规范 PDF。\n"
+        "请在终端部署后原样放置规范文件，或确保公共盘回退路径可读。\n"
+        "默认公共盘：\\\\10.102.2.7\\文件服务器\\建筑结构所\\14-自开发软件\\规范下载\n",
+    )
 
 
 def _materialize_reinforcement_table_skill(
@@ -2111,17 +2133,25 @@ if ($probe.blocking_issues.Count -gt 0) {
 if ($null -eq $probe.archive_runtime -or $probe.archive_runtime.status -ne "pass") {
     throw "私有 7-Zip 运行时探针未通过，拒绝生成 runtime.env.ps1"
 }
+if ($null -eq $probe.building_standards -or $probe.building_standards.status -ne "pass") {
+    throw "规范 PDF 本地目录和公共盘均不可用，拒绝生成 runtime.env.ps1"
+}
 
 Write-Host "[4/4] 生成运行环境文件..."
 $envMap = $probe.recommended_runtime.recommended_env
 $expectedArchiveExecutable = [System.IO.Path]::GetFullPath((Join-Path $root "bin\7-Zip\7z.exe"))
 $recommendedArchiveExecutable = [string]$envMap.FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE
+$recommendedStandardsSourceRoot = [string]$envMap.FANBAN_BUILDING_STANDARDS_SOURCE_ROOT
+$recommendedStandardsFallbackRoots = [string]$envMap.FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS
 if (
     [string]::IsNullOrWhiteSpace($recommendedArchiveExecutable) -or
     -not (Test-Path -LiteralPath $expectedArchiveExecutable -PathType Leaf) -or
     [System.IO.Path]::GetFullPath($recommendedArchiveExecutable) -ne $expectedArchiveExecutable
 ) {
     throw "探针未返回固定的私有 7-Zip 绝对路径，拒绝生成 runtime.env.ps1"
+}
+if ([string]::IsNullOrWhiteSpace($recommendedStandardsSourceRoot)) {
+    throw "探针未返回规范 PDF 主目录，拒绝生成 runtime.env.ps1"
 }
 $lines = @(
     '$ErrorActionPreference = "Stop"',
@@ -3936,6 +3966,7 @@ def build_terminal_deploy_package(
 
     _materialize_ansys_mapdl_skill(repo_root, output_root)
     _materialize_building_standards_skill(repo_root, output_root)
+    _write_building_standards_source_placeholder(output_root)
     _materialize_reinforcement_table_skill(repo_root, output_root)
     _materialize_rebar_suggestion_skill(repo_root, output_root)
     _write_frontend_web_config(output_root)

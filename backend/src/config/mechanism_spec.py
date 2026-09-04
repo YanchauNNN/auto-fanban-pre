@@ -124,6 +124,7 @@ class TaskGroupSubmissionSharedPrepConfig(BaseModel):
 
 
 class TaskGroupSubmissionConfig(BaseModel):
+    standalone_job_types: list[Literal["deliverable"]] = Field(default_factory=lambda: ["deliverable"])
     shared_prep: TaskGroupSubmissionSharedPrepConfig = Field(
         default_factory=TaskGroupSubmissionSharedPrepConfig
     )

@@ -188,6 +188,20 @@ class AiChatAgentConfig(BaseModel):
     system_prompt: str = ""
 
 
+class AiChatSkillSourceAccessConfig(BaseModel):
+    primary_root: str = ""
+    primary_root_env_var: str = ""
+    fallback_roots: list[str] = Field(default_factory=list)
+    fallback_roots_env_var: str = ""
+    per_file_fallback: bool = True
+    preview_enabled: bool = False
+    download_enabled: bool = False
+    model_page_images_enabled: bool = False
+    page_render_dpi: int = Field(default=144, ge=72, le=300)
+    max_model_page_images: int = Field(default=2, ge=0, le=5)
+    verify_sha256: bool = False
+
+
 class AiChatSkillConfig(BaseModel):
     skill_id: str
     name: str
@@ -203,6 +217,9 @@ class AiChatSkillConfig(BaseModel):
     max_context_chars: int = 16_000
     query_timeout_seconds: int = 20
     history_followup_messages: int = 6
+    source_access: AiChatSkillSourceAccessConfig = Field(
+        default_factory=AiChatSkillSourceAccessConfig
+    )
 
 
 class AiChatMcpServerConfig(BaseModel):

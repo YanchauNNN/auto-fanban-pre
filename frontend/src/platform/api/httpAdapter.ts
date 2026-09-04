@@ -38,6 +38,10 @@ import type {
   InvalidAccountRow,
   InvalidAccountRowList,
   JobDetail,
+  JobExecutionActions,
+  JobRetryResult,
+  JobWorkloadSubmission,
+  JobWorkloadSubmitPayload,
   JobList,
   JobListSort,
   JobSummary,
@@ -633,6 +637,14 @@ type RawTaskGroupDetail = RawTaskGroupSummary & {
   archive?: RawArchiveState | null;
   replacement?: RawReplacementState | null;
   legacy_visibility?: RawLegacyVisibilityState | null;
+};
+
+type RawJobExecutionActions = {
+  can_cancel: boolean;
+  can_retry: boolean;
+  cancel_requested: boolean;
+  cancel_reason: string | null;
+  retry_reason: string | null;
 };
 
 type HttpAdapterOptions = {
@@ -1460,6 +1472,73 @@ export class HttpAdapter implements ApiAdapter {
     return this.normalizeTaskGroupDetail(
       await this.fetchJson<RawTaskGroupDetail>(`/api/task-groups/${groupId}`),
     );
+  }
+
+  async getJobWorkloadSubmission(jobId: string): Promise<JobWorkloadSubmission> {
+    const response = await this.fetchJson<{
+      supported: boolean;
+      can_submit: boolean;
+      blockers: JobWorkloadSubmission["blockers"];
+      group_id: string | null;
+      workflow_status: string;
+      initial_workload_a1: number | null;
+      personnel_fields: JobWorkloadSubmission["personnelFields"];
+      group: RawTaskGroupDetail | null;
+    }>(`/api/jobs/${encodeURIComponent(jobId)}/workload-submission`);
+    return {
+      supported: response.supported,
+      canSubmit: response.can_submit,
+      blockers: response.blockers ?? [],
+      groupId: response.group_id,
+      workflowStatus: response.workflow_status,
+      initialWorkloadA1: response.initial_workload_a1,
+      personnelFields: response.personnel_fields ?? [],
+      group: response.group ? this.normalizeTaskGroupDetail(response.group) : null,
+    };
+  }
+
+  async submitJobWorkload(jobId: string, payload: JobWorkloadSubmitPayload): Promise<TaskGroupDetail> {
+    return this.normalizeTaskGroupDetail(await this.fetchJson<RawTaskGroupDetail>(
+      `/api/jobs/${encodeURIComponent(jobId)}/workload-submission`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          personnel: payload.personnel,
+          overwrite_archive_existing: payload.overwriteArchiveExisting,
+          cancel_existing_in_progress: payload.cancelExistingInProgress,
+        }),
+      },
+    ));
+  }
+
+  async getJobExecutionActions(jobId: string): Promise<JobExecutionActions> {
+    return this.normalizeJobExecutionActions(await this.fetchJson<RawJobExecutionActions>(
+      `/api/jobs/${encodeURIComponent(jobId)}/execution-actions`,
+    ));
+  }
+
+  async cancelJob(jobId: string): Promise<JobExecutionActions> {
+    return this.normalizeJobExecutionActions(await this.fetchJson<RawJobExecutionActions>(
+      `/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" },
+    ));
+  }
+
+  async retryJob(jobId: string): Promise<JobRetryResult> {
+    const response = await this.fetchJson<{ job_id: string; group_id: string | null }>(
+      `/api/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" },
+    );
+    return { jobId: response.job_id, groupId: response.group_id };
+  }
+
+  private normalizeJobExecutionActions(response: RawJobExecutionActions): JobExecutionActions {
+    return {
+      canCancel: response.can_cancel,
+      canRetry: response.can_retry,
+      cancelRequested: response.cancel_requested,
+      cancelReason: response.cancel_reason,
+      retryReason: response.retry_reason,
+    };
   }
 
   async submitTaskGroup(

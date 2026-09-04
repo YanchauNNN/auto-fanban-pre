@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from datetime import datetime
+import math
 
 from ..config import BusinessSpec, load_mechanism_spec, load_spec
 from ..models import AccountSnapshot, TaskGroup, TaskOwnerSnapshot
@@ -59,7 +60,7 @@ class WorkflowService:
         min_factor = float(factor_cfg['min'])
         max_factor = float(factor_cfg['max'])
         precision = int(factor_cfg['precision'])
-        if factor < min_factor or factor > max_factor:
+        if not math.isfinite(factor) or factor < min_factor or factor > max_factor:
             raise ValueError('factor out of range')
         current.status = WorkflowNodeStatus.APPROVED
         current.factor = round(float(factor), precision)

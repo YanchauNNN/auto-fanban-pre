@@ -1,0 +1,15 @@
+schema_version: 1
+selection:
+  native_min_chars: 100
+  native_max_replacement_ratio: 0.05
+  ocr_min_chars: 30
+  ocr_min_confidence: 0.35
+  ocr_review_confidence: 0.6
+  line_review_confidence: 0.6
+  structure_min_char_ratio: 0.65
+# Patterns detect risk only. Never substitute inferred units or symbols.
+ocr_review_patterns:
+  suspicious_unit: '(?i)(?<![a-z])(?:[ckm]?m)\s*[\u00b0\u00ba]'
+  critical_numeric_unit: '(?i)\d\s*(?:[ckm]?m(?:[\u00b2\u00b3]|\^[23]|[23])?|[kM]?N|[kM]?Pa|kg|%|\u5e73\u65b9\u7c73|\u7acb\u65b9\u7c73)(?![a-z])'
+  formula_or_comparison: '[=<>\u2264\u2265\u2248\u2260\u2211\u221a]'
+  table_structure_unverified: '(?:\u8868|[Tt]able)\s*[A-Z]?\.?\d+(?:\.\d+)+'

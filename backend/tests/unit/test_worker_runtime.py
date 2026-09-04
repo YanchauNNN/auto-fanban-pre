@@ -535,6 +535,7 @@ def test_interrupted_reconciliation_is_idempotent_when_worker_crashes_before_ack
     from API.app.worker import DeliverableWorkerRuntime
 
     crashed_worker = DeliverableWorkerRuntime.__new__(DeliverableWorkerRuntime)
+    crashed_worker.queue_store = queue_store
     crashed_worker.runtime = SimpleNamespace(
         job_manager=manager,
         group_manager=GroupManager(),

@@ -43,6 +43,9 @@ def build_package(
     )
     if int(validation.get("failed_count", 1)) != 0:
         raise ValueError("validation report contains failures")
+    database_path = skill_root / "assets" / "data" / "standards.sqlite"
+    if validation.get("database_sha256") != _sha256(database_path):
+        raise ValueError("validation report covers a different standards database")
     parse_report = _load_json(
         skill_root / "assets" / "data" / "parse_report.json"
     )
@@ -67,9 +70,7 @@ def build_package(
             "sha256": _sha256(path),
         }
         for path in sorted(skill_root.rglob("*"))
-        if path.is_file()
-        and "__pycache__" not in path.parts
-        and path.suffix.lower() != ".pyc"
+        if _is_package_file(path)
     ]
     manifest = {
         "schema_version": 1,
@@ -80,8 +81,8 @@ def build_package(
         .isoformat(),
         "package_scope": "私有内部离线检索",
         "authorization_notice": (
-            "仅收录官方社会公开或已明确授权用于内部离线检索的全文；"
-            "审计目录中无授权全文的条目不进入正文索引。"
+            "仅索引已放入批准目录并授权用于内部离线检索的规范；"
+            "原始 PDF 不进入 Skill 包或程序部署包。"
         ),
         "confidentiality": "内部；受控 JT/CP 语料如后续加入应实施最小权限",
         "audit": {
@@ -138,11 +139,7 @@ def build_package(
     prefix = f"private/{SKILL_DIR_NAME}"
     with ZipFile(output_zip, "w", compression=ZIP_DEFLATED, compresslevel=9) as bundle:
         for path in sorted(skill_root.rglob("*")):
-            if (
-                not path.is_file()
-                or "__pycache__" in path.parts
-                or path.suffix.lower() == ".pyc"
-            ):
+            if not _is_package_file(path):
                 continue
             relative = path.relative_to(skill_root).as_posix()
             bundle.write(path, f"{prefix}/{relative}")
@@ -174,6 +171,14 @@ def _load_json(path: Path) -> Any:
     if not path.is_file():
         raise FileNotFoundError(path)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _is_package_file(path: Path) -> bool:
+    return (
+        path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix.casefold() not in {".pyc", ".pdf"}
+    )
 
 
 def _sha256(path: Path) -> str:

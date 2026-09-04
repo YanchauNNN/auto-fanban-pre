@@ -11,13 +11,15 @@
     [string]$OfficeWorkerTemplatePath = "",
     [string]$OfficeWorkerTemplateLabel = "",
     [string]$OfficeWorkerOutJson = "",
-    [int]$OfficeWorkerTimeoutSec = 90
+    [int]$OfficeWorkerTimeoutSec = 90,
+    [string]$StandardsSourceRoot = "",
+    [string]$StandardsFallbackRoots = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:ProbeScriptPath = $PSCommandPath
-$script:ProbeVersion = "fanban-env-probe@2.2-deploy-20260318"
+$script:ProbeVersion = "fanban-env-probe@2.3-standards-20260902"
 
 function Get-Timestamp {
     return (Get-Date).ToString("yyyyMMdd-HHmmss")
@@ -2873,6 +2875,168 @@ if (-not [string]::IsNullOrWhiteSpace($OfficeWorkerTask)) {
     Write-OfficeWorkerResultAndExit -Result $workerResult
 }
 
+function Test-BuildingStandardsRoot {
+    param(
+        [string]$PathText,
+        [string]$Kind
+    )
+
+    $resolved = Resolve-FullPathOrRaw $PathText
+    $files = @()
+    $validRelativePaths = [System.Collections.Generic.List[string]]::new()
+    $invalidFiles = [System.Collections.Generic.List[object]]::new()
+    $enumerationError = ""
+    try {
+        if (-not (Test-Path -LiteralPath $resolved -PathType Container)) {
+            return [ordered]@{
+                status = "fail"
+                kind = $Kind
+                path = $resolved
+                exists = $false
+                pdf_count = 0
+                valid_pdf_count = 0
+                invalid_pdf_count = 0
+                relative_paths = @()
+                invalid_files = @()
+                error = "standards source directory does not exist"
+            }
+        }
+        $files = @(Get-ChildItem -LiteralPath $resolved -Recurse -File -Filter "*.pdf" -ErrorAction Stop)
+    } catch {
+        $enumerationError = $_.Exception.Message
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($enumerationError)) {
+        return [ordered]@{
+            status = "fail"
+            kind = $Kind
+            path = $resolved
+            exists = $true
+            pdf_count = @($files).Count
+            valid_pdf_count = 0
+            invalid_pdf_count = 0
+            relative_paths = @()
+            invalid_files = @()
+            error = $enumerationError
+        }
+    }
+
+    foreach ($file in @($files)) {
+        $stream = $null
+        try {
+            $stream = [System.IO.File]::Open(
+                $file.FullName,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::ReadWrite
+            )
+            $signatureBytes = New-Object byte[] 5
+            $readCount = $stream.Read($signatureBytes, 0, 5)
+            $signature = [System.Text.Encoding]::ASCII.GetString($signatureBytes, 0, $readCount)
+            if ($signature -ne "%PDF-") {
+                throw "invalid PDF signature"
+            }
+            $relative = $file.FullName.Substring($resolved.Length) -replace '^[\\/]+', ''
+            $validRelativePaths.Add($relative)
+        } catch {
+            $invalidFiles.Add([ordered]@{
+                path = $file.FullName
+                error = $_.Exception.Message
+            })
+        } finally {
+            if ($null -ne $stream) {
+                $stream.Dispose()
+            }
+        }
+    }
+
+    $validCount = @($validRelativePaths).Count
+    return [ordered]@{
+        status = if ($validCount -gt 0) { "pass" } else { "fail" }
+        kind = $Kind
+        path = $resolved
+        exists = $true
+        pdf_count = @($files).Count
+        valid_pdf_count = $validCount
+        invalid_pdf_count = @($invalidFiles).Count
+        relative_paths = @($validRelativePaths)
+        invalid_files = @($invalidFiles)
+        error = if ($validCount -gt 0) { "" } else { "no readable PDF with a valid signature" }
+    }
+}
+
+function Get-BuildingStandardsSourceFacts {
+    param(
+        [string]$ActualRepoRoot,
+        [string]$PrimaryRootArg,
+        [string]$FallbackRootsArg
+    )
+
+    $primaryOverride = [Environment]::GetEnvironmentVariable(
+        "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT",
+        "Process"
+    )
+    $primaryRoot = if (-not [string]::IsNullOrWhiteSpace($PrimaryRootArg)) {
+        $PrimaryRootArg
+    } elseif (-not [string]::IsNullOrWhiteSpace($primaryOverride)) {
+        $primaryOverride
+    } else {
+        $standardsFolderName = [System.Text.RegularExpressions.Regex]::Unescape('\u89c4\u8303\u4e0b\u8f7d')
+        Join-Path $ActualRepoRoot ("documents\" + $standardsFolderName)
+    }
+    $fallbackOverride = [Environment]::GetEnvironmentVariable(
+        "FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS",
+        "Process"
+    )
+    $fallbackText = if (-not [string]::IsNullOrWhiteSpace($fallbackOverride)) {
+        $fallbackOverride
+    } elseif (-not [string]::IsNullOrWhiteSpace($FallbackRootsArg)) {
+        $FallbackRootsArg
+    } else {
+        $segments = @(
+            [System.Text.RegularExpressions.Regex]::Unescape('\u6587\u4ef6\u670d\u52a1\u5668'),
+            [System.Text.RegularExpressions.Regex]::Unescape('\u5efa\u7b51\u7ed3\u6784\u6240'),
+            ("14-" + [System.Text.RegularExpressions.Regex]::Unescape('\u81ea\u5f00\u53d1\u8f6f\u4ef6')),
+            [System.Text.RegularExpressions.Regex]::Unescape('\u89c4\u8303\u4e0b\u8f7d')
+        )
+        "\\10.102.2.7\" + ($segments -join "\")
+    }
+    $fallbackRoots = @($fallbackText -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+    $primary = Test-BuildingStandardsRoot -PathText $primaryRoot -Kind "primary"
+    $fallbacks = [System.Collections.Generic.List[object]]::new()
+    foreach ($fallbackRoot in @($fallbackRoots)) {
+        $fallbacks.Add((Test-BuildingStandardsRoot -PathText ([string]$fallbackRoot).Trim() -Kind "fallback"))
+    }
+
+    $effective = @{}
+    $primarySet = @{}
+    foreach ($relative in @($primary.relative_paths)) {
+        $primarySet[[string]$relative] = $true
+        $effective[[string]$relative] = $true
+    }
+    $fallbackContribution = 0
+    foreach ($fallback in @($fallbacks)) {
+        foreach ($relative in @($fallback.relative_paths)) {
+            if (-not $primarySet.ContainsKey([string]$relative)) {
+                $fallbackContribution += 1
+            }
+            $effective[[string]$relative] = $true
+        }
+    }
+
+    $effectiveCount = @($effective.Keys).Count
+    return [ordered]@{
+        status = if ($effectiveCount -gt 0) { "pass" } else { "fail" }
+        per_file_fallback = $true
+        primary = $primary
+        fallbacks = @($fallbacks)
+        effective_pdf_count = $effectiveCount
+        fallback_contribution_count = $fallbackContribution
+        error = if ($effectiveCount -gt 0) { "" } else { "no readable standards PDFs in primary or fallback roots" }
+    }
+}
+
 $actualRepoRoot = Resolve-RepoRoot -RepoRootArg $RepoRoot
 if ([string]::IsNullOrWhiteSpace($StorageRoot)) {
     $StorageRoot = Join-Path $actualRepoRoot "storage"
@@ -2969,6 +3133,12 @@ $officeFacts = Get-OfficeFacts -RepoFacts $repoFacts -ProbeMode $OfficeProbeMode
 
 $serviceHostingFacts = Get-ServiceHostingFacts -ActualRepoRoot $actualRepoRoot
 
+Write-ProbeStage -Stage "standards" -Message "检查规范 PDF 本地目录和公共盘逐文件回退"
+$buildingStandardsFacts = Get-BuildingStandardsSourceFacts `
+    -ActualRepoRoot $actualRepoRoot `
+    -PrimaryRootArg $StandardsSourceRoot `
+    -FallbackRootsArg $StandardsFallbackRoots
+
 $blockingIssues = @()
 $warnings = @()
 $infoItems = @()
@@ -3021,6 +3191,14 @@ if ($sqliteFacts.status -ne "pass") {
         section = "sqlite"
         code = "sqlite_probe"
         message = if ([string]::IsNullOrWhiteSpace($sqliteFacts.error)) { "sqlite probe failed" } else { [string]$sqliteFacts.error }
+    }
+}
+
+if ($buildingStandardsFacts.status -ne "pass") {
+    $blockingIssues += [ordered]@{
+        section = "building_standards"
+        code = "standards_source_unavailable"
+        message = [string]$buildingStandardsFacts.error
     }
 }
 
@@ -3204,7 +3382,8 @@ $readyForWebService = (
     $storageFacts.status -eq "pass" -and
     $autocadFacts.status -eq "pass" -and
     $officeFacts.status -eq "pass" -and
-    $networkFacts.port.status -eq "pass"
+    $networkFacts.port.status -eq "pass" -and
+    $buildingStandardsFacts.status -eq "pass"
 )
 
 $officeWarningCount = @($warnings | Where-Object { $_.section -eq "office" }).Count
@@ -3246,6 +3425,8 @@ $recommendedRuntime = [ordered]@{
         FANBAN_LIFECYCLE__RETENTION_HOURS = "168"
         FANBAN_UPLOAD_LIMITS__MIN_FREE_DISK_MB = "20480"
         FANBAN_CALCULATION_BOOK__ARCHIVE_EXTRACTOR__EXECUTABLE = (Resolve-FullPathOrRaw (Join-Path $actualRepoRoot "bin\7-Zip\7z.exe"))
+        FANBAN_BUILDING_STANDARDS_SOURCE_ROOT = [string]$buildingStandardsFacts.primary.path
+        FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS = ((@($buildingStandardsFacts.fallbacks) | ForEach-Object { [string]$_.path }) -join ";")
     }
 }
 
@@ -3285,6 +3466,7 @@ $result = [ordered]@{
     python = $pythonFacts
     archive_runtime = $archiveRuntimeFacts
     sqlite = $sqliteFacts
+    building_standards = $buildingStandardsFacts
     storage = $storageFacts
     network = $networkFacts
     autocad = $autocadFacts
@@ -3317,6 +3499,7 @@ Write-Host ("Python status: " + $pythonFacts.status)
 Write-Host ("Archive runtime status: " + $archiveRuntimeFacts.status)
 Write-Host ("AutoCAD status: " + $autocadFacts.status)
 Write-Host ("Office status: " + $officeFacts.status + " (mode: " + $officeFacts.probe_mode + ")")
+Write-Host ("Building standards status: " + $buildingStandardsFacts.status + " (effective PDFs: " + $buildingStandardsFacts.effective_pdf_count + ")")
 Write-Host ("Ready for web service: " + $readyForWebService)
 Write-Host ("Blocking issues: " + $blockingIssues.Count)
 Write-Host ("Warnings: " + $warnings.Count)

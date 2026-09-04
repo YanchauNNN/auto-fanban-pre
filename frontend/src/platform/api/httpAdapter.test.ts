@@ -3,6 +3,36 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpAdapter } from "./httpAdapter";
 
 describe("HttpAdapter", () => {
+  it("reads job follow-up availability and posts only explicit workload and execution actions", async () => {
+    const replies = [
+      { supported: true, can_submit: true, blockers: [], group_id: null, workflow_status: "draft", initial_workload_a1: 3.25, personnel_fields: [{ key: "ied_checked_by", label: "一审", value: "", required: true }], group: null },
+      { group_id: "created-group", workflow_status: "in_review" },
+      { can_cancel: true, can_retry: false, cancel_requested: false, cancel_reason: null, retry_reason: "任务仍在运行" },
+      { can_cancel: false, can_retry: false, cancel_requested: true, cancel_reason: "正在取消", retry_reason: null },
+      { job_id: "retry-job", group_id: null },
+    ];
+    const fetchMock = vi.fn().mockImplementation(async () => ({ ok: true, text: async () => JSON.stringify(replies.shift()) }));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new HttpAdapter("http://127.0.0.1:8000");
+    expect(await adapter.getJobWorkloadSubmission("job-1")).toMatchObject({
+      canSubmit: true, initialWorkloadA1: 3.25,
+      personnelFields: [{ key: "ied_checked_by", label: "一审", value: "", required: true }],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await adapter.submitJobWorkload("job-1", { personnel: { ied_checked_by: "李工@li" }, overwriteArchiveExisting: false, cancelExistingInProgress: false })).groupId).toBe("created-group");
+    expect(await adapter.getJobExecutionActions("job-1")).toMatchObject({ canCancel: true, canRetry: false });
+    expect(await adapter.cancelJob("job-1")).toMatchObject({ cancelRequested: true });
+    expect(await adapter.retryJob("job-1")).toEqual({ jobId: "retry-job", groupId: null });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:8000/api/jobs/job-1/workload-submission",
+      "http://127.0.0.1:8000/api/jobs/job-1/workload-submission",
+      "http://127.0.0.1:8000/api/jobs/job-1/execution-actions",
+      "http://127.0.0.1:8000/api/jobs/job-1/cancel",
+      "http://127.0.0.1:8000/api/jobs/job-1/retry",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ personnel: { ied_checked_by: "李工@li" }, overwrite_archive_existing: false, cancel_existing_in_progress: false });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

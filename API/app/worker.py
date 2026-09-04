@@ -137,16 +137,25 @@ class DeliverableWorkerRuntime:
                     JobStatus.FAILED,
                     JobStatus.CANCELLED,
                 }
-                if latest is not None and latest.status not in terminal_statuses:
+                control = self.queue_store.execution_control("job", item_id)
+                if latest is not None and (
+                    latest.status not in terminal_statuses
+                    or bool(control and control["state"] == "running")
+                ):
                     self.runtime._wait_for_job_completion(item_id)
             elif item_type == "group":
                 self.runtime._process_group(item_id)
             else:
                 raise RuntimeError(f"unsupported queue item type: {item_type}")
             self.runtime.refresh_summary_index(item_type, item_id)
+            latest_item = (
+                self.runtime.job_manager.reload_job(item_id)
+                if item_type == "job"
+                else self.runtime.group_manager.reload_group(item_id)
+            )
             self._finish_owned_claim(
                 item,
-                status="done",
+                status="cancelled" if latest_item is not None and latest_item.status == JobStatus.CANCELLED else "done",
             )
             self._heartbeat(state="idle")
             return True
@@ -215,6 +224,8 @@ class DeliverableWorkerRuntime:
             return True
 
         current = self.queue_store.get_queue_item(int(item["id"]))
+        if current is not None and current.get("status") == "cancelled":
+            return True
         if current is not None and current.get("last_error") == WORKER_INTERRUPTED_ERROR:
             current_owner = current.get("claimed_by")
             has_newer_attempt = self._has_newer_attempt(current)
@@ -249,6 +260,7 @@ class DeliverableWorkerRuntime:
             if job is None:
                 logger.warning("interrupted queue job metadata is missing: %s", item_id)
                 return False
+            self.queue_store.finish_execution("job", item_id)
             if self._mark_interrupted(job):
                 self.runtime.job_manager.update_job(job)
             self.runtime.refresh_summary_index("job", item_id)
@@ -259,12 +271,17 @@ class DeliverableWorkerRuntime:
             if group is None:
                 logger.warning("interrupted queue group metadata is missing: %s", item_id)
                 return False
+            cancelled = self.queue_store.finish_execution("group", item_id)
             if self._mark_interrupted(group):
+                if cancelled:
+                    group.status = JobStatus.CANCELLED
+                    group.progress.message = "任务包已取消（执行器中断后恢复）"
                 self.runtime.group_manager.update_group(group)
             for child_id in group.child_job_ids:
                 child = self.runtime.job_manager.reload_job(child_id)
                 if child is None or child.status not in {JobStatus.QUEUED, JobStatus.RUNNING}:
                     continue
+                self.queue_store.finish_execution("job", child_id)
                 if self._mark_interrupted(child):
                     self.runtime.job_manager.update_job(child)
                 self.runtime.refresh_summary_index("job", child_id)

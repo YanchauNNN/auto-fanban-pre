@@ -21,7 +21,9 @@ from typing import TYPE_CHECKING, Any
 
 from ..cad.splitter import output_name_for_frame, output_name_for_sheet_set
 from ..config import load_spec
+from ..doc_gen.derivation import DerivationEngine
 from ..interfaces import IPackager
+from ..models import DocContext, GlobalDocParams
 from ..result_views import build_deliverable_outputs, normalize_user_flags
 
 if TYPE_CHECKING:
@@ -33,6 +35,7 @@ class Packager(IPackager):
 
     def __init__(self, spec_path: str | None = None):
         self.spec = load_spec(spec_path) if spec_path else load_spec()
+        self.derivation = DerivationEngine(spec_path)
 
     def package(self, job: Job) -> Path:
         """打包交付产物"""
@@ -110,6 +113,21 @@ class Packager(IPackager):
 
         # Drawing级追溯条目
         if context:
+            # Only these inputs affect the two recorded fields. Split-only jobs
+            # intentionally do not validate unrelated document form parameters.
+            document_context = DocContext(
+                params=GlobalDocParams(
+                    project_no=job.project_no,
+                    revision=str(job.params.get("revision") or "").strip() or None,
+                ),
+                frames=context.get("frames", []),
+                sheet_sets=context.get("sheet_sets", []),
+            )
+            derived = self.derivation.compute(document_context)
+            manifest["derived"] = {
+                "album_internal_code": derived.album_internal_code,
+                "document_revision": derived.document_revision,
+            }
             manifest["drawings"] = self._build_drawing_entries(context)
             docs_dir = job.artifacts.docs_dir or (job.work_dir / "output" / "docs")
             manifest["deliverable_outputs"] = build_deliverable_outputs(
@@ -144,6 +162,8 @@ class Packager(IPackager):
                     "frame_id": frame.frame_id,
                     "internal_code": frame.titleblock.internal_code,
                     "external_code": frame.titleblock.external_code,
+                    "revision": frame.titleblock.revision,
+                    "status": frame.titleblock.status,
                     "pdf_path": str(frame.runtime.pdf_path) if frame.runtime.pdf_path else None,
                     "dwg_path": str(frame.runtime.dwg_path) if frame.runtime.dwg_path else None,
                     "flags": normalize_user_flags(frame.runtime.flags),
@@ -161,6 +181,8 @@ class Packager(IPackager):
                     "page_total": ss.generated_page_count or ss.page_total,
                     "internal_code": master_tb.get("internal_code"),
                     "external_code": master_tb.get("external_code"),
+                    "revision": master_tb.get("revision"),
+                    "status": master_tb.get("status"),
                     "pdf_path": str(ss.pdf_path) if ss.pdf_path else None,
                     "dwg_path": str(ss.dwg_path) if ss.dwg_path else None,
                     "flags": normalize_user_flags(ss.flags),

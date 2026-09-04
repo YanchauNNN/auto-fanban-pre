@@ -218,6 +218,22 @@ def test_probe_target_env_runs_private_archive_runtime_probe_fail_closed() -> No
     assert "function Get-ArchiveRuntimeFacts" in script_text
     assert "src.deploy.archive_runtime_probe" in script_text
     assert "Get-Command 7z" not in script_text
+
+
+def test_probe_target_env_checks_building_standards_local_and_unc_sources() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    script_text = (repo_root / "tools" / "probe_target_env.ps1").read_text(
+        encoding="utf-8",
+    )
+
+    assert "Get-BuildingStandardsSourceFacts" in script_text
+    assert "FANBAN_BUILDING_STANDARDS_SOURCE_ROOT" in script_text
+    assert "FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS" in script_text
+    assert "\\u89c4\\u8303\\u4e0b\\u8f7d" in script_text
+    assert '"\\\\10.102.2.7\\"' in script_text
+    assert "valid_pdf_count" in script_text
+    assert "effective_pdf_count" in script_text
+    assert 'section = "building_standards"' in script_text
     assert "where.exe 7z" not in script_text
     assert 'section = "archive_runtime"' in script_text
     assert 'code = "archive_runtime_probe"' in script_text

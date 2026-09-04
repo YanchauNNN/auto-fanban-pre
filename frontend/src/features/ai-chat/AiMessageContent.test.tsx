@@ -49,24 +49,37 @@ describe("AiMessageContent", () => {
     expect(container.querySelector("p code")).toHaveTextContent("SOLVE");
   });
 
-  it("blocks raw HTML, images, and non-http links", () => {
+  it("renders Markdown images and general links while blocking unsafe protocols", () => {
     const { container } = render(
       <AiMessageContent
         content={[
           "<script>window.__unsafe = true</script>",
           "<strong>原始 HTML</strong>",
           "![远程图片](https://example.com/secret.png)",
+          "![站内图片](/api/ai/standards/7/page/12)",
+          "![内联图片](data:image/png;base64,AAAA)",
           "[安全链接](https://example.com/docs)",
           "[邮件链接](mailto:test@example.com)",
           "[脚本链接](javascript:alert(1))",
-          "[相对链接](/internal/path)",
+          "[本地文件](file:///C:/secret.txt)",
+          "[相对链接](/internal/path?tab=1#details)",
         ].join("\n\n")}
       />,
     );
 
     expect(container.querySelector("script")).not.toBeInTheDocument();
-    expect(container.querySelector("img")).not.toBeInTheDocument();
     expect(container.querySelector("strong")).not.toBeInTheDocument();
+
+    const remoteImage = screen.getByRole("img", { name: "远程图片" });
+    expect(remoteImage).toHaveAttribute("src", "https://example.com/secret.png");
+    expect(remoteImage).toHaveAttribute("loading", "lazy");
+    expect(remoteImage).toHaveAttribute("decoding", "async");
+    expect(remoteImage).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(screen.getByRole("img", { name: "站内图片" })).toHaveAttribute(
+      "src",
+      "/api/ai/standards/7/page/12",
+    );
+    expect(screen.queryByRole("img", { name: "内联图片" })).not.toBeInTheDocument();
 
     const safeLink = screen.getByRole("link", { name: "安全链接" });
     expect(safeLink).toHaveAttribute("href", "https://example.com/docs");
@@ -74,9 +87,41 @@ describe("AiMessageContent", () => {
     expect(safeLink).toHaveAttribute("rel", "noopener noreferrer");
     expect(safeLink).not.toHaveAttribute("node");
 
-    expect(screen.queryByRole("link", { name: "邮件链接" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "邮件链接" })).toHaveAttribute(
+      "href",
+      "mailto:test@example.com",
+    );
     expect(screen.queryByRole("link", { name: "脚本链接" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "相对链接" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "本地文件" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "相对链接" })).toHaveAttribute(
+      "href",
+      "/internal/path?tab=1#details",
+    );
+  });
+
+  it("keeps building-standard document routes usable", () => {
+    render(
+      <AiMessageContent
+        content={[
+          "[查看原页](/api/ai/standards/7/page/12)",
+          "[打开规范](/api/ai/standards/7/document#page=12)",
+          "[下载规范](/api/ai/standards/7/download)",
+        ].join("\n\n")}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "查看原页" })).toHaveAttribute(
+      "href",
+      "/api/ai/standards/7/page/12",
+    );
+    expect(screen.getByRole("link", { name: "打开规范" })).toHaveAttribute(
+      "href",
+      "/api/ai/standards/7/document#page=12",
+    );
+    expect(screen.getByRole("link", { name: "下载规范" })).toHaveAttribute(
+      "href",
+      "/api/ai/standards/7/download",
+    );
   });
 
   it.each(["apdl", "ansys", "ansys-apdl", "mapdl"])(

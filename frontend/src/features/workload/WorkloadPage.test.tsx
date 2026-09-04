@@ -421,7 +421,7 @@ describe("WorkloadPage", () => {
     expect(failedItems).toHaveLength(2);
     failedItems.forEach((item) => {
       expect(item.className).toContain("monitorCardFailed");
-      expect(within(item).getByText("归档失败，请优先检查异常。")).toBeInTheDocument();
+      expect(within(item).getByText("归档失败，请检查异常并等待重试。")).toBeInTheDocument();
       expect(within(item).getByText("归档异常")).toBeInTheDocument();
     });
     const overview = screen.getByRole("region", { name: "工作量概览" });
@@ -536,6 +536,29 @@ describe("WorkloadPage", () => {
     within(rail)
       .getAllByRole("listitem")
       .forEach((stage) => expect(stage).toHaveTextContent("已完成"));
+  });
+
+  it.each([
+    ["archived", "succeeded", "流程已完成", "流程已完成，产物已归档。"],
+    ["archive_failed", "failed", "归档待重试", "归档失败，请检查异常并等待重试。"],
+    ["archiving", "running", "归档中", "审批已通过，正在归档。"],
+    ["three_review_approved", "pending", "等待归档", "审批已通过，等待归档。"],
+    ["cancelled", "pending", "流程已取消", "流程已取消，无需继续审批。"],
+    ["draft", "pending", "未进入审批", "尚未提交工作量填报。"],
+    ["submitted", "pending", "待分配审批节点", "已提交工作量填报，等待进入审批。"],
+  ])("shows accurate next-step wording for %s instead of awaiting approval", async (workflowStatus, archiveStatus, nodeLabel, hint) => {
+    mockGetWorkflowMonitor.mockResolvedValue({
+      total: 1,
+      items: [makeMonitorItem({ workflowStatus, archiveStatus, currentNodeKey: null, canApprove: false })],
+    });
+    renderWorkloadPage();
+    const card = await screen.findByTestId("workflow-item");
+    expect(within(card).getByText("当前节点").nextElementSibling).toHaveTextContent(nodeLabel);
+    expect(within(card).getByText(hint)).toBeInTheDocument();
+    expect(within(card).queryByText("与你有关，但当前还未轮到你处理。")).not.toBeInTheDocument();
+    if (workflowStatus !== "draft") {
+      expect(within(card).queryByText("未进入审批")).not.toBeInTheDocument();
+    }
   });
 
   it("replaces the existing second-review factor in the live A1 preview", async () => {

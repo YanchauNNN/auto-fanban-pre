@@ -13,6 +13,8 @@ from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.auth import router as auth_router
 from .routers.jobs import router as jobs_router
+from .routers.job_workload import router as job_workload_router
+from .routers.job_actions import router as job_actions_router
 from .routers.meta import router as meta_router
 from .routers.system import router as system_router
 from .routers.task_groups import router as task_groups_router
@@ -69,6 +71,8 @@ def create_app(
     app.include_router(system_router)
     app.include_router(meta_router)
     app.include_router(jobs_router)
+    app.include_router(job_workload_router)
+    app.include_router(job_actions_router)
     app.include_router(auth_router)
     app.include_router(accounts_router)
     app.include_router(task_groups_router)

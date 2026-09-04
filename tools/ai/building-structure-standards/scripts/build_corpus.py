@@ -3,17 +3,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
-from dataclasses import asdict, dataclass, field
+import sys
+import tempfile
+from dataclasses import dataclass, field, fields
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
 
 CLAUSE_HEADING_RE = re.compile(
-    r"^\s*((?:\d+\.)+\d+|\d+)(?:\s+|(?=[\u4e00-\u9fff]))(.+?)\s*$"
+    r"^\s*((?:[A-Z]\.)?(?:\d+\.)+\d+|\d+)(?:(?:\s+|(?=[\u4e00-\u9fff]))(.*?))?\s*$"
 )
+PARSER_VERSION = "standards-structure-2.3"
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from standards_io import replace_atomic  # noqa: E402
+
 SPECIAL_HEADING_RE = re.compile(r"^\s*(术\s*语|附录\s*[A-Z一二三四五六七八九十]*)\s*$")
 PAGE_MARKER_RE = re.compile(
     r"(?:[—\-]\s*)?(?:第\s*)?"
@@ -35,6 +45,7 @@ class SourceSpec:
     official_status: str = ""
     replacement_standard: str = ""
     major: str = ""
+    relative_source_path: str = ""
 
 
 @dataclass
@@ -43,6 +54,14 @@ class PageRecord:
     printed_page: str
     text: str
     anchor: str
+    native_text: str = ""
+    ocr_text: str = ""
+    text_source: str = "native"
+    ocr_confidence: float = 0.0
+    quality_status: str = "usable"
+    quality_flags: list[str] = field(default_factory=list)
+    content_role: str = "unknown"
+    ocr_provenance: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -54,6 +73,7 @@ class ClauseRecord:
     page_end: int
     anchor: str
     table_ids: list[str] = field(default_factory=list)
+    content_role: str = "normative"
 
 
 @dataclass
@@ -63,6 +83,9 @@ class TableRecord:
     rows: list[list[str]]
     markdown: str
     anchor: str
+    quality_status: str = "usable"
+    table_label: str = ""
+    quality_flags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -102,7 +125,8 @@ def _parse_pdf(source: SourceSpec, path: Path) -> ParsedSource:
     try:
         for page_index, page in enumerate(document):
             page_number = page_index + 1
-            text = _normalize_page_text(page.get_text("text", sort=True))
+            raw_text = page.get_text("text", sort=True)
+            text = _normalize_page_text(raw_text)
             printed_page = _detect_printed_page(text)
             anchor = f"{path.name}#page={page_number}"
             pages.append(
@@ -111,6 +135,15 @@ def _parse_pdf(source: SourceSpec, path: Path) -> ParsedSource:
                     printed_page=printed_page,
                     text=text,
                     anchor=anchor,
+                    native_text=raw_text,
+                    quality_status=(
+                        "usable"
+                        if text
+                        else "review_required"
+                        if page.get_images() or page.get_drawings()
+                        else "blank"
+                    ),
+                    quality_flags=[] if text else ["no_native_text"],
                 )
             )
             try:
@@ -161,9 +194,7 @@ def _parse_html(source: SourceSpec, path: Path) -> ParsedSource:
         declared_page = int(event["page"])
         page_text.setdefault(declared_page, []).append(text)
         match = (
-            CLAUSE_HEADING_RE.match(text)
-            if str(event["tag"]).startswith("h")
-            else None
+            _match_clause_heading(text) if str(event["tag"]).startswith("h") else None
         )
         if match:
             if current is not None:
@@ -222,26 +253,92 @@ def _parse_html(source: SourceSpec, path: Path) -> ParsedSource:
     )
 
 
+def _match_clause_heading(line: str) -> re.Match[str] | None:
+    prefix = re.match(r"^\s*((?:[A-Z]\s*[.．]\s*)?\d+(?:\s*[.．]\s*\d+)+)", line)
+    if prefix:
+        normalized = re.sub(r"\s+", "", prefix.group(1)).replace("．", ".")
+        line = normalized + line[prefix.end() :]
+    return CLAUSE_HEADING_RE.match(line)
+
+
 def _split_clauses(
     pages: list[PageRecord],
     tables: list[TableRecord],
 ) -> list[ClauseRecord]:
     clauses: list[ClauseRecord] = []
     current: ClauseRecord | None = None
+    role = "unknown"
     for page in pages:
         lines = [line.strip() for line in page.text.splitlines() if line.strip()]
-        for line in lines:
+        toc_page = any(
+            re.sub(r"\s+", "", line) in {"目录", "目次", "Contents"}
+            for line in lines[:3]
+        ) or any(re.search(r"(?:\.{2,}|…{2,}|·{2,})\s*\d+\s*$", line) for line in lines)
+        has_body_prose = any(
+            re.search(r"[\u4e00-\u9fff]{2,}.*[。！？；]", line) for line in lines
+        )
+        page.content_role = role
+        for line_index, line in enumerate(lines):
             if page.printed_page and _page_marker(line) == page.printed_page:
                 continue
-            match = CLAUSE_HEADING_RE.match(line)
+            compact = re.sub(r"\s+", "", line)
+            combined = compact + (
+                re.sub(r"\s+", "", lines[line_index + 1])
+                if line_index + 1 < len(lines)
+                else ""
+            )
+            marker = (
+                combined if combined in {"条文说明", "条款说明", "1总则"} else compact
+            )
+            next_role = role
+            if marker in {"条文说明", "条款说明"}:
+                next_role = "commentary"
+            elif compact in {"目录", "目次", "Contents"}:
+                next_role = "toc"
+            elif compact in {"公告", "前言", "发布公告"} or (
+                line_index < 3 and "部公告" in compact
+            ):
+                next_role = "announcement"
+            elif (
+                role != "commentary"
+                and not toc_page
+                and marker == "1总则"
+                and (role != "toc" or has_body_prose)
+            ):
+                next_role = "normative"
+            elif (
+                role in {"unknown", "toc", "announcement"}
+                and not toc_page
+                and (role == "unknown" or has_body_prose)
+                and re.match(r"^1\.0\.1(?:\s|$|(?=[\u4e00-\u9fff]))", line)
+            ):
+                next_role = "normative"
+            if next_role != role:
+                if current is not None:
+                    clauses.append(current)
+                    current = None
+                role = next_role
+                page.content_role = role
+            match = _match_clause_heading(line)
+            if match and match.group(1).isdigit():
+                heading = match.group(2) or ""
+                # Single numbers inside a clause are list items, not new clauses.
+                if (
+                    not heading
+                    or re.search(r"[。；;，,：:]", heading)
+                    or (
+                        current is not None
+                        and "." in current.clause_id
+                        and line_index != 0
+                    )
+                ):
+                    match = None
             special = SPECIAL_HEADING_RE.match(line)
             if match or special:
                 if current is not None:
                     clauses.append(current)
                 clause_id = (
-                    match.group(1)
-                    if match
-                    else re.sub(r"\s+", "", special.group(1))
+                    match.group(1) if match else re.sub(r"\s+", "", special.group(1))
                 )
                 current = ClauseRecord(
                     clause_id=clause_id,
@@ -250,16 +347,94 @@ def _split_clauses(
                     page_start=page.page_number,
                     page_end=page.page_number,
                     anchor=page.anchor,
+                    content_role=role,
                 )
             elif current is not None:
                 current.text = f"{current.text}\n{line}"
                 current.page_end = page.page_number
-        if current is not None:
-            current.page_end = max(current.page_end, page.page_number)
     if current is not None:
         clauses.append(current)
     _attach_tables(clauses, tables)
     return clauses
+
+
+def reindex_parsed_source(
+    parsed: ParsedSource, source: SourceSpec | None = None
+) -> ParsedSource:
+    """Reuse raw candidates; never promote legacy OCR to reviewed evidence."""
+    from standards_ocr import OcrLineResult, select_page_text
+
+    if source is not None:
+        parsed.source = source
+    filename = Path(parsed.source.source_path).name
+    for page in parsed.pages:
+        page.anchor = f"{filename}#page={page.page_number}"
+        native = page.native_text or (page.text if page.text_source != "ocr" else "")
+        prior_flags = list(page.quality_flags)
+        if page.quality_status in {"review_required", "failed"}:
+            prior_flags.append("prior_review_required")
+        try:
+            ocr_lines = [
+                OcrLineResult(**line) for line in page.ocr_provenance.get("lines", [])
+            ]
+        except (TypeError, ValueError):
+            ocr_lines = []
+            prior_flags.append("invalid_ocr_line_evidence")
+        decision = select_page_text(
+            native_text=native,
+            ocr_text=page.ocr_text,
+            ocr_confidence=page.ocr_confidence,
+            parse_mode="text_primary",
+            blank_verified=page.quality_status == "blank",
+            legacy_ocr=bool(
+                page.ocr_text
+                and (not ocr_lines or not page.ocr_provenance.get("engine_identity"))
+            ),
+            ocr_lines=ocr_lines,
+        )
+        page.native_text = native
+        page.text = decision.selected_text
+        page.text_source = decision.text_source
+        page.quality_status = decision.quality
+        page.quality_flags = list(
+            dict.fromkeys([*prior_flags, *decision.quality_flags])
+        )
+        if prior_flags and page.quality_status == "usable":
+            page.quality_status = "review_required"
+        page.printed_page = _detect_printed_page(page.text) or page.printed_page
+    # Native table extraction is retained; OCR-only table references never invent cells.
+    tables = [
+        table for table in parsed.tables if table.quality_status != "visual_required"
+    ]
+    for table in tables:
+        table.anchor = f"{filename}#page={table.page_number}"
+    for page in parsed.pages:
+        labels = list(
+            dict.fromkeys(re.findall(r"表\s*([A-Z]?\.?\d+(?:\.\d+)+)", page.text))
+        )
+        native_tables = [
+            table for table in tables if table.page_number == page.page_number
+        ]
+        if len(labels) == 1 and len(native_tables) == 1:
+            native_tables[0].table_label = labels[0]
+        for label in labels:
+            if any(table.table_label == label for table in native_tables):
+                continue
+            tables.append(
+                TableRecord(
+                    table_id=f"p{page.page_number}-visual-{label}",
+                    page_number=page.page_number,
+                    rows=[],
+                    markdown="",
+                    anchor=page.anchor,
+                    table_label=label,
+                    quality_status="visual_required",
+                    quality_flags=["table_cells_unverified"],
+                )
+            )
+    parsed.tables = tables
+    parsed.clauses = _split_clauses(parsed.pages, parsed.tables)
+    return parsed
 
 
 def _attach_tables(
@@ -280,7 +455,25 @@ def build_sqlite(
     parsed_sources: Iterable[ParsedSource],
     database_path: Path | str,
 ) -> dict[str, Any]:
-    sources = list(parsed_sources)
+    path = Path(database_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=path.name + ".", suffix=".tmp", dir=path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(name)
+    try:
+        report = _build_sqlite_file(parsed_sources, temporary)
+        replace_atomic(temporary, path)
+        return report
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _build_sqlite_file(
+    parsed_sources: Iterable[ParsedSource],
+    database_path: Path | str,
+) -> dict[str, Any]:
     path = Path(database_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -310,7 +503,15 @@ def build_sqlite(
                 page_number INTEGER NOT NULL,
                 printed_page TEXT NOT NULL,
                 text TEXT NOT NULL,
-                anchor TEXT NOT NULL
+                anchor TEXT NOT NULL,
+                native_text TEXT NOT NULL,
+                ocr_text TEXT NOT NULL,
+                text_source TEXT NOT NULL,
+                ocr_confidence REAL NOT NULL,
+                quality_status TEXT NOT NULL,
+                quality_flags_json TEXT NOT NULL,
+                content_role TEXT NOT NULL,
+                ocr_provenance_json TEXT NOT NULL
             );
             CREATE TABLE clauses (
                 clause_pk INTEGER PRIMARY KEY,
@@ -321,7 +522,8 @@ def build_sqlite(
                 page_start INTEGER NOT NULL,
                 page_end INTEGER NOT NULL,
                 anchor TEXT NOT NULL,
-                table_ids_json TEXT NOT NULL
+                table_ids_json TEXT NOT NULL,
+                content_role TEXT NOT NULL
             );
             CREATE TABLE standard_tables (
                 table_pk INTEGER PRIMARY KEY,
@@ -330,7 +532,10 @@ def build_sqlite(
                 page_number INTEGER NOT NULL,
                 rows_json TEXT NOT NULL,
                 markdown TEXT NOT NULL,
-                anchor TEXT NOT NULL
+                anchor TEXT NOT NULL,
+                quality_status TEXT NOT NULL,
+                table_label TEXT NOT NULL,
+                quality_flags_json TEXT NOT NULL
             );
             CREATE VIRTUAL TABLE clauses_fts USING fts5(
                 standard_code,
@@ -342,10 +547,28 @@ def build_sqlite(
             );
             CREATE INDEX idx_sources_code ON sources(standard_code);
             CREATE INDEX idx_clauses_source_clause ON clauses(source_id, clause_id);
+            CREATE INDEX idx_pages_source_number ON pages(source_id, page_number);
+            CREATE INDEX idx_tables_source_label ON standard_tables(source_id, table_label);
             """
         )
-        for source_index, parsed in enumerate(sources, start=1):
+        source_count = 0
+        page_count = 0
+        clause_count = 0
+        table_count = 0
+        warning_items: list[dict[str, Any]] = []
+        for source_index, parsed in enumerate(parsed_sources, start=1):
             spec = parsed.source
+            source_count += 1
+            page_count += len(parsed.pages)
+            clause_count += len(parsed.clauses)
+            table_count += len(parsed.tables)
+            if parsed.warnings:
+                warning_items.append(
+                    {
+                        "standard_code": spec.standard_code,
+                        "warnings": parsed.warnings,
+                    }
+                )
             connection.execute(
                 """
                 INSERT INTO sources(
@@ -363,7 +586,7 @@ def build_sqlite(
                     spec.major,
                     spec.official_status,
                     spec.replacement_standard,
-                    Path(spec.source_path).name,
+                    spec.relative_source_path or Path(spec.source_path).name,
                     parsed.source_sha256,
                     spec.official_source_url,
                     spec.authorization,
@@ -374,8 +597,10 @@ def build_sqlite(
                 connection.execute(
                     """
                     INSERT INTO pages(
-                        source_id, page_number, printed_page, text, anchor
-                    ) VALUES (?, ?, ?, ?, ?)
+                        source_id, page_number, printed_page, text, anchor,
+                        native_text, ocr_text, text_source, ocr_confidence,
+                        quality_status, quality_flags_json, content_role, ocr_provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_index,
@@ -383,6 +608,15 @@ def build_sqlite(
                         page.printed_page,
                         page.text,
                         page.anchor,
+                        page.native_text
+                        or (page.text if page.text_source == "native" else ""),
+                        page.ocr_text,
+                        page.text_source,
+                        page.ocr_confidence,
+                        page.quality_status,
+                        json.dumps(page.quality_flags, ensure_ascii=False),
+                        page.content_role,
+                        json.dumps(page.ocr_provenance, ensure_ascii=False),
                     ),
                 )
             for clause in parsed.clauses:
@@ -390,8 +624,8 @@ def build_sqlite(
                     """
                     INSERT INTO clauses(
                         source_id, clause_id, heading, text, page_start,
-                        page_end, anchor, table_ids_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        page_end, anchor, table_ids_json, content_role
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_index,
@@ -402,6 +636,7 @@ def build_sqlite(
                         clause.page_end,
                         clause.anchor,
                         json.dumps(clause.table_ids, ensure_ascii=False),
+                        clause.content_role,
                     ),
                 )
                 connection.execute(
@@ -425,8 +660,8 @@ def build_sqlite(
                     """
                     INSERT INTO standard_tables(
                         source_id, table_id, page_number, rows_json,
-                        markdown, anchor
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        markdown, anchor, quality_status, table_label, quality_flags_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         source_index,
@@ -435,6 +670,9 @@ def build_sqlite(
                         json.dumps(table.rows, ensure_ascii=False),
                         table.markdown,
                         table.anchor,
+                        table.quality_status,
+                        table.table_label,
+                        json.dumps(table.quality_flags, ensure_ascii=False),
                     ),
                 )
         connection.commit()
@@ -442,15 +680,11 @@ def build_sqlite(
         connection.close()
 
     return {
-        "source_count": len(sources),
-        "page_count": sum(len(item.pages) for item in sources),
-        "clause_count": sum(len(item.clauses) for item in sources),
-        "table_count": sum(len(item.tables) for item in sources),
-        "warnings": [
-            {"standard_code": item.source.standard_code, "warnings": item.warnings}
-            for item in sources
-            if item.warnings
-        ],
+        "source_count": source_count,
+        "page_count": page_count,
+        "clause_count": clause_count,
+        "table_count": table_count,
+        "warnings": warning_items,
         "database_sha256": _sha256(path),
     }
 
@@ -502,28 +736,46 @@ def query_index(
 def build_from_manifest(
     manifest_path: Path | str,
     database_path: Path | str,
+    *,
+    source_root: Path | str | None = None,
 ) -> dict[str, Any]:
     manifest_file = Path(manifest_path)
     payload = json.loads(manifest_file.read_text(encoding="utf-8"))
-    parsed: list[ParsedSource] = []
     skipped: list[dict[str, str]] = []
-    for item in payload.get("sources", []):
-        source_data = dict(item)
-        source_path = Path(source_data["source_path"])
-        if not source_path.is_absolute():
-            source_path = (manifest_file.parent / source_path).resolve()
-        source_data["source_path"] = str(source_path)
-        authorization = str(source_data.get("authorization") or "")
-        if "已授权" not in authorization:
-            skipped.append(
-                {
-                    "standard_code": str(source_data.get("standard_code") or ""),
-                    "reason": "authorization gate",
-                }
+    source_base = (
+        Path(source_root).resolve()
+        if source_root is not None
+        else manifest_file.parent.resolve()
+    )
+    source_fields = {item.name for item in fields(SourceSpec)}
+
+    def iter_parsed_sources() -> Iterable[ParsedSource]:
+        for item in payload.get("sources", []):
+            source_data = {
+                key: value for key, value in dict(item).items() if key in source_fields
+            }
+            source_path = Path(source_data["source_path"])
+            relative_source_path = (
+                source_path.as_posix()
+                if not source_path.is_absolute()
+                else source_path.name
             )
-            continue
-        parsed.append(parse_source(SourceSpec(**source_data)))
-    report = build_sqlite(parsed, database_path)
+            if not source_path.is_absolute():
+                source_path = (source_base / source_path).resolve()
+            source_data["source_path"] = str(source_path)
+            source_data["relative_source_path"] = relative_source_path
+            authorization = str(source_data.get("authorization") or "")
+            if "已授权" not in authorization:
+                skipped.append(
+                    {
+                        "standard_code": str(source_data.get("standard_code") or ""),
+                        "reason": "authorization gate",
+                    }
+                )
+                continue
+            yield parse_source(SourceSpec(**source_data))
+
+    report = build_sqlite(iter_parsed_sources(), database_path)
     report["skipped_sources"] = skipped
     report["manifest_sha256"] = _sha256(manifest_file)
     return report
@@ -645,14 +897,9 @@ class _StandardsHtmlParser(HTMLParser):
             self._cell_tag = ""
             self._cell_text = []
         elif tag == "tr" and self._table is not None and self._row is not None:
-            self._table["rows"].append(
-                [cell[0] if cell else "" for cell in self._row]
-            )
+            self._table["rows"].append([cell[0] if cell else "" for cell in self._row])
             self._row = None
-        if (
-            tag == self._block_tag
-            and len(self.stack) == self._block_depth
-        ):
+        if tag == self._block_tag and len(self.stack) == self._block_depth:
             self.text_events.append(
                 {
                     "tag": self._block_tag,
@@ -694,8 +941,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--source-root", type=Path)
     args = parser.parse_args(argv)
-    report = build_from_manifest(args.manifest, args.output)
+    report = build_from_manifest(
+        args.manifest,
+        args.output,
+        source_root=args.source_root,
+    )
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
