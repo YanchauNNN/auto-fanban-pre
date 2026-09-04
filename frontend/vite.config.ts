@@ -6,8 +6,9 @@ import react from "@vitejs/plugin-react";
 import { apiProxyConfig } from "./src/tooling/viteProxy";
 
 const configDir = fileURLToPath(new URL(".", import.meta.url));
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const nodeModulesDir = fileURLToPath(new URL("./node_modules", import.meta.url));
-const devServerFsAllow = [configDir];
+const devServerFsAllow = [configDir, projectRoot];
 
 if (existsSync(nodeModulesDir)) {
   devServerFsAllow.push(realpathSync(nodeModulesDir));

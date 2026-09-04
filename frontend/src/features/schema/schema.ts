@@ -93,6 +93,7 @@ type RawFormSchema = {
       valid_roles?: readonly string[];
       admin_roles?: readonly string[];
       admin_created_default_password_configured?: boolean | null;
+      admin_created_default_password?: string | null;
     };
     workflow?: {
       terminal_status?: string | null;
@@ -485,6 +486,9 @@ function normalizeManagementSchema(
       adminRoles: normalizeStringList(value.account?.admin_roles),
       adminCreatedDefaultPasswordConfigured: Boolean(
         value.account?.admin_created_default_password_configured,
+      ),
+      adminCreatedDefaultPassword: String(
+        value.account?.admin_created_default_password ?? "",
       ),
     },
     workflow: {

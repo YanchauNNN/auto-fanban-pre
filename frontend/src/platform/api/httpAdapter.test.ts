@@ -939,8 +939,9 @@ describe("HttpAdapter", () => {
     const adapter = new HttpAdapter("http://127.0.0.1:8000/", {
       getAccessToken: () => "access-token",
     });
+    const readArtifact = adapter.readArtifact;
 
-    await expect(adapter.readArtifact("/api/jobs/job-1/download/package")).resolves.toBe(artifact);
+    await expect(readArtifact("/api/jobs/job-1/download/package")).resolves.toBe(artifact);
 
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8000/api/jobs/job-1/download/package");

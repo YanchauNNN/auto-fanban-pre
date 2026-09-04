@@ -502,7 +502,7 @@ describe("homepage shell", () => {
     expect(screen.getByText("加载中")).toBeInTheDocument();
   });
 
-  it("never renders the configured default password on the login page", async () => {
+  it("shows the account convention and YAML-backed default password beside the login labels", async () => {
     window.localStorage.clear();
     window.history.replaceState({}, "", "/login");
     mockGetFormSchema.mockResolvedValue({
@@ -522,18 +522,21 @@ describe("homepage shell", () => {
           validRoles: ["设计人员", "管理员"],
           adminRoles: ["管理员"],
           adminCreatedDefaultPasswordConfigured: true,
-          adminCreatedDefaultPassword: "must-never-render",
+          adminCreatedDefaultPassword: "password",
         },
       },
     });
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "登录平台" })).toBeInTheDocument();
     expect(
-      await screen.findByText("初始密码由管理员提供，系统已配置账号密码策略。"),
+      await screen.findByRole("heading", {
+        name: "中核工程-河北分公司-建筑结构所出图平台",
+      }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/must-never-render/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "账号登录" })).toBeInTheDocument();
+    expect(screen.getByText("（同龙语账号，eg:wangrca）")).toBeInTheDocument();
+    expect(await screen.findByText("（默认：password）")).toBeInTheDocument();
   });
 
   it("shows a clear loading state before form schema is ready", async () => {
@@ -635,6 +638,7 @@ describe("homepage shell", () => {
     expect(screen.getByText("中核工程-河北分公司-建筑结构所出图平台")).toBeInTheDocument();
     expect(screen.getByTestId("hero-watermark")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "教程" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更新日志" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出图" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "纠错" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "标准化出图" })).toBeInTheDocument();
@@ -661,6 +665,20 @@ describe("homepage shell", () => {
     expect(screen.queryByText("工作量模块预留")).not.toBeInTheDocument();
     expect(within(toolbar).queryByRole("button", { name: "AI 助手" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "打开 AI 助手" })).toBeInTheDocument();
+  });
+
+  it("opens and closes the complete update log from the title strip", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "更新日志" }));
+
+    expect(await screen.findByRole("dialog", { name: "更新日志" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /2026\.01\.04\.1/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "关闭更新日志" }));
+    expect(screen.queryByRole("dialog", { name: "更新日志" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更新日志" })).toHaveFocus();
   });
 
   it("opens calculation-book creation as a same-level business action", async () => {
@@ -695,8 +713,8 @@ describe("homepage shell", () => {
     expect(within(drawer).queryByLabelText("技能")).not.toBeInTheDocument();
     expect(within(drawer).queryByLabelText("MCP 能力")).not.toBeInTheDocument();
     expect(within(drawer).getAllByText("记忆验证")).toHaveLength(1);
-    expect(within(drawer).getByText("请记住我的测试编号是 AI-0711")).toBeInTheDocument();
-    expect(within(drawer).getByText("我已记住 AI-0711")).toBeInTheDocument();
+    expect(await within(drawer).findByText("请记住我的测试编号是 AI-0711")).toBeInTheDocument();
+    expect(await within(drawer).findByText("我已记住 AI-0711")).toBeInTheDocument();
 
     await user.type(within(drawer).getByRole("textbox", { name: "输入 AI 对话内容" }), "我刚才的测试编号是什么？");
     await user.click(within(drawer).getByRole("button", { name: "发送" }));
@@ -716,7 +734,7 @@ describe("homepage shell", () => {
     expect(await within(drawer).findByText("你的测试编号是 AI-0711。")).toBeInTheDocument();
     expect(within(drawer).getByText("已使用 2 条历史消息")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("button", { name: "隐藏或调整 AI 助手窗口" }));
+    await user.click(screen.getByRole("button", { name: "隐藏或调整 AI 助手窗口" }));
     await screen.findByRole("button", { name: "打开 AI 助手" });
     expect(document.body.style.overflow).toBe("");
   });
@@ -790,7 +808,7 @@ describe("homepage shell", () => {
 
     await user.click(await screen.findByRole("button", { name: "打开 AI 助手" }));
     const drawer = await screen.findByRole("dialog", { name: "AI 助手" });
-    const handle = within(drawer).getByRole("button", { name: "隐藏或调整 AI 助手窗口" });
+    const handle = screen.getByRole("button", { name: "隐藏或调整 AI 助手窗口" });
     const initialWidth = drawer.style.getPropertyValue("--ai-drawer-width");
     const initialHeight = drawer.style.getPropertyValue("--ai-drawer-height");
 
@@ -1553,7 +1571,7 @@ describe("recent jobs area", () => {
     expect(screen.queryByRole("dialog", { name: "全部任务浏览器" })).not.toBeInTheDocument();
   });
 
-  it("uses loaded card count instead of backend total for the expand button", async () => {
+  it("uses backend total for the expand button when only the first page is loaded", async () => {
     const jobs = Array.from({ length: 100 }, (_, index) =>
       makeSingleJob(index + 1, `sample-${index + 1}.dwg`),
     );
@@ -1565,7 +1583,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     expect(await screen.findAllByTestId("recent-job-card")).toHaveLength(8);
-    expect(screen.getByRole("button", { name: "展开其余 92 个" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "展开其余 361 个" })).toBeInTheDocument();
   });
 
   it("loads more jobs inside the modal so records after the first 100 are reachable", async () => {
@@ -1581,7 +1599,7 @@ describe("recent jobs area", () => {
     render(<App />);
 
     await screen.findAllByTestId("recent-job-card");
-    await user.click(screen.getByRole("button", { name: "展开其余 92 个" }));
+    await user.click(screen.getByRole("button", { name: "展开其余 112 个" }));
 
     const modal = await screen.findByRole("dialog");
     expect(within(modal).queryByText("sample-120.dwg")).not.toBeInTheDocument();

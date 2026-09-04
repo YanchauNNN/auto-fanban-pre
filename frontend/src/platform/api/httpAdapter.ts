@@ -1716,9 +1716,9 @@ export class HttpAdapter implements ApiAdapter {
     };
   }
 
-  async readArtifact(url: string): Promise<Blob> {
+  readArtifact = async (url: string): Promise<Blob> => {
     return (await this.fetchArtifact(url)).blob;
-  }
+  };
 
   async downloadArtifact(url: string, fallbackFilename = "download"): Promise<void> {
     const { blob, filename } = await this.fetchArtifact(url);

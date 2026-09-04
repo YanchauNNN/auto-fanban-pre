@@ -206,6 +206,9 @@ class FormMetadataService:
                 "admin_created_default_password_configured": bool(
                     str(account_cfg.get("admin_created_default_password") or "").strip()
                 ),
+                "admin_created_default_password": str(
+                    account_cfg.get("admin_created_default_password") or ""
+                ),
             },
             "workflow": {
                 "terminal_status": mechanism.workflow_runtime.approval_terminal_status,

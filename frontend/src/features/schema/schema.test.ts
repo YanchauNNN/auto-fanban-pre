@@ -260,9 +260,7 @@ describe("normalizeFormSchema", () => {
           valid_roles: ["designer", "admin"],
           admin_roles: ["admin"],
           admin_created_default_password_configured: true,
-          ...({
-            admin_created_default_password: "must-never-normalize",
-          } as Record<string, unknown>),
+          admin_created_default_password: "yaml-password",
         },
         workflow: {
           terminal_status: "archived",
@@ -320,8 +318,7 @@ describe("normalizeFormSchema", () => {
     expect(normalized.management?.account.fieldMap.accountId).toBe("账号");
     expect(normalized.management?.account.adminRoles).toEqual(["admin"]);
     expect(normalized.management?.account.adminCreatedDefaultPasswordConfigured).toBe(true);
-    expect(normalized.management?.account).not.toHaveProperty("adminCreatedDefaultPassword");
-    expect(JSON.stringify(normalized)).not.toContain("must-never-normalize");
+    expect(normalized.management?.account.adminCreatedDefaultPassword).toBe("yaml-password");
     expect(normalized.management?.workflow.factor.max).toBe(1.3);
     expect(normalized.management?.workflow.terminalStatus).toBe("archived");
     expect(normalized.management?.workflow.nodes).toEqual([
