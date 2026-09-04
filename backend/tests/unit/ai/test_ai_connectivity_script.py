@@ -22,6 +22,18 @@ REBAR_SUGGESTION_REQUIRED_FILES = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_building_standards_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "building-standards-source"
+    source_root.mkdir()
+    (source_root / "GB 50010-2010.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    monkeypatch.setenv("FANBAN_BUILDING_STANDARDS_SOURCE_ROOT", str(source_root))
+    monkeypatch.setenv("FANBAN_BUILDING_STANDARDS_FALLBACK_ROOTS", str(source_root))
+
+
 def _rebar_skill_bundle_sha256(skill_root: Path) -> str:
     parts = [
         ("SKILL.md", (skill_root / "SKILL.md").read_text(encoding="utf-8")),

@@ -126,4 +126,3 @@
 4. Build a terminal deployment directory and assert that it contains the placeholder but no standards PDFs.
 5. Run the generated environment probe against a temporary local source and fallback source fixture.
 6. Report the 504-file manifest totals separately from the smaller fully parsed sample totals; do not claim full OCR completion unless every source has a terminal status.
-
