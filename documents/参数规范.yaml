@@ -1142,7 +1142,13 @@ titleblock_extract:
 
     date:
       roi: 日期
-      parse: { type: pick_top_by_y }
+      parse:
+        type: pick_top_by_y
+        composite_revision_date_status:
+          enabled: true
+          source_rois: [版次, 日期, 状态]
+          pattern: '^\s*(?P<revision>[A-Z])\s+(?P<date>\d{4}[./-]\d{1,2})\s+(?P<status>[A-Z][A-Z0-9_-]*)\s*$'
+          note: "兼容版次、日期、状态写在同一个完整TEXT/MTEXT/属性文本中的图签；不跨文本框拼接"
 
     revision_description:
       roi: 版本说明

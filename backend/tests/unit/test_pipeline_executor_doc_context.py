@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.cad.titleblock_consistency import TitleblockConsistencyService
+from src.doc_gen.param_validator import DocParamValidator
 from src.models import (
     BBox,
     DocContext,
@@ -241,6 +242,65 @@ def test_build_doc_context_falls_forward_to_first_readable_sequential_frame(
     assert doc_ctx.params.discipline == "结构"
     assert doc_ctx.params.revision == "B"
     assert doc_ctx.params.doc_status == "CFC"
+
+
+def test_build_doc_context_keeps_available_fields_from_partial_exact_001(
+    sample_frame: FrameMeta,
+) -> None:
+    executor = object.__new__(PipelineExecutor)
+    executor.spec = cast(Any, SimpleNamespace(
+        doc_generation={"rules": {}},
+        get_mappings=lambda: {},
+    ))
+
+    frame_001 = deepcopy(sample_frame)
+    frame_001.runtime.frame_id = "partial-frame-001"
+    frame_001.titleblock.internal_code = "20169DY-JZS01-001"
+    frame_001.titleblock.engineering_no = "2016"
+    frame_001.titleblock.subitem_no = "DY"
+    frame_001.titleblock.discipline = "建筑"
+    frame_001.titleblock.revision = None
+    frame_001.titleblock.status = None
+
+    frame_002 = deepcopy(sample_frame)
+    frame_002.runtime.frame_id = "complete-frame-002"
+    frame_002.titleblock.internal_code = "20169DY-JZS01-002"
+    frame_002.titleblock.engineering_no = "9999"
+    frame_002.titleblock.subitem_no = "XX"
+    frame_002.titleblock.discipline = "错误专业"
+    frame_002.titleblock.revision = "B"
+    frame_002.titleblock.status = "APVD"
+
+    job = Job(
+        job_id="job-partial-exact-001",
+        job_type=JobType.DELIVERABLE,
+        project_no="2016",
+        params={"project_no": "2016"},
+    )
+
+    doc_ctx = PipelineExecutor._build_doc_context(
+        executor,
+        job,
+        {"frames": [frame_002, frame_001], "sheet_sets": []},
+    )
+
+    assert doc_ctx.params.engineering_no == "2016"
+    assert doc_ctx.params.subitem_no == "DY"
+    assert doc_ctx.params.discipline == "建筑"
+    assert doc_ctx.params.revision is None
+    assert doc_ctx.params.doc_status is None
+    assert doc_ctx.get_frame_001() is frame_001
+
+    titleblock_errors = {
+        error
+        for error in DocParamValidator().validate(doc_ctx)
+        if error.rsplit(": ", 1)[-1]
+        in {"engineering_no", "subitem_no", "discipline", "revision", "doc_status"}
+    }
+    assert titleblock_errors == {
+        "文档参数缺失: revision",
+        "文档参数缺失: doc_status",
+    }
 
 
 def test_build_doc_context_normalizes_discipline_from_1818_titleblock_hint(

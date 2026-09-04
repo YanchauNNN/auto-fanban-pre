@@ -95,6 +95,10 @@ class TitleblockExtractor(ITitleblockExtractor):
         self.standalone_tilde_require_bbox_overlap = bool(
             tilde_merge.get("require_host_bbox_overlap", True)
         )
+        date_parse = self.field_defs.get("date").parse if self.field_defs.get("date") else {}
+        self.revision_date_status_composite = dict(
+            date_parse.get("composite_revision_date_status", {})
+        )
         external_parse = (
             self.field_defs.get("external_code").parse
             if self.field_defs.get("external_code")
@@ -280,9 +284,69 @@ class TitleblockExtractor(ITitleblockExtractor):
 
         frame.titleblock = fields
         frame.raw_extracts = raw_extracts
+        self._apply_revision_date_status_composite(fields, raw_extracts)
         self._validate_required_status(frame)
         self._check_scale_mismatch(frame)
         return frame
+
+    def _apply_revision_date_status_composite(
+        self,
+        fields: TitleblockFields,
+        raw_extracts: dict[str, Any],
+    ) -> None:
+        config = self.revision_date_status_composite
+        if not bool(config.get("enabled", False)):
+            return
+
+        pattern = str(config.get("pattern") or "").strip()
+        if not pattern:
+            return
+        try:
+            regex = re.compile(pattern, flags=re.IGNORECASE)
+        except re.error:
+            return
+
+        source_rois = config.get("source_rois", ["版次", "日期", "状态"])
+        candidates: list[tuple[float, str, str]] = []
+        for roi_name in source_rois:
+            raw_items = raw_extracts.get(str(roi_name), [])
+            if not isinstance(raw_items, list):
+                continue
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                try:
+                    y = float(item.get("y", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    y = 0.0
+                candidates.append((y, text, str(roi_name)))
+
+        for _y, text, roi_name in sorted(candidates, key=lambda item: -item[0]):
+            match = regex.fullmatch(text)
+            if match is None:
+                continue
+            values = {
+                key: str(match.groupdict().get(key) or "").strip()
+                for key in ("revision", "date", "status")
+            }
+            if not all(values.values()):
+                continue
+
+            if not str(fields.revision or "").strip():
+                fields.revision = values["revision"].upper()
+            if not str(fields.status or "").strip():
+                fields.status = values["status"].upper()
+            if not str(fields.date or "").strip() or fields.date == text:
+                fields.date = values["date"]
+            raw_extracts["版次日期状态组合行"] = {
+                "source_roi": roi_name,
+                "text": text,
+                **values,
+            }
+            return
 
     def _validate_required_status(self, frame: FrameMeta) -> None:
         if str(frame.titleblock.status or "").strip():

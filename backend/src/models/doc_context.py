@@ -230,7 +230,7 @@ class DocContext(BaseModel):
             frame for frame in candidates
             if self._is_exact_001_frame(frame)
         ]
-        frame = self._first_readable_frame(exact_001)
+        frame = self._best_available_frame(exact_001)
         if frame is not None:
             return frame
 
@@ -238,7 +238,7 @@ class DocContext(BaseModel):
             frame for frame in candidates
             if self._same_code_page_index(frame) == 1
         ]
-        frame = self._first_readable_frame(same_code_primary)
+        frame = self._best_available_frame(same_code_primary)
         if frame is not None:
             return frame
 
@@ -252,7 +252,7 @@ class DocContext(BaseModel):
                 frame.titleblock.internal_code or "",
             ),
         )
-        return self._first_readable_frame(sequenced)
+        return self._best_available_frame(sequenced)
 
     def get_sorted_frames(self) -> list[FrameMeta]:
         """按internal_code尾号排序"""
@@ -390,22 +390,21 @@ class DocContext(BaseModel):
         return internal_code.endswith("-001")
 
     @staticmethod
-    def _has_required_doc_fields(frame: FrameMeta) -> bool:
+    def _available_doc_field_count(frame: FrameMeta) -> int:
         tb = frame.titleblock
-        required = [
+        fields = [
             tb.engineering_no,
             tb.subitem_no,
             tb.discipline,
             tb.revision,
             tb.status,
         ]
-        return all(str(value or "").strip() for value in required)
+        return sum(bool(str(value or "").strip()) for value in fields)
 
-    def _first_readable_frame(self, frames: list[FrameMeta]) -> FrameMeta | None:
-        for frame in frames:
-            if self._has_required_doc_fields(frame):
-                return frame
-        return None
+    def _best_available_frame(self, frames: list[FrameMeta]) -> FrameMeta | None:
+        if not frames:
+            return None
+        return max(frames, key=self._available_doc_field_count)
 
     def get_document_revision(self) -> str:
         """返回图纸链路文档应使用的统一版次。"""
