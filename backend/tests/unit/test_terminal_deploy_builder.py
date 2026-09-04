@@ -455,11 +455,18 @@ def test_full_build_rejects_archive_runtime_source_changed_after_gather(
 def test_build_terminal_deploy_package_writes_layout_and_missing_installer_notes(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     _make_fake_repo(repo_root)
+    _write_file(
+        repo_root / "frontend" / "dist" / "assets" / "UpdateLogDialog-test.js",
+        "bundled project update log",
+    )
     output_root = tmp_path / "build" / "fanban-terminal-deploy"
 
     build_terminal_deploy_package(repo_root=repo_root, output_root=output_root)
 
     assert (output_root / "frontend-dist" / "index.html").exists()
+    assert (
+        output_root / "frontend-dist" / "assets" / "UpdateLogDialog-test.js"
+    ).read_text(encoding="utf-8-sig") == "bundled project update log"
     frontend_web_config = (output_root / "frontend-dist" / "web.config").read_text(encoding="utf-8")
     assert '<mimeMap fileExtension=".mjs" mimeType="text/javascript" />' in frontend_web_config
     assert '<mimeMap fileExtension=".wasm" mimeType="application/wasm" />' in frontend_web_config

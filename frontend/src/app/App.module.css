@@ -420,6 +420,19 @@
   font-weight: 700;
 }
 
+.loginFieldLabel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.loginFieldHint {
+  color: #7c8796;
+  font-size: 0.86rem;
+  font-weight: 400;
+}
+
 .loginInput {
   width: 100%;
   min-height: 3.35rem;
@@ -435,12 +448,6 @@
   outline: none;
   border-color: rgba(24, 82, 150, 0.54);
   box-shadow: 0 0 0 4px rgba(37, 106, 184, 0.12);
-}
-
-.loginHelper {
-  margin: 0.85rem 0 0;
-  color: #5e7697;
-  font-size: 0.92rem;
 }
 
 .loginError {

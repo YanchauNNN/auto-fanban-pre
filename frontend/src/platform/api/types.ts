@@ -229,6 +229,7 @@ export type ManagementSchema = {
     validRoles: readonly string[];
     adminRoles: readonly string[];
     adminCreatedDefaultPasswordConfigured: boolean;
+    adminCreatedDefaultPassword: string;
   };
   workflow: {
     terminalStatus: string;

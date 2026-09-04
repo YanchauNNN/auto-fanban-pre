@@ -811,6 +811,7 @@ def test_form_schema_returns_deliverable_fields_and_options(
         "7",
         "9",
     ]
+    assert payload["management"]["account"]["admin_created_default_password"] == "password"
 
     project_section = next(
         section for section in payload["deliverable"]["sections"] if section["id"] == "project"

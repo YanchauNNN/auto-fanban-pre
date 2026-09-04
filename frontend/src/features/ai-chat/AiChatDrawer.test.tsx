@@ -174,6 +174,60 @@ describe("AiChatDrawer attachments", () => {
     expect(await screen.findByRole("dialog", { name: "AI 助手" })).toBeInTheDocument();
   });
 
+  it("keeps one canonical mascot actor mounted while only pose and occlusion change", async () => {
+    const user = userEvent.setup();
+    const { adapter } = createAdapter();
+    renderClosedDrawer(adapter);
+
+    const trigger = screen.getByRole("button", { name: "打开 AI 助手" });
+    const initialRigCount = document.querySelectorAll("[data-mascot-rig]").length;
+    expect(initialRigCount).toBe(3);
+    expect(document.querySelector("[data-mascot-variant]")).toBeNull();
+
+    await user.click(trigger);
+
+    const handle = await screen.findByRole("button", {
+      name: "隐藏或调整 AI 助手窗口",
+    });
+    expect(handle).toBe(trigger);
+    expect(document.querySelectorAll("[data-mascot-rig]")).toHaveLength(initialRigCount);
+    await waitFor(() =>
+      expect(screen.getByTestId("mascot-pass-rear")).toHaveAttribute("data-active", "true"),
+    );
+    expect(screen.getByTestId("mascot-pass-front")).toHaveAttribute("data-active", "true");
+  });
+
+  it("retracts the mascot after closing while preserving focus restoration", async () => {
+    const user = userEvent.setup();
+    const { adapter } = createAdapter();
+    renderClosedDrawer(adapter);
+
+    await user.click(screen.getByRole("button", { name: "打开 AI 助手" }));
+    await user.click(
+      await screen.findByRole("button", { name: "隐藏或调整 AI 助手窗口" }),
+    );
+
+    const trigger = await screen.findByRole("button", { name: "打开 AI 助手" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute("data-engaged", "false");
+    expect(trigger).toHaveAttribute("data-suppress-focus-visual", "true");
+  });
+
+  it("also retracts after Escape while restoring keyboard focus", async () => {
+    const user = userEvent.setup();
+    const { adapter } = createAdapter();
+    renderClosedDrawer(adapter);
+
+    await user.click(screen.getByRole("button", { name: "打开 AI 助手" }));
+    await screen.findByRole("dialog", { name: "AI 助手" });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    const trigger = await screen.findByRole("button", { name: "打开 AI 助手" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toHaveAttribute("data-engaged", "false");
+    expect(trigger).toHaveAttribute("data-suppress-focus-visual", "true");
+  });
+
   it("uses the open-drawer mascot as the only hide and resize control", async () => {
     const { adapter } = createAdapter();
     renderDrawer(adapter);

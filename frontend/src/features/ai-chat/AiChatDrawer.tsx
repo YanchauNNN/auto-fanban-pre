@@ -12,9 +12,11 @@ import {
 import { createPortal } from "react-dom";
 
 import type { AiAttachment, ApiAdapter } from "../../platform/api/types";
-import { AiDrawerMascotHandle } from "./AiDrawerMascotHandle";
+import {
+  AiMascotActor,
+  MASCOT_DRAWER_MOTION_MS,
+} from "./AiMascotActor";
 import styles from "./AiChatDrawer.module.css";
-import { AiMascotTrigger } from "./AiMascotTrigger";
 import { AiMessageContent } from "./AiMessageContent";
 import { isAiConversationNotFoundError, useAiChat } from "./useAiChat";
 
@@ -22,7 +24,7 @@ const DRAWER_OPEN_KEY = "fanban.ai.drawerOpen";
 const DRAWER_SIZE_KEY = "fanban.ai.drawerSize";
 const DRAWER_SIZE_VERSION_KEY = "fanban.ai.drawerSizeVersion";
 const DRAWER_SIZE_VERSION = "3";
-const DRAWER_TRANSITION_MS = 200;
+const DRAWER_TRANSITION_MS = MASCOT_DRAWER_MOTION_MS;
 const MIN_DRAWER_WIDTH = 380;
 const MIN_DRAWER_HEIGHT = 460;
 const DEFAULT_DRAWER_WIDTH = 720;
@@ -65,6 +67,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [drawerSize, setDrawerSize] = useState<DrawerSize>(loadDrawerSize);
+  const [suppressTriggerFocusVisual, setSuppressTriggerFocusVisual] = useState(false);
   const collapsedButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -272,7 +275,11 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       if (event.key !== "Tab" || !drawerRef.current) {
         return;
       }
-      const focusRoots = [drawerRef.current, conversationMenuRef.current].filter(
+      const focusRoots = [
+        collapsedButtonRef.current,
+        drawerRef.current,
+        conversationMenuRef.current,
+      ].filter(
         (root): root is HTMLElement => Boolean(root),
       );
       const focusable = focusRoots.flatMap((root) =>
@@ -307,6 +314,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
       return;
     }
     restoreFocusOnCloseRef.current = true;
+    setSuppressTriggerFocusVisual(true);
     setConversationMenu(null);
     setDrawerOpen(false);
     if (drawerTransitionTimerRef.current !== null) {
@@ -320,6 +328,7 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
 
   function handleOpen() {
     restoreFocusOnCloseRef.current = false;
+    setSuppressTriggerFocusVisual(false);
     if (drawerTransitionTimerRef.current !== null) {
       window.clearTimeout(drawerTransitionTimerRef.current);
       drawerTransitionTimerRef.current = null;
@@ -656,10 +665,6 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
     handleClose();
   }
 
-  if (!isDrawerVisible) {
-    return <AiMascotTrigger buttonRef={collapsedButtonRef} onOpen={handleOpen} />;
-  }
-
   const busy =
     chat.sendMessageMutation.isPending ||
     chat.createConversationMutation.isPending ||
@@ -685,7 +690,20 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
   ].find((candidate) => Boolean(candidate) && !isAiConversationNotFoundError(candidate));
 
   return (
-    <aside
+    <>
+      <AiMascotActor
+        buttonRef={collapsedButtonRef}
+        drawerOpen={isDrawerOpen}
+        drawerSize={drawerSize}
+        drawerVisible={isDrawerVisible}
+        onHide={handleMascotHide}
+        onOpen={handleOpen}
+        onResizeKeyDown={handleResizeKeyDown}
+        onResizePointerDown={handleResizePointerDown}
+        suppressRestoredFocusVisual={suppressTriggerFocusVisual}
+      />
+      {isDrawerVisible ? (
+      <aside
       aria-label="AI 助手"
       aria-modal="true"
       className={`${styles.drawer} ${isDrawerOpen ? styles.drawerOpen : styles.drawerClosing}`}
@@ -700,12 +718,8 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         } as CSSProperties
       }
     >
-      <AiDrawerMascotHandle
-        onHide={handleMascotHide}
-        onResizeKeyDown={handleResizeKeyDown}
-        onResizePointerDown={handleResizePointerDown}
-      />
-      <header className={styles.header}>
+      <div className={styles.drawerPanel}>
+        <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>AI Assistant</p>
           <h2>AI 助手</h2>
@@ -726,10 +740,10 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
         </div>
       ) : null}
 
-      {state && !state.enabled ? (
-        <div className={styles.emptyState}>AI 对话未启用。</div>
-      ) : (
-        <>
+        {state && !state.enabled ? (
+          <div className={styles.emptyState}>AI 对话未启用。</div>
+        ) : (
+          <>
           <label className={styles.modeBar}>
             <span>对话模式</span>
             <select
@@ -1055,9 +1069,12 @@ export function AiChatDrawer({ adapter }: { adapter: ApiAdapter }) {
               )}
             </div>
           </footer>
-        </>
-      )}
-    </aside>
+          </>
+        )}
+      </div>
+      </aside>
+      ) : null}
+    </>
   );
 }
 

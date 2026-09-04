@@ -110,6 +110,9 @@ const ChangePageExtractWorkspace = lazy(async () => ({
 const PreviewPdfModal = lazy(async () => ({
   default: (await import("./PreviewPdfModal")).PreviewPdfModal,
 }));
+const UpdateLogDialog = lazy(async () => ({
+  default: (await import("./UpdateLogDialog")).UpdateLogDialog,
+}));
 
 const JOB_FILTER_OPTIONS: Array<{ label: string; value?: string }> = [
   { label: "全部" },
@@ -645,9 +648,7 @@ function LoginPage() {
     queryFn: () => adapter.getFormSchema(),
     staleTime: 60000,
   });
-  const defaultPasswordConfigured = Boolean(
-    schemaQuery.data?.management?.account.adminCreatedDefaultPasswordConfigured,
-  );
+  const defaultPassword = schemaQuery.data?.management?.account.adminCreatedDefaultPassword;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -677,16 +678,19 @@ function LoginPage() {
         <div className={styles.loginHeroContent}>
           <img alt="" className={styles.loginLogo} src={groupLogoUrl} />
           <p className={styles.loginEyebrow}>核电设计协同</p>
-          <h1 className={styles.loginHeroTitle}>核电图纸业务协同平台</h1>
+          <h1 className={styles.loginHeroTitle}>中核工程-河北分公司-建筑结构所出图平台</h1>
           <p className={styles.loginHeroBody}>统一进入出图、任务审批、账号管理和工作量结算。</p>
         </div>
       </section>
       <section className={styles.loginCardPanel}>
         <form className={styles.loginCard} onSubmit={handleSubmit}>
-          <p className={styles.loginCardEyebrow}>账号登录</p>
-          <h2>登录平台</h2>
+          <p className={styles.loginCardEyebrow}>统一身份认证</p>
+          <h2>账号登录</h2>
           <label className={styles.loginField} htmlFor="login-account-id">
-            账号
+            <span className={styles.loginFieldLabel}>
+              账号
+              <span className={styles.loginFieldHint}>（同龙语账号，eg:wangrca）</span>
+            </span>
             <input
               autoComplete="username"
               className={styles.loginInput}
@@ -696,7 +700,12 @@ function LoginPage() {
             />
           </label>
           <label className={styles.loginField} htmlFor="login-password">
-            密码
+            <span className={styles.loginFieldLabel}>
+              密码
+              <span className={styles.loginFieldHint}>
+                {defaultPassword ? `（默认：${defaultPassword}）` : "（正在读取默认密码）"}
+              </span>
+            </span>
             <input
               autoComplete="current-password"
               className={styles.loginInput}
@@ -707,9 +716,6 @@ function LoginPage() {
             />
           </label>
           {error ? <p className={styles.loginError} role="alert">{error}</p> : null}
-          {defaultPasswordConfigured ? (
-            <p className={styles.loginHelper}>初始密码由管理员提供，系统已配置账号密码策略。</p>
-          ) : null}
           <button className={styles.loginPrimaryButton} disabled={submitting} type="submit">
             {submitting ? "正在登录..." : "登录"}
           </button>
@@ -739,6 +745,7 @@ function WorkspacePage() {
   const [accountPanelMode, setAccountPanelMode] = useState<AccountPanelMode>("self");
   const [jobsRefreshState, setJobsRefreshState] = useState<"idle" | "refreshing" | "done">("idle");
   const [tutorialStepIndex, setTutorialStepIndex] = useState<number | null>(null);
+  const [updateLogOpen, setUpdateLogOpen] = useState(false);
 
   const [deliverableConfigOpen, setDeliverableConfigOpen] = useState(false);
   const [deliverableDraftAvailable, setDeliverableDraftAvailable] = useState(false);
@@ -851,7 +858,7 @@ function WorkspacePage() {
   }, [jobCards, normalizedRecentJobsSearch]);
   const hiddenJobCardCount = normalizedRecentJobsSearch
     ? 0
-    : Math.max(filteredJobCards.length - DEFAULT_VISIBLE_JOB_CARDS, 0);
+    : Math.max((jobsQuery.data?.total ?? filteredJobCards.length) - DEFAULT_VISIBLE_JOB_CARDS, 0);
   const visibleJobCards = normalizedRecentJobsSearch
     ? filteredJobCards
     : filteredJobCards.slice(0, DEFAULT_VISIBLE_JOB_CARDS);
@@ -1149,6 +1156,13 @@ function WorkspacePage() {
                   onClick={handleOpenTutorial}
                 >
                   教程
+                </button>
+                <button
+                  className={styles.tutorialEntryButton}
+                  type="button"
+                  onClick={() => setUpdateLogOpen(true)}
+                >
+                  更新日志
                 </button>
                 <button className={styles.tutorialEntryButton} type="button" onClick={() => void logout()}>
                   退出
@@ -1556,6 +1570,12 @@ function WorkspacePage() {
           onNext={handleNextTutorialStep}
           onPrevious={handlePreviousTutorialStep}
         />
+      ) : null}
+
+      {updateLogOpen ? (
+        <Suspense fallback={null}>
+          <UpdateLogDialog onClose={() => setUpdateLogOpen(false)} />
+        </Suspense>
       ) : null}
 
       {!calculationConfigOpen ? <AiChatDrawer adapter={adapter} /> : null}
